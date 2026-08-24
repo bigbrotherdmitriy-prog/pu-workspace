@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Backups / temporary files
+*.bak
+*.bak.*
+*.backup.*
+*.before_*
+*.fast
+*.parallel
+backups/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log

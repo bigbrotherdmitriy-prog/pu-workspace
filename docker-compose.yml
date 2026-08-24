@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pu-workspace-db
+    restart: unless-stopped
+    environment:
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY}
+      POSTGRES_DB: pu_workspace
+      POSTGRES_USER: pu_user
+      POSTGRES_PASSWORD: pu_change_me
+    volumes:
+    - pu_pgdata:/var/lib/postgresql/data
+  backend:
+    build: ./backend
+    container_name: pu-workspace-backend
+    restart: unless-stopped
+    depends_on:
+    - db
+    environment:
+      DATABASE_URL: postgresql://pu_user:pu_change_me@db:5432/pu_workspace
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY}
+      MAX_FILES_PER_SCAN: '1000000'
+    ports:
+    - 3000:8000
+volumes:
+  pu_pgdata: null
