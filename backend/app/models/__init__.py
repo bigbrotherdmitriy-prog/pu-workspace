@@ -17,6 +17,7 @@ from app.models.auth_session import AuthSession
 from app.models.task import Task, TaskDueDateHistory
 from app.models.response_draft import ResponseDraft
 from app.models.telegram_chat import TelegramChatLink
+from app.models.governance import Decision, Risk
 
 __all__ = [
     "Project",
@@ -37,4 +38,6 @@ __all__ = [
     "TaskDueDateHistory",
     "ResponseDraft",
     "TelegramChatLink",
+    "Risk",
+    "Decision",
 ]

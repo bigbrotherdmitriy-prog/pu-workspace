@@ -19,6 +19,7 @@ from app.task_engine import create_tasks_from_files
 from app.google_tasks import sync_tasks_to_google
 from app.google_calendar import sync_tasks_to_calendar
 from app.summary_engine import brief_summary
+from app.governance_engine import create_governance_items
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -202,10 +203,12 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         google_synced, _ = sync_tasks_to_google(db, link.project_id, tasks)
         calendar_synced, _ = sync_tasks_to_calendar(db, link.project_id, tasks)
         drafts = create_response_drafts(db, link.project_id, None, [synthetic])
+        risks, decisions = create_governance_items(db, link.project_id, [synthetic], source_type="telegram")
         if document:
-            notify_telegram_chat(chat_id, brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced))
-        elif tasks or drafts:
-            notify_telegram_chat(chat_id, f"PU Workspace: задач — {len(tasks)}, Google Tasks — {google_synced}, Calendar — {calendar_synced}, черновиков ответов — {len(drafts)}.")
+            summary = brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
+            notify_telegram_chat(chat_id, summary + f"\n\n⚠️ Риски: {len(risks)} · 🗳 Решения на подтверждение: {len(decisions)}")
+        elif tasks or drafts or risks or decisions:
+            notify_telegram_chat(chat_id, f"PU Workspace: задач — {len(tasks)}, Google Tasks — {google_synced}, Calendar — {calendar_synced}, рисков — {len(risks)}, решений — {len(decisions)}, черновиков ответов — {len(drafts)}.")
         return {"ok": True}
     finally:
         db.close()
