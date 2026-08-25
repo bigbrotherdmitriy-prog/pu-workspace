@@ -19,6 +19,7 @@ from app.models.user import User
 from app.task_engine import create_tasks_from_files
 from app.response_engine import create_response_drafts
 from app.google_tasks import sync_tasks_to_google
+from app.google_calendar import sync_tasks_to_calendar
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
 _workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
@@ -119,6 +120,7 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         tasks = create_tasks_from_files(db, project_id, session_id, copy_items)
         google_synced, _ = sync_tasks_to_google(db, project_id, tasks)
+        calendar_synced, _ = sync_tasks_to_calendar(db, project_id, tasks)
         drafts = create_response_drafts(db, project_id, session_id, copy_items)
         proposal_id = repo.create_proposal(
             project_id, session_id, source_name, source_folder_id, copy_folder_id
@@ -134,20 +136,20 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
                 notify_telegram(
                     f"PU Workspace: «{source_name}» обработана автоматически. "
                     f"Применено безопасных действий: {approved}. Оригиналы не изменялись. "
-                    f"Автоматически назначено задач: {len(tasks)}; в Google Tasks: {google_synced}. Черновиков ответов: {len(drafts)}."
+                    f"Задач: {len(tasks)}; Google Tasks: {google_synced}; Calendar: {calendar_synced}. Черновиков ответов: {len(drafts)}."
                 )
             else:
                 repo.update_session(session_id, status="proposed", progress=100)
                 notify_telegram(
                     f"PU Workspace: анализ «{source_name}» завершён. "
                     f"Безопасных автоматических действий нет; требуется проверка. "
-                    f"Автоматически назначено задач: {len(tasks)}; в Google Tasks: {google_synced}. Черновиков ответов: {len(drafts)}."
+                    f"Задач: {len(tasks)}; Google Tasks: {google_synced}; Calendar: {calendar_synced}. Черновиков ответов: {len(drafts)}."
                 )
         else:
             repo.update_session(session_id, status="proposed", progress=100)
             notify_telegram(
                 f"PU Workspace: предложение для «{source_name}» готово к проверке. "
-                f"Автоматически назначено задач: {len(tasks)}; в Google Tasks: {google_synced}. Черновиков ответов: {len(drafts)}."
+                f"Задач: {len(tasks)}; Google Tasks: {google_synced}; Calendar: {calendar_synced}. Черновиков ответов: {len(drafts)}."
             )
     except Exception as exc:
         db.rollback()
