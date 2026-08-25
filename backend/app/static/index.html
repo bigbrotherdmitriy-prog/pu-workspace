@@ -23,6 +23,17 @@
     <div><span class="badge">Оригиналы не изменяются</span> <button id="logout" class="header-button">Выйти</button></div>
   </header>
   <main>
+    <section class="panel wide command-center" id="dashboardPanel" hidden>
+      <div class="section-head"><div><span class="eyebrow dark">РАБОЧИЙ ЦЕНТР</span><h2>Что требует внимания</h2><p class="muted" id="dashboardHint"></p></div><button id="refreshDashboard" class="secondary">Обновить всё</button></div>
+      <div class="metric-grid">
+        <button class="metric urgent" data-jump="issuesPanel"><strong id="metricAttention">0</strong><span>требуют внимания</span></button>
+        <button class="metric" data-jump="tasksPanel"><strong id="metricTasks">0</strong><span>открытых задач</span></button>
+        <button class="metric" data-jump="tasksPanel"><strong id="metricOverdue">0</strong><span>просрочено</span></button>
+        <button class="metric" data-jump="issuesPanel"><strong id="metricRisks">0</strong><span>рисков</span></button>
+        <button class="metric" data-jump="issuesPanel"><strong id="metricDecisions">0</strong><span>ждут решения</span></button>
+        <button class="metric" data-jump="draftsPanel"><strong id="metricDrafts">0</strong><span>черновиков ответов</span></button>
+      </div>
+    </section>
     <section class="panel setup">
       <h2>1. Проект и Google Drive</h2>
       <div class="row">
@@ -77,6 +88,11 @@
       <div class="section-head"><div><h2>7. Единый реестр открытых вопросов</h2><p class="muted" id="issuesMeta"></p></div><button id="refreshIssues" class="secondary">Обновить</button></div>
       <div class="notice">Риски и решения определяются по содержанию документов и сообщений. Найденные системой записи требуют подтверждения человеком.</div>
       <div class="table-wrap"><table><thead><tr><th>Тип</th><th>Вопрос</th><th>Статус</th><th>Важность</th><th>Источник</th></tr></thead><tbody id="issues"></tbody></table></div>
+    </section>
+
+    <section class="panel wide" id="documentsPanel" hidden>
+      <div class="section-head"><div><h2>8. Карточки документов</h2><p class="muted" id="documentsMeta"></p></div></div>
+      <div id="documentCards" class="document-grid"></div>
     </section>
 
     <div id="message" role="status"></div>
