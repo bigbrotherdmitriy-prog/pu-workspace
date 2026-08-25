@@ -11,7 +11,6 @@ from app.api.drive import router as drive_router
 from app.api.google_drive import router as google_drive_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
-from app.database import Base, engine
 from app.models import (
     Document,
     DriveConnection,
@@ -21,9 +20,8 @@ from app.models import (
     User,
 )
 from app.organizer import router as organizer_router
+from app.organizer import recover_incomplete_scans
 
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="PU Workspace",
@@ -43,6 +41,11 @@ app.include_router(google_drive_router)
 
 app.include_router(history_router)
 app.include_router(organizer_router)
+
+
+@app.on_event("startup")
+def recover_organizer_jobs():
+    recover_incomplete_scans()
 
 
 @app.get("/")

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.core.token_crypto import TokenEncryptionError, decrypt_token, encrypt_token
 from app.models.google_token import GoogleOAuthToken
 from app.models.project import Project
 
@@ -100,9 +101,15 @@ def credentials_for_project(project_id: int, db: Session):
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
+    try:
+        access_token = decrypt_token(token.access_token)
+        refresh_token = decrypt_token(token.refresh_token)
+    except TokenEncryptionError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
     credentials = Credentials(
-        token=token.access_token,
-        refresh_token=token.refresh_token,
+        token=access_token,
+        refresh_token=refresh_token,
         token_uri=token.token_uri,
         client_id=client_id,
         client_secret=client_secret,
@@ -112,10 +119,10 @@ def credentials_for_project(project_id: int, db: Session):
     if credentials.expired and credentials.refresh_token:
         credentials.refresh(Request())
 
-        token.access_token = credentials.token
+        token.access_token = encrypt_token(credentials.token)
 
         if credentials.refresh_token:
-            token.refresh_token = credentials.refresh_token
+            token.refresh_token = encrypt_token(credentials.refresh_token)
 
         db.commit()
 
@@ -196,8 +203,11 @@ def google_callback(
         )
         db.add(token)
 
-    token.access_token = credentials.token
-    token.refresh_token = credentials.refresh_token
+    try:
+        token.access_token = encrypt_token(credentials.token)
+        token.refresh_token = encrypt_token(credentials.refresh_token)
+    except TokenEncryptionError as exc:
+        raise HTTPException(503, str(exc)) from exc
     token.token_uri = credentials.token_uri
     token.scopes = " ".join(credentials.scopes or SCOPES)
 

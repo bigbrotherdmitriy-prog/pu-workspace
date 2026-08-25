@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
+import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -13,6 +15,7 @@ from app.organizer_engine.types import DriveFile
 from app.organizer_engine.config import FOLDER_STRUCTURE
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
+_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
 
 
 class AnalyzeRequest(BaseModel):
@@ -56,36 +59,43 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
     db = SessionLocal()
     repo = OrganizerRepository(db)
     try:
-        repo.update_session(session_id, status="scanning", progress=5)
+        session = repo.get_session(session_id)
+        if not session:
+            raise ValueError("Session not found")
+        if repo.proposal_for_session(session_id):
+            repo.update_session(session_id, status="proposed", progress=100)
+            return
         project = repo.project(project_id)
         if not project:
             raise ValueError("Project not found")
         service = get_drive_service(project_id=project_id, db=db)
         drive = DriveClient(service)
-        source = drive.get_file_meta(source_folder_id)
-        if not source.is_folder:
-            raise ValueError("Source ID is not a Google Drive folder")
-        source_items = drive.walk_tree(source_folder_id)
-        repo.update_session(session_id, source_item_count=len(source_items), progress=15)
-        copy_result = drive.copy_folder_tree(
-            source_folder_id,
-            source.parent_id,
-            source.name,
-            source_items=source_items,
-        )
-        repo.update_session(
-            session_id,
-            copy_folder_id=copy_result.copy_root_id,
-            copy_folder_name=copy_result.copy_root_name,
-            copy_item_count=copy_result.item_count,
-            status="analyzing",
-            progress=55,
-        )
-        copy_items = drive.walk_tree(copy_result.copy_root_id)
+        if session["copy_folder_id"]:
+            copy_folder_id = session["copy_folder_id"]
+            source_name = session["source_folder_name"]
+            repo.update_session(session_id, status="analyzing", progress=max(55, session["progress"] or 0))
+        else:
+            repo.update_session(session_id, status="scanning", progress=5)
+            source = drive.get_file_meta(source_folder_id)
+            if not source.is_folder:
+                raise ValueError("Source ID is not a Google Drive folder")
+            source_name = source.name
+            source_items = drive.walk_tree(source_folder_id)
+            repo.update_session(session_id, source_item_count=len(source_items), progress=15)
+            copy_result = drive.copy_folder_tree(
+                source_folder_id, source.parent_id, source.name, source_items=source_items,
+            )
+            copy_folder_id = copy_result.copy_root_id
+            repo.update_session(
+                session_id, copy_folder_id=copy_folder_id,
+                copy_folder_name=copy_result.copy_root_name,
+                copy_item_count=copy_result.item_count, status="analyzing", progress=55,
+            )
+        copy_items = drive.walk_tree(copy_folder_id)
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         proposal_id = repo.create_proposal(
-            project_id, session_id, source.name, source_folder_id, copy_result.copy_root_id
+            project_id, session_id, source_name, source_folder_id, copy_folder_id
         )
         repo.save_items(proposal_id, items)
         repo.update_session(session_id, status="proposed", progress=100)
@@ -97,6 +107,21 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
             pass
     finally:
         db.close()
+
+
+def submit_scan(session_id: int, project_id: int, source_folder_id: str) -> None:
+    _workers.submit(_scan_worker, session_id, project_id, source_folder_id)
+
+
+def recover_incomplete_scans() -> int:
+    db = SessionLocal()
+    try:
+        rows = list(OrganizerRepository(db).incomplete_sessions())
+    finally:
+        db.close()
+    for row in rows:
+        submit_scan(row["id"], row["project_id"], row["source_folder_id"])
+    return len(rows)
 
 
 @router.get("/status")
@@ -132,7 +157,7 @@ def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = 
     session_id = repo.create_session(payload.project_id, source.id, source.name)
     db.commit()
     if payload.background:
-        background_tasks.add_task(_scan_worker, session_id, payload.project_id, source.id)
+        background_tasks.add_task(submit_scan, session_id, payload.project_id, source.id)
         return {"session_id": session_id, "status": "queued"}
     _scan_worker(session_id, payload.project_id, source.id)
     return dict(repo.get_session(session_id) or {})
@@ -144,6 +169,18 @@ def session_status(session_id: int, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(404, "Session not found")
     return dict(row)
+
+
+@router.post("/sessions/{session_id}/retry")
+def retry_session(session_id: int, db: Session = Depends(get_db)):
+    repo = OrganizerRepository(db)
+    row = repo.get_session(session_id)
+    if not row:
+        raise HTTPException(404, "Session not found")
+    if not repo.retry_failed_session(session_id):
+        raise HTTPException(409, "Only a failed session can be retried")
+    submit_scan(session_id, row["project_id"], row["source_folder_id"])
+    return {"session_id": session_id, "status": "queued"}
 
 
 @router.post("/analyze")

@@ -6,3 +6,5 @@ google-api-python-client==2.179.0
 google-auth==2.40.3
 google-auth-oauthlib==1.2.2
 pytest==8.4.1
+alembic==1.16.5
+cryptography==45.0.6

@@ -38,6 +38,23 @@ class OrganizerRepository:
     def latest_session_for_project(self, project_id: int):
         return self.db.execute(text("SELECT * FROM organizer_sessions WHERE project_id=:p ORDER BY id DESC LIMIT 1"), {"p":project_id}).mappings().first()
 
+    def incomplete_sessions(self):
+        return self.db.execute(text("""
+            SELECT * FROM organizer_sessions
+            WHERE status IN ('queued','scanning','analyzing')
+            ORDER BY id
+        """)).mappings().all()
+
+    def retry_failed_session(self, session_id: int) -> bool:
+        result = self.db.execute(text("""
+            UPDATE organizer_sessions
+            SET status='queued', progress=CASE WHEN copy_folder_id IS NULL THEN 0 ELSE 55 END,
+                error_message=NULL, updated_at=now()
+            WHERE id=:id AND status='failed'
+        """), {"id": session_id})
+        self.db.commit()
+        return result.rowcount == 1
+
     def create_proposal(self, project_id: int, session_id: int, folder_name: str, source_folder_id: str, copy_folder_id: str) -> int:
         return int(self.db.execute(text("""
             INSERT INTO organizer_proposals(project_id,folder_name,status,originals_modified,created_at,session_id,source_folder_id,copy_folder_id)
@@ -66,6 +83,11 @@ class OrganizerRepository:
 
     def proposal(self, proposal_id: int):
         return self.db.execute(text("SELECT * FROM organizer_proposals WHERE id=:id"), {"id":proposal_id}).mappings().first()
+
+    def proposal_for_session(self, session_id: int):
+        return self.db.execute(text(
+            "SELECT * FROM organizer_proposals WHERE session_id=:id"
+        ), {"id": session_id}).mappings().first()
 
     def proposal_items(self, proposal_id: int):
         return self.db.execute(text("SELECT * FROM organizer_actions WHERE proposal_id=:id ORDER BY action_order,id"), {"id":proposal_id}).mappings().all()
