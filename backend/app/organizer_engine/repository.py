@@ -96,7 +96,7 @@ class OrganizerRepository:
         self.db.execute(text("""
             UPDATE organizer_actions SET user_decision=:decision,edited_name=:edited_name,edited_folder=:edited_folder
             WHERE id=:id
-        """), locals()); self.db.commit()
+        """), {"id": action_id, "decision": decision, "edited_name": edited_name, "edited_folder": edited_folder}); self.db.commit()
 
     def decide(self, proposal_id: int, approved: bool, note: str | None):
         status = "approved" if approved else "rejected"

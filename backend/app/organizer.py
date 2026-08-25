@@ -278,11 +278,11 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
     p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     if not p["copy_folder_id"] or p["copy_folder_id"] == "manual":
         raise HTTPException(409, "Apply requires a real Google Drive safe copy created by /scan")
-    if p["status"] != "approved":
+    if p["status"] not in {"approved", "ready_to_apply_to_copy"}:
         raise HTTPException(409, "Proposal must be approved before apply")
     try:
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
-        if not repo.mark_prepared(proposal_id):
+        if p["status"] == "approved" and not repo.mark_prepared(proposal_id):
             raise HTTPException(409, "Proposal is already being applied or was processed")
         stats = OrganizerExecutor(repo, drive).apply(proposal_id)
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": stats}
