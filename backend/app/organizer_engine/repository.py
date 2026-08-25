@@ -112,6 +112,7 @@ class OrganizerRepository:
             WHERE id=:id AND status='approved'
         """), {"id": proposal_id})
         self.db.commit()
+        return result.rowcount == 1
 
     def apply_auto_policy(self, proposal_id: int, minimum_confidence: float) -> int:
         self.db.execute(text("""
@@ -137,7 +138,6 @@ class OrganizerRepository:
             })
         self.db.commit()
         return approved
-        return result.rowcount == 1
 
     def mark_applied(self, proposal_id: int):
         self.db.execute(text("""
