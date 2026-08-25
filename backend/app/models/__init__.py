@@ -15,6 +15,7 @@ from app.models.organizer import (
 )
 from app.models.auth_session import AuthSession
 from app.models.task import Task
+from app.models.response_draft import ResponseDraft
 
 __all__ = [
     "Project",
@@ -32,4 +33,5 @@ __all__ = [
     "OrganizerRule",
     "AuthSession",
     "Task",
+    "ResponseDraft",
 ]

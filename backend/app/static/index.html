@@ -67,6 +67,12 @@
       <div class="table-wrap"><table><thead><tr><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Приоритет</th><th>Источник</th><th>Уверенность</th></tr></thead><tbody id="tasks"></tbody></table></div>
     </section>
 
+    <section class="panel wide" id="draftsPanel" hidden>
+      <div class="section-head"><div><h2>6. Черновики автоматических ответов</h2><p class="muted" id="draftsMeta"></p></div><button id="refreshDrafts" class="secondary">Обновить</button></div>
+      <div class="notice">Это только проекты ответов. Система никогда не отправляет их адресатам без проверки и явного подтверждения пользователя.</div>
+      <div id="drafts"></div>
+    </section>
+
     <div id="message" role="status"></div>
   </main>
   <script src="/static/app.js"></script>
