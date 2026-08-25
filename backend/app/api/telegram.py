@@ -14,6 +14,7 @@ from app.response_engine import create_response_drafts
 from app.task_engine import create_tasks_from_files
 from app.google_tasks import sync_tasks_to_google
 from app.google_calendar import sync_tasks_to_calendar
+from app.summary_engine import brief_summary
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -133,7 +134,9 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         google_synced, _ = sync_tasks_to_google(db, link.project_id, tasks)
         calendar_synced, _ = sync_tasks_to_calendar(db, link.project_id, tasks)
         drafts = create_response_drafts(db, link.project_id, None, [synthetic])
-        if tasks or drafts:
+        if document:
+            notify_telegram_chat(chat_id, brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced))
+        elif tasks or drafts:
             notify_telegram_chat(chat_id, f"PU Workspace: задач — {len(tasks)}, Google Tasks — {google_synced}, Calendar — {calendar_synced}, черновиков ответов — {len(drafts)}.")
         return {"ok": True}
     finally:
