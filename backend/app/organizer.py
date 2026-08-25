@@ -219,7 +219,6 @@ def compatibility_analyze(payload: AnalyzeRequest, db: Session = Depends(get_db)
 
 @router.get("/proposals")
 def proposals(project_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    require_project_role(db, user, payload.project_id, "editor")
     repo = OrganizerRepository(db)
     if project_id is None and not user.is_admin:
         raise HTTPException(422, "project_id is required")
