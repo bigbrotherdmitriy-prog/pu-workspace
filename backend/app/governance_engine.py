@@ -9,9 +9,9 @@ from app.models.user import User
 from app.organizer_engine.types import DriveFile
 
 SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
-RISK_RE = re.compile(r"\b(риск|угроз|вероятн|может привести|возможн(?:а|о|ы)? задерж|просроч|дефицит|нехватк|отклонен)\b", re.I)
+RISK_RE = re.compile(r"\b(риск\w*|угроз\w*|вероятн\w*|может привести|возможн\w* задерж\w*|просроч\w*|дефицит\w*|нехватк\w*|отклонен\w*)", re.I)
 DECISION_RE = re.compile(r"\b(требуется решение|необходимо решить|нужно решить|на согласование|следует выбрать|утвердить|согласовать вариант)\b", re.I)
-HIGH_RE = re.compile(r"\b(критич|существен|срыв|авар|штраф|просроч)\b", re.I)
+HIGH_RE = re.compile(r"\b(критич\w*|существен\w*|срыв\w*|авар\w*|штраф\w*|просроч\w*)", re.I)
 
 
 def extract_governance_candidates(text: str) -> tuple[list[dict], list[dict]]:
@@ -24,7 +24,7 @@ def extract_governance_candidates(text: str) -> tuple[list[dict], list[dict]]:
         if RISK_RE.search(sentence):
             risks.append({
                 "text": sentence,
-                "kind": "deviation" if re.search(r"\b(просроч|отклонен)\b", sentence, re.I) else "risk",
+                "kind": "deviation" if re.search(r"\b(просроч\w*|отклонен\w*)", sentence, re.I) else "risk",
                 "criticality": "high" if HIGH_RE.search(sentence) else "medium",
             })
         if DECISION_RE.search(sentence):
