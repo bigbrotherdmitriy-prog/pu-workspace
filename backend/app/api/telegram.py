@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hmac
 import os
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy import select
 from app.core.notifications import notify_telegram_chat
@@ -8,6 +9,7 @@ from app.database import SessionLocal
 from app.models.project import Project
 from app.models.telegram_chat import TelegramChatLink
 from app.organizer_engine.types import DriveFile
+from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
 from app.task_engine import create_tasks_from_files
 from app.google_tasks import sync_tasks_to_google
@@ -19,6 +21,26 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 def _authorized_admin(user_id: int) -> bool:
     expected = os.getenv("TELEGRAM_ADMIN_USER_ID", "")
     return bool(expected and hmac.compare_digest(str(user_id), expected))
+
+
+def _download_document(document: dict) -> tuple[str, str, bytes]:
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        raise RuntimeError("Telegram bot token is not configured")
+    size = int(document.get("file_size") or 0)
+    if size > 20 * 1024 * 1024:
+        raise ValueError("Файл больше 20 МБ; Telegram Bot API не позволяет безопасно скачать его этим способом")
+    file_id = document.get("file_id")
+    if not file_id:
+        raise ValueError("Telegram file_id missing")
+    meta = httpx.get(f"https://api.telegram.org/bot{token}/getFile", params={"file_id": file_id}, timeout=20.0)
+    meta.raise_for_status()
+    path = meta.json()["result"]["file_path"]
+    response = httpx.get(f"https://api.telegram.org/file/bot{token}/{path}", timeout=30.0)
+    response.raise_for_status()
+    if len(response.content) > 20 * 1024 * 1024:
+        raise ValueError("Скачанный файл превышает лимит 20 МБ")
+    return document.get("file_name") or "telegram-file", document.get("mime_type") or "application/octet-stream", response.content
 
 
 @router.post("/webhook")
@@ -35,7 +57,8 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
     chat_id = chat.get("id")
     user_id = sender.get("id")
     text = (message.get("text") or message.get("caption") or "").strip()
-    if chat_id is None or not text:
+    document = message.get("document")
+    if chat_id is None:
         return {"ok": True}
 
     db = SessionLocal()
@@ -75,8 +98,30 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
 
         link = db.get(TelegramChatLink, chat_id)
         if not link or not link.enabled:
+            if document:
+                notify_telegram_chat(chat_id, "Этот чат ещё не подключён к проекту. Владелец должен отправить: /connect 1")
             return {"ok": True}
-        synthetic = DriveFile(id=f"telegram:{chat_id}:{message.get('message_id')}", name=f"Telegram — {link.title}", mime_type="text/plain", parent_id="telegram", content_text=text)
+        source_name = f"Telegram — {link.title}"
+        source_id = f"telegram:{chat_id}:{message.get('message_id')}"
+        mime_type = "text/plain"
+        content = text
+        if document:
+            try:
+                filename, mime_type, data = _download_document(document)
+                extracted = extract_text(data, mime_type, filename)
+            except Exception as exc:
+                notify_telegram_chat(chat_id, f"Не удалось обработать файл: {str(exc)[:500]}")
+                return {"ok": True}
+            if not extracted:
+                notify_telegram_chat(chat_id, "В файле не найден машиночитаемый текст. Возможно, это скан — для него потребуется OCR.")
+                return {"ok": True}
+            source_name = filename
+            source_id = f"telegram-file:{chat_id}:{document.get('file_unique_id') or document.get('file_id')}"
+            content = (text + "\n" + extracted).strip()
+            notify_telegram_chat(chat_id, f"Файл «{filename}» получен, текст извлечён. Выполняю анализ.")
+        if not content:
+            return {"ok": True}
+        synthetic = DriveFile(id=source_id, name=source_name, mime_type=mime_type, parent_id="telegram", content_text=content)
         tasks = create_tasks_from_files(db, link.project_id, None, [synthetic], source_type="telegram")
         google_synced, _ = sync_tasks_to_google(db, link.project_id, tasks)
         calendar_synced, _ = sync_tasks_to_calendar(db, link.project_id, tasks)
