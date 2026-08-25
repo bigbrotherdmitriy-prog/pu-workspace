@@ -10,6 +10,7 @@ from app.api.responses import router as responses_router
 from app.api.telegram import router as telegram_router
 from app.api.governance import router as governance_router
 from app.api.dashboard import router as dashboard_router
+from app.api.local_upload import router as local_upload_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -34,7 +35,7 @@ from app.core.readiness import readiness_report
 
 app = FastAPI(
     title="PU Workspace",
-    version="0.13.0",
+    version="0.14.0",
 )
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -52,6 +53,7 @@ app.include_router(responses_router)
 app.include_router(telegram_router)
 app.include_router(governance_router)
 app.include_router(dashboard_router)
+app.include_router(local_upload_router)
 
 
 app.include_router(history_router, dependencies=[Depends(require_user)])
@@ -75,7 +77,7 @@ def root():
 
 @app.get("/api/status")
 def api_status():
-    return {"status": "ok", "service": "PU Workspace", "version": "0.13.0"}
+    return {"status": "ok", "service": "PU Workspace", "version": "0.14.0"}
 
 
 @app.get("/api/readiness")

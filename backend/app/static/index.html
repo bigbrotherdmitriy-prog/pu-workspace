@@ -56,6 +56,10 @@
       <div class="row"><input id="folderId" value="root" aria-label="ID папки"><button id="loadFolder" class="secondary">Открыть</button></div>
       <div id="files" class="file-list empty">Подключите Drive и откройте папку.</div>
       <button id="scan" disabled>Создать копию и проанализировать</button>
+      <div class="upload-divider"><span>или с компьютера</span></div>
+      <input id="localFolder" type="file" webkitdirectory directory multiple hidden>
+      <button id="chooseLocalFolder" class="secondary">Загрузить рабочую папку</button>
+      <p class="muted" id="localUploadStatus">Оригиналы на компьютере не изменяются. Поддерживаются DOCX, PDF, XLSX, TXT и CSV.</p>
     </section>
 
     <section class="panel" id="progressPanel" hidden>
