@@ -13,6 +13,8 @@ from app.organizer_engine import DriveClient, OrganizerExecutor, OrganizerReposi
 from app.organizer_engine.drive_factory import get_drive_service
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.config import FOLDER_STRUCTURE
+from app.core.auth import require_project_role, require_user
+from app.models.user import User
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
 _workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
@@ -137,7 +139,8 @@ def status():
 
 
 @router.post("/scan")
-def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
     repo = OrganizerRepository(db)
     project = repo.project(payload.project_id)
     if not project:
@@ -184,7 +187,7 @@ def retry_session(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/analyze")
-def compatibility_analyze(payload: AnalyzeRequest, db: Session = Depends(get_db)):
+def compatibility_analyze(payload: AnalyzeRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Compatibility endpoint: proposal-only, no Drive mutation/copy.
 
     Kept for existing clients/tests. Real MVP flow should use /scan because TZ
@@ -297,6 +300,7 @@ def rollback(proposal_id: int, db: Session = Depends(get_db)):
 
 @router.get("/proposals/{proposal_id}/operations")
 def proposal_operations(proposal_id: int, db: Session = Depends(get_db)):
+    require_project_role(db, user, payload.project_id, "editor")
     repo = OrganizerRepository(db)
     if not repo.proposal(proposal_id):
         raise HTTPException(404, "Proposal not found")

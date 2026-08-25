@@ -5,6 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.user import User
+from app.core.auth import require_project_role, require_user
 
 
 router = APIRouter(
@@ -31,10 +34,12 @@ class ProjectResponse(BaseModel):
 @router.get("/")
 def list_projects(
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    projects = db.scalars(
-        select(Project).order_by(Project.id)
-    ).all()
+    query = select(Project).order_by(Project.id)
+    if not user.is_admin:
+        query = query.join(ProjectMember).where(ProjectMember.user_id == user.id)
+    projects = db.scalars(query).all()
 
     return {
         "projects": [
@@ -54,10 +59,13 @@ def list_projects(
 def create_project(
     project: ProjectCreate,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
     item = Project(name=project.name)
 
     db.add(item)
+    db.flush()
+    db.add(ProjectMember(project_id=item.id, user_id=user.id, role="owner"))
     db.commit()
     db.refresh(item)
 
@@ -71,7 +79,9 @@ def create_project(
 def get_project(
     project_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "viewer")
     item = db.get(Project, project_id)
 
     if item is None:
@@ -91,7 +101,9 @@ def update_project(
     project_id: int,
     project: ProjectUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "manager")
     item = db.get(Project, project_id)
 
     if item is None:
@@ -112,7 +124,9 @@ def update_project(
 def delete_project(
     project_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "owner")
     item = db.get(Project, project_id)
 
     if item is None:

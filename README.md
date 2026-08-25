@@ -18,6 +18,8 @@ MVP безопасного органайзера проектных докум�
 1. Скопируйте `.env.example` в `.env` и заполните Google OAuth credentials.
    Создайте ключ токенов командой
    `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+   Также задайте случайный `BOOTSTRAP_TOKEN` длиной не менее 24 символов.
+   Он используется только для создания первого администратора.
 2. В Google Cloud Console добавьте redirect URI
    `http://localhost:3000/projects/google/callback`.
 3. Запустите `docker compose up --build`.

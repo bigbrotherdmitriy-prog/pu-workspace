@@ -7,9 +7,19 @@
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+  <div id="authGate" class="auth-gate">
+    <section class="panel auth-card">
+      <span class="eyebrow dark">PU WORKSPACE</span><h2>Вход</h2>
+      <input id="authEmail" type="email" placeholder="Email">
+      <input id="authPassword" type="password" placeholder="Пароль (минимум 12 символов)">
+      <button id="login">Войти</button>
+      <details><summary>Первый запуск</summary><input id="authName" placeholder="Имя администратора"><input id="bootstrapToken" type="password" placeholder="BOOTSTRAP_TOKEN"><button id="bootstrap" class="secondary">Создать администратора</button></details>
+      <p id="authError" class="special"></p>
+    </section>
+  </div>
   <header>
     <div><span class="eyebrow">PU WORKSPACE</span><h1>Безопасный органайзер</h1></div>
-    <span class="badge">Оригиналы не изменяются</span>
+    <div><span class="badge">Оригиналы не изменяются</span> <button id="logout" class="header-button">Выйти</button></div>
   </header>
   <main>
     <section class="panel setup">

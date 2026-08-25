@@ -1,9 +1,10 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.api.history import router as history_router
+from app.api.auth import router as auth_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -21,6 +22,7 @@ from app.models import (
 )
 from app.organizer import router as organizer_router
 from app.organizer import recover_incomplete_scans
+from app.core.auth import require_user
 
 
 app = FastAPI(
@@ -31,16 +33,17 @@ app = FastAPI(
 STATIC_DIR = Path(__file__).with_name("static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+app.include_router(auth_router)
 app.include_router(projects_router)
-app.include_router(users_router)
-app.include_router(access_router)
-app.include_router(drive_router)
-app.include_router(documents_router)
+app.include_router(users_router, dependencies=[Depends(require_user)])
+app.include_router(access_router, dependencies=[Depends(require_user)])
+app.include_router(drive_router, dependencies=[Depends(require_user)])
+app.include_router(documents_router, dependencies=[Depends(require_user)])
 app.include_router(google_drive_router)
 
 
-app.include_router(history_router)
-app.include_router(organizer_router)
+app.include_router(history_router, dependencies=[Depends(require_user)])
+app.include_router(organizer_router, dependencies=[Depends(require_user)])
 
 
 @app.on_event("startup")

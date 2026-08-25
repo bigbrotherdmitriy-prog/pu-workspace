@@ -19,6 +19,8 @@ from app.database import get_db
 from app.core.token_crypto import TokenEncryptionError, decrypt_token, encrypt_token
 from app.models.google_token import GoogleOAuthToken
 from app.models.project import Project
+from app.models.user import User
+from app.core.auth import require_project_role, require_user
 
 
 router = APIRouter(
@@ -133,7 +135,9 @@ def credentials_for_project(project_id: int, db: Session):
 def google_auth(
     project_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "manager")
     project = db.get(Project, project_id)
 
     if project is None:
@@ -214,7 +218,7 @@ def google_callback(
     db.commit()
 
     return RedirectResponse(
-        url=f"/projects/{project_id}/google/status"
+        url=f"/?oauth=connected&project_id={project_id}"
     )
 
 
@@ -222,7 +226,9 @@ def google_callback(
 def google_status(
     project_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "viewer")
     token = db.scalar(
         select(GoogleOAuthToken).where(
             GoogleOAuthToken.project_id == project_id
@@ -242,7 +248,9 @@ def google_files(
     project_id: int,
     folder_id: str = Query("root"),
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "viewer")
     credentials = credentials_for_project(
         project_id,
         db,
