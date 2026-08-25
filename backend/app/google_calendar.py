@@ -25,8 +25,8 @@ def event_payload(task: Task) -> dict:
     }
 
 
-def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task]) -> tuple[int, int]:
-    pending = [task for task in tasks if task.due_date and not task.google_calendar_event_id]
+def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task], force_update: bool = False) -> tuple[int, int]:
+    pending = [task for task in tasks if (task.due_date and (force_update or not task.google_calendar_event_id)) or (force_update and not task.due_date and task.google_calendar_event_id)]
     if not pending:
         return 0, 0
     try:
@@ -42,8 +42,16 @@ def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task]) -> t
     synced = failed = 0
     for task in pending:
         try:
-            result = service.events().insert(calendarId="primary", body=event_payload(task)).execute()
-            task.google_calendar_event_id = result["id"]
+            if not task.due_date and task.google_calendar_event_id:
+                service.events().delete(calendarId="primary", eventId=task.google_calendar_event_id).execute()
+                task.google_calendar_event_id = None
+            elif task.google_calendar_event_id:
+                body = event_payload(task)
+                if task.status == "completed": body["summary"] = "✅ " + body["summary"]
+                service.events().patch(calendarId="primary", eventId=task.google_calendar_event_id, body=body).execute()
+            else:
+                result = service.events().insert(calendarId="primary", body=event_payload(task)).execute()
+                task.google_calendar_event_id = result["id"]
             task.google_calendar_sync_error = None
             task.google_calendar_synced_at = datetime.now(timezone.utc)
             synced += 1

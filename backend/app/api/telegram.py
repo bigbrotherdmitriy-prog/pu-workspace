@@ -2,12 +2,16 @@ from __future__ import annotations
 import hmac
 import os
 import httpx
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy import select
 from app.core.notifications import notify_telegram_chat, telegram_http_client
 from app.database import SessionLocal
 from app.models.project import Project
 from app.models.telegram_chat import TelegramChatLink
+from app.models.task import Task, TaskDueDateHistory
+from app.models.project_member import ProjectMember
+from app.models.user import User
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
@@ -22,6 +26,14 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 def _authorized_admin(user_id: int) -> bool:
     expected = os.getenv("TELEGRAM_ADMIN_USER_ID", "")
     return bool(expected and hmac.compare_digest(str(user_id), expected))
+
+
+def _parse_ru_date(value: str) -> date:
+    return datetime.strptime(value, "%d.%m.%Y").date()
+
+
+def _project_owner(db, project_id: int) -> User | None:
+    return db.scalar(select(User).join(ProjectMember, ProjectMember.user_id == User.id).where(ProjectMember.project_id == project_id).order_by((ProjectMember.role == "owner").desc(), User.id))
 
 
 def _download_document(document: dict) -> tuple[str, str, bytes]:
@@ -101,13 +113,69 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             return {"ok": True}
 
         if text.startswith("/help") or text.startswith("/start"):
-            notify_telegram_chat(chat_id, "PU Workspace: /connect ID — подключить рабочий чат; /disconnect — отключить. В подключённых чатах поручения превращаются в задачи, запросы — в черновики ответов.")
+            notify_telegram_chat(chat_id, "PU Workspace: /connect ID — подключить чат; /disconnect — отключить; /tasks — открытые задачи; /take ID — принять; /done ID результат — выполнить; /move ID ДД.ММ.ГГГГ причина — перенести срок.")
             return {"ok": True}
 
         link = db.get(TelegramChatLink, chat_id)
         if not link or not link.enabled:
             if document:
                 notify_telegram_chat(chat_id, "Этот чат ещё не подключён к проекту. Владелец должен отправить: /connect 1")
+            return {"ok": True}
+        if text.startswith("/tasks"):
+            rows = list(db.scalars(select(Task).where(Task.project_id == link.project_id, Task.status.in_(["assigned", "in_progress"])).order_by(Task.due_date.asc().nullslast(), Task.id).limit(20)).all())
+            if not rows:
+                notify_telegram_chat(chat_id, "Открытых задач нет.")
+            else:
+                lines = ["📋 Кто что должен:"]
+                for task in rows:
+                    due = task.due_date.strftime("%d.%m.%Y") if task.due_date else "без срока"
+                    status = "в работе" if task.status == "in_progress" else "назначено"
+                    lines.append(f"#{task.id} · {due} · {status}\n{task.title[:180]}")
+                lines.append("Команды: /take ID · /done ID результат · /move ID ДД.ММ.ГГГГ причина")
+                notify_telegram_chat(chat_id, "\n\n".join(lines))
+            return {"ok": True}
+        if text.startswith(("/take", "/done", "/move")):
+            if not _authorized_admin(user_id):
+                notify_telegram_chat(chat_id, "Изменять задачи через Telegram пока может только владелец PU Workspace.")
+                return {"ok": True}
+            parts = text.split(maxsplit=3)
+            if len(parts) < 2 or not parts[1].isdigit():
+                notify_telegram_chat(chat_id, "Укажите ID задачи. Пример: /take 15")
+                return {"ok": True}
+            task = db.get(Task, int(parts[1]))
+            if not task or task.project_id != link.project_id:
+                notify_telegram_chat(chat_id, "Задача не найдена в этом проекте.")
+                return {"ok": True}
+            owner = _project_owner(db, link.project_id)
+            if not owner:
+                notify_telegram_chat(chat_id, "У проекта нет владельца для записи изменения.")
+                return {"ok": True}
+            if text.startswith("/take"):
+                task.status = "in_progress"
+                answer = f"▶️ Задача #{task.id} принята в работу."
+            elif text.startswith("/done"):
+                result = text.split(maxsplit=2)[2].strip() if len(text.split(maxsplit=2)) > 2 else ""
+                if not result:
+                    notify_telegram_chat(chat_id, "Укажите результат: /done ID что выполнено и где подтверждение")
+                    return {"ok": True}
+                task.status = "completed"; task.result_note = result; task.completed_at = datetime.now(timezone.utc)
+                answer = f"✅ Задача #{task.id} выполнена. Результат сохранён."
+            else:
+                if len(parts) < 4:
+                    notify_telegram_chat(chat_id, "Формат: /move ID ДД.ММ.ГГГГ причина переноса")
+                    return {"ok": True}
+                try:
+                    new_due = _parse_ru_date(parts[2])
+                except ValueError:
+                    notify_telegram_chat(chat_id, "Дата должна быть в формате ДД.ММ.ГГГГ.")
+                    return {"ok": True}
+                db.add(TaskDueDateHistory(task_id=task.id, old_due_date=task.due_date, new_due_date=new_due, reason=parts[3].strip(), changed_by_user_id=owner.id))
+                task.due_date = new_due
+                answer = f"📅 Срок задачи #{task.id} перенесён на {parts[2]}. Причина сохранена."
+            db.commit(); db.refresh(task)
+            sync_tasks_to_google(db, link.project_id, [task], force_update=True)
+            sync_tasks_to_calendar(db, link.project_id, [task], force_update=True)
+            notify_telegram_chat(chat_id, answer)
             return {"ok": True}
         source_name = f"Telegram — {link.title}"
         source_id = f"telegram:{chat_id}:{message.get('message_id')}"

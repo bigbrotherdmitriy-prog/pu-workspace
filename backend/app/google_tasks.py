@@ -21,8 +21,8 @@ def task_payload(task: Task) -> dict:
     return payload
 
 
-def sync_tasks_to_google(db: Session, project_id: int, tasks: list[Task]) -> tuple[int, int]:
-    pending = [task for task in tasks if not task.google_task_id]
+def sync_tasks_to_google(db: Session, project_id: int, tasks: list[Task], force_update: bool = False) -> tuple[int, int]:
+    pending = [task for task in tasks if force_update or not task.google_task_id]
     if not pending:
         return 0, 0
     try:
@@ -38,8 +38,13 @@ def sync_tasks_to_google(db: Session, project_id: int, tasks: list[Task]) -> tup
     synced = failed = 0
     for task in pending:
         try:
-            result = service.tasks().insert(tasklist="@default", body=task_payload(task)).execute()
-            task.google_task_id = result["id"]
+            body = task_payload(task)
+            body["status"] = "completed" if task.status == "completed" else "needsAction"
+            if task.google_task_id:
+                result = service.tasks().patch(tasklist=task.google_task_list_id or "@default", task=task.google_task_id, body=body).execute()
+            else:
+                result = service.tasks().insert(tasklist="@default", body=body).execute()
+                task.google_task_id = result["id"]
             task.google_task_list_id = "@default"
             task.google_sync_error = None
             task.google_synced_at = datetime.now(timezone.utc)

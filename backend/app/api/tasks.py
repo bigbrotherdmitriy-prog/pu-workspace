@@ -65,6 +65,8 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     if payload.result_note is not None:
         task.result_note = payload.result_note.strip() or None
     db.commit(); db.refresh(task)
+    sync_tasks_to_google(db, task.project_id, [task], force_update=True)
+    sync_tasks_to_calendar(db, task.project_id, [task], force_update=True)
     return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note, "completed_at": task.completed_at}
 
 
