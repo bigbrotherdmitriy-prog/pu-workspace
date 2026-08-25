@@ -30,6 +30,7 @@ router = APIRouter(
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/tasks",
 ]
 
 
@@ -240,6 +241,7 @@ def google_status(
         "authorized": bool(
             token and token.access_token
         ),
+        "tasks_authorized": bool(token and "https://www.googleapis.com/auth/tasks" in (token.scopes or "").split()),
     }
 
 

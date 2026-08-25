@@ -10,6 +10,7 @@ from app.models.telegram_chat import TelegramChatLink
 from app.organizer_engine.types import DriveFile
 from app.response_engine import create_response_drafts
 from app.task_engine import create_tasks_from_files
+from app.google_tasks import sync_tasks_to_google
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -76,9 +77,10 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             return {"ok": True}
         synthetic = DriveFile(id=f"telegram:{chat_id}:{message.get('message_id')}", name=f"Telegram — {link.title}", mime_type="text/plain", parent_id="telegram", content_text=text)
         tasks = create_tasks_from_files(db, link.project_id, None, [synthetic], source_type="telegram")
+        google_synced, _ = sync_tasks_to_google(db, link.project_id, tasks)
         drafts = create_response_drafts(db, link.project_id, None, [synthetic])
         if tasks or drafts:
-            notify_telegram_chat(chat_id, f"PU Workspace: создано задач — {len(tasks)}, черновиков ответов — {len(drafts)}.")
+            notify_telegram_chat(chat_id, f"PU Workspace: создано задач — {len(tasks)}, добавлено в Google Tasks — {google_synced}, черновиков ответов — {len(drafts)}.")
         return {"ok": True}
     finally:
         db.close()
