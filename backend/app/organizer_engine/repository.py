@@ -112,6 +112,31 @@ class OrganizerRepository:
             WHERE id=:id AND status='approved'
         """), {"id": proposal_id})
         self.db.commit()
+
+    def apply_auto_policy(self, proposal_id: int, minimum_confidence: float) -> int:
+        self.db.execute(text("""
+            UPDATE organizer_actions
+            SET user_decision = CASE
+                WHEN special_case IS NULL AND confidence >= :minimum THEN 'approved'
+                ELSE 'skipped'
+            END
+            WHERE proposal_id=:id
+        """), {"id": proposal_id, "minimum": minimum_confidence})
+        approved = int(self.db.execute(text("""
+            SELECT count(*) FROM organizer_actions
+            WHERE proposal_id=:id AND user_decision='approved'
+        """), {"id": proposal_id}).scalar_one())
+        if approved:
+            self.db.execute(text("""
+                UPDATE organizer_proposals
+                SET status='approved', note=:note
+                WHERE id=:id AND status='waiting_confirmation'
+            """), {
+                "id": proposal_id,
+                "note": f"Автоматическая политика: {approved} безопасных действий, порог {minimum_confidence:.0%}.",
+            })
+        self.db.commit()
+        return approved
         return result.rowcount == 1
 
     def mark_applied(self, proposal_id: int):

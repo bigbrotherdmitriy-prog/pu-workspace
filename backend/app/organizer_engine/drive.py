@@ -3,10 +3,23 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import io
+import os
 from typing import Any
 
+from googleapiclient.http import MediaIoBaseDownload
+
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
+from .content import extract_text
 from .types import DriveFile, FOLDER_MIME
+
+
+MAX_CONTENT_BYTES = int(os.getenv("ORGANIZER_MAX_CONTENT_BYTES", str(4 * 1024 * 1024)))
+GOOGLE_EXPORTS = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
 
 
 class UnsafeDriveMutation(RuntimeError):
@@ -71,6 +84,33 @@ class DriveClient:
             page_token = resp.get("nextPageToken")
             if not page_token:
                 return out
+
+    def populate_content(self, items: list[DriveFile]) -> tuple[int, int]:
+        extracted = 0
+        failed = 0
+        for item in items:
+            if item.is_folder or (item.size is not None and item.size > MAX_CONTENT_BYTES):
+                continue
+            try:
+                export_mime = GOOGLE_EXPORTS.get(item.mime_type)
+                request = (
+                    self.service.files().export_media(fileId=item.id, mimeType=export_mime)
+                    if export_mime
+                    else self.service.files().get_media(fileId=item.id)
+                )
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request, chunksize=1024 * 1024)
+                done = False
+                while not done and buffer.tell() <= MAX_CONTENT_BYTES:
+                    _, done = downloader.next_chunk()
+                if buffer.tell() > MAX_CONTENT_BYTES:
+                    continue
+                item.content_text = extract_text(buffer.getvalue(), export_mime or item.mime_type, item.name)
+                if item.content_text:
+                    extracted += 1
+            except Exception:
+                failed += 1
+        return extracted, failed
 
     def walk_tree(self, root_folder_id: str, limit: int = MAX_FILES_PER_SCAN) -> list[DriveFile]:
         out: list[DriveFile] = []

@@ -219,6 +219,7 @@ def classify(
     filename: str,
     confirmed_rules: list[dict] | None = None,
     context: str | None = None,
+    content: str | None = None,
 ) -> Classification:
     # Explicit user-confirmed rules remain the strongest signal.
     for rule in confirmed_rules or []:
@@ -263,6 +264,24 @@ def classify(
             f"{', '.join(filename_matches)}.",
             True,
         )
+
+    if content:
+        content_matches = _keyword_matches(content[:50000])
+        if len(content_matches) == 1:
+            folder = content_matches[0]
+            return Classification(
+                folder,
+                0.92,
+                f"Раздел определён по тексту документа: «{folder}».",
+            )
+        if len(content_matches) > 1:
+            return Classification(
+                content_matches[0],
+                0.60,
+                "В тексте документа найдено несколько возможных разделов: "
+                f"{', '.join(content_matches)}.",
+                True,
+            )
 
     # Recognize common project-document section codes such as
     # АР / ОПЗ / ИОС / КЖ / ЭОМ when filename keywords are absent.

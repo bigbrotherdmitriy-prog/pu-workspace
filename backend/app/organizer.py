@@ -12,8 +12,9 @@ from app.database import SessionLocal, get_db
 from app.organizer_engine import DriveClient, OrganizerExecutor, OrganizerRepository, build_proposal
 from app.organizer_engine.drive_factory import get_drive_service
 from app.organizer_engine.types import DriveFile
-from app.organizer_engine.config import FOLDER_STRUCTURE
+from app.organizer_engine.config import AUTO_APPLY_CONFIDENCE, AUTO_APPLY_ENABLED, FOLDER_STRUCTURE
 from app.core.auth import require_admin, require_project_role, require_user
+from app.core.notifications import notify_telegram
 from app.models.user import User
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
@@ -110,17 +111,38 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
                 copy_item_count=copy_result.item_count, status="analyzing", progress=55,
             )
         copy_items = drive.walk_tree(copy_folder_id)
+        drive.populate_content(copy_items)
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         proposal_id = repo.create_proposal(
             project_id, session_id, source_name, source_folder_id, copy_folder_id
         )
         repo.save_items(proposal_id, items)
-        repo.update_session(session_id, status="proposed", progress=100)
+        if AUTO_APPLY_ENABLED:
+            approved = repo.apply_auto_policy(proposal_id, AUTO_APPLY_CONFIDENCE)
+            if approved:
+                if not repo.mark_prepared(proposal_id):
+                    raise ValueError("Automatic proposal could not be prepared")
+                OrganizerExecutor(repo, drive).apply(proposal_id)
+                repo.update_session(session_id, status="applied", progress=100)
+                notify_telegram(
+                    f"PU Workspace: «{source_name}» обработана автоматически. "
+                    f"Применено безопасных действий: {approved}. Оригиналы не изменялись."
+                )
+            else:
+                repo.update_session(session_id, status="proposed", progress=100)
+                notify_telegram(
+                    f"PU Workspace: анализ «{source_name}» завершён. "
+                    "Безопасных автоматических действий нет; требуется проверка."
+                )
+        else:
+            repo.update_session(session_id, status="proposed", progress=100)
+            notify_telegram(f"PU Workspace: предложение для «{source_name}» готово к проверке.")
     except Exception as exc:
         db.rollback()
         try:
             repo.update_session(session_id, status="failed", error_message=str(exc), progress=100)
+            notify_telegram(f"PU Workspace: ошибка обработки сессии {session_id}: {str(exc)[:500]}")
         except Exception:
             pass
     finally:
@@ -147,7 +169,7 @@ def status():
     return {
         "status": "ok",
         "module": "organizer",
-        "mode": "preview-first",
+        "mode": "auto-copy" if AUTO_APPLY_ENABLED else "preview-first",
         "storage": "postgresql",
         "safe_copy_required": True,
         "originals_modified": False,

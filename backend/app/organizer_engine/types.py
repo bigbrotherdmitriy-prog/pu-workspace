@@ -14,6 +14,7 @@ class DriveFile:
     md5_checksum: str | None = None
     size: int | None = None
     modified_time: str | None = None
+    content_text: str | None = None
 
     @property
     def is_folder(self) -> bool:

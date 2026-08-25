@@ -45,6 +45,14 @@ class PlannerSafetyTests(unittest.TestCase):
         self.assertEqual(item.proposed_name, item.current_name)
         self.assertEqual(item.special_case, "ambiguous")
 
+    def test_document_content_classifies_generic_filename(self):
+        generic = file("1", "scan0001.pdf")
+        generic.content_text = "ДОГОВОР ПОСТАВКИ. Стороны заключили настоящий договор."
+        item = build_proposal([generic], project_name="Проект")[0]
+        self.assertEqual(item.proposed_folder, "02_ДОГОВОРЫ И ЮРИДИЧЕСКИЕ")
+        self.assertGreaterEqual(item.confidence, 0.9)
+        self.assertIn("тексту документа", item.reasoning)
+
 
 if __name__ == "__main__":
     unittest.main()

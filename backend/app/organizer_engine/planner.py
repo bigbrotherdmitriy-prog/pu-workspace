@@ -70,6 +70,7 @@ def build_proposal(
             file.name,
             confirmed_rules,
             context=context,
+            content=file.content_text,
         )
 
         special = special_by_id.get(file.id)
