@@ -27,6 +27,12 @@ def notify_telegram_chat(chat_id: str | int, message: str) -> bool:
     if not token or not chat_id:
         return False
     try:
+        relay = os.getenv("TELEGRAM_RELAY_URL", "")
+        relay_secret = os.getenv("TELEGRAM_RELAY_SECRET", "")
+        if relay and relay_secret:
+            response = httpx.post(f"{relay.rstrip('/')}/send", json={"chat_id": chat_id, "message": message[:4000]}, headers={"X-Relay-Secret": relay_secret}, timeout=12.0)
+            response.raise_for_status()
+            return True
         with telegram_http_client() as client:
             response = client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
