@@ -11,8 +11,12 @@ def telegram_configured() -> bool:
 
 def notify_telegram(message: str) -> bool:
     """Best-effort notification; organizer work never fails because Telegram is unavailable."""
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    return notify_telegram_chat(chat_id, message)
+
+
+def notify_telegram_chat(chat_id: str | int, message: str) -> bool:
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not token or not chat_id:
         return False
     try:

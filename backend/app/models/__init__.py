@@ -16,6 +16,7 @@ from app.models.organizer import (
 from app.models.auth_session import AuthSession
 from app.models.task import Task
 from app.models.response_draft import ResponseDraft
+from app.models.telegram_chat import TelegramChatLink
 
 __all__ = [
     "Project",
@@ -34,4 +35,5 @@ __all__ = [
     "AuthSession",
     "Task",
     "ResponseDraft",
+    "TelegramChatLink",
 ]

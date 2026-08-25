@@ -57,7 +57,7 @@ def _reviewer(db: Session, project_id: int) -> User | None:
     return db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id))
 
 
-def create_response_drafts(db: Session, project_id: int, session_id: int, files: list[DriveFile]) -> list[ResponseDraft]:
+def create_response_drafts(db: Session, project_id: int, session_id: int | None, files: list[DriveFile]) -> list[ResponseDraft]:
     reviewer = _reviewer(db, project_id)
     if not reviewer:
         return []

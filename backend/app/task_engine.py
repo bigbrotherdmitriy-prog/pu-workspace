@@ -73,7 +73,7 @@ def _default_assignee(db: Session, project_id: int) -> User | None:
     return rows[0].User
 
 
-def create_tasks_from_files(db: Session, project_id: int, session_id: int, files: list[DriveFile]) -> list[Task]:
+def create_tasks_from_files(db: Session, project_id: int, session_id: int | None, files: list[DriveFile], source_type: str = "document_analysis") -> list[Task]:
     assignee = _default_assignee(db, project_id)
     if not assignee:
         return []
@@ -106,6 +106,7 @@ def create_tasks_from_files(db: Session, project_id: int, session_id: int, files
                 source_excerpt_hash=excerpt_hash,
                 confidence=candidate.confidence,
                 needs_review=True,
+                source_type=source_type,
             )
             db.add(task)
             created.append(task)
