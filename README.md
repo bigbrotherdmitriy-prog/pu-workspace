@@ -21,15 +21,19 @@ MVP безопасного органайзера проектных докум�
 
 ## Запуск
 
-1. Скопируйте `.env.example` в `.env` и заполните Google OAuth credentials.
+1. Выполните `powershell -ExecutionPolicy Bypass -File scripts/setup-local.ps1`.
+   Скрипт создаст `.env` со случайными локальными секретами и не перезапишет
+   существующий файл без явно переданного `-Force`.
+2. Заполните в `.env` Google OAuth credentials.
    Создайте ключ токенов командой
    `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
    Также задайте случайный `BOOTSTRAP_TOKEN` длиной не менее 24 символов.
    Он используется только для создания первого администратора.
-2. В Google Cloud Console добавьте redirect URI
+3. В Google Cloud Console добавьте redirect URI
    `http://localhost:3000/projects/google/callback`.
-3. Запустите `docker compose up --build`.
-4. Откройте `http://localhost:3000`.
+4. Запустите `docker compose up --build`.
+5. Откройте `http://localhost:3000` и раскройте «Первый запуск» для создания
+   администратора с `BOOTSTRAP_TOKEN` из `.env`.
 
 Перед стартом backend контейнер применяет версионируемые миграции Alembic.
 Для локального запуска из каталога `backend` выполните

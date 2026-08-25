@@ -24,6 +24,7 @@ from app.organizer import router as organizer_router
 from app.organizer import recover_incomplete_scans
 from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
+from app.core.readiness import readiness_report
 
 
 app = FastAPI(
@@ -65,6 +66,12 @@ def root():
 @app.get("/api/status")
 def api_status():
     return {"status": "ok", "service": "PU Workspace", "version": "0.4.0"}
+
+
+@app.get("/api/readiness")
+def readiness():
+    report = readiness_report()
+    return report
 
 
 @app.get("/health")
