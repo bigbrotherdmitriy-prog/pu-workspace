@@ -4,28 +4,31 @@ services:
     container_name: pu-workspace-db
     restart: unless-stopped
     environment:
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
-      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY}
       POSTGRES_DB: pu_workspace
       POSTGRES_USER: pu_user
-      POSTGRES_PASSWORD: pu_change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pu_change_me}
     volumes:
     - pu_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pu_user -d pu_workspace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   backend:
     build: ./backend
     container_name: pu-workspace-backend
     restart: unless-stopped
     depends_on:
-    - db
+      db:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://pu_user:pu_change_me@db:5432/pu_workspace
+      DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:-pu_change_me}@db:5432/pu_workspace
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
-      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY}
-      MAX_FILES_PER_SCAN: '1000000'
+      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY:-app.api.google_drive:drive_service_for_project}
+      MAX_FILES_PER_SCAN: ${MAX_FILES_PER_SCAN:-2000}
     ports:
     - 3000:8000
 volumes:

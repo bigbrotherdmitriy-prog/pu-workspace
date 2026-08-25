@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PU Workspace — безопасный органайзер</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">PU WORKSPACE</span><h1>Безопасный органайзер</h1></div>
+    <span class="badge">Оригиналы не изменяются</span>
+  </header>
+  <main>
+    <section class="panel setup">
+      <h2>1. Проект и Google Drive</h2>
+      <div class="row">
+        <label>Проект<select id="project"></select></label>
+        <button id="refreshProjects" class="secondary">Обновить</button>
+      </div>
+      <div class="row">
+        <input id="newProject" placeholder="Название нового проекта">
+        <button id="createProject">Создать проект</button>
+      </div>
+      <div class="row">
+        <button id="connectDrive" class="secondary">Подключить Google Drive</button>
+        <span id="driveStatus" class="muted">Статус не проверен</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>2. Выберите исходную папку</h2>
+      <p class="muted">Система сначала создаст отдельную копию рядом с исходной папкой.</p>
+      <div class="row"><input id="folderId" value="root" aria-label="ID папки"><button id="loadFolder" class="secondary">Открыть</button></div>
+      <div id="files" class="file-list empty">Подключите Drive и откройте папку.</div>
+      <button id="scan" disabled>Создать копию и проанализировать</button>
+    </section>
+
+    <section class="panel" id="progressPanel" hidden>
+      <h2>3. Анализ</h2>
+      <div class="progress"><span id="progressBar"></span></div>
+      <p id="progressText">Ожидание…</p>
+    </section>
+
+    <section class="panel wide" id="proposalPanel" hidden>
+      <div class="section-head"><div><h2>4. Предлагаемые изменения</h2><p class="muted" id="proposalMeta"></p></div><span id="proposalStatus" class="badge"></span></div>
+      <div class="notice">Особые случаи и низкая уверенность требуют явной ручной проверки.</div>
+      <div class="table-wrap"><table><thead><tr><th>Решение</th><th>Было</th><th>Станет</th><th>Уверенность</th><th>Основание</th></tr></thead><tbody id="actions"></tbody></table></div>
+      <div class="actions"><button id="approve">Подтвердить изменения</button><button id="reject" class="secondary">Ничего не менять</button><button id="apply" hidden>Применить к копии</button><button id="rollback" class="danger" hidden>Откатить</button></div>
+    </section>
+
+    <div id="message" role="status"></div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

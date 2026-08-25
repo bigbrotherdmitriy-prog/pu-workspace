@@ -53,9 +53,14 @@ def build_proposal(
     non_folders = [f for f in files if not f.is_folder]
     folders_by_id = {f.id: f for f in files if f.is_folder}
 
-    # Deduplication is intentionally NOT part of normal organization.
-    # Duplicate/version review belongs to a separate explicit workflow.
+    # Detection is advisory only. Special cases are surfaced in the proposal,
+    # never deleted, archived, renamed, or applied without explicit review.
     special_by_id: dict[str, str] = {}
+    for group in find_duplicate_and_version_groups(non_folders):
+        for grouped_file in group.files:
+            # Exact content evidence wins over a weaker version relationship.
+            if group.kind == "duplicate" or grouped_file.id not in special_by_id:
+                special_by_id[grouped_file.id] = group.kind
     draft: list[ProposalItem] = []
 
     for file in non_folders:
@@ -80,16 +85,15 @@ def build_proposal(
         if result.is_ambiguous or result.confidence < MIN_AUTO_CONFIDENCE:
             target_folder = DEFAULT_FOLDER
 
-        # Safety policy:
-        # classification and movement are allowed independently from renaming.
-        #
-        # The current build_name() intentionally generates generic names from
-        # project/category metadata and can discard meaningful information from
-        # the original filename (document number, subject, section code, etc.).
-        #
-        # Until semantic naming has its own strict safety policy, preserve every
-        # original filename. Organizer may classify/move, but does not auto-rename.
         proposed = file.name
+        if not unsafe_to_rename and target_folder != DEFAULT_FOLDER:
+            proposed = build_name(
+                file.name,
+                target_folder,
+                project=project_name,
+                date_iso=extract_date(file.name),
+                version=extract_version(file.name),
+            )
 
         reasoning = result.reasoning
 

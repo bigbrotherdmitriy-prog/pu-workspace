@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from app.api.history import router as history_router
 
 from app.api.access import router as access_router
@@ -26,6 +30,9 @@ app = FastAPI(
     version="0.4.0",
 )
 
+STATIC_DIR = Path(__file__).with_name("static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 app.include_router(projects_router)
 app.include_router(users_router)
 app.include_router(access_router)
@@ -40,11 +47,12 @@ app.include_router(organizer_router)
 
 @app.get("/")
 def root():
-    return {
-        "status": "ok",
-        "service": "PU Workspace",
-        "version": "0.4.0",
-    }
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/status")
+def api_status():
+    return {"status": "ok", "service": "PU Workspace", "version": "0.4.0"}
 
 
 @app.get("/health")

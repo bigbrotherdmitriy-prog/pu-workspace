@@ -115,11 +115,8 @@ class OrganizerExecutor:
         if not proposal:
             raise ValueError("Proposal not found")
 
-        if proposal["status"] not in {
-            "approved",
-            "ready_to_apply_to_copy",
-        }:
-            raise ValueError("Proposal must be approved before apply")
+        if proposal["status"] != "ready_to_apply_to_copy":
+            raise ValueError("Proposal is not prepared for apply")
 
         copy_root = proposal["copy_folder_id"]
 
@@ -276,6 +273,9 @@ class OrganizerExecutor:
         if not proposal or not proposal["copy_folder_id"]:
             raise ValueError("Proposal/safe copy not found")
 
+        if proposal["status"] not in {"applied", "rollback_partial"}:
+            raise ValueError("Only an applied proposal can be rolled back")
+
         copy_root = proposal["copy_folder_id"]
 
         stats = {
@@ -323,4 +323,5 @@ class OrganizerExecutor:
             except Exception:
                 stats["errors"] += 1
 
+        self.repo.mark_rollback_result(proposal_id, complete=stats["errors"] == 0)
         return stats

@@ -10,6 +10,7 @@ from app.database import SessionLocal, get_db
 from app.organizer_engine import DriveClient, OrganizerExecutor, OrganizerRepository, build_proposal
 from app.organizer_engine.drive_factory import get_drive_service
 from app.organizer_engine.types import DriveFile
+from app.organizer_engine.config import FOLDER_STRUCTURE
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
 
@@ -188,6 +189,13 @@ def edit_action(action_id: int, payload: EditItemRequest, db: Session = Depends(
     row = db.execute(__import__("sqlalchemy").text("SELECT * FROM organizer_actions WHERE id=:id"), {"id": action_id}).mappings().first()
     if not row:
         raise HTTPException(404, "Action not found")
+    valid_folders = {name for name, _ in FOLDER_STRUCTURE}
+    if payload.edited_folder and payload.edited_folder not in valid_folders:
+        raise HTTPException(422, "Unknown target folder")
+    if payload.edited_name is not None:
+        edited_name = payload.edited_name.strip()
+        if not edited_name or len(edited_name) > 240:
+            raise HTTPException(422, "Edited name must contain 1..240 characters")
     repo.edit_item(action_id, payload.decision, payload.edited_name, payload.edited_folder)
     if payload.save_as_rule and payload.edited_folder:
         repo.add_rule({"filename_contains": row["source"]}, {"folder": payload.edited_folder}, None, "user_correction", True)
@@ -219,9 +227,15 @@ def apply(proposal_id: int, db: Session = Depends(get_db)):
         raise HTTPException(409, "Proposal must be approved before apply")
     try:
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
-        repo.mark_prepared(proposal_id)
+        if not repo.mark_prepared(proposal_id):
+            raise HTTPException(409, "Proposal is already being applied or was processed")
         stats = OrganizerExecutor(repo, drive).apply(proposal_id)
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": stats}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(500, str(exc)) from exc
@@ -236,9 +250,20 @@ def rollback(proposal_id: int, db: Session = Depends(get_db)):
     try:
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
         return OrganizerExecutor(repo, drive).rollback(proposal_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(500, str(exc)) from exc
+
+
+@router.get("/proposals/{proposal_id}/operations")
+def proposal_operations(proposal_id: int, db: Session = Depends(get_db)):
+    repo = OrganizerRepository(db)
+    if not repo.proposal(proposal_id):
+        raise HTTPException(404, "Proposal not found")
+    return {"operations": [dict(item) for item in repo.operations(proposal_id)]}
 
 
 @router.post("/rules")

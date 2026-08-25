@@ -22,11 +22,6 @@ def _base_name(filename: str) -> str:
 
 
 def _has_version_marker(filename: str) -> bool:
-    name = filename.rsplit(".", 1)[0] if "." in filename else filename
-    return _STRIP_PATTERN.search(name) is not None
-
-
-def _has_version_marker(filename: str) -> bool:
     """
     True only when the original basename contains an explicit marker
     that _STRIP_PATTERN understands as a version/copy/date suffix.

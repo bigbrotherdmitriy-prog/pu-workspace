@@ -6,6 +6,13 @@ from app.models.document import Document
 from app.models.google_token import GoogleOAuthToken
 from app.models.document_version import DocumentVersion
 from app.models.audit_log import AuditLog
+from app.models.organizer import (
+    OrganizerAction,
+    OrganizerOperation,
+    OrganizerProposal,
+    OrganizerRule,
+    OrganizerSession,
+)
 
 __all__ = [
     "Project",
@@ -16,4 +23,9 @@ __all__ = [
     "GoogleOAuthToken",
     "DocumentVersion",
     "AuditLog",
+    "OrganizerSession",
+    "OrganizerProposal",
+    "OrganizerAction",
+    "OrganizerOperation",
+    "OrganizerRule",
 ]

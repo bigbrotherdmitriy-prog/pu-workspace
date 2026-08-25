@@ -83,13 +83,30 @@ class OrganizerRepository:
             self.db.execute(text("UPDATE organizer_actions SET user_decision='approved' WHERE proposal_id=:id AND user_decision='pending'"), {"id":proposal_id})
         self.db.commit()
 
-    def mark_prepared(self, proposal_id: int):
-        self.db.execute(text("""
-            UPDATE organizer_proposals SET status='ready_to_apply_to_copy', originals_modified=false, prepared_at=now() WHERE id=:id
-        """), {"id":proposal_id}); self.db.commit()
+    def mark_prepared(self, proposal_id: int) -> bool:
+        result = self.db.execute(text("""
+            UPDATE organizer_proposals
+            SET status='ready_to_apply_to_copy', originals_modified=false, prepared_at=now()
+            WHERE id=:id AND status='approved'
+        """), {"id": proposal_id})
+        self.db.commit()
+        return result.rowcount == 1
 
     def mark_applied(self, proposal_id: int):
-        self.db.execute(text("UPDATE organizer_proposals SET status='applied', originals_modified=false WHERE id=:id"), {"id":proposal_id}); self.db.commit()
+        self.db.execute(text("""
+            UPDATE organizer_proposals
+            SET status='applied', originals_modified=false, applied_at=now()
+            WHERE id=:id AND status='ready_to_apply_to_copy'
+        """), {"id": proposal_id}); self.db.commit()
+
+    def mark_rollback_result(self, proposal_id: int, complete: bool):
+        status = "rolled_back" if complete else "rollback_partial"
+        self.db.execute(text("""
+            UPDATE organizer_proposals
+            SET status=:status, rolled_back_at=CASE WHEN :complete THEN now() ELSE rolled_back_at END
+            WHERE id=:id
+        """), {"id": proposal_id, "status": status, "complete": complete})
+        self.db.commit()
 
     def log_operation(self, proposal_id: int, session_id: int, file_id: str, op_type: str, before: dict, after: dict) -> int:
         return int(self.db.execute(text("""

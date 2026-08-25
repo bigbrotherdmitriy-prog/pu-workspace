@@ -1,4 +1,10 @@
 import os
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -22,6 +28,38 @@ router = APIRouter(
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
+
+
+def _state_secret() -> bytes:
+    value = os.getenv("APP_SECRET_KEY", "")
+    if len(value) < 32:
+        raise HTTPException(503, "APP_SECRET_KEY must contain at least 32 characters")
+    return value.encode("utf-8")
+
+
+def _make_oauth_state(project_id: int) -> str:
+    payload = json.dumps(
+        {"project_id": project_id, "expires": int(time.time()) + 600, "nonce": secrets.token_urlsafe(16)},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    encoded = base64.urlsafe_b64encode(payload).rstrip(b"=")
+    signature = hmac.new(_state_secret(), encoded, hashlib.sha256).digest()
+    return (encoded + b"." + base64.urlsafe_b64encode(signature).rstrip(b"=")).decode("ascii")
+
+
+def _project_from_oauth_state(state: str) -> int:
+    try:
+        encoded, supplied = state.encode("ascii").split(b".", 1)
+        expected = hmac.new(_state_secret(), encoded, hashlib.sha256).digest()
+        signature = base64.urlsafe_b64decode(supplied + b"=" * (-len(supplied) % 4))
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError("signature")
+        payload = json.loads(base64.urlsafe_b64decode(encoded + b"=" * (-len(encoded) % 4)))
+        if int(payload["expires"]) < int(time.time()):
+            raise ValueError("expired")
+        return int(payload["project_id"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, "Invalid or expired OAuth state") from exc
 
 
 def google_config():
@@ -109,7 +147,7 @@ def google_auth(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
-        state=str(project_id),
+        state=_make_oauth_state(project_id),
     )
 
     return {
@@ -124,13 +162,7 @@ def google_callback(
     state: str = Query(...),
     db: Session = Depends(get_db),
 ):
-    try:
-        project_id = int(state)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid OAuth state",
-        )
+    project_id = _project_from_oauth_state(state)
 
     project = db.get(Project, project_id)
 
