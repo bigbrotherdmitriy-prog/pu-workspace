@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.api.history import router as history_router
 from app.api.auth import router as auth_router
+from app.api.tasks import router as tasks_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -29,7 +30,7 @@ from app.core.readiness import readiness_report
 
 app = FastAPI(
     title="PU Workspace",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -42,6 +43,7 @@ app.include_router(access_router, dependencies=[Depends(require_user)])
 app.include_router(drive_router, dependencies=[Depends(require_user)])
 app.include_router(documents_router, dependencies=[Depends(require_user)])
 app.include_router(google_drive_router)
+app.include_router(tasks_router)
 
 
 app.include_router(history_router, dependencies=[Depends(require_user)])
@@ -65,7 +67,7 @@ def root():
 
 @app.get("/api/status")
 def api_status():
-    return {"status": "ok", "service": "PU Workspace", "version": "0.4.0"}
+    return {"status": "ok", "service": "PU Workspace", "version": "0.5.0"}
 
 
 @app.get("/api/readiness")

@@ -61,6 +61,12 @@
       <div class="actions"><button id="approve">Подтвердить изменения</button><button id="reject" class="secondary">Ничего не менять</button><button id="apply" hidden>Применить к копии</button><button id="rollback" class="danger" hidden>Откатить</button></div>
     </section>
 
+    <section class="panel wide" id="tasksPanel" hidden>
+      <div class="section-head"><div><h2>5. Автоматически назначенные задачи</h2><p class="muted" id="tasksMeta"></p></div><button id="refreshTasks" class="secondary">Обновить</button></div>
+      <div class="notice">Задачи извлекаются из текста документов и назначаются владельцу проекта. Перед исполнением проверьте формулировку и срок по источнику.</div>
+      <div class="table-wrap"><table><thead><tr><th>Задача</th><th>Ответственный</th><th>Срок</th><th>Приоритет</th><th>Источник</th><th>Уверенность</th></tr></thead><tbody id="tasks"></tbody></table></div>
+    </section>
+
     <div id="message" role="status"></div>
   </main>
   <script src="/static/app.js"></script>

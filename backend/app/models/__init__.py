@@ -14,6 +14,7 @@ from app.models.organizer import (
     OrganizerSession,
 )
 from app.models.auth_session import AuthSession
+from app.models.task import Task
 
 __all__ = [
     "Project",
@@ -30,4 +31,5 @@ __all__ = [
     "OrganizerOperation",
     "OrganizerRule",
     "AuthSession",
+    "Task",
 ]

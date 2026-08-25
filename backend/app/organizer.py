@@ -16,6 +16,7 @@ from app.organizer_engine.config import AUTO_APPLY_CONFIDENCE, AUTO_APPLY_ENABLE
 from app.core.auth import require_admin, require_project_role, require_user
 from app.core.notifications import notify_telegram
 from app.models.user import User
+from app.task_engine import create_tasks_from_files
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
 _workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
@@ -114,6 +115,7 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
         drive.populate_content(copy_items)
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
+        tasks = create_tasks_from_files(db, project_id, session_id, copy_items)
         proposal_id = repo.create_proposal(
             project_id, session_id, source_name, source_folder_id, copy_folder_id
         )
@@ -127,17 +129,22 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
                 repo.update_session(session_id, status="applied", progress=100)
                 notify_telegram(
                     f"PU Workspace: «{source_name}» обработана автоматически. "
-                    f"Применено безопасных действий: {approved}. Оригиналы не изменялись."
+                    f"Применено безопасных действий: {approved}. Оригиналы не изменялись. "
+                    f"Автоматически назначено задач: {len(tasks)}."
                 )
             else:
                 repo.update_session(session_id, status="proposed", progress=100)
                 notify_telegram(
                     f"PU Workspace: анализ «{source_name}» завершён. "
-                    "Безопасных автоматических действий нет; требуется проверка."
+                    f"Безопасных автоматических действий нет; требуется проверка. "
+                    f"Автоматически назначено задач: {len(tasks)}."
                 )
         else:
             repo.update_session(session_id, status="proposed", progress=100)
-            notify_telegram(f"PU Workspace: предложение для «{source_name}» готово к проверке.")
+            notify_telegram(
+                f"PU Workspace: предложение для «{source_name}» готово к проверке. "
+                f"Автоматически назначено задач: {len(tasks)}."
+            )
     except Exception as exc:
         db.rollback()
         try:
