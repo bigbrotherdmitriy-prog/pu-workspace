@@ -7,6 +7,8 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
+from app.models.user import User
+from app.core.auth import require_admin, require_project_role, require_user
 
 
 router = APIRouter(
@@ -33,19 +35,22 @@ def document_to_dict(document):
     return result
 
 
+def accessible_document(db: Session, user: User, document_id: int, minimum: str):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(404, "Document not found")
+    require_project_role(db, user, document.project_id, minimum)
+    return document
+
+
 @router.post("/documents/{document_id}/snapshot")
 def create_snapshot(
     document_id: int,
     payload: SnapshotRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
+    document = accessible_document(db, user, document_id, "editor")
 
     current_max = db.scalar(
         select(
@@ -94,14 +99,9 @@ def create_snapshot(
 def get_versions(
     document_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
+    accessible_document(db, user, document_id, "viewer")
 
     versions = db.scalars(
         select(DocumentVersion)
@@ -132,7 +132,9 @@ def get_version(
     document_id: int,
     version_number: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    accessible_document(db, user, document_id, "viewer")
     version = db.scalar(
         select(DocumentVersion).where(
             DocumentVersion.document_id == document_id,
@@ -162,14 +164,9 @@ def restore_version(
     document_id: int,
     version_number: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
+    document = accessible_document(db, user, document_id, "manager")
 
     version = db.scalar(
         select(DocumentVersion).where(
@@ -206,6 +203,7 @@ def restore_version(
 def audit(
     limit: int = 100,
     db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
 ):
     limit = max(1, min(limit, 500))
 

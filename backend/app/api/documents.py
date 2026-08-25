@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.document import Document
 from app.models.project import Project
+from app.models.user import User
+from app.core.auth import require_project_role, require_user
 
 
 router = APIRouter(
@@ -27,7 +29,9 @@ def create_document(
     project_id: int,
     payload: DocumentCreate,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "editor")
     project = db.get(Project, project_id)
 
     if project is None:
@@ -64,7 +68,9 @@ def create_document(
 def list_documents(
     project_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "viewer")
     project = db.get(Project, project_id)
 
     if project is None:

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -42,11 +42,18 @@ def verify_password(password: str, encoded: str | None) -> bool:
 
 
 def issue_session(db: Session, user_id: int) -> tuple[str, datetime]:
+    cleanup_expired_sessions(db)
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(hours=int(os.getenv("AUTH_SESSION_HOURS", "24")))
     db.add(AuthSession(user_id=user_id, token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=expires))
     db.commit()
     return token, expires
+
+
+def cleanup_expired_sessions(db: Session) -> int:
+    result = db.execute(delete(AuthSession).where(AuthSession.expires_at <= datetime.now(timezone.utc)))
+    db.commit()
+    return result.rowcount or 0
 
 
 def require_user(

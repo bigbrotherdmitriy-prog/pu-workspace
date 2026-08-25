@@ -13,7 +13,7 @@ from app.organizer_engine import DriveClient, OrganizerExecutor, OrganizerReposi
 from app.organizer_engine.drive_factory import get_drive_service
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.config import FOLDER_STRUCTURE
-from app.core.auth import require_project_role, require_user
+from app.core.auth import require_admin, require_project_role, require_user
 from app.models.user import User
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
@@ -55,6 +55,22 @@ def _proposal_payload(repo: OrganizerRepository, proposal_id: int):
     if not p:
         raise HTTPException(404, "Proposal not found")
     return {**dict(p), "actions": [dict(x) for x in repo.proposal_items(proposal_id)]}
+
+
+def _session_for_user(repo, db, user, session_id, minimum="viewer"):
+    row = repo.get_session(session_id)
+    if not row:
+        raise HTTPException(404, "Session not found")
+    require_project_role(db, user, row["project_id"], minimum)
+    return row
+
+
+def _proposal_for_user(repo, db, user, proposal_id, minimum="viewer"):
+    row = repo.proposal(proposal_id)
+    if not row:
+        raise HTTPException(404, "Proposal not found")
+    require_project_role(db, user, row["project_id"], minimum)
+    return row
 
 
 def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
@@ -167,19 +183,15 @@ def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = 
 
 
 @router.get("/sessions/{session_id}")
-def session_status(session_id: int, db: Session = Depends(get_db)):
-    row = OrganizerRepository(db).get_session(session_id)
-    if not row:
-        raise HTTPException(404, "Session not found")
+def session_status(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = _session_for_user(OrganizerRepository(db), db, user, session_id)
     return dict(row)
 
 
 @router.post("/sessions/{session_id}/retry")
-def retry_session(session_id: int, db: Session = Depends(get_db)):
+def retry_session(session_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
-    row = repo.get_session(session_id)
-    if not row:
-        raise HTTPException(404, "Session not found")
+    row = _session_for_user(repo, db, user, session_id, "manager")
     if not repo.retry_failed_session(session_id):
         raise HTTPException(409, "Only a failed session can be retried")
     submit_scan(session_id, row["project_id"], row["source_folder_id"])
@@ -206,8 +218,13 @@ def compatibility_analyze(payload: AnalyzeRequest, db: Session = Depends(get_db)
 
 
 @router.get("/proposals")
-def proposals(project_id: int | None = None, db: Session = Depends(get_db)):
+def proposals(project_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
     repo = OrganizerRepository(db)
+    if project_id is None and not user.is_admin:
+        raise HTTPException(422, "project_id is required")
+    if project_id is not None:
+        require_project_role(db, user, project_id, "viewer")
     sql = "SELECT id FROM organizer_proposals"
     params = {}
     if project_id is not None:
@@ -219,16 +236,19 @@ def proposals(project_id: int | None = None, db: Session = Depends(get_db)):
 
 
 @router.get("/proposals/{proposal_id}")
-def proposal(proposal_id: int, db: Session = Depends(get_db)):
-    return _proposal_payload(OrganizerRepository(db), proposal_id)
+def proposal(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    repo = OrganizerRepository(db)
+    _proposal_for_user(repo, db, user, proposal_id)
+    return _proposal_payload(repo, proposal_id)
 
 
 @router.patch("/actions/{action_id}")
-def edit_action(action_id: int, payload: EditItemRequest, db: Session = Depends(get_db)):
+def edit_action(action_id: int, payload: EditItemRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
     row = db.execute(__import__("sqlalchemy").text("SELECT * FROM organizer_actions WHERE id=:id"), {"id": action_id}).mappings().first()
     if not row:
         raise HTTPException(404, "Action not found")
+    _proposal_for_user(repo, db, user, row["proposal_id"], "editor")
     valid_folders = {name for name, _ in FOLDER_STRUCTURE}
     if payload.edited_folder and payload.edited_folder not in valid_folders:
         raise HTTPException(422, "Unknown target folder")
@@ -244,11 +264,9 @@ def edit_action(action_id: int, payload: EditItemRequest, db: Session = Depends(
 
 
 @router.post("/proposals/{proposal_id}/decision")
-def decide(proposal_id: int, payload: DecisionRequest, db: Session = Depends(get_db)):
+def decide(proposal_id: int, payload: DecisionRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
-    p = repo.proposal(proposal_id)
-    if not p:
-        raise HTTPException(404, "Proposal not found")
+    p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     if p["status"] != "waiting_confirmation":
         raise HTTPException(409, "Proposal already processed")
     repo.decide(proposal_id, payload.approved, payload.note)
@@ -256,11 +274,9 @@ def decide(proposal_id: int, payload: DecisionRequest, db: Session = Depends(get
 
 
 @router.post("/proposals/{proposal_id}/apply")
-def apply(proposal_id: int, db: Session = Depends(get_db)):
+def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
-    p = repo.proposal(proposal_id)
-    if not p:
-        raise HTTPException(404, "Proposal not found")
+    p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     if not p["copy_folder_id"] or p["copy_folder_id"] == "manual":
         raise HTTPException(409, "Apply requires a real Google Drive safe copy created by /scan")
     if p["status"] != "approved":
@@ -282,11 +298,9 @@ def apply(proposal_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/proposals/{proposal_id}/rollback")
-def rollback(proposal_id: int, db: Session = Depends(get_db)):
+def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
-    p = repo.proposal(proposal_id)
-    if not p:
-        raise HTTPException(404, "Proposal not found")
+    p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     try:
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
         return OrganizerExecutor(repo, drive).rollback(proposal_id)
@@ -299,16 +313,14 @@ def rollback(proposal_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/proposals/{proposal_id}/operations")
-def proposal_operations(proposal_id: int, db: Session = Depends(get_db)):
-    require_project_role(db, user, payload.project_id, "editor")
+def proposal_operations(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
-    if not repo.proposal(proposal_id):
-        raise HTTPException(404, "Proposal not found")
+    _proposal_for_user(repo, db, user, proposal_id, "viewer")
     return {"operations": [dict(item) for item in repo.operations(proposal_id)]}
 
 
 @router.post("/rules")
-def create_rule(payload: RuleRequest, db: Session = Depends(get_db)):
+def create_rule(payload: RuleRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     repo = OrganizerRepository(db)
     rule_id = repo.add_rule(
         {"filename_contains": payload.filename_contains},

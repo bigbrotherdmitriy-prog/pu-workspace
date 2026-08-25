@@ -22,7 +22,8 @@ from app.models import (
 )
 from app.organizer import router as organizer_router
 from app.organizer import recover_incomplete_scans
-from app.core.auth import require_user
+from app.core.auth import cleanup_expired_sessions, require_user
+from app.database import SessionLocal
 
 
 app = FastAPI(
@@ -48,6 +49,11 @@ app.include_router(organizer_router, dependencies=[Depends(require_user)])
 
 @app.on_event("startup")
 def recover_organizer_jobs():
+    db = SessionLocal()
+    try:
+        cleanup_expired_sessions(db)
+    finally:
+        db.close()
     recover_incomplete_scans()
 
 
