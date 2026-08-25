@@ -14,7 +14,7 @@ from app.models.organizer import (
     OrganizerSession,
 )
 from app.models.auth_session import AuthSession
-from app.models.task import Task
+from app.models.task import Task, TaskDueDateHistory
 from app.models.response_draft import ResponseDraft
 from app.models.telegram_chat import TelegramChatLink
 
@@ -34,6 +34,7 @@ __all__ = [
     "OrganizerRule",
     "AuthSession",
     "Task",
+    "TaskDueDateHistory",
     "ResponseDraft",
     "TelegramChatLink",
 ]
