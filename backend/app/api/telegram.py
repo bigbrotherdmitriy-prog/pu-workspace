@@ -1,10 +1,9 @@
 from __future__ import annotations
 import hmac
 import os
-import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy import select
-from app.core.notifications import notify_telegram_chat
+from app.core.notifications import notify_telegram_chat, telegram_http_client
 from app.database import SessionLocal
 from app.models.project import Project
 from app.models.telegram_chat import TelegramChatLink
@@ -33,11 +32,12 @@ def _download_document(document: dict) -> tuple[str, str, bytes]:
     file_id = document.get("file_id")
     if not file_id:
         raise ValueError("Telegram file_id missing")
-    meta = httpx.get(f"https://api.telegram.org/bot{token}/getFile", params={"file_id": file_id}, timeout=20.0)
-    meta.raise_for_status()
-    path = meta.json()["result"]["file_path"]
-    response = httpx.get(f"https://api.telegram.org/file/bot{token}/{path}", timeout=30.0)
-    response.raise_for_status()
+    with telegram_http_client(timeout=30.0) as client:
+        meta = client.get(f"https://api.telegram.org/bot{token}/getFile", params={"file_id": file_id})
+        meta.raise_for_status()
+        path = meta.json()["result"]["file_path"]
+        response = client.get(f"https://api.telegram.org/file/bot{token}/{path}")
+        response.raise_for_status()
     if len(response.content) > 20 * 1024 * 1024:
         raise ValueError("Скачанный файл превышает лимит 20 МБ")
     return document.get("file_name") or "telegram-file", document.get("mime_type") or "application/octet-stream", response.content
