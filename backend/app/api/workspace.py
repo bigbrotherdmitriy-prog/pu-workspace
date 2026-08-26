@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from googleapiclient.discovery import build
@@ -7,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.google_drive import credentials_for_project
 from app.core.auth import require_project_role, require_user
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.project import Project
 from app.models.user import User
 from app.models.workspace import SourceFolder, VirtualNode, WorkspaceSnapshot
@@ -24,6 +26,7 @@ from app.google_calendar import sync_tasks_to_calendar
 
 
 router = APIRouter(prefix="/projects", tags=["virtual-workspace"])
+_snapshot_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("SNAPSHOT_WORKERS", "1"))))
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -33,6 +36,87 @@ def _parse_time(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None:
+    db = SessionLocal()
+    try:
+        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+        if snapshot is None or snapshot.status == "ready":
+            return
+        drive = DriveClient(build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False))
+        source_meta = drive.get_file_meta(external_id)
+        items = drive.walk_tree(external_id)
+        db.add(VirtualNode(
+            snapshot_id=snapshot.id, external_id=source_meta.id,
+            parent_external_id=source_meta.parent_id or None, name=source_meta.name,
+            mime_type=source_meta.mime_type, node_type="folder", size_bytes=source_meta.size,
+            checksum=source_meta.md5_checksum, source_modified_at=_parse_time(source_meta.modified_time),
+        ))
+        db.add_all(VirtualNode(
+            snapshot_id=snapshot.id, external_id=item.id,
+            parent_external_id=item.parent_id or None, name=item.name, mime_type=item.mime_type,
+            node_type="folder" if item.is_folder else "file", size_bytes=item.size,
+            checksum=item.md5_checksum, source_modified_at=_parse_time(item.modified_time),
+        ) for item in items)
+        snapshot.item_count = len(items) + 1
+        snapshot.status = "ready"
+        snapshot.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        failed = db.get(WorkspaceSnapshot, snapshot_id)
+        if failed is not None:
+            failed.status = "failed"
+            failed.error_message = str(exc)[:2000]
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.get("/{project_id}/source-folders/discover")
+def discover_source_folders(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """List top-level Drive folders available for independent snapshot queues."""
+    require_project_role(db, user, project_id, "viewer")
+    service = build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False)
+    result = service.files().list(
+        q="'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id,name,modifiedTime,createdTime)", pageSize=1000, orderBy="name",
+    ).execute()
+    registered = {row.external_id for row in db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id))}
+    return {"folders": [{**item, "registered": item["id"] in registered} for item in result.get("files", [])]}
+
+
+@router.post("/{project_id}/source-folders/{external_id}/snapshot-queue")
+def queue_workspace_snapshot(
+    project_id: int,
+    external_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    drive = DriveClient(build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False))
+    source_meta = drive.get_file_meta(external_id)
+    if not source_meta.is_folder:
+        raise HTTPException(422, "Source object is not a folder")
+    source = db.scalar(select(SourceFolder).where(SourceFolder.project_id == project_id, SourceFolder.external_id == external_id))
+    if source is None:
+        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name)
+        db.add(source); db.flush()
+    active = db.scalar(select(WorkspaceSnapshot).where(
+        WorkspaceSnapshot.source_folder_id == source.id,
+        WorkspaceSnapshot.status == "building",
+    ).order_by(WorkspaceSnapshot.id.desc()))
+    if active:
+        return {"id": active.id, "status": active.status, "source_folder": source.name, "already_queued": True}
+    snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building")
+    db.add(snapshot); db.commit(); db.refresh(snapshot)
+    _snapshot_workers.submit(_build_snapshot, snapshot.id, project_id, external_id)
+    return {"id": snapshot.id, "status": snapshot.status, "source_folder": source.name, "already_queued": False}
 
 
 @router.post("/{project_id}/source-folders/{external_id}/snapshots")
