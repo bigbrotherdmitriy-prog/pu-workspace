@@ -17,6 +17,7 @@ __pycache__/
 *.fast
 *.parallel
 backups/
+pu-workspace-*.tar.gz
 
 # OS / editors
 .DS_Store
