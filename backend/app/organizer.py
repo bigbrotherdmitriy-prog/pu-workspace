@@ -318,7 +318,7 @@ def decide(proposal_id: int, payload: DecisionRequest, db: Session = Depends(get
 def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
     p = _proposal_for_user(repo, db, user, proposal_id, "manager")
-    if not p["copy_folder_id"] or p["copy_folder_id"] == "manual":
+    if not p["copy_folder_id"] or p["copy_folder_id"] == "manual" or p["copy_folder_id"].startswith("virtual:"):
         raise HTTPException(409, "Apply requires a real Google Drive safe copy created by /scan")
     if p["status"] not in {"approved", "ready_to_apply_to_copy", "applied"}:
         raise HTTPException(409, "Proposal must be approved before apply")
