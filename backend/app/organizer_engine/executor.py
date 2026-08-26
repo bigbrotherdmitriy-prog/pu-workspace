@@ -7,6 +7,17 @@ from .drive import DriveClient
 from .repository import OrganizerRepository
 
 
+def source_metadata_changed(item, current) -> bool:
+    if current.name != item["source"] or current.parent_id != item["current_parent_id"]:
+        return True
+    expected_modified = item.get("source_modified_at")
+    expected_checksum = item.get("source_checksum")
+    return bool(
+        (expected_modified and current.modified_time != expected_modified)
+        or (expected_checksum and current.md5_checksum != expected_checksum)
+    )
+
+
 class OrganizerExecutor:
     def __init__(self, repo: OrganizerRepository, drive: DriveClient):
         self.repo = repo
@@ -109,6 +120,19 @@ class OrganizerExecutor:
                 f"{preview}"
             )
 
+    def _recheck_sources(self, proposal_id: int) -> None:
+        conflicts: list[int] = []
+        for item in self._approved_items(proposal_id):
+            current = self.drive.get_file_meta(item["file_id"])
+            if source_metadata_changed(item, current):
+                conflicts.append(int(item["id"]))
+        if conflicts:
+            self.repo.mark_source_conflicts(proposal_id, conflicts)
+            raise ValueError(
+                "Safety dry-run blocked apply: source metadata changed after analysis "
+                f"for {len(conflicts)} action(s). Re-scan is required."
+            )
+
     def apply(self, proposal_id: int) -> dict[str, int]:
         proposal = self.repo.proposal(proposal_id)
 
@@ -125,6 +149,7 @@ class OrganizerExecutor:
 
         # Absolutely no Drive mutation before this passes.
         self._preflight(proposal_id)
+        self._recheck_sources(proposal_id)
 
         session_id = int(proposal["session_id"])
         folders = self._target_folders(copy_root)

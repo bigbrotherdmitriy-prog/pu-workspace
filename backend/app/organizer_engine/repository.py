@@ -67,10 +67,10 @@ class OrganizerRepository:
             self.db.execute(text("""
                 INSERT INTO organizer_actions(
                     proposal_id,action_order,action,source,target_folder,proposed_name,requires_confirmation,
-                    file_id,current_parent_id,special_case,confidence,reasoning,user_decision
+                    file_id,current_parent_id,special_case,confidence,reasoning,source_modified_at,source_checksum,user_decision
                 ) VALUES (
                     :proposal_id,:action_order,:action,:source,:target_folder,:proposed_name,true,
-                    :file_id,:current_parent_id,:special_case,:confidence,:reasoning,'pending'
+                    :file_id,:current_parent_id,:special_case,:confidence,:reasoning,:source_modified_at,:source_checksum,'pending'
                 )
             """), {
                 "proposal_id": proposal_id, "action_order": order, "action": it.kind,
@@ -78,6 +78,7 @@ class OrganizerRepository:
                 "proposed_name": it.proposed_name, "file_id": it.file_id,
                 "current_parent_id": it.current_parent_id, "special_case": it.special_case,
                 "confidence": it.confidence, "reasoning": it.reasoning,
+                "source_modified_at": it.source_modified_at, "source_checksum": it.source_checksum,
             })
         self.db.commit()
 
@@ -145,6 +146,21 @@ class OrganizerRepository:
             SET status='applied', originals_modified=false, applied_at=now()
             WHERE id=:id AND status='ready_to_apply_to_copy'
         """), {"id": proposal_id}); self.db.commit()
+
+    def mark_source_conflicts(self, proposal_id: int, action_ids: list[int]) -> None:
+        if not action_ids:
+            return
+        self.db.execute(text("""
+            UPDATE organizer_actions
+            SET user_decision='conflict_source_changed', special_case='source_changed'
+            WHERE proposal_id=:proposal_id AND id = ANY(:action_ids)
+        """), {"proposal_id": proposal_id, "action_ids": action_ids})
+        self.db.execute(text("""
+            UPDATE organizer_proposals SET status='conflict_source_changed',
+                note='Источник изменился после анализа. Требуется новый снимок и повторный dry-run.'
+            WHERE id=:proposal_id
+        """), {"proposal_id": proposal_id})
+        self.db.commit()
 
     def mark_rollback_result(self, proposal_id: int, complete: bool):
         status = "rolled_back" if complete else "rollback_partial"

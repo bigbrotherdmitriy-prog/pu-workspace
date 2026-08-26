@@ -138,6 +138,8 @@ def build_proposal(
                 ),
                 confidence=result.confidence,
                 reasoning=reasoning,
+                source_modified_at=file.modified_time,
+                source_checksum=file.md5_checksum,
             )
         )
 

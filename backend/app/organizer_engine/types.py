@@ -40,3 +40,5 @@ class ProposalItem:
     special_case: str | None = None
     confidence: float = 1.0
     reasoning: str = ""
+    source_modified_at: str | None = None
+    source_checksum: str | None = None

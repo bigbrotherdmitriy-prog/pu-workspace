@@ -59,6 +59,8 @@ class OrganizerAction(Base):
     special_case: Mapped[str | None] = mapped_column(String(50))
     confidence: Mapped[float] = mapped_column(Float, default=0)
     reasoning: Mapped[str] = mapped_column(Text, default="")
+    source_modified_at: Mapped[str | None] = mapped_column(String(100))
+    source_checksum: Mapped[str | None] = mapped_column(String(128))
     user_decision: Mapped[str] = mapped_column(String(50), default="pending")
     edited_name: Mapped[str | None] = mapped_column(String(500))
     edited_folder: Mapped[str | None] = mapped_column(String(500))
