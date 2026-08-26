@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
 from sqlalchemy import text
@@ -57,10 +58,11 @@ class OrganizerRepository:
 
     def create_proposal(self, project_id: int, session_id: int, folder_name: str, source_folder_id: str, copy_folder_id: str) -> int:
         return int(self.db.execute(text("""
-            INSERT INTO organizer_proposals(project_id,folder_name,status,originals_modified,created_at,session_id,source_folder_id,copy_folder_id)
-            VALUES (:project_id,:folder_name,'waiting_confirmation',false,now(),:session_id,:source_folder_id,:copy_folder_id)
+            INSERT INTO organizer_proposals(project_id,folder_name,status,originals_modified,created_at,session_id,source_folder_id,copy_folder_id,idempotency_key)
+            VALUES (:project_id,:folder_name,'waiting_confirmation',false,now(),:session_id,:source_folder_id,:copy_folder_id,:idempotency_key)
+            ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key
             RETURNING id
-        """), locals()).scalar_one())
+        """), {**locals(), "idempotency_key": f"organizer-session-{session_id}"}).scalar_one())
 
     def save_items(self, proposal_id: int, items: list[ProposalItem]) -> None:
         for order, it in enumerate(items, 1):
@@ -172,11 +174,16 @@ class OrganizerRepository:
         self.db.commit()
 
     def log_operation(self, proposal_id: int, session_id: int, file_id: str, op_type: str, before: dict, after: dict) -> int:
+        raw_key = f"{proposal_id}:{file_id}:{op_type}".encode("utf-8")
+        idempotency_key = hashlib.sha256(raw_key).hexdigest()
         return int(self.db.execute(text("""
-            INSERT INTO organizer_operations(proposal_id,session_id,file_id,op_type,before_json,after_json,applied_at)
-            VALUES (:proposal_id,:session_id,:file_id,:op_type,CAST(:before AS jsonb),CAST(:after AS jsonb),now()) RETURNING id
+            INSERT INTO organizer_operations(proposal_id,session_id,file_id,op_type,before_json,after_json,applied_at,idempotency_key)
+            VALUES (:proposal_id,:session_id,:file_id,:op_type,CAST(:before AS jsonb),CAST(:after AS jsonb),now(),:idempotency_key)
+            ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key
+            RETURNING id
         """), {"proposal_id":proposal_id,"session_id":session_id,"file_id":file_id,"op_type":op_type,
-                 "before":json.dumps(before,ensure_ascii=False),"after":json.dumps(after,ensure_ascii=False)}).scalar_one())
+                 "before":json.dumps(before,ensure_ascii=False),"after":json.dumps(after,ensure_ascii=False),
+                 "idempotency_key": idempotency_key}).scalar_one())
 
     def operations(self, proposal_id: int, limit: int = 500):
         return self.db.execute(text("""

@@ -139,6 +139,9 @@ class OrganizerExecutor:
         if not proposal:
             raise ValueError("Proposal not found")
 
+        if proposal["status"] == "applied":
+            return {"renamed": 0, "moved": 0, "skipped": 0, "errors": 0, "already_applied": 1}
+
         if proposal["status"] != "ready_to_apply_to_copy":
             raise ValueError("Proposal is not prepared for apply")
 
@@ -159,6 +162,7 @@ class OrganizerExecutor:
             "moved": 0,
             "skipped": 0,
             "errors": 0,
+            "already_applied": 0,
         }
 
         applied: list[tuple[str, str, dict, dict]] = []

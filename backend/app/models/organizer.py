@@ -40,6 +40,7 @@ class OrganizerProposal(Base):
     prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
 
 
 class OrganizerAction(Base):
@@ -78,6 +79,7 @@ class OrganizerOperation(Base):
     after_json: Mapped[dict] = mapped_column(JSON)
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
 
 
 class OrganizerRule(Base):
