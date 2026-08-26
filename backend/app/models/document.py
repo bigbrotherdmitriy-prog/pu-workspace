@@ -1,4 +1,5 @@
-from sqlalchemy import ForeignKey, String, Text
+from datetime import datetime
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -55,3 +56,8 @@ class Document(Base):
         Text,
         nullable=True,
     )
+
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_version: Mapped[int] = mapped_column(default=1)

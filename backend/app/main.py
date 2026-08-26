@@ -35,7 +35,7 @@ from app.core.readiness import readiness_report
 
 app = FastAPI(
     title="PU Workspace",
-    version="0.14.0",
+    version="0.15.0",
 )
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -77,7 +77,7 @@ def root():
 
 @app.get("/api/status")
 def api_status():
-    return {"status": "ok", "service": "PU Workspace", "version": "0.14.0"}
+    return {"status": "ok", "service": "PU Workspace", "version": "0.15.0"}
 
 
 @app.get("/api/readiness")

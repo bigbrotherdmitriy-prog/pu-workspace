@@ -18,6 +18,7 @@ from app.organizer_engine.content import extract_text
 from app.organizer_engine.types import DriveFile
 from app.response_engine import create_response_drafts
 from app.task_engine import create_tasks_from_files
+from app.document_engine import index_documents
 
 router = APIRouter(prefix="/local-upload", tags=["local-upload"])
 MAX_FILE_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_FILE_BYTES", str(4 * 1024 * 1024)))
@@ -62,10 +63,12 @@ def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), use
             if not text:
                 skipped.append({"path": item.path, "reason": "текст не извлечён"})
                 continue
-            digest = hashlib.sha256((item.path + ":").encode() + data).hexdigest()
-            extracted.append(DriveFile(id=f"local:{digest}", name=item.path, mime_type=item.mime_type, parent_id="local-upload", size=len(data), content_text=text))
+            content_digest = hashlib.sha256(data).hexdigest()
+            path_digest = hashlib.sha256(item.path.casefold().encode()).hexdigest()
+            extracted.append(DriveFile(id=f"local:{path_digest}", name=item.path, mime_type=item.mime_type, parent_id="local-upload", md5_checksum=content_digest, size=len(data), content_text=text))
         except ValueError as exc:
             skipped.append({"path": item.path, "reason": str(exc)})
+    index_documents(db, payload.project_id, extracted, "local_upload")
     tasks = create_tasks_from_files(db, payload.project_id, None, extracted, source_type="local_upload")
     google_synced, _ = sync_tasks_to_google(db, payload.project_id, tasks)
     calendar_synced, _ = sync_tasks_to_calendar(db, payload.project_id, tasks)

@@ -11,6 +11,7 @@ from app.models.governance import Decision, Risk
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.user import User
+from app.models.document import Document
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -22,6 +23,7 @@ def project_dashboard(project_id: int, db: Session = Depends(get_db), user: User
     risks = list(db.scalars(select(Risk).where(Risk.project_id == project_id)).all())
     decisions = list(db.scalars(select(Decision).where(Decision.project_id == project_id)).all())
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.project_id == project_id)).all())
+    registered_documents = list(db.scalars(select(Document).where(Document.project_id == project_id)).all())
     today = date.today()
     open_tasks = [x for x in tasks if x.status in {"assigned", "in_progress"}]
     overdue = [x for x in open_tasks if x.due_date and x.due_date < today]
@@ -41,8 +43,11 @@ def project_dashboard(project_id: int, db: Session = Depends(get_db), user: User
     for item in drafts:
         key = (item.source_file_id, item.source_file_name)
         document_map[key]["drafts"] += 1
+    document_id_by_source = {item.external_id: item.id for item in registered_documents}
+    for item in registered_documents:
+        document_map[(item.external_id or f"db:{item.id}", item.name)]
     documents = [
-        {"source_id": source_id, "name": name, **counts, "attention": counts["risks"] + counts["decisions"]}
+        {"source_id": source_id, "document_id": document_id_by_source.get(source_id), "name": name, **counts, "attention": counts["risks"] + counts["decisions"]}
         for (source_id, name), counts in document_map.items()
     ]
     documents.sort(key=lambda x: (x["attention"], x["tasks"], x["name"]), reverse=True)

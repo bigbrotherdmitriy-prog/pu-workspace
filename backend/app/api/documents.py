@@ -7,6 +7,10 @@ from app.database import get_db
 from app.models.document import Document
 from app.models.project import Project
 from app.models.user import User
+from app.models.document_version import DocumentVersion
+from app.models.governance import Decision, Risk
+from app.models.response_draft import ResponseDraft
+from app.models.task import Task
 from app.core.auth import require_project_role, require_user
 
 
@@ -94,7 +98,30 @@ def list_documents(
                 "mime_type": item.mime_type,
                 "source": item.source,
                 "status": item.status,
+                "current_version": item.current_version,
+                "source_modified_at": item.source_modified_at,
+                "summary": item.summary,
             }
             for item in documents
         ]
+    }
+
+
+@router.get("/{project_id}/documents/{document_id}")
+def document_card(project_id: int, document_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    item = db.get(Document, document_id)
+    if item is None or item.project_id != project_id:
+        raise HTTPException(404, "Document not found")
+    versions = list(db.scalars(select(DocumentVersion).where(DocumentVersion.document_id == item.id).order_by(DocumentVersion.version_number.desc())).all())
+    tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.source_file_id == item.external_id)).all())
+    risks = list(db.scalars(select(Risk).where(Risk.project_id == project_id, Risk.source_id == item.external_id)).all())
+    decisions = list(db.scalars(select(Decision).where(Decision.project_id == project_id, Decision.source_id == item.external_id)).all())
+    drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.project_id == project_id, ResponseDraft.source_file_id == item.external_id)).all())
+    return {
+        "id": item.id, "name": item.name, "mime_type": item.mime_type, "source": item.source,
+        "status": item.status, "current_version": item.current_version,
+        "source_modified_at": item.source_modified_at, "summary": item.summary,
+        "versions": [{"version": x.version_number, "created_at": x.created_at} for x in versions],
+        "links": {"tasks": len(tasks), "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts)},
     }

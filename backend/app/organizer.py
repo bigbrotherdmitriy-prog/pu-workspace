@@ -21,6 +21,7 @@ from app.response_engine import create_response_drafts
 from app.google_tasks import sync_tasks_to_google
 from app.google_calendar import sync_tasks_to_calendar
 from app.governance_engine import create_governance_items
+from app.document_engine import index_documents
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
 _workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
@@ -117,6 +118,7 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
             )
         copy_items = drive.walk_tree(copy_folder_id)
         drive.populate_content(copy_items)
+        index_documents(db, project_id, copy_items, "google_drive_copy")
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         tasks = create_tasks_from_files(db, project_id, session_id, copy_items)

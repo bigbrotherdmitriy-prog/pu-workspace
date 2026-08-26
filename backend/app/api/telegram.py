@@ -20,6 +20,7 @@ from app.google_tasks import sync_tasks_to_google
 from app.google_calendar import sync_tasks_to_calendar
 from app.summary_engine import brief_summary
 from app.governance_engine import create_governance_items
+from app.document_engine import index_documents
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -199,6 +200,7 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         if not content:
             return {"ok": True}
         synthetic = DriveFile(id=source_id, name=source_name, mime_type=mime_type, parent_id="telegram", content_text=content)
+        index_documents(db, link.project_id, [synthetic], "telegram")
         tasks = create_tasks_from_files(db, link.project_id, None, [synthetic], source_type="telegram")
         google_synced, _ = sync_tasks_to_google(db, link.project_id, tasks)
         calendar_synced, _ = sync_tasks_to_calendar(db, link.project_id, tasks)
