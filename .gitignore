@@ -25,3 +25,7 @@ backups/
 
 # Logs
 *.log
+
+# Frontend dependencies and compiler cache
+frontend/node_modules/
+frontend/*.tsbuildinfo

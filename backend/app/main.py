@@ -35,10 +35,11 @@ from app.core.readiness import readiness_report
 
 app = FastAPI(
     title="PU Workspace",
-    version="0.15.0",
+    version="0.16.0",
 )
 
 STATIC_DIR = Path(__file__).with_name("static")
+REACT_DIR = Path(__file__).with_name("react_dist")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.include_router(auth_router)
@@ -77,7 +78,7 @@ def root():
 
 @app.get("/api/status")
 def api_status():
-    return {"status": "ok", "service": "PU Workspace", "version": "0.15.0"}
+    return {"status": "ok", "service": "PU Workspace", "version": "0.16.0"}
 
 
 @app.get("/api/readiness")
@@ -91,3 +92,7 @@ def health():
     return {
         "status": "healthy",
     }
+
+
+if REACT_DIR.exists():
+    app.mount("/new", StaticFiles(directory=REACT_DIR, html=True), name="react-ui")
