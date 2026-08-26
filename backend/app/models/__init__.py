@@ -18,6 +18,7 @@ from app.models.task import Task, TaskDueDateHistory
 from app.models.response_draft import ResponseDraft
 from app.models.telegram_chat import TelegramChatLink
 from app.models.governance import Decision, Risk
+from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
 
 __all__ = [
     "Project",
@@ -40,4 +41,8 @@ __all__ = [
     "TelegramChatLink",
     "Risk",
     "Decision",
+    "SourceFolder",
+    "WorkspaceSnapshot",
+    "VirtualNode",
+    "ExtractionResult",
 ]

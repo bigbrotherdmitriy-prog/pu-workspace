@@ -11,6 +11,7 @@ from app.api.telegram import router as telegram_router
 from app.api.governance import router as governance_router
 from app.api.dashboard import router as dashboard_router
 from app.api.local_upload import router as local_upload_router
+from app.api.workspace import router as workspace_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -55,6 +56,7 @@ app.include_router(telegram_router)
 app.include_router(governance_router)
 app.include_router(dashboard_router)
 app.include_router(local_upload_router)
+app.include_router(workspace_router)
 
 
 app.include_router(history_router, dependencies=[Depends(require_user)])
