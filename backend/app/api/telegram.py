@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hmac
 import os
+import time
 import httpx
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -51,8 +52,16 @@ def _download_document(document: dict) -> tuple[str, str, bytes]:
     relay = os.getenv("TELEGRAM_RELAY_URL", "")
     relay_secret = os.getenv("TELEGRAM_RELAY_SECRET", "")
     if relay and relay_secret:
-        response = httpx.get(f"{relay.rstrip('/')}/file/{file_id}", headers={"X-Relay-Secret": relay_secret}, timeout=35.0)
-        response.raise_for_status()
+        response = None
+        for attempt in range(3):
+            try:
+                response = httpx.get(f"{relay.rstrip('/')}/file/{file_id}", headers={"X-Relay-Secret": relay_secret}, timeout=35.0)
+                response.raise_for_status()
+                break
+            except httpx.HTTPError as exc:
+                if attempt == 2:
+                    raise RuntimeError("Telegram временно не отдал файл после трёх попыток") from exc
+                time.sleep(attempt + 1)
     else:
         with telegram_http_client(timeout=30.0) as client:
             meta = client.get(f"https://api.telegram.org/bot{token}/getFile", params={"file_id": file_id})
@@ -63,6 +72,23 @@ def _download_document(document: dict) -> tuple[str, str, bytes]:
     if len(response.content) > 20 * 1024 * 1024:
         raise ValueError("Скачанный файл превышает лимит 20 МБ")
     return document.get("file_name") or "telegram-file", document.get("mime_type") or "application/octet-stream", response.content
+
+
+def _incoming_file(message: dict) -> dict | None:
+    document = message.get("document")
+    if document:
+        return document
+    photos = message.get("photo") or []
+    if not photos:
+        return None
+    photo = dict(photos[-1])
+    photo.setdefault("file_name", f"telegram-photo-{message.get('message_id', 'unknown')}.jpg")
+    photo.setdefault("mime_type", "image/jpeg")
+    return photo
+
+
+def _public_download_error(_: Exception) -> str:
+    return "Не удалось скачать файл из Telegram. Попробуйте отправить его ещё раз через несколько секунд."
 
 
 @router.post("/webhook")
@@ -79,7 +105,7 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
     chat_id = chat.get("id")
     user_id = sender.get("id")
     text = (message.get("text") or message.get("caption") or "").strip()
-    document = message.get("document")
+    document = _incoming_file(message)
     if chat_id is None:
         return {"ok": True}
 
@@ -188,11 +214,17 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                 filename, mime_type, data = _download_document(document)
                 extracted = extract_text(data, mime_type, filename)
             except Exception as exc:
-                notify_telegram_chat(chat_id, f"Не удалось обработать файл: {str(exc)[:500]}")
+                notify_telegram_chat(chat_id, _public_download_error(exc))
                 return {"ok": True}
             if not extracted:
-                notify_telegram_chat(chat_id, "В файле не найден машиночитаемый текст. Возможно, это скан — для него потребуется OCR.")
-                return {"ok": True}
+                if mime_type.startswith("image/") and text:
+                    notify_telegram_chat(chat_id, "Изображение получено. Пока анализирую текст из подписи; OCR для текста внутри фото будет добавлен отдельно.")
+                elif mime_type.startswith("image/"):
+                    notify_telegram_chat(chat_id, "Изображение получено, но распознавание текста на фото пока не подключено. Отправьте документ DOCX/PDF или добавьте текст в подпись.")
+                    return {"ok": True}
+                else:
+                    notify_telegram_chat(chat_id, "В файле не найден машиночитаемый текст. Возможно, это скан — для него потребуется OCR.")
+                    return {"ok": True}
             source_name = filename
             source_id = f"telegram-file:{chat_id}:{document.get('file_unique_id') or document.get('file_id')}"
             content = (text + "\n" + extracted).strip()

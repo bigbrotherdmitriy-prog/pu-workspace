@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import hmac
 import os
+import time
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
@@ -76,6 +77,20 @@ def _client() -> httpx.Client:
     return httpx.Client(transport=httpx.HTTPTransport(local_address="::"), timeout=30.0)
 
 
+def _get_with_retry(client: httpx.Client, url: str, **kwargs) -> httpx.Response:
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = client.get(url, **kwargs)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(attempt + 1)
+    raise HTTPException(502, "Telegram file service is temporarily unavailable") from last_error
+
+
 @app.post("/send")
 def send(payload: SendRequest, x_relay_secret: str | None = Header(default=None)):
     _check(x_relay_secret)
@@ -91,9 +106,7 @@ def file(file_id: str, x_relay_secret: str | None = Header(default=None)):
     _check(x_relay_secret)
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     with _client() as client:
-        meta = client.get(f"https://api.telegram.org/bot{token}/getFile", params={"file_id": file_id})
-        meta.raise_for_status()
+        meta = _get_with_retry(client, f"https://api.telegram.org/bot{token}/getFile", params={"file_id": file_id})
         path = meta.json()["result"]["file_path"]
-        data = client.get(f"https://api.telegram.org/file/bot{token}/{path}")
-        data.raise_for_status()
+        data = _get_with_retry(client, f"https://api.telegram.org/file/bot{token}/{path}")
     return Response(data.content, media_type="application/octet-stream")
