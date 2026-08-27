@@ -63,6 +63,11 @@ class RuleRequest(BaseModel):
     confirmed: bool = True
 
 
+class SourceApplyRequest(BaseModel):
+    action_id: int
+    confirmation: str
+
+
 def _proposal_payload(repo: OrganizerRepository, proposal_id: int):
     p = repo.proposal(proposal_id)
     if not p:
@@ -369,6 +374,25 @@ def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depen
         result = OrganizerExecutor(repo, drive).rollback(proposal_id)
         _audit(db, "proposal_rollback", "organizer_proposal", proposal_id, f"Result: {result}")
         return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, str(exc)) from exc
+
+
+@router.post("/proposals/{proposal_id}/apply-source-one")
+def apply_source_one(proposal_id: int, payload: SourceApplyRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if payload.confirmation != "APPLY_ONE_TO_SOURCE":
+        raise HTTPException(422, "Exact confirmation phrase is required")
+    repo = OrganizerRepository(db)
+    proposal = _proposal_for_user(repo, db, user, proposal_id, "owner")
+    try:
+        drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
+        result = OrganizerExecutor(repo, drive).apply_one_to_source(proposal_id, payload.action_id)
+        _audit(db, "proposal_applied_to_source", "organizer_proposal", proposal_id, f"Action: {payload.action_id}; result: {result}")
+        return {"proposal": _proposal_payload(repo, proposal_id), "stats": result}
     except ValueError as exc:
         db.rollback()
         raise HTTPException(409, str(exc)) from exc

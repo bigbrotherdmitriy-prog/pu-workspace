@@ -292,6 +292,42 @@ class OrganizerExecutor:
             self.repo.db.rollback()
             raise
 
+    def apply_one_to_source(self, proposal_id: int, action_id: int) -> dict[str, int]:
+        """Apply one explicitly selected rename to the original source, fail closed."""
+        proposal = self.repo.proposal(proposal_id)
+        if not proposal or not str(proposal["copy_folder_id"]).startswith("virtual:"):
+            raise ValueError("Source apply requires a virtual snapshot proposal")
+        if proposal["status"] not in {"approved", "waiting_confirmation"}:
+            if proposal["status"] == "applied":
+                return {"renamed": 0, "already_applied": 1}
+            raise ValueError("Proposal is not available for source apply")
+        item = next((row for row in self.repo.proposal_items(proposal_id) if int(row["id"]) == action_id), None)
+        if item is None or item["user_decision"] not in {"approved", "edited"}:
+            raise ValueError("The selected action must be explicitly approved or edited")
+        if item["user_decision"] != "edited" and (item["special_case"] or float(item["confidence"] or 0) < MIN_AUTO_CONFIDENCE):
+            raise ValueError("Low-confidence or special-case actions must be explicitly edited")
+        if any(op["file_id"] == item["file_id"] and op["op_type"] == "source_rename" for op in self.repo.operations(proposal_id)):
+            return {"renamed": 0, "already_applied": 1}
+        current = self.drive.get_file_meta(item["file_id"])
+        if source_metadata_changed(item, current):
+            self.repo.mark_source_conflicts(proposal_id, [int(item["id"])])
+            raise ValueError("Safety dry-run blocked apply: source metadata changed after snapshot")
+        target_name = item["edited_name"] or item["proposed_name"]
+        if current.name == target_name:
+            return {"renamed": 0, "already_applied": 1}
+        siblings = self.drive.list_children(current.parent_id)
+        if any(row.id != current.id and row.name == target_name for row in siblings):
+            raise ValueError("Target name already exists; source file was not changed")
+        source_root = proposal["source_folder_id"]
+        self.drive.assert_inside_copy(current.id, source_root)
+        before = {"name": current.name, "parent_id": current.parent_id}
+        after = {"name": target_name, "parent_id": current.parent_id}
+        self.drive.rename_file(current.id, target_name, source_root)
+        self.repo.log_operation(proposal_id, int(proposal["session_id"]), current.id, "source_rename", before, after)
+        self.repo.db.commit()
+        self.repo.mark_source_applied(proposal_id)
+        return {"renamed": 1, "already_applied": 0}
+
     def rollback(
         self,
         proposal_id: int,
@@ -305,7 +341,7 @@ class OrganizerExecutor:
         if proposal["status"] not in {"applied", "rollback_partial"}:
             raise ValueError("Only an applied proposal can be rolled back")
 
-        copy_root = proposal["copy_folder_id"]
+        copy_root = proposal["source_folder_id"] if proposal["originals_modified"] else proposal["copy_folder_id"]
 
         stats = {
             "rolled_back": 0,
@@ -327,7 +363,7 @@ class OrganizerExecutor:
                 before = op["before_json"]
                 after = op["after_json"]
 
-                if op["op_type"] == "rename":
+                if op["op_type"] in {"rename", "source_rename"}:
                     self.drive.rename_file(
                         op["file_id"],
                         before["name"],

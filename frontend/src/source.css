@@ -179,6 +179,12 @@
 .proposal-action > div:nth-child(3) { display: grid; gap: 6px; }
 .proposal-action p { margin: 5px 0 0; color: #596577; font-size: 12px; }
 .proposal-action .needs-review { color: #a45f00; font-weight: 700; }
+.source-apply-panel { position: fixed; right: 24px; bottom: 24px; z-index: 30; display: grid; grid-template-columns: auto minmax(190px,1fr) auto; align-items: center; gap: 12px; max-width: 620px; padding: 16px; border: 1px solid #f0c36a; border-radius: 12px; background: #fff9e9; box-shadow: 0 14px 40px rgba(31,45,61,.2); color: #26364f; }
+.source-apply-panel > svg { width: 24px; color: #a45f00; }
+.source-apply-panel strong, .source-apply-panel p { display: block; margin: 0; }
+.source-apply-panel p { margin-top: 3px; color: #725514; font-size: 12px; }
+.source-apply-panel button { padding: 10px 13px; border: 1px solid #b83232; border-radius: 8px; background: #fff; color: #b83232; font-weight: 700; cursor: pointer; }
+.source-apply-panel button:disabled { opacity: .55; cursor: default; }
 .contract-create { margin-bottom: 18px; }
 .contract-create h2, .contract-create p { margin: 0; }
 .contract-create p { margin-top: 5px; color: #748091; }
@@ -222,6 +228,8 @@
   .span-settings { grid-column: auto; }
   .proposal-intro, .proposal-head { display: block; }
   .proposal-controls { justify-content: flex-start; margin-top: 13px; }
+  .source-apply-panel { right: 12px; bottom: 12px; left: 12px; grid-template-columns: auto 1fr; }
+  .source-apply-panel button { grid-column: 1 / -1; }
   .contract-form { grid-template-columns: 1fr; }
   .contract-card { grid-template-columns: 1fr; }
   .contract-number { justify-self: start; }

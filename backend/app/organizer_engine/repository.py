@@ -149,6 +149,13 @@ class OrganizerRepository:
             WHERE id=:id AND status='ready_to_apply_to_copy'
         """), {"id": proposal_id}); self.db.commit()
 
+    def mark_source_applied(self, proposal_id: int):
+        self.db.execute(text("""
+            UPDATE organizer_proposals
+            SET status='applied', originals_modified=true, applied_at=now()
+            WHERE id=:id
+        """), {"id": proposal_id}); self.db.commit()
+
     def mark_source_conflicts(self, proposal_id: int, action_ids: list[int]) -> None:
         if not action_ids:
             return
