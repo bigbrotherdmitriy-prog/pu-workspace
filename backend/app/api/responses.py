@@ -6,6 +6,7 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
+from app.models.audit_log import AuditLog
 
 router = APIRouter(prefix="/response-drafts", tags=["response-drafts"])
 
@@ -29,12 +30,19 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
     if draft is None:
         raise HTTPException(404, "Response draft not found")
     require_project_role(db, user, draft.project_id, "editor")
+    before_status = draft.status
+    edited = payload.subject is not None or payload.body is not None
     if payload.subject is not None:
         draft.subject = payload.subject.strip()
     if payload.body is not None:
         draft.body = payload.body.strip()
     if payload.status is not None:
         draft.status = payload.status
+    db.add(AuditLog(
+        action="response_draft_reviewed" if payload.status is not None else "response_draft_edited",
+        entity_type="response_draft", entity_id=draft.id,
+        details=f"status={before_status}->{draft.status}; edited={edited}; message={draft.message_id or 'none'}",
+    ))
     db.commit()
     db.refresh(draft)
     return {"id": draft.id, "subject": draft.subject, "body": draft.body, "status": draft.status}

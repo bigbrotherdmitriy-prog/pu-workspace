@@ -14,6 +14,8 @@ from app.models.telegram_chat import TelegramChatLink
 from app.models.task import Task, TaskDueDateHistory
 from app.models.project_member import ProjectMember
 from app.models.user import User
+from app.models.ai_secretary import Message
+from app.models.audit_log import AuditLog
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
@@ -30,6 +32,7 @@ from app.gemini_analysis import (
     format_message_replies,
     gemini_configured,
 )
+from app.api.ai_secretary import _contract_candidate
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -259,17 +262,44 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             notify_telegram_chat(chat_id, f"Файл «{filename}» получен, текст извлечён. Выполняю анализ.")
         if not content:
             return {"ok": True}
-        synthetic = DriveFile(id=source_id, name=source_name, mime_type=mime_type, parent_id="telegram", content_text=content)
+        existing_message = db.scalar(select(Message).where(Message.source_type == "telegram", Message.source_external_id == source_id))
+        if existing_message:
+            notify_telegram_chat(chat_id, "Это сообщение уже сохранено во входящих AI Secretary.")
+            return {"ok": True}
+        project = db.get(Project, link.project_id)
+        owner = _project_owner(db, link.project_id)
+        if project is None or owner is None:
+            notify_telegram_chat(chat_id, "Не удалось определить проект или его владельца.")
+            return {"ok": True}
+        contract, context_confidence, context_evidence = _contract_candidate(db, link.project_id, content)
+        inbox_message = Message(
+            organization_id=project.organization_id, project_id=project.id,
+            contract_id=contract.id if contract else None, created_by_user_id=owner.id,
+            source_type="telegram", source_external_id=source_id, source_name=source_name,
+            source_url=f"https://t.me/c/{str(chat_id).removeprefix('-100')}/{message.get('message_id')}" if str(chat_id).startswith("-100") else None,
+            content=content, summary="Анализируется", context_confidence=context_confidence,
+            context_evidence="Проект подтверждён подключением Telegram-чата. " + context_evidence,
+            context_confirmed=True, status="ready",
+        )
+        db.add(inbox_message); db.flush()
+        synthetic = DriveFile(id=f"message:{inbox_message.id}", name=source_name, mime_type=mime_type, parent_id="telegram", content_text=content)
         index_documents(db, link.project_id, [synthetic], "telegram")
         tasks = create_tasks_from_files(db, link.project_id, None, [synthetic], source_type="telegram")
         google_synced = calendar_synced = 0
         drafts = create_response_drafts(db, link.project_id, None, [synthetic])
         risks, decisions = create_governance_items(db, link.project_id, [synthetic], source_type="telegram")
+        for task in tasks:
+            task.message_id = inbox_message.id
+            task.external_action_status = "proposed"
+        for draft in drafts:
+            draft.message_id = inbox_message.id
+        inbox_message.summary = brief_summary(content, source_name, len(tasks), len(drafts), 0)
         if document:
             if gemini_configured():
                 try:
                     semantic = analyze_document_with_gemini(content, source_name)
                     summary = format_gemini_analysis(semantic, source_name)
+                    inbox_message.summary = summary
                 except Exception:
                     summary = "⚠️ Gemini временно недоступен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
             else:
@@ -283,6 +313,9 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                 notify_telegram_chat(chat_id, "⚠️ Не удалось подготовить варианты ответа через Gemini. Сообщение сохранено, попробуйте ещё раз позже.")
         elif tasks or drafts or risks or decisions:
             notify_telegram_chat(chat_id, f"PU Workspace: задач — {len(tasks)}, Google Tasks — {google_synced}, Calendar — {calendar_synced}, рисков — {len(risks)}, решений — {len(decisions)}, черновиков ответов — {len(drafts)}.")
+        db.add(AuditLog(action="message_processed", entity_type="message", entity_id=inbox_message.id,
+                        details=f"source=telegram; tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}"))
+        db.commit()
         return {"ok": True}
     finally:
         db.close()
