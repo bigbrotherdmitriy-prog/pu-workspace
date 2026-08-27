@@ -115,6 +115,45 @@
 .draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
 .draft-actions button { padding: 9px 13px; border: 1px solid #d6dde7; border-radius: 9px; background: #fff; cursor: pointer; }
 .draft-actions .approve { border-color: #16856c; background: #16856c; color: #fff; }
+.module-overlay { position: fixed; left: 272px; top: 82px; right: 0; bottom: 0; z-index: 9; overflow: auto; background: #f5f7fa; padding: 26px 30px 50px; }
+.module-overlay.collapsed { left: 76px; }
+.module-page { max-width: 1300px; margin: 0 auto; }
+.integration-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; margin-bottom: 18px; }
+.integration-card { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; }
+.integration-card h2, .integration-card p { margin: 0; }
+.integration-card p { margin-top: 4px; color: #748091; }
+.integration-card > span { padding: 6px 9px; border-radius: 999px; background: #fff0f0; color: #b83232; font-size: 11px; }
+.integration-card > span.connected { background: #eaf7f3; color: #13745f; }
+.integration-card > button { grid-column: 2 / 4; justify-self: start; padding: 8px 11px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; cursor: pointer; }
+.integration-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: #f0f2f5; color: #748091; }
+.integration-icon.connected { background: #eaf7f3; color: #13745f; }
+.system-checks .card-head button { padding: 8px 11px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; cursor: pointer; }
+.check-row { display: grid; grid-template-columns: auto 180px 1fr auto; gap: 10px; align-items: center; padding: 11px 2px; border-top: 1px solid #eef1f5; }
+.check-row p { margin: 0; color: #748091; }
+.check-row small { color: #8b95a4; }
+.check-row > span { width: 9px; height: 9px; border-radius: 50%; background: #d34a4a; }
+.check-row > span.ok { background: #20a486; }
+.audit-list article { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; padding: 14px 3px; border-top: 1px solid #eef1f5; }
+.audit-list strong, .audit-list p, .audit-list small { display: block; margin: 0; }
+.audit-list p { margin: 3px 0; color: #748091; font-size: 12px; }
+.audit-list small { color: #596577; }
+.audit-list time { color: #8b95a4; font-size: 11px; }
+.audit-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: #185adb; }
+.settings-grid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 18px; }
+.settings-profile { display: flex; align-items: center; gap: 13px; margin: 18px 0; }
+.settings-profile .avatar, .member-list .avatar { display: grid; place-items: center; flex: none; }
+.settings-profile h2, .settings-profile p { margin: 0; }
+.settings-profile p { margin-top: 3px; color: #748091; }
+.setting-row { display: flex; justify-content: space-between; gap: 15px; padding: 12px 0; border-top: 1px solid #eef1f5; color: #748091; }
+.setting-row strong { color: #26364f; text-align: right; }
+.member-list article { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid #eef1f5; }
+.member-list article > div:nth-child(2) { flex: 1; }
+.member-list strong, .member-list p { display: block; margin: 0; }
+.member-list p { margin-top: 3px; color: #748091; font-size: 12px; }
+.member-list article > span { padding: 5px 8px; border-radius: 999px; background: #edf3ff; color: #185adb; font-size: 11px; }
+.span-settings { grid-column: 1 / -1; }
+.safety-list p { display: flex; align-items: center; gap: 9px; color: #4f5c6f; }
+.safety-list svg { width: 18px; color: #16856c; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
@@ -134,4 +173,9 @@
   .project-cards { grid-template-columns: 1fr; }
   .secretary-overlay, .secretary-overlay.collapsed { left: 0; top: 72px; padding: 16px; }
   .secretary-intro { align-items: flex-start; flex-wrap: wrap; }
+  .module-overlay, .module-overlay.collapsed { left: 0; top: 72px; padding: 16px; }
+  .integration-grid, .settings-grid { grid-template-columns: 1fr; }
+  .check-row { grid-template-columns: auto 1fr; }
+  .check-row p, .check-row small { grid-column: 2; }
+  .span-settings { grid-column: auto; }
 }

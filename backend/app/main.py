@@ -36,7 +36,7 @@ from app.core.readiness import readiness_report
 
 app = FastAPI(
     title="PU Workspace",
-    version="0.29.0",
+    version="0.30.0",
 )
 
 STATIC_DIR = Path(__file__).with_name("static")

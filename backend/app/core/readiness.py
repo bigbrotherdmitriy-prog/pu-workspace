@@ -24,6 +24,14 @@ def readiness_report() -> dict:
     google_values = [os.getenv(name, "") for name in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI")]
     google_ready = all(google_values)
     checks["google_oauth"] = _check(google_ready, "configured" if google_ready else "credentials not configured", required=False)
+    telegram_ready = bool(os.getenv("TELEGRAM_BOT_TOKEN", "")) and bool(
+        os.getenv("TELEGRAM_RELAY_URL", "") or os.getenv("TELEGRAM_CHAT_ID", "")
+    )
+    checks["telegram"] = _check(
+        telegram_ready,
+        "configured" if telegram_ready else "bot or relay not configured",
+        required=False,
+    )
 
     try:
         with engine.connect() as connection:
@@ -36,7 +44,7 @@ def readiness_report() -> dict:
         checks["schema"] = _check(False, "database unavailable")
 
     required_ready = all(item["ok"] for item in checks.values() if item["required"])
-    return {"ready": required_ready, "google_drive_ready": google_ready, "checks": checks}
+    return {"ready": required_ready, "google_drive_ready": google_ready, "telegram_ready": telegram_ready, "checks": checks}
 
 
 def _check(ok: bool, message: str, required: bool = True) -> dict:
