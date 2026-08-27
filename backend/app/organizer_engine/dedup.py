@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import difflib
 import re
 from dataclasses import dataclass
 
@@ -71,71 +70,23 @@ def find_duplicate_and_version_groups(
     exact_ids = {f.id for group in groups for f in group.files}
     remaining = [f for f in non_folders if f.id not in exact_ids]
 
-    used: set[str] = set()
-
-    for i, f1 in enumerate(remaining):
-        if f1.id in used:
+    # Linear-time conservative version detection. Earlier pairwise fuzzy
+    # comparison was quadratic for 10k-file folders. A version group now
+    # requires an explicit marker and the same normalized basename/type.
+    by_version_key: dict[tuple[str, str], list[DriveFile]] = {}
+    for file in remaining:
+        if file.size == 0 or not _has_version_marker(file.name):
             continue
-
-        # Empty files carry no content evidence and must never be
-        # classified as probable versions.
-        if f1.size == 0:
+        base = _base_name(file.name)
+        if len(base) < 5:
             continue
+        extension = file.name.rsplit(".", 1)[1].lower() if "." in file.name else ""
+        by_version_key.setdefault((extension, base), []).append(file)
 
-        base1 = _base_name(f1.name)
-
-        # Critical guard:
-        # "" / "v2" / "(2)"-like names must not cluster together.
-        if len(base1) < 5:
-            continue
-
-        ext1 = f1.name.rsplit(".", 1)[1].lower() if "." in f1.name else ""
-
-        cluster = [f1]
-
-        for f2 in remaining[i + 1:]:
-            if f2.id in used:
-                continue
-
-            # Empty files carry no content evidence and must never be
-            # classified as probable versions.
-            if f2.size == 0:
-                continue
-
-            base2 = _base_name(f2.name)
-            if len(base2) < 5:
-                continue
-
-            ext2 = f2.name.rsplit(".", 1)[1].lower() if "." in f2.name else ""
-
-            # Different file types are not versions of each other.
-            if ext1 != ext2:
-                continue
-
-            # Similarity alone is not version evidence. At least one
-            # original filename must contain an explicit version/copy/date
-            # marker recognized by _STRIP_PATTERN.
-            if not (_has_version_marker(f1.name) or _has_version_marker(f2.name)):
-                continue
-
-            # After removing the explicit marker, the normalized names must
-            # still describe the same document closely enough.
-            ratio = difflib.SequenceMatcher(None, base1, base2).ratio()
-
-            # Similar names alone are not enough to call files versions.
-            # At least one filename must contain an explicit version/copy/date
-            # marker understood by _STRIP_PATTERN.
-            has_explicit_marker = (
-                _has_version_marker(f1.name)
-                or _has_version_marker(f2.name)
-            )
-
-            if ratio >= similarity_threshold and has_explicit_marker:
-                cluster.append(f2)
-                used.add(f2.id)
-
-        if len(cluster) > 1:
-            used.add(f1.id)
-            groups.append(DuplicateGroup(cluster, "version"))
+    groups.extend(
+        DuplicateGroup(group, "version")
+        for group in by_version_key.values()
+        if len(group) > 1
+    )
 
     return groups
