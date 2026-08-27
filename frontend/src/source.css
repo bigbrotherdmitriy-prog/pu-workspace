@@ -52,6 +52,13 @@
 .task-actions { display: flex; gap: 6px; }
 .task-actions button { padding: 8px 10px; border: 1px solid #dfe4eb; border-radius: 8px; background: #fff; cursor: pointer; white-space: nowrap; }
 .task-actions .complete { border-color: #16856c; color: #13745f; }
+.governance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.governance-list article { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 15px 3px; border-top: 1px solid #eef1f5; }
+.governance-list article > div:first-child { min-width: 0; }
+.governance-list strong { display: block; }
+.governance-list p { margin: 4px 0 7px; color: #748091; font-size: 12px; }
+.governance-status { display: inline-block; padding: 4px 7px; border-radius: 999px; background: #f0f2f5; color: #596577; font-size: 11px; }
+.governance-status.high, .governance-status.critical { background: #fff0f0; color: #b83232; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
@@ -59,4 +66,6 @@
   .source-row-actions { width: 100%; padding-left: 36px; }
   .task-list article { grid-template-columns: 4px 1fr; }
   .task-meta, .task-actions { grid-column: 2; }
+  .governance-grid { display: block; }
+  .governance-grid .card { margin-bottom: 14px; }
 }
