@@ -39,4 +39,4 @@ def test_metadata_only_never_returns_content():
     text, mode = prepare_external_ai_text(FakeSession("metadata_only"), 1, "очень секретный текст")
     assert mode == "metadata_only"
     assert "секретный" not in text
-    assert "22" in text
+    assert str(len("очень секретный текст")) in text
