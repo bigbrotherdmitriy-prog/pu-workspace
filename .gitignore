@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.server-access/
 
 # Python
 __pycache__/
