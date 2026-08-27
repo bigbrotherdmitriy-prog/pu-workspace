@@ -6,6 +6,7 @@ def test_virtual_snapshot_routes_are_exposed():
     assert "/projects/{project_id}/source-folders/{external_id}/snapshots" in paths
     assert "/projects/{project_id}/source-folders/discover" in paths
     assert "/projects/{project_id}/source-folders/{external_id}/snapshot-queue" in paths
+    assert "/projects/{project_id}/source-folders/snapshot-queue-all" in paths
     assert "/projects/{project_id}/source-folders/{external_id}/primary" in paths
     assert "/projects/{project_id}/snapshots/{snapshot_id}/analyze" in paths
 

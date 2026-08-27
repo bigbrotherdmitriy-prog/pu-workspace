@@ -249,6 +249,55 @@ def queue_workspace_snapshot(
     return {"id": snapshot.id, "status": snapshot.status, "source_folder": source.name, "already_queued": False}
 
 
+@router.post("/{project_id}/source-folders/snapshot-queue-all")
+def queue_all_workspace_snapshots(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Queue missing top-level Drive folders for sequential metadata-only snapshots."""
+    require_project_role(db, user, project_id, "manager")
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    service = build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False)
+    result = service.files().list(
+        q="'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id,name)", pageSize=1000, orderBy="name",
+    ).execute()
+    sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)))
+    source_by_external = {row.external_id: row for row in sources}
+    queued: list[tuple[int, str, str]] = []
+    skipped = 0
+    for item in result.get("files", []):
+        source = source_by_external.get(item["id"])
+        if source is None:
+            source = SourceFolder(
+                project_id=project_id, external_id=item["id"], name=item["name"],
+                is_primary=not source_by_external,
+            )
+            db.add(source)
+            db.flush()
+            source_by_external[item["id"]] = source
+        latest = db.scalar(select(WorkspaceSnapshot).where(
+            WorkspaceSnapshot.source_folder_id == source.id,
+        ).order_by(WorkspaceSnapshot.id.desc()))
+        if latest is not None and latest.status in {"building", "ready"}:
+            skipped += 1
+            continue
+        snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building")
+        db.add(snapshot)
+        db.flush()
+        queued.append((snapshot.id, item["id"], item["name"]))
+    db.commit()
+    for snapshot_id, external_id, _ in queued:
+        _snapshot_workers.submit(_build_snapshot, snapshot_id, project_id, external_id)
+    return {
+        "queued": len(queued), "skipped": skipped,
+        "folders": [{"snapshot_id": snapshot_id, "external_id": external_id, "name": name} for snapshot_id, external_id, name in queued],
+        "originals_modified": False,
+    }
+
+
 @router.post("/{project_id}/source-folders/{external_id}/snapshots")
 def create_workspace_snapshot(
     project_id: int,
