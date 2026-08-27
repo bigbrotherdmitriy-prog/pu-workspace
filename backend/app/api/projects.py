@@ -7,6 +7,8 @@ from app.database import get_db
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
+from app.models.organization_contract import Organization
+from app.models.audit_log import AuditLog
 from app.core.auth import require_project_role, require_user
 
 
@@ -18,6 +20,7 @@ router = APIRouter(
 
 class ProjectCreate(BaseModel):
     name: str
+    organization_id: int | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -29,6 +32,7 @@ class ProjectResponse(BaseModel):
 
     id: int
     name: str
+    organization_id: int
 
 
 @router.get("/")
@@ -61,11 +65,15 @@ def create_project(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    item = Project(name=project.name)
+    organization_id = project.organization_id or db.scalar(select(Organization.id).order_by(Organization.id).limit(1))
+    if organization_id is None or db.get(Organization, organization_id) is None:
+        raise HTTPException(422, "Organization is required")
+    item = Project(name=project.name, organization_id=organization_id)
 
     db.add(item)
     db.flush()
     db.add(ProjectMember(project_id=item.id, user_id=user.id, role="owner"))
+    db.add(AuditLog(action="project_created", entity_type="project", entity_id=item.id, details=f"Project: {item.name}"))
     db.commit()
     db.refresh(item)
 

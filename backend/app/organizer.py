@@ -16,6 +16,7 @@ from app.organizer_engine.config import AUTO_APPLY_CONFIDENCE, AUTO_APPLY_ENABLE
 from app.core.auth import require_admin, require_project_role, require_user
 from app.core.notifications import notify_telegram
 from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.task_engine import create_tasks_from_files
 from app.response_engine import create_response_drafts
 from app.google_tasks import sync_tasks_to_google
@@ -25,6 +26,11 @@ from app.document_engine import index_documents
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
 _workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
+
+
+def _audit(db: Session, action: str, entity_type: str, entity_id: int, details: str) -> None:
+    db.add(AuditLog(action=action, entity_type=entity_type, entity_id=entity_id, details=details))
+    db.commit()
 
 
 class AnalyzeRequest(BaseModel):
@@ -217,6 +223,7 @@ def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = 
         raise HTTPException(400, str(exc)) from exc
     session_id = repo.create_session(payload.project_id, source.id, source.name)
     db.commit()
+    _audit(db, "snapshot_scan_started", "organizer_session", session_id, f"Source folder: {source.name}")
     if payload.background:
         background_tasks.add_task(submit_scan, session_id, payload.project_id, source.id)
         return {"session_id": session_id, "status": "queued"}
@@ -301,6 +308,7 @@ def edit_action(action_id: int, payload: EditItemRequest, db: Session = Depends(
     if payload.save_as_rule and payload.edited_folder:
         repo.add_rule({"filename_contains": row["source"]}, {"folder": payload.edited_folder}, None, "user_correction", True)
         db.commit()
+    _audit(db, "proposal_action_reviewed", "organizer_action", action_id, f"Decision: {payload.decision}")
     return {"status": "ok", "action_id": action_id}
 
 
@@ -311,7 +319,20 @@ def decide(proposal_id: int, payload: DecisionRequest, db: Session = Depends(get
     if p["status"] != "waiting_confirmation":
         raise HTTPException(409, "Proposal already processed")
     repo.decide(proposal_id, payload.approved, payload.note)
+    _audit(db, "proposal_decided", "organizer_proposal", proposal_id, "Approved" if payload.approved else "Rejected")
     return _proposal_payload(repo, proposal_id)
+
+
+@router.post("/proposals/{proposal_id}/approve-safe")
+def approve_safe(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Approve only deterministic, high-confidence actions; skip every special case."""
+    repo = OrganizerRepository(db)
+    proposal = _proposal_for_user(repo, db, user, proposal_id, "manager")
+    if proposal["status"] != "waiting_confirmation":
+        raise HTTPException(409, "Proposal already processed")
+    approved = repo.apply_auto_policy(proposal_id, AUTO_APPLY_CONFIDENCE)
+    _audit(db, "proposal_safe_actions_approved", "organizer_proposal", proposal_id, f"Approved: {approved}")
+    return {"approved": approved, "proposal": _proposal_payload(repo, proposal_id)}
 
 
 @router.post("/proposals/{proposal_id}/apply")
@@ -327,6 +348,7 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
         if p["status"] == "approved" and not repo.mark_prepared(proposal_id):
             raise HTTPException(409, "Proposal is already being applied or was processed")
         stats = OrganizerExecutor(repo, drive).apply(proposal_id)
+        _audit(db, "proposal_applied_to_safe_copy", "organizer_proposal", proposal_id, f"Result: {stats}")
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": stats}
     except HTTPException:
         raise
@@ -344,7 +366,9 @@ def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depen
     p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     try:
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
-        return OrganizerExecutor(repo, drive).rollback(proposal_id)
+        result = OrganizerExecutor(repo, drive).rollback(proposal_id)
+        _audit(db, "proposal_rollback", "organizer_proposal", proposal_id, f"Result: {result}")
+        return result
     except ValueError as exc:
         db.rollback()
         raise HTTPException(409, str(exc)) from exc

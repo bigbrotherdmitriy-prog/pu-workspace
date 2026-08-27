@@ -12,6 +12,7 @@ from app.models.auth_session import AuthSession
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
+from app.models.organization_contract import Organization
 
 
 class RbacTests(unittest.TestCase):
@@ -21,7 +22,9 @@ class RbacTests(unittest.TestCase):
         self.db = Session(self.engine)
         self.owner = User(name="Owner", email="owner@test", is_admin=False)
         self.outsider = User(name="Outsider", email="out@test", is_admin=False)
-        self.project = Project(name="Private")
+        organization = Organization(name="Test")
+        self.db.add(organization); self.db.flush()
+        self.project = Project(name="Private", organization_id=organization.id)
         self.db.add_all([self.owner, self.outsider, self.project]); self.db.flush()
         self.db.add(ProjectMember(project_id=self.project.id, user_id=self.owner.id, role="owner")); self.db.commit()
 

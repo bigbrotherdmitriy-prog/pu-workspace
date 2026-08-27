@@ -1,0 +1,74 @@
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.auth import require_admin, require_project_role, require_user
+from app.database import get_db
+from app.models.organization_contract import Contract, Organization
+from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.user import User
+from app.models.audit_log import AuditLog
+
+router = APIRouter(tags=["organizations", "contracts"])
+
+
+class OrganizationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ContractCreate(BaseModel):
+    number: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=500)
+    counterparty: str | None = Field(default=None, max_length=500)
+    signed_at: date | None = None
+    status: str = Field(default="active", pattern="^(draft|active|completed|terminated)$")
+    source_document_id: int | None = None
+    notes: str | None = Field(default=None, max_length=5000)
+
+
+@router.get("/organizations")
+def list_organizations(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    query = select(Organization).order_by(Organization.id)
+    if not user.is_admin:
+        query = query.join(Project, Project.organization_id == Organization.id).join(ProjectMember).where(ProjectMember.user_id == user.id).distinct()
+    rows = db.scalars(query).all()
+    return {"organizations": [{"id": row.id, "name": row.name} for row in rows]}
+
+
+@router.post("/organizations")
+def create_organization(payload: OrganizationCreate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    row = Organization(name=payload.name.strip())
+    db.add(row); db.commit(); db.refresh(row)
+    return {"id": row.id, "name": row.name}
+
+
+@router.get("/projects/{project_id}/contracts")
+def list_contracts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    rows = db.scalars(select(Contract).where(Contract.project_id == project_id).order_by(Contract.id.desc())).all()
+    return {"contracts": [_contract(row) for row in rows]}
+
+
+@router.post("/projects/{project_id}/contracts")
+def create_contract(project_id: int, payload: ContractCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "editor")
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    row = Contract(project_id=project_id, **payload.model_dump())
+    db.add(row); db.flush()
+    db.add(AuditLog(action="contract_created", entity_type="contract", entity_id=row.id, details=f"Contract: {row.number}"))
+    db.commit(); db.refresh(row)
+    return _contract(row)
+
+
+def _contract(row: Contract) -> dict:
+    return {
+        "id": row.id, "project_id": row.project_id, "number": row.number,
+        "title": row.title, "counterparty": row.counterparty,
+        "signed_at": row.signed_at, "status": row.status,
+        "source_document_id": row.source_document_id, "notes": row.notes,
+    }
