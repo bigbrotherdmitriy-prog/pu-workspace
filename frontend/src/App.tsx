@@ -609,6 +609,20 @@ export function App() {
       setError((e as Error).message);
     }
   }
+  async function loadIntegrations() {
+    if (!projectId) return;
+    try {
+      setError("");
+      const [google, health] = await Promise.all([
+        api(`/projects/${projectId}/google/status`),
+        api("/api/readiness"),
+      ]);
+      setGoogleState(google);
+      setSystemState(health);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function createProject() {
     const name = newProjectName.trim();
     if (!name) return;
@@ -1127,6 +1141,9 @@ export function App() {
   useEffect(() => {
     if (ready) load();
   }, [ready, projectId]);
+  useEffect(() => {
+    if (ready && projectId && active === "Интеграции") loadIntegrations();
+  }, [ready, projectId, active]);
   useEffect(() => {
     if (!ready || !snapshots.some((item) => item.status === "building")) return;
     const timer = window.setInterval(load, 5000);
@@ -2750,7 +2767,7 @@ export function App() {
                   <h2>Состояние системы</h2>
                   <p>Проверка обязательных и внешних компонентов</p>
                 </div>
-                <button onClick={load}>Проверить снова</button>
+                <button onClick={loadIntegrations}>Проверить снова</button>
               </div>
               {Object.entries(systemState?.checks || {}).map(
                 ([name, check]) => (
