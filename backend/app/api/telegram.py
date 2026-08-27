@@ -23,7 +23,13 @@ from app.google_calendar import sync_tasks_to_calendar
 from app.summary_engine import brief_summary
 from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
-from app.gemini_analysis import analyze_document_with_gemini, format_gemini_analysis, gemini_configured
+from app.gemini_analysis import (
+    analyze_document_with_gemini,
+    analyze_message_with_gemini,
+    format_gemini_analysis,
+    format_message_replies,
+    gemini_configured,
+)
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -91,6 +97,19 @@ def _incoming_file(message: dict) -> dict | None:
 
 def _public_download_error(_: Exception) -> str:
     return "Не удалось скачать файл из Telegram. Попробуйте отправить его ещё раз через несколько секунд."
+
+
+def _should_prepare_message_replies(message: dict, text: str) -> bool:
+    if not text or text.startswith("/"):
+        return False
+    if (message.get("chat") or {}).get("type") == "private":
+        return True
+    return bool(
+        message.get("forward_origin")
+        or message.get("forward_from")
+        or message.get("forward_sender_name")
+        or message.get("forward_from_chat")
+    )
 
 
 @router.post("/webhook")
@@ -257,6 +276,12 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             else:
                 summary = "⚠️ Gemini API ещё не настроен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
             notify_telegram_chat(chat_id, summary + f"\n\nАвтоматически: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}")
+        elif _should_prepare_message_replies(message, text) and gemini_configured():
+            try:
+                replies = analyze_message_with_gemini(content, source_name)
+                notify_telegram_chat(chat_id, format_message_replies(replies))
+            except Exception:
+                notify_telegram_chat(chat_id, "⚠️ Не удалось подготовить варианты ответа через Gemini. Сообщение сохранено, попробуйте ещё раз позже.")
         elif tasks or drafts or risks or decisions:
             notify_telegram_chat(chat_id, f"PU Workspace: задач — {len(tasks)}, Google Tasks — {google_synced}, Calendar — {calendar_synced}, рисков — {len(risks)}, решений — {len(decisions)}, черновиков ответов — {len(drafts)}.")
         return {"ok": True}

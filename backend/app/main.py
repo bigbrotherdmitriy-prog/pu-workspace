@@ -35,7 +35,7 @@ from app.database import SessionLocal
 from app.core.readiness import readiness_report
 
 
-APP_VERSION = "0.33.0"
+APP_VERSION = "0.34.0"
 
 app = FastAPI(
     title="PU Workspace",
