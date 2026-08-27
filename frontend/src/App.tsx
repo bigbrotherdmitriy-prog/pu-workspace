@@ -4,8 +4,8 @@ import { AlertTriangle, Bot, CalendarDays, ChevronLeft, FileText, FolderKanban, 
 type Project = { id: number; name: string };
 type Summary = { attention:number; open_tasks:number; overdue_tasks:number; open_risks:number; pending_decisions:number; drafts:number; documents:number };
 type DocumentCard = { document_id?:number; name:string; tasks:number; risks:number; decisions:number; drafts:number; attention:number };
-type Snapshot = { id:number; status:string; item_count:number; source_folder:string; source_external_id:string; created_at:string; completed_at?:string };
-type DriveFolder = { id:string; name:string; modifiedTime?:string; registered:boolean; snapshot_id?:number; snapshot_status?:string; item_count?:number };
+type Snapshot = { id:number; status:string; item_count:number; source_folder:string; source_external_id:string; is_primary:boolean; created_at:string; completed_at?:string };
+type DriveFolder = { id:string; name:string; modifiedTime?:string; registered:boolean; is_primary:boolean; snapshot_id?:number; snapshot_status?:string; item_count?:number };
 
 const items = [
   [LayoutDashboard,"Рабочий центр"], [FolderKanban,"Проекты"], [FileText,"Документы"],
@@ -38,7 +38,7 @@ export function App(){
   useEffect(()=>{if(!ready||!snapshots.some(item=>item.status==="building"))return;const timer=window.setInterval(load,5000);return()=>window.clearInterval(timer)},[ready,projectId,snapshots.some(item=>item.status==="building")]);
   if(!ready)return <Login onDone={()=>setReady(true)}/>;
   const metrics=[["Требуют внимания",summary?.attention||0,"warn"],["Открытые задачи",summary?.open_tasks||0,""],["Просрочено",summary?.overdue_tasks||0,"danger"],["Риски",summary?.open_risks||0,"warn"],["Ждут решения",summary?.pending_decisions||0,""],["Документы",summary?.documents||0,""]];
-  const latestSnapshot=snapshots[0];
+  const latestSnapshot=snapshots.find(item=>item.is_primary)||snapshots[0];
   return <div className="shell">
     <aside className={`${collapsed?"collapsed":""} ${mobile?"mobile-open":""}`}><div className="sidebar-head"><div className="brand-mark">PU</div>{!collapsed&&<strong>PU Workspace</strong>}<button className="icon" onClick={()=>setCollapsed(!collapsed)}><ChevronLeft/></button></div><nav>{items.map(([Icon,label],i)=><button className={i===0?"active":""} key={label} title={label}><Icon/><span>{label}</span></button>)}</nav><div className="profile"><div className="avatar">D</div>{!collapsed&&<div><strong>Администратор</strong><small>Владелец</small></div>}<button className="icon" onClick={()=>{sessionStorage.removeItem("pu_token");setReady(false)}}><LogOut/></button></div></aside>
     <main><header><button className="mobile-menu icon" onClick={()=>setMobile(!mobile)}><Menu/></button><div><h1>Рабочий центр</h1><p>Главное по проекту на сегодня</p></div><div className="header-actions"><div className="search"><Search/><input placeholder="Поиск по проекту"/></div><select value={projectId} onChange={e=>setProjectId(Number(e.target.value))}>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select><button className="icon" onClick={load}><RefreshCw/></button></div></header>

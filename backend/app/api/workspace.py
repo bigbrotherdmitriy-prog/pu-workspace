@@ -114,10 +114,28 @@ def discover_source_folders(
         source = source_by_external.get(item["id"])
         snapshot = latest_by_source.get(source.id) if source else None
         folders.append({**item, "registered": source is not None,
+            "is_primary": bool(source.is_primary) if source else False,
             "snapshot_id": snapshot.id if snapshot else None,
             "snapshot_status": snapshot.status if snapshot else None,
             "item_count": snapshot.item_count if snapshot else None})
     return {"folders": folders}
+
+
+@router.post("/{project_id}/source-folders/{external_id}/primary")
+def set_primary_source_folder(
+    project_id: int,
+    external_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    source = db.scalar(select(SourceFolder).where(SourceFolder.project_id == project_id, SourceFolder.external_id == external_id))
+    if source is None:
+        raise HTTPException(404, "Source folder is not registered")
+    for row in db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)):
+        row.is_primary = row.id == source.id
+    db.commit()
+    return {"id": source.id, "external_id": source.external_id, "name": source.name, "is_primary": True}
 
 
 @router.post("/{project_id}/source-folders/{external_id}/snapshot-queue")
@@ -134,7 +152,8 @@ def queue_workspace_snapshot(
         raise HTTPException(422, "Source object is not a folder")
     source = db.scalar(select(SourceFolder).where(SourceFolder.project_id == project_id, SourceFolder.external_id == external_id))
     if source is None:
-        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name)
+        has_source = db.scalar(select(SourceFolder.id).where(SourceFolder.project_id == project_id).limit(1)) is not None
+        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name, is_primary=not has_source)
         db.add(source); db.flush()
     active = db.scalar(select(WorkspaceSnapshot).where(
         WorkspaceSnapshot.source_folder_id == source.id,
@@ -173,7 +192,8 @@ def create_workspace_snapshot(
         )
     )
     if source is None:
-        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name)
+        has_source = db.scalar(select(SourceFolder.id).where(SourceFolder.project_id == project_id).limit(1)) is not None
+        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name, is_primary=not has_source)
         db.add(source)
         db.flush()
     else:
@@ -248,6 +268,7 @@ def list_workspace_snapshots(
                 "item_count": snapshot.item_count,
                 "source_folder": source.name,
                 "source_external_id": source.external_id,
+                "is_primary": source.is_primary,
                 "created_at": snapshot.created_at,
                 "completed_at": snapshot.completed_at,
             }
