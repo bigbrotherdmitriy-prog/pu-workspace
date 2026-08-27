@@ -94,6 +94,19 @@ def recover_incomplete_snapshots() -> int:
     return len(rows)
 
 
+def recover_incomplete_analyses() -> int:
+    db = SessionLocal()
+    try:
+        rows = db.execute(select(WorkspaceSnapshot.id, WorkspaceSnapshot.project_id).where(WorkspaceSnapshot.analysis_status == "analyzing")).all()
+    finally:
+        db.close()
+    for snapshot_id, project_id in rows:
+        if snapshot_id not in _analysis_in_progress:
+            _analysis_in_progress.add(snapshot_id)
+            _analysis_workers.submit(_analyze_snapshot_worker, snapshot_id, project_id)
+    return len(rows)
+
+
 def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
     db = SessionLocal()
     try:
@@ -131,8 +144,18 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
             "google_tasks_synced": google_synced, "calendar_synced": calendar_synced,
             "drafts": len(drafts), "risks": len(risks), "decisions": len(decisions),
         }
+        snapshot.analysis_status = "ready"
+        snapshot.analysis_result = _analysis_results[snapshot_id]
+        snapshot.analysis_error = None
+        db.commit()
     except Exception as exc:
         _analysis_results[snapshot_id] = {"status": "failed", "error": str(exc)[:500]}
+        db.rollback()
+        failed = db.get(WorkspaceSnapshot, snapshot_id)
+        if failed is not None:
+            failed.analysis_status = "failed"
+            failed.analysis_error = str(exc)[:2000]
+            db.commit()
     finally:
         _analysis_in_progress.discard(snapshot_id)
         db.close()
@@ -174,8 +197,9 @@ def discover_source_folders(
             "snapshot_status": snapshot.status if snapshot else None,
             "item_count": snapshot.item_count if snapshot else None,
             "analyzed": snapshot.id in analyzed_snapshot_ids if snapshot else False,
-            "analysis_status": ("analyzing" if snapshot and snapshot.id in _analysis_in_progress else _analysis_results.get(snapshot.id, {}).get("status") if snapshot else None),
-            "analysis_result": _analysis_results.get(snapshot.id) if snapshot else None})
+            "analysis_status": snapshot.analysis_status if snapshot else None,
+            "analysis_result": snapshot.analysis_result if snapshot else None,
+            "analysis_error": snapshot.analysis_error if snapshot else None})
     return {"folders": folders}
 
 
@@ -333,8 +357,9 @@ def list_workspace_snapshots(
                         WHERE project_id=:project_id AND copy_folder_id=:copy_folder_id
                     )
                 """), {"project_id": project_id, "copy_folder_id": f"virtual:{snapshot.id}"}).scalar_one(),
-                "analysis_status": "analyzing" if snapshot.id in _analysis_in_progress else _analysis_results.get(snapshot.id, {}).get("status"),
-                "analysis_result": _analysis_results.get(snapshot.id),
+                "analysis_status": snapshot.analysis_status,
+                "analysis_result": snapshot.analysis_result,
+                "analysis_error": snapshot.analysis_error,
                 "created_at": snapshot.created_at,
                 "completed_at": snapshot.completed_at,
             }
@@ -415,5 +440,9 @@ def analyze_workspace_snapshot(
         return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": True}
     _analysis_results.pop(snapshot_id, None)
     _analysis_in_progress.add(snapshot_id)
+    snapshot.analysis_status = "analyzing"
+    snapshot.analysis_result = None
+    snapshot.analysis_error = None
+    db.commit()
     _analysis_workers.submit(_analyze_snapshot_worker, snapshot_id, project_id)
     return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": False}
