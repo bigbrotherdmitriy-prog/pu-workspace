@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.project_member import ProjectMember
 from app.models.task import Task
+from app.models.management import Obligation
 from app.models.user import User
 from app.organizer_engine.types import DriveFile
 
@@ -20,6 +21,13 @@ OBLIGATION_RE = re.compile(
     re.IGNORECASE,
 )
 DATE_RE = re.compile(r"\b(?:до\s+|не позднее\s+)?(\d{1,2})[./](\d{1,2})[./](20\d{2})\b", re.IGNORECASE)
+MONTH_DATE_RE = re.compile(
+    r"\b(?:до\s+|не позднее\s+)?(\d{1,2})\s+"
+    r"(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
+    r"(?:\s+(20\d{2}))?\b", re.IGNORECASE,
+)
+MONTHS = {name: index + 1 for index, name in enumerate(
+    ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"))}
 SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
 
 
@@ -52,6 +60,13 @@ def extract_task_candidates(text: str | None, limit: int = 5) -> list[TaskCandid
                 due = date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
             except ValueError:
                 pass
+        if due is None:
+            word_match = MONTH_DATE_RE.search(sentence)
+            if word_match:
+                try:
+                    due = date(int(word_match.group(3) or date.today().year), MONTHS[word_match.group(2).lower()], int(word_match.group(1)))
+                except ValueError:
+                    pass
         urgent = bool(re.search(r"\b(срочно|критич|немедленно|не позднее)\b", sentence, re.I))
         confidence = 0.90 if due else 0.82
         result.append(TaskCandidate(sentence[:240], sentence, due, "high" if urgent else "normal", confidence))
@@ -109,6 +124,14 @@ def create_tasks_from_files(db: Session, project_id: int, session_id: int | None
                 source_type=source_type,
             )
             db.add(task)
+            db.flush()
+            db.add(Obligation(
+                project_id=project_id, owner_user_id=assignee.id, task_id=task.id,
+                title=candidate.title, due_date=candidate.due_date,
+                source_type=source_type, source_id=file.id, source_name=file.name,
+                source_excerpt=candidate.excerpt, source_hash=excerpt_hash,
+                confidence=candidate.confidence,
+            ))
             created.append(task)
     db.commit()
     for task in created:

@@ -12,6 +12,7 @@ from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.user import User
 from app.models.document import Document
+from app.models.management import Meeting, Notification, Obligation
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -24,11 +25,17 @@ def project_dashboard(project_id: int, db: Session = Depends(get_db), user: User
     decisions = list(db.scalars(select(Decision).where(Decision.project_id == project_id)).all())
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.project_id == project_id)).all())
     registered_documents = list(db.scalars(select(Document).where(Document.project_id == project_id)).all())
+    obligations = list(db.scalars(select(Obligation).where(Obligation.project_id == project_id)).all())
+    meetings = list(db.scalars(select(Meeting).where(Meeting.project_id == project_id)).all())
+    notifications = list(db.scalars(select(Notification).where(Notification.project_id == project_id, Notification.user_id == user.id, Notification.is_read.is_(False))).all())
     today = date.today()
     open_tasks = [x for x in tasks if x.status in {"assigned", "in_progress"}]
     overdue = [x for x in open_tasks if x.due_date and x.due_date < today]
     open_risks = [x for x in risks if x.status in {"needs_confirmation", "confirmed", "mitigating"}]
     pending_decisions = [x for x in decisions if x.status in {"needs_confirmation", "confirmed", "decided"}]
+    open_obligations = [x for x in obligations if x.status in {"needs_confirmation", "confirmed", "in_progress"}]
+    overdue_obligations = [x for x in open_obligations if x.due_date and x.due_date < today]
+    upcoming_meetings = [x for x in meetings if x.status == "planned"]
 
     document_map: dict[tuple[str, str], dict] = defaultdict(lambda: {"tasks": 0, "risks": 0, "decisions": 0, "drafts": 0})
     for item in tasks:
@@ -51,7 +58,7 @@ def project_dashboard(project_id: int, db: Session = Depends(get_db), user: User
         for (source_id, name), counts in document_map.items()
     ]
     documents.sort(key=lambda x: (x["attention"], x["tasks"], x["name"]), reverse=True)
-    attention = len(overdue) + len(open_risks) + len(pending_decisions)
+    attention = len(overdue) + len(overdue_obligations) + len(open_risks) + len(pending_decisions) + len(notifications)
     return {
         "summary": {
             "attention": attention,
@@ -61,6 +68,10 @@ def project_dashboard(project_id: int, db: Session = Depends(get_db), user: User
             "pending_decisions": len(pending_decisions),
             "drafts": len([x for x in drafts if x.status == "draft"]),
             "documents": len(documents),
+            "open_obligations": len(open_obligations),
+            "overdue_obligations": len(overdue_obligations),
+            "upcoming_meetings": len(upcoming_meetings),
+            "unread_notifications": len(notifications),
         },
         "documents": documents[:100],
     }
