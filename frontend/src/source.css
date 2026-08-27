@@ -94,6 +94,27 @@
 .project-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 22px 0; }
 .project-metrics span { padding: 11px; border-radius: 9px; background: #f5f7fa; color: #748091; font-size: 11px; }
 .project-metrics strong { display: block; margin-top: 4px; color: #17243a; font-size: 19px; }
+.secretary-overlay { position: fixed; left: 272px; top: 82px; right: 0; bottom: 0; z-index: 9; overflow: auto; background: #f5f7fa; padding: 26px 30px 50px; }
+.secretary-overlay.collapsed { left: 76px; }
+.secretary-page { max-width: 1200px; margin: 0 auto; }
+.secretary-intro { display: flex; align-items: center; gap: 15px; margin-bottom: 18px; }
+.secretary-intro > div:nth-child(2) { flex: 1; }
+.secretary-intro h2, .secretary-intro p { margin: 0; }
+.secretary-intro p { margin-top: 5px; color: #748091; }
+.secretary-intro > span { padding: 7px 11px; border-radius: 999px; background: #fff4db; color: #9c6400; font-size: 12px; }
+.draft-list { display: grid; gap: 16px; }
+.draft-head h2 { margin: 9px 0 4px; }
+.draft-head p { margin: 0; color: #748091; font-size: 12px; }
+.draft-status { display: inline-block; padding: 5px 8px; border-radius: 999px; background: #fff4db; color: #9c6400; font-size: 11px; font-weight: 700; }
+.draft-status.approved { background: #eaf7f3; color: #13745f; }
+.draft-status.rejected { background: #f0f2f5; color: #748091; }
+.draft-card blockquote { margin: 18px 0; padding: 12px 14px; border-left: 3px solid #a8c4f5; background: #f7f9fc; color: #596577; }
+.draft-card label { display: grid; gap: 7px; color: #37455a; font-size: 12px; font-weight: 650; }
+.draft-card textarea { min-height: 150px; resize: vertical; padding: 13px; border: 1px solid #d6dde7; border-radius: 9px; background: #fff; color: #26364f; font: inherit; line-height: 1.5; }
+.draft-card textarea:disabled { background: #f7f9fc; color: #596577; }
+.draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
+.draft-actions button { padding: 9px 13px; border: 1px solid #d6dde7; border-radius: 9px; background: #fff; cursor: pointer; }
+.draft-actions .approve { border-color: #16856c; background: #16856c; color: #fff; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
@@ -111,4 +132,6 @@
   .project-create { display: block; }
   .project-create > div:last-child { min-width: 0; margin-top: 14px; }
   .project-cards { grid-template-columns: 1fr; }
+  .secretary-overlay, .secretary-overlay.collapsed { left: 0; top: 72px; padding: 16px; }
+  .secretary-intro { align-items: flex-start; flex-wrap: wrap; }
 }
