@@ -14,14 +14,20 @@ def _polling_enabled() -> bool:
     return os.getenv("TELEGRAM_POLLING_ENABLED", "true").lower() in {"1", "true", "yes"}
 
 
+def _force_ipv6() -> bool:
+    return os.getenv("TELEGRAM_FORCE_IPV6", "false").lower() in {"1", "true", "yes"}
+
+
 async def _poll_updates() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     webhook_secret = os.environ["TELEGRAM_WEBHOOK_SECRET"]
     backend_url = os.getenv("TELEGRAM_BACKEND_WEBHOOK_URL", "http://127.0.0.1:3000/telegram/webhook")
     api = f"https://api.telegram.org/bot{token}"
     offset: int | None = None
-    transport = httpx.AsyncHTTPTransport(local_address="::")
-    async with httpx.AsyncClient(transport=transport, timeout=35.0) as telegram, httpx.AsyncClient(timeout=120.0) as backend:
+    telegram_options = {"timeout": 35.0}
+    if _force_ipv6():
+        telegram_options["transport"] = httpx.AsyncHTTPTransport(local_address="::")
+    async with httpx.AsyncClient(**telegram_options) as telegram, httpx.AsyncClient(timeout=120.0) as backend:
         # Long polling and webhooks are mutually exclusive. Keep queued updates.
         response = await telegram.post(f"{api}/deleteWebhook", json={"drop_pending_updates": False})
         response.raise_for_status()
@@ -74,7 +80,9 @@ def _check(secret: str | None):
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(transport=httpx.HTTPTransport(local_address="::"), timeout=30.0)
+    if _force_ipv6():
+        return httpx.Client(transport=httpx.HTTPTransport(local_address="::"), timeout=30.0)
+    return httpx.Client(timeout=30.0)
 
 
 def _get_with_retry(client: httpx.Client, url: str, **kwargs) -> httpx.Response:

@@ -59,6 +59,7 @@ services:
       TELEGRAM_RELAY_SECRET: ${TELEGRAM_RELAY_SECRET:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
+      TELEGRAM_FORCE_IPV6: ${TELEGRAM_FORCE_IPV6:-false}
       TELEGRAM_BACKEND_WEBHOOK_URL: ${TELEGRAM_BACKEND_WEBHOOK_URL:-http://127.0.0.1:3000/telegram/webhook}
     command: ["uvicorn", "app.telegram_relay:app", "--host", "172.19.0.1", "--port", "18080"]
 volumes:
