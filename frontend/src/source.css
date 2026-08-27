@@ -59,6 +59,24 @@
 .governance-list p { margin: 4px 0 7px; color: #748091; font-size: 12px; }
 .governance-status { display: inline-block; padding: 4px 7px; border-radius: 999px; background: #f0f2f5; color: #596577; font-size: 11px; }
 .governance-status.high, .governance-status.critical { background: #fff0f0; color: #b83232; }
+.documents-overlay { position: fixed; left: 272px; top: 82px; right: 0; bottom: 0; z-index: 9; overflow: auto; background: #f5f7fa; padding: 26px 30px 50px; }
+.documents-overlay.collapsed { left: 76px; }
+.documents-layout { max-width: 1440px; margin: 0 auto; display: grid; grid-template-columns: minmax(360px,.9fr) minmax(0,1.4fr); gap: 18px; }
+.document-register { display: grid; align-content: start; max-height: calc(100vh - 190px); overflow: auto; }
+.document-register button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px 10px; border: 0; border-bottom: 1px solid #eef1f5; background: #fff; color: #26364f; cursor: pointer; }
+.document-register button:hover, .document-register button.selected { background: #edf3ff; }
+.document-register button.selected { box-shadow: inset 3px 0 #185adb; }
+.document-register button > svg { width: 20px; color: #185adb; flex: none; }
+.document-register button > span { min-width: 0; text-align: left; }
+.document-register strong, .document-register small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.document-register small { margin-top: 4px; color: #748091; }
+.document-detail { min-height: 430px; }
+.document-detail h3 { margin: 25px 0 8px; }
+.document-links { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-top: 20px; }
+.document-links span { padding: 14px; border-radius: 10px; background: #f5f7fa; color: #748091; font-size: 12px; }
+.document-links strong { display: block; margin-top: 4px; color: #17243a; font-size: 20px; }
+.document-summary { white-space: pre-wrap; line-height: 1.55; color: #4f5c6f; }
+.versions { margin-top: 24px; color: #748091; font-size: 12px; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
@@ -68,4 +86,8 @@
   .task-meta, .task-actions { grid-column: 2; }
   .governance-grid { display: block; }
   .governance-grid .card { margin-bottom: 14px; }
+  .documents-overlay, .documents-overlay.collapsed { left: 0; top: 72px; padding: 16px; }
+  .documents-layout { grid-template-columns: 1fr; }
+  .document-register { max-height: 300px; }
+  .document-links { grid-template-columns: repeat(2,1fr); }
 }

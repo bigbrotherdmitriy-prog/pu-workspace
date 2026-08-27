@@ -119,7 +119,8 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
     decisions = list(db.scalars(select(Decision).where(Decision.project_id == project_id, Decision.source_id == item.external_id)).all())
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.project_id == project_id, ResponseDraft.source_file_id == item.external_id)).all())
     return {
-        "id": item.id, "name": item.name, "mime_type": item.mime_type, "source": item.source,
+        "id": item.id, "name": item.name, "external_id": item.external_id,
+        "mime_type": item.mime_type, "source": item.source,
         "status": item.status, "current_version": item.current_version,
         "source_modified_at": item.source_modified_at, "summary": item.summary,
         "versions": [{"version": x.version_number, "created_at": x.created_at} for x in versions],
