@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.core.notifications import notify_telegram_chat, telegram_http_client
 from app.database import SessionLocal
 from app.models.project import Project
+from app.models.document import Document
 from app.models.telegram_chat import TelegramChatLink
 from app.models.task import Task, TaskDueDateHistory
 from app.models.project_member import ProjectMember
@@ -210,6 +211,14 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         mime_type = "text/plain"
         content = text
         if document:
+            source_id = f"telegram-file:{chat_id}:{document.get('file_unique_id') or document.get('file_id')}"
+            already_processed = db.scalar(select(Document.id).where(
+                Document.project_id == link.project_id,
+                Document.external_id == source_id,
+            ))
+            if already_processed:
+                notify_telegram_chat(chat_id, "Этот файл уже был проанализирован ранее — повторные задачи и риски не созданы.")
+                return {"ok": True}
             try:
                 filename, mime_type, data = _download_document(document)
                 extracted = extract_text(data, mime_type, filename)
@@ -226,7 +235,6 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                     notify_telegram_chat(chat_id, "В файле не найден машиночитаемый текст. Возможно, это скан — для него потребуется OCR.")
                     return {"ok": True}
             source_name = filename
-            source_id = f"telegram-file:{chat_id}:{document.get('file_unique_id') or document.get('file_id')}"
             content = (text + "\n" + extracted).strip()
             notify_telegram_chat(chat_id, f"Файл «{filename}» получен, текст извлечён. Выполняю анализ.")
         if not content:
