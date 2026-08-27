@@ -109,6 +109,14 @@ def discover_source_folders(
     latest_by_source: dict[int, WorkspaceSnapshot] = {}
     for snapshot in db.scalars(select(WorkspaceSnapshot).where(WorkspaceSnapshot.project_id == project_id).order_by(WorkspaceSnapshot.id.desc())):
         latest_by_source.setdefault(snapshot.source_folder_id, snapshot)
+    analyzed_snapshot_ids = {
+        int(value.removeprefix("virtual:"))
+        for value in db.scalars(
+            text("SELECT copy_folder_id FROM organizer_proposals WHERE project_id=:project_id AND copy_folder_id LIKE 'virtual:%'"),
+            {"project_id": project_id},
+        )
+        if value and value.removeprefix("virtual:").isdigit()
+    }
     folders = []
     for item in result.get("files", []):
         source = source_by_external.get(item["id"])
@@ -117,7 +125,8 @@ def discover_source_folders(
             "is_primary": bool(source.is_primary) if source else False,
             "snapshot_id": snapshot.id if snapshot else None,
             "snapshot_status": snapshot.status if snapshot else None,
-            "item_count": snapshot.item_count if snapshot else None})
+            "item_count": snapshot.item_count if snapshot else None,
+            "analyzed": snapshot.id in analyzed_snapshot_ids if snapshot else False})
     return {"folders": folders}
 
 
@@ -269,6 +278,12 @@ def list_workspace_snapshots(
                 "source_folder": source.name,
                 "source_external_id": source.external_id,
                 "is_primary": source.is_primary,
+                "analyzed": db.execute(text("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM organizer_proposals
+                        WHERE project_id=:project_id AND copy_folder_id=:copy_folder_id
+                    )
+                """), {"project_id": project_id, "copy_folder_id": f"virtual:{snapshot.id}"}).scalar_one(),
                 "created_at": snapshot.created_at,
                 "completed_at": snapshot.completed_at,
             }

@@ -30,7 +30,13 @@
 .source-list strong, .source-list p { display: block; margin: 0; }
 .source-list p { color: #7c8696; font-size: 12px; margin-top: 3px; }
 .source-list button:disabled { color: #13745f; background: #eaf7f3; cursor: default; }
+.source-row-actions { display: flex !important; flex: none !important; gap: 8px; }
+.source-row-actions .analyze { border-color: #16856c; color: #13745f; }
+.primary-label { display: inline-block; margin-left: 8px; padding: 3px 7px; border-radius: 999px; background: #edf3ff; color: #185adb; font-size: 10px; font-weight: 700; }
+.notice { padding: 12px; border-radius: 10px; background: #eaf7f3; color: #13745f; margin-bottom: 15px; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
+  .source-list article { align-items: flex-start; flex-wrap: wrap; }
+  .source-row-actions { width: 100%; padding-left: 36px; }
 }
