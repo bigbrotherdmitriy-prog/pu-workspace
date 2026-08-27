@@ -23,6 +23,7 @@ from app.google_calendar import sync_tasks_to_calendar
 from app.summary_engine import brief_summary
 from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
+from app.gemini_analysis import analyze_document_with_gemini, format_gemini_analysis, gemini_configured
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -247,8 +248,15 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         drafts = create_response_drafts(db, link.project_id, None, [synthetic])
         risks, decisions = create_governance_items(db, link.project_id, [synthetic], source_type="telegram")
         if document:
-            summary = brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
-            notify_telegram_chat(chat_id, summary + f"\n\n⚠️ Риски: {len(risks)} · 🗳 Решения на подтверждение: {len(decisions)}")
+            if gemini_configured():
+                try:
+                    semantic = analyze_document_with_gemini(content, source_name)
+                    summary = format_gemini_analysis(semantic, source_name)
+                except Exception:
+                    summary = "⚠️ Gemini временно недоступен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
+            else:
+                summary = "⚠️ Gemini API ещё не настроен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
+            notify_telegram_chat(chat_id, summary + f"\n\nАвтоматически: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}")
         elif tasks or drafts or risks or decisions:
             notify_telegram_chat(chat_id, f"PU Workspace: задач — {len(tasks)}, Google Tasks — {google_synced}, Calendar — {calendar_synced}, рисков — {len(risks)}, решений — {len(decisions)}, черновиков ответов — {len(drafts)}.")
         return {"ok": True}

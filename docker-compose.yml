@@ -43,6 +43,9 @@ services:
       TELEGRAM_FORCE_IPV6: ${TELEGRAM_FORCE_IPV6:-false}
       TELEGRAM_RELAY_URL: ${TELEGRAM_RELAY_URL:-}
       TELEGRAM_RELAY_SECRET: ${TELEGRAM_RELAY_SECRET:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_API_BASE: ${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}
     ports:
     - 3000:8000
   telegram-relay:

@@ -21,7 +21,7 @@ async def _poll_updates() -> None:
     api = f"https://api.telegram.org/bot{token}"
     offset: int | None = None
     transport = httpx.AsyncHTTPTransport(local_address="::")
-    async with httpx.AsyncClient(transport=transport, timeout=35.0) as telegram, httpx.AsyncClient(timeout=35.0) as backend:
+    async with httpx.AsyncClient(transport=transport, timeout=35.0) as telegram, httpx.AsyncClient(timeout=120.0) as backend:
         # Long polling and webhooks are mutually exclusive. Keep queued updates.
         response = await telegram.post(f"{api}/deleteWebhook", json={"drop_pending_updates": False})
         response.raise_for_status()
