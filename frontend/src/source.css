@@ -214,8 +214,20 @@
 .inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .inbox-head h2 { margin: 8px 0 3px; }
 .inbox-head p { margin: 0; color: #748091; font-size: 12px; }
+.inbox-head a { display: inline-block; margin-top: 7px; color: #185adb; font-size: 13px; text-decoration: none; }
+.context-confirm { display: grid; gap: 8px; min-width: 260px; }
+.context-confirm select { padding: 9px 11px; border: 1px solid #ccd5e1; border-radius: 8px; background: #fff; }
+.context-confirm button { padding: 9px 11px; border: 1px solid #185adb; border-radius: 8px; background: #fff; color: #185adb; font-weight: 650; cursor: pointer; }
 .inbox-head > button, .inbox-task button { padding: 9px 11px; border: 1px solid #185adb; border-radius: 8px; background: #fff; color: #185adb; font-weight: 650; cursor: pointer; }
 .inbox-summary { margin: 15px 0; padding: 14px; border-radius: 9px; background: #f7f9fc; white-space: pre-wrap; font: inherit; line-height: 1.5; }
+.inbox-risks { margin: 15px 0; padding: 14px; border-radius: 9px; background: #fff8e8; }
+.inbox-risks h3 { margin: 0 0 9px; }
+.inbox-risks > div { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 10px; padding: 8px 0; border-top: 1px solid #f0dfb4; }
+.inbox-risks > div:first-of-type { border-top: 0; }
+.inbox-risks svg { width: 18px; color: #a86400; }
+.inbox-risks span { display: grid; gap: 3px; }
+.inbox-risks small { color: #6f6250; }
+.inbox-risks b { color: #a86400; font-size: 12px; white-space: nowrap; }
 .inbox-proposals { display: grid; gap: 8px; }
 .inbox-task { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #eef1f5; }
 .inbox-task p { margin: 4px 0 0; color: #748091; font-size: 12px; }
@@ -257,5 +269,8 @@
   .contract-links { text-align: left; }
   .inbox-head { display: block; }
   .inbox-head > button { margin-top: 10px; }
+  .context-confirm { margin-top: 10px; min-width: 0; }
+  .inbox-risks > div { grid-template-columns: auto 1fr; }
+  .inbox-risks b { grid-column: 2; }
   .inbox-task { grid-template-columns: 1fr; }
 }

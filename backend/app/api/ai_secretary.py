@@ -16,6 +16,7 @@ from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
+from app.models.governance import Risk
 from app.models.user import User
 from app.organizer_engine.types import DriveFile
 from app.response_engine import create_response_drafts
@@ -51,6 +52,7 @@ def _contract_candidate(db: Session, project_id: int, content: str) -> tuple[Con
 def _message_payload(db: Session, row: Message) -> dict:
     tasks = list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
+    risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
     return {
         "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
         "source_type": row.source_type, "source_external_id": row.source_external_id,
@@ -63,6 +65,9 @@ def _message_payload(db: Session, row: Message) -> dict:
                    "google_calendar_event_id": task.google_calendar_event_id} for task in tasks],
         "drafts": [{"id": draft.id, "subject": draft.subject, "body": draft.body,
                     "status": draft.status, "confidence": draft.confidence} for draft in drafts],
+        "risks": [{"id": risk.id, "title": risk.title, "criticality": risk.criticality,
+                   "status": risk.status, "confidence": risk.confidence,
+                   "source_excerpt": risk.source_excerpt} for risk in risks],
     }
 
 
