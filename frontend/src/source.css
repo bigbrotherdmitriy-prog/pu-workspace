@@ -37,9 +37,26 @@
 .source-head-actions .queue-all:disabled { opacity: .65; }
 .primary-label { display: inline-block; margin-left: 8px; padding: 3px 7px; border-radius: 999px; background: #edf3ff; color: #185adb; font-size: 10px; font-weight: 700; }
 .notice { padding: 12px; border-radius: 10px; background: #eaf7f3; color: #13745f; margin-bottom: 15px; }
+.task-register { min-height: 500px; }
+.task-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.task-filters button.selected { background: #185adb; border-color: #185adb; color: #fff; }
+.task-list article { display: grid; grid-template-columns: 4px minmax(0,1fr) 180px auto; gap: 14px; align-items: center; padding: 15px 3px; border-top: 1px solid #eef1f5; }
+.task-priority { width: 4px; align-self: stretch; border-radius: 99px; background: #9ba5b3; }
+.task-priority.high { background: #df4c4c; }
+.task-body { min-width: 0; }
+.task-body strong { display: block; }
+.task-body p { margin: 4px 0; color: #748091; font-size: 12px; }
+.task-body small { display: block; color: #4f5c6f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-meta { display: grid; gap: 5px; color: #748091; font-size: 12px; }
+.task-meta .overdue { color: #c63737; font-weight: 700; }
+.task-actions { display: flex; gap: 6px; }
+.task-actions button { padding: 8px 10px; border: 1px solid #dfe4eb; border-radius: 8px; background: #fff; cursor: pointer; white-space: nowrap; }
+.task-actions .complete { border-color: #16856c; color: #13745f; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
   .source-list article { align-items: flex-start; flex-wrap: wrap; }
   .source-row-actions { width: 100%; padding-left: 36px; }
+  .task-list article { grid-template-columns: 4px 1fr; }
+  .task-meta, .task-actions { grid-column: 2; }
 }
