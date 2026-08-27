@@ -32,6 +32,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 
@@ -244,6 +246,10 @@ def google_status(
         ),
         "tasks_authorized": bool(token and "https://www.googleapis.com/auth/tasks" in (token.scopes or "").split()),
         "calendar_authorized": bool(token and "https://www.googleapis.com/auth/calendar.events" in (token.scopes or "").split()),
+        "gmail_authorized": bool(token and {
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+        }.issubset(set((token.scopes or "").split()))),
     }
 
 

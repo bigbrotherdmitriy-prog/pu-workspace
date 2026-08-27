@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -71,6 +71,11 @@ def create_document(
 @router.get("/{project_id}/documents")
 def list_documents(
     project_id: int,
+    search: str | None = Query(default=None, max_length=200),
+    status: str | None = Query(default=None, max_length=50),
+    source: str | None = Query(default=None, max_length=50),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -83,13 +88,22 @@ def list_documents(
             detail="Project not found",
         )
 
+    filters = [Document.project_id == project_id]
+    if search:
+        filters.append(Document.name.ilike(f"%{search.strip()}%"))
+    if status:
+        filters.append(Document.status == status)
+    if source:
+        filters.append(Document.source == source)
+    total = db.scalar(select(func.count(Document.id)).where(*filters)) or 0
     documents = db.scalars(
-        select(Document)
-        .where(Document.project_id == project_id)
-        .order_by(Document.id)
+        select(Document).where(*filters).order_by(Document.id.desc()).offset(offset).limit(limit)
     ).all()
 
     return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
         "documents": [
             {
                 "id": item.id,

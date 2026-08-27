@@ -21,6 +21,7 @@ from app.models.governance import Decision, Risk
 from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
 from app.models.organization_contract import Contract, Organization
 from app.models.ai_secretary import Message
+from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import Meeting, Notification, Obligation
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 
@@ -52,6 +53,7 @@ __all__ = [
     "Organization",
     "Contract",
     "Message",
+    "ProjectAIPolicy",
     "Obligation",
     "Meeting",
     "Notification",

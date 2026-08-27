@@ -12,7 +12,7 @@ router = APIRouter(prefix="/response-drafts", tags=["response-drafts"])
 
 
 class DraftUpdate(BaseModel):
-    status: str | None = Field(default=None, pattern="^(draft|approved|rejected)$")
+    status: str | None = Field(default=None, pattern="^(draft|approved|rejected|sent)$")
     subject: str | None = Field(default=None, min_length=1, max_length=500)
     body: str | None = Field(default=None, min_length=1, max_length=20000)
 

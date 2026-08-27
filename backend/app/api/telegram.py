@@ -33,6 +33,7 @@ from app.gemini_analysis import (
     gemini_configured,
 )
 from app.api.ai_secretary import _contract_candidate
+from app.ai_policy import ExternalAIBlocked, policy_for_project, prepare_external_ai_text
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 
@@ -297,9 +298,15 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         if document:
             if gemini_configured():
                 try:
-                    semantic = analyze_document_with_gemini(content, source_name)
+                    ai_content, ai_mode = prepare_external_ai_text(db, link.project_id, content)
+                    semantic = analyze_document_with_gemini(ai_content, source_name)
                     summary = format_gemini_analysis(semantic, source_name)
                     inbox_message.summary = summary
+                    policy = policy_for_project(db, link.project_id)
+                    db.add(AuditLog(action="external_ai_used", entity_type="message", entity_id=inbox_message.id,
+                                    details=f"provider=gemini; model={os.getenv('GEMINI_MODEL', 'default')}; mode={ai_mode}; prompt={policy.prompt_version if policy else 'v1'}"))
+                except ExternalAIBlocked:
+                    summary = "ℹ️ Внешний AI отключён политикой проекта. Ниже локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
                 except Exception:
                     summary = "⚠️ Gemini временно недоступен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
             else:
@@ -307,8 +314,14 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             notify_telegram_chat(chat_id, summary + f"\n\nПредложено: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}. Внешние действия требуют подтверждения в web.")
         elif _should_prepare_message_replies(message, text) and gemini_configured():
             try:
-                replies = analyze_message_with_gemini(content, source_name)
+                ai_content, ai_mode = prepare_external_ai_text(db, link.project_id, content)
+                replies = analyze_message_with_gemini(ai_content, source_name)
                 notify_telegram_chat(chat_id, format_message_replies(replies))
+                policy = policy_for_project(db, link.project_id)
+                db.add(AuditLog(action="external_ai_used", entity_type="message", entity_id=inbox_message.id,
+                                details=f"provider=gemini; model={os.getenv('GEMINI_MODEL', 'default')}; mode={ai_mode}; prompt={policy.prompt_version if policy else 'v1'}"))
+            except ExternalAIBlocked:
+                notify_telegram_chat(chat_id, "ℹ️ Внешний AI отключён политикой проекта. Сообщение и локальные предложения сохранены в PU Workspace.")
             except Exception:
                 notify_telegram_chat(chat_id, "⚠️ Не удалось подготовить варианты ответа через Gemini. Сообщение сохранено, попробуйте ещё раз позже.")
         elif tasks or drafts or risks or decisions:

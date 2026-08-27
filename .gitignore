@@ -19,6 +19,7 @@ __pycache__/
 *.parallel
 backups/
 pu-workspace-*.tar.gz
+.tmp-pnpm/
 
 # OS / editors
 .DS_Store

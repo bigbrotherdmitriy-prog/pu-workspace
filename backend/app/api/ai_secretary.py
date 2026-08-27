@@ -32,6 +32,8 @@ class IncomingMessage(BaseModel):
     source_external_id: str | None = Field(default=None, max_length=500)
     source_name: str = Field(min_length=1, max_length=1000)
     source_url: str | None = Field(default=None, max_length=2000)
+    source_sender: str | None = Field(default=None, max_length=1000)
+    source_thread_id: str | None = Field(default=None, max_length=500)
     content: str = Field(min_length=1, max_length=100000)
 
 
@@ -57,6 +59,7 @@ def _message_payload(db: Session, row: Message) -> dict:
         "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
         "source_type": row.source_type, "source_external_id": row.source_external_id,
         "source_name": row.source_name, "source_url": row.source_url,
+        "source_sender": row.source_sender, "source_thread_id": row.source_thread_id,
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
         "status": row.status, "created_at": row.created_at,
@@ -78,8 +81,7 @@ def inbox(project_id: int, db: Session = Depends(get_db), user: User = Depends(r
     return {"messages": [_message_payload(db, row) for row in rows], "count": len(rows)}
 
 
-@router.post("/inbox")
-def ingest(payload: IncomingMessage, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
     require_project_role(db, user, payload.project_id, "editor")
     project = db.get(Project, payload.project_id)
     if project is None:
@@ -93,6 +95,7 @@ def ingest(payload: IncomingMessage, db: Session = Depends(get_db), user: User =
         organization_id=project.organization_id, project_id=project.id, contract_id=contract.id if contract else None,
         created_by_user_id=user.id, source_type=payload.source_type, source_external_id=external_id,
         source_name=payload.source_name.strip(), source_url=payload.source_url,
+        source_sender=payload.source_sender, source_thread_id=payload.source_thread_id,
         content=payload.content.strip(), summary="Анализируется", context_confidence=confidence,
         context_evidence=evidence, context_confirmed=confidence >= 0.90,
         status="ready" if confidence >= 0.90 else "needs_context_confirmation",
@@ -112,6 +115,11 @@ def ingest(payload: IncomingMessage, db: Session = Depends(get_db), user: User =
                     details=f"source={row.source_type}; tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}; context={confidence:.0%}"))
     db.commit(); db.refresh(row)
     return _message_payload(db, row)
+
+
+@router.post("/inbox")
+def ingest(payload: IncomingMessage, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return ingest_message(payload, db, user)
 
 
 @router.post("/inbox/{message_id}/confirm-context")

@@ -20,5 +20,7 @@ class ResponseDraft(Base):
     source_excerpt: Mapped[str] = mapped_column(Text)
     source_excerpt_hash: Mapped[str] = mapped_column(String(64))
     confidence: Mapped[float] = mapped_column(Float)
+    sent_external_id: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
