@@ -19,6 +19,7 @@ class Task(Base):
     organizer_session_id: Mapped[int | None] = mapped_column(
         ForeignKey("organizer_sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(500))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="assigned", index=True)
@@ -31,6 +32,7 @@ class Task(Base):
     source_excerpt_hash: Mapped[str] = mapped_column(String(64))
     confidence: Mapped[float] = mapped_column(Float)
     needs_review: Mapped[bool] = mapped_column(default=True)
+    external_action_status: Mapped[str] = mapped_column(String(30), default="proposed", index=True)
     google_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     google_task_list_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     google_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)

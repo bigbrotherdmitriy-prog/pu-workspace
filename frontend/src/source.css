@@ -179,6 +179,7 @@
 .proposal-action > div:nth-child(3) { display: grid; gap: 6px; }
 .proposal-action p { margin: 5px 0 0; color: #596577; font-size: 12px; }
 .proposal-action .needs-review { color: #a45f00; font-weight: 700; }
+.apply-source-inline { margin-top: 9px; padding: 8px 10px; border: 1px solid #b83232; border-radius: 7px; background: #fff; color: #b83232; font-weight: 700; cursor: pointer; }
 .source-apply-panel { position: fixed; right: 24px; bottom: 24px; z-index: 30; display: grid; grid-template-columns: auto minmax(190px,1fr) auto; align-items: center; gap: 12px; max-width: 620px; padding: 16px; border: 1px solid #f0c36a; border-radius: 12px; background: #fff9e9; box-shadow: 0 14px 40px rgba(31,45,61,.2); color: #26364f; }
 .source-apply-panel > svg { width: 24px; color: #a45f00; }
 .source-apply-panel strong, .source-apply-panel p { display: block; margin: 0; }
@@ -202,6 +203,26 @@
 .contract-status.draft { background: #fff4db; color: #9c6400; }
 .contract-links { text-align: right; color: #748091; font-size: 11px; }
 .contract-links strong { display: block; margin-top: 4px; color: #26364f; }
+.inbox-compose { display: grid; gap: 10px; margin: 16px 0; }
+.inbox-compose h2, .inbox-compose p { margin: 0; }
+.inbox-compose p { color: #748091; }
+.inbox-compose input, .inbox-compose textarea { padding: 11px 12px; border: 1px solid #d6dde7; border-radius: 8px; font: inherit; }
+.inbox-compose textarea { min-height: 120px; resize: vertical; }
+.inbox-compose button { justify-self: start; padding: 10px 15px; border: 0; border-radius: 8px; background: #185adb; color: #fff; font-weight: 700; cursor: pointer; }
+.inbox-compose button:disabled { opacity: .5; cursor: default; }
+.inbox-list { display: grid; gap: 16px; }
+.inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.inbox-head h2 { margin: 8px 0 3px; }
+.inbox-head p { margin: 0; color: #748091; font-size: 12px; }
+.inbox-head > button, .inbox-task button { padding: 9px 11px; border: 1px solid #185adb; border-radius: 8px; background: #fff; color: #185adb; font-weight: 650; cursor: pointer; }
+.inbox-summary { margin: 15px 0; padding: 14px; border-radius: 9px; background: #f7f9fc; white-space: pre-wrap; font: inherit; line-height: 1.5; }
+.inbox-proposals { display: grid; gap: 8px; }
+.inbox-task { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #eef1f5; }
+.inbox-task p { margin: 4px 0 0; color: #748091; font-size: 12px; }
+.inbox-task > span { color: #748091; font-size: 12px; }
+.inbox-draft { margin-top: 13px; padding-top: 13px; border-top: 1px solid #eef1f5; }
+.inbox-draft textarea { width: 100%; min-height: 130px; box-sizing: border-box; padding: 11px; border: 1px solid #d6dde7; border-radius: 8px; font: inherit; resize: vertical; }
+.inbox-draft > span { display: block; margin-top: 5px; color: #9c6400; font-size: 12px; }
 @media (max-width: 760px) {
   .source-card { grid-template-columns: auto 1fr; }
   .source-status, .source-link { grid-column: 2; justify-self: start; }
@@ -234,4 +255,7 @@
   .contract-card { grid-template-columns: 1fr; }
   .contract-number { justify-self: start; }
   .contract-links { text-align: left; }
+  .inbox-head { display: block; }
+  .inbox-head > button { margin-top: 10px; }
+  .inbox-task { grid-template-columns: 1fr; }
 }

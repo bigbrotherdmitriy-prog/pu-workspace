@@ -8,6 +8,7 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.task import Task, TaskDueDateHistory
 from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.google_tasks import sync_tasks_to_google
 from app.google_calendar import sync_tasks_to_calendar
 
@@ -19,6 +20,11 @@ class TaskUpdate(BaseModel):
     due_date: date | None = None
     due_change_reason: str | None = Field(default=None, max_length=2000)
     result_note: str | None = Field(default=None, max_length=5000)
+
+
+class ExternalActionApproval(BaseModel):
+    create_google_task: bool = True
+    create_calendar_event: bool = True
 
 
 @router.get("")
@@ -35,6 +41,7 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
             "assignee_name": assignee.name, "assignee_email": assignee.email,
             "source_file_name": task.source_file_name, "source_excerpt": task.source_excerpt,
             "confidence": task.confidence, "needs_review": task.needs_review,
+            "message_id": task.message_id, "external_action_status": task.external_action_status,
             "google_task_id": task.google_task_id, "google_sync_error": task.google_sync_error,
             "google_calendar_event_id": task.google_calendar_event_id,
             "google_calendar_sync_error": task.google_calendar_sync_error,
@@ -65,8 +72,9 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     if payload.result_note is not None:
         task.result_note = payload.result_note.strip() or None
     db.commit(); db.refresh(task)
-    sync_tasks_to_google(db, task.project_id, [task], force_update=True)
-    sync_tasks_to_calendar(db, task.project_id, [task], force_update=True)
+    if task.external_action_status == "executed":
+        sync_tasks_to_google(db, task.project_id, [task], force_update=True)
+        sync_tasks_to_calendar(db, task.project_id, [task], force_update=True)
     return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note, "completed_at": task.completed_at}
 
 
@@ -83,7 +91,36 @@ def due_history(task_id: int, db: Session = Depends(get_db), user: User = Depend
 @router.post("/sync-google")
 def sync_google(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "manager")
-    tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.google_task_id.is_(None))).all())
+    tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.external_action_status == "approved", Task.google_task_id.is_(None))).all())
     synced, failed = sync_tasks_to_google(db, project_id, tasks)
     calendar_synced, calendar_failed = sync_tasks_to_calendar(db, project_id, tasks)
     return {"synced": synced, "failed": failed, "calendar_synced": calendar_synced, "calendar_failed": calendar_failed}
+
+
+@router.post("/{task_id}/approve-external")
+def approve_external(task_id: int, payload: ExternalActionApproval, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    task = db.get(Task, task_id)
+    if task is None:
+        raise HTTPException(404, "Task not found")
+    require_project_role(db, user, task.project_id, "manager")
+    if not payload.create_google_task and not payload.create_calendar_event:
+        raise HTTPException(422, "Select at least one external action")
+    if task.message_id is not None and task.needs_review:
+        task.needs_review = False
+    task.external_action_status = "approved"
+    db.commit()
+    task_synced = task_failed = calendar_synced = calendar_failed = 0
+    if payload.create_google_task:
+        task_synced, task_failed = sync_tasks_to_google(db, task.project_id, [task])
+    if payload.create_calendar_event and task.due_date:
+        calendar_synced, calendar_failed = sync_tasks_to_calendar(db, task.project_id, [task])
+    success = (not payload.create_google_task or task_synced == 1 or bool(task.google_task_id)) and (
+        not payload.create_calendar_event or not task.due_date or calendar_synced == 1 or bool(task.google_calendar_event_id)
+    )
+    task.external_action_status = "executed" if success else "failed"
+    db.add(AuditLog(action="external_task_action", entity_type="task", entity_id=task.id,
+                    details=f"google_task={task_synced}; calendar={calendar_synced}; success={success}"))
+    db.commit(); db.refresh(task)
+    return {"id": task.id, "external_action_status": task.external_action_status,
+            "google_task_id": task.google_task_id, "google_calendar_event_id": task.google_calendar_event_id,
+            "google_task_failed": task_failed, "calendar_failed": calendar_failed}

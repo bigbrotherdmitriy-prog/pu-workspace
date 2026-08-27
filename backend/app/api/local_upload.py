@@ -10,8 +10,6 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.core.notifications import notify_telegram
 from app.database import get_db
-from app.google_calendar import sync_tasks_to_calendar
-from app.google_tasks import sync_tasks_to_google
 from app.governance_engine import create_governance_items
 from app.models.user import User
 from app.organizer_engine.content import extract_text
@@ -70,8 +68,7 @@ def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), use
             skipped.append({"path": item.path, "reason": str(exc)})
     index_documents(db, payload.project_id, extracted, "local_upload")
     tasks = create_tasks_from_files(db, payload.project_id, None, extracted, source_type="local_upload")
-    google_synced, _ = sync_tasks_to_google(db, payload.project_id, tasks)
-    calendar_synced, _ = sync_tasks_to_calendar(db, payload.project_id, tasks)
+    google_synced = calendar_synced = 0
     drafts = create_response_drafts(db, payload.project_id, None, extracted)
     risks, decisions = create_governance_items(db, payload.project_id, extracted, source_type="local_upload")
     if extracted:
@@ -82,5 +79,6 @@ def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), use
     return {
         "processed": len(extracted), "skipped": skipped, "tasks": len(tasks),
         "google_tasks": google_synced, "calendar": calendar_synced,
+        "external_actions": "proposed",
         "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts),
     }

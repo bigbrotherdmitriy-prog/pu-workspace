@@ -13,6 +13,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.local_upload import router as local_upload_router
 from app.api.workspace import recover_incomplete_analyses, recover_incomplete_snapshots, router as workspace_router
 from app.api.organizations_contracts import router as organizations_contracts_router
+from app.api.ai_secretary import router as ai_secretary_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -35,7 +36,7 @@ from app.database import SessionLocal
 from app.core.readiness import readiness_report
 
 
-APP_VERSION = "0.34.0"
+APP_VERSION = "0.40.0"
 
 app = FastAPI(
     title="PU Workspace",
@@ -53,6 +54,7 @@ app.include_router(access_router, dependencies=[Depends(require_user)])
 app.include_router(drive_router, dependencies=[Depends(require_user)])
 app.include_router(documents_router, dependencies=[Depends(require_user)])
 app.include_router(organizations_contracts_router)
+app.include_router(ai_secretary_router)
 app.include_router(google_drive_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)

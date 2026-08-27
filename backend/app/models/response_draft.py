@@ -11,6 +11,7 @@ class ResponseDraft(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     reviewer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     organizer_session_id: Mapped[int | None] = mapped_column(ForeignKey("organizer_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True)
     subject: Mapped[str] = mapped_column(String(500))
     body: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), default="draft", index=True)

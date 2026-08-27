@@ -19,8 +19,6 @@ from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.task_engine import create_tasks_from_files
 from app.response_engine import create_response_drafts
-from app.google_tasks import sync_tasks_to_google
-from app.google_calendar import sync_tasks_to_calendar
 from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
 
@@ -133,8 +131,7 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         tasks = create_tasks_from_files(db, project_id, session_id, copy_items)
-        google_synced, _ = sync_tasks_to_google(db, project_id, tasks)
-        calendar_synced, _ = sync_tasks_to_calendar(db, project_id, tasks)
+        google_synced = calendar_synced = 0
         drafts = create_response_drafts(db, project_id, session_id, copy_items)
         risks, decisions = create_governance_items(db, project_id, copy_items)
         proposal_id = repo.create_proposal(

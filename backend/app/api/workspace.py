@@ -21,8 +21,6 @@ from app.document_engine import index_documents
 from app.task_engine import create_tasks_from_files
 from app.response_engine import create_response_drafts
 from app.governance_engine import create_governance_items
-from app.google_tasks import sync_tasks_to_google
-from app.google_calendar import sync_tasks_to_calendar
 
 
 router = APIRouter(prefix="/projects", tags=["virtual-workspace"])
@@ -131,8 +129,7 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
         indexed = index_documents(db, project_id, files, "google_drive_snapshot")
         items = build_proposal(files, project_name=project.name if project else None, confirmed_rules=repo.confirmed_rules())
         tasks = create_tasks_from_files(db, project_id, session_id, files)
-        google_synced, _ = sync_tasks_to_google(db, project_id, tasks)
-        calendar_synced, _ = sync_tasks_to_calendar(db, project_id, tasks)
+        google_synced = calendar_synced = 0
         drafts = create_response_drafts(db, project_id, session_id, files)
         risks, decisions = create_governance_items(db, project_id, files)
         proposal_id = repo.create_proposal(project_id, session_id, source.name, source.external_id, f"virtual:{snapshot_id}")

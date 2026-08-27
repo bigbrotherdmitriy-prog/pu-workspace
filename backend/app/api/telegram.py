@@ -262,8 +262,7 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         synthetic = DriveFile(id=source_id, name=source_name, mime_type=mime_type, parent_id="telegram", content_text=content)
         index_documents(db, link.project_id, [synthetic], "telegram")
         tasks = create_tasks_from_files(db, link.project_id, None, [synthetic], source_type="telegram")
-        google_synced, _ = sync_tasks_to_google(db, link.project_id, tasks)
-        calendar_synced, _ = sync_tasks_to_calendar(db, link.project_id, tasks)
+        google_synced = calendar_synced = 0
         drafts = create_response_drafts(db, link.project_id, None, [synthetic])
         risks, decisions = create_governance_items(db, link.project_id, [synthetic], source_type="telegram")
         if document:
@@ -275,7 +274,7 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                     summary = "⚠️ Gemini временно недоступен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
             else:
                 summary = "⚠️ Gemini API ещё не настроен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
-            notify_telegram_chat(chat_id, summary + f"\n\nАвтоматически: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}")
+            notify_telegram_chat(chat_id, summary + f"\n\nПредложено: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}. Внешние действия требуют подтверждения в web.")
         elif _should_prepare_message_replies(message, text) and gemini_configured():
             try:
                 replies = analyze_message_with_gemini(content, source_name)
