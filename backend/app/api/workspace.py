@@ -74,6 +74,23 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None
         db.close()
 
 
+def recover_incomplete_snapshots() -> int:
+    """Resume metadata-only snapshot jobs interrupted by a process restart."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            select(WorkspaceSnapshot.id, WorkspaceSnapshot.project_id, SourceFolder.external_id)
+            .join(SourceFolder, SourceFolder.id == WorkspaceSnapshot.source_folder_id)
+            .where(WorkspaceSnapshot.status == "building")
+            .order_by(WorkspaceSnapshot.id)
+        ).all()
+    finally:
+        db.close()
+    for snapshot_id, project_id, external_id in rows:
+        _snapshot_workers.submit(_build_snapshot, snapshot_id, project_id, external_id)
+    return len(rows)
+
+
 @router.get("/{project_id}/source-folders/discover")
 def discover_source_folders(
     project_id: int,
@@ -87,8 +104,20 @@ def discover_source_folders(
         q="'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
         fields="files(id,name,modifiedTime,createdTime)", pageSize=1000, orderBy="name",
     ).execute()
-    registered = {row.external_id for row in db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id))}
-    return {"folders": [{**item, "registered": item["id"] in registered} for item in result.get("files", [])]}
+    sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)))
+    source_by_external = {row.external_id: row for row in sources}
+    latest_by_source: dict[int, WorkspaceSnapshot] = {}
+    for snapshot in db.scalars(select(WorkspaceSnapshot).where(WorkspaceSnapshot.project_id == project_id).order_by(WorkspaceSnapshot.id.desc())):
+        latest_by_source.setdefault(snapshot.source_folder_id, snapshot)
+    folders = []
+    for item in result.get("files", []):
+        source = source_by_external.get(item["id"])
+        snapshot = latest_by_source.get(source.id) if source else None
+        folders.append({**item, "registered": source is not None,
+            "snapshot_id": snapshot.id if snapshot else None,
+            "snapshot_status": snapshot.status if snapshot else None,
+            "item_count": snapshot.item_count if snapshot else None})
+    return {"folders": folders}
 
 
 @router.post("/{project_id}/source-folders/{external_id}/snapshot-queue")
