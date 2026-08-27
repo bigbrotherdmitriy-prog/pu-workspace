@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -12,7 +12,6 @@ from app.models.audit_log import AuditLog
 from app.models.governance import Decision, Risk
 from app.models.management import Meeting, Notification, Obligation
 from app.models.organization_contract import Contract
-from app.models.task import Task
 from app.models.user import User
 from app.organizer_engine.types import DriveFile
 from app.task_engine import create_tasks_from_files
@@ -123,16 +122,22 @@ def _ensure_notification(db: Session, user_id: int, project_id: int, kind: str, 
 def refresh_notifications(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     today, soon = date.today(), date.today() + timedelta(days=7)
-    for task in db.scalars(select(Task).where(Task.project_id == project_id, Task.status.in_(["assigned", "in_progress"]))).all():
-        if task.due_date and task.due_date <= soon:
-            kind = "overdue" if task.due_date < today else "deadline"
-            _ensure_notification(db, user.id, project_id, kind, task.title,
-                                 f"Срок: {task.due_date.isoformat()}. Источник: {task.source_file_name}", "task", task.id,
-                                 f"task:{task.id}:{kind}:{task.due_date}")
-    for risk in db.scalars(select(Risk).where(Risk.project_id == project_id, Risk.status.in_(["needs_confirmation", "confirmed", "mitigating"]))).all():
+    # The notification centre is a current control snapshot, not the audit log.
+    # Rebuild it fully so stale or previously-read alerts do not survive a refresh.
+    db.execute(delete(Notification).where(Notification.project_id == project_id, Notification.user_id == user.id))
+    for obligation in db.scalars(select(Obligation).where(
+        Obligation.project_id == project_id,
+        Obligation.status.in_(["confirmed", "in_progress"]),
+    )).all():
+        if obligation.due_date and obligation.due_date <= soon:
+            kind = "overdue" if obligation.due_date < today else "deadline"
+            _ensure_notification(db, user.id, project_id, kind, obligation.title[:240],
+                                 f"Срок: {obligation.due_date.isoformat()}. Источник: {obligation.source_name}",
+                                 "obligation", obligation.id, f"obligation:{obligation.id}:{kind}:{obligation.due_date}")
+    for risk in db.scalars(select(Risk).where(Risk.project_id == project_id, Risk.status.in_(["confirmed", "mitigating"]))).all():
         _ensure_notification(db, user.id, project_id, "risk", risk.title, risk.source_excerpt,
                              "risk", risk.id, f"risk:{risk.id}:{risk.status}")
-    for decision in db.scalars(select(Decision).where(Decision.project_id == project_id, Decision.status.in_(["needs_confirmation", "confirmed"]))).all():
+    for decision in db.scalars(select(Decision).where(Decision.project_id == project_id, Decision.status == "confirmed")).all():
         _ensure_notification(db, user.id, project_id, "decision", decision.question, decision.source_excerpt,
                              "decision", decision.id, f"decision:{decision.id}:{decision.status}")
     db.commit()

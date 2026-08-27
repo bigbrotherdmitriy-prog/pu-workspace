@@ -22,6 +22,7 @@ from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, Wo
 from app.models.organization_contract import Contract, Organization
 from app.models.ai_secretary import Message
 from app.models.management import Meeting, Notification, Obligation
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 
 __all__ = [
     "Project",
@@ -54,4 +55,10 @@ __all__ = [
     "Obligation",
     "Meeting",
     "Notification",
+    "ScheduleBaseline",
+    "ScheduleItem",
+    "BudgetLine",
+    "CashFlowEntry",
+    "ProcurementItem",
+    "AcceptanceAct",
 ]
