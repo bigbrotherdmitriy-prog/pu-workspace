@@ -222,7 +222,7 @@ def google_callback(
     db.commit()
 
     return RedirectResponse(
-        url=f"/?oauth=connected&project_id={project_id}"
+        url=f"/new/?oauth=connected&project_id={project_id}"
     )
 
 

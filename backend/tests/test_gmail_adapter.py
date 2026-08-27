@@ -26,3 +26,8 @@ def test_gmail_sync_is_bounded():
     request = GmailSyncRequest()
     assert request.query == "newer_than:7d"
     assert request.max_results == 25
+
+
+def test_oauth_callback_returns_to_new_interface():
+    source = __import__("inspect").getsource(__import__("app.api.google_drive", fromlist=["google_callback"]).google_callback)
+    assert 'url=f"/new/?oauth=connected&project_id={project_id}"' in source
