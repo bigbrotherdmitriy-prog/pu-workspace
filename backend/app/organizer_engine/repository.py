@@ -50,8 +50,8 @@ class OrganizerRepository:
         result = self.db.execute(text("""
             UPDATE organizer_sessions
             SET status='queued', progress=CASE WHEN copy_folder_id IS NULL THEN 0 ELSE 55 END,
-                error_message=NULL, updated_at=now()
-            WHERE id=:id AND status='failed'
+                error_message=NULL, retry_count=retry_count+1, updated_at=now()
+            WHERE id=:id AND status='failed' AND retry_count < 2
         """), {"id": session_id})
         self.db.commit()
         return result.rowcount == 1

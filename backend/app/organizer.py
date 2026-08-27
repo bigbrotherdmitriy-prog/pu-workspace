@@ -169,7 +169,9 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
     except Exception as exc:
         db.rollback()
         try:
-            repo.update_session(session_id, status="failed", error_message=str(exc), progress=100)
+            failed_session = repo.get_session(session_id)
+            failed_status = "dead_letter" if failed_session and failed_session["retry_count"] >= 2 else "failed"
+            repo.update_session(session_id, status=failed_status, error_message=str(exc), progress=100)
             notify_telegram(f"PU Workspace: ошибка обработки сессии {session_id}: {str(exc)[:500]}")
         except Exception:
             pass
@@ -244,7 +246,7 @@ def retry_session(session_id: int, db: Session = Depends(get_db), user: User = D
     repo = OrganizerRepository(db)
     row = _session_for_user(repo, db, user, session_id, "manager")
     if not repo.retry_failed_session(session_id):
-        raise HTTPException(409, "Only a failed session can be retried")
+        raise HTTPException(409, "Only a failed session with fewer than three attempts can be retried")
     submit_scan(session_id, row["project_id"], row["source_folder_id"])
     return {"session_id": session_id, "status": "queued"}
 

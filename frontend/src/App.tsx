@@ -138,6 +138,24 @@ type AIProjectPolicy = {
   dlp_enabled: boolean;
   prompt_version: string;
 };
+type ProcessingQueue = {
+  summary: { active: number; failed: number; dead_letter: number };
+  snapshots: Array<{
+    id: number;
+    status: string;
+    analysis_status: string;
+    retry_count: number;
+    analysis_retry_count: number;
+    error?: string;
+  }>;
+  sessions: Array<{
+    id: number;
+    status: string;
+    progress: number;
+    retry_count: number;
+    error_message?: string;
+  }>;
+};
 type SystemState = {
   ready: boolean;
   google_drive_ready: boolean;
@@ -487,6 +505,7 @@ export function App() {
     [members, setMembers] = useState<MemberRow[]>([]),
     [googleState, setGoogleState] = useState<GoogleState | null>(null),
     [aiPolicy, setAiPolicy] = useState<AIProjectPolicy | null>(null),
+    [processingQueue, setProcessingQueue] = useState<ProcessingQueue | null>(null),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
     [showSources, setShowSources] = useState(false),
@@ -533,6 +552,7 @@ export function App() {
           me,
           audit,
           policy,
+          queue,
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
@@ -561,6 +581,7 @@ export function App() {
           api("/auth/me").catch(() => null),
           api("/history/audit?limit=100").catch(() => ({ logs: [] })),
           api(`/projects/${id}/ai-policy`).catch(() => null),
+          api(`/projects/${id}/processing-queue`).catch(() => null),
         ]);
         setSummary(d.summary);
         setDocuments(d.documents);
@@ -578,6 +599,7 @@ export function App() {
         );
         setGoogleState(google);
         setAiPolicy(policy);
+        setProcessingQueue(queue);
         setSystemState(health);
         setMembers(team.members);
         setCurrentUser(me);
@@ -640,6 +662,28 @@ export function App() {
       });
       setAiPolicy(saved);
       setNotice("Политика AI и защиты данных сохранена");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function retrySnapshot(snapshotId: number) {
+    try {
+      setError("");
+      await api(`/projects/${projectId}/snapshots/${snapshotId}/retry-build`, {
+        method: "POST",
+      });
+      setNotice(`Повтор снимка №${snapshotId} поставлен в очередь`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function retryOrganizerSession(sessionId: number) {
+    try {
+      setError("");
+      await api(`/organizer/sessions/${sessionId}/retry`, { method: "POST" });
+      setNotice(`Повтор обработки №${sessionId} поставлен в очередь`);
+      await load();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2877,6 +2921,39 @@ export function App() {
                   <ShieldCheck /> Изменения проекта фиксируются в журнале.
                 </p>
               </div>
+            </section>
+            <section className="card span-settings">
+              <div className="card-head">
+                <div>
+                  <h2>Очередь массовой обработки</h2>
+                  <p>Прогресс, ошибки и операции, требующие диагностики</p>
+                </div>
+              </div>
+              {processingQueue && (
+                <div className="safety-list">
+                  <p>
+                    Активно: <strong>{processingQueue.summary.active}</strong> · Ошибок: {" "}
+                    <strong>{processingQueue.summary.failed}</strong> · Dead-letter: {" "}
+                    <strong>{processingQueue.summary.dead_letter}</strong>
+                  </p>
+                  {processingQueue.snapshots
+                    .filter((item) => item.status === "failed")
+                    .map((item) => (
+                      <p key={`snapshot-${item.id}`}>
+                        Снимок №{item.id}: {item.error || "ошибка без описания"}
+                        <button onClick={() => retrySnapshot(item.id)}>Повторить</button>
+                      </p>
+                    ))}
+                  {processingQueue.sessions
+                    .filter((item) => item.status === "failed")
+                    .map((item) => (
+                      <p key={`session-${item.id}`}>
+                        Обработка №{item.id}: {item.error_message || "ошибка без описания"}
+                        <button onClick={() => retryOrganizerSession(item.id)}>Повторить</button>
+                      </p>
+                    ))}
+                </div>
+              )}
             </section>
           </div>
         </section>

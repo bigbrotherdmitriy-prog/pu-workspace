@@ -68,7 +68,7 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None
         db.rollback()
         failed = db.get(WorkspaceSnapshot, snapshot_id)
         if failed is not None:
-            failed.status = "failed"
+            failed.status = "dead_letter" if failed.retry_count >= 2 else "failed"
             failed.error_message = str(exc)[:2000]
             db.commit()
     finally:
@@ -150,7 +150,7 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
         db.rollback()
         failed = db.get(WorkspaceSnapshot, snapshot_id)
         if failed is not None:
-            failed.analysis_status = "failed"
+            failed.analysis_status = "dead_letter" if failed.analysis_retry_count >= 2 else "failed"
             failed.analysis_error = str(exc)[:2000]
             db.commit()
     finally:
@@ -406,12 +406,55 @@ def list_workspace_snapshots(
                 "analysis_status": snapshot.analysis_status,
                 "analysis_result": snapshot.analysis_result,
                 "analysis_error": snapshot.analysis_error,
+                "retry_count": snapshot.retry_count,
+                "analysis_retry_count": snapshot.analysis_retry_count,
                 "created_at": snapshot.created_at,
                 "completed_at": snapshot.completed_at,
             }
             for snapshot, source in rows
         ]
     }
+
+
+@router.get("/{project_id}/processing-queue")
+def processing_queue(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Observable project queue with explicit failed and dead-letter work."""
+    require_project_role(db, user, project_id, "viewer")
+    snapshots = list(db.scalars(select(WorkspaceSnapshot).where(WorkspaceSnapshot.project_id == project_id).order_by(WorkspaceSnapshot.id.desc()).limit(500)))
+    sessions = db.execute(text("""
+        SELECT id,status,progress,error_message,retry_count,created_at,updated_at
+        FROM organizer_sessions WHERE project_id=:project_id ORDER BY id DESC LIMIT 500
+    """), {"project_id": project_id}).mappings().all()
+    return {
+        "summary": {
+            "active": sum(x.status in {"building"} or x.analysis_status == "analyzing" for x in snapshots) + sum(x["status"] in {"queued", "scanning", "analyzing"} for x in sessions),
+            "failed": sum(x.status == "failed" or x.analysis_status == "failed" for x in snapshots) + sum(x["status"] == "failed" for x in sessions),
+            "dead_letter": sum(x.status == "dead_letter" or x.analysis_status == "dead_letter" for x in snapshots) + sum(x["status"] == "dead_letter" for x in sessions),
+        },
+        "snapshots": [{"id": x.id, "status": x.status, "analysis_status": x.analysis_status,
+                       "retry_count": x.retry_count, "analysis_retry_count": x.analysis_retry_count,
+                       "error": x.error_message or x.analysis_error} for x in snapshots],
+        "sessions": [dict(x) for x in sessions],
+    }
+
+
+@router.post("/{project_id}/snapshots/{snapshot_id}/retry-build")
+def retry_snapshot_build(project_id: int, snapshot_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+    if snapshot is None or snapshot.project_id != project_id:
+        raise HTTPException(404, "Snapshot not found")
+    if snapshot.status != "failed" or snapshot.retry_count >= 2:
+        raise HTTPException(409, "Only a failed snapshot with fewer than three attempts can be retried")
+    source = db.get(SourceFolder, snapshot.source_folder_id)
+    if source is None:
+        raise HTTPException(409, "Snapshot source folder is missing")
+    snapshot.status = "building"
+    snapshot.error_message = None
+    snapshot.retry_count += 1
+    db.commit()
+    _snapshot_workers.submit(_build_snapshot, snapshot.id, project_id, source.external_id)
+    return {"snapshot_id": snapshot.id, "status": snapshot.status, "retry_count": snapshot.retry_count}
 
 
 @router.get("/{project_id}/snapshots/{snapshot_id}/nodes")
@@ -484,6 +527,12 @@ def analyze_workspace_snapshot(
         }
     if snapshot_id in _analysis_in_progress:
         return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": True}
+    if snapshot.analysis_status == "dead_letter" or (
+        snapshot.analysis_retry_count >= 2 and snapshot.analysis_status == "failed"
+    ):
+        raise HTTPException(409, "Analysis exhausted three attempts and is in the dead-letter queue")
+    if snapshot.analysis_status == "failed":
+        snapshot.analysis_retry_count += 1
     _analysis_results.pop(snapshot_id, None)
     _analysis_in_progress.add(snapshot_id)
     snapshot.analysis_status = "analyzing"
