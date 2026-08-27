@@ -37,7 +37,8 @@ def brief_summary(text: str, source_name: str, tasks: int, drafts: int, calendar
     action = _first_matching(sentences, r"\b(?:просим|требуется|необходимо|должен|обязан|предоставить|устранить|согласовать)\b")
     structured = []
     for label, value in (("Документ", document_kind), ("Основание", contract), ("Сумма", amount), ("Стороны", parties)):
-        if value and value not in [item[1] for item in structured]:
+        # One sentence can legitimately describe both the document and its contract basis.
+        if value:
             structured.append((label, value))
     dates = []
     for value in DATE_RE.findall(text):
