@@ -1807,7 +1807,11 @@ export function App() {
             </div>
             <select
               value={projectId}
-              onChange={(e) => setProjectId(Number(e.target.value))}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                rememberProject(id);
+                void load(id);
+              }}
             >
               {projects.map((p) => (
                 <option value={p.id} key={p.id}>

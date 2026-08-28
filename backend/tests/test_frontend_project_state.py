@@ -29,6 +29,14 @@ def test_project_switch_is_persisted_and_stale_loads_cannot_restore_old_project(
     assert "onClick={() => activateProject(item.id)}" in source
 
 
+def test_header_project_switch_updates_persistent_context_before_loading():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+
+    assert "const id = Number(e.target.value);" in source
+    assert "rememberProject(id);\n                void load(id);" in source
+    assert 'onChange={(e) => setProjectId(Number(e.target.value))}' not in source
+
+
 def test_legacy_ui_keeps_selected_project_after_refresh_and_oauth():
     source = (APP_SOURCE.parents[2] / "backend" / "app" / "static" / "app.js").read_text(
         encoding="utf-8"
