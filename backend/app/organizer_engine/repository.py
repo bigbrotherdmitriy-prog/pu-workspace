@@ -171,6 +171,22 @@ class OrganizerRepository:
         """), {"proposal_id": proposal_id})
         self.db.commit()
 
+    def restore_revalidated_conflicts(self, proposal_id: int, action_ids: list[int], remaining: int) -> None:
+        if action_ids:
+            self.db.execute(text("""
+                UPDATE organizer_actions
+                SET user_decision='approved', special_case=NULL
+                WHERE proposal_id=:proposal_id AND id = ANY(:action_ids)
+                  AND user_decision='conflict_source_changed'
+            """), {"proposal_id": proposal_id, "action_ids": action_ids})
+        if remaining == 0:
+            self.db.execute(text("""
+                UPDATE organizer_proposals
+                SET status='approved', note='Конфликты safe-copy перепроверены; содержимое не изменилось.'
+                WHERE id=:proposal_id AND status='conflict_source_changed'
+            """), {"proposal_id": proposal_id})
+        self.db.commit()
+
     def mark_rollback_result(self, proposal_id: int, complete: bool):
         status = "rolled_back" if complete else "rollback_partial"
         self.db.execute(text("""

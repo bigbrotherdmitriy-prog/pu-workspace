@@ -135,6 +135,20 @@ class OrganizerExecutor:
                 f"for {len(conflicts)} action(s). Re-scan is required."
             )
 
+    def revalidate_source_conflicts(self, proposal_id: int) -> dict[str, int]:
+        recovered: list[int] = []
+        remaining = 0
+        for item in self.repo.proposal_items(proposal_id):
+            if item["user_decision"] != "conflict_source_changed":
+                continue
+            current = self.drive.get_file_meta(item["file_id"])
+            if source_metadata_changed(item, current):
+                remaining += 1
+            else:
+                recovered.append(int(item["id"]))
+        self.repo.restore_revalidated_conflicts(proposal_id, recovered, remaining)
+        return {"recovered": len(recovered), "remaining": remaining}
+
     def apply(self, proposal_id: int) -> dict[str, int]:
         proposal = self.repo.proposal(proposal_id)
 

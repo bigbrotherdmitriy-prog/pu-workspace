@@ -350,6 +350,12 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
     p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     if not p["copy_folder_id"] or p["copy_folder_id"] == "manual" or p["copy_folder_id"].startswith("virtual:"):
         raise HTTPException(409, "Apply requires a real Google Drive safe copy created by /scan")
+    if p["status"] == "conflict_source_changed":
+        drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
+        result = OrganizerExecutor(repo, drive).revalidate_source_conflicts(proposal_id)
+        if result["remaining"]:
+            raise HTTPException(409, f"После повторной проверки изменены {result['remaining']} файлов; нужен новый снимок")
+        p = repo.proposal(proposal_id)
     if p["status"] not in {"approved", "ready_to_apply_to_copy", "applied"}:
         raise HTTPException(409, "Proposal must be approved before apply")
     try:

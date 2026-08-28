@@ -1,4 +1,4 @@
-from app.organizer_engine.executor import source_metadata_changed
+from app.organizer_engine.executor import OrganizerExecutor, source_metadata_changed
 from app.organizer_engine.types import DriveFile
 
 
@@ -41,3 +41,32 @@ def test_native_file_timestamp_change_remains_a_conflict_without_checksum():
         _expected(source_checksum=None),
         _current(md5_checksum=None, modified_time="2026-08-26T10:00:02Z"),
     ) is True
+
+
+def test_revalidation_restores_only_checksum_identical_copy_items():
+    class Repo:
+        def __init__(self):
+            self.saved = None
+
+        def proposal_items(self, _proposal_id):
+            return [
+                {"id": 1, "file_id": "ok", "user_decision": "conflict_source_changed", **_expected()},
+                {"id": 2, "file_id": "changed", "user_decision": "conflict_source_changed", **_expected()},
+            ]
+
+        def restore_revalidated_conflicts(self, proposal_id, action_ids, remaining):
+            self.saved = (proposal_id, action_ids, remaining)
+
+    class Drive:
+        def get_file_meta(self, file_id):
+            return _current(
+                id=file_id,
+                modified_time="2026-08-26T10:00:02Z",
+                md5_checksum="abc" if file_id == "ok" else "def",
+            )
+
+    repo = Repo()
+    result = OrganizerExecutor(repo, Drive()).revalidate_source_conflicts(9)
+
+    assert result == {"recovered": 1, "remaining": 1}
+    assert repo.saved == (9, [1], 1)
