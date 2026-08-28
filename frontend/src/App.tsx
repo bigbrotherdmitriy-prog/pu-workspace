@@ -657,23 +657,25 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  async function syncGmail() {
+  async function syncGmail(options: { silent?: boolean } = {}) {
+    if (gmailSyncing || !projectId) return;
     try {
-      setError("");
+      if (!options.silent) setError("");
       setGmailSyncing(true);
-      setGmailSyncStatus("Получаю последние письма за 7 дней…");
+      if (!options.silent) setGmailSyncStatus("Получаю последние письма за 7 дней…");
       const result = await api(`/projects/${projectId}/gmail/sync`, {
         method: "POST",
         body: JSON.stringify({ query: "newer_than:7d", max_results: 25 }),
       });
-      const message = `Получено: ${result.processed}. Уже были загружены: ${result.skipped}. Ошибок: ${result.failed}.`;
+      const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Ошибок: ${result.failed}.`;
       setGmailSyncStatus(message);
-      setNotice(`Gmail: ${message}`);
-      await load();
+      if (!options.silent || result.processed > 0) setNotice(`Gmail: ${message}`);
+      if (result.processed > 0 || !options.silent) await load();
     } catch (e) {
       const message = (e as Error).message;
       setGmailSyncStatus(`Не удалось получить письма: ${message}`);
-      setError(message);
+      if (!options.silent) setError(message);
     } finally {
       setGmailSyncing(false);
     }
@@ -1174,6 +1176,15 @@ export function App() {
   useEffect(() => {
     if (ready && projectId && active === "Интеграции") loadIntegrations();
   }, [ready, projectId, active]);
+  useEffect(() => {
+    if (!ready || !projectId || !googleState?.gmail_authorized) return;
+    const initial = window.setTimeout(() => syncGmail({ silent: true }), 12000);
+    const timer = window.setInterval(() => syncGmail({ silent: true }), 5 * 60 * 1000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, [ready, projectId, googleState?.gmail_authorized]);
   useEffect(() => {
     if (!ready || !snapshots.some((item) => item.status === "building")) return;
     const timer = window.setInterval(load, 5000);
@@ -2819,7 +2830,7 @@ export function App() {
                     {connected ? "Подключено" : "Не подключено"}
                   </span>
                   {name === "Gmail" && connected ? (
-                    <button onClick={syncGmail} disabled={gmailSyncing}>
+                    <button onClick={() => syncGmail()} disabled={gmailSyncing}>
                       {gmailSyncing ? "Получаю…" : "Получить письма"}
                     </button>
                   ) : (
@@ -3086,7 +3097,7 @@ export function App() {
                 требуют внимания
               </span>
               {active === "Письма" && (
-                <button className="inbox-sync" onClick={syncGmail} disabled={gmailSyncing}>
+                <button className="inbox-sync" onClick={() => syncGmail()} disabled={gmailSyncing}>
                   <RefreshCw /> {gmailSyncing ? "Получаю…" : "Получить новые"}
                 </button>
               )}
