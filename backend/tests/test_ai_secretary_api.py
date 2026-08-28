@@ -6,6 +6,7 @@ def test_mvp2_inbox_routes_are_registered():
     paths = {route.path for route in secretary_router.routes}
     assert "/ai-secretary/inbox" in paths
     assert "/ai-secretary/inbox/{message_id}/confirm-context" in paths
+    assert "/ai-secretary/inbox/{message_id}/status" in paths
 
 
 def test_external_action_requires_explicit_route():

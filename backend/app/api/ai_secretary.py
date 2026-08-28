@@ -41,6 +41,10 @@ class ContextConfirmation(BaseModel):
     contract_id: int | None = None
 
 
+class MessageStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(ready|needs_context_confirmation|in_progress|completed)$")
+
+
 def _contract_candidate(db: Session, project_id: int, content: str) -> tuple[Contract | None, float, str]:
     rows = list(db.scalars(select(Contract).where(Contract.project_id == project_id, Contract.status.in_(("draft", "active")))))
     matched = [row for row in rows if row.number.casefold() in content.casefold() or (row.counterparty and row.counterparty.casefold() in content.casefold())]
@@ -80,6 +84,19 @@ def inbox(project_id: int, db: Session = Depends(get_db), user: User = Depends(r
     require_project_role(db, user, project_id, "viewer")
     rows = list(db.scalars(select(Message).where(Message.project_id == project_id).order_by(Message.created_at.desc(), Message.id.desc()).limit(200)))
     return {"messages": [_message_payload(db, row) for row in rows], "count": len(rows)}
+
+
+@router.patch("/inbox/{message_id}/status")
+def update_message_status(message_id: int, payload: MessageStatusUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = db.get(Message, message_id)
+    if row is None:
+        raise HTTPException(404, "Message not found")
+    require_project_role(db, user, row.project_id, "editor")
+    row.status = payload.status
+    db.add(AuditLog(action="message_status_updated", entity_type="message", entity_id=row.id,
+                    details=f"status={payload.status}"))
+    db.commit(); db.refresh(row)
+    return _message_payload(db, row)
 
 
 def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:

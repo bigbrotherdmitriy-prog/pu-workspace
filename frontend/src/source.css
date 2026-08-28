@@ -230,6 +230,8 @@
 .inbox-head p { margin: 0; color: #748091; font-size: 12px; }
 .inbox-meta { display: flex; gap: 12px; margin: 3px 0 7px; color: #718078; font-size: 12px; }
 .inbox-toggle { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #0b9068; border-radius: 8px; background: #fff; color: #087a59; font-weight: 700; cursor: pointer; }
+.inbox-workflow { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #087a59; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
+.inbox-workflow.secondary { background: #fff; color: #56655e; border-color: #c8d3ce; }
 .inbox-preview { margin: 10px 0 0; color: #56655e; line-height: 1.45; }
 .inbox-original { margin: 15px 0; border: 1px solid #dbe3df; border-radius: 9px; background: #fff; }
 .inbox-original summary { padding: 12px 14px; cursor: pointer; color: #087a59; font-weight: 700; }
@@ -352,6 +354,7 @@
   .contract-links { text-align: left; }
   .inbox-head { display: block; }
   .inbox-toggle { margin-top: 10px; width: 100%; }
+  .inbox-workflow { margin-top: 8px; width: 100%; }
   .inbox-toolbar { align-items: flex-start; flex-direction: column; }
   .inbox-head > button { margin-top: 10px; }
   .context-confirm { margin-top: 10px; min-width: 0; }

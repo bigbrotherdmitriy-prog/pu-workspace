@@ -972,6 +972,18 @@ export function App() {
       setError((e as Error).message);
     }
   }
+  async function updateInboxStatus(message: InboxMessage, status: string) {
+    try {
+      const updated = await api(`/ai-secretary/inbox/${message.id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      setInbox((rows) => rows.map((row) => row.id === message.id ? updated : row));
+      setNotice(status === "completed" ? "Письмо отмечено обработанным" : "Письмо взято в работу");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function approveExternal(task: InboxTask) {
     if (
       !window.confirm(
@@ -1492,7 +1504,7 @@ export function App() {
   );
   const inboxCounts = {
     all: inbox.length,
-    attention: inbox.filter((item) => !item.context_confirmed).length,
+    attention: inbox.filter((item) => !item.context_confirmed || item.status !== "completed").length,
     tasks: inbox.filter((item) => item.tasks.length > 0).length,
     drafts: inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length,
   };
@@ -1500,7 +1512,7 @@ export function App() {
     const matchesQuery = !query || `${item.source_name} ${item.source_sender || ""} ${item.summary}`
       .toLocaleLowerCase("ru-RU").includes(query.toLocaleLowerCase("ru-RU"));
     if (!matchesQuery) return false;
-    if (inboxFilter === "attention") return !item.context_confirmed;
+    if (inboxFilter === "attention") return !item.context_confirmed || item.status !== "completed";
     if (inboxFilter === "tasks") return item.tasks.length > 0;
     if (inboxFilter === "drafts") return item.drafts.some((draft) => draft.status !== "sent");
     return true;
@@ -3103,9 +3115,13 @@ export function App() {
                     <div className="inbox-head">
                       <div>
                         <span className={`draft-status ${message.status}`}>
-                          {message.context_confirmed
-                            ? "Контекст подтверждён"
-                            : "Подтвердите контекст"}
+                          {message.status === "completed"
+                            ? "Обработано"
+                            : message.status === "in_progress"
+                              ? "В работе"
+                              : message.context_confirmed
+                                ? "Новое"
+                                : "Подтвердите контекст"}
                         </span>
                         <h2>{message.source_name}</h2>
                         <div className="inbox-meta">
@@ -3130,6 +3146,13 @@ export function App() {
                       <button className="inbox-toggle" onClick={() => setExpandedInboxId(expanded ? null : message.id)}>
                         {expanded ? "Свернуть" : "Открыть"}
                       </button>
+                      {message.status !== "completed" ? (
+                        <button className="inbox-workflow" onClick={() => updateInboxStatus(message, message.status === "in_progress" ? "completed" : "in_progress")}>
+                          {message.status === "in_progress" ? "Завершить" : "В работу"}
+                        </button>
+                      ) : (
+                        <button className="inbox-workflow secondary" onClick={() => updateInboxStatus(message, "in_progress")}>Вернуть</button>
+                      )}
                       {expanded && !message.context_confirmed && (
                         <div className="context-confirm">
                           <select
