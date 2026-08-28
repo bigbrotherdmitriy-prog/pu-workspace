@@ -157,6 +157,35 @@ button:not(:disabled):active { transform: translateY(1px); }
 .login-card { border-color: var(--pu-border); box-shadow: 0 24px 70px rgba(17,23,20,.12); }
 .login-card > button { background: var(--pu-green-700); }
 .login-card > button:hover { background: var(--pu-green-600); }
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.connection-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
+.connection-status.online { background: var(--pu-green-050); color: var(--pu-green-700); }
+.connection-status.online::before { background: var(--pu-green-600); }
+.connection-status.offline { background: #fff1d7; color: #8a5a00; }
+.connection-status.offline::before { background: #d89016; }
+.install-app {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--pu-green-600);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--pu-green-700);
+  font-weight: 700;
+  cursor: pointer;
+}
+.install-app:hover { background: var(--pu-green-050); }
+.install-app svg { width: 17px; }
 
 @media (max-width: 760px) {
   .shell > aside { box-shadow: 12px 0 38px rgba(10, 18, 14, .32); }
@@ -166,4 +195,13 @@ button:not(:disabled):active { transform: translateY(1px); }
   .card, .metrics article { border-radius: 13px; box-shadow: 0 5px 18px rgba(24,33,29,.04); }
   .dashboard-inbox-list > button { grid-template-columns: auto 1fr; }
   .dashboard-inbox-list b { grid-column: 2; }
+  header { gap: 8px; }
+  header > div:nth-child(2) { min-width: 0; flex: 1; }
+  header h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
+  header p { display: none; }
+  .header-actions { gap: 6px; }
+  .connection-status { padding: 5px 8px; }
+  .install-app { width: 38px; padding: 0; justify-content: center; }
+  .install-app span { display: none; }
+  .header-actions select { max-width: 112px; }
 }

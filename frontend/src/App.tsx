@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ClipboardCheck,
+  Download,
   FileText,
   FolderKanban,
   FolderTree,
@@ -23,6 +24,11 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 
 type Project = { id: number; name: string };
 type ProjectStats = {
@@ -478,7 +484,9 @@ function Login({ onDone }: { onDone: () => void }) {
 export function App() {
   const [ready, setReady] = useState(false),
     [collapsed, setCollapsed] = useState(false),
-    [mobile, setMobile] = useState(false);
+    [mobile, setMobile] = useState(false),
+    [online, setOnline] = useState(navigator.onLine),
+    [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [active, setActive] = useState("Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -1186,6 +1194,31 @@ export function App() {
       .catch(() => setReady(false));
   }, []);
   useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    const handleInstall = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const handleInstalled = () => setInstallPrompt(null);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("beforeinstallprompt", handleInstall);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("beforeinstallprompt", handleInstall);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+  async function installApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  }
+  useEffect(() => {
     if (ready) load();
   }, [ready, projectId]);
   useEffect(() => {
@@ -1625,6 +1658,15 @@ export function App() {
             </p>
           </div>
           <div className="header-actions">
+            <span className={`connection-status ${online ? "online" : "offline"}`}>
+              {online ? "Онлайн" : "Офлайн"}
+            </span>
+            {installPrompt && (
+              <button className="install-app" onClick={installApp} title="Установить PU Workspace">
+                <Download />
+                <span>Установить</span>
+              </button>
+            )}
             <div className="search">
               <Search />
               <input
