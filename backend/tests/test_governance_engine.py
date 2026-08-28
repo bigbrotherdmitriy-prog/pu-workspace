@@ -1,4 +1,4 @@
-from app.governance_engine import extract_governance_candidates
+from app.governance_engine import _source_digest, extract_governance_candidates
 
 
 def test_extracts_risk_deviation_and_decision_from_content():
@@ -19,3 +19,9 @@ def test_ignores_unrelated_content():
     risks, decisions = extract_governance_candidates("Обычное информационное сообщение без поручений.")
     assert risks == []
     assert decisions == []
+
+
+def test_repeated_governance_clause_has_stable_digest_for_batch_deduplication():
+    sentence = "Существует риск просрочки поставки оборудования."
+    assert _source_digest("risk", sentence) == _source_digest("risk", sentence.upper())
+    assert _source_digest("risk", sentence) != _source_digest("decision", sentence)

@@ -36,26 +36,34 @@ def _owner(db: Session, project_id: int) -> User | None:
     return db.scalar(select(User).join(ProjectMember, ProjectMember.user_id == User.id).where(ProjectMember.project_id == project_id).order_by((ProjectMember.role == "owner").desc(), User.id))
 
 
+def _source_digest(kind: str, sentence: str) -> str:
+    return hashlib.sha256((kind + ":" + sentence.casefold()).encode()).hexdigest()
+
+
 def create_governance_items(db: Session, project_id: int, files: list[StorageObject], source_type: str = "document_analysis") -> tuple[list[Risk], list[Decision]]:
     owner = _owner(db, project_id)
     if not owner:
         return [], []
     risks: list[Risk] = []; decisions: list[Decision] = []
+    # SessionLocal has autoflush disabled. Track hashes added in this batch so
+    # identical clauses from multiple files cannot violate unique constraints.
+    known_risk_hashes = set(db.scalars(select(Risk.source_hash).where(Risk.project_id == project_id)).all())
+    known_decision_hashes = set(db.scalars(select(Decision.source_hash).where(Decision.project_id == project_id)).all())
     for file in files:
         if file.is_folder or not file.content_text:
             continue
         risk_candidates, decision_candidates = extract_governance_candidates(file.content_text)
         for candidate in risk_candidates:
             sentence = candidate["text"]
-            digest = hashlib.sha256(("risk:" + sentence.casefold()).encode()).hexdigest()
-            if not db.scalar(select(Risk.id).where(Risk.project_id == project_id, Risk.source_hash == digest)):
+            digest = _source_digest("risk", sentence)
+            if digest not in known_risk_hashes:
                 item = Risk(project_id=project_id, owner_user_id=owner.id, kind=candidate["kind"], title=sentence[:240], description=sentence, criticality=candidate["criticality"], source_type=source_type, source_id=file.id, source_name=file.name, source_excerpt=sentence, source_hash=digest, confidence=0.82)
-                db.add(item); risks.append(item)
+                db.add(item); risks.append(item); known_risk_hashes.add(digest)
         for candidate in decision_candidates:
             sentence = candidate["text"]
-            digest = hashlib.sha256(("decision:" + sentence.casefold()).encode()).hexdigest()
-            if not db.scalar(select(Decision.id).where(Decision.project_id == project_id, Decision.source_hash == digest)):
+            digest = _source_digest("decision", sentence)
+            if digest not in known_decision_hashes:
                 item = Decision(project_id=project_id, initiator_user_id=owner.id, question=sentence, source_type=source_type, source_id=file.id, source_name=file.name, source_excerpt=sentence, source_hash=digest, confidence=0.80)
-                db.add(item); decisions.append(item)
+                db.add(item); decisions.append(item); known_decision_hashes.add(digest)
     db.commit()
     return risks, decisions
