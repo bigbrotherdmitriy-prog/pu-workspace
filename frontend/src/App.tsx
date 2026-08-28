@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
+  Mail,
   Menu,
   RefreshCw,
   RotateCcw,
@@ -390,6 +391,7 @@ const items = [
   [AlertTriangle, "Риски и решения"],
   [Users, "Совещания"],
   [Bell, "Уведомления"],
+  [Mail, "Письма"],
   [Bot, "AI Secretary"],
   [Wallet, "Исполнение и финансы"],
   [CalendarDays, "Интеграции"],
@@ -3002,21 +3004,21 @@ export function App() {
           </div>
         </section>
       )}
-      {active === "AI Secretary" && (
+      {(active === "AI Secretary" || active === "Письма") && (
         <section
           className={`secretary-overlay ${collapsed ? "collapsed" : ""}`}
         >
           <div className="secretary-page">
             <section className="card secretary-intro">
               <div className="source-icon">
-                <Bot />
+                {active === "Письма" ? <Mail /> : <Bot />}
               </div>
               <div>
-                <h2>Входящие AI Secretary</h2>
+                <h2>{active === "Письма" ? "Входящие письма" : "Входящие AI Secretary"}</h2>
                 <p>
-                  Источник → контекст проекта и договора → сводка → предложения
-                  задач и ответа. Ничего внешнего не создаётся без
-                  подтверждения.
+                  {active === "Письма"
+                    ? "Письма из Gmail с исходным текстом, AI-сводкой, задачами и черновиками ответов."
+                    : "Источник → контекст проекта и договора → сводка → предложения задач и ответа. Ничего внешнего не создаётся без подтверждения."}
                 </p>
               </div>
               <span>
@@ -3031,8 +3033,13 @@ export function App() {
                 }{" "}
                 требуют внимания
               </span>
+              {active === "Письма" && (
+                <button className="inbox-sync" onClick={syncGmail} disabled={gmailSyncing}>
+                  <RefreshCw /> {gmailSyncing ? "Получаю…" : "Получить новые"}
+                </button>
+              )}
             </section>
-            <section className="card inbox-compose">
+            {active === "AI Secretary" && <section className="card inbox-compose">
               <h2>Добавить тестовое сообщение</h2>
               <p>Вставьте письмо или сообщение для полного сценария MVP2.</p>
               <input
@@ -3051,12 +3058,12 @@ export function App() {
               >
                 Проанализировать
               </button>
-            </section>
+            </section>}
             <section className="inbox-list">
               <div className="inbox-toolbar">
                 <div>
                   <strong>Входящие письма и сообщения</strong>
-                  <small>{inbox.length} обработано AI Secretary</small>
+                  <small>{inbox.length} писем и сообщений обработано</small>
                 </div>
                 <span>Нажмите на письмо, чтобы открыть анализ</span>
               </div>

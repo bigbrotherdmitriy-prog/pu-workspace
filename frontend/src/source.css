@@ -214,6 +214,8 @@
 .inbox-compose button { justify-self: start; padding: 10px 15px; border: 0; border-radius: 8px; background: #185adb; color: #fff; font-weight: 700; cursor: pointer; }
 .inbox-compose button:disabled { opacity: .5; cursor: default; }
 .inbox-list { display: grid; gap: 16px; }
+.inbox-sync { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid #0b9068; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
+.inbox-sync svg { width: 16px; height: 16px; }
 .inbox-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 4px 2px; color: #718078; }
 .inbox-toolbar > div { display: grid; gap: 2px; }
 .inbox-toolbar strong { color: #18211d; }
