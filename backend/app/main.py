@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -43,9 +44,28 @@ from app.automations.gmail import start as start_gmail_automation, stop as stop_
 
 APP_VERSION = "1.0.3"
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db = SessionLocal()
+    try:
+        cleanup_expired_sessions(db)
+    finally:
+        db.close()
+    recover_incomplete_scans()
+    recover_incomplete_snapshots()
+    recover_incomplete_analyses()
+    start_gmail_automation()
+    try:
+        yield
+    finally:
+        stop_gmail_automation()
+
+
 app = FastAPI(
     title="PU Workspace",
     version=APP_VERSION,
+    lifespan=lifespan,
 )
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -76,24 +96,6 @@ app.include_router(workspace_router)
 
 app.include_router(history_router, dependencies=[Depends(require_user)])
 app.include_router(organizer_router, dependencies=[Depends(require_user)])
-
-
-@app.on_event("startup")
-def recover_organizer_jobs():
-    db = SessionLocal()
-    try:
-        cleanup_expired_sessions(db)
-    finally:
-        db.close()
-    recover_incomplete_scans()
-    recover_incomplete_snapshots()
-    recover_incomplete_analyses()
-    start_gmail_automation()
-
-
-@app.on_event("shutdown")
-def stop_automation_workers():
-    stop_gmail_automation()
 
 
 @app.get("/")
