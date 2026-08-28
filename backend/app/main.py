@@ -38,6 +38,7 @@ from app.organizer import recover_incomplete_scans
 from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
+from app.automations.gmail import start as start_gmail_automation, stop as stop_gmail_automation
 
 
 APP_VERSION = "1.0.3"
@@ -87,6 +88,12 @@ def recover_organizer_jobs():
     recover_incomplete_scans()
     recover_incomplete_snapshots()
     recover_incomplete_analyses()
+    start_gmail_automation()
+
+
+@app.on_event("shutdown")
+def stop_automation_workers():
+    stop_gmail_automation()
 
 
 @app.get("/")

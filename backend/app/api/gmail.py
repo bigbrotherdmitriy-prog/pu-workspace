@@ -108,8 +108,12 @@ def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
+    return sync_gmail_project(project_id, db, user, query=payload.query, max_results=payload.max_results)
+
+
+def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:
     service = google_workspace_for_project(project_id, db).service("gmail", "v1")
-    page = service.users().messages().list(userId="me", q=payload.query, maxResults=payload.max_results).execute()
+    page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
     for ref in page.get("messages", []):
@@ -149,7 +153,7 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
             failed += 1
             errors.append({"message_id": ref.get("id"), "error": exc.__class__.__name__})
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
-                    details=f"query={payload.query}; processed={processed}; skipped={skipped}; failed={failed}"))
+                    details=f"query={query}; processed={processed}; skipped={skipped}; failed={failed}"))
     db.commit()
     return {"processed": processed, "skipped": skipped, "failed": failed, "errors": errors[:20]}
 

@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import logging
+import os
+from threading import Event, Lock, Thread
+
+from sqlalchemy import select
+
+from app.database import SessionLocal
+from app.models.audit_log import AuditLog
+from app.models.google_token import GoogleOAuthToken
+from app.models.project_member import ProjectMember
+from app.models.user import User
+
+log = logging.getLogger(__name__)
+_stop = Event()
+_run_lock = Lock()
+_thread: Thread | None = None
+
+
+def enabled() -> bool:
+    return os.getenv("GMAIL_AUTO_SYNC_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def interval_seconds() -> int:
+    return max(60, int(os.getenv("GMAIL_AUTO_SYNC_INTERVAL_SECONDS", "300")))
+
+
+def _automation_user(db, project_id: int) -> User | None:
+    role_order = {"owner": 0, "manager": 1, "editor": 2}
+    members = db.execute(
+        select(ProjectMember, User)
+        .join(User, User.id == ProjectMember.user_id)
+        .where(ProjectMember.project_id == project_id, ProjectMember.role.in_(tuple(role_order)))
+    ).all()
+    if members:
+        return min(members, key=lambda pair: role_order[pair[0].role])[1]
+    return db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id))
+
+
+def sync_authorized_projects_once() -> dict[str, int]:
+    """Run one bounded pass. A process lock prevents overlapping passes."""
+    if not _run_lock.acquire(blocking=False):
+        return {"projects": 0, "processed": 0, "skipped": 0, "failed": 0, "overlap_skipped": 1}
+    totals = {"projects": 0, "processed": 0, "skipped": 0, "failed": 0, "overlap_skipped": 0}
+    try:
+        from app.api.gmail import sync_gmail_project
+
+        with SessionLocal() as db:
+            project_ids = list(db.scalars(select(GoogleOAuthToken.project_id).order_by(GoogleOAuthToken.project_id)))
+        for project_id in project_ids:
+            with SessionLocal() as db:
+                try:
+                    user = _automation_user(db, project_id)
+                    if user is None:
+                        totals["failed"] += 1
+                        db.add(AuditLog(action="gmail_auto_sync_failed", entity_type="project", entity_id=project_id,
+                                        details="reason=no_authorized_actor"))
+                        db.commit()
+                        continue
+                    result = sync_gmail_project(project_id, db, user, query="is:inbox newer_than:7d", max_results=25)
+                    totals["projects"] += 1
+                    for key in ("processed", "skipped", "failed"):
+                        totals[key] += int(result.get(key, 0))
+                except Exception as exc:
+                    db.rollback()
+                    totals["failed"] += 1
+                    db.add(AuditLog(action="gmail_auto_sync_failed", entity_type="project", entity_id=project_id,
+                                    details=f"error={exc.__class__.__name__}"))
+                    db.commit()
+                    log.exception("Automatic Gmail synchronization failed for project %s", project_id)
+        return totals
+    finally:
+        _run_lock.release()
+
+
+def _worker() -> None:
+    while not _stop.is_set():
+        try:
+            sync_authorized_projects_once()
+        except Exception:
+            log.exception("Automatic Gmail synchronization pass failed")
+        _stop.wait(interval_seconds())
+
+
+def start() -> bool:
+    global _thread
+    if not enabled() or (_thread and _thread.is_alive()):
+        return False
+    _stop.clear()
+    _thread = Thread(target=_worker, name="gmail-auto-sync", daemon=True)
+    _thread.start()
+    return True
+
+
+def stop() -> None:
+    _stop.set()
+    if _thread and _thread.is_alive():
+        _thread.join(timeout=5)
+
+
+def status() -> dict:
+    return {
+        "enabled": enabled(),
+        "running": bool(_thread and _thread.is_alive()),
+        "interval_seconds": interval_seconds(),
+    }

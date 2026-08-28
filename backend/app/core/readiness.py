@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import engine
 from app.schema import CURRENT_SCHEMA_REVISION
+from app.automations.gmail import status as gmail_automation_status
 
 
 def readiness_report() -> dict:
@@ -30,6 +31,16 @@ def readiness_report() -> dict:
     checks["telegram"] = _check(
         telegram_ready,
         "configured" if telegram_ready else "bot or relay not configured",
+        required=False,
+    )
+    gmail_automation = gmail_automation_status()
+    checks["gmail_automation"] = _check(
+        not gmail_automation["enabled"] or gmail_automation["running"],
+        (
+            f"running every {gmail_automation['interval_seconds']} seconds"
+            if gmail_automation["running"]
+            else "disabled" if not gmail_automation["enabled"] else "not running"
+        ),
         required=False,
     )
 
