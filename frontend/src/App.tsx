@@ -270,6 +270,7 @@ type InboxMessage = {
   source_thread_id?: string;
   source_url?: string;
   content: string;
+  attachments: { name: string; mime_type: string; size: number }[];
   summary: string;
   context_confidence: number;
   context_evidence: string;
@@ -3227,6 +3228,18 @@ export function App() {
                       <summary>Исходный текст письма</summary>
                       <pre>{message.content}</pre>
                     </details>
+                    {message.attachments.length > 0 && (
+                      <div className="inbox-attachments">
+                        <h3>Вложения ({message.attachments.length})</h3>
+                        {message.attachments.map((attachment, index) => (
+                          <div key={`${attachment.name}-${index}`}>
+                            <FileText />
+                            <span><strong>{attachment.name}</strong><small>{attachment.mime_type} · {attachment.size ? `${Math.ceil(attachment.size / 1024)} КБ` : "размер не указан"}</small></span>
+                          </div>
+                        ))}
+                        {message.source_url && <a href={message.source_url} target="_blank" rel="noreferrer">Открыть письмо и скачать вложения</a>}
+                      </div>
+                    )}
                     <pre className="inbox-summary">{message.summary}</pre>
                     {message.risks.length > 0 && (
                       <div className="inbox-risks">

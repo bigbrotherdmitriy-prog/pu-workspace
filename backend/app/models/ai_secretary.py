@@ -22,6 +22,7 @@ class Message(Base):
     source_sender: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     source_thread_id: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
     content: Mapped[str] = mapped_column(Text)
+    attachments_json: Mapped[str] = mapped_column(Text, default="[]")
     summary: Mapped[str] = mapped_column(Text)
     context_confidence: Mapped[float] = mapped_column(Float, default=1.0)
     context_evidence: Mapped[str] = mapped_column(Text)

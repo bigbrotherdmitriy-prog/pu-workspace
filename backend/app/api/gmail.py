@@ -59,6 +59,23 @@ def _headers(payload: dict) -> dict[str, str]:
     return {item.get("name", "").lower(): item.get("value", "") for item in payload.get("headers", [])}
 
 
+def _attachments(payload: dict) -> list[dict]:
+    result: list[dict] = []
+    def walk(part: dict):
+        filename = (part.get("filename") or "").strip()
+        body = part.get("body", {})
+        if filename:
+            result.append({
+                "name": filename[:500],
+                "mime_type": (part.get("mimeType") or "application/octet-stream")[:200],
+                "size": int(body.get("size") or 0),
+            })
+        for child in part.get("parts", []):
+            walk(child)
+    walk(payload)
+    return result[:100]
+
+
 def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
     tasks = len(result.get("tasks", []))
     drafts = len(result.get("drafts", []))
@@ -91,6 +108,7 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
             item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
             headers = _headers(item.get("payload", {}))
             content = _message_text(item.get("payload", {})) or item.get("snippet", "")
+            attachments = _attachments(item.get("payload", {}))
             if not content.strip():
                 skipped += 1
                 continue
@@ -100,6 +118,7 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
                 project_id=project_id, source_type="email", source_external_id=item["id"],
                 source_name=f"{sender} — {subject}", source_url=f"https://mail.google.com/mail/u/0/#inbox/{item['id']}",
                 source_sender=sender, source_thread_id=item.get("threadId"), content=content,
+                attachments=attachments,
             ), db, user)
             processed += 1 if result["status"] else 0
             notify_telegram(_gmail_telegram_notice(sender, subject, result))

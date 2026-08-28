@@ -1,6 +1,6 @@
 import base64
 
-from app.api.gmail import GmailSyncRequest, _gmail_telegram_notice, _message_text, router
+from app.api.gmail import GmailSyncRequest, _attachments, _gmail_telegram_notice, _message_text, router
 from app.api.google_drive import SCOPES
 
 
@@ -20,6 +20,11 @@ def test_gmail_payload_prefers_plain_text():
         {"mimeType": "text/plain", "body": {"data": plain}},
     ]}
     assert _message_text(payload) == "Просим направить акт до 30.08.2026"
+
+
+def test_gmail_attachment_metadata_is_extracted_without_file_transfer():
+    payload = {"parts": [{"filename": "Акт.pdf", "mimeType": "application/pdf", "body": {"attachmentId": "secret", "size": 2048}}]}
+    assert _attachments(payload) == [{"name": "Акт.pdf", "mime_type": "application/pdf", "size": 2048}]
 
 
 def test_gmail_sync_is_bounded():

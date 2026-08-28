@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -35,6 +36,7 @@ class IncomingMessage(BaseModel):
     source_sender: str | None = Field(default=None, max_length=1000)
     source_thread_id: str | None = Field(default=None, max_length=500)
     content: str = Field(min_length=1, max_length=100000)
+    attachments: list[dict] = Field(default_factory=list)
 
 
 class ContextConfirmation(BaseModel):
@@ -64,7 +66,7 @@ def _message_payload(db: Session, row: Message) -> dict:
         "source_type": row.source_type, "source_external_id": row.source_external_id,
         "source_name": row.source_name, "source_url": row.source_url,
         "source_sender": row.source_sender, "source_thread_id": row.source_thread_id,
-        "content": row.content,
+        "content": row.content, "attachments": json.loads(row.attachments_json or "[]"),
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
         "status": row.status, "created_at": row.created_at,
@@ -114,7 +116,8 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         created_by_user_id=user.id, source_type=payload.source_type, source_external_id=external_id,
         source_name=payload.source_name.strip(), source_url=payload.source_url,
         source_sender=payload.source_sender, source_thread_id=payload.source_thread_id,
-        content=payload.content.strip(), summary="Анализируется", context_confidence=confidence,
+        content=payload.content.strip(), attachments_json=json.dumps(payload.attachments, ensure_ascii=False),
+        summary="Анализируется", context_confidence=confidence,
         context_evidence=evidence, context_confirmed=confidence >= 0.90,
         status="ready" if confidence >= 0.90 else "needs_context_confirmation",
     )
