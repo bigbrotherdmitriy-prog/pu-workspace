@@ -1,6 +1,6 @@
 import base64
 
-from app.api.gmail import GmailSyncRequest, _message_text, router
+from app.api.gmail import GmailSyncRequest, _gmail_telegram_notice, _message_text, router
 from app.api.google_drive import SCOPES
 
 
@@ -26,6 +26,17 @@ def test_gmail_sync_is_bounded():
     request = GmailSyncRequest()
     assert request.query == "newer_than:7d"
     assert request.max_results == 25
+
+
+def test_gmail_telegram_notice_is_concise_and_actionable():
+    text = _gmail_telegram_notice("Заказчик <client@example.com>", "Нужен акт", {
+        "tasks": [{"id": 1}], "risks": [{"id": 2}], "drafts": [{"id": 3}],
+    })
+    assert "Новое письмо" in text
+    assert "Нужен акт" in text
+    assert "задач 1" in text
+    assert "рисков 1" in text
+    assert "черновиков 1" in text
 
 
 def test_oauth_callback_returns_to_new_interface():

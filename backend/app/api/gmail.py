@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.ai_secretary import IncomingMessage, ingest_message
 from app.integrations.google_workspace import google_workspace_for_project
+from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.ai_secretary import Message
@@ -58,6 +59,19 @@ def _headers(payload: dict) -> dict[str, str]:
     return {item.get("name", "").lower(): item.get("value", "") for item in payload.get("headers", [])}
 
 
+def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
+    tasks = len(result.get("tasks", []))
+    drafts = len(result.get("drafts", []))
+    risks = len(result.get("risks", []))
+    return (
+        "✉️ Новое письмо в PU Workspace\n"
+        f"От: {sender[:180]}\n"
+        f"Тема: {subject[:240]}\n"
+        f"Найдено: задач {tasks} · рисков {risks} · черновиков {drafts}\n"
+        "Откройте раздел «Письма» для проверки."
+    )
+
+
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -88,6 +102,7 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
                 source_sender=sender, source_thread_id=item.get("threadId"), content=content,
             ), db, user)
             processed += 1 if result["status"] else 0
+            notify_telegram(_gmail_telegram_notice(sender, subject, result))
         except Exception as exc:
             db.rollback()
             failed += 1
