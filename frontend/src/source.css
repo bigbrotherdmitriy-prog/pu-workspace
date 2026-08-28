@@ -201,15 +201,19 @@
 .contract-form button { padding: 10px 14px; border: 1px solid #185adb; border-radius: 8px; background: #185adb; color: #fff; font-weight: 650; cursor: pointer; }
 .contract-form button:disabled { opacity: .5; cursor: default; }
 .contract-list { display: grid; gap: 14px; }
-.contract-card { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; }
+.contract-card { display: grid; grid-template-columns: auto minmax(280px,1fr) minmax(320px,.8fr); gap: 16px; align-items: center; }
 .contract-number { min-width: 110px; padding: 14px; border-radius: 10px; background: #edf3ff; color: #185adb; font-weight: 750; text-align: center; }
 .contract-card h2 { margin: 7px 0 3px; }
 .contract-card p, .contract-card small { display: block; margin: 0; color: #748091; }
 .contract-card small { margin-top: 8px; }
 .contract-status { padding: 4px 7px; border-radius: 999px; background: #eaf7f3; color: #13745f; font-size: 10px; font-weight: 700; }
 .contract-status.draft { background: #fff4db; color: #9c6400; }
-.contract-links { text-align: right; color: #748091; font-size: 11px; }
-.contract-links strong { display: block; margin-top: 4px; color: #26364f; }
+.contract-links { display: grid; gap: 8px; color: #748091; font-size: 11px; }
+.contract-links select { width: 100%; padding: 9px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; }
+.contract-links button { padding: 9px 12px; border: 1px solid #087a59; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
+.contract-chain-status { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
+.contract-chain-status span { padding: 7px; border-radius: 7px; background: #f1f6f3; }
+.contract-chain-status b { display: block; margin-top: 3px; color: #087a59; }
 .inbox-compose { display: grid; gap: 10px; margin: 16px 0; }
 .inbox-compose h2, .inbox-compose p { margin: 0; }
 .inbox-compose p { color: #748091; }
@@ -228,6 +232,13 @@
 .inbox-filters button { padding: 8px 11px; border: 1px solid #d2ddd7; border-radius: 999px; background: #fff; color: #56655e; cursor: pointer; }
 .inbox-filters button.selected { border-color: #0b9068; background: #dff4ec; color: #087a59; }
 .inbox-filters b { margin-left: 5px; }
+.inbox-bulk { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(190px, 1fr) auto; align-items: center; gap: 10px; padding: 14px; }
+.inbox-bulk label { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.inbox-bulk select, .inbox-bulk button { min-height: 40px; padding: 8px 10px; border: 1px solid #c8d3ce; border-radius: 8px; background: #fff; font: inherit; }
+.inbox-bulk button { border-color: #087a59; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
+.inbox-bulk button:disabled { opacity: .5; cursor: default; }
+.inbox-bulk small { grid-column: 1 / -1; color: #718078; }
+.inbox-select { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 10px; accent-color: #087a59; }
 .inbox-card.collapsed { padding-top: 16px; padding-bottom: 16px; }
 .inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .inbox-head h2 { margin: 8px 0 3px; }
@@ -322,6 +333,10 @@
 .finance-entry > div:last-child { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }
 .finance-entry select, .finance-entry input { padding: 10px 11px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; font: inherit; }
 .finance-entry button { padding: 10px 14px; border: 0; border-radius: 8px; background: #185adb; color: #fff; font-weight: 700; cursor: pointer; }
+.finance-contract-chain { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.finance-contract-chain h2, .finance-contract-chain p { margin: 4px 0 0; }
+.finance-contract-chain p { color: #748091; }
+.finance-contract-chain select { min-width: 340px; padding: 10px; border: 1px solid #b9c8c0; border-radius: 8px; background: #fff; }
 .finance-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .finance-grid h2 { margin: 0 0 12px; }
 .finance-list { display: grid; }
@@ -367,10 +382,13 @@
   .contract-card { grid-template-columns: 1fr; }
   .contract-number { justify-self: start; }
   .contract-links { text-align: left; }
+  .contract-chain-status { grid-template-columns: 1fr; }
   .inbox-head { display: block; }
   .inbox-toggle { margin-top: 10px; width: 100%; }
   .inbox-workflow { margin-top: 8px; width: 100%; }
   .inbox-toolbar { align-items: flex-start; flex-direction: column; }
+  .inbox-bulk { grid-template-columns: 1fr; }
+  .inbox-bulk small { grid-column: 1; }
   .inbox-head > button { margin-top: 10px; }
   .context-confirm { margin-top: 10px; min-width: 0; }
   .inbox-risks > div { grid-template-columns: auto 1fr; }
@@ -385,6 +403,8 @@
   .notification-list button { grid-column: 2; justify-self: start; }
   .finance-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .finance-entry { grid-template-columns: 1fr; }
+  .finance-contract-chain { align-items: stretch; flex-direction: column; }
+  .finance-contract-chain select { min-width: 0; width: 100%; }
   .finance-entry > div:last-child { grid-template-columns: 1fr; }
   .finance-grid { grid-template-columns: 1fr; }
   .finance-list > div { grid-template-columns: 1fr; }

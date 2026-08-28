@@ -637,3 +637,27 @@ def analyze_workspace_snapshot(
     db.commit()
     _analysis_workers.submit(_analyze_snapshot_worker, snapshot_id, project_id)
     return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": False}
+
+
+@router.post("/{project_id}/snapshots/{snapshot_id}/standardize")
+def standardize_workspace_snapshot(
+    project_id: int,
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Create and organize a safe Drive copy for an already-built snapshot."""
+    require_project_role(db, user, project_id, "manager")
+    snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+    if snapshot is None or snapshot.project_id != project_id or snapshot.status != "ready":
+        raise HTTPException(409, "A ready snapshot is required")
+    source = db.get(SourceFolder, snapshot.source_folder_id)
+    if source is None:
+        raise HTTPException(409, "Snapshot source folder is missing")
+    existing = snapshot.analysis_result or {}
+    if existing.get("mode") == "safe_copy" and existing.get("organizer_session_id"):
+        return {"snapshot_id": snapshot.id, "session_id": existing["organizer_session_id"],
+                "status": snapshot.analysis_status, "already_queued": True}
+    session_id = _start_safe_copy_pipeline(snapshot.id, project_id, source.external_id, source.name)
+    return {"snapshot_id": snapshot.id, "session_id": session_id,
+            "status": "analyzing", "already_queued": False, "originals_modified": False}

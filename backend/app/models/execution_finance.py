@@ -12,6 +12,7 @@ class ScheduleBaseline(Base):
     __table_args__ = (UniqueConstraint("project_id", "version", name="uq_schedule_baseline_version"),)
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     name: Mapped[str] = mapped_column(String(500))
     version: Mapped[int] = mapped_column(Integer)

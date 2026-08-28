@@ -24,13 +24,14 @@ def test_mvp4_routes_are_registered():
 
 
 def test_mvp4_request_contracts_preserve_plan_and_fact():
-    baseline = BaselineCreate(project_id=7, name="ГПР редакция 1")
+    baseline = BaselineCreate(project_id=7, contract_id=11, name="ГПР редакция 1")
     schedule = ScheduleItemCreate(baseline_id=3, title="Монтаж", planned_progress=80)
     budget = BudgetCreate(project_id=7, category="СМР", description="Монтаж", planned_amount="120000")
     cash = CashFlowCreate(project_id=7, direction="outflow", title="Аванс", planned_date="2026-09-01", planned_amount="50000")
     actual = StatusUpdate(status="active", actual_amount="42000", actual_date="2026-09-02")
 
     assert baseline.note is None
+    assert baseline.contract_id == 11
     assert schedule.planned_progress == 80
     assert budget.planned_amount == Decimal("120000")
     assert cash.direction == "outflow"

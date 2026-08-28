@@ -63,3 +63,17 @@ def test_unconfirmed_mail_context_can_be_assigned_to_a_project():
     source = APP_SOURCE.read_text(encoding="utf-8")
     assert "project_id: message.project_id || projectId" in source
     assert "{projects.map((project) => (" in source
+
+
+def test_unconfirmed_mail_can_be_bulk_moved_to_one_project():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    assert '"/ai-secretary/inbox/confirm-context-bulk"' in source
+    assert "Выбрать все нераспределённые" in source
+    assert "Перенести выбранные" in source
+
+
+def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    assert "linkContractDocument" in source
+    assert "Открыть ГПР и ДДС" in source
+    assert "Договор → ГПР → бюджет → ДДС → акты" in source

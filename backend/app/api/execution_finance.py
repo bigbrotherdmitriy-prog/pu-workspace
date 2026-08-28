@@ -18,6 +18,7 @@ router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
 class BaselineCreate(BaseModel):
     project_id: int
+    contract_id: int | None = None
     name: str = Field(min_length=2, max_length=500)
     note: str | None = Field(default=None, max_length=5000)
 
@@ -117,7 +118,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "budget_variance": forecast - planned, "cash_balance_forecast": balance,
                     "cash_gap": minimum, "cash_gap_date": gap_date, "delayed_schedule": len(delayed),
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}])},
-        "baselines": [{"id": x.id, "name": x.name, "version": x.version, "status": x.status, "note": x.note} for x in baselines],
+        "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note} for x in baselines],
         "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "planned_start": x.planned_start,
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status} for x in schedule],
@@ -138,6 +139,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
 @router.post("/baselines")
 def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "manager")
+    _check_contract(db, payload.project_id, payload.contract_id)
     version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == payload.project_id)) or 0) + 1
     item = ScheduleBaseline(project_id=payload.project_id, created_by_user_id=user.id, name=payload.name.strip(), version=version, note=payload.note)
     db.add(item); db.flush(); _audit(db, "baseline_created", "schedule_baseline", item.id, user.id, f"version={version}"); db.commit(); db.refresh(item)

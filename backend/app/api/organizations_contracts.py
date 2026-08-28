@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
 from app.models.organization_contract import Contract, Organization
+from app.models.document import Document
+from app.models.execution_finance import ScheduleBaseline
+from sqlalchemy import func
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
@@ -28,6 +31,10 @@ class ContractCreate(BaseModel):
     status: str = Field(default="active", pattern="^(draft|active|completed|terminated)$")
     source_document_id: int | None = None
     notes: str | None = Field(default=None, max_length=5000)
+
+
+class ContractLinkUpdate(BaseModel):
+    source_document_id: int | None = None
 
 
 @router.get("/organizations")
@@ -60,7 +67,31 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
         raise HTTPException(404, "Project not found")
     row = Contract(project_id=project_id, **payload.model_dump())
     db.add(row); db.flush()
+    version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == project_id)) or 0) + 1
+    db.add(ScheduleBaseline(
+        project_id=project_id, contract_id=row.id, created_by_user_id=user.id,
+        name=f"ГПР по договору {row.number}", version=version,
+        note="Автоматически создано при добавлении договора; заполните этапы и сроки.",
+    ))
     db.add(AuditLog(action="contract_created", entity_type="contract", entity_id=row.id, details=f"Contract: {row.number}"))
+    db.commit(); db.refresh(row)
+    return _contract(row)
+
+
+@router.patch("/projects/{project_id}/contracts/{contract_id}")
+def update_contract_links(project_id: int, contract_id: int, payload: ContractLinkUpdate,
+                          db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "editor")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    if payload.source_document_id is not None and not db.scalar(select(Document.id).where(
+        Document.id == payload.source_document_id, Document.project_id == project_id,
+    )):
+        raise HTTPException(422, "Документ не принадлежит выбранному проекту")
+    row.source_document_id = payload.source_document_id
+    db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
+                    details=f"document={row.source_document_id or 'none'}"))
     db.commit(); db.refresh(row)
     return _contract(row)
 

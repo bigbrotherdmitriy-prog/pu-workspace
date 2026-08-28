@@ -11,6 +11,7 @@ def test_virtual_snapshot_routes_are_exposed():
     assert "/projects/{project_id}/source-folders/snapshot-queue-all" in paths
     assert "/projects/{project_id}/source-folders/{external_id}/primary" in paths
     assert "/projects/{project_id}/snapshots/{snapshot_id}/analyze" in paths
+    assert "/projects/{project_id}/snapshots/{snapshot_id}/standardize" in paths
 
 
 def test_snapshot_analysis_is_explicitly_read_only_in_contract():

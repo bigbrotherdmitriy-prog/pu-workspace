@@ -340,6 +340,7 @@ type FinanceOverview = {
   };
   baselines: {
     id: number;
+    contract_id?: number;
     name: string;
     version: number;
     status: string;
@@ -356,6 +357,7 @@ type FinanceOverview = {
   }[];
   budget: {
     id: number;
+    contract_id?: number;
     category: string;
     description: string;
     planned_amount: number;
@@ -366,6 +368,7 @@ type FinanceOverview = {
   }[];
   cash_flow: {
     id: number;
+    contract_id?: number;
     direction: string;
     title: string;
     planned_date: string;
@@ -375,6 +378,7 @@ type FinanceOverview = {
   }[];
   procurement: {
     id: number;
+    contract_id?: number;
     title: string;
     supplier?: string;
     stage: string;
@@ -384,6 +388,7 @@ type FinanceOverview = {
   }[];
   acts: {
     id: number;
+    contract_id?: number;
     number: string;
     title: string;
     act_date?: string;
@@ -554,6 +559,9 @@ export function App() {
     [inbox, setInbox] = useState<InboxMessage[]>([]),
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
     [inboxFilter, setInboxFilter] = useState("all"),
+    [selectedInboxIds, setSelectedInboxIds] = useState<number[]>([]),
+    [bulkInboxProjectId, setBulkInboxProjectId] = useState(restoredProjectId),
+    [bulkInboxContractId, setBulkInboxContractId] = useState(0),
     [incomingName, setIncomingName] = useState(""),
     [incomingText, setIncomingText] = useState(""),
     [contracts, setContracts] = useState<ContractRow[]>([]),
@@ -590,6 +598,7 @@ export function App() {
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [finance, setFinance] = useState<FinanceOverview | null>(null),
+    [selectedFinanceContractId, setSelectedFinanceContractId] = useState(0),
     [financeKind, setFinanceKind] = useState("budget"),
     [financeTitle, setFinanceTitle] = useState(""),
     [financeAmount, setFinanceAmount] = useState(""),
@@ -822,7 +831,7 @@ export function App() {
   async function createContract() {
     if (!newContractNumber.trim() || !newContractTitle.trim()) return;
     try {
-      await api(`/projects/${projectId}/contracts`, {
+      const created = await api(`/projects/${projectId}/contracts`, {
         method: "POST",
         body: JSON.stringify({
           number: newContractNumber.trim(),
@@ -833,11 +842,28 @@ export function App() {
       setNewContractNumber("");
       setNewContractTitle("");
       setNewCounterparty("");
-      setNotice("Договор добавлен в проектный контекст");
+      setSelectedFinanceContractId(created.id);
+      setNotice("Договор добавлен; черновик ГПР создан, контур ДДС готов к заполнению");
       await load();
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  async function linkContractDocument(contractId: number, documentId: number) {
+    try {
+      await api(`/projects/${projectId}/contracts/${contractId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ source_document_id: documentId || null }),
+      });
+      setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  function openContractControl(contractId: number) {
+    setSelectedFinanceContractId(contractId);
+    setActive("Исполнение и финансы");
   }
   async function openSources(folderId = "root") {
     try {
@@ -918,7 +944,7 @@ export function App() {
       setError("");
       setNotice("");
       const result = await api(
-        `/projects/${projectId}/snapshots/${folder.snapshot_id}/analyze`,
+        `/projects/${projectId}/snapshots/${folder.snapshot_id}/standardize`,
         { method: "POST" },
       );
       if (result.already_analyzed) {
@@ -927,7 +953,7 @@ export function App() {
             item.id === folder.id ? { ...item, analyzed: true } : item,
           ),
         );
-        setNotice(`${folder.name} уже проанализирована`);
+        setNotice(`${folder.name} уже поставлена на безопасную стандартизацию`);
       } else {
         setFolders((items) =>
           items.map((item) =>
@@ -937,7 +963,7 @@ export function App() {
           ),
         );
         setNotice(
-          `Анализ «${folder.name}» запущен в фоне. Страницу можно закрыть.`,
+          `Создание безопасной копии, анализ и стандартизация «${folder.name}» запущены. Страницу можно закрыть.`,
         );
       }
     } catch (e) {
@@ -1084,6 +1110,26 @@ export function App() {
         }),
       });
       setNotice("Связь сообщения с проектом и договором подтверждена");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function confirmMessageContextBulk() {
+    const targetProjectId = bulkInboxProjectId || projectId;
+    if (!selectedInboxIds.length || !targetProjectId) return;
+    if (!window.confirm(`Перенести и подтвердить ${selectedInboxIds.length} писем в выбранном проекте?`)) return;
+    try {
+      const result = await api("/ai-secretary/inbox/confirm-context-bulk", {
+        method: "POST",
+        body: JSON.stringify({
+          message_ids: selectedInboxIds,
+          project_id: targetProjectId,
+          contract_id: bulkInboxContractId || null,
+        }),
+      });
+      setSelectedInboxIds([]);
+      setNotice(`Подтверждено писем: ${result.confirmed}; перенесено между проектами: ${result.moved}`);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -1527,7 +1573,10 @@ export function App() {
     if (!financeTitle.trim()) return;
     try {
       let path = "/execution/budget";
-      let body: Record<string, unknown> = { project_id: projectId };
+      let body: Record<string, unknown> = {
+        project_id: projectId,
+        contract_id: selectedFinanceContractId || null,
+      };
       if (financeKind === "budget")
         body = {
           ...body,
@@ -2264,8 +2313,8 @@ export function App() {
                                   : folder.analyzed
                                     ? "Проанализирована"
                                     : folder.analysis_status === "failed"
-                                      ? "Повторить анализ"
-                                      : "Проанализировать"}
+                                      ? "Повторить стандартизацию"
+                                      : "Создать копию и стандартизировать"}
                               </button>
                             ) : (
                               <button
@@ -2400,6 +2449,17 @@ export function App() {
                 </article>
               ))}
             </section>
+            <section className="card finance-contract-chain">
+              <div>
+                <span className="eyebrow">ЛОГИЧЕСКАЯ ЦЕПОЧКА</span>
+                <h2>Договор → ГПР → бюджет → ДДС → акты</h2>
+                <p>Все новые записи ниже автоматически получают связь с выбранным договором.</p>
+              </div>
+              <select value={selectedFinanceContractId} onChange={(e) => setSelectedFinanceContractId(Number(e.target.value))}>
+                <option value={0}>Весь проект / без договора</option>
+                {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
+              </select>
+            </section>
             <section className="card finance-entry">
               <div>
                 <h2>Добавить управленческую запись</h2>
@@ -2468,7 +2528,7 @@ export function App() {
               <article className="card">
                 <h2>ГПР: план / факт</h2>
                 <div className="finance-list">
-                  {finance?.baselines.map((item) => (
+                  {finance?.baselines.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
                     <div key={item.id}>
                       <span>
                         <strong>{item.name}</strong>
@@ -2486,7 +2546,7 @@ export function App() {
                       )}
                     </div>
                   ))}
-                  {!finance?.baselines.length && (
+                  {!finance?.baselines.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
                     <p className="finance-empty">Добавьте первую версию ГПР.</p>
                   )}
                 </div>
@@ -2497,7 +2557,7 @@ export function App() {
               <article className="card">
                 <h2>Бюджет</h2>
                 <div className="finance-list">
-                  {finance?.budget.map((item) => (
+                  {finance?.budget.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
                     <div key={item.id}>
                       <span>
                         <strong>{item.description}</strong>
@@ -2518,7 +2578,7 @@ export function App() {
                       )}
                     </div>
                   ))}
-                  {!finance?.budget.length && (
+                  {!finance?.budget.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
                     <p className="finance-empty">Строк бюджета пока нет.</p>
                   )}
                 </div>
@@ -2526,7 +2586,7 @@ export function App() {
               <article className="card">
                 <h2>ДДС</h2>
                 <div className="finance-list">
-                  {finance?.cash_flow.map((item) => (
+                  {finance?.cash_flow.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
                     <div key={item.id}>
                       <span>
                         <strong>{item.title}</strong>
@@ -2549,7 +2609,7 @@ export function App() {
                       )}
                     </div>
                   ))}
-                  {!finance?.cash_flow.length && (
+                  {!finance?.cash_flow.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
                     <p className="finance-empty">План ДДС пока пуст.</p>
                   )}
                 </div>
@@ -2557,7 +2617,7 @@ export function App() {
               <article className="card">
                 <h2>Закупки и поставки</h2>
                 <div className="finance-list">
-                  {finance?.procurement.map((item) => (
+                  {finance?.procurement.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
                     <div key={item.id}>
                       <span>
                         <strong>{item.title}</strong>
@@ -2579,7 +2639,7 @@ export function App() {
                       )}
                     </div>
                   ))}
-                  {!finance?.procurement.length && (
+                  {!finance?.procurement.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
                     <p className="finance-empty">Закупок пока нет.</p>
                   )}
                 </div>
@@ -2591,7 +2651,7 @@ export function App() {
               <article className="card">
                 <h2>Акты и закрытие</h2>
                 <div className="finance-list">
-                  {finance?.acts.map((item) => (
+                  {finance?.acts.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
                     <div key={item.id}>
                       <span>
                         <strong>
@@ -2613,7 +2673,7 @@ export function App() {
                       )}
                     </div>
                   ))}
-                  {!finance?.acts.length && (
+                  {!finance?.acts.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
                     <p className="finance-empty">Актов пока нет.</p>
                   )}
                 </div>
@@ -2902,12 +2962,22 @@ export function App() {
                       {item.notes && <small>{item.notes}</small>}
                     </div>
                     <div className="contract-links">
-                      <span>Документ-источник</span>
-                      <strong>
-                        {item.source_document_id
-                          ? `№${item.source_document_id}`
-                          : "не привязан"}
-                      </strong>
+                      <label>1. Документ-источник</label>
+                      <select
+                        value={item.source_document_id || 0}
+                        onChange={(e) => linkContractDocument(item.id, Number(e.target.value))}
+                      >
+                        <option value={0}>Выберите документ договора</option>
+                        {documentRows.map((document) => (
+                          <option value={document.id} key={document.id}>{document.name}</option>
+                        ))}
+                      </select>
+                      <div className="contract-chain-status">
+                        <span>2. ГПР <b>{finance?.baselines.filter((row) => row.contract_id === item.id).length ? "создан" : "не создан"}</b></span>
+                        <span>3. ДДС <b>{finance?.cash_flow.filter((row) => row.contract_id === item.id).length || 0} записей</b></span>
+                        <span>4. Бюджет <b>{finance?.budget.filter((row) => row.contract_id === item.id).length || 0} строк</b></span>
+                      </div>
+                      <button onClick={() => openContractControl(item.id)}>Открыть ГПР и ДДС</button>
                     </div>
                   </article>
                 ))}
@@ -3465,12 +3535,60 @@ export function App() {
                   </button>
                 ))}
               </div>
+              {visibleInbox.some((item) => !item.context_confirmed) && (
+                <div className="inbox-bulk card">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={visibleInbox.filter((item) => !item.context_confirmed).every((item) => selectedInboxIds.includes(item.id))}
+                      onChange={(e) => {
+                        const ids = visibleInbox.filter((item) => !item.context_confirmed).map((item) => item.id);
+                        setSelectedInboxIds((current) => e.target.checked
+                          ? Array.from(new Set([...current, ...ids]))
+                          : current.filter((id) => !ids.includes(id)));
+                      }}
+                    />
+                    Выбрать все нераспределённые ({visibleInbox.filter((item) => !item.context_confirmed).length})
+                  </label>
+                  <select value={bulkInboxProjectId || projectId} onChange={(e) => {
+                    setBulkInboxProjectId(Number(e.target.value));
+                    setBulkInboxContractId(0);
+                  }}>
+                    {projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
+                  </select>
+                  <select
+                    value={bulkInboxContractId}
+                    disabled={(bulkInboxProjectId || projectId) !== projectId}
+                    onChange={(e) => setBulkInboxContractId(Number(e.target.value))}
+                  >
+                    <option value={0}>Без договора</option>
+                    {contracts.map((contract) => (
+                      <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>
+                    ))}
+                  </select>
+                  <button disabled={!selectedInboxIds.length} onClick={confirmMessageContextBulk}>
+                    Перенести выбранные ({selectedInboxIds.length})
+                  </button>
+                  <small>Переносятся письма и связанные предложения задач, рисков и ответов. Письма в Gmail не изменяются.</small>
+                </div>
+              )}
               {visibleInbox
                 .map((message) => {
                   const expanded = expandedInboxId === message.id;
                   return (
                   <article className={`card inbox-card ${expanded ? "expanded" : "collapsed"}`} key={message.id}>
                     <div className="inbox-head">
+                      {!message.context_confirmed && (
+                        <input
+                          className="inbox-select"
+                          type="checkbox"
+                          aria-label={`Выбрать письмо ${message.source_name}`}
+                          checked={selectedInboxIds.includes(message.id)}
+                          onChange={(e) => setSelectedInboxIds((current) => e.target.checked
+                            ? Array.from(new Set([...current, message.id]))
+                            : current.filter((id) => id !== message.id))}
+                        />
+                      )}
                       <div>
                         <span className={`draft-status ${message.status}`}>
                           {message.status === "completed"

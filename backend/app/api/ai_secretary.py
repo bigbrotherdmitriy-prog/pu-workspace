@@ -47,6 +47,10 @@ class ContextConfirmation(BaseModel):
     contract_id: int | None = None
 
 
+class BulkContextConfirmation(ContextConfirmation):
+    message_ids: list[int] = Field(min_length=1, max_length=200)
+
+
 class MessageStatusUpdate(BaseModel):
     status: str = Field(pattern="^(ready|needs_context_confirmation|in_progress|completed)$")
 
@@ -266,3 +270,63 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
                     details=f"project={row.project_id}; contract={row.contract_id or 'none'}"))
     db.commit(); db.refresh(row)
     return _message_payload(db, row)
+
+
+@router.post("/inbox/confirm-context-bulk")
+def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Atomically move and confirm several messages in one user-approved action."""
+    message_ids = list(dict.fromkeys(payload.message_ids))
+    rows = list(db.scalars(select(Message).where(Message.id.in_(message_ids)).order_by(Message.id)))
+    if len(rows) != len(message_ids):
+        raise HTTPException(404, "One or more messages were not found")
+    target_project_id = payload.project_id
+    if target_project_id is None:
+        raise HTTPException(422, "Target project is required")
+    require_project_role(db, user, target_project_id, "editor")
+    target_project = db.get(Project, target_project_id)
+    if target_project is None:
+        raise HTTPException(404, "Project not found")
+    contract = None
+    if payload.contract_id is not None:
+        contract = db.scalar(select(Contract).where(
+            Contract.id == payload.contract_id,
+            Contract.project_id == target_project_id,
+        ))
+        if contract is None:
+            raise HTTPException(422, "Contract does not belong to this project")
+    for row in rows:
+        require_project_role(db, user, row.project_id, "viewer")
+        if row.organization_id != target_project.organization_id:
+            raise HTTPException(422, "Messages and target project must belong to the same organization")
+    moved = 0
+    for row in rows:
+        old_project_id = row.project_id
+        if old_project_id != target_project_id:
+            moved += 1
+            row.project_id = target_project_id
+            for task in db.scalars(select(Task).where(Task.message_id == row.id)):
+                task.project_id = target_project_id
+            for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
+                draft.project_id = target_project_id
+            for risk in db.scalars(select(Risk).where(
+                Risk.project_id == old_project_id,
+                Risk.source_id == f"message:{row.id}",
+            )):
+                risk.project_id = target_project_id
+        row.contract_id = contract.id if contract else None
+        row.context_confirmed = True
+        row.context_confidence = 1.0
+        row.status = "ready"
+        row.context_evidence = (
+            f"Массово подтверждены проект и договор: {target_project.name}; {contract.number}"
+            if contract else f"Массово подтверждён проект: {target_project.name}"
+        )
+    db.add(AuditLog(
+        action="message_context_bulk_confirmed",
+        entity_type="project",
+        entity_id=target_project_id,
+        details=f"messages={len(rows)}; moved={moved}; contract={contract.id if contract else 'none'}",
+    ))
+    db.commit()
+    return {"confirmed": len(rows), "moved": moved, "project_id": target_project_id,
+            "contract_id": contract.id if contract else None}

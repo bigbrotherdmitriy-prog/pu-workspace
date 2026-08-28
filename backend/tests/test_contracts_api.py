@@ -5,6 +5,7 @@ def test_contract_routes_are_registered():
     paths = {route.path for route in router.routes}
     assert "/organizations" in paths
     assert "/projects/{project_id}/contracts" in paths
+    assert "/projects/{project_id}/contracts/{contract_id}" in paths
 
 
 def test_contract_payload_defaults_to_active():
