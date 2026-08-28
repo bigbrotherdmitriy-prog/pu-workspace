@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import hmac
 import os
+import re
 import time
 from datetime import datetime, timezone
 import httpx
@@ -25,6 +26,15 @@ def _utc_now() -> str:
 
 def _polling_enabled() -> bool:
     return os.getenv("TELEGRAM_POLLING_ENABLED", "true").lower() in {"1", "true", "yes"}
+
+
+def _safe_error(exc: Exception) -> str:
+    """Keep diagnostics useful without exposing the bot credential in URLs."""
+    message = str(exc)
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if token:
+        message = message.replace(token, "<redacted>")
+    return re.sub(r"(?<=/bot)[0-9]+:[A-Za-z0-9_-]+", "<redacted>", message)
 
 
 def _force_ipv6() -> bool:
@@ -66,8 +76,9 @@ async def _poll_updates() -> None:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                _poll_state["last_error"] = f"{exc.__class__.__name__}: {str(exc)[:200]}"
-                print(f"[TELEGRAM POLLING] {exc.__class__.__name__}: {str(exc)[:300]}", flush=True)
+                safe_error = _safe_error(exc)
+                _poll_state["last_error"] = f"{exc.__class__.__name__}: {safe_error[:200]}"
+                print(f"[TELEGRAM POLLING] {exc.__class__.__name__}: {safe_error[:300]}", flush=True)
                 await asyncio.sleep(3)
 
 
