@@ -75,5 +75,5 @@ def test_unconfirmed_mail_can_be_bulk_moved_to_one_project():
 def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
     source = APP_SOURCE.read_text(encoding="utf-8")
     assert "linkContractDocument" in source
-    assert "Открыть ГПР и ДДС" in source
+    assert "Открыть ГПР, бюджет и ДДС" in source
     assert "Договор → ГПР → бюджет → ДДС → акты" in source
