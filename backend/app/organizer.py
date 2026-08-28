@@ -89,7 +89,12 @@ def _proposal_for_user(repo, db, user, proposal_id, minimum="viewer"):
     return row
 
 
-def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
+def _scan_worker(
+    session_id: int,
+    project_id: int,
+    source_folder_id: str,
+    auto_apply: bool | None = None,
+):
     db = SessionLocal()
     repo = OrganizerRepository(db)
     try:
@@ -138,7 +143,7 @@ def _scan_worker(session_id: int, project_id: int, source_folder_id: str):
             project_id, session_id, source_name, source_folder_id, copy_folder_id
         )
         repo.save_items(proposal_id, items)
-        if AUTO_APPLY_ENABLED:
+        if AUTO_APPLY_ENABLED if auto_apply is None else auto_apply:
             approved = repo.apply_auto_policy(proposal_id, AUTO_APPLY_CONFIDENCE)
             if approved:
                 if not repo.mark_prepared(proposal_id):

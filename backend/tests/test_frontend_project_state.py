@@ -44,7 +44,8 @@ def test_authorized_project_without_snapshot_can_select_and_bind_drive_folder():
     assert "Выбрать рабочую папку" in source
     assert "const targetProjectId = projectIdRef.current;" in source
     assert "await load(targetProjectId);" in source
-    assert 'setNotice(`Папка «${folder.name}» подключена к текущему проекту`);' in source
+    assert "Создаётся безопасная копия, выполняются анализ и стандартизация имён" in source
+    assert "Подключить и стандартизировать" in source
 
 
 def test_legacy_ui_keeps_selected_project_after_refresh_and_oauth():
@@ -56,3 +57,9 @@ def test_legacy_ui_keeps_selected_project_after_refresh_and_oauth():
     assert "async function projects(preferredId=0)" in source
     assert "await projects(created.id)" in source
     assert "projects(rememberedProjectId())" in source
+
+
+def test_unconfirmed_mail_context_can_be_assigned_to_a_project():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    assert "project_id: message.project_id || projectId" in source
+    assert "{projects.map((project) => (" in source

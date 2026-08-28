@@ -16,6 +16,7 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.organization_contract import Contract
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.governance import Risk
@@ -42,6 +43,7 @@ class IncomingMessage(BaseModel):
 
 
 class ContextConfirmation(BaseModel):
+    project_id: int | None = None
     contract_id: int | None = None
 
 
@@ -57,6 +59,45 @@ def _contract_candidate(db: Session, project_id: int, content: str) -> tuple[Con
     if len(matched) > 1:
         return None, 0.45, "Найдено несколько возможных договоров; требуется подтверждение"
     return None, 0.70, "Проект выбран пользователем; договор в тексте не определён"
+
+
+def project_candidate(db: Session, fallback_project_id: int, content: str, user: User | None = None) -> tuple[int, float, str]:
+    """Select a project from explicit names or contract evidence, otherwise keep a reviewable fallback."""
+    fallback = db.get(Project, fallback_project_id)
+    if fallback is None:
+        raise HTTPException(404, "Project not found")
+    text_value = content.casefold()
+    project_query = select(Project).where(Project.organization_id == fallback.organization_id)
+    if user is not None and not user.is_admin:
+        project_query = project_query.join(ProjectMember, ProjectMember.project_id == Project.id).where(
+            ProjectMember.user_id == user.id,
+        )
+    projects = list(db.scalars(project_query))
+    allowed_project_ids = {project.id for project in projects}
+    matches: dict[int, list[str]] = {}
+    for project in projects:
+        name = project.name.strip().casefold()
+        if len(name) >= 4 and name in text_value:
+            matches.setdefault(project.id, []).append(f"название проекта «{project.name}»")
+    for contract in db.scalars(
+        select(Contract).join(Project, Project.id == Contract.project_id).where(
+            Project.organization_id == fallback.organization_id,
+            Contract.project_id.in_(allowed_project_ids),
+        )
+    ):
+        evidence = []
+        if contract.number and contract.number.casefold() in text_value:
+            evidence.append(f"договор {contract.number}")
+        if contract.counterparty and len(contract.counterparty.strip()) >= 4 and contract.counterparty.casefold() in text_value:
+            evidence.append(f"контрагент {contract.counterparty}")
+        if evidence:
+            matches.setdefault(contract.project_id, []).extend(evidence)
+    if len(matches) == 1:
+        project_id, evidence = next(iter(matches.items()))
+        return project_id, 0.95, "Проект определён по содержанию: " + ", ".join(evidence[:3])
+    if len(matches) > 1:
+        return fallback_project_id, 0.40, "Найдено несколько возможных проектов; требуется подтверждение"
+    return fallback_project_id, 0.55, "Проект по содержанию не определён; требуется подтверждение"
 
 
 def _message_payload(db: Session, row: Message) -> dict:
@@ -116,7 +157,21 @@ def _message_payload(db: Session, row: Message) -> dict:
 @router.get("/inbox")
 def inbox(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
-    rows = list(db.scalars(select(Message).where(Message.project_id == project_id).order_by(Message.created_at.desc(), Message.id.desc()).limit(200)))
+    project = db.get(Project, project_id)
+    if user.is_admin:
+        accessible_project_ids = list(db.scalars(select(Project.id).where(Project.organization_id == project.organization_id)))
+    else:
+        accessible_project_ids = list(db.scalars(
+            select(ProjectMember.project_id).join(Project, Project.id == ProjectMember.project_id).where(
+                ProjectMember.user_id == user.id,
+                Project.organization_id == project.organization_id,
+            )
+        ))
+    rows = list(db.scalars(select(Message).where(
+        Message.organization_id == project.organization_id,
+        Message.project_id.in_(accessible_project_ids),
+        (Message.project_id == project_id) | (Message.context_confirmed.is_(False)),
+    ).order_by(Message.created_at.desc(), Message.id.desc()).limit(200)))
     return {"messages": [_message_payload(db, row) for row in rows], "count": len(rows)}
 
 
@@ -180,13 +235,30 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
     row = db.get(Message, message_id)
     if row is None:
         raise HTTPException(404, "Message not found")
-    require_project_role(db, user, row.project_id, "editor")
+    require_project_role(db, user, row.project_id, "viewer")
+    target_project_id = payload.project_id or row.project_id
+    require_project_role(db, user, target_project_id, "editor")
+    target_project = db.get(Project, target_project_id)
+    if target_project is None or target_project.organization_id != row.organization_id:
+        raise HTTPException(422, "Project does not belong to this organization")
+    if target_project_id != row.project_id:
+        old_project_id = row.project_id
+        row.project_id = target_project_id
+        row.contract_id = None
+        for task in db.scalars(select(Task).where(Task.message_id == row.id)):
+            task.project_id = target_project_id
+        for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
+            draft.project_id = target_project_id
+        for risk in db.scalars(select(Risk).where(Risk.project_id == old_project_id, Risk.source_id == f"message:{row.id}")):
+            risk.project_id = target_project_id
     if payload.contract_id is not None:
-        contract = db.scalar(select(Contract).where(Contract.id == payload.contract_id, Contract.project_id == row.project_id))
+        contract = db.scalar(select(Contract).where(Contract.id == payload.contract_id, Contract.project_id == target_project_id))
         if contract is None:
             raise HTTPException(422, "Contract does not belong to this project")
         row.contract_id = contract.id
-        row.context_evidence = f"Договор подтверждён пользователем: {contract.number}"
+        row.context_evidence = f"Проект и договор подтверждены пользователем: {target_project.name}; {contract.number}"
+    else:
+        row.context_evidence = f"Проект подтверждён пользователем: {target_project.name}"
     row.context_confirmed = True
     row.context_confidence = 1.0
     row.status = "ready"

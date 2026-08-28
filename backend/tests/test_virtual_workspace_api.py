@@ -1,4 +1,6 @@
-from app.api.workspace import _drive_folder_breadcrumb, router
+import inspect
+
+from app.api.workspace import _build_snapshot, _drive_folder_breadcrumb, _run_safe_copy_pipeline, router
 
 
 def test_virtual_snapshot_routes_are_exposed():
@@ -14,6 +16,13 @@ def test_virtual_snapshot_routes_are_exposed():
 def test_snapshot_analysis_is_explicitly_read_only_in_contract():
     route = next(route for route in router.routes if route.path.endswith("/snapshots/{snapshot_id}/analyze"))
     assert "no Drive copy or mutation" in (route.endpoint.__doc__ or "")
+
+
+def test_connected_folder_automatically_starts_safe_copy_pipeline():
+    source = inspect.getsource(_build_snapshot)
+    assert "_start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)" in source
+    pipeline = inspect.getsource(_run_safe_copy_pipeline)
+    assert "auto_apply=True" in pipeline
 
 
 def test_nested_drive_breadcrumb_is_root_to_current_folder():

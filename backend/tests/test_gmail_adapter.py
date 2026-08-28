@@ -1,6 +1,9 @@
 import base64
 
-from app.api.gmail import GmailSyncRequest, _attachments, _gmail_telegram_notice, _message_text, router
+import inspect
+
+from app.api.ai_secretary import project_candidate
+from app.api.gmail import GmailSyncRequest, _attachments, _gmail_telegram_notice, _message_text, router, sync_gmail_project
 from app.api.google_drive import SCOPES
 
 
@@ -33,6 +36,16 @@ def test_gmail_sync_is_bounded():
     request = GmailSyncRequest()
     assert request.query == "newer_than:7d"
     assert request.max_results == 25
+
+
+def test_gmail_sync_routes_new_messages_through_semantic_project_matching():
+    source = inspect.getsource(sync_gmail_project)
+    assert "project_candidate(" in source
+    assert "project_id=target_project_id" in source
+
+
+def test_project_candidate_is_available_for_cross_project_routing():
+    assert callable(project_candidate)
 
 
 def test_gmail_telegram_notice_is_concise_and_actionable():

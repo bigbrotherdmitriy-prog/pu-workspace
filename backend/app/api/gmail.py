@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.ai_secretary import IncomingMessage, ingest_message
+from app.api.ai_secretary import IncomingMessage, ingest_message, project_candidate
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
@@ -118,6 +118,11 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
     errors: list[dict] = []
     for ref in page.get("messages", []):
         try:
+            item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+            headers = _headers(item.get("payload", {}))
+            content = _message_text(item.get("payload", {})) or item.get("snippet", "")
+            subject = headers.get("subject") or "Письмо без темы"
+            sender = headers.get("from") or "Отправитель не указан"
             existing = db.scalar(select(Message).where(
                 Message.source_type == "email",
                 Message.source_external_id == ref["id"],
@@ -127,21 +132,18 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
                 if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
-                    item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
                 skipped += 1
                 continue
-            item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
-            headers = _headers(item.get("payload", {}))
-            content = _message_text(item.get("payload", {})) or item.get("snippet", "")
             attachments = _attachments(item.get("payload", {}), item["id"])
             if not content.strip():
                 skipped += 1
                 continue
-            subject = headers.get("subject") or "Письмо без темы"
-            sender = headers.get("from") or "Отправитель не указан"
+            target_project_id, _, _ = project_candidate(
+                db, project_id, f"{subject}\n{sender}\n{content}", user,
+            )
             result = ingest_message(IncomingMessage(
-                project_id=project_id, source_type="email", source_external_id=item["id"],
+                project_id=target_project_id, source_type="email", source_external_id=item["id"],
                 source_name=f"{sender} — {subject}", source_url=f"https://mail.google.com/mail/u/0/#inbox/{item['id']}",
                 source_sender=sender, source_thread_id=item.get("threadId"), content=content,
                 attachments=attachments,

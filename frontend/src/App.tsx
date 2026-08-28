@@ -210,10 +210,12 @@ type ContractRow = {
 };
 type AnalysisResult = {
   status: string;
+  mode?: string;
   documents?: number;
   tasks?: number;
   risks?: number;
   drafts?: number;
+  copy_folder_name?: string;
   error?: string;
 };
 type Snapshot = {
@@ -876,7 +878,9 @@ export function App() {
             : item,
         ),
       );
-      setNotice(`Папка «${folder.name}» подключена к текущему проекту`);
+      setNotice(
+        `Папка «${folder.name}» подключена. Создаётся безопасная копия, выполняются анализ и стандартизация имён. Оригиналы не изменяются.`,
+      );
       await load(targetProjectId);
     } catch (e) {
       setError((e as Error).message);
@@ -1074,7 +1078,10 @@ export function App() {
     try {
       await api(`/ai-secretary/inbox/${message.id}/confirm-context`, {
         method: "POST",
-        body: JSON.stringify({ contract_id: message.contract_id || null }),
+        body: JSON.stringify({
+          project_id: message.project_id || projectId,
+          contract_id: message.contract_id || null,
+        }),
       });
       setNotice("Связь сообщения с проектом и договором подтверждена");
       await load();
@@ -2209,12 +2216,14 @@ export function App() {
                             <p>
                               {folder.snapshot_status === "building"
                                 ? "Создаётся виртуальный снимок…"
-                                : folder.analysis_status === "analyzing"
-                                  ? `Анализируется в фоне · ${(folder.item_count || 0).toLocaleString("ru-RU")} объектов`
+                                  : folder.analysis_status === "analyzing"
+                                  ? `Создаётся безопасная копия, анализируются документы и имена · ${(folder.item_count || 0).toLocaleString("ru-RU")} объектов`
                                   : folder.analysis_status === "failed"
                                     ? `Ошибка анализа: ${folder.analysis_error || "можно повторить"}`
                                     : folder.analysis_status === "ready"
-                                      ? `Готово: документов ${folder.analysis_result?.documents || 0}, задач ${folder.analysis_result?.tasks || 0}, рисков ${folder.analysis_result?.risks || 0}, черновиков ${folder.analysis_result?.drafts || 0}`
+                                      ? folder.analysis_result?.mode === "safe_copy"
+                                        ? `Безопасная копия готова: ${folder.analysis_result?.copy_folder_name || "имена стандартизированы"}. Оригиналы не изменены.`
+                                        : `Готово: документов ${folder.analysis_result?.documents || 0}, задач ${folder.analysis_result?.tasks || 0}, рисков ${folder.analysis_result?.risks || 0}, черновиков ${folder.analysis_result?.drafts || 0}`
                                       : folder.snapshot_status === "ready"
                                         ? `Снимок №${folder.snapshot_id} готов · ${(folder.item_count || 0).toLocaleString("ru-RU")} объектов${folder.analyzed ? " · проанализирован" : ""}`
                                         : folder.snapshot_status === "failed"
@@ -2242,13 +2251,16 @@ export function App() {
                                 disabled={
                                   busyFolder === folder.id ||
                                   folder.analyzed ||
-                                  folder.analysis_status === "analyzing"
+                                  folder.analysis_status === "analyzing" ||
+                                  folder.analysis_result?.mode === "safe_copy"
                                 }
                                 onClick={() => analyzeFolder(folder)}
                               >
                                 {busyFolder === folder.id ||
                                 folder.analysis_status === "analyzing"
                                   ? "Анализ…"
+                                  : folder.analysis_result?.mode === "safe_copy"
+                                    ? "Стандартизирована"
                                   : folder.analyzed
                                     ? "Проанализирована"
                                     : folder.analysis_status === "failed"
@@ -2268,8 +2280,8 @@ export function App() {
                                   : folder.snapshot_status === "failed"
                                     ? "Повторить"
                                     : folder.registered
-                                      ? "Создать новый снимок"
-                                      : "Подключить папку"}
+                                      ? "Обновить копию и анализ"
+                                      : "Подключить и стандартизировать"}
                               </button>
                             )}
                           </div>
@@ -3502,6 +3514,22 @@ export function App() {
                       {expanded && !message.context_confirmed && (
                         <div className="context-confirm">
                           <select
+                            value={message.project_id}
+                            onChange={(e) =>
+                              setInbox((rows) =>
+                                rows.map((row) =>
+                                  row.id === message.id
+                                    ? { ...row, project_id: Number(e.target.value), contract_id: undefined }
+                                    : row,
+                                ),
+                              )
+                            }
+                          >
+                            {projects.map((project) => (
+                              <option value={project.id} key={project.id}>{project.name}</option>
+                            ))}
+                          </select>
+                          <select
                             value={message.contract_id || ""}
                             onChange={(e) =>
                               setInbox((rows) =>
@@ -3518,7 +3546,7 @@ export function App() {
                             }
                           >
                             <option value="">Без договора</option>
-                            {contracts.map((contract) => (
+                            {(message.project_id === projectId ? contracts : []).map((contract) => (
                               <option value={contract.id} key={contract.id}>
                                 {contract.number} — {contract.title}
                               </option>

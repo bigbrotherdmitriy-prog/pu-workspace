@@ -33,6 +33,10 @@ _analysis_results: dict[int, dict] = {}
 def _parse_time(value: str | None) -> datetime | None:
     if not value:
         return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
@@ -55,20 +59,80 @@ def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
         current = (item.get("parents") or ["root"])[0]
     trail.reverse()
     return [{"id": "root", "name": "Мой диск"}, *trail]
+
+
+def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, source_folder_id: str) -> None:
+    """Organize one explicitly selected folder copy and mirror its result on the snapshot."""
+    from app.organizer import _scan_worker
+
+    _scan_worker(session_id, project_id, source_folder_id, auto_apply=True)
+    db = SessionLocal()
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+        repo = OrganizerRepository(db)
+        session = repo.get_session(session_id)
+        if snapshot is None or session is None:
+            return
+        proposal = repo.proposal_for_session(session_id)
+        succeeded = session["status"] in {"proposed", "applied"}
+        snapshot.analysis_status = "ready" if succeeded else "failed"
+        snapshot.analysis_error = None if succeeded else (session["error_message"] or "Safe-copy organization failed")
+        snapshot.analysis_result = {
+            "mode": "safe_copy",
+            "organizer_session_id": session_id,
+            "proposal_id": proposal["id"] if proposal else None,
+            "status": session["status"],
+            "copy_folder_id": session["copy_folder_id"],
+            "copy_folder_name": session["copy_folder_name"],
+            "source_item_count": session["source_item_count"],
+            "copy_item_count": session["copy_item_count"],
+            "originals_modified": False,
+        }
+        db.commit()
+    finally:
+        db.close()
+
+
+def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_id: str, source_name: str) -> int | None:
+    """Idempotently queue copy creation, content analysis and high-confidence renaming."""
+    db = SessionLocal()
+    try:
+        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+        if snapshot is None:
+            return None
+        existing = snapshot.analysis_result or {}
+        if existing.get("organizer_session_id"):
+            return int(existing["organizer_session_id"])
+        repo = OrganizerRepository(db)
+        session_id = repo.create_session(project_id, source_folder_id, source_name)
+        snapshot.analysis_status = "analyzing"
+        snapshot.analysis_error = None
+        snapshot.analysis_result = {
+            "mode": "safe_copy",
+            "organizer_session_id": session_id,
+            "status": "queued",
+            "originals_modified": False,
+        }
+        db.commit()
+    finally:
+        db.close()
+    _analysis_workers.submit(
+        _run_safe_copy_pipeline, snapshot_id, session_id, project_id, source_folder_id,
+    )
+    return session_id
 
 
 def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None:
     db = SessionLocal()
+    start_pipeline = False
+    source_name = ""
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
         if snapshot is None or snapshot.status == "ready":
             return
         drive = DriveClient(build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False))
         source_meta = drive.get_file_meta(external_id)
+        source_name = source_meta.name
         items = drive.walk_tree(external_id)
         db.add(VirtualNode(
             snapshot_id=snapshot.id, external_id=source_meta.id,
@@ -86,6 +150,7 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None
         snapshot.status = "ready"
         snapshot.completed_at = datetime.now(timezone.utc)
         db.commit()
+        start_pipeline = True
     except Exception as exc:
         db.rollback()
         failed = db.get(WorkspaceSnapshot, snapshot_id)
@@ -95,6 +160,8 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None
             db.commit()
     finally:
         db.close()
+    if start_pipeline:
+        _start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)
 
 
 def recover_incomplete_snapshots() -> int:
