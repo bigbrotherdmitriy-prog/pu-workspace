@@ -1188,6 +1188,10 @@ export function App() {
   }
   async function createAutomationRule() {
     const day = Number(automationDay);
+    if (!automationContractId) {
+      setError("Сначала выберите договор для регламента");
+      return;
+    }
     if (!automationName.trim()) {
       setError("Укажите название ежемесячного регламента");
       return;
@@ -1225,6 +1229,13 @@ export function App() {
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  function openAutomationContractPicker() {
+    const select = document.getElementById("automation-contract-select") as
+      | (HTMLSelectElement & { showPicker?: () => void })
+      | null;
+    select?.focus();
+    select?.showPicker?.();
   }
   async function setAutomationActive(rule: AutomationRule, activeValue: boolean) {
     try {
@@ -1889,6 +1900,22 @@ export function App() {
     ["Ждут решения", summary?.pending_decisions || 0, ""],
     ["Уведомления", summary?.unread_notifications || 0, ""],
   ];
+  function openMetric(label: string) {
+    if (label === "Обязательства") {
+      setActive("Обязательства");
+      return;
+    }
+    if (label === "Просрочено") {
+      setTaskFilter("overdue");
+      setActive("Задачи");
+      return;
+    }
+    if (label === "Риски" || label === "Ждут решения" || label === "Требуют внимания") {
+      setActive("Риски и решения");
+      return;
+    }
+    if (label === "Уведомления") setActive("Уведомления");
+  }
   const latestSnapshot =
     snapshots.find((item) => item.is_primary) || snapshots[0];
   const today = new Date().toISOString().slice(0, 10);
@@ -2259,10 +2286,16 @@ export function App() {
             <>
               <div className="metrics">
                 {metrics.map(([label, value, tone]) => (
-                  <article className={String(tone)} key={String(label)}>
+                  <button
+                    type="button"
+                    className={String(tone)}
+                    key={String(label)}
+                    onClick={() => openMetric(String(label))}
+                    aria-label={`Открыть раздел: ${label}`}
+                  >
                     <span>{label}</span>
                     <strong>{value}</strong>
-                  </article>
+                  </button>
                 ))}
               </div>
               <div className="grid">
@@ -2274,7 +2307,7 @@ export function App() {
                         Задачи, риски и решения из подтверждённых источников
                       </p>
                     </div>
-                    <button>Открыть реестр</button>
+                    <button onClick={() => setActive("Риски и решения")}>Открыть реестр</button>
                   </div>
                   {summary?.attention ? (
                     <div className="attention">
@@ -3704,13 +3737,18 @@ export function App() {
                 <b>{automationRules.filter((rule) => rule.active).length} активных</b>
               </div>
               <div className="automation-form">
+                <button className="secondary" onClick={openAutomationContractPicker}>1. Выбрать договор</button>
+                <select
+                  id="automation-contract-select"
+                  value={automationContractId}
+                  onChange={(e) => setAutomationContractId(Number(e.target.value))}
+                >
+                  <option value={0}>Выберите договор…</option>
+                  {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
+                </select>
                 <input value={automationName} onChange={(e) => setAutomationName(e.target.value)} placeholder="Название регламента" />
                 <label>Каждое число месяца<input type="number" min="1" max="31" value={automationDay} onChange={(e) => setAutomationDay(e.target.value)} /></label>
                 <input type="email" value={automationRecipient} onChange={(e) => setAutomationRecipient(e.target.value)} placeholder="Получатель письма" />
-                <select value={automationContractId} onChange={(e) => setAutomationContractId(Number(e.target.value))}>
-                  <option value={0}>Без договора</option>
-                  {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
-                </select>
                 <select value={automationDocumentId} onChange={(e) => setAutomationDocumentId(Number(e.target.value))}>
                   <option value={0}>Без опорного документа</option>
                   {documentRows.map((document) => <option value={document.id} key={document.id}>{document.name}</option>)}
@@ -3720,7 +3758,7 @@ export function App() {
                 <input value={automationTaskTitle} onChange={(e) => setAutomationTaskTitle(e.target.value)} placeholder="Название контрольной задачи" />
                 <button onClick={createAutomationRule}>Создать ежемесячный регламент</button>
               </div>
-              <small>Обязательно укажите email получателя. Переменные: {"{project}"}, {"{contract}"}, {"{month}"}, {"{next_month}"}, {"{date}"}.</small>
+              <small>Сначала выберите договор, затем укажите email получателя. Переменные: {"{project}"}, {"{contract}"}, {"{month}"}, {"{next_month}"}, {"{date}"}.</small>
               <div className="automation-list">
                 {automationRules.map((rule) => <article key={rule.id}>
                   <div>
