@@ -1,0 +1,133 @@
+:root {
+  --pu-graphite-950: #111714;
+  --pu-graphite-900: #18211d;
+  --pu-graphite-800: #26322d;
+  --pu-graphite-700: #3d4a44;
+  --pu-green-700: #087a59;
+  --pu-green-600: #0b9068;
+  --pu-green-500: #18a77a;
+  --pu-green-100: #dff4ec;
+  --pu-green-050: #eff9f5;
+  --pu-surface: #ffffff;
+  --pu-canvas: #f1f4f2;
+  --pu-border: #dbe3df;
+  --pu-muted: #718078;
+  color: var(--pu-graphite-900);
+  background: var(--pu-canvas);
+}
+
+body { background: var(--pu-canvas); }
+
+.shell > aside {
+  background: linear-gradient(180deg, var(--pu-graphite-950), var(--pu-graphite-900));
+  border-right: 1px solid #2d3934;
+  color: #f5faf7;
+}
+.brand-mark {
+  background: linear-gradient(145deg, var(--pu-green-500), var(--pu-green-700));
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(24, 167, 122, .28);
+}
+.sidebar-head .icon, .profile .icon { color: #aebbb5; }
+.sidebar-head .icon:hover, .profile .icon:hover { background: #2a3631; color: #fff; }
+nav button { color: #b8c4be; }
+nav button:hover { background: #26332e; color: #fff; }
+nav button.active {
+  background: linear-gradient(90deg, rgba(24,167,122,.25), rgba(24,167,122,.09));
+  color: #7be0bd;
+  box-shadow: inset 3px 0 var(--pu-green-500);
+}
+.profile { border-top-color: #303c37; }
+.profile small { color: #8fa099; }
+.avatar { background: #293832; color: #76ddb9; }
+
+header {
+  background: rgba(255,255,255,.95);
+  border-bottom-color: var(--pu-border);
+  box-shadow: 0 5px 24px rgba(17, 23, 20, .035);
+  backdrop-filter: blur(12px);
+}
+header h1 { color: var(--pu-graphite-900); }
+header p, .card-head p { color: var(--pu-muted); }
+.content, .documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay {
+  background: var(--pu-canvas);
+}
+.card, .metrics article {
+  border-color: var(--pu-border);
+  box-shadow: 0 8px 28px rgba(24, 33, 29, .045);
+}
+.card:hover { border-color: #c9d6d0; }
+.eyebrow { color: var(--pu-green-700); }
+
+button { transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s ease; }
+button:not(:disabled):active { transform: translateY(1px); }
+.project-create button,
+.project-card > button,
+.inbox-compose button,
+.meeting-create button,
+.finance-entry button,
+.management-meta .complete,
+.task-filters button.selected,
+.proposal-controls .apply-safe,
+.source-head-actions .queue-all,
+.draft-actions .approve {
+  background: var(--pu-green-700);
+  border-color: var(--pu-green-700);
+  color: #fff;
+}
+.project-create button:hover,
+.project-card > button:hover,
+.inbox-compose button:hover,
+.meeting-create button:hover,
+.finance-entry button:hover,
+.proposal-controls .apply-safe:hover,
+.source-head-actions .queue-all:hover,
+.draft-actions .approve:hover { background: var(--pu-green-600); }
+
+.source-icon, .integration-icon.connected, .notification-kind,
+.file-icon, .contract-number {
+  background: var(--pu-green-100);
+  color: var(--pu-green-700);
+}
+.source-status.ready, .integration-card > span.connected,
+.draft-status.approved, .proposal-status.applied,
+.proposal-status.rolled_back, .contract-status,
+.finance-forecast .good, .notice {
+  background: var(--pu-green-050);
+  color: var(--pu-green-700);
+}
+.task-actions .complete, .source-row-actions .analyze,
+.context-confirm button, .inbox-task button,
+.management-intro button, .management-meta button,
+.meeting-card button, .finance-list button {
+  border-color: var(--pu-green-600);
+  color: var(--pu-green-700);
+}
+.document-register button.selected {
+  background: var(--pu-green-050);
+  box-shadow: inset 3px 0 var(--pu-green-600);
+}
+.document-register button > svg, .source-list article > svg,
+.audit-dot { color: var(--pu-green-700); }
+.audit-dot { background: var(--pu-green-600); }
+.primary-label, .member-list article > span, .proposal-intro > span,
+.management-intro > span {
+  background: var(--pu-green-100);
+  color: var(--pu-green-700);
+}
+.search:focus-within, input:focus, textarea:focus, select:focus {
+  border-color: var(--pu-green-500) !important;
+  outline: 3px solid rgba(24,167,122,.12);
+}
+.login-page { background: radial-gradient(circle at 20% 10%, #dcece5, var(--pu-canvas) 42%); }
+.login-card { border-color: var(--pu-border); box-shadow: 0 24px 70px rgba(17,23,20,.12); }
+.login-card > button { background: var(--pu-green-700); }
+.login-card > button:hover { background: var(--pu-green-600); }
+
+@media (max-width: 760px) {
+  .shell > aside { box-shadow: 12px 0 38px rgba(10, 18, 14, .32); }
+  .content, .documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay {
+    padding: 14px;
+  }
+  .card, .metrics article { border-radius: 13px; box-shadow: 0 5px 18px rgba(24,33,29,.04); }
+}
