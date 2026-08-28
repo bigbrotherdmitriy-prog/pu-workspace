@@ -835,7 +835,10 @@ export function App() {
   async function openSources() {
     try {
       setError("");
-      const d = await api(`/projects/${projectId}/source-folders/discover`);
+      const targetProjectId = projectIdRef.current;
+      const d = await api(
+        `/projects/${targetProjectId}/source-folders/discover`,
+      );
       setFolders(d.folders);
       setShowSources(true);
     } catch (e) {
@@ -844,8 +847,11 @@ export function App() {
   }
   async function queueFolder(folder: DriveFolder) {
     try {
+      const targetProjectId = projectIdRef.current;
+      setBusyFolder(folder.id);
+      setError("");
       const queued = await api(
-        `/projects/${projectId}/source-folders/${folder.id}/snapshot-queue`,
+        `/projects/${targetProjectId}/source-folders/${folder.id}/snapshot-queue`,
         { method: "POST" },
       );
       setFolders((items) =>
@@ -861,9 +867,12 @@ export function App() {
             : item,
         ),
       );
-      await load();
+      setNotice(`Папка «${folder.name}» подключена к текущему проекту`);
+      await load(targetProjectId);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusyFolder("");
     }
   }
   async function makePrimary(folder: DriveFolder) {
@@ -2119,6 +2128,26 @@ export function App() {
                     </div>
                   </section>
                 )}
+                {!latestSnapshot && googleState?.authorized && (
+                  <section className="card span-3 source-card source-onboarding">
+                    <div className="source-icon">
+                      <FolderTree />
+                    </div>
+                    <div>
+                      <span className="eyebrow">РАБОЧИЙ ИСТОЧНИК</span>
+                      <h2>Google Drive подключён</h2>
+                      <p>
+                        Выберите папку, которая станет рабочим источником этого
+                        проекта. Оригиналы не изменяются.
+                      </p>
+                    </div>
+                    <div className="source-actions">
+                      <button onClick={openSources}>
+                        Выбрать рабочую папку
+                      </button>
+                    </div>
+                  </section>
+                )}
                 {showSources && (
                   <section className="card span-3">
                     <div className="card-head">
@@ -2211,7 +2240,9 @@ export function App() {
                                   ? "В очереди"
                                   : folder.snapshot_status === "failed"
                                     ? "Повторить"
-                                    : "Поставить в очередь"}
+                                    : folder.registered
+                                      ? "Создать новый снимок"
+                                      : "Подключить папку"}
                               </button>
                             )}
                           </div>
@@ -3073,6 +3104,17 @@ export function App() {
                   {item.action === "sync" && item.connected ? (
                     <button onClick={() => syncGmail()} disabled={gmailSyncing}>
                       {gmailSyncing ? "Получаю…" : "Получить письма"}
+                    </button>
+                  ) : item.provider === "google_workspace" &&
+                    item.capability === "storage" &&
+                    item.connected ? (
+                    <button
+                      onClick={() => {
+                        setActive("Рабочий центр");
+                        void openSources();
+                      }}
+                    >
+                      Выбрать папку
                     </button>
                   ) : item.action === "oauth" ? (
                     <button onClick={connectGoogle}>{item.connected ? "Переподключить" : "Подключить"}</button>

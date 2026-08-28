@@ -37,6 +37,16 @@ def test_header_project_switch_updates_persistent_context_before_loading():
     assert 'onChange={(e) => setProjectId(Number(e.target.value))}' not in source
 
 
+def test_authorized_project_without_snapshot_can_select_and_bind_drive_folder():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+
+    assert "!latestSnapshot && googleState?.authorized" in source
+    assert "Выбрать рабочую папку" in source
+    assert "const targetProjectId = projectIdRef.current;" in source
+    assert "await load(targetProjectId);" in source
+    assert 'setNotice(`Папка «${folder.name}» подключена к текущему проекту`);' in source
+
+
 def test_legacy_ui_keeps_selected_project_after_refresh_and_oauth():
     source = (APP_SOURCE.parents[2] / "backend" / "app" / "static" / "app.js").read_text(
         encoding="utf-8"
