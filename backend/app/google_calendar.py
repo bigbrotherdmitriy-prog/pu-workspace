@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 from app.integrations.google_workspace import google_workspace_for_project
-from app.integrations.external_resources import record_external_resource
+from app.integrations.external_resources import external_id_for, record_external_resource
 from app.models.task import Task
 
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
@@ -27,7 +27,13 @@ def event_payload(task: Task) -> dict:
 
 
 def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task], force_update: bool = False) -> tuple[int, int]:
-    pending = [task for task in tasks if (task.due_date and (force_update or not task.google_calendar_event_id)) or (force_update and not task.due_date and task.google_calendar_event_id)]
+    linked = {
+        task.id: external_id_for(
+            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
+        ) for task in tasks
+    }
+    pending = [task for task in tasks if (task.due_date and (force_update or not linked[task.id])) or (force_update and not task.due_date and linked[task.id])]
     if not pending:
         return 0, 0
     try:
@@ -43,19 +49,21 @@ def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task], forc
     synced = failed = 0
     for task in pending:
         try:
-            if not task.due_date and task.google_calendar_event_id:
-                removed_id = task.google_calendar_event_id
-                service.events().delete(calendarId="primary", eventId=task.google_calendar_event_id).execute()
+            external_id = linked[task.id]
+            if not task.due_date and external_id:
+                removed_id = external_id
+                service.events().delete(calendarId="primary", eventId=external_id).execute()
                 task.google_calendar_event_id = None
                 record_external_resource(
                     db, project_id=project_id, entity_type="task", entity_id=task.id,
                     provider="google_workspace", resource_type="calendar_event",
                     external_id=removed_id, sync_status="deleted",
                 )
-            elif task.google_calendar_event_id:
+            elif external_id:
                 body = event_payload(task)
                 if task.status == "completed": body["summary"] = "✅ " + body["summary"]
-                service.events().patch(calendarId="primary", eventId=task.google_calendar_event_id, body=body).execute()
+                service.events().patch(calendarId="primary", eventId=external_id, body=body).execute()
+                task.google_calendar_event_id = external_id
             else:
                 result = service.events().insert(calendarId="primary", body=event_payload(task)).execute()
                 task.google_calendar_event_id = result["id"]

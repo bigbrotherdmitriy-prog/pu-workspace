@@ -3,7 +3,7 @@ from datetime import datetime, time, timezone
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 from app.integrations.google_workspace import google_workspace_for_project
-from app.integrations.external_resources import record_external_resource
+from app.integrations.external_resources import external_id_for, get_external_resource, record_external_resource
 from app.models.task import Task
 
 TASKS_SCOPE = "https://www.googleapis.com/auth/tasks"
@@ -23,7 +23,13 @@ def task_payload(task: Task) -> dict:
 
 
 def sync_tasks_to_google(db: Session, project_id: int, tasks: list[Task], force_update: bool = False) -> tuple[int, int]:
-    pending = [task for task in tasks if force_update or not task.google_task_id]
+    linked = {
+        task.id: external_id_for(
+            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            resource_type="task", legacy_id=task.google_task_id,
+        ) for task in tasks
+    }
+    pending = [task for task in tasks if force_update or not linked[task.id]]
     if not pending:
         return 0, 0
     try:
@@ -41,18 +47,24 @@ def sync_tasks_to_google(db: Session, project_id: int, tasks: list[Task], force_
         try:
             body = task_payload(task)
             body["status"] = "completed" if task.status == "completed" else "needsAction"
-            if task.google_task_id:
-                result = service.tasks().patch(tasklist=task.google_task_list_id or "@default", task=task.google_task_id, body=body).execute()
+            external_id = linked[task.id]
+            existing_link = get_external_resource(
+                db, entity_type="task", entity_id=task.id, provider="google_workspace", resource_type="task",
+            )
+            container_id = (existing_link.container_id if existing_link else None) or task.google_task_list_id or "@default"
+            if external_id:
+                result = service.tasks().patch(tasklist=container_id, task=external_id, body=body).execute()
             else:
                 result = service.tasks().insert(tasklist="@default", body=body).execute()
-                task.google_task_id = result["id"]
-            task.google_task_list_id = "@default"
+                external_id = result["id"]
+            task.google_task_id = external_id
+            task.google_task_list_id = container_id
             task.google_sync_error = None
             task.google_synced_at = datetime.now(timezone.utc)
             record_external_resource(
                 db, project_id=project_id, entity_type="task", entity_id=task.id,
                 provider="google_workspace", resource_type="task",
-                external_id=task.google_task_id, container_id=task.google_task_list_id,
+                external_id=external_id, container_id=container_id,
             )
             synced += 1
         except Exception as exc:

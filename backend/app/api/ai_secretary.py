@@ -24,6 +24,7 @@ from app.core.integration_types import StorageObject
 from app.response_engine import create_response_drafts
 from app.summary_engine import brief_summary
 from app.task_engine import create_tasks_from_files
+from app.integrations.external_resources import external_id_for
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
 
@@ -75,6 +76,25 @@ def _message_payload(db: Session, row: Message) -> dict:
         external_id = item.get("document_external_id")
         item["document_id"] = imported.get(external_id)
         item["imported"] = bool(item["document_id"])
+    task_payloads = []
+    for task in tasks:
+        external_task_id = external_id_for(
+            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            resource_type="task", legacy_id=task.google_task_id,
+        )
+        external_calendar_id = external_id_for(
+            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
+        )
+        task_payloads.append({
+            "id": task.id, "title": task.title, "due_date": task.due_date, "confidence": task.confidence,
+            "external_action_status": task.external_action_status, "google_task_id": external_task_id,
+            "google_calendar_event_id": external_calendar_id,
+            "external_resources": [
+                *([{"provider": "google_workspace", "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
+                *([{"provider": "google_workspace", "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
+            ],
+        })
     return {
         "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
         "source_type": row.source_type, "source_external_id": row.source_external_id,
@@ -84,9 +104,7 @@ def _message_payload(db: Session, row: Message) -> dict:
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
         "status": row.status, "created_at": row.created_at,
-        "tasks": [{"id": task.id, "title": task.title, "due_date": task.due_date, "confidence": task.confidence,
-                   "external_action_status": task.external_action_status, "google_task_id": task.google_task_id,
-                   "google_calendar_event_id": task.google_calendar_event_id} for task in tasks],
+        "tasks": task_payloads,
         "drafts": [{"id": draft.id, "subject": draft.subject, "body": draft.body,
                     "status": draft.status, "confidence": draft.confidence} for draft in drafts],
         "risks": [{"id": risk.id, "title": risk.title, "criticality": risk.criticality,
