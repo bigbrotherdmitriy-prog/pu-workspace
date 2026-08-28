@@ -1,0 +1,9 @@
+[project]
+name = "pu-workspace-sales-bot"
+version = "0.1.0"
+description = "Telegram sales and Early Access bot for PU Workspace"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
