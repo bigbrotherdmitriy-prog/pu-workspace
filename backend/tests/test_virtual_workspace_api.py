@@ -1,6 +1,12 @@
 import inspect
 
-from app.api.workspace import _build_snapshot, _drive_folder_breadcrumb, _run_safe_copy_pipeline, router
+from app.api.workspace import (
+    _build_snapshot,
+    _drive_folder_breadcrumb,
+    _run_safe_copy_pipeline,
+    recover_incomplete_analyses,
+    router,
+)
 
 
 def test_virtual_snapshot_routes_are_exposed():
@@ -24,6 +30,11 @@ def test_connected_folder_automatically_starts_safe_copy_pipeline():
     assert "_start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)" in source
     pipeline = inspect.getsource(_run_safe_copy_pipeline)
     assert "auto_apply=True" in pipeline
+
+
+def test_safe_copy_recovery_is_not_started_by_legacy_virtual_analyzer():
+    source = inspect.getsource(recover_incomplete_analyses)
+    assert 'get("mode") != "safe_copy"' in source
 
 
 def test_nested_drive_breadcrumb_is_root_to_current_folder():

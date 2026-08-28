@@ -184,7 +184,16 @@ def recover_incomplete_snapshots() -> int:
 def recover_incomplete_analyses() -> int:
     db = SessionLocal()
     try:
-        rows = db.execute(select(WorkspaceSnapshot.id, WorkspaceSnapshot.project_id).where(WorkspaceSnapshot.analysis_status == "analyzing")).all()
+        snapshots = db.scalars(select(WorkspaceSnapshot).where(
+            WorkspaceSnapshot.analysis_status == "analyzing",
+        )).all()
+        # Safe-copy sessions are resumed by recover_incomplete_scans(). Starting
+        # the legacy virtual analyzer as well would duplicate documents/tasks.
+        rows = [
+            (snapshot.id, snapshot.project_id)
+            for snapshot in snapshots
+            if (snapshot.analysis_result or {}).get("mode") != "safe_copy"
+        ]
     finally:
         db.close()
     for snapshot_id, project_id in rows:

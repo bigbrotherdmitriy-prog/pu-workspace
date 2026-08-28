@@ -53,6 +53,17 @@ class PlannerSafetyTests(unittest.TestCase):
         self.assertGreaterEqual(item.confidence, 0.9)
         self.assertIn("тексту документа", item.reasoning)
 
+    def test_gpr_and_cash_flow_are_classified_and_named_explicitly(self):
+        gpr, cash_flow = build_proposal([
+            file("1", "ГПР объекта.xlsx"),
+            file("2", "ДДС август.xlsx"),
+        ], project_name="Проект").copy()
+
+        self.assertEqual(gpr.proposed_folder, "01_УПРАВЛЕНИЕ ПРОЕКТОМ")
+        self.assertIn(" — ГПР — ", gpr.proposed_name)
+        self.assertEqual(cash_flow.proposed_folder, "03_ФИНАНСЫ И СМЕТЫ")
+        self.assertIn(" — ДДС — ", cash_flow.proposed_name)
+
 
 if __name__ == "__main__":
     unittest.main()

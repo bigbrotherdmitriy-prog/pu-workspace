@@ -19,6 +19,23 @@ _FOLDER_TO_DOC_TYPE = {
 }
 
 
+def _specific_doc_type(original_filename: str, folder: str, fallback: str | None) -> str | None:
+    stem = original_filename.rsplit(".", 1)[0]
+    if folder == "01_УПРАВЛЕНИЕ ПРОЕКТОМ" and re.search(
+        r"(?<![0-9a-zа-яё])(?:гпр|график\s+производства\s+работ)(?![0-9a-zа-яё])",
+        stem,
+        re.IGNORECASE,
+    ):
+        return "ГПР"
+    if folder == "03_ФИНАНСЫ И СМЕТЫ" and re.search(
+        r"(?<![0-9a-zа-яё])(?:ддс|движение\s+денежных\s+средств|плат[её]жный\s+календарь)(?![0-9a-zа-яё])",
+        stem,
+        re.IGNORECASE,
+    ):
+        return "ДДС"
+    return fallback
+
+
 def build_name(
     original_filename: str,
     folder: str,
@@ -29,7 +46,7 @@ def build_name(
 ) -> str:
     if folder == DEFAULT_FOLDER:
         return original_filename
-    doc_type = _FOLDER_TO_DOC_TYPE.get(folder)
+    doc_type = _specific_doc_type(original_filename, folder, _FOLDER_TO_DOC_TYPE.get(folder))
     ext = ""
     stem = original_filename
     if "." in original_filename:
