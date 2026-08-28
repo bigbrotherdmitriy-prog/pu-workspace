@@ -4,10 +4,23 @@ from contextlib import asynccontextmanager, suppress
 import hmac
 import os
 import time
+from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+
+_poll_state = {
+    "last_poll_at": None,
+    "last_update_id": None,
+    "delivered_updates": 0,
+    "last_error": None,
+}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _polling_enabled() -> bool:
@@ -38,6 +51,8 @@ async def _poll_updates() -> None:
                     params["offset"] = offset
                 response = await telegram.get(f"{api}/getUpdates", params=params)
                 response.raise_for_status()
+                _poll_state["last_poll_at"] = _utc_now()
+                _poll_state["last_error"] = None
                 for update in response.json().get("result", []):
                     delivered = await backend.post(
                         backend_url,
@@ -46,9 +61,12 @@ async def _poll_updates() -> None:
                     )
                     delivered.raise_for_status()
                     offset = int(update["update_id"]) + 1
+                    _poll_state["last_update_id"] = int(update["update_id"])
+                    _poll_state["delivered_updates"] += 1
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                _poll_state["last_error"] = f"{exc.__class__.__name__}: {str(exc)[:200]}"
                 print(f"[TELEGRAM POLLING] {exc.__class__.__name__}: {str(exc)[:300]}", flush=True)
                 await asyncio.sleep(3)
 
@@ -66,6 +84,15 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="PU Workspace Telegram Relay", lifespan=lifespan)
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy" if _poll_state["last_error"] is None else "degraded",
+        "polling_enabled": _polling_enabled(),
+        **_poll_state,
+    }
 
 
 class SendRequest(BaseModel):
