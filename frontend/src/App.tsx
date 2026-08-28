@@ -1187,6 +1187,23 @@ export function App() {
     }
   }
   async function createAutomationRule() {
+    const day = Number(automationDay);
+    if (!automationName.trim()) {
+      setError("Укажите название ежемесячного регламента");
+      return;
+    }
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      setError("Укажите число месяца от 1 до 31");
+      return;
+    }
+    if (!automationRecipient.trim() || !automationRecipient.includes("@")) {
+      setError("Укажите email получателя письма, например office@example.com");
+      return;
+    }
+    if (!automationSubject.trim() || !automationBody.trim() || !automationTaskTitle.trim()) {
+      setError("Заполните тему, текст письма и название контрольной задачи");
+      return;
+    }
     try {
       setError("");
       await api("/ai-secretary/automations", {
@@ -1196,7 +1213,7 @@ export function App() {
           contract_id: automationContractId || null,
           source_document_id: automationDocumentId || null,
           name: automationName.trim(),
-          day_of_month: Number(automationDay),
+          day_of_month: day,
           recipient_to: automationRecipient.trim(),
           subject_template: automationSubject.trim(),
           body_template: automationBody.trim(),
@@ -3701,12 +3718,9 @@ export function App() {
                 <input value={automationSubject} onChange={(e) => setAutomationSubject(e.target.value)} placeholder="Тема письма" />
                 <textarea value={automationBody} onChange={(e) => setAutomationBody(e.target.value)} placeholder="Текст письма" />
                 <input value={automationTaskTitle} onChange={(e) => setAutomationTaskTitle(e.target.value)} placeholder="Название контрольной задачи" />
-                <button
-                  disabled={!automationName.trim() || !automationRecipient.trim() || !automationSubject.trim() || !automationBody.trim() || Number(automationDay) < 1 || Number(automationDay) > 31}
-                  onClick={createAutomationRule}
-                >Создать ежемесячный регламент</button>
+                <button onClick={createAutomationRule}>Создать ежемесячный регламент</button>
               </div>
-              <small>Переменные: {"{project}"}, {"{contract}"}, {"{month}"}, {"{next_month}"}, {"{date}"}.</small>
+              <small>Обязательно укажите email получателя. Переменные: {"{project}"}, {"{contract}"}, {"{month}"}, {"{next_month}"}, {"{date}"}.</small>
               <div className="automation-list">
                 {automationRules.map((rule) => <article key={rule.id}>
                   <div>
