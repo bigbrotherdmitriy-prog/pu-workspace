@@ -42,6 +42,7 @@ from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
 from app.automations.gmail import start as start_gmail_automation, stop as stop_gmail_automation
+from app.automations.ai_secretary import start as start_ai_secretary_automation, stop as stop_ai_secretary_automation
 
 
 APP_VERSION = "1.0.3"
@@ -58,10 +59,12 @@ async def lifespan(_: FastAPI):
     recover_incomplete_snapshots()
     recover_incomplete_analyses()
     start_gmail_automation()
+    start_ai_secretary_automation()
     try:
         yield
     finally:
         stop_gmail_automation()
+        stop_ai_secretary_automation()
 
 
 app = FastAPI(

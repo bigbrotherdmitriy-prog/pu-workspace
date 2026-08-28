@@ -16,6 +16,7 @@ from app.models.organizer import (
 from app.models.auth_session import AuthSession
 from app.models.task import Task, TaskDueDateHistory
 from app.models.response_draft import ResponseDraft
+from app.models.automation_rule import AutomationRule, AutomationRun
 from app.models.telegram_chat import TelegramChatLink
 from app.models.governance import Decision, Risk
 from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
@@ -44,6 +45,8 @@ __all__ = [
     "Task",
     "TaskDueDateHistory",
     "ResponseDraft",
+    "AutomationRule",
+    "AutomationRun",
     "TelegramChatLink",
     "Risk",
     "Decision",

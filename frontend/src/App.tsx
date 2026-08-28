@@ -292,6 +292,22 @@ type InboxMessage = {
   drafts: InboxDraft[];
   risks: InboxRisk[];
 };
+type AutomationRule = {
+  id: number;
+  project_id: number;
+  contract_id?: number;
+  source_document_id?: number;
+  name: string;
+  day_of_month: number;
+  recipient_to: string;
+  subject_template: string;
+  body_template: string;
+  task_title_template: string;
+  active: boolean;
+  next_run_on: string;
+  last_run_on?: string;
+  runs: { id: number; scheduled_for: string; task_id?: number; response_draft_id?: number; status: string }[];
+};
 type ObligationRow = {
   id: number;
   contract_id?: number;
@@ -564,6 +580,15 @@ export function App() {
     [bulkInboxContractId, setBulkInboxContractId] = useState(0),
     [incomingName, setIncomingName] = useState(""),
     [incomingText, setIncomingText] = useState(""),
+    [automationRules, setAutomationRules] = useState<AutomationRule[]>([]),
+    [automationName, setAutomationName] = useState("Ежемесячное письмо на пропуска"),
+    [automationDay, setAutomationDay] = useState("20"),
+    [automationRecipient, setAutomationRecipient] = useState(""),
+    [automationSubject, setAutomationSubject] = useState("Заявка на пропуска на {next_month}"),
+    [automationBody, setAutomationBody] = useState("Просьба оформить пропуска на {next_month} по проекту «{project}», договор {contract}."),
+    [automationTaskTitle, setAutomationTaskTitle] = useState("Проверить и отправить письмо на пропуска на {next_month}"),
+    [automationContractId, setAutomationContractId] = useState(0),
+    [automationDocumentId, setAutomationDocumentId] = useState(0),
     [contracts, setContracts] = useState<ContractRow[]>([]),
     [documentRows, setDocumentRows] = useState<DocumentRow[]>([]),
     [selectedDocument, setSelectedDocument] = useState<DocumentDetail | null>(
@@ -659,6 +684,7 @@ export function App() {
           queue,
           analyticsData,
           integrationData,
+          automationData,
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
@@ -690,6 +716,7 @@ export function App() {
           api(`/projects/${id}/processing-queue`).catch(() => null),
           api(`/analytics/project?project_id=${id}`).catch(() => null),
           api(`/integrations/project?project_id=${id}`).catch(() => ({ adapters: [] })),
+          api(`/ai-secretary/automations?project_id=${id}`).catch(() => ({ rules: [] })),
         ]);
         if (
           loadSequence !== loadSequenceRef.current ||
@@ -718,6 +745,7 @@ export function App() {
         setAuditLogs(audit.logs);
         setAnalytics(analyticsData);
         setIntegrationItems(integrationData.adapters);
+        setAutomationRules(automationData.rules);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1107,6 +1135,50 @@ export function App() {
       setNotice(
         "Сообщение обработано. Внешние задачи и события пока только предложены.",
       );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function createAutomationRule() {
+    try {
+      setError("");
+      await api("/ai-secretary/automations", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          contract_id: automationContractId || null,
+          source_document_id: automationDocumentId || null,
+          name: automationName.trim(),
+          day_of_month: Number(automationDay),
+          recipient_to: automationRecipient.trim(),
+          subject_template: automationSubject.trim(),
+          body_template: automationBody.trim(),
+          task_title_template: automationTaskTitle.trim(),
+        }),
+      });
+      setNotice("Регламент создан: в установленный день появятся задача и черновик письма; отправка только после подтверждения");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function setAutomationActive(rule: AutomationRule, activeValue: boolean) {
+    try {
+      await api(`/ai-secretary/automations/${rule.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: activeValue }),
+      });
+      setNotice(activeValue ? "Регламент включён" : "Регламент приостановлен");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function runAutomationNow(rule: AutomationRule) {
+    try {
+      await api(`/ai-secretary/automations/${rule.id}/run-now`, { method: "POST" });
+      setNotice("Созданы задача и черновик письма. Проверьте их перед подтверждением и отправкой");
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -3511,6 +3583,50 @@ export function App() {
                 </button>
               )}
             </section>
+            {active === "AI Secretary" && <section className="card automation-control">
+              <div className="automation-heading">
+                <div>
+                  <span className="eyebrow">РЕГЛАМЕНТНЫЕ СЦЕНАРИИ</span>
+                  <h2>AI Secretary — контролёр повторяющихся задач</h2>
+                  <p>В нужный день создаются задача и черновик письма. Внешняя отправка всегда требует вашего подтверждения.</p>
+                </div>
+                <b>{automationRules.filter((rule) => rule.active).length} активных</b>
+              </div>
+              <div className="automation-form">
+                <input value={automationName} onChange={(e) => setAutomationName(e.target.value)} placeholder="Название регламента" />
+                <label>Каждое число месяца<input type="number" min="1" max="31" value={automationDay} onChange={(e) => setAutomationDay(e.target.value)} /></label>
+                <input type="email" value={automationRecipient} onChange={(e) => setAutomationRecipient(e.target.value)} placeholder="Получатель письма" />
+                <select value={automationContractId} onChange={(e) => setAutomationContractId(Number(e.target.value))}>
+                  <option value={0}>Без договора</option>
+                  {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
+                </select>
+                <select value={automationDocumentId} onChange={(e) => setAutomationDocumentId(Number(e.target.value))}>
+                  <option value={0}>Без опорного документа</option>
+                  {documentRows.map((document) => <option value={document.id} key={document.id}>{document.name}</option>)}
+                </select>
+                <input value={automationSubject} onChange={(e) => setAutomationSubject(e.target.value)} placeholder="Тема письма" />
+                <textarea value={automationBody} onChange={(e) => setAutomationBody(e.target.value)} placeholder="Текст письма" />
+                <input value={automationTaskTitle} onChange={(e) => setAutomationTaskTitle(e.target.value)} placeholder="Название контрольной задачи" />
+                <button
+                  disabled={!automationName.trim() || !automationRecipient.trim() || !automationSubject.trim() || !automationBody.trim() || Number(automationDay) < 1 || Number(automationDay) > 31}
+                  onClick={createAutomationRule}
+                >Создать ежемесячный регламент</button>
+              </div>
+              <small>Переменные: {"{project}"}, {"{contract}"}, {"{month}"}, {"{next_month}"}, {"{date}"}.</small>
+              <div className="automation-list">
+                {automationRules.map((rule) => <article key={rule.id}>
+                  <div>
+                    <span className={`draft-status ${rule.active ? "ready" : "completed"}`}>{rule.active ? "Активен" : "Пауза"}</span>
+                    <strong>{rule.name}</strong>
+                    <small>Каждого {rule.day_of_month} числа · следующий запуск {new Date(`${rule.next_run_on}T00:00:00`).toLocaleDateString("ru-RU")} · {rule.recipient_to}</small>
+                    <small>{rule.contract_id ? `Договор привязан · ` : ""}{rule.source_document_id ? "Опорный документ привязан" : "Без опорного документа"}</small>
+                  </div>
+                  <button onClick={() => runAutomationNow(rule)}>Подготовить сейчас</button>
+                  <button className="secondary" onClick={() => setAutomationActive(rule, !rule.active)}>{rule.active ? "Приостановить" : "Включить"}</button>
+                </article>)}
+                {!automationRules.length && <p>Регламентов пока нет. Заполните форму выше — например, ежемесячное письмо на пропуска.</p>}
+              </div>
+            </section>}
             {active === "AI Secretary" && <section className="card inbox-compose">
               <h2>Добавить тестовое сообщение</h2>
               <p>Вставьте письмо или сообщение для полного сценария MVP2.</p>

@@ -221,25 +221,29 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     if draft.status != "approved":
         raise HTTPException(409, "Сначала подтвердите и при необходимости отредактируйте проект ответа")
     source = db.get(Message, draft.message_id) if draft.message_id else None
-    if source is None or source.source_type != "email" or not source.source_sender:
-        raise HTTPException(422, "Черновик не связан с письмом Gmail")
-    recipient = parseaddr(source.source_sender)[1]
+    recipient = draft.recipient_to or (
+        parseaddr(source.source_sender)[1]
+        if source is not None and source.source_type == "email" and source.source_sender else ""
+    )
     if not recipient:
         raise HTTPException(422, "Не удалось определить адрес получателя")
     message = EmailMessage()
     message["To"] = recipient
-    message["Subject"] = draft.subject if draft.subject.lower().startswith("re:") else f"Re: {draft.subject}"
+    message["Subject"] = (
+        draft.subject if draft.recipient_to or draft.subject.lower().startswith("re:")
+        else f"Re: {draft.subject}"
+    )
     message.set_content(draft.body)
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
     service = google_workspace_for_project(draft.project_id, db).service("gmail", "v1")
     body = {"raw": raw}
-    if source.source_thread_id:
+    if source is not None and source.source_thread_id:
         body["threadId"] = source.source_thread_id
     sent = service.users().messages().send(userId="me", body=body).execute()
     draft.sent_external_id = sent["id"]
     draft.sent_at = datetime.now(timezone.utc)
     draft.status = "sent"
     db.add(AuditLog(action="gmail_reply_sent", entity_type="response_draft", entity_id=draft.id,
-                    details=f"message={source.id}; gmail_message={sent['id']}"))
+                    details=f"message={source.id if source else 'proactive'}; gmail_message={sent['id']}"))
     db.commit()
     return {"id": draft.id, "status": draft.status, "gmail_message_id": draft.sent_external_id, "already_sent": False}

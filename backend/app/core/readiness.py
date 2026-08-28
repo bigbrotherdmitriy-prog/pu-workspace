@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database import engine
 from app.schema import CURRENT_SCHEMA_REVISION
 from app.automations.gmail import status as gmail_automation_status
+from app.automations.ai_secretary import status as ai_secretary_automation_status
 
 
 def readiness_report() -> dict:
@@ -47,6 +48,18 @@ def readiness_report() -> dict:
             automation_message
             if gmail_automation["running"]
             else "disabled" if not gmail_automation["enabled"] else "not running"
+        ),
+        required=False,
+    )
+    ai_automation = ai_secretary_automation_status()
+    ai_last_result = ai_automation.get("last_result") or {}
+    checks["ai_secretary_automation"] = _check(
+        not ai_automation["enabled"] or (ai_automation["running"] and not ai_automation["last_error"]),
+        (
+            f"running every {ai_automation['interval_seconds']} seconds; "
+            f"last run {ai_automation['last_run_at'] or 'pending'}; "
+            f"prepared {ai_last_result.get('prepared', 0)}"
+            if ai_automation["running"] else "disabled" if not ai_automation["enabled"] else "not running"
         ),
         required=False,
     )

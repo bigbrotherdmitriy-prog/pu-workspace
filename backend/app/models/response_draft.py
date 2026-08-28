@@ -14,6 +14,7 @@ class ResponseDraft(Base):
     message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True)
     subject: Mapped[str] = mapped_column(String(500))
     body: Mapped[str] = mapped_column(Text)
+    recipient_to: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
     source_file_id: Mapped[str] = mapped_column(String(255), index=True)
     source_file_name: Mapped[str] = mapped_column(String(1000))

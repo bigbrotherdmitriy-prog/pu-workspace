@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from datetime import date
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +22,8 @@ from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.governance import Risk
 from app.models.user import User
+from app.models.automation_rule import AutomationRule, AutomationRun
+from app.automation_engine import next_monthly_date, prepare_rule_run
 from app.core.integration_types import StorageObject
 from app.response_engine import create_response_drafts
 from app.summary_engine import brief_summary
@@ -53,6 +56,22 @@ class BulkContextConfirmation(ContextConfirmation):
 
 class MessageStatusUpdate(BaseModel):
     status: str = Field(pattern="^(ready|needs_context_confirmation|in_progress|completed)$")
+
+
+class AutomationRuleCreate(BaseModel):
+    project_id: int
+    contract_id: int | None = None
+    source_document_id: int | None = None
+    name: str = Field(min_length=1, max_length=500)
+    day_of_month: int = Field(ge=1, le=31)
+    recipient_to: str = Field(min_length=3, max_length=1000)
+    subject_template: str = Field(min_length=1, max_length=500)
+    body_template: str = Field(min_length=1, max_length=20000)
+    task_title_template: str = Field(min_length=1, max_length=500)
+
+
+class AutomationRuleState(BaseModel):
+    active: bool
 
 
 def _contract_candidate(db: Session, project_id: int, content: str) -> tuple[Contract | None, float, str]:
@@ -330,3 +349,80 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
     db.commit()
     return {"confirmed": len(rows), "moved": moved, "project_id": target_project_id,
             "contract_id": contract.id if contract else None}
+
+
+def _automation_rule_payload(db: Session, row: AutomationRule) -> dict:
+    runs = list(db.scalars(select(AutomationRun).where(
+        AutomationRun.rule_id == row.id,
+    ).order_by(AutomationRun.scheduled_for.desc()).limit(12)))
+    return {
+        "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
+        "source_document_id": row.source_document_id, "name": row.name, "kind": row.kind,
+        "day_of_month": row.day_of_month, "recipient_to": row.recipient_to,
+        "subject_template": row.subject_template, "body_template": row.body_template,
+        "task_title_template": row.task_title_template, "active": row.active,
+        "next_run_on": row.next_run_on, "last_run_on": row.last_run_on,
+        "runs": [{"id": run.id, "scheduled_for": run.scheduled_for, "task_id": run.task_id,
+                  "response_draft_id": run.response_draft_id, "status": run.status} for run in runs],
+    }
+
+
+@router.get("/automations")
+def list_automation_rules(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    rows = list(db.scalars(select(AutomationRule).where(
+        AutomationRule.project_id == project_id,
+    ).order_by(AutomationRule.active.desc(), AutomationRule.next_run_on, AutomationRule.id)))
+    return {"rules": [_automation_rule_payload(db, row) for row in rows], "count": len(rows)}
+
+
+@router.post("/automations")
+def create_automation_rule(payload: AutomationRuleCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
+    if "@" not in payload.recipient_to or payload.recipient_to.startswith("@"):
+        raise HTTPException(422, "Укажите корректный адрес получателя")
+    if payload.contract_id is not None and not db.scalar(select(Contract.id).where(
+        Contract.id == payload.contract_id, Contract.project_id == payload.project_id,
+    )):
+        raise HTTPException(422, "Contract does not belong to this project")
+    if payload.source_document_id is not None and not db.scalar(select(Document.id).where(
+        Document.id == payload.source_document_id, Document.project_id == payload.project_id,
+    )):
+        raise HTTPException(422, "Document does not belong to this project")
+    row = AutomationRule(
+        **payload.model_dump(), created_by_user_id=user.id,
+        next_run_on=next_monthly_date(payload.day_of_month, date.today()),
+    )
+    db.add(row); db.flush()
+    db.add(AuditLog(action="automation_rule_created", entity_type="automation_rule", entity_id=row.id,
+                    details=f"project={row.project_id}; day={row.day_of_month}; confirmation_required=true"))
+    db.commit(); db.refresh(row)
+    return _automation_rule_payload(db, row)
+
+
+@router.patch("/automations/{rule_id}")
+def update_automation_rule(rule_id: int, payload: AutomationRuleState,
+                           db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = db.get(AutomationRule, rule_id)
+    if row is None:
+        raise HTTPException(404, "Automation rule not found")
+    require_project_role(db, user, row.project_id, "manager")
+    row.active = payload.active
+    db.add(AuditLog(action="automation_rule_state_changed", entity_type="automation_rule", entity_id=row.id,
+                    details=f"active={row.active}"))
+    db.commit(); db.refresh(row)
+    return _automation_rule_payload(db, row)
+
+
+@router.post("/automations/{rule_id}/run-now")
+def run_automation_rule_now(rule_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = db.get(AutomationRule, rule_id)
+    if row is None:
+        raise HTTPException(404, "Automation rule not found")
+    require_project_role(db, user, row.project_id, "manager")
+    run = prepare_rule_run(db, row, date.today())
+    db.add(AuditLog(action="automation_rule_run_prepared", entity_type="automation_run", entity_id=run.id,
+                    details=f"rule={row.id}; task={run.task_id}; draft={run.response_draft_id}; sent=false"))
+    db.commit()
+    return {"run_id": run.id, "task_id": run.task_id, "response_draft_id": run.response_draft_id,
+            "status": run.status, "sent": False}
