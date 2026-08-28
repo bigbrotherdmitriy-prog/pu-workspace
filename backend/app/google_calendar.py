@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
 from app.integrations.google_workspace import google_workspace_for_project
+from app.integrations.external_resources import record_external_resource
 from app.models.task import Task
 
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
@@ -43,8 +44,14 @@ def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task], forc
     for task in pending:
         try:
             if not task.due_date and task.google_calendar_event_id:
+                removed_id = task.google_calendar_event_id
                 service.events().delete(calendarId="primary", eventId=task.google_calendar_event_id).execute()
                 task.google_calendar_event_id = None
+                record_external_resource(
+                    db, project_id=project_id, entity_type="task", entity_id=task.id,
+                    provider="google_workspace", resource_type="calendar_event",
+                    external_id=removed_id, sync_status="deleted",
+                )
             elif task.google_calendar_event_id:
                 body = event_payload(task)
                 if task.status == "completed": body["summary"] = "✅ " + body["summary"]
@@ -54,6 +61,12 @@ def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task], forc
                 task.google_calendar_event_id = result["id"]
             task.google_calendar_sync_error = None
             task.google_calendar_synced_at = datetime.now(timezone.utc)
+            if task.google_calendar_event_id:
+                record_external_resource(
+                    db, project_id=project_id, entity_type="task", entity_id=task.id,
+                    provider="google_workspace", resource_type="calendar_event",
+                    external_id=task.google_calendar_event_id,
+                )
             synced += 1
         except Exception as exc:
             task.google_calendar_sync_error = str(exc)[:1000]
