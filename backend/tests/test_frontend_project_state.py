@@ -9,7 +9,7 @@ def test_new_project_reload_uses_created_project_id():
 
     assert "async function load(preferredProjectId?: number)" in source
     assert "await activateProject(created.id);" in source
-    assert 'sessionStorage.setItem("pu_active_project_id", String(created.id));' in source
+    assert 'sessionStorage.setItem("pu_active_project_id", String(id));' in source
 
 
 def test_oauth_callback_restores_project_before_initial_load():
