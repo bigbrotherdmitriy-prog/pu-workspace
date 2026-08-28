@@ -401,6 +401,21 @@
 .finance-chain-steps span { font-weight: 750; }
 .finance-chain-steps small { color: #718078; }
 .finance-next-action { padding: 10px 12px; border-radius: 8px; background: #fff8e8; color: #8a5a00!important; }
+.finance-document-assistant { display: grid; gap: 14px; }
+.finance-document-assistant .card-head { margin: 0; }
+.finance-document-assistant h2, .finance-document-assistant p { margin: 4px 0 0; }
+.finance-document-assistant .card-head button { padding: 9px 12px; border: 1px solid #0b9068; border-radius: 8px; background: #fff; color: #087a59; font-weight: 700; cursor: pointer; }
+.finance-candidates { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.finance-candidates article { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid #dbe3df; border-radius: 10px; background: #fff; }
+.finance-candidates article.linked { opacity: .65; background: #f4f7f5; }
+.finance-candidates article > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.finance-candidates article > div span { color: #087a59; font-size: 12px; font-weight: 750; }
+.finance-candidates article > div b { color: #087a59; }
+.finance-candidates article strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.finance-candidates article small { color: #718078; }
+.finance-candidates article button { justify-self: start; padding: 7px 9px; border: 1px solid #0b9068; border-radius: 7px; background: #fff; color: #087a59; font-weight: 650; cursor: pointer; }
+.finance-candidates article button:disabled { cursor: default; }
+.finance-source-note { color: #087a59!important; font-weight: 650; }
 .finance-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .finance-grid h2 { margin: 0 0 12px; }
 .finance-list { display: grid; }
@@ -474,6 +489,7 @@
   .finance-contract-chain { align-items: stretch; flex-direction: column; }
   .finance-contract-chain select { min-width: 0; width: 100%; }
   .finance-chain-steps { grid-template-columns: 1fr; }
+  .finance-candidates { grid-template-columns: 1fr; }
   .finance-entry > div:last-child { grid-template-columns: 1fr; }
   .finance-grid { grid-template-columns: 1fr; }
   .finance-list > div { grid-template-columns: 1fr; }

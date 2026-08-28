@@ -85,4 +85,13 @@ def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
     assert '<option value="schedule">Этап ГПР</option>' in source
     assert "finance-chain-steps" in source
     assert "Связать с этапом ГПР" in source
+
+
+def test_finance_workflow_suggests_analyzed_project_documents_without_mutating_sources():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    assert "/execution/document-candidates" in source
+    assert "Найденные ГПР, бюджеты, ДДС, счета и акты" in source
+    assert "Проверить и использовать" in source
+    assert "source_document_id: financeSourceDocumentId || null" in source
+    assert "document_id: financeSourceDocumentId || null" in source
     assert "Связать со строкой бюджета" in source

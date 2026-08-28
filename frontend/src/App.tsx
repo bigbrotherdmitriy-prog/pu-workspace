@@ -447,6 +447,17 @@ type FinanceOverview = {
     status: string;
   }[];
 };
+type FinanceDocumentCandidate = {
+  document_id: number;
+  name: string;
+  source: string;
+  kind: "schedule" | "budget" | "invoice" | "cash-flow" | "act";
+  score: number;
+  reasons: string[];
+  hints: { amount?: string; date?: string; number?: string };
+  already_linked: boolean;
+  originals_changed: boolean;
+};
 type AnalyticsDistribution = { key: string; count: number }[];
 type ProjectAnalytics = {
   summary: {
@@ -667,12 +678,14 @@ export function App() {
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [finance, setFinance] = useState<FinanceOverview | null>(null),
+    [financeCandidates, setFinanceCandidates] = useState<FinanceDocumentCandidate[]>([]),
     [selectedFinanceContractId, setSelectedFinanceContractId] = useState(0),
     [financeKind, setFinanceKind] = useState("budget"),
     [financeTitle, setFinanceTitle] = useState(""),
     [financeAmount, setFinanceAmount] = useState(""),
     [financeDate, setFinanceDate] = useState(""),
     [financeExtra, setFinanceExtra] = useState(""),
+    [financeSourceDocumentId, setFinanceSourceDocumentId] = useState(0),
     [financeScheduleItemId, setFinanceScheduleItemId] = useState(0),
     [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
@@ -1826,20 +1839,38 @@ export function App() {
   async function loadFinance() {
     if (!projectId) return;
     try {
-      setFinance(await api(`/execution/overview?project_id=${projectId}`));
+      const contractQuery = selectedFinanceContractId ? `&contract_id=${selectedFinanceContractId}` : "";
+      const [overview, suggestions] = await Promise.all([
+        api(`/execution/overview?project_id=${projectId}`),
+        api(`/execution/document-candidates?project_id=${projectId}${contractQuery}`),
+      ]);
+      setFinance(overview);
+      setFinanceCandidates(suggestions.candidates || []);
     } catch (e) {
       setError((e as Error).message);
     }
   }
   useEffect(() => {
     if (ready && projectId) loadFinance();
-  }, [ready, projectId]);
+  }, [ready, projectId, selectedFinanceContractId]);
   function prepareFinanceItem(kind: string) {
     setFinanceKind(kind);
     setFinanceTitle("");
     setFinanceAmount("");
     setFinanceDate("");
     setFinanceExtra("");
+    setFinanceSourceDocumentId(0);
+    window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  }
+  function useFinanceCandidate(candidate: FinanceDocumentCandidate) {
+    const kind = candidate.kind === "cash-flow" ? "cash-out" : candidate.kind;
+    setFinanceKind(kind);
+    setFinanceTitle(candidate.name.replace(/\.[^.]+$/, ""));
+    setFinanceAmount(candidate.hints.amount || "");
+    setFinanceDate(candidate.hints.date || "");
+    setFinanceExtra(candidate.kind === "act" ? candidate.hints.number || "" : "");
+    setFinanceSourceDocumentId(candidate.document_id);
+    setNotice(`Документ «${candidate.name}» выбран как источник. Проверьте поля и подтвердите предложение.`);
     window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
   async function addFinanceItem() {
@@ -1880,6 +1911,7 @@ export function App() {
           counterparty: financeExtra.trim() || null,
           schedule_item_id: financeScheduleItemId || null,
           budget_line_id: financeBudgetLineId || null,
+          source_document_id: financeSourceDocumentId || null,
         };
       }
       if (financeKind === "procurement") {
@@ -1900,6 +1932,7 @@ export function App() {
           title: financeTitle.trim(),
           act_date: financeDate || null,
           amount,
+          document_id: financeSourceDocumentId || null,
         };
       }
       if (financeKind === "baseline") {
@@ -2880,6 +2913,39 @@ export function App() {
                 <p className="finance-next-action">Следующий шаг: добавьте этапы ГПР с плановыми сроками. После этого создайте бюджет и связывайте счета с этапом и строкой бюджета.</p>
               )}
             </section>
+            <section className="card finance-document-assistant">
+              <div className="card-head">
+                <div>
+                  <span className="eyebrow">АНАЛИЗ ПРОЕКТНОЙ ПАПКИ</span>
+                  <h2>Найденные ГПР, бюджеты, ДДС, счета и акты</h2>
+                  <p>Система предлагает роль документа по названию и извлечённому тексту. Оригинал не меняется; перед созданием записи проверьте поля.</p>
+                </div>
+                <button type="button" onClick={loadFinance}>Обновить анализ</button>
+              </div>
+              <div className="finance-candidates">
+                {financeCandidates.slice(0, 12).map((candidate) => (
+                  <article className={candidate.already_linked ? "linked" : ""} key={candidate.document_id}>
+                    <div>
+                      <span>{({ schedule: "ГПР", budget: "Бюджет / смета", invoice: "Счёт", "cash-flow": "ДДС", act: "Акт" } as Record<string, string>)[candidate.kind]}</span>
+                      <b>{candidate.score}%</b>
+                    </div>
+                    <strong title={candidate.name}>{candidate.name}</strong>
+                    <small>{candidate.reasons.join("; ") || "совпадение по структуре документа"}</small>
+                    <small>{[
+                      candidate.hints.amount ? money(Number(candidate.hints.amount)) : "",
+                      candidate.hints.date || "",
+                      candidate.hints.number ? `№ ${candidate.hints.number}` : "",
+                    ].filter(Boolean).join(" · ")}</small>
+                    <button type="button" disabled={candidate.already_linked} onClick={() => useFinanceCandidate(candidate)}>
+                      {candidate.already_linked ? "Уже привязан" : "Проверить и использовать"}
+                    </button>
+                  </article>
+                ))}
+                {!financeCandidates.length && (
+                  <p className="finance-empty">Подходящие документы пока не распознаны. Завершите анализ подключённой рабочей копии и обновите этот блок.</p>
+                )}
+              </div>
+            </section>
             <section className="card finance-entry" id="finance-entry">
               <div>
                 <h2>Добавить управленческую запись</h2>
@@ -2887,6 +2953,7 @@ export function App() {
                   Новая запись создаётся как предложение и не влияет на
                   подтверждённый прогноз.
                 </p>
+                {financeSourceDocumentId > 0 && <p className="finance-source-note">Источник: документ #{financeSourceDocumentId}. Связь сохранится для счёта или акта.</p>}
               </div>
               <div>
                 <select

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.document_version import DocumentVersion
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract
 from app.models.user import User
@@ -94,6 +96,55 @@ class StatusUpdate(BaseModel):
     actual_date: date | None = None
 
 
+_DOCUMENT_KIND_MARKERS = {
+    "schedule": (("гпр", 45), ("график производства работ", 50), ("календарный план", 40), ("график", 35), ("срок выполнения", 15)),
+    "budget": (("бюджет", 45), ("смета", 45), ("стоимость работ", 25), ("ведомость объем", 20)),
+    "invoice": (("счет на оплату", 55), ("счёт на оплату", 55), ("итого к оплате", 35), ("платеж", 15)),
+    "cash-flow": (("ддс", 55), ("движение денежных средств", 55), ("платежный календарь", 40), ("платёжный календарь", 40)),
+    "act": (("акт выполненных работ", 55), ("акт приемки", 50), ("акт приёмки", 50), ("кс-2", 45), ("кс 2", 40)),
+}
+
+
+def _finance_document_score(name: str, content: str, kind: str) -> tuple[int, list[str]]:
+    """Explainably classify an extracted project document without changing it."""
+    normalized_name = re.sub(r"\s+", " ", name.casefold().replace("_", " "))
+    normalized_text = re.sub(r"\s+", " ", content[:120_000].casefold())
+    score = 0
+    reasons: list[str] = []
+    for marker, weight in _DOCUMENT_KIND_MARKERS[kind]:
+        if marker in normalized_name:
+            score += weight
+            reasons.append(f"«{marker}» найдено в названии")
+        elif marker in normalized_text:
+            score += max(8, weight // 2)
+            reasons.append(f"«{marker}» найдено в тексте")
+    if kind == "invoice" and any(word in normalized_name for word in ("акт", "договор", "приложение")):
+        score -= 20
+    if kind == "act" and "счет" in normalized_name:
+        score -= 20
+    return max(0, min(score, 100)), reasons[:4]
+
+
+def _finance_document_hints(name: str, content: str) -> dict:
+    text = f"{name}\n{content[:120_000]}"
+    amount_matches = re.findall(r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:₽|руб(?:\.|лей)?)", text, re.IGNORECASE)
+    amount = None
+    if amount_matches:
+        try:
+            amount = str(max(Decimal(value.replace(" ", "").replace(",", ".")) for value in amount_matches))
+        except Exception:
+            amount = None
+    date_match = re.search(r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)", text)
+    suggested_date = None
+    if date_match:
+        try:
+            suggested_date = date(int(date_match.group(3)), int(date_match.group(2)), int(date_match.group(1))).isoformat()
+        except ValueError:
+            pass
+    number_match = re.search(r"(?:№|номер|сч[её]т(?:\s+на\s+оплату)?|акт)\s*[:№-]?\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9./_-]{1,40})", text, re.IGNORECASE)
+    return {"amount": amount, "date": suggested_date, "number": number_match.group(1) if number_match else None}
+
+
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
     if contract_id is not None and not db.scalar(select(Contract.id).where(Contract.id == contract_id, Contract.project_id == project_id)):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
@@ -148,6 +199,55 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         "acts": [{"id": x.id, "contract_id": x.contract_id, "document_id": x.document_id, "number": x.number,
                   "title": x.title, "act_date": x.act_date, "amount": x.amount, "status": x.status} for x in acts],
     }
+
+
+@router.get("/document-candidates")
+def document_candidates(project_id: int, contract_id: int | None = None,
+                        db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Suggest finance/control roles for analyzed documents; never mutates a source."""
+    require_project_role(db, user, project_id, "viewer")
+    _check_contract(db, project_id, contract_id)
+    linked_document_ids = set(db.scalars(select(CashFlowEntry.source_document_id).where(
+        CashFlowEntry.project_id == project_id,
+        CashFlowEntry.source_document_id.is_not(None),
+    ))) | set(db.scalars(select(AcceptanceAct.document_id).where(
+        AcceptanceAct.project_id == project_id,
+        AcceptanceAct.document_id.is_not(None),
+    )))
+    rows = db.execute(select(Document, DocumentVersion.content).outerjoin(
+        DocumentVersion,
+        (DocumentVersion.document_id == Document.id) &
+        (DocumentVersion.version_number == Document.current_version),
+    ).where(Document.project_id == project_id).order_by(Document.id.desc())).all()
+    candidates = []
+    for document, extracted_content in rows:
+        content = "\n".join(part.strip() for part in (document.summary, document.notes, extracted_content)
+                            if part and part.strip())
+        ranked = []
+        for kind in _DOCUMENT_KIND_MARKERS:
+            score, reasons = _finance_document_score(document.name, content, kind)
+            if score:
+                ranked.append((score, kind, reasons))
+        if not ranked:
+            continue
+        ranked.sort(reverse=True)
+        score, kind, reasons = ranked[0]
+        if score < 20:
+            continue
+        candidates.append({
+            "document_id": document.id,
+            "name": document.name,
+            "source": document.source,
+            "kind": kind,
+            "score": score,
+            "reasons": reasons,
+            "hints": _finance_document_hints(document.name, content),
+            "already_linked": document.id in linked_document_ids,
+            "originals_changed": False,
+        })
+    candidates.sort(key=lambda item: (item["already_linked"], -item["score"], item["name"].casefold()))
+    return {"project_id": project_id, "contract_id": contract_id, "candidates": candidates[:100],
+            "requires_confirmation": True, "originals_changed": False}
 
 
 @router.post("/baselines")
