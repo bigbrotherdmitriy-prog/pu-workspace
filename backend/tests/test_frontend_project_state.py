@@ -77,3 +77,12 @@ def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
     assert "linkContractDocument" in source
     assert "Открыть ГПР, бюджет и ДДС" in source
     assert "Договор → ГПР → бюджет → ДДС → акты" in source
+
+
+def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    assert "Мастер запуска исполнения" in source
+    assert '<option value="schedule">Этап ГПР</option>' in source
+    assert "finance-chain-steps" in source
+    assert "Связать с этапом ГПР" in source
+    assert "Связать со строкой бюджета" in source

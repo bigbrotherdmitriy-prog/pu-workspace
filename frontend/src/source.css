@@ -387,6 +387,20 @@
 .finance-contract-chain h2, .finance-contract-chain p { margin: 4px 0 0; }
 .finance-contract-chain p { color: #748091; }
 .finance-contract-chain select { min-width: 340px; padding: 10px; border: 1px solid #b9c8c0; border-radius: 8px; background: #fff; }
+.finance-chain-guide { display: grid; gap: 14px; }
+.finance-chain-guide .card-head { margin: 0; }
+.finance-chain-guide h2, .finance-chain-guide p { margin: 0; }
+.finance-chain-guide p { margin-top: 5px; color: #748091; }
+.finance-chain-steps { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; }
+.finance-chain-steps button { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px; padding: 12px; border: 1px solid #dbe3df; border-radius: 10px; background: #fff; color: #3d4a44; text-align: left; cursor: pointer; }
+.finance-chain-steps button:not(:disabled):hover { border-color: #18a77a; background: #eff9f5; }
+.finance-chain-steps button.complete { border-color: #b9dfd2; background: #eff9f5; color: #087a59; }
+.finance-chain-steps button:disabled { cursor: default; opacity: .7; }
+.finance-chain-steps b { grid-row: 1 / span 2; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #e8eeeb; }
+.finance-chain-steps .complete b { background: #18a77a; color: #fff; }
+.finance-chain-steps span { font-weight: 750; }
+.finance-chain-steps small { color: #718078; }
+.finance-next-action { padding: 10px 12px; border-radius: 8px; background: #fff8e8; color: #8a5a00!important; }
 .finance-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .finance-grid h2 { margin: 0 0 12px; }
 .finance-list { display: grid; }
@@ -459,6 +473,7 @@
   .finance-entry { grid-template-columns: 1fr; }
   .finance-contract-chain { align-items: stretch; flex-direction: column; }
   .finance-contract-chain select { min-width: 0; width: 100%; }
+  .finance-chain-steps { grid-template-columns: 1fr; }
   .finance-entry > div:last-child { grid-template-columns: 1fr; }
   .finance-grid { grid-template-columns: 1fr; }
   .finance-list > div { grid-template-columns: 1fr; }

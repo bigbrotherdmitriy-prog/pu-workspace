@@ -1834,6 +1834,14 @@ export function App() {
   useEffect(() => {
     if (ready && projectId) loadFinance();
   }, [ready, projectId]);
+  function prepareFinanceItem(kind: string) {
+    setFinanceKind(kind);
+    setFinanceTitle("");
+    setFinanceAmount("");
+    setFinanceDate("");
+    setFinanceExtra("");
+    window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  }
   async function addFinanceItem() {
     const amount = Number(financeAmount || 0);
     if (!financeTitle.trim()) return;
@@ -2066,6 +2074,13 @@ export function App() {
     indexed: "Проиндексированы",
     unknown: "Не определено",
   } as Record<string, string>)[value] || value.replaceAll("_", " ");
+  const financeContract = contracts.find((contract) => contract.id === selectedFinanceContractId);
+  const financeBaselines = finance?.baselines.filter((row) => row.contract_id === selectedFinanceContractId) || [];
+  const financeBaselineIds = new Set(financeBaselines.map((row) => row.id));
+  const financeSchedule = finance?.schedule.filter((row) => financeBaselineIds.has(row.baseline_id)) || [];
+  const financeBudget = finance?.budget.filter((row) => row.contract_id === selectedFinanceContractId) || [];
+  const financeCash = finance?.cash_flow.filter((row) => row.contract_id === selectedFinanceContractId) || [];
+  const financeActs = finance?.acts.filter((row) => row.contract_id === selectedFinanceContractId) || [];
   const visibleDocuments = documentRows.filter(
     (item) =>
       active === "Центр знаний" ||
@@ -2831,7 +2846,41 @@ export function App() {
                 {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
               </select>
             </section>
-            <section className="card finance-entry">
+            <section className="card finance-chain-guide">
+              <div className="card-head">
+                <div>
+                  <h2>Мастер запуска исполнения</h2>
+                  <p>{financeContract
+                    ? `Договор ${financeContract.number}: выполните шаги слева направо.`
+                    : "Выберите договор выше — записи не должны терять договорный контекст."}</p>
+                </div>
+              </div>
+              <div className="finance-chain-steps">
+                {[
+                  ["1", "Договор", Boolean(financeContract), "contracts"],
+                  ["2", "ГПР", financeSchedule.length > 0, "schedule"],
+                  ["3", "Бюджет", financeBudget.length > 0, "budget"],
+                  ["4", "ДДС / счёт", financeCash.length > 0, "invoice"],
+                  ["5", "Акты", financeActs.length > 0, "act"],
+                ].map(([number, label, complete, kind]) => (
+                  <button
+                    type="button"
+                    className={complete ? "complete" : "pending"}
+                    disabled={!financeContract || kind === "contracts"}
+                    onClick={() => kind !== "contracts" && prepareFinanceItem(String(kind))}
+                    key={String(label)}
+                  >
+                    <b>{complete ? "✓" : number}</b>
+                    <span>{label}</span>
+                    <small>{complete ? "готово" : kind === "contracts" ? "выберите договор" : "добавить"}</small>
+                  </button>
+                ))}
+              </div>
+              {financeContract && !financeSchedule.length && (
+                <p className="finance-next-action">Следующий шаг: добавьте этапы ГПР с плановыми сроками. После этого создайте бюджет и связывайте счета с этапом и строкой бюджета.</p>
+              )}
+            </section>
+            <section className="card finance-entry" id="finance-entry">
               <div>
                 <h2>Добавить управленческую запись</h2>
                 <p>
@@ -2851,6 +2900,7 @@ export function App() {
                   <option value="procurement">Закупка / поставка</option>
                   <option value="act">Акт</option>
                   <option value="baseline">Версия ГПР</option>
+                  <option value="schedule">Этап ГПР</option>
                 </select>
                 <input
                   value={financeTitle}
@@ -2885,6 +2935,8 @@ export function App() {
                         ? "Номер акта"
                         : financeKind === "baseline"
                           ? "Комментарий"
+                          : financeKind === "schedule"
+                            ? "Комментарий к этапу"
                           : "Контрагент / поставщик"
                   }
                 />
