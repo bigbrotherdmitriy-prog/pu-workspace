@@ -3061,6 +3061,7 @@ export function App() {
                     <h2>{item.name}</h2>
                     <p>{item.description}</p>
                     <small>{item.capability} · {item.provider}</small>
+                    {item.detail && <small className="integration-detail">{item.detail}</small>}
                   </div>
                   <span className={item.connected ? "connected" : ""}>
                     {item.connected ? "Готово" : item.available ? "Не подключено" : "Недоступно"}

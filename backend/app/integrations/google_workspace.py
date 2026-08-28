@@ -24,10 +24,24 @@ class GoogleWorkspaceAdapter:
         self.project_id = project_id
         self.db = db
 
+    def configured(self) -> bool:
+        return bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
+
     def health(self) -> AdapterHealth:
         token = self.db.scalar(select(GoogleOAuthToken.id).where(GoogleOAuthToken.project_id == self.project_id))
-        ready = token is not None and bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
+        ready = token is not None and self.configured()
         return AdapterHealth(ready=ready, detail="connected" if ready else "not connected")
+
+    def authorized_scopes(self) -> frozenset[str]:
+        token = self.db.scalar(
+            select(GoogleOAuthToken.scopes).where(
+                GoogleOAuthToken.project_id == self.project_id
+            )
+        )
+        return frozenset((token or "").split())
+
+    def capability_connected(self, scope: str) -> bool:
+        return self.health().ready and scope in self.authorized_scopes()
 
     def credentials(self) -> Credentials:
         token = self.db.scalar(select(GoogleOAuthToken).where(GoogleOAuthToken.project_id == self.project_id))

@@ -1,4 +1,5 @@
 from app.api.integrations import GOOGLE_CAPABILITIES, router
+from app.integrations.catalog import IntegrationStatus
 
 
 def test_provider_neutral_integration_catalog_route_is_registered():
@@ -32,3 +33,21 @@ def test_external_action_approval_accepts_neutral_and_legacy_fields():
     })
     assert legacy.publish_task is True
     assert legacy.publish_calendar is False
+
+
+def test_catalog_status_serializes_provider_neutral_fields():
+    status = IntegrationStatus(
+        key="demo:channel",
+        provider="demo",
+        capability="channel",
+        name="Demo",
+        description="Test adapter",
+        available=True,
+        connected=False,
+        detail="authorization required",
+    ).as_dict()
+
+    assert status["provider"] == "demo"
+    assert status["capability"] == "channel"
+    assert status["connected"] is False
+    assert "google" not in status["key"]

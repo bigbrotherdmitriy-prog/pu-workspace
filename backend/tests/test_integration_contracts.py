@@ -57,7 +57,26 @@ def test_gemini_adapter_conforms_to_ai_contract(monkeypatch):
 
 def test_telegram_adapter_conforms_to_channel_contract(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "configured-for-test")
+    monkeypatch.delenv("TELEGRAM_RELAY_URL", raising=False)
     adapter = TelegramChannelAdapter()
     assert isinstance(adapter, ChannelAdapter)
     assert adapter.health().ready
     assert adapter.receive() == []
+
+
+def test_telegram_adapter_reports_polling_conflict(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status": "degraded", "last_error": "409 Conflict"}
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "configured-for-test")
+    monkeypatch.setenv("TELEGRAM_RELAY_URL", "http://relay")
+    monkeypatch.setattr("app.integrations.telegram.httpx.get", lambda *args, **kwargs: Response())
+
+    health = TelegramChannelAdapter().health()
+
+    assert health.ready is False
+    assert "polling conflict" in health.detail

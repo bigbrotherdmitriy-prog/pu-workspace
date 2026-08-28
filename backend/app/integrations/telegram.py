@@ -18,8 +18,22 @@ class TelegramChannelAdapter:
     provider = "telegram"
 
     def health(self) -> AdapterHealth:
-        ready = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
-        return AdapterHealth(ready=ready, detail="configured" if ready else "bot token is not configured")
+        if not os.getenv("TELEGRAM_BOT_TOKEN"):
+            return AdapterHealth(ready=False, detail="bot token is not configured")
+        relay = os.getenv("TELEGRAM_RELAY_URL", "").rstrip("/")
+        if not relay:
+            return AdapterHealth(ready=True, detail="configured")
+        try:
+            response = httpx.get(f"{relay}/health", timeout=3.0)
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("status") == "healthy":
+                return AdapterHealth(ready=True, detail="relay healthy")
+            error = str(payload.get("last_error") or "relay degraded")
+            detail = "polling conflict: another bot process is active" if "409 Conflict" in error else "relay degraded"
+            return AdapterHealth(ready=False, detail=detail)
+        except Exception:
+            return AdapterHealth(ready=False, detail="relay is unreachable")
 
     def receive(self, limit: int = 100) -> list[ChannelMessage]:
         # Telegram messages are pushed to the webhook/relay; polling is owned by
