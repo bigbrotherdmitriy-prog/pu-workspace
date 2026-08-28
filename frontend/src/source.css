@@ -220,6 +220,10 @@
 .inbox-toolbar > div { display: grid; gap: 2px; }
 .inbox-toolbar strong { color: #18211d; }
 .inbox-toolbar small, .inbox-toolbar > span { font-size: 12px; }
+.inbox-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.inbox-filters button { padding: 8px 11px; border: 1px solid #d2ddd7; border-radius: 999px; background: #fff; color: #56655e; cursor: pointer; }
+.inbox-filters button.selected { border-color: #0b9068; background: #dff4ec; color: #087a59; }
+.inbox-filters b { margin-left: 5px; }
 .inbox-card.collapsed { padding-top: 16px; padding-bottom: 16px; }
 .inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .inbox-head h2 { margin: 8px 0 3px; }

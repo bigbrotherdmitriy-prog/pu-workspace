@@ -493,6 +493,7 @@ export function App() {
     [drafts, setDrafts] = useState<ResponseDraft[]>([]),
     [inbox, setInbox] = useState<InboxMessage[]>([]),
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
+    [inboxFilter, setInboxFilter] = useState("all"),
     [incomingName, setIncomingName] = useState(""),
     [incomingText, setIncomingText] = useState(""),
     [contracts, setContracts] = useState<ContractRow[]>([]),
@@ -1489,6 +1490,21 @@ export function App() {
         .toLocaleLowerCase("ru-RU")
         .includes(query.toLocaleLowerCase("ru-RU")),
   );
+  const inboxCounts = {
+    all: inbox.length,
+    attention: inbox.filter((item) => !item.context_confirmed).length,
+    tasks: inbox.filter((item) => item.tasks.length > 0).length,
+    drafts: inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length,
+  };
+  const visibleInbox = inbox.filter((item) => {
+    const matchesQuery = !query || `${item.source_name} ${item.source_sender || ""} ${item.summary}`
+      .toLocaleLowerCase("ru-RU").includes(query.toLocaleLowerCase("ru-RU"));
+    if (!matchesQuery) return false;
+    if (inboxFilter === "attention") return !item.context_confirmed;
+    if (inboxFilter === "tasks") return item.tasks.length > 0;
+    if (inboxFilter === "drafts") return item.drafts.some((draft) => draft.status !== "sent");
+    return true;
+  });
   return (
     <div className="shell">
       <aside
@@ -3067,14 +3083,19 @@ export function App() {
                 </div>
                 <span>Нажмите на письмо, чтобы открыть анализ</span>
               </div>
-              {inbox
-                .filter(
-                  (item) =>
-                    !query ||
-                    `${item.source_name} ${item.summary}`
-                      .toLocaleLowerCase("ru-RU")
-                      .includes(query.toLocaleLowerCase("ru-RU")),
-                )
+              <div className="inbox-filters">
+                {[
+                  ["all", "Все", inboxCounts.all],
+                  ["attention", "Требуют внимания", inboxCounts.attention],
+                  ["tasks", "Есть задачи", inboxCounts.tasks],
+                  ["drafts", "Есть черновики", inboxCounts.drafts],
+                ].map(([value, label, count]) => (
+                  <button className={inboxFilter === value ? "selected" : ""} onClick={() => setInboxFilter(String(value))} key={value}>
+                    {label} <b>{count}</b>
+                  </button>
+                ))}
+              </div>
+              {visibleInbox
                 .map((message) => {
                   const expanded = expandedInboxId === message.id;
                   return (
@@ -3271,10 +3292,10 @@ export function App() {
                   </article>
                   );
                 })}
-              {!inbox.length && (
+              {!visibleInbox.length && (
                 <div className="card empty">
                   <Bot />
-                  <p>Входящих пока нет. Добавьте тестовое сообщение выше.</p>
+                  <p>{inbox.length ? "По выбранному фильтру писем нет." : "Входящих пока нет. Получите письма из Gmail или добавьте сообщение."}</p>
                 </div>
               )}
             </section>
