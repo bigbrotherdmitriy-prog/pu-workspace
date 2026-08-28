@@ -9,6 +9,8 @@ from typing import Any
 
 from googleapiclient.http import MediaIoBaseDownload
 
+from app.integrations.contracts import AdapterHealth
+
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
 from .content import extract_text
 from .types import DriveFile, FOLDER_MIME
@@ -46,8 +48,13 @@ class DriveClient:
     the file is outside the safe-copy tree.
     """
 
+    provider = "google_drive"
+
     def __init__(self, service: Any):
         self.service = service
+
+    def health(self) -> AdapterHealth:
+        return AdapterHealth(ready=self.service is not None, detail="service configured")
 
     @staticmethod
     def _to_file(meta: dict, fallback_parent: str = "") -> DriveFile:
@@ -59,7 +66,12 @@ class DriveClient:
             md5_checksum=meta.get("md5Checksum"),
             size=int(meta["size"]) if meta.get("size") else None,
             modified_time=meta.get("modifiedTime"),
+            object_type="folder" if meta["mimeType"] == FOLDER_MIME else "file",
+            provider="google_drive",
         )
+
+    def get_object(self, object_id: str) -> DriveFile:
+        return self.get_file_meta(object_id)
 
     def get_file_meta(self, file_id: str) -> DriveFile:
         meta = self.service.files().get(

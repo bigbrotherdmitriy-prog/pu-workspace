@@ -1,6 +1,7 @@
 import unittest
 
 from app.organizer_engine.drive import DriveClient, UnsafeDriveMutation
+from app.integrations.contracts import StorageAdapter
 
 
 class _Request:
@@ -35,6 +36,12 @@ class DriveBoundaryTests(unittest.TestCase):
             "outside": {"id": "outside", "name": "outside", "mimeType": "application/vnd.google-apps.folder", "parents": []},
         })
         self.drive = DriveClient(self.service)
+
+    def test_google_drive_client_is_a_storage_adapter(self):
+        self.assertIsInstance(self.drive, StorageAdapter)
+        item = self.drive.get_object("copy")
+        self.assertTrue(item.is_folder)
+        self.assertEqual(item.provider, "google_drive")
 
     def test_rename_outside_copy_is_blocked_before_api_update(self):
         with self.assertRaises(UnsafeDriveMutation):

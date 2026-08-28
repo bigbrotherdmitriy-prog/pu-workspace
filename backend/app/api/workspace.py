@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.api.google_drive import credentials_for_project
+from app.integrations.google_workspace import credentials_for_project
 from app.core.auth import require_project_role, require_user
 from app.database import SessionLocal, get_db
 from app.models.project import Project

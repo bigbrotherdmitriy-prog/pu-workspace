@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime, time, timezone
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
-from app.api.google_drive import credentials_for_project
+from app.integrations.google_workspace import google_workspace_for_project
 from app.models.task import Task
 
 TASKS_SCOPE = "https://www.googleapis.com/auth/tasks"
@@ -26,7 +26,7 @@ def sync_tasks_to_google(db: Session, project_id: int, tasks: list[Task], force_
     if not pending:
         return 0, 0
     try:
-        credentials = credentials_for_project(project_id, db)
+        credentials = google_workspace_for_project(project_id, db).credentials()
         if TASKS_SCOPE not in set(credentials.scopes or []):
             raise RuntimeError("Требуется повторно подключить Google и разрешить Google Tasks")
         service = build("tasks", "v1", credentials=credentials, cache_discovery=False)

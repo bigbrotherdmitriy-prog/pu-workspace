@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
-from app.api.google_drive import credentials_for_project
+from app.integrations.google_workspace import google_workspace_for_project
 from app.models.task import Task
 
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
@@ -30,7 +30,7 @@ def sync_tasks_to_calendar(db: Session, project_id: int, tasks: list[Task], forc
     if not pending:
         return 0, 0
     try:
-        credentials = credentials_for_project(project_id, db)
+        credentials = google_workspace_for_project(project_id, db).credentials()
         if CALENDAR_SCOPE not in set(credentials.scopes or []):
             raise RuntimeError("Требуется повторно подключить Google и разрешить Google Calendar")
         service = build("calendar", "v3", credentials=credentials, cache_discovery=False)

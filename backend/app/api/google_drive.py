@@ -8,8 +8,6 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from sqlalchemy import select
@@ -21,6 +19,7 @@ from app.models.google_token import GoogleOAuthToken
 from app.models.project import Project
 from app.models.user import User
 from app.core.auth import require_project_role, require_user
+from app.integrations.google_workspace import credentials_for_project as _adapter_credentials_for_project
 
 
 router = APIRouter(
@@ -92,47 +91,8 @@ def google_config():
 
 
 def credentials_for_project(project_id: int, db: Session):
-    token = db.scalar(
-        select(GoogleOAuthToken).where(
-            GoogleOAuthToken.project_id == project_id
-        )
-    )
-
-    if token is None or token.access_token is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Google Drive is not authorized",
-        )
-
-    client_id = os.getenv("GOOGLE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-
-    try:
-        access_token = decrypt_token(token.access_token)
-        refresh_token = decrypt_token(token.refresh_token)
-    except TokenEncryptionError as exc:
-        raise HTTPException(503, str(exc)) from exc
-
-    credentials = Credentials(
-        token=access_token,
-        refresh_token=refresh_token,
-        token_uri=token.token_uri,
-        client_id=client_id,
-        client_secret=client_secret,
-        scopes=(token.scopes or "").split(),
-    )
-
-    if credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-
-        token.access_token = encrypt_token(credentials.token)
-
-        if credentials.refresh_token:
-            token.refresh_token = encrypt_token(credentials.refresh_token)
-
-        db.commit()
-
-    return credentials
+    """Backward-compatible facade; new code imports the integration adapter."""
+    return _adapter_credentials_for_project(project_id, db)
 
 
 @router.get("/{project_id}/google/auth")

@@ -9,12 +9,11 @@ from email.utils import parseaddr
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from googleapiclient.discovery import build
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.ai_secretary import IncomingMessage, ingest_message
-from app.api.google_drive import credentials_for_project
+from app.integrations.google_workspace import google_workspace_for_project
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.ai_secretary import Message
@@ -62,7 +61,7 @@ def _headers(payload: dict) -> dict[str, str]:
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
-    service = build("gmail", "v1", credentials=credentials_for_project(project_id, db), cache_discovery=False)
+    service = google_workspace_for_project(project_id, db).service("gmail", "v1")
     page = service.users().messages().list(userId="me", q=payload.query, maxResults=payload.max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
@@ -120,7 +119,7 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     message["Subject"] = draft.subject if draft.subject.lower().startswith("re:") else f"Re: {draft.subject}"
     message.set_content(draft.body)
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    service = build("gmail", "v1", credentials=credentials_for_project(draft.project_id, db), cache_discovery=False)
+    service = google_workspace_for_project(draft.project_id, db).service("gmail", "v1")
     body = {"raw": raw}
     if source.source_thread_id:
         body["threadId"] = source.source_thread_id
