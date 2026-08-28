@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from threading import Event, Lock, Thread
 
 from sqlalchemy import select
@@ -15,7 +16,11 @@ from app.models.user import User
 log = logging.getLogger(__name__)
 _stop = Event()
 _run_lock = Lock()
+_state_lock = Lock()
 _thread: Thread | None = None
+_last_run_at: str | None = None
+_last_result: dict[str, int] | None = None
+_last_error: str | None = None
 
 
 def enabled() -> bool:
@@ -75,10 +80,19 @@ def sync_authorized_projects_once() -> dict[str, int]:
 
 
 def _worker() -> None:
+    global _last_run_at, _last_result, _last_error
     while not _stop.is_set():
         try:
-            sync_authorized_projects_once()
-        except Exception:
+            result = sync_authorized_projects_once()
+            with _state_lock:
+                _last_run_at = datetime.now(timezone.utc).isoformat()
+                _last_result = result
+                _last_error = None
+        except Exception as exc:
+            with _state_lock:
+                _last_run_at = datetime.now(timezone.utc).isoformat()
+                _last_result = None
+                _last_error = exc.__class__.__name__
             log.exception("Automatic Gmail synchronization pass failed")
         _stop.wait(interval_seconds())
 
@@ -100,8 +114,12 @@ def stop() -> None:
 
 
 def status() -> dict:
-    return {
-        "enabled": enabled(),
-        "running": bool(_thread and _thread.is_alive()),
-        "interval_seconds": interval_seconds(),
-    }
+    with _state_lock:
+        return {
+            "enabled": enabled(),
+            "running": bool(_thread and _thread.is_alive()),
+            "interval_seconds": interval_seconds(),
+            "last_run_at": _last_run_at,
+            "last_result": dict(_last_result) if _last_result is not None else None,
+            "last_error": _last_error,
+        }

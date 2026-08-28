@@ -19,3 +19,4 @@ def test_gmail_automation_status_is_observable():
         result = gmail.status()
         assert result["enabled"] is True
         assert result["interval_seconds"] == 600
+        assert {"last_run_at", "last_result", "last_error"} <= result.keys()

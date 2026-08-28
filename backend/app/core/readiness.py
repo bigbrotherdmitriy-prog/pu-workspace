@@ -34,10 +34,16 @@ def readiness_report() -> dict:
         required=False,
     )
     gmail_automation = gmail_automation_status()
+    last_result = gmail_automation.get("last_result") or {}
+    automation_message = (
+        f"running every {gmail_automation['interval_seconds']} seconds"
+        f"; last run {gmail_automation['last_run_at'] or 'pending'}"
+        f"; processed {last_result.get('processed', 0)}; failed {last_result.get('failed', 0)}"
+    )
     checks["gmail_automation"] = _check(
-        not gmail_automation["enabled"] or gmail_automation["running"],
+        not gmail_automation["enabled"] or (gmail_automation["running"] and not gmail_automation["last_error"]),
         (
-            f"running every {gmail_automation['interval_seconds']} seconds"
+            automation_message
             if gmail_automation["running"]
             else "disabled" if not gmail_automation["enabled"] else "not running"
         ),
