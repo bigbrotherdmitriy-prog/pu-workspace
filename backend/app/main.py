@@ -20,6 +20,7 @@ from app.api.execution_finance import router as execution_finance_router
 from app.api.gmail import router as gmail_router
 from app.api.ai_policy import router as ai_policy_router
 from app.api.analytics import router as analytics_router
+from app.api.integrations import router as integrations_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -86,6 +87,7 @@ app.include_router(execution_finance_router)
 app.include_router(gmail_router)
 app.include_router(ai_policy_router)
 app.include_router(analytics_router)
+app.include_router(integrations_router)
 app.include_router(google_drive_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)

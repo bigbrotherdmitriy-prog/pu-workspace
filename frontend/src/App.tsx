@@ -408,6 +408,17 @@ type ProjectAnalytics = {
   risks_by_criticality: AnalyticsDistribution;
   messages_by_channel: AnalyticsDistribution;
 };
+type IntegrationItem = {
+  key: string;
+  provider: string;
+  capability: "storage" | "channel" | "task" | "calendar" | "ai";
+  name: string;
+  description: string;
+  available: boolean;
+  connected: boolean;
+  action?: "oauth" | "sync" | "local_upload" | "ai_policy";
+  detail?: string;
+};
 
 const items = [
   [LayoutDashboard, "Рабочий центр"],
@@ -569,6 +580,7 @@ export function App() {
     [financeDate, setFinanceDate] = useState(""),
     [financeExtra, setFinanceExtra] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
+  const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   async function load() {
     try {
       setError("");
@@ -597,6 +609,7 @@ export function App() {
           policy,
           queue,
           analyticsData,
+          integrationData,
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
@@ -627,6 +640,7 @@ export function App() {
           api(`/projects/${id}/ai-policy`).catch(() => null),
           api(`/projects/${id}/processing-queue`).catch(() => null),
           api(`/analytics/project?project_id=${id}`).catch(() => null),
+          api(`/integrations/project?project_id=${id}`).catch(() => ({ adapters: [] })),
         ]);
         setSummary(d.summary);
         setDocuments(d.documents);
@@ -650,6 +664,7 @@ export function App() {
         setCurrentUser(me);
         setAuditLogs(audit.logs);
         setAnalytics(analyticsData);
+        setIntegrationItems(integrationData.adapters);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -659,12 +674,14 @@ export function App() {
     if (!projectId) return;
     try {
       setError("");
-      const [google, health] = await Promise.all([
+      const [google, health, catalog] = await Promise.all([
         api(`/projects/${projectId}/google/status`),
         api("/api/readiness"),
+        api(`/integrations/project?project_id=${projectId}`),
       ]);
       setGoogleState(google);
       setSystemState(health);
+      setIntegrationItems(catalog.adapters);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2997,58 +3014,33 @@ export function App() {
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page">
             <div className="integration-grid">
-              {[
-                [
-                  "Google Drive",
-                  "Документы и рабочие папки",
-                  Boolean(googleState?.authorized),
-                ],
-                [
-                  "Google Tasks",
-                  "Подтверждённые задачи",
-                  Boolean(googleState?.tasks_authorized),
-                ],
-                [
-                  "Google Calendar",
-                  "Сроки и события проекта",
-                  Boolean(googleState?.calendar_authorized),
-                ],
-                [
-                  "Gmail",
-                  "Разрешённые письма и подтверждаемая отправка",
-                  Boolean(googleState?.gmail_authorized),
-                ],
-                [
-                  "Telegram",
-                  "Файлы, сообщения и уведомления",
-                  Boolean(systemState?.telegram_ready),
-                ],
-              ].map(([name, description, connected]) => (
-                <article className="card integration-card" key={String(name)}>
+              {integrationItems.map((item) => (
+                <article className="card integration-card" key={item.key}>
                   <div
-                    className={`integration-icon ${connected ? "connected" : ""}`}
+                    className={`integration-icon ${item.connected ? "connected" : ""}`}
                   >
-                    {name === "Telegram" ? <Bot /> : <CalendarDays />}
+                    {item.capability === "channel" ? <Mail /> : item.capability === "ai" ? <Bot /> : item.capability === "storage" ? <FolderTree /> : <CalendarDays />}
                   </div>
                   <div>
-                    <h2>{name}</h2>
-                    <p>{description}</p>
+                    <h2>{item.name}</h2>
+                    <p>{item.description}</p>
+                    <small>{item.capability} · {item.provider}</small>
                   </div>
-                  <span className={connected ? "connected" : ""}>
-                    {connected ? "Подключено" : "Не подключено"}
+                  <span className={item.connected ? "connected" : ""}>
+                    {item.connected ? "Готово" : item.available ? "Не подключено" : "Недоступно"}
                   </span>
-                  {name === "Gmail" && connected ? (
+                  {item.action === "sync" && item.connected ? (
                     <button onClick={() => syncGmail()} disabled={gmailSyncing}>
                       {gmailSyncing ? "Получаю…" : "Получить письма"}
                     </button>
-                  ) : (
-                    name !== "Telegram" && (
-                      <button onClick={connectGoogle}>
-                        {connected ? "Переподключить" : "Подключить"}
-                      </button>
-                    )
-                  )}
-                  {name === "Gmail" && gmailSyncStatus && (
+                  ) : item.action === "oauth" ? (
+                    <button onClick={connectGoogle}>{item.connected ? "Переподключить" : "Подключить"}</button>
+                  ) : item.action === "local_upload" ? (
+                    <button onClick={() => { setActive("Рабочий центр"); setNotice("Нажмите «Загрузить рабочую папку» в рабочем центре"); }}>Загрузить папку</button>
+                  ) : item.action === "ai_policy" ? (
+                    <button onClick={() => setActive("Настройки")}>Политика AI</button>
+                  ) : null}
+                  {item.action === "sync" && gmailSyncStatus && (
                     <div className="integration-sync-result">
                       <small>{gmailSyncStatus}</small>
                       {!gmailSyncing && (
@@ -3060,6 +3052,7 @@ export function App() {
                   )}
                 </article>
               ))}
+              {!integrationItems.length && <div className="card empty"><Activity /><p>Каталог подключений загружается…</p></div>}
             </div>
             <section className="card system-checks">
               <div className="card-head">
