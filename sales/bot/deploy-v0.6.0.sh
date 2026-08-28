@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=v0.6.0
-previous_version=v0.5.2
+version=${VERSION:-v0.6.0}
+previous_version=${PREVIOUS_VERSION:-v0.5.2}
 root=/opt/pu-workspace-sales-bot
 release="$root/releases/$version"
 archive="/opt/pu-workspace-sales-bot-$version.tar.gz"

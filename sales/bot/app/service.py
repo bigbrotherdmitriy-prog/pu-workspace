@@ -40,6 +40,14 @@ STATUS_LABELS = {
     "rejected": "Отказ",
 }
 
+STATUS_ICONS = {
+    "new": "🟡",
+    "contacted": "📞",
+    "pilot": "🚀",
+    "closed": "✅",
+    "rejected": "⛔",
+}
+
 
 @dataclass
 class SalesBotService:
@@ -65,7 +73,7 @@ class SalesBotService:
         user = callback["from"]
         action = callback.get("data", "")
         if action.startswith("lead:"):
-            self._handle_lead_status_callback(chat_id, user, action)
+            self._handle_lead_status_callback(chat_id, user, action, message)
             return
         if action == "about":
             text = (
@@ -296,28 +304,44 @@ class SalesBotService:
     def _notify_admin(self, lead_id: int, lead: Lead) -> None:
         if self.settings.admin_chat_id is None:
             return
-        username = f"@{html.escape(lead.telegram_username)}" if lead.telegram_username else "не указан"
         self.telegram.send_message(
             self.settings.admin_chat_id,
-            "<b>Новая заявка PU Workspace</b>\n"
-            f"ID: {lead_id}\nКомпания: {html.escape(lead.company)}\n"
-            f"Контактное лицо: {html.escape(lead.name)}\nРоль: {html.escape(lead.role)}\n"
-            f"Задача: {html.escape(lead.need)}\nКонтакт: {html.escape(lead.contact)}\n"
-            f"Telegram: {username} (ID {lead.telegram_user_id})\n"
-            f"Источник: <code>{html.escape(lead.source)}</code>",
-            {
-                "inline_keyboard": [
-                    [
-                        {"text": "📞 Связались", "callback_data": f"lead:{lead_id}:contacted"},
-                        {"text": "🚀 Пилот", "callback_data": f"lead:{lead_id}:pilot"},
-                    ],
-                    [
-                        {"text": "✅ Закрыть", "callback_data": f"lead:{lead_id}:closed"},
-                        {"text": "⛔ Отказ", "callback_data": f"lead:{lead_id}:rejected"},
-                    ],
-                ]
-            },
+            self._lead_card_text(lead_id, lead, "new"),
+            self._lead_card_keyboard(lead_id, "new"),
         )
+
+    def _lead_card_text(self, lead_id: int, lead: Lead | Any, status: str) -> str:
+        username = (
+            f"@{html.escape(lead.telegram_username)}"
+            if lead.telegram_username
+            else "не указан"
+        )
+        status_line = f"{STATUS_ICONS.get(status, '•')} <b>{STATUS_LABELS.get(status, status)}</b>"
+        return (
+            f"<b>PU WORKSPACE · ЗАЯВКА #{lead_id}</b>\n"
+            f"{status_line}\n\n"
+            f"🏢 <b>{html.escape(lead.company)}</b>\n"
+            f"👤 {html.escape(lead.name)} · {html.escape(lead.role)}\n"
+            f"💬 <b>Что нужно решить</b>\n{html.escape(lead.need)}\n\n"
+            f"☎️ <b>Контакт</b>: {html.escape(lead.contact)}\n"
+            f"✈️ Telegram: {username}\n"
+            f"📍 Источник: <code>{html.escape(lead.source)}</code>"
+        )
+
+    def _lead_card_keyboard(self, lead_id: int, status: str) -> dict[str, Any]:
+        rows: list[list[dict[str, str]]] = []
+        if status != "contacted":
+            rows.append([{"text": "📞 Связались", "callback_data": f"lead:{lead_id}:contacted"}])
+        if status != "pilot":
+            rows.append([{"text": "🚀 Перевести в пилот", "callback_data": f"lead:{lead_id}:pilot"}])
+        if status not in {"closed", "rejected"}:
+            rows.append(
+                [
+                    {"text": "✅ Закрыть", "callback_data": f"lead:{lead_id}:closed"},
+                    {"text": "⛔ Отказ", "callback_data": f"lead:{lead_id}:rejected"},
+                ]
+            )
+        return {"inline_keyboard": rows}
 
     def _is_admin(self, user_id: int) -> bool:
         return self.settings.admin_chat_id is not None and user_id == self.settings.admin_chat_id
@@ -354,7 +378,11 @@ class SalesBotService:
         self.telegram.send_message(chat_id, "\n".join(lines))
 
     def _handle_lead_status_callback(
-        self, chat_id: int, user: dict[str, Any], action: str
+        self,
+        chat_id: int,
+        user: dict[str, Any],
+        action: str,
+        message: dict[str, Any],
     ) -> None:
         user_id = int(user["id"])
         if not self._is_admin(user_id):
@@ -363,6 +391,9 @@ class SalesBotService:
         try:
             _, lead_id_raw, status = action.split(":", 2)
             lead_id = int(lead_id_raw)
+            current = self.storage.get_lead(lead_id)
+            if current is not None and current.status == status:
+                return
             changed = self.storage.set_lead_status(lead_id, status)
         except (ValueError, TypeError):
             self.telegram.send_message(chat_id, "Некорректная команда изменения статуса.")
@@ -370,7 +401,20 @@ class SalesBotService:
         if not changed:
             self.telegram.send_message(chat_id, f"Заявка #{lead_id} не найдена.")
             return
+        lead = self.storage.get_lead(lead_id)
+        if lead is None:
+            return
+        message_id = message.get("message_id")
+        if message_id is not None:
+            self.telegram.edit_message_text(
+                chat_id,
+                int(message_id),
+                self._lead_card_text(lead_id, lead, status),
+                self._lead_card_keyboard(lead_id, status),
+            )
+            return
         self.telegram.send_message(
             chat_id,
-            f"Статус заявки #{lead_id}: <b>{STATUS_LABELS[status]}</b>.",
+            self._lead_card_text(lead_id, lead, status),
+            self._lead_card_keyboard(lead_id, status),
         )

@@ -61,6 +61,23 @@ class TelegramClient:
     def answer_callback(self, callback_query_id: str) -> None:
         self.call("answerCallbackQuery", {"callback_query_id": callback_query_id})
 
+    def edit_message_text(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        self.call("editMessageText", payload)
+
     def get_updates(self, offset: int, timeout: int) -> list[dict[str, Any]]:
         return self.call(
             "getUpdates",

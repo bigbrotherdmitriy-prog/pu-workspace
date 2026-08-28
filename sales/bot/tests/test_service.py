@@ -5,7 +5,7 @@ from pathlib import Path
 from app.config import Settings
 from app.knowledge import ApprovedKnowledgeProvider
 from app.service import SalesBotService
-from app.storage import Storage
+from app.storage import Lead, Storage
 from app.telegram import TelegramError
 
 
@@ -14,6 +14,7 @@ class FakeTelegram:
         self.fail = fail
         self.fail_photo = fail_photo
         self.messages = []
+        self.edits = []
 
     def send_message(self, chat_id, text, reply_markup=None):
         if self.fail:
@@ -29,6 +30,9 @@ class FakeTelegram:
 
     def answer_callback(self, callback_query_id):
         return None
+
+    def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
+        self.edits.append((chat_id, message_id, text, reply_markup))
 
 
 class SalesBotServiceTest(unittest.TestCase):
@@ -112,6 +116,61 @@ class SalesBotServiceTest(unittest.TestCase):
             service.handle_update({"update_id": 33, "callback_query": {"id": "d3", "from": {"id": 10}, "message": {"chat": {"id": 20}}, "data": "lead_consent"}})
             self.assertEqual(storage.get_session(10)[1]["source"], "bot_development")
             self.assertIn("компания или проект", telegram.messages[-1][1])
+
+    def test_repeated_lead_status_callback_does_not_duplicate_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "test.sqlite3")
+            telegram = FakeTelegram()
+            storage = Storage(path)
+            lead_id = storage.save_lead(
+                Lead(10, "client", "Компания", "Иван", "Директор", "Контроль", "contact")
+            )
+            settings = self.settings(path)
+            settings = Settings(
+                token=settings.token,
+                admin_chat_id=10,
+                database_path=settings.database_path,
+                website_url=settings.website_url,
+                channel_url=settings.channel_url,
+                presentation_url=settings.presentation_url,
+                brochure_url=settings.brochure_url,
+                poll_timeout=settings.poll_timeout,
+            )
+            service = SalesBotService(settings, storage, telegram, ApprovedKnowledgeProvider())
+            callback = {
+                "from": {"id": 10},
+                "message": {"chat": {"id": 10}},
+                "data": f"lead:{lead_id}:contacted",
+            }
+            service.handle_update({"update_id": 100, "callback_query": {"id": "x1", **callback}})
+            service.handle_update({"update_id": 101, "callback_query": {"id": "x2", **callback}})
+            self.assertEqual(storage.get_lead(lead_id).status, "contacted")
+            self.assertEqual(len(telegram.messages), 1)
+
+    def test_status_callback_updates_existing_lead_card(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "test.sqlite3")
+            telegram = FakeTelegram()
+            storage = Storage(path)
+            lead_id = storage.save_lead(
+                Lead(10, "client", "Компания", "Иван", "Директор", "Контроль", "contact")
+            )
+            base = self.settings(path)
+            settings = Settings(**{**base.__dict__, "admin_chat_id": 10})
+            service = SalesBotService(settings, storage, telegram, ApprovedKnowledgeProvider())
+            service.handle_update({
+                "update_id": 200,
+                "callback_query": {
+                    "id": "e1",
+                    "from": {"id": 10},
+                    "message": {"chat": {"id": 10}, "message_id": 77},
+                    "data": f"lead:{lead_id}:pilot",
+                },
+            })
+            self.assertEqual(len(telegram.edits), 1)
+            self.assertEqual(telegram.edits[0][1], 77)
+            self.assertIn("PU WORKSPACE · ЗАЯВКА", telegram.edits[0][2])
+            self.assertIn("Пилот", telegram.edits[0][2])
 
 
 if __name__ == "__main__":
