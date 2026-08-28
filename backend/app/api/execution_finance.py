@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.audit_log import AuditLog
+from app.models.document import Document
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract
 from app.models.user import User
@@ -55,6 +56,17 @@ class CashFlowCreate(BaseModel):
     planned_date: date
     planned_amount: Decimal = Field(gt=0)
     counterparty: str | None = Field(default=None, max_length=500)
+
+
+class InvoiceProposalCreate(CashFlowCreate):
+    schedule_item_id: int | None = None
+    budget_line_id: int | None = None
+    source_document_id: int | None = None
+
+
+class PaymentConfirmation(BaseModel):
+    actual_amount: Decimal | None = Field(default=None, gt=0)
+    actual_date: date | None = None
 
 
 class ProcurementCreate(BaseModel):
@@ -125,7 +137,9 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         "budget": [{"id": x.id, "contract_id": x.contract_id, "category": x.category, "description": x.description,
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
-        "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "direction": x.direction, "title": x.title,
+        "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
+                       "budget_line_id": x.budget_line_id, "source_document_id": x.source_document_id,
+                       "direction": x.direction, "title": x.title,
                        "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
                        "actual_amount": x.actual_amount, "counterparty": x.counterparty, "status": x.status} for x in cash],
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
@@ -141,7 +155,8 @@ def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user
     require_project_role(db, user, payload.project_id, "manager")
     _check_contract(db, payload.project_id, payload.contract_id)
     version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == payload.project_id)) or 0) + 1
-    item = ScheduleBaseline(project_id=payload.project_id, created_by_user_id=user.id, name=payload.name.strip(), version=version, note=payload.note)
+    item = ScheduleBaseline(project_id=payload.project_id, contract_id=payload.contract_id,
+                            created_by_user_id=user.id, name=payload.name.strip(), version=version, note=payload.note)
     db.add(item); db.flush(); _audit(db, "baseline_created", "schedule_baseline", item.id, user.id, f"version={version}"); db.commit(); db.refresh(item)
     return {"id": item.id, "version": item.version, "status": item.status}
 
@@ -179,6 +194,61 @@ def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: Us
 def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
     item = CashFlowEntry(**payload.model_dump()); db.add(item); db.flush(); _audit(db, "cash_flow_proposed", "cash_flow", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
+
+
+@router.post("/invoice-proposals")
+def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    _check_contract(db, payload.project_id, payload.contract_id)
+    if payload.schedule_item_id is not None:
+        stage = db.get(ScheduleItem, payload.schedule_item_id)
+        if stage is None or stage.project_id != payload.project_id:
+            raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
+        baseline = db.get(ScheduleBaseline, stage.baseline_id)
+        if payload.contract_id and baseline and baseline.contract_id not in {None, payload.contract_id}:
+            raise HTTPException(422, "Этап ГПР связан с другим договором")
+    if payload.budget_line_id is not None:
+        budget = db.get(BudgetLine, payload.budget_line_id)
+        if budget is None or budget.project_id != payload.project_id:
+            raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+        if payload.contract_id and budget.contract_id not in {None, payload.contract_id}:
+            raise HTTPException(422, "Строка бюджета связана с другим договором")
+    if payload.source_document_id is not None:
+        document = db.get(Document, payload.source_document_id)
+        if document is None or document.project_id != payload.project_id:
+            raise HTTPException(422, "Счёт не принадлежит выбранному проекту")
+    item = CashFlowEntry(**payload.model_dump(), status="proposed")
+    db.add(item); db.flush()
+    _audit(db, "invoice_cash_flow_proposed", "cash_flow", item.id, user.id,
+           f"contract={payload.contract_id}; schedule={payload.schedule_item_id}; budget={payload.budget_line_id}; document={payload.source_document_id}")
+    db.commit()
+    return {"id": item.id, "status": item.status, "requires_payment_confirmation": True}
+
+
+@router.post("/cash-flow/{item_id}/confirm-payment")
+def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.get(CashFlowEntry, item_id)
+    if item is None:
+        raise HTTPException(404, "Запись ДДС не найдена")
+    require_project_role(db, user, item.project_id, "manager")
+    paid_status = "received" if item.direction == "inflow" else "paid"
+    if item.status in {"paid", "received"}:
+        return {"id": item.id, "status": item.status, "already_confirmed": True}
+    if item.status not in {"proposed", "approved"}:
+        raise HTTPException(409, "Эту запись нельзя подтвердить как оплаченную")
+    actual_amount = payload.actual_amount or item.planned_amount
+    item.actual_amount = actual_amount
+    item.actual_date = payload.actual_date or date.today()
+    item.status = paid_status
+    if item.budget_line_id:
+        budget = db.get(BudgetLine, item.budget_line_id)
+        if budget is not None:
+            budget.actual_amount = (budget.actual_amount or Decimal("0")) + actual_amount
+    _audit(db, "cash_flow_payment_confirmed", "cash_flow", item.id, user.id,
+           f"status={paid_status}; amount={actual_amount}; date={item.actual_date}; budget={item.budget_line_id}")
+    db.commit()
+    return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
+            "actual_date": item.actual_date, "already_confirmed": False}
 
 
 @router.post("/procurement")

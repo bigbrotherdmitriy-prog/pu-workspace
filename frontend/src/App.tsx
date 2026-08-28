@@ -387,6 +387,9 @@ type FinanceOverview = {
   cash_flow: {
     id: number;
     contract_id?: number;
+    schedule_item_id?: number;
+    budget_line_id?: number;
+    source_document_id?: number;
     direction: string;
     title: string;
     planned_date: string;
@@ -630,7 +633,9 @@ export function App() {
     [financeTitle, setFinanceTitle] = useState(""),
     [financeAmount, setFinanceAmount] = useState(""),
     [financeDate, setFinanceDate] = useState(""),
-    [financeExtra, setFinanceExtra] = useState("");
+    [financeExtra, setFinanceExtra] = useState(""),
+    [financeScheduleItemId, setFinanceScheduleItemId] = useState(0),
+    [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const [sourceFolderId, setSourceFolderId] = useState("root");
@@ -1720,6 +1725,19 @@ export function App() {
           counterparty: financeExtra.trim() || null,
         };
       }
+      if (financeKind === "invoice") {
+        path = "/execution/invoice-proposals";
+        body = {
+          ...body,
+          direction: "outflow",
+          title: financeTitle.trim(),
+          planned_date: financeDate,
+          planned_amount: amount,
+          counterparty: financeExtra.trim() || null,
+          schedule_item_id: financeScheduleItemId || null,
+          budget_line_id: financeBudgetLineId || null,
+        };
+      }
       if (financeKind === "procurement") {
         path = "/execution/procurement";
         body = {
@@ -1777,6 +1795,19 @@ export function App() {
         body: JSON.stringify({ status }),
       });
       setNotice("Статус финансовой записи подтверждён и сохранён в аудите");
+      await loadFinance();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function confirmCashPayment(id: number, amount: number) {
+    if (!window.confirm(`Подтвердить факт оплаты ${money(amount)} сегодняшней датой?`)) return;
+    try {
+      await api(`/execution/cash-flow/${id}/confirm-payment`, {
+        method: "POST",
+        body: JSON.stringify({ actual_amount: amount }),
+      });
+      setNotice("Оплата подтверждена пользователем, факт записан в ДДС и бюджет");
       await loadFinance();
     } catch (e) {
       setError((e as Error).message);
@@ -2601,6 +2632,7 @@ export function App() {
                   <option value="budget">Строка бюджета</option>
                   <option value="cash-in">Поступление ДДС</option>
                   <option value="cash-out">Выплата ДДС</option>
+                  <option value="invoice">Счёт → предложение ДДС</option>
                   <option value="procurement">Закупка / поставка</option>
                   <option value="act">Акт</option>
                   <option value="baseline">Версия ГПР</option>
@@ -2619,7 +2651,7 @@ export function App() {
                     placeholder="Сумма, ₽"
                   />
                 )}
-                {["cash-in", "cash-out", "procurement", "act"].includes(
+                {["cash-in", "cash-out", "invoice", "procurement", "act"].includes(
                   financeKind,
                 ) && (
                   <input
@@ -2641,6 +2673,22 @@ export function App() {
                           : "Контрагент / поставщик"
                   }
                 />
+                {financeKind === "invoice" && (
+                  <>
+                    <select value={financeScheduleItemId} onChange={(e) => setFinanceScheduleItemId(Number(e.target.value))}>
+                      <option value={0}>Связать с этапом ГПР (не выбран)</option>
+                      {finance?.schedule.filter((stage) => {
+                        const baseline = finance.baselines.find((row) => row.id === stage.baseline_id);
+                        return !selectedFinanceContractId || baseline?.contract_id === selectedFinanceContractId;
+                      }).map((stage) => <option key={stage.id} value={stage.id}>{stage.title}</option>)}
+                    </select>
+                    <select value={financeBudgetLineId} onChange={(e) => setFinanceBudgetLineId(Number(e.target.value))}>
+                      <option value={0}>Связать со строкой бюджета (не выбрана)</option>
+                      {finance?.budget.filter((row) => !selectedFinanceContractId || row.contract_id === selectedFinanceContractId)
+                        .map((row) => <option key={row.id} value={row.id}>{row.description}</option>)}
+                    </select>
+                  </>
+                )}
                 <button
                   disabled={!financeTitle.trim()}
                   onClick={addFinanceItem}
@@ -2730,6 +2778,11 @@ export function App() {
                           }
                         >
                           Подтвердить
+                        </button>
+                      )}
+                      {item.status === "approved" && (
+                        <button onClick={() => confirmCashPayment(item.id, Number(item.planned_amount))}>
+                          Подтвердить оплату
                         </button>
                       )}
                     </div>
