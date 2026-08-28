@@ -60,6 +60,7 @@ def _message_payload(db: Session, row: Message) -> dict:
         "source_type": row.source_type, "source_external_id": row.source_external_id,
         "source_name": row.source_name, "source_url": row.source_url,
         "source_sender": row.source_sender, "source_thread_id": row.source_thread_id,
+        "content": row.content,
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
         "status": row.status, "created_at": row.created_at,

@@ -265,7 +265,10 @@ type InboxMessage = {
   contract_id?: number;
   source_type: string;
   source_name: string;
+  source_sender?: string;
+  source_thread_id?: string;
   source_url?: string;
+  content: string;
   summary: string;
   context_confidence: number;
   context_evidence: string;
@@ -487,6 +490,7 @@ export function App() {
     [decisions, setDecisions] = useState<DecisionRow[]>([]),
     [drafts, setDrafts] = useState<ResponseDraft[]>([]),
     [inbox, setInbox] = useState<InboxMessage[]>([]),
+    [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
     [incomingName, setIncomingName] = useState(""),
     [incomingText, setIncomingText] = useState(""),
     [contracts, setContracts] = useState<ContractRow[]>([]),
@@ -3049,6 +3053,13 @@ export function App() {
               </button>
             </section>
             <section className="inbox-list">
+              <div className="inbox-toolbar">
+                <div>
+                  <strong>Входящие письма и сообщения</strong>
+                  <small>{inbox.length} обработано AI Secretary</small>
+                </div>
+                <span>Нажмите на письмо, чтобы открыть анализ</span>
+              </div>
               {inbox
                 .filter(
                   (item) =>
@@ -3057,8 +3068,10 @@ export function App() {
                       .toLocaleLowerCase("ru-RU")
                       .includes(query.toLocaleLowerCase("ru-RU")),
                 )
-                .map((message) => (
-                  <article className="card inbox-card" key={message.id}>
+                .map((message) => {
+                  const expanded = expandedInboxId === message.id;
+                  return (
+                  <article className={`card inbox-card ${expanded ? "expanded" : "collapsed"}`} key={message.id}>
                     <div className="inbox-head">
                       <div>
                         <span className={`draft-status ${message.status}`}>
@@ -3067,6 +3080,10 @@ export function App() {
                             : "Подтвердите контекст"}
                         </span>
                         <h2>{message.source_name}</h2>
+                        <div className="inbox-meta">
+                          <span>{message.source_sender || (message.source_type === "email" ? "Отправитель не указан" : message.source_type)}</span>
+                          <time>{new Date(message.created_at).toLocaleString("ru-RU")}</time>
+                        </div>
                         <p>
                           {message.source_type} · уверенность связи{" "}
                           {Math.round(message.context_confidence * 100)}% ·{" "}
@@ -3082,7 +3099,10 @@ export function App() {
                           </a>
                         )}
                       </div>
-                      {!message.context_confirmed && (
+                      <button className="inbox-toggle" onClick={() => setExpandedInboxId(expanded ? null : message.id)}>
+                        {expanded ? "Свернуть" : "Открыть"}
+                      </button>
+                      {expanded && !message.context_confirmed && (
                         <div className="context-confirm">
                           <select
                             value={message.contract_id || ""}
@@ -3115,6 +3135,12 @@ export function App() {
                         </div>
                       )}
                     </div>
+                    {!expanded && <p className="inbox-preview">{message.summary.replace(/\s+/g, " ").slice(0, 220)}</p>}
+                    {expanded && <>
+                    <details className="inbox-original">
+                      <summary>Исходный текст письма</summary>
+                      <pre>{message.content}</pre>
+                    </details>
                     <pre className="inbox-summary">{message.summary}</pre>
                     {message.risks.length > 0 && (
                       <div className="inbox-risks">
@@ -3234,8 +3260,10 @@ export function App() {
                           )}
                       </div>
                     ))}
+                    </>}
                   </article>
-                ))}
+                  );
+                })}
               {!inbox.length && (
                 <div className="card empty">
                   <Bot />
