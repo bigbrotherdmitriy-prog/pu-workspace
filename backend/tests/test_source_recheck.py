@@ -28,3 +28,16 @@ def test_parent_change_is_a_conflict():
 
 def test_content_change_is_a_conflict():
     assert source_metadata_changed(_expected(), _current(md5_checksum="def")) is True
+
+
+def test_drive_timestamp_settling_is_allowed_when_checksum_matches():
+    assert source_metadata_changed(
+        _expected(), _current(modified_time="2026-08-26T10:00:02Z")
+    ) is False
+
+
+def test_native_file_timestamp_change_remains_a_conflict_without_checksum():
+    assert source_metadata_changed(
+        _expected(source_checksum=None),
+        _current(md5_checksum=None, modified_time="2026-08-26T10:00:02Z"),
+    ) is True

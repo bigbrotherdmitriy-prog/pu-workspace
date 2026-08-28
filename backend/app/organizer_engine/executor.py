@@ -12,10 +12,12 @@ def source_metadata_changed(item, current) -> bool:
         return True
     expected_modified = item.get("source_modified_at")
     expected_checksum = item.get("source_checksum")
-    return bool(
-        (expected_modified and current.modified_time != expected_modified)
-        or (expected_checksum and current.md5_checksum != expected_checksum)
-    )
+    # For binary files a matching content checksum is stronger evidence than a
+    # Drive modifiedTime value, which can settle shortly after server-side copy.
+    # Native Google files have no MD5, so they still require an exact timestamp.
+    if expected_checksum and current.md5_checksum:
+        return current.md5_checksum != expected_checksum
+    return bool(expected_modified and current.modified_time != expected_modified)
 
 
 class OrganizerExecutor:
