@@ -19,7 +19,7 @@ Vertical Slice 1 устойчивым и подготовить Core к подк
 - [x] Google scopes проверяются внутри GoogleWorkspaceAdapter;
 - [x] Telegram relay health отличает настроенный токен от рабочего polling;
 - [x] секрет Telegram не попадает в health и журнал ошибок;
-- [ ] production regression после обновления каталога;
+- [x] production regression после обновления каталога (123 теста, readiness green);
 - [ ] устранён внешний второй polling-процесс Telegram и заменён раскрытый токен.
 
 Последний пункт требует выпуска нового токена через BotFather и остановки старого
