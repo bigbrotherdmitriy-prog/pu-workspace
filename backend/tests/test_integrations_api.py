@@ -14,3 +14,21 @@ def test_provider_neutral_action_sync_route_is_registered():
     from app.api.tasks import router as tasks_router
 
     assert "/tasks/sync-actions" in {route.path for route in tasks_router.routes}
+
+
+def test_external_action_approval_accepts_neutral_and_legacy_fields():
+    from app.api.tasks import ExternalActionApproval
+
+    neutral = ExternalActionApproval.model_validate({
+        "publish_task": False,
+        "publish_calendar": True,
+    })
+    assert neutral.publish_task is False
+    assert neutral.publish_calendar is True
+
+    legacy = ExternalActionApproval.model_validate({
+        "create_google_task": True,
+        "create_calendar_event": False,
+    })
+    assert legacy.publish_task is True
+    assert legacy.publish_calendar is False

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -594,18 +594,34 @@ export function App() {
     [financeExtra, setFinanceExtra] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
+  const projectIdRef = useRef(projectId);
+  const loadSequenceRef = useRef(0);
+
+  function rememberProject(id: number) {
+    projectIdRef.current = id;
+    setProjectId(id);
+    sessionStorage.setItem("pu_active_project_id", String(id));
+  }
+
+  async function activateProject(id: number) {
+    rememberProject(id);
+    setActive("Рабочий центр");
+    await load(id);
+  }
+
   async function load(preferredProjectId?: number) {
+    const loadSequence = ++loadSequenceRef.current;
     try {
       setError("");
       const p = await api("/projects/");
       setProjects(p.projects);
-      const requestedProjectId = preferredProjectId ?? projectId;
+      const requestedProjectId = preferredProjectId ?? projectIdRef.current;
       const id = p.projects.some((item: Project) => item.id === requestedProjectId)
         ? requestedProjectId
         : p.projects[0]?.id || 0;
       if (id) {
-        setProjectId(id);
-        sessionStorage.setItem("pu_active_project_id", String(id));
+        if (loadSequence !== loadSequenceRef.current) return;
+        rememberProject(id);
         const [
           d,
           s,
@@ -659,6 +675,10 @@ export function App() {
           api(`/analytics/project?project_id=${id}`).catch(() => null),
           api(`/integrations/project?project_id=${id}`).catch(() => ({ adapters: [] })),
         ]);
+        if (
+          loadSequence !== loadSequenceRef.current ||
+          projectIdRef.current !== id
+        ) return;
         setSummary(d.summary);
         setDocuments(d.documents);
         setSnapshots(s.snapshots);
@@ -713,10 +733,8 @@ export function App() {
         body: JSON.stringify({ name }),
       });
       setNewProjectName("");
-      setProjectId(created.id);
-      sessionStorage.setItem("pu_active_project_id", String(created.id));
       setNotice(`Проект «${created.name}» создан`);
-      await load(created.id);
+      await activateProject(created.id);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -1082,8 +1100,8 @@ export function App() {
       const result = await api(`/tasks/${task.id}/approve-external`, {
         method: "POST",
         body: JSON.stringify({
-          create_google_task: true,
-          create_calendar_event: Boolean(task.due_date),
+          publish_task: true,
+          publish_calendar: Boolean(task.due_date),
         }),
       });
       setNotice(
@@ -3664,10 +3682,7 @@ export function App() {
                         </span>
                       </div>
                       <button
-                        onClick={() => {
-                          setProjectId(item.id);
-                          setActive("Рабочий центр");
-                        }}
+                        onClick={() => activateProject(item.id)}
                       >
                         {item.id === projectId
                           ? "Открыть рабочий центр"

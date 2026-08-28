@@ -38,6 +38,9 @@ Task API and Telegram commands publish approved actions through `ActionAdapter`.
 `GoogleWorkspaceActionAdapter` is the only Vertical Slice 1 implementation; the
 legacy `/tasks/sync-google` route remains as a compatibility alias for the neutral
 `/tasks/sync-actions` route.
+The approval API accepts provider-neutral `publish_task` and `publish_calendar`
+flags. The former Google-specific request names remain accepted as compatibility
+aliases, and legacy response fields remain available during the migration period.
 
 No additional provider is implemented in this slice. The contracts are the seam
 for Yandex 360, VK WorkSpace, Microsoft/Exchange/SharePoint, private file storage,

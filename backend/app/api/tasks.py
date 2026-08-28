@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,8 +23,14 @@ class TaskUpdate(BaseModel):
 
 
 class ExternalActionApproval(BaseModel):
-    create_google_task: bool = True
-    create_calendar_event: bool = True
+    publish_task: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("publish_task", "create_google_task"),
+    )
+    publish_calendar: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("publish_calendar", "create_calendar_event"),
+    )
 
 
 @router.get("")
@@ -102,8 +108,9 @@ def due_history(task_id: int, db: Session = Depends(get_db), user: User = Depend
 def _sync_actions(project_id: int, db: Session, user: User):
     require_project_role(db, user, project_id, "manager")
     tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.external_action_status == "approved")).all())
-    result = publish_actions(configured_action_adapter(project_id, db), tasks)
-    return {"provider": "google_workspace", "synced": result.task_synced, "failed": result.task_failed,
+    adapter = configured_action_adapter(project_id, db)
+    result = publish_actions(adapter, tasks)
+    return {"provider": adapter.provider, "synced": result.task_synced, "failed": result.task_failed,
             "calendar_synced": result.calendar_synced, "calendar_failed": result.calendar_failed}
 
 
@@ -124,38 +131,41 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
     if task is None:
         raise HTTPException(404, "Task not found")
     require_project_role(db, user, task.project_id, "manager")
-    if not payload.create_google_task and not payload.create_calendar_event:
+    if not payload.publish_task and not payload.publish_calendar:
         raise HTTPException(422, "Select at least one external action")
     if task.message_id is not None and task.needs_review:
         task.needs_review = False
     task.external_action_status = "approved"
     db.commit()
+    adapter = configured_action_adapter(task.project_id, db)
     result = publish_actions(
-        configured_action_adapter(task.project_id, db), [task],
-        publish_tasks=payload.create_google_task,
-        publish_calendar=payload.create_calendar_event and bool(task.due_date),
+        adapter, [task],
+        publish_tasks=payload.publish_task,
+        publish_calendar=payload.publish_calendar and bool(task.due_date),
     )
     task_synced, task_failed = result.task_synced, result.task_failed
     calendar_synced, calendar_failed = result.calendar_synced, result.calendar_failed
     external_task_id = external_id_for(
-        db, entity_type="task", entity_id=task.id, provider="google_workspace",
+        db, entity_type="task", entity_id=task.id, provider=adapter.provider,
         resource_type="task", legacy_id=task.google_task_id,
     )
     external_calendar_id = external_id_for(
-        db, entity_type="task", entity_id=task.id, provider="google_workspace",
+        db, entity_type="task", entity_id=task.id, provider=adapter.provider,
         resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
     )
-    success = (not payload.create_google_task or task_synced == 1 or bool(external_task_id)) and (
-        not payload.create_calendar_event or not task.due_date or calendar_synced == 1 or bool(external_calendar_id)
+    success = (not payload.publish_task or task_synced == 1 or bool(external_task_id)) and (
+        not payload.publish_calendar or not task.due_date or calendar_synced == 1 or bool(external_calendar_id)
     )
     task.external_action_status = "executed" if success else "failed"
     db.add(AuditLog(action="external_task_action", entity_type="task", entity_id=task.id,
-                    details=f"google_task={task_synced}; calendar={calendar_synced}; success={success}"))
+                    details=f"provider={adapter.provider}; task={task_synced}; calendar={calendar_synced}; success={success}"))
     db.commit(); db.refresh(task)
-    return {"id": task.id, "external_action_status": task.external_action_status,
+    return {"id": task.id, "provider": adapter.provider,
+            "external_action_status": task.external_action_status,
             "google_task_id": external_task_id, "google_calendar_event_id": external_calendar_id,
             "external_resources": [
                 *([{"provider": "google_workspace", "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
                 *([{"provider": "google_workspace", "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
-            "google_task_failed": task_failed, "calendar_failed": calendar_failed}
+            "task_failed": task_failed, "google_task_failed": task_failed,
+            "calendar_failed": calendar_failed}
