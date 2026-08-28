@@ -1,0 +1,19 @@
+{
+  "name": "PU Workspace",
+  "short_name": "PU Workspace",
+  "description": "Проекты, документы, задачи и AI-секретарь в едином рабочем пространстве.",
+  "lang": "ru",
+  "start_url": "/new/",
+  "scope": "/new/",
+  "display": "standalone",
+  "background_color": "#f1f4f2",
+  "theme_color": "#111714",
+  "icons": [
+    {
+      "src": "/new/pu-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
