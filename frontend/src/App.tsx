@@ -270,7 +270,7 @@ type InboxMessage = {
   source_thread_id?: string;
   source_url?: string;
   content: string;
-  attachments: { name: string; mime_type: string; size: number; attachment_id?: string }[];
+  attachments: { name: string; mime_type: string; size: number; attachment_id?: string; document_id?: number; imported?: boolean }[];
   summary: string;
   context_confidence: number;
   context_evidence: string;
@@ -992,9 +992,10 @@ export function App() {
     if (!window.confirm(`Импортировать «${attachment.name}» в документы проекта и выполнить анализ?`)) return;
     try {
       const result = await api(`/ai-secretary/inbox/${message.id}/attachments/${index}/import`, { method: "POST" });
-      setNotice(`Вложение «${result.name}» добавлено: задач ${result.tasks}, рисков ${result.risks}, черновиков ${result.drafts}.`);
+      setNotice(result.already_indexed
+        ? `Вложение «${result.name}» уже находится в документах проекта.`
+        : `Вложение «${result.name}» добавлено: задач ${result.tasks}, рисков ${result.risks}, черновиков ${result.drafts}.`);
       await load();
-      setActive("Документы");
     } catch (e) {
       setError((e as Error).message);
     }
@@ -3247,7 +3248,11 @@ export function App() {
                           <div key={`${attachment.name}-${index}`}>
                             <FileText />
                             <span><strong>{attachment.name}</strong><small>{attachment.mime_type} · {attachment.size ? `${Math.ceil(attachment.size / 1024)} КБ` : "размер не указан"}</small></span>
-                            {attachment.attachment_id && <button onClick={() => importInboxAttachment(message, index)}>Импортировать и проанализировать</button>}
+                            {attachment.imported ? (
+                              <button className="imported" onClick={() => setActive("Документы")}>Уже в документах</button>
+                            ) : attachment.attachment_id ? (
+                              <button onClick={() => importInboxAttachment(message, index)}>Импортировать и проанализировать</button>
+                            ) : null}
                           </div>
                         ))}
                         {message.source_url && <a href={message.source_url} target="_blank" rel="noreferrer">Открыть письмо и скачать вложения</a>}

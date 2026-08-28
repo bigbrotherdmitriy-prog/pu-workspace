@@ -13,6 +13,7 @@ from app.database import get_db
 from app.governance_engine import create_governance_items
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
+from app.models.document import Document
 from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.response_draft import ResponseDraft
@@ -61,12 +62,25 @@ def _message_payload(db: Session, row: Message) -> dict:
     tasks = list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
     risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
+    attachments = json.loads(row.attachments_json or "[]")
+    attachment_ids = [item["document_external_id"] for item in attachments if item.get("document_external_id")]
+    imported = {
+        document.external_id: document.id
+        for document in db.scalars(select(Document).where(
+            Document.project_id == row.project_id,
+            Document.external_id.in_(attachment_ids),
+        ))
+    } if attachment_ids else {}
+    for item in attachments:
+        external_id = item.get("document_external_id")
+        item["document_id"] = imported.get(external_id)
+        item["imported"] = bool(item["document_id"])
     return {
         "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
         "source_type": row.source_type, "source_external_id": row.source_external_id,
         "source_name": row.source_name, "source_url": row.source_url,
         "source_sender": row.source_sender, "source_thread_id": row.source_thread_id,
-        "content": row.content, "attachments": json.loads(row.attachments_json or "[]"),
+        "content": row.content, "attachments": attachments,
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
         "status": row.status, "created_at": row.created_at,

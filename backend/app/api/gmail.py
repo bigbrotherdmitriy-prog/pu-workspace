@@ -69,17 +69,22 @@ def _headers(payload: dict) -> dict[str, str]:
     return {item.get("name", "").lower(): item.get("value", "") for item in payload.get("headers", [])}
 
 
-def _attachments(payload: dict) -> list[dict]:
+def _attachments(payload: dict, message_external_id: str | None = None) -> list[dict]:
     result: list[dict] = []
     def walk(part: dict):
         filename = (part.get("filename") or "").strip()
         body = part.get("body", {})
         if filename:
+            attachment_id = body.get("attachmentId") or ""
             result.append({
                 "name": filename[:500],
                 "mime_type": (part.get("mimeType") or "application/octet-stream")[:200],
                 "size": int(body.get("size") or 0),
-                "attachment_id": body.get("attachmentId") or "",
+                "attachment_id": attachment_id,
+                "document_external_id": (
+                    f"gmail:{message_external_id}:{attachment_id}"
+                    if message_external_id and attachment_id else ""
+                ),
             })
         for child in part.get("parts", []):
             walk(child)
@@ -116,15 +121,16 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
             if existing:
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
-                if not json.loads(existing.attachments_json or "[]"):
+                existing_attachments = json.loads(existing.attachments_json or "[]")
+                if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
                     item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
-                    existing.attachments_json = json.dumps(_attachments(item.get("payload", {})), ensure_ascii=False)
+                    existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
                 skipped += 1
                 continue
             item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
             headers = _headers(item.get("payload", {}))
             content = _message_text(item.get("payload", {})) or item.get("snippet", "")
-            attachments = _attachments(item.get("payload", {}))
+            attachments = _attachments(item.get("payload", {}), item["id"])
             if not content.strip():
                 skipped += 1
                 continue
@@ -163,7 +169,7 @@ def import_gmail_attachment(message_id: int, attachment_index: int, db: Session 
         raise HTTPException(422, "Attachment cannot be downloaded")
     if int(metadata.get("size") or 0) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
-    external_id = f"gmail:{source.source_external_id}:{attachment_id}"
+    external_id = metadata.get("document_external_id") or f"gmail:{source.source_external_id}:{attachment_id}"
     existing_document = db.scalar(select(Document).where(
         Document.project_id == source.project_id,
         Document.external_id == external_id,

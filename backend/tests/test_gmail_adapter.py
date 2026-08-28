@@ -25,7 +25,8 @@ def test_gmail_payload_prefers_plain_text():
 
 def test_gmail_attachment_metadata_is_extracted_without_file_transfer():
     payload = {"parts": [{"filename": "Акт.pdf", "mimeType": "application/pdf", "body": {"attachmentId": "secret", "size": 2048}}]}
-    assert _attachments(payload) == [{"name": "Акт.pdf", "mime_type": "application/pdf", "size": 2048, "attachment_id": "secret"}]
+    assert _attachments(payload, "message-1") == [{"name": "Акт.pdf", "mime_type": "application/pdf", "size": 2048,
+                                                    "attachment_id": "secret", "document_external_id": "gmail:message-1:secret"}]
 
 
 def test_gmail_sync_is_bounded():
