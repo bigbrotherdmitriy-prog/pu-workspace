@@ -468,6 +468,19 @@ async function api(path: string, options: RequestInit = {}) {
   return body;
 }
 
+function restoredProjectId(): number {
+  const callbackProjectId = Number(
+    new URLSearchParams(window.location.search).get("project_id"),
+  );
+  if (Number.isSafeInteger(callbackProjectId) && callbackProjectId > 0) {
+    return callbackProjectId;
+  }
+  const storedProjectId = Number(sessionStorage.getItem("pu_active_project_id"));
+  return Number.isSafeInteger(storedProjectId) && storedProjectId > 0
+    ? storedProjectId
+    : 0;
+}
+
 function Login({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -546,7 +559,7 @@ export function App() {
       null,
     );
   const [projects, setProjects] = useState<Project[]>([]),
-    [projectId, setProjectId] = useState(0),
+    [projectId, setProjectId] = useState(restoredProjectId),
     [summary, setSummary] = useState<Summary | null>(null),
     [documents, setDocuments] = useState<DocumentCard[]>([]),
     [snapshots, setSnapshots] = useState<Snapshot[]>([]),
@@ -581,14 +594,18 @@ export function App() {
     [financeExtra, setFinanceExtra] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
-  async function load() {
+  async function load(preferredProjectId?: number) {
     try {
       setError("");
       const p = await api("/projects/");
       setProjects(p.projects);
-      const id = projectId || p.projects[0]?.id || 0;
+      const requestedProjectId = preferredProjectId ?? projectId;
+      const id = p.projects.some((item: Project) => item.id === requestedProjectId)
+        ? requestedProjectId
+        : p.projects[0]?.id || 0;
       if (id) {
         setProjectId(id);
+        sessionStorage.setItem("pu_active_project_id", String(id));
         const [
           d,
           s,
@@ -697,8 +714,9 @@ export function App() {
       });
       setNewProjectName("");
       setProjectId(created.id);
+      sessionStorage.setItem("pu_active_project_id", String(created.id));
       setNotice(`Проект «${created.name}» создан`);
-      await load();
+      await load(created.id);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -1779,7 +1797,7 @@ export function App() {
                 </option>
               ))}
             </select>
-            <button className="icon" onClick={load}>
+            <button className="icon" onClick={() => load()}>
               <RefreshCw />
             </button>
           </div>
@@ -2222,7 +2240,7 @@ export function App() {
                 <h2>Состояние проекта</h2>
                 <p>Единая аналитика по документам, задачам, рискам и входящим — независимо от подключённых сервисов.</p>
               </div>
-              <button onClick={load}><RefreshCw /> Обновить</button>
+              <button onClick={() => load()}><RefreshCw /> Обновить</button>
             </section>
             {analytics ? (
               <>
@@ -3087,7 +3105,7 @@ export function App() {
                   <h2>Журнал действий</h2>
                   <p>Последние {auditLogs.length} зафиксированных операций</p>
                 </div>
-                <button onClick={load}>Обновить</button>
+                <button onClick={() => load()}>Обновить</button>
               </div>
               <div className="audit-list">
                 {auditLogs

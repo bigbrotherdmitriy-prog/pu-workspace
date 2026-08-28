@@ -11,7 +11,9 @@ External systems are replaceable adapters:
 - `IntegrationAdapter` — common identity and health contract;
 - `StorageAdapter` — folders/files and content sources;
 - `ChannelAdapter` — incoming and outgoing communications;
-- `AIProviderAdapter` — document/message analysis behind project AI policy.
+- `AIProviderAdapter` — document/message analysis behind project AI policy;
+- `ActionAdapter` — publishing approved tasks and deadlines without coupling
+  Task Core to an external work-management provider.
 
 `StorageObject` is the provider-neutral boundary object used by Document, Task,
 Response and Governance engines. `DriveFile` remains a compatibility alias while
@@ -32,6 +34,10 @@ notification module only re-exports compatibility functions.
 External task and calendar identifiers are dual-written to the provider-neutral
 `external_resource_links` table. Existing `google_*` task columns remain during
 the compatibility period and are backfilled by an additive migration.
+Task API and Telegram commands publish approved actions through `ActionAdapter`.
+`GoogleWorkspaceActionAdapter` is the only Vertical Slice 1 implementation; the
+legacy `/tasks/sync-google` route remains as a compatibility alias for the neutral
+`/tasks/sync-actions` route.
 
 No additional provider is implemented in this slice. The contracts are the seam
 for Yandex 360, VK WorkSpace, Microsoft/Exchange/SharePoint, private file storage,

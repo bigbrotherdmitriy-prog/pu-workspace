@@ -20,8 +20,7 @@ from app.organizer_engine.types import DriveFile
 from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
 from app.task_engine import create_tasks_from_files
-from app.google_tasks import sync_tasks_to_google
-from app.google_calendar import sync_tasks_to_calendar
+from app.integrations.actions import configured_action_adapter, publish_actions
 from app.summary_engine import brief_summary
 from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
@@ -221,8 +220,9 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                 task.due_date = new_due
                 answer = f"📅 Срок задачи #{task.id} перенесён на {parts[2]}. Причина сохранена."
             db.commit(); db.refresh(task)
-            sync_tasks_to_google(db, link.project_id, [task], force_update=True)
-            sync_tasks_to_calendar(db, link.project_id, [task], force_update=True)
+            publish_actions(
+                configured_action_adapter(link.project_id, db), [task], force_update=True,
+            )
             notify_telegram_chat(chat_id, answer)
             return {"ok": True}
         source_name = f"Telegram — {link.title}"

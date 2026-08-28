@@ -10,8 +10,7 @@ from app.models.task import Task, TaskDueDateHistory
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.integrations.external_resources import external_id_for
-from app.google_tasks import sync_tasks_to_google
-from app.google_calendar import sync_tasks_to_calendar
+from app.integrations.actions import configured_action_adapter, publish_actions
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -86,8 +85,7 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
         task.result_note = payload.result_note.strip() or None
     db.commit(); db.refresh(task)
     if task.external_action_status == "executed":
-        sync_tasks_to_google(db, task.project_id, [task], force_update=True)
-        sync_tasks_to_calendar(db, task.project_id, [task], force_update=True)
+        publish_actions(configured_action_adapter(task.project_id, db), [task], force_update=True)
     return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note, "completed_at": task.completed_at}
 
 
@@ -101,13 +99,23 @@ def due_history(task_id: int, db: Session = Depends(get_db), user: User = Depend
     return {"history": [{"old_due_date": x.old_due_date, "new_due_date": x.new_due_date, "reason": x.reason, "changed_at": x.changed_at} for x in rows]}
 
 
-@router.post("/sync-google")
-def sync_google(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def _sync_actions(project_id: int, db: Session, user: User):
     require_project_role(db, user, project_id, "manager")
     tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.external_action_status == "approved")).all())
-    synced, failed = sync_tasks_to_google(db, project_id, tasks)
-    calendar_synced, calendar_failed = sync_tasks_to_calendar(db, project_id, tasks)
-    return {"synced": synced, "failed": failed, "calendar_synced": calendar_synced, "calendar_failed": calendar_failed}
+    result = publish_actions(configured_action_adapter(project_id, db), tasks)
+    return {"provider": "google_workspace", "synced": result.task_synced, "failed": result.task_failed,
+            "calendar_synced": result.calendar_synced, "calendar_failed": result.calendar_failed}
+
+
+@router.post("/sync-actions")
+def sync_actions(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return _sync_actions(project_id, db, user)
+
+
+@router.post("/sync-google")
+def sync_google(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Backward-compatible route for the existing UI."""
+    return _sync_actions(project_id, db, user)
 
 
 @router.post("/{task_id}/approve-external")
@@ -122,11 +130,13 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
         task.needs_review = False
     task.external_action_status = "approved"
     db.commit()
-    task_synced = task_failed = calendar_synced = calendar_failed = 0
-    if payload.create_google_task:
-        task_synced, task_failed = sync_tasks_to_google(db, task.project_id, [task])
-    if payload.create_calendar_event and task.due_date:
-        calendar_synced, calendar_failed = sync_tasks_to_calendar(db, task.project_id, [task])
+    result = publish_actions(
+        configured_action_adapter(task.project_id, db), [task],
+        publish_tasks=payload.create_google_task,
+        publish_calendar=payload.create_calendar_event and bool(task.due_date),
+    )
+    task_synced, task_failed = result.task_synced, result.task_failed
+    calendar_synced, calendar_failed = result.calendar_synced, result.calendar_failed
     external_task_id = external_id_for(
         db, entity_type="task", entity_id=task.id, provider="google_workspace",
         resource_type="task", legacy_id=task.google_task_id,
