@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import html
+import json
+import os
 import re
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -19,10 +21,18 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
+from app.models.document import Document
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
+from app.core.integration_types import StorageObject
+from app.document_engine import index_documents
+from app.governance_engine import create_governance_items
+from app.organizer_engine.content import extract_text
+from app.response_engine import create_response_drafts
+from app.task_engine import create_tasks_from_files
 
 router = APIRouter(tags=["gmail"])
+MAX_ATTACHMENT_BYTES = int(os.getenv("GMAIL_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
 
 
 class GmailSyncRequest(BaseModel):
@@ -69,6 +79,7 @@ def _attachments(payload: dict) -> list[dict]:
                 "name": filename[:500],
                 "mime_type": (part.get("mimeType") or "application/octet-stream")[:200],
                 "size": int(body.get("size") or 0),
+                "attachment_id": body.get("attachmentId") or "",
             })
         for child in part.get("parts", []):
             walk(child)
@@ -98,11 +109,16 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
     errors: list[dict] = []
     for ref in page.get("messages", []):
         try:
-            existing = db.scalar(select(Message.id).where(
+            existing = db.scalar(select(Message).where(
                 Message.source_type == "email",
                 Message.source_external_id == ref["id"],
             ))
             if existing:
+                # Older synchronized rows predate attachment metadata. Backfill
+                # metadata once, without re-running message analysis or alerts.
+                if not json.loads(existing.attachments_json or "[]"):
+                    item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+                    existing.attachments_json = json.dumps(_attachments(item.get("payload", {})), ensure_ascii=False)
                 skipped += 1
                 continue
             item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
@@ -130,6 +146,56 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
                     details=f"query={payload.query}; processed={processed}; skipped={skipped}; failed={failed}"))
     db.commit()
     return {"processed": processed, "skipped": skipped, "failed": failed, "errors": errors[:20]}
+
+
+@router.post("/ai-secretary/inbox/{message_id}/attachments/{attachment_index}/import")
+def import_gmail_attachment(message_id: int, attachment_index: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    source = db.get(Message, message_id)
+    if source is None or source.source_type != "email":
+        raise HTTPException(404, "Email message not found")
+    require_project_role(db, user, source.project_id, "editor")
+    attachments = json.loads(source.attachments_json or "[]")
+    if attachment_index < 0 or attachment_index >= len(attachments):
+        raise HTTPException(404, "Attachment not found")
+    metadata = attachments[attachment_index]
+    attachment_id = metadata.get("attachment_id")
+    if not attachment_id:
+        raise HTTPException(422, "Attachment cannot be downloaded")
+    if int(metadata.get("size") or 0) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
+    external_id = f"gmail:{source.source_external_id}:{attachment_id}"
+    existing_document = db.scalar(select(Document).where(
+        Document.project_id == source.project_id,
+        Document.external_id == external_id,
+    ))
+    if existing_document:
+        return {"document_id": existing_document.id, "name": existing_document.name, "tasks": 0, "drafts": 0,
+                "risks": 0, "decisions": 0, "already_indexed": True}
+    service = google_workspace_for_project(source.project_id, db).service("gmail", "v1")
+    payload = service.users().messages().attachments().get(
+        userId="me", messageId=source.source_external_id, id=attachment_id,
+    ).execute()
+    data = base64.urlsafe_b64decode(payload.get("data", "") + "=" * (-len(payload.get("data", "")) % 4))
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
+    name = metadata.get("name") or "attachment"
+    mime_type = metadata.get("mime_type") or "application/octet-stream"
+    content = extract_text(data, mime_type, name)
+    if not content:
+        raise HTTPException(422, "Текст из вложения не извлечён; возможно, требуется OCR")
+    item = StorageObject(
+        id=external_id, name=name,
+        mime_type=mime_type, parent_id=f"message:{source.id}", size=len(data), content_text=content,
+    )
+    documents = index_documents(db, source.project_id, [item], "gmail")
+    tasks = create_tasks_from_files(db, source.project_id, source.contract_id, [item], source_type="email_attachment")
+    drafts = create_response_drafts(db, source.project_id, source.contract_id, [item])
+    risks, decisions = create_governance_items(db, source.project_id, [item], source_type="email_attachment")
+    db.add(AuditLog(action="gmail_attachment_imported", entity_type="message", entity_id=source.id,
+                    details=f"name={name}; documents={len(documents)}; tasks={len(tasks)}; risks={len(risks)}"))
+    db.commit()
+    return {"document_id": documents[0].id, "name": name, "tasks": len(tasks), "drafts": len(drafts),
+            "risks": len(risks), "decisions": len(decisions), "already_indexed": False}
 
 
 @router.post("/response-drafts/{draft_id}/send-gmail")

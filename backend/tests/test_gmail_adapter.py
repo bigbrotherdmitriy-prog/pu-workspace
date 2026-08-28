@@ -7,6 +7,7 @@ from app.api.google_drive import SCOPES
 def test_gmail_routes_and_scopes_are_explicit():
     paths = {route.path for route in router.routes}
     assert "/projects/{project_id}/gmail/sync" in paths
+    assert "/ai-secretary/inbox/{message_id}/attachments/{attachment_index}/import" in paths
     assert "/response-drafts/{draft_id}/send-gmail" in paths
     assert "https://www.googleapis.com/auth/gmail.readonly" in SCOPES
     assert "https://www.googleapis.com/auth/gmail.send" in SCOPES
@@ -24,7 +25,7 @@ def test_gmail_payload_prefers_plain_text():
 
 def test_gmail_attachment_metadata_is_extracted_without_file_transfer():
     payload = {"parts": [{"filename": "Акт.pdf", "mimeType": "application/pdf", "body": {"attachmentId": "secret", "size": 2048}}]}
-    assert _attachments(payload) == [{"name": "Акт.pdf", "mime_type": "application/pdf", "size": 2048}]
+    assert _attachments(payload) == [{"name": "Акт.pdf", "mime_type": "application/pdf", "size": 2048, "attachment_id": "secret"}]
 
 
 def test_gmail_sync_is_bounded():

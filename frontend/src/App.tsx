@@ -270,7 +270,7 @@ type InboxMessage = {
   source_thread_id?: string;
   source_url?: string;
   content: string;
-  attachments: { name: string; mime_type: string; size: number }[];
+  attachments: { name: string; mime_type: string; size: number; attachment_id?: string }[];
   summary: string;
   context_confidence: number;
   context_evidence: string;
@@ -983,6 +983,18 @@ export function App() {
       });
       setInbox((rows) => rows.map((row) => row.id === message.id ? updated : row));
       setNotice(status === "completed" ? "Письмо отмечено обработанным" : "Письмо взято в работу");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function importInboxAttachment(message: InboxMessage, index: number) {
+    const attachment = message.attachments[index];
+    if (!window.confirm(`Импортировать «${attachment.name}» в документы проекта и выполнить анализ?`)) return;
+    try {
+      const result = await api(`/ai-secretary/inbox/${message.id}/attachments/${index}/import`, { method: "POST" });
+      setNotice(`Вложение «${result.name}» добавлено: задач ${result.tasks}, рисков ${result.risks}, черновиков ${result.drafts}.`);
+      await load();
+      setActive("Документы");
     } catch (e) {
       setError((e as Error).message);
     }
@@ -3235,6 +3247,7 @@ export function App() {
                           <div key={`${attachment.name}-${index}`}>
                             <FileText />
                             <span><strong>{attachment.name}</strong><small>{attachment.mime_type} · {attachment.size ? `${Math.ceil(attachment.size / 1024)} КБ` : "размер не указан"}</small></span>
+                            {attachment.attachment_id && <button onClick={() => importInboxAttachment(message, index)}>Импортировать и проанализировать</button>}
                           </div>
                         ))}
                         {message.source_url && <a href={message.source_url} target="_blank" rel="noreferrer">Открыть письмо и скачать вложения</a>}

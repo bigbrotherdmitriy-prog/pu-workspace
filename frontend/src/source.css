@@ -242,7 +242,9 @@
 .inbox-attachments > div:first-of-type { border-top: 0; }
 .inbox-attachments svg { width: 18px; color: #087a59; }
 .inbox-attachments span { display: grid; gap: 2px; }
+.inbox-attachments span { flex: 1; min-width: 0; }
 .inbox-attachments small { color: #718078; }
+.inbox-attachments button { padding: 8px 10px; border: 1px solid #0b9068; border-radius: 8px; background: #fff; color: #087a59; font-weight: 700; cursor: pointer; }
 .inbox-attachments a { display: inline-block; margin-top: 8px; color: #087a59; font-weight: 700; text-decoration: none; }
 .inbox-head a { display: inline-block; margin-top: 7px; color: #185adb; font-size: 13px; text-decoration: none; }
 .context-confirm { display: grid; gap: 8px; min-width: 260px; }
