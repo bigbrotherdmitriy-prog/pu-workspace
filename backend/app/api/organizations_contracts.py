@@ -9,7 +9,13 @@ from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
 from app.models.organization_contract import Contract, Organization
 from app.models.document import Document
+from app.models.governance import Decision, Risk
+from app.models.management import Obligation
+from app.models.task import Task
 from app.models.execution_finance import ScheduleBaseline
+from app.core.integration_types import StorageObject
+from app.governance_engine import create_governance_items
+from app.task_engine import create_tasks_from_files
 from sqlalchemy import func
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -57,7 +63,7 @@ def create_organization(payload: OrganizationCreate, db: Session = Depends(get_d
 def list_contracts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     rows = db.scalars(select(Contract).where(Contract.project_id == project_id).order_by(Contract.id.desc())).all()
-    return {"contracts": [_contract(row) for row in rows]}
+    return {"contracts": [_contract(row, db) for row in rows]}
 
 
 @router.post("/projects/{project_id}/contracts")
@@ -75,7 +81,7 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
     ))
     db.add(AuditLog(action="contract_created", entity_type="contract", entity_id=row.id, details=f"Contract: {row.number}"))
     db.commit(); db.refresh(row)
-    return _contract(row)
+    return _contract(row, db)
 
 
 @router.patch("/projects/{project_id}/contracts/{contract_id}")
@@ -93,7 +99,61 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
     db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
                     details=f"document={row.source_document_id or 'none'}"))
     db.commit(); db.refresh(row)
-    return _contract(row)
+    return _contract(row, db)
+
+
+def _contract_source_text(document: Document) -> str:
+    return "\n".join(part.strip() for part in (document.summary, document.notes) if part and part.strip())
+
+
+@router.post("/projects/{project_id}/contracts/{contract_id}/analyze")
+def analyze_contract(project_id: int, contract_id: int,
+                     db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Extract proposed controls from the linked contract without changing its source document."""
+    require_project_role(db, user, project_id, "editor")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    if row.source_document_id is None:
+        raise HTTPException(409, "Сначала выберите документ договора")
+    document = db.scalar(select(Document).where(
+        Document.id == row.source_document_id, Document.project_id == project_id,
+    ))
+    if document is None:
+        raise HTTPException(404, "Contract source document not found")
+    content = _contract_source_text(document)
+    if not content:
+        raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
+    source_id = document.external_id or f"document:{document.id}"
+    source = StorageObject(
+        id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",
+        parent_id=document.parent_external_id or "contracts", content_text=content,
+        object_type="file", provider=document.source,
+    )
+    created_tasks = create_tasks_from_files(db, project_id, None, [source], source_type="contract_analysis")
+    created_risks, created_decisions = create_governance_items(
+        db, project_id, [source], source_type="contract_analysis",
+    )
+    task_ids = list(db.scalars(select(Task.id).where(
+        Task.project_id == project_id, Task.source_file_id == source_id,
+    )))
+    linked_obligations = list(db.scalars(select(Obligation).where(
+        Obligation.project_id == project_id, Obligation.task_id.in_(task_ids) if task_ids else False,
+    )))
+    for obligation in linked_obligations:
+        obligation.contract_id = row.id
+    db.add(AuditLog(
+        action="contract_analyzed", entity_type="contract", entity_id=row.id,
+        details=(f"document={document.id}; tasks_created={len(created_tasks)}; "
+                 f"obligations_linked={len(linked_obligations)}; risks_created={len(created_risks)}; "
+                 f"decisions_created={len(created_decisions)}; originals_changed=false"),
+    ))
+    db.commit()
+    result = _contract(row, db)
+    result["created"] = {
+        "tasks": len(created_tasks), "risks": len(created_risks), "decisions": len(created_decisions),
+    }
+    return result
 
 
 @router.post("/projects/{project_id}/contracts/{contract_id}/initialize-control")
@@ -134,10 +194,30 @@ def initialize_contract_control(project_id: int, contract_id: int,
     return {"created": created, "baseline_id": baseline.id, "contract_id": contract_id}
 
 
-def _contract(row: Contract) -> dict:
-    return {
+def _contract(row: Contract, db: Session | None = None) -> dict:
+    result = {
         "id": row.id, "project_id": row.project_id, "number": row.number,
         "title": row.title, "counterparty": row.counterparty,
         "signed_at": row.signed_at, "status": row.status,
         "source_document_id": row.source_document_id, "notes": row.notes,
     }
+    if db is not None:
+        document = db.get(Document, row.source_document_id) if row.source_document_id else None
+        source_id = (document.external_id or f"document:{document.id}") if document else None
+        task_ids = list(db.scalars(select(Task.id).where(
+            Task.project_id == row.project_id, Task.source_file_id == source_id,
+        ))) if source_id else []
+        result["analysis"] = {
+            "source_ready": bool(document and _contract_source_text(document)),
+            "tasks": len(task_ids),
+            "obligations": db.scalar(select(func.count(Obligation.id)).where(
+                Obligation.project_id == row.project_id, Obligation.contract_id == row.id,
+            )) or 0,
+            "risks": db.scalar(select(func.count(Risk.id)).where(
+                Risk.project_id == row.project_id, Risk.source_id == source_id,
+            )) or 0 if source_id else 0,
+            "decisions": db.scalar(select(func.count(Decision.id)).where(
+                Decision.project_id == row.project_id, Decision.source_id == source_id,
+            )) or 0 if source_id else 0,
+        }
+    return result

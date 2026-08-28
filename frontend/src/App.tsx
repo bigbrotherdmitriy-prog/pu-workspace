@@ -209,6 +209,13 @@ type ContractRow = {
   status: string;
   source_document_id?: number;
   notes?: string;
+  analysis?: {
+    source_ready: boolean;
+    tasks: number;
+    obligations: number;
+    risks: number;
+    decisions: number;
+  };
 };
 type AnalysisResult = {
   status: string;
@@ -930,6 +937,20 @@ export function App() {
         body: JSON.stringify({ source_document_id: documentId || null }),
       });
       setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function analyzeContract(contractId: number) {
+    try {
+      setError("");
+      const result = await api(`/projects/${projectId}/contracts/${contractId}/analyze`, {
+        method: "POST",
+      });
+      setNotice(
+        `Договор проанализирован: первичных задач ${result.analysis.tasks}, обязательств ${result.analysis.obligations}, рисков ${result.analysis.risks}, решений ${result.analysis.decisions}. Теперь привяжите ГПР, бюджет и ДДС.`,
+      );
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -3200,15 +3221,33 @@ export function App() {
                           <option value={document.id} key={document.id}>{document.name}</option>
                         ))}
                       </select>
+                      <button
+                        className="secondary"
+                        disabled={!item.source_document_id}
+                        onClick={() => analyzeContract(item.id)}
+                      >
+                        2. Проанализировать договор и создать первичные задачи
+                      </button>
+                      {item.source_document_id && !item.analysis?.source_ready && (
+                        <small>Сначала дождитесь завершения анализа рабочей папки: текст договора ещё не извлечён.</small>
+                      )}
+                      {item.analysis && (item.analysis.tasks > 0 || item.analysis.obligations > 0) && (
+                        <div className="contract-analysis-status">
+                          <span>Задачи <b>{item.analysis.tasks}</b></span>
+                          <span>Обязательства <b>{item.analysis.obligations}</b></span>
+                          <span>Риски <b>{item.analysis.risks}</b></span>
+                          <span>Решения <b>{item.analysis.decisions}</b></span>
+                        </div>
+                      )}
                       <div className="contract-chain-status">
-                        <span>2. ГПР <b>{finance?.baselines.filter((row) => row.contract_id === item.id).length ? "создан" : "не создан"}</b></span>
-                        <span>3. ДДС <b>{finance?.cash_flow.filter((row) => row.contract_id === item.id).length || 0} записей</b></span>
+                        <span>3. ГПР <b>{finance?.baselines.filter((row) => row.contract_id === item.id).length ? "создан" : "не создан"}</b></span>
                         <span>4. Бюджет <b>{finance?.budget.filter((row) => row.contract_id === item.id).length || 0} строк</b></span>
+                        <span>5. ДДС <b>{finance?.cash_flow.filter((row) => row.contract_id === item.id).length || 0} записей</b></span>
                       </div>
                       <button onClick={() => openContractControl(item.id)}>
                         {finance?.baselines.some((row) => row.contract_id === item.id)
-                          ? "Открыть ГПР и ДДС"
-                          : "Создать ГПР и открыть ДДС"}
+                          ? "3. Открыть ГПР, бюджет и ДДС"
+                          : "3. Создать ГПР, бюджет и ДДС"}
                       </button>
                     </div>
                   </article>

@@ -216,6 +216,11 @@
 .contract-links { display: grid; gap: 8px; color: #748091; font-size: 11px; }
 .contract-links select { width: 100%; padding: 9px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; }
 .contract-links button { padding: 9px 12px; border: 1px solid #087a59; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
+.contract-links button.secondary { background: #fff; color: #087a59; }
+.contract-links button:disabled { cursor: not-allowed; opacity: .5; }
+.contract-analysis-status { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+.contract-analysis-status span { padding: 7px; border-radius: 7px; background: #edf8f4; }
+.contract-analysis-status b { display: block; margin-top: 3px; color: #087a59; }
 .contract-chain-status { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
 .contract-chain-status span { padding: 7px; border-radius: 7px; background: #f1f6f3; }
 .contract-chain-status b { display: block; margin-top: 3px; color: #087a59; }
@@ -410,6 +415,7 @@
   .contract-number { justify-self: start; }
   .contract-links { text-align: left; }
   .contract-chain-status { grid-template-columns: 1fr; }
+  .contract-analysis-status { grid-template-columns: 1fr 1fr; }
   .inbox-head { display: block; }
   .inbox-toggle { margin-top: 10px; width: 100%; }
   .inbox-workflow { margin-top: 8px; width: 100%; }
