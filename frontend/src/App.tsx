@@ -1838,9 +1838,33 @@ export function App() {
                     </div>
                   </div>
                   <div className="quick">
-                    <a href="/#folderId">Выбрать папку Drive</a>
-                    <a href="/#chooseLocalFolder">Загрузить папку</a>
-                    <a href="/#tasksPanel">Открыть задачи</a>
+                    <button onClick={() => setActive("Интеграции")}>Подключения и источники</button>
+                    <button onClick={() => setActive("Письма")}>Открыть письма</button>
+                    <button onClick={() => setActive("Задачи")}>Открыть задачи</button>
+                  </div>
+                </section>
+                <section className="card span-3 dashboard-inbox">
+                  <div className="card-head">
+                    <div>
+                      <h2>Входящие, требующие реакции</h2>
+                      <p>Новые письма, неподтверждённый контекст и работа в процессе</p>
+                    </div>
+                    <button onClick={() => setActive("Письма")}>Все письма</button>
+                  </div>
+                  <div className="dashboard-inbox-list">
+                    {inbox.filter((item) => item.status !== "completed" || !item.context_confirmed).slice(0, 4).map((message) => (
+                      <button key={message.id} onClick={() => { setExpandedInboxId(message.id); setActive("Письма"); }}>
+                        <Mail />
+                        <span>
+                          <strong>{message.source_name}</strong>
+                          <small>{message.source_sender || message.source_type} · {new Date(message.created_at).toLocaleDateString("ru-RU")}</small>
+                        </span>
+                        <b>{message.tasks.length ? `${message.tasks.length} задач` : message.drafts.length ? `${message.drafts.length} черновиков` : "Открыть"}</b>
+                      </button>
+                    ))}
+                    {!inbox.some((item) => item.status !== "completed" || !item.context_confirmed) && (
+                      <div className="empty"><ShieldCheck /><p>Необработанных входящих нет</p></div>
+                    )}
                   </div>
                 </section>
                 {latestSnapshot && (
