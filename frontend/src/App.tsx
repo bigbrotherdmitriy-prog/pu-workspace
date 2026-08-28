@@ -244,6 +244,7 @@ type DriveFolder = {
   snapshot_status?: string;
   item_count?: number;
 };
+type DriveBreadcrumb = { id: string; name: string };
 type InboxTask = {
   id: number;
   title: string;
@@ -594,6 +595,10 @@ export function App() {
     [financeExtra, setFinanceExtra] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
+  const [sourceFolderId, setSourceFolderId] = useState("root");
+  const [sourceBreadcrumbs, setSourceBreadcrumbs] = useState<DriveBreadcrumb[]>([
+    { id: "root", name: "Мой диск" },
+  ]);
   const projectIdRef = useRef(projectId);
   const loadSequenceRef = useRef(0);
 
@@ -832,14 +837,18 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  async function openSources() {
+  async function openSources(folderId = "root") {
     try {
       setError("");
       const targetProjectId = projectIdRef.current;
       const d = await api(
-        `/projects/${targetProjectId}/source-folders/discover`,
+        `/projects/${targetProjectId}/source-folders/discover?folder_id=${encodeURIComponent(folderId)}`,
       );
       setFolders(d.folders);
+      setSourceFolderId(d.folder_id || folderId);
+      setSourceBreadcrumbs(
+        d.breadcrumbs || [{ id: "root", name: "Мой диск" }],
+      );
       setShowSources(true);
     } catch (e) {
       setError((e as Error).message);
@@ -2116,7 +2125,9 @@ export function App() {
                         : latestSnapshot.status}
                     </span>
                     <div className="source-actions">
-                      <button onClick={openSources}>Все источники</button>
+                      <button onClick={() => void openSources("root")}>
+                        Все источники
+                      </button>
                       <a
                         className="source-link"
                         href={`https://drive.google.com/drive/folders/${latestSnapshot.source_external_id}`}
@@ -2142,7 +2153,7 @@ export function App() {
                       </p>
                     </div>
                     <div className="source-actions">
-                      <button onClick={openSources}>
+                      <button onClick={() => void openSources("root")}>
                         Выбрать рабочую папку
                       </button>
                     </div>
@@ -2159,17 +2170,30 @@ export function App() {
                         </p>
                       </div>
                       <div className="source-head-actions">
-                        <button
-                          className="queue-all"
-                          disabled={busyAll}
-                          onClick={queueAllFolders}
-                        >
-                          {busyAll ? "Добавление…" : "Подготовить все папки"}
-                        </button>
+                        {sourceFolderId === "root" && (
+                          <button
+                            className="queue-all"
+                            disabled={busyAll}
+                            onClick={queueAllFolders}
+                          >
+                            {busyAll ? "Добавление…" : "Подготовить все папки"}
+                          </button>
+                        )}
                         <button onClick={() => setShowSources(false)}>
                           Закрыть
                         </button>
                       </div>
+                    </div>
+                    <div className="source-breadcrumbs">
+                      {sourceBreadcrumbs.map((crumb, index) => (
+                        <button
+                          key={crumb.id}
+                          disabled={index === sourceBreadcrumbs.length - 1}
+                          onClick={() => void openSources(crumb.id)}
+                        >
+                          {crumb.name}
+                        </button>
+                      ))}
                     </div>
                     <div className="source-list">
                       {folders.map((folder) => (
@@ -2201,6 +2225,9 @@ export function App() {
                             </p>
                           </div>
                           <div className="source-row-actions">
+                            <button onClick={() => void openSources(folder.id)}>
+                              Открыть
+                            </button>
                             {folder.registered && !folder.is_primary && (
                               <button
                                 disabled={busyFolder === folder.id}
@@ -3111,7 +3138,7 @@ export function App() {
                     <button
                       onClick={() => {
                         setActive("Рабочий центр");
-                        void openSources();
+                        void openSources("root");
                       }}
                     >
                       Выбрать папку

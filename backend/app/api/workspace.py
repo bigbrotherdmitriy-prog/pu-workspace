@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from googleapiclient.discovery import build
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -33,6 +33,28 @@ _analysis_results: dict[int, dict] = {}
 def _parse_time(value: str | None) -> datetime | None:
     if not value:
         return None
+
+
+def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
+    """Return a bounded root-to-folder path without mutating Drive."""
+    if folder_id == "root":
+        return [{"id": "root", "name": "Мой диск"}]
+    trail: list[dict[str, str]] = []
+    current = folder_id
+    visited: set[str] = set()
+    for _ in range(50):
+        if current == "root" or current in visited:
+            break
+        visited.add(current)
+        item = service.files().get(
+            fileId=current,
+            fields="id,name,parents",
+            supportsAllDrives=True,
+        ).execute()
+        trail.append({"id": item["id"], "name": item.get("name") or "Папка"})
+        current = (item.get("parents") or ["root"])[0]
+    trail.reverse()
+    return [{"id": "root", "name": "Мой диск"}, *trail]
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
@@ -161,15 +183,18 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
 @router.get("/{project_id}/source-folders/discover")
 def discover_source_folders(
     project_id: int,
+    folder_id: str = Query("root"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """List top-level Drive folders available for independent snapshot queues."""
+    """Browse Drive folders at any depth for independent snapshot queues."""
     require_project_role(db, user, project_id, "viewer")
     service = build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False)
     result = service.files().list(
-        q="'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        q=f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
         fields="files(id,name,modifiedTime,createdTime)", pageSize=1000, orderBy="name",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
     ).execute()
     sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)))
     source_by_external = {row.external_id: row for row in sources}
@@ -197,7 +222,11 @@ def discover_source_folders(
             "analysis_status": snapshot.analysis_status if snapshot else None,
             "analysis_result": snapshot.analysis_result if snapshot else None,
             "analysis_error": snapshot.analysis_error if snapshot else None})
-    return {"folders": folders}
+    return {
+        "folder_id": folder_id,
+        "breadcrumbs": _drive_folder_breadcrumb(service, folder_id),
+        "folders": folders,
+    }
 
 
 @router.post("/{project_id}/source-folders/{external_id}/primary")
