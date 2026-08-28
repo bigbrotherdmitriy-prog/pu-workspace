@@ -1,4 +1,5 @@
 import os
+import shutil
 
 from cryptography.fernet import Fernet
 from sqlalchemy import text
@@ -46,6 +47,19 @@ def readiness_report() -> dict:
             automation_message
             if gmail_automation["running"]
             else "disabled" if not gmail_automation["enabled"] else "not running"
+        ),
+        required=False,
+    )
+    ocr_tools = {name: bool(shutil.which(name)) for name in ("tesseract", "pdftoppm")}
+    ocr_enabled = os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    checks["local_ocr"] = _check(
+        not ocr_enabled or all(ocr_tools.values()),
+        (
+            "ready (rus+eng; local processing)"
+            if ocr_enabled and all(ocr_tools.values())
+            else "disabled"
+            if not ocr_enabled
+            else "missing: " + ", ".join(name for name, available in ocr_tools.items() if not available)
         ),
         required=False,
     )
