@@ -6,7 +6,7 @@ import httpx
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy import select
-from app.core.notifications import notify_telegram_chat, telegram_http_client
+from app.integrations.telegram import notify_telegram_chat, telegram_http_client
 from app.database import SessionLocal
 from app.models.project import Project
 from app.models.document import Document

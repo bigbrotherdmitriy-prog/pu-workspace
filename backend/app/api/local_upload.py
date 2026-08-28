@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
-from app.core.notifications import notify_telegram
+from app.integrations.telegram import notify_telegram
 from app.database import get_db
 from app.governance_engine import create_governance_items
 from app.models.user import User

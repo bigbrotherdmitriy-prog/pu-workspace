@@ -14,7 +14,7 @@ from app.organizer_engine.drive_factory import get_drive_service
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.config import AUTO_APPLY_CONFIDENCE, AUTO_APPLY_ENABLED, FOLDER_STRUCTURE
 from app.core.auth import require_admin, require_project_role, require_user
-from app.core.notifications import notify_telegram
+from app.integrations.telegram import notify_telegram
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.task_engine import create_tasks_from_files

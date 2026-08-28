@@ -2,8 +2,9 @@ import pytest
 
 from app.core.integration_types import StorageObject
 from app.integrations.ai import GeminiAIAdapter
-from app.integrations.contracts import AIProviderAdapter, AdapterHealth, IntegrationAdapter
+from app.integrations.contracts import AIProviderAdapter, AdapterHealth, ChannelAdapter, IntegrationAdapter
 from app.integrations.registry import AdapterRegistry
+from app.integrations.telegram import TelegramChannelAdapter
 from app.organizer_engine.types import DriveFile, FOLDER_MIME
 
 
@@ -35,3 +36,11 @@ def test_gemini_adapter_conforms_to_ai_contract(monkeypatch):
     adapter = GeminiAIAdapter()
     assert isinstance(adapter, AIProviderAdapter)
     assert adapter.health().ready
+
+
+def test_telegram_adapter_conforms_to_channel_contract(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "configured-for-test")
+    adapter = TelegramChannelAdapter()
+    assert isinstance(adapter, ChannelAdapter)
+    assert adapter.health().ready
+    assert adapter.receive() == []

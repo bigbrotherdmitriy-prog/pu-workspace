@@ -1,44 +1,10 @@
-from __future__ import annotations
+"""Compatibility exports. New code imports the Telegram channel adapter directly."""
 
-import os
+from app.integrations.telegram import (
+    notify_telegram,
+    notify_telegram_chat,
+    telegram_configured,
+    telegram_http_client,
+)
 
-import httpx
-
-
-def telegram_http_client(timeout: float = 10.0) -> httpx.Client:
-    """Use IPv6 when requested; this server's Telegram IPv4 route is unavailable."""
-    force_ipv6 = os.getenv("TELEGRAM_FORCE_IPV6", "").lower() in {"1", "true", "yes"}
-    transport = httpx.HTTPTransport(local_address="::") if force_ipv6 else None
-    return httpx.Client(transport=transport, timeout=timeout)
-
-
-def telegram_configured() -> bool:
-    return bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"))
-
-
-def notify_telegram(message: str) -> bool:
-    """Best-effort notification; organizer work never fails because Telegram is unavailable."""
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    return notify_telegram_chat(chat_id, message)
-
-
-def notify_telegram_chat(chat_id: str | int, message: str) -> bool:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    if not token or not chat_id:
-        return False
-    try:
-        relay = os.getenv("TELEGRAM_RELAY_URL", "")
-        relay_secret = os.getenv("TELEGRAM_RELAY_SECRET", "")
-        if relay and relay_secret:
-            response = httpx.post(f"{relay.rstrip('/')}/send", json={"chat_id": chat_id, "message": message[:4000]}, headers={"X-Relay-Secret": relay_secret}, timeout=12.0)
-            response.raise_for_status()
-            return True
-        with telegram_http_client() as client:
-            response = client.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": message[:4000]},
-            )
-        response.raise_for_status()
-        return True
-    except Exception:
-        return False
+__all__ = ["notify_telegram", "notify_telegram_chat", "telegram_configured", "telegram_http_client"]

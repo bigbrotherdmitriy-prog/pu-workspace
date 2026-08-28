@@ -27,6 +27,8 @@ policy, and AI use is governed by the project's `ProjectAIPolicy`.
 Google account credentials are resolved by `GoogleWorkspaceAdapter`, shared by
 Drive, Gmail, Tasks and Calendar. `DriveClient` is the first `StorageAdapter`.
 The old API credential function remains only as a compatibility facade.
+Telegram delivery is implemented by `TelegramChannelAdapter`; the old Core
+notification module only re-exports compatibility functions.
 
 No additional provider is implemented in this slice. The contracts are the seam
 for Yandex 360, VK WorkSpace, Microsoft/Exchange/SharePoint, private file storage,
@@ -36,9 +38,8 @@ corporate APIs and private AI endpoints.
 
 1. Replace task columns named `google_*` with a generic external-link table, preserving data.
 2. Replace `DriveConnection` with generic integration accounts/connections via a data migration.
-3. Move Telegram notification transport from `core` into a channel adapter.
-4. Add deployment profiles for PU Cloud, Russian cloud/private cloud and on-premise.
-5. Add provider capability/configuration UI only when a second implementation exists.
+3. Add deployment profiles for PU Cloud, Russian cloud/private cloud and on-premise.
+4. Add provider capability/configuration UI only when a second implementation exists.
 
 These items must be delivered as additive migrations. Existing credentials, external
 IDs and production integrations must not be deleted or silently rewritten.
