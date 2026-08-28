@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.organizer_engine.executor import OrganizerExecutor, source_metadata_changed
 from app.organizer_engine.types import DriveFile
 
@@ -73,6 +75,6 @@ def test_revalidation_restores_only_checksum_identical_copy_items():
 
 
 def test_bulk_retry_contract_keeps_changed_copy_items_out_of_apply():
-    source = open("/backend/app/organizer.py", encoding="utf-8").read()
+    source = (Path(__file__).parents[1] / "app" / "organizer.py").read_text(encoding="utf-8")
     assert "repo.skip_remaining_source_conflicts(proposal_id)" in source
     assert "После повторной проверки" not in source
