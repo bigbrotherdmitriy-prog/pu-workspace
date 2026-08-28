@@ -354,7 +354,7 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
         result = OrganizerExecutor(repo, drive).revalidate_source_conflicts(proposal_id)
         if result["remaining"]:
-            raise HTTPException(409, f"После повторной проверки изменены {result['remaining']} файлов; нужен новый снимок")
+            repo.skip_remaining_source_conflicts(proposal_id)
         p = repo.proposal(proposal_id)
     if p["status"] not in {"approved", "ready_to_apply_to_copy", "applied"}:
         raise HTTPException(409, "Proposal must be approved before apply")

@@ -70,3 +70,9 @@ def test_revalidation_restores_only_checksum_identical_copy_items():
 
     assert result == {"recovered": 1, "remaining": 1}
     assert repo.saved == (9, [1], 1)
+
+
+def test_bulk_retry_contract_keeps_changed_copy_items_out_of_apply():
+    source = open("/backend/app/organizer.py", encoding="utf-8").read()
+    assert "repo.skip_remaining_source_conflicts(proposal_id)" in source
+    assert "После повторной проверки" not in source

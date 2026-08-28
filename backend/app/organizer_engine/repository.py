@@ -187,6 +187,21 @@ class OrganizerRepository:
             """), {"proposal_id": proposal_id})
         self.db.commit()
 
+    def skip_remaining_source_conflicts(self, proposal_id: int) -> int:
+        result = self.db.execute(text("""
+            UPDATE organizer_actions
+            SET user_decision='skipped'
+            WHERE proposal_id=:proposal_id AND user_decision='conflict_source_changed'
+        """), {"proposal_id": proposal_id})
+        self.db.execute(text("""
+            UPDATE organizer_proposals
+            SET status='approved',
+                note='Изменившиеся файлы safe-copy пропущены; применяются только повторно проверенные действия.'
+            WHERE id=:proposal_id AND status='conflict_source_changed'
+        """), {"proposal_id": proposal_id})
+        self.db.commit()
+        return int(result.rowcount)
+
     def mark_rollback_result(self, proposal_id: int, complete: bool):
         status = "rolled_back" if complete else "rollback_partial"
         self.db.execute(text("""
