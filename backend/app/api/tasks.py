@@ -8,6 +8,7 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.task import Task, TaskDueDateHistory, TaskHistory
 from app.models.document import Document
+from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.integrations.external_resources import external_id_for
@@ -22,6 +23,7 @@ class TaskUpdate(BaseModel):
     due_change_reason: str | None = Field(default=None, max_length=2000)
     result_note: str | None = Field(default=None, max_length=5000)
     completion_document_id: int | None = Field(default=None, ge=1)
+    assignee_user_id: int | None = Field(default=None, ge=1)
 
 
 class ExternalActionApproval(BaseModel):
@@ -81,7 +83,17 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     require_project_role(db, user, task.project_id, "editor")
     old_status = task.status
     old_due_date = task.due_date
+    old_assignee_user_id = task.assignee_user_id
     changed = False
+    if "assignee_user_id" in payload.model_fields_set:
+        membership = db.scalar(select(ProjectMember).where(
+            ProjectMember.project_id == task.project_id,
+            ProjectMember.user_id == payload.assignee_user_id,
+        ))
+        if membership is None:
+            raise HTTPException(422, "Исполнитель должен быть участником проекта")
+        task.assignee_user_id = payload.assignee_user_id
+        changed = changed or task.assignee_user_id != old_assignee_user_id
     if "due_date" in payload.model_fields_set and payload.due_date != task.due_date:
         if not (payload.due_change_reason or "").strip():
             raise HTTPException(422, "Причина переноса срока обязательна")
@@ -110,6 +122,9 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
         details = []
         if old_due_date != task.due_date:
             details.append(f"Срок: {old_due_date or 'не задан'} → {task.due_date or 'не задан'}")
+        if old_assignee_user_id != task.assignee_user_id:
+            assignee = db.get(User, task.assignee_user_id)
+            details.append(f"Исполнитель: {assignee.name if assignee else task.assignee_user_id}")
         db.add(TaskHistory(
             task_id=task.id,
             action="completed" if task.status == "completed" and old_status != "completed" else "updated",
@@ -126,7 +141,8 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     if task.external_action_status == "executed":
         publish_actions(configured_action_adapter(task.project_id, db), [task], force_update=True)
     return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note,
-            "completion_document_id": task.completion_document_id, "completed_at": task.completed_at}
+            "completion_document_id": task.completion_document_id, "completed_at": task.completed_at,
+            "assignee_user_id": task.assignee_user_id}
 
 
 @router.get("/{task_id}/history")

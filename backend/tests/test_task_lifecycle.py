@@ -21,3 +21,10 @@ def test_completion_evidence_is_optional_and_explicitly_clearable():
     assert "completion_document_id" not in without_evidence.model_fields_set
     assert with_evidence.completion_document_id == 42
     assert "completion_document_id" in clear_evidence.model_fields_set
+
+
+def test_task_assignee_can_be_changed_explicitly():
+    unchanged = TaskUpdate(status="in_progress")
+    reassigned = TaskUpdate(assignee_user_id=17)
+    assert "assignee_user_id" not in unchanged.model_fields_set
+    assert reassigned.assignee_user_id == 17

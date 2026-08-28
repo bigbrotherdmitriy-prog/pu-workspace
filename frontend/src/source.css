@@ -53,9 +53,12 @@
 .task-body small { display: block; color: #4f5c6f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-meta { display: grid; gap: 5px; color: #748091; font-size: 12px; }
 .task-meta .overdue { color: #c63737; font-weight: 700; }
-.task-actions { display: flex; gap: 6px; }
+.task-actions { display: flex; gap: 6px; align-items: end; flex-wrap: wrap; }
 .task-actions button { padding: 8px 10px; border: 1px solid #dfe4eb; border-radius: 8px; background: #fff; cursor: pointer; white-space: nowrap; }
 .task-actions .complete { border-color: #16856c; color: #13745f; }
+.task-assignee { display: grid; gap: 4px; min-width: 190px; }
+.task-assignee span { color: #748091; font-size: 11px; }
+.task-assignee select { width: 100%; padding: 8px 10px; border: 1px solid #dfe4eb; border-radius: 8px; background: #fff; color: #17221f; }
 .task-completion, .task-history { grid-column: 1 / -1; margin-top: 12px; padding: 16px; border: 1px solid #d9e5df; border-radius: 12px; background: #f7fbf9; display: grid; gap: 10px; }
 .task-completion textarea { min-height: 82px; resize: vertical; }
 .task-completion select, .task-completion textarea { width: 100%; padding: 10px 12px; border: 1px solid #cad8d1; border-radius: 8px; background: #fff; }
@@ -218,6 +221,10 @@
 .contract-card h2 { margin: 7px 0 3px; }
 .contract-card p, .contract-card small { display: block; margin: 0; color: #748091; }
 .contract-card small { margin-top: 8px; }
+.contract-source-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.contract-source-tabs button { padding: 8px 6px; font-size: 12px; }
+.contract-source-tabs button.selected { background: #0d8d70; border-color: #0d8d70; color: #fff; }
+.contract-links > input { width: 100%; padding: 10px 12px; border: 1px solid #d7e0dc; border-radius: 8px; }
 .contract-status { padding: 4px 7px; border-radius: 999px; background: #eaf7f3; color: #13745f; font-size: 10px; font-weight: 700; }
 .contract-status.draft { background: #fff4db; color: #9c6400; }
 .contract-links { display: grid; gap: 8px; color: #748091; font-size: 11px; }

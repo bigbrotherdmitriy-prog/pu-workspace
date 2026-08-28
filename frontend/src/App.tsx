@@ -590,6 +590,8 @@ export function App() {
     [newContractNumber, setNewContractNumber] = useState(""),
     [newContractTitle, setNewContractTitle] = useState(""),
     [newCounterparty, setNewCounterparty] = useState(""),
+    [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "server" | "upload" | "google">>({}),
+    [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
       {},
     ),
@@ -3327,15 +3329,52 @@ export function App() {
                     </div>
                     <div className="contract-links">
                       <label>1. Документ-источник</label>
+                      <div className="contract-source-tabs">
+                        {([
+                          ["server", "Сервер / реестр"],
+                          ["upload", "Облако / загрузки"],
+                          ["google", "Google Drive"],
+                        ] as const).map(([source, title]) => (
+                          <button
+                            type="button"
+                            className={(contractDocumentTabs[item.id] || "server") === source ? "selected" : "secondary"}
+                            onClick={() => setContractDocumentTabs((current) => ({ ...current, [item.id]: source }))}
+                            key={source}
+                          >
+                            {title}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        value={contractDocumentQueries[item.id] || ""}
+                        onChange={(event) => setContractDocumentQueries((current) => ({ ...current, [item.id]: event.target.value }))}
+                        placeholder="Поиск документа по названию"
+                      />
                       <select
                         value={item.source_document_id || 0}
                         onChange={(e) => linkContractDocument(item.id, Number(e.target.value))}
                       >
                         <option value={0}>Выберите документ договора</option>
-                        {documentRows.map((document) => (
-                          <option value={document.id} key={document.id}>{document.name}</option>
-                        ))}
+                        {documentRows
+                          .filter((document) => {
+                            const tab = contractDocumentTabs[item.id] || "server";
+                            const source = (document.source || "").toLowerCase();
+                            const sourceMatches = tab === "server"
+                              ? true
+                              : tab === "upload"
+                                ? !source.includes("google")
+                                : source.includes("google");
+                            const search = (contractDocumentQueries[item.id] || "").trim().toLocaleLowerCase("ru-RU");
+                            return sourceMatches && (!search || document.name.toLocaleLowerCase("ru-RU").includes(search));
+                          })
+                          .map((document) => (
+                            <option value={document.id} key={document.id}>{document.name}</option>
+                          ))}
                       </select>
+                      <small>
+                        «Сервер / реестр» показывает все документы проекта; «Облако / загрузки» — загруженные файлы;
+                        «Google Drive» — документы, проиндексированные из подключённого Диска.
+                      </small>
                       <button
                         className="secondary"
                         disabled={!item.source_document_id}
