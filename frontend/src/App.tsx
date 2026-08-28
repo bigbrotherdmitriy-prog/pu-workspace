@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Activity,
   AlertTriangle,
   Bell,
   Bot,
@@ -1239,6 +1240,19 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [ready, projectId, snapshots.some((item) => item.status === "building")]);
   useEffect(() => {
+    if (!ready || !projectId || !processingQueue?.summary.active) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const queue = await api(`/projects/${projectId}/processing-queue`);
+        setProcessingQueue(queue);
+        if (!queue.summary.active) await load();
+      } catch {
+        // A transient refresh failure must not interrupt the active screen.
+      }
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [ready, projectId, processingQueue?.summary.active]);
+  useEffect(() => {
     if (
       !ready ||
       !showSources ||
@@ -1658,6 +1672,23 @@ export function App() {
             </p>
           </div>
           <div className="header-actions">
+            {processingQueue &&
+              (processingQueue.summary.active > 0 ||
+                processingQueue.summary.failed > 0 ||
+                processingQueue.summary.dead_letter > 0) && (
+                <button
+                  className={`queue-status ${processingQueue.summary.failed || processingQueue.summary.dead_letter ? "has-errors" : ""}`}
+                  onClick={() => setActive("Настройки")}
+                  title="Открыть очередь обработки"
+                >
+                  <Activity />
+                  <span>
+                    {processingQueue.summary.active
+                      ? `В работе: ${processingQueue.summary.active}`
+                      : `Ошибок: ${processingQueue.summary.failed + processingQueue.summary.dead_letter}`}
+                  </span>
+                </button>
+              )}
             <span className={`connection-status ${online ? "online" : "offline"}`}>
               {online ? "Онлайн" : "Офлайн"}
             </span>

@@ -186,6 +186,22 @@ button:not(:disabled):active { transform: translateY(1px); }
 }
 .install-app:hover { background: var(--pu-green-050); }
 .install-app svg { width: 17px; }
+.queue-status {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--pu-border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--pu-green-700);
+  font-weight: 700;
+  cursor: pointer;
+}
+.queue-status:hover { background: var(--pu-green-050); }
+.queue-status.has-errors { border-color: #e6a23c; color: #8a5a00; background: #fff8e8; }
+.queue-status svg { width: 17px; }
 
 @media (max-width: 760px) {
   .shell > aside { box-shadow: 12px 0 38px rgba(10, 18, 14, .32); }
@@ -203,5 +219,7 @@ button:not(:disabled):active { transform: translateY(1px); }
   .connection-status { padding: 5px 8px; }
   .install-app { width: 38px; padding: 0; justify-content: center; }
   .install-app span { display: none; }
+  .queue-status { width: 38px; padding: 0; justify-content: center; }
+  .queue-status span { display: none; }
   .header-actions select { max-width: 112px; }
 }
