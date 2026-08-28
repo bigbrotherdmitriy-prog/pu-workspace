@@ -1,0 +1,10 @@
+# Emergency deployment path when the upstream registry is rate-limited.
+# The base is the currently verified production image; use only when
+# requirements.txt and system packages have not changed.
+FROM app-backend:latest
+
+WORKDIR /app
+COPY app ./app
+COPY scripts ./scripts
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
