@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
-from app.models.task import Task, TaskDueDateHistory
+from app.models.task import Task, TaskDueDateHistory, TaskHistory
+from app.models.document import Document
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.integrations.external_resources import external_id_for
@@ -20,6 +21,7 @@ class TaskUpdate(BaseModel):
     due_date: date | None = None
     due_change_reason: str | None = Field(default=None, max_length=2000)
     result_note: str | None = Field(default=None, max_length=5000)
+    completion_document_id: int | None = Field(default=None, ge=1)
 
 
 class ExternalActionApproval(BaseModel):
@@ -65,6 +67,8 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
                 *([{"provider": "google_workspace", "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
             "result_note": task.result_note, "completed_at": task.completed_at,
+            "completion_document_id": task.completion_document_id,
+            "completion_document_name": db.get(Document, task.completion_document_id).name if task.completion_document_id and db.get(Document, task.completion_document_id) else None,
         })
     return {"tasks": result, "count": len(rows)}
 
@@ -75,6 +79,9 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
     if not task:
         raise HTTPException(404, "Task not found")
     require_project_role(db, user, task.project_id, "editor")
+    old_status = task.status
+    old_due_date = task.due_date
+    changed = False
     if "due_date" in payload.model_fields_set and payload.due_date != task.due_date:
         if not (payload.due_change_reason or "").strip():
             raise HTTPException(422, "Причина переноса срока обязательна")
@@ -82,17 +89,68 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
         task.due_date = payload.due_date
         task.google_calendar_event_id = None
         task.google_calendar_sync_error = None
+        changed = True
     if payload.status:
         if payload.status == "completed" and not (payload.result_note or task.result_note or "").strip():
             raise HTTPException(422, "Для завершения задачи укажите подтверждаемый результат")
         task.status = payload.status
         task.completed_at = datetime.now(timezone.utc) if payload.status == "completed" else None
+        changed = changed or payload.status != old_status
     if payload.result_note is not None:
-        task.result_note = payload.result_note.strip() or None
+        new_note = payload.result_note.strip() or None
+        changed = changed or new_note != task.result_note
+        task.result_note = new_note
+    if "completion_document_id" in payload.model_fields_set:
+        document = db.get(Document, payload.completion_document_id) if payload.completion_document_id else None
+        if payload.completion_document_id and (not document or document.project_id != task.project_id):
+            raise HTTPException(422, "Подтверждающий документ должен относиться к проекту задачи")
+        changed = changed or payload.completion_document_id != task.completion_document_id
+        task.completion_document_id = payload.completion_document_id
+    if changed:
+        details = []
+        if old_due_date != task.due_date:
+            details.append(f"Срок: {old_due_date or 'не задан'} → {task.due_date or 'не задан'}")
+        db.add(TaskHistory(
+            task_id=task.id,
+            action="completed" if task.status == "completed" and old_status != "completed" else "updated",
+            old_status=old_status,
+            new_status=task.status,
+            result_note=task.result_note,
+            completion_document_id=task.completion_document_id,
+            details="; ".join(details) or None,
+            changed_by_user_id=user.id,
+        ))
+        db.add(AuditLog(action="task_updated", entity_type="task", entity_id=task.id,
+                        details=f"user={user.id}; status={old_status}->{task.status}; completion_document_id={task.completion_document_id}"))
     db.commit(); db.refresh(task)
     if task.external_action_status == "executed":
         publish_actions(configured_action_adapter(task.project_id, db), [task], force_update=True)
-    return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note, "completed_at": task.completed_at}
+    return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note,
+            "completion_document_id": task.completion_document_id, "completed_at": task.completed_at}
+
+
+@router.get("/{task_id}/history")
+def task_history(task_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    require_project_role(db, user, task.project_id, "viewer")
+    rows = db.execute(
+        select(TaskHistory, User, Document)
+        .join(User, User.id == TaskHistory.changed_by_user_id)
+        .outerjoin(Document, Document.id == TaskHistory.completion_document_id)
+        .where(TaskHistory.task_id == task_id)
+        .order_by(TaskHistory.changed_at.asc(), TaskHistory.id.asc())
+    ).all()
+    history = [{"action": "created", "new_status": "assigned", "changed_at": task.created_at,
+                "changed_by": "Система", "result_note": None, "completion_document_id": None,
+                "completion_document_name": None, "details": "Задача создана из подтверждённого источника"}]
+    history.extend({"action": row.action, "old_status": row.old_status, "new_status": row.new_status,
+                    "result_note": row.result_note, "completion_document_id": row.completion_document_id,
+                    "completion_document_name": document.name if document else None,
+                    "details": row.details, "changed_by": changed_by.name, "changed_at": row.changed_at}
+                   for row, changed_by, document in rows)
+    return {"history": history}
 
 
 @router.get("/{task_id}/due-history")
