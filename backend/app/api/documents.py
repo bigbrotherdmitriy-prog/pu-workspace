@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -90,7 +90,21 @@ def list_documents(
 
     filters = [Document.project_id == project_id]
     if search:
-        filters.append(Document.name.ilike(f"%{search.strip()}%"))
+        pattern = f"%{search.strip()}%"
+        content_match = exists(
+            select(DocumentVersion.id).where(
+                DocumentVersion.document_id == Document.id,
+                DocumentVersion.content.ilike(pattern),
+            )
+        )
+        filters.append(
+            or_(
+                Document.name.ilike(pattern),
+                Document.summary.ilike(pattern),
+                Document.notes.ilike(pattern),
+                content_match,
+            )
+        )
     if status:
         filters.append(Document.status == status)
     if source:

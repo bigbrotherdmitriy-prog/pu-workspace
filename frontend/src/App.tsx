@@ -386,6 +386,7 @@ const items = [
   [FolderKanban, "Проекты"],
   [FileText, "Договоры"],
   [FileText, "Документы"],
+  [Search, "Центр знаний"],
   [GitPullRequest, "Предложения"],
   [ListTodo, "Задачи"],
   [ClipboardCheck, "Обязательства"],
@@ -1231,9 +1232,26 @@ export function App() {
     ),
   ]);
   useEffect(() => {
-    if (active === "Документы" && documentRows.length && !selectedDocument)
+    if ((active === "Документы" || active === "Центр знаний") && documentRows.length && !selectedDocument)
       openDocument(documentRows[0]);
   }, [active, documentRows.length, projectId]);
+  useEffect(() => {
+    if (!ready || !projectId || active !== "Центр знаний") return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const suffix = query.trim()
+          ? `?search=${encodeURIComponent(query.trim())}&limit=200`
+          : "?limit=200";
+        const result = await api(`/projects/${projectId}/documents${suffix}`);
+        setDocumentRows(result.documents);
+        if (result.documents.length) await openDocument(result.documents[0]);
+        else setSelectedDocument(null);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [ready, projectId, active, query]);
   async function loadManagement() {
     if (!projectId) return;
     try {
@@ -1522,6 +1540,7 @@ export function App() {
     }).format(Number(value || 0));
   const visibleDocuments = documentRows.filter(
     (item) =>
+      active === "Центр знаний" ||
       !query ||
       item.name
         .toLocaleLowerCase("ru-RU")
@@ -3475,7 +3494,7 @@ export function App() {
           </div>
         </section>
       )}
-      {active === "Документы" && (
+      {(active === "Документы" || active === "Центр знаний") && (
         <section
           className={`documents-overlay ${collapsed ? "collapsed" : ""}`}
         >
@@ -3483,8 +3502,12 @@ export function App() {
             <div className="card">
               <div className="card-head">
                 <div>
-                  <h2>Реестр документов</h2>
-                  <p>Найдено: {visibleDocuments.length}</p>
+                  <h2>{active === "Центр знаний" ? "Центр знаний" : "Реестр документов"}</h2>
+                  <p>
+                    {active === "Центр знаний"
+                      ? "Поиск по названиям, сводкам и извлечённому тексту"
+                      : `Найдено: ${visibleDocuments.length}`}
+                  </p>
                 </div>
               </div>
               <div className="document-register">
