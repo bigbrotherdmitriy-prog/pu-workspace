@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   Bell,
   Bot,
   CalendarDays,
@@ -387,6 +388,26 @@ type FinanceOverview = {
     status: string;
   }[];
 };
+type AnalyticsDistribution = { key: string; count: number }[];
+type ProjectAnalytics = {
+  summary: {
+    documents: number;
+    document_coverage: number;
+    open_tasks: number;
+    overdue_tasks: number;
+    open_risks: number;
+    pending_decisions: number;
+    contracts: number;
+    active_contracts: number;
+    messages: number;
+    pending_messages: number;
+  };
+  documents_by_source: AnalyticsDistribution;
+  documents_by_status: AnalyticsDistribution;
+  tasks_by_status: AnalyticsDistribution;
+  risks_by_criticality: AnalyticsDistribution;
+  messages_by_channel: AnalyticsDistribution;
+};
 
 const items = [
   [LayoutDashboard, "Рабочий центр"],
@@ -394,6 +415,7 @@ const items = [
   [FileText, "Договоры"],
   [FileText, "Документы"],
   [Search, "Центр знаний"],
+  [BarChart3, "Аналитика"],
   [GitPullRequest, "Предложения"],
   [ListTodo, "Задачи"],
   [ClipboardCheck, "Обязательства"],
@@ -546,6 +568,7 @@ export function App() {
     [financeAmount, setFinanceAmount] = useState(""),
     [financeDate, setFinanceDate] = useState(""),
     [financeExtra, setFinanceExtra] = useState("");
+  const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   async function load() {
     try {
       setError("");
@@ -573,6 +596,7 @@ export function App() {
           audit,
           policy,
           queue,
+          analyticsData,
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
@@ -602,6 +626,7 @@ export function App() {
           api("/history/audit?limit=100").catch(() => ({ logs: [] })),
           api(`/projects/${id}/ai-policy`).catch(() => null),
           api(`/projects/${id}/processing-queue`).catch(() => null),
+          api(`/analytics/project?project_id=${id}`).catch(() => null),
         ]);
         setSummary(d.summary);
         setDocuments(d.documents);
@@ -624,6 +649,7 @@ export function App() {
         setMembers(team.members);
         setCurrentUser(me);
         setAuditLogs(audit.logs);
+        setAnalytics(analyticsData);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1585,6 +1611,26 @@ export function App() {
       currency: "RUB",
       maximumFractionDigits: 0,
     }).format(Number(value || 0));
+  const analyticsLabel = (value: string) => ({
+    assigned: "Назначены",
+    in_progress: "В работе",
+    completed: "Выполнены",
+    needs_confirmation: "Требуют подтверждения",
+    confirmed: "Подтверждены",
+    mitigating: "Снижаются",
+    resolved: "Закрыты",
+    low: "Низкая",
+    medium: "Средняя",
+    high: "Высокая",
+    critical: "Критическая",
+    email: "Email",
+    telegram: "Telegram",
+    manual: "Вручную",
+    document: "Документ",
+    discovered: "Обнаружены",
+    indexed: "Проиндексированы",
+    unknown: "Не определено",
+  } as Record<string, string>)[value] || value.replaceAll("_", " ");
   const visibleDocuments = documentRows.filter(
     (item) =>
       active === "Центр знаний" ||
@@ -2150,6 +2196,62 @@ export function App() {
           )}
         </section>
       </main>
+      {active === "Аналитика" && (
+        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
+          <div className="module-page analytics-page">
+            <section className="analytics-hero card">
+              <div>
+                <span className="eyebrow">PROJECT CORE</span>
+                <h2>Состояние проекта</h2>
+                <p>Единая аналитика по документам, задачам, рискам и входящим — независимо от подключённых сервисов.</p>
+              </div>
+              <button onClick={load}><RefreshCw /> Обновить</button>
+            </section>
+            {analytics ? (
+              <>
+                <section className="analytics-metrics">
+                  {[
+                    ["Документы", analytics.summary.documents],
+                    ["Извлечена сводка", `${analytics.summary.document_coverage}%`],
+                    ["Открытые задачи", analytics.summary.open_tasks],
+                    ["Просрочено", analytics.summary.overdue_tasks],
+                    ["Открытые риски", analytics.summary.open_risks],
+                    ["Входящие без реакции", analytics.summary.pending_messages],
+                  ].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}
+                </section>
+                <section className="analytics-grid">
+                  {[
+                    ["Источники документов", analytics.documents_by_source],
+                    ["Состояние документов", analytics.documents_by_status],
+                    ["Состояние задач", analytics.tasks_by_status],
+                    ["Критичность рисков", analytics.risks_by_criticality],
+                    ["Каналы входящих", analytics.messages_by_channel],
+                  ].map(([title, rawRows]) => {
+                    const rows = rawRows as AnalyticsDistribution;
+                    const maximum = Math.max(1, ...rows.map((row) => row.count));
+                    return <section className="card analytics-panel" key={String(title)}>
+                      <h2>{title as string}</h2>
+                      <div className="analytics-bars">
+                        {rows.map((row) => <div key={row.key}>
+                          <span>{analyticsLabel(row.key)}</span><b>{row.count}</b>
+                          <i><em style={{ width: `${Math.max(4, row.count / maximum * 100)}%` }} /></i>
+                        </div>)}
+                        {!rows.length && <p className="analytics-empty">Данных пока нет</p>}
+                      </div>
+                    </section>;
+                  })}
+                  <section className="card analytics-panel analytics-summary">
+                    <h2>Контур управления</h2>
+                    <p><strong>{analytics.summary.active_contracts}</strong> активных договоров из {analytics.summary.contracts}</p>
+                    <p><strong>{analytics.summary.pending_decisions}</strong> решений требуют фиксации</p>
+                    <p><strong>{analytics.summary.messages}</strong> входящих обработано системой</p>
+                  </section>
+                </section>
+              </>
+            ) : <section className="card empty"><Activity /><p>Аналитика загружается…</p></section>}
+          </div>
+        </section>
+      )}
       {active === "Исполнение и финансы" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page finance-page">
