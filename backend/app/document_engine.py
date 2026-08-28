@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.organizer_engine.types import DriveFile
+from app.core.integration_types import StorageObject
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -19,7 +19,7 @@ def _parse_time(value: str | None) -> datetime | None:
         return None
 
 
-def index_documents(db: Session, project_id: int, files: list[DriveFile], source: str) -> list[Document]:
+def index_documents(db: Session, project_id: int, files: list[StorageObject], source: str) -> list[Document]:
     indexed: list[Document] = []
     for file in files:
         if file.is_folder:

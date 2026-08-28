@@ -25,13 +25,8 @@ from app.google_calendar import sync_tasks_to_calendar
 from app.summary_engine import brief_summary
 from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
-from app.gemini_analysis import (
-    analyze_document_with_gemini,
-    analyze_message_with_gemini,
-    format_gemini_analysis,
-    format_message_replies,
-    gemini_configured,
-)
+from app.gemini_analysis import format_gemini_analysis, format_message_replies
+from app.integrations.ai import configured_ai_provider
 from app.api.ai_secretary import _contract_candidate
 from app.ai_policy import ExternalAIBlocked, policy_for_project, prepare_external_ai_text
 
@@ -296,10 +291,11 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             draft.message_id = inbox_message.id
         inbox_message.summary = brief_summary(content, source_name, len(tasks), len(drafts), 0)
         if document:
-            if gemini_configured():
+            ai_provider = configured_ai_provider()
+            if ai_provider.health().ready:
                 try:
                     ai_content, ai_mode = prepare_external_ai_text(db, link.project_id, content)
-                    semantic = analyze_document_with_gemini(ai_content, source_name)
+                    semantic = ai_provider.analyze_document(ai_content, source_name)
                     summary = format_gemini_analysis(semantic, source_name)
                     inbox_message.summary = summary
                     policy = policy_for_project(db, link.project_id)
@@ -312,10 +308,10 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             else:
                 summary = "⚠️ Gemini API ещё не настроен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
             notify_telegram_chat(chat_id, summary + f"\n\nПредложено: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}. Внешние действия требуют подтверждения в web.")
-        elif _should_prepare_message_replies(message, text) and gemini_configured():
+        elif _should_prepare_message_replies(message, text) and configured_ai_provider().health().ready:
             try:
                 ai_content, ai_mode = prepare_external_ai_text(db, link.project_id, content)
-                replies = analyze_message_with_gemini(ai_content, source_name)
+                replies = configured_ai_provider().analyze_message(ai_content, source_name)
                 notify_telegram_chat(chat_id, format_message_replies(replies))
                 policy = policy_for_project(db, link.project_id)
                 db.add(AuditLog(action="external_ai_used", entity_type="message", entity_id=inbox_message.id,

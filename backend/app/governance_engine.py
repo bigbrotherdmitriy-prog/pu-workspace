@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.governance import Decision, Risk
 from app.models.project_member import ProjectMember
 from app.models.user import User
-from app.organizer_engine.types import DriveFile
+from app.core.integration_types import StorageObject
 
 SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
 RISK_RE = re.compile(r"\b(риск\w*|угроз\w*|вероятн\w*|может привести|возможн\w* задерж\w*|просроч\w*|дефицит\w*|нехватк\w*|отклонен\w*)", re.I)
@@ -36,7 +36,7 @@ def _owner(db: Session, project_id: int) -> User | None:
     return db.scalar(select(User).join(ProjectMember, ProjectMember.user_id == User.id).where(ProjectMember.project_id == project_id).order_by((ProjectMember.role == "owner").desc(), User.id))
 
 
-def create_governance_items(db: Session, project_id: int, files: list[DriveFile], source_type: str = "document_analysis") -> tuple[list[Risk], list[Decision]]:
+def create_governance_items(db: Session, project_id: int, files: list[StorageObject], source_type: str = "document_analysis") -> tuple[list[Risk], list[Decision]]:
     owner = _owner(db, project_id)
     if not owner:
         return [], []

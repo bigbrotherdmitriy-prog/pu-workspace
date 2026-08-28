@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
-from app.organizer_engine.types import DriveFile
+from app.core.integration_types import StorageObject
 
 REQUEST_RE = re.compile(r"\b(просим|прошу|запрашиваем|предоставьте|сообщите|подтвердите|согласуйте|направьте|уточните|дайте ответ|ожидаем ответ)\b", re.I)
 SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
@@ -57,7 +57,7 @@ def _reviewer(db: Session, project_id: int) -> User | None:
     return db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id))
 
 
-def create_response_drafts(db: Session, project_id: int, session_id: int | None, files: list[DriveFile]) -> list[ResponseDraft]:
+def create_response_drafts(db: Session, project_id: int, session_id: int | None, files: list[StorageObject]) -> list[ResponseDraft]:
     reviewer = _reviewer(db, project_id)
     if not reviewer:
         return []

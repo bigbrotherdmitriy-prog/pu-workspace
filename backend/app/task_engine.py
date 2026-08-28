@@ -12,7 +12,7 @@ from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.management import Obligation
 from app.models.user import User
-from app.organizer_engine.types import DriveFile
+from app.core.integration_types import StorageObject
 
 OBLIGATION_RE = re.compile(
     r"\b(должен|должна|должны|обязан|обязана|обязаны|необходимо|следует|"
@@ -88,7 +88,7 @@ def _default_assignee(db: Session, project_id: int) -> User | None:
     return rows[0].User
 
 
-def create_tasks_from_files(db: Session, project_id: int, session_id: int | None, files: list[DriveFile], source_type: str = "document_analysis") -> list[Task]:
+def create_tasks_from_files(db: Session, project_id: int, session_id: int | None, files: list[StorageObject], source_type: str = "document_analysis") -> list[Task]:
     assignee = _default_assignee(db, project_id)
     if not assignee:
         return []

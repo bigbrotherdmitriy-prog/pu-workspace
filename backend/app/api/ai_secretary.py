@@ -18,7 +18,7 @@ from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.governance import Risk
 from app.models.user import User
-from app.organizer_engine.types import DriveFile
+from app.core.integration_types import StorageObject
 from app.response_engine import create_response_drafts
 from app.summary_engine import brief_summary
 from app.task_engine import create_tasks_from_files
@@ -101,7 +101,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         status="ready" if confidence >= 0.90 else "needs_context_confirmation",
     )
     db.add(row); db.flush()
-    synthetic = DriveFile(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)
+    synthetic = StorageObject(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)
     tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
     drafts = create_response_drafts(db, row.project_id, None, [synthetic])
     risks, _ = create_governance_items(db, row.project_id, [synthetic], source_type=row.source_type)
