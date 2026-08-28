@@ -56,6 +56,13 @@
 .task-actions { display: flex; gap: 6px; }
 .task-actions button { padding: 8px 10px; border: 1px solid #dfe4eb; border-radius: 8px; background: #fff; cursor: pointer; white-space: nowrap; }
 .task-actions .complete { border-color: #16856c; color: #13745f; }
+.task-completion, .task-history { grid-column: 1 / -1; margin-top: 12px; padding: 16px; border: 1px solid #d9e5df; border-radius: 12px; background: #f7fbf9; display: grid; gap: 10px; }
+.task-completion textarea { min-height: 82px; resize: vertical; }
+.task-completion select, .task-completion textarea { width: 100%; padding: 10px 12px; border: 1px solid #cad8d1; border-radius: 8px; background: #fff; }
+.task-completion-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.task-history-row { display: grid; grid-template-columns: 150px 140px 100px 1fr; gap: 8px; align-items: baseline; padding: 9px 0; border-top: 1px solid #e3ebe7; }
+.task-history-row p { grid-column: 2 / -1; margin: 0; }
+.task-history-row small { color: #65736d; }
 .governance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .governance-list article { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 15px 3px; border-top: 1px solid #eef1f5; }
 .governance-list article > div:first-child { min-width: 0; }

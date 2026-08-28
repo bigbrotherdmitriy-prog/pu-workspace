@@ -83,6 +83,7 @@ type TaskRow = {
   status: string;
   priority: string;
   due_date?: string;
+  assignee_user_id: number;
   assignee_name: string;
   source_file_name: string;
   source_excerpt: string;
@@ -92,6 +93,19 @@ type TaskRow = {
   external_action_status: string;
   google_task_id?: string;
   google_calendar_event_id?: string;
+  result_note?: string;
+  completion_document_id?: number;
+  completion_document_name?: string;
+};
+type TaskHistoryRow = {
+  action: string;
+  old_status?: string;
+  new_status?: string;
+  result_note?: string;
+  completion_document_name?: string;
+  details?: string;
+  changed_by: string;
+  changed_at: string;
 };
 type RiskRow = {
   id: number;
@@ -581,6 +595,11 @@ export function App() {
     ),
     [taskFilter, setTaskFilter] = useState("open"),
     [tasks, setTasks] = useState<TaskRow[]>([]),
+    [completionTaskId, setCompletionTaskId] = useState(0),
+    [completionNote, setCompletionNote] = useState(""),
+    [completionDocumentId, setCompletionDocumentId] = useState(0),
+    [taskHistoryId, setTaskHistoryId] = useState(0),
+    [taskHistory, setTaskHistory] = useState<TaskHistoryRow[]>([]),
     [risks, setRisks] = useState<RiskRow[]>([]),
     [decisions, setDecisions] = useState<DecisionRow[]>([]),
     [drafts, setDrafts] = useState<ResponseDraft[]>([]),
@@ -1100,25 +1119,49 @@ export function App() {
       setBusyAll(false);
     }
   }
+  function startTaskCompletion(task: TaskRow) {
+    setCompletionTaskId(task.id);
+    setCompletionNote(task.result_note || "");
+    setCompletionDocumentId(task.completion_document_id || 0);
+  }
+  async function loadTaskHistory(task: TaskRow) {
+    if (taskHistoryId === task.id) {
+      setTaskHistoryId(0);
+      setTaskHistory([]);
+      return;
+    }
+    try {
+      const result = await api(`/tasks/${task.id}/history`);
+      setTaskHistory(result.history);
+      setTaskHistoryId(task.id);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function updateTask(task: TaskRow, status: string) {
     try {
       setError("");
-      let result_note: string | undefined;
-      if (status === "completed") {
-        result_note =
-          window.prompt("Укажите подтверждаемый результат выполнения") ||
-          undefined;
-        if (!result_note) return;
+      const result_note = status === "completed" ? completionNote.trim() : undefined;
+      if (status === "completed" && !result_note) {
+        setError("Кратко укажите, что выполнено. Подтверждающий документ добавляется по желанию.");
+        return;
       }
       await api(`/tasks/${task.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status, result_note }),
+        body: JSON.stringify({
+          status,
+          result_note,
+          ...(status === "completed" ? { completion_document_id: completionDocumentId || null } : {}),
+        }),
       });
       setNotice(
         status === "completed"
           ? "Задача завершена и синхронизирована"
           : "Задача взята в работу",
       );
+      setCompletionTaskId(0);
+      setCompletionNote("");
+      setCompletionDocumentId(0);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -1360,6 +1403,21 @@ export function App() {
           : "Не удалось создать внешнее действие; подробности сохранены",
       );
       await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function assignTask(task: TaskRow, assigneeUserId: number) {
+    try {
+      const assignee = members.find((member) => member.user_id === assigneeUserId);
+      await api(`/tasks/${task.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignee_user_id: assigneeUserId }),
+      });
+      setTasks((rows) => rows.map((row) => row.id === task.id
+        ? { ...row, assignee_user_id: assigneeUserId, assignee_name: assignee?.name || row.assignee_name }
+        : row));
+      setNotice(`Исполнитель задачи: ${assignee?.name || "участник проекта"}`);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2182,9 +2240,23 @@ export function App() {
                       </span>
                     </div>
                     <div className="task-actions">
+                      <label className="task-assignee">
+                        <span>Исполнитель</span>
+                        <select
+                          aria-label={`Исполнитель задачи ${task.title}`}
+                          value={task.assignee_user_id}
+                          onChange={(event) => assignTask(task, Number(event.target.value))}
+                        >
+                          {members.map((member) => (
+                            <option value={member.user_id} key={member.user_id}>
+                              {member.name} · {member.role}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       {task.external_action_status !== "executed" && (
                         <button onClick={() => approveExternal(task)}>
-                          Создать в Google
+                          Поставить задачу
                         </button>
                       )}
                       {task.status === "assigned" && (
@@ -2195,12 +2267,55 @@ export function App() {
                       {task.status !== "completed" && (
                         <button
                           className="complete"
-                          onClick={() => updateTask(task, "completed")}
+                          onClick={() => startTaskCompletion(task)}
                         >
                           Завершить
                         </button>
                       )}
+                      <button className="secondary" onClick={() => loadTaskHistory(task)}>
+                        История
+                      </button>
                     </div>
+                    {completionTaskId === task.id && (
+                      <div className="task-completion">
+                        <strong>Подтверждение выполнения</strong>
+                        <textarea
+                          value={completionNote}
+                          onChange={(event) => setCompletionNote(event.target.value)}
+                          placeholder="Что выполнено и какой результат получен *"
+                        />
+                        <select
+                          value={completionDocumentId}
+                          onChange={(event) => setCompletionDocumentId(Number(event.target.value))}
+                        >
+                          <option value={0}>Без вложения — это допустимо</option>
+                          {documentRows.map((document) => (
+                            <option value={document.id} key={document.id}>{document.name}</option>
+                          ))}
+                        </select>
+                        <small>Необязательно: выберите акт, письмо, счёт, фото или другой документ проекта.</small>
+                        <div className="task-completion-actions">
+                          <button className="secondary" onClick={() => setCompletionTaskId(0)}>Отмена</button>
+                          <button className="complete" onClick={() => updateTask(task, "completed")}>Подтвердить завершение</button>
+                        </div>
+                      </div>
+                    )}
+                    {taskHistoryId === task.id && (
+                      <div className="task-history">
+                        <strong>История задачи и решений</strong>
+                        {taskHistory.map((item, index) => (
+                          <div className="task-history-row" key={`${item.changed_at}-${index}`}>
+                            <time>{new Date(item.changed_at).toLocaleString("ru-RU")}</time>
+                            <span>{item.changed_by}</span>
+                            <b>{item.action === "created" ? "Создана" : item.action === "completed" ? "Завершена" : "Изменена"}</b>
+                            {item.old_status !== item.new_status && <small>{item.old_status || "—"} → {item.new_status || "—"}</small>}
+                            {item.result_note && <p>{item.result_note}</p>}
+                            {item.completion_document_name && <p>Подтверждение: {item.completion_document_name}</p>}
+                            {item.details && <p>{item.details}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </article>
                 ))}
                 {!visibleTasks.length && (
