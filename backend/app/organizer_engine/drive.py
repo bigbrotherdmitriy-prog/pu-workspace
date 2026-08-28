@@ -195,6 +195,17 @@ class DriveClient:
             fields="id,parents",
         ).execute()
 
+    def trash_safe_copy(self, copy_root_id: str) -> None:
+        """Move an explicitly identified PU safe-copy root to Drive trash."""
+        meta = self.get_file_meta(copy_root_id)
+        if not meta.is_folder:
+            raise UnsafeDriveMutation("Safe copy root must be a folder")
+        self.service.files().update(
+            fileId=copy_root_id,
+            body={"trashed": True},
+            fields="id,trashed",
+        ).execute()
+
     def copy_folder_tree(self, source_folder_id: str, new_parent_id: str, source_name: str, source_items: list[DriveFile] | None = None) -> CopyResult:
         # Reuse the scan we already performed in organizer.py.
         # This avoids walking the whole Google Drive a second time.

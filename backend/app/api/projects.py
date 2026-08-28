@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,7 +11,10 @@ from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.organization_contract import Organization
 from app.models.audit_log import AuditLog
+from app.models.organizer import OrganizerSession
 from app.core.auth import require_project_role, require_user
+from app.organizer import get_drive_service
+from app.organizer_engine.drive import DriveClient
 
 
 router = APIRouter(
@@ -33,14 +38,22 @@ class ProjectResponse(BaseModel):
     id: int
     name: str
     organization_id: int
+    archived_at: datetime | None = None
+
+
+class SafeCopyCleanup(BaseModel):
+    confirmation: str
 
 
 @router.get("/")
 def list_projects(
+    include_archived: bool = Query(False),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     query = select(Project).order_by(Project.id)
+    if not include_archived:
+        query = query.where(Project.archived_at.is_(None))
     if not user.is_admin:
         query = query.join(ProjectMember).where(ProjectMember.user_id == user.id)
     projects = db.scalars(query).all()
@@ -50,6 +63,7 @@ def list_projects(
             {
                 "id": project.id,
                 "name": project.name,
+                "archived_at": project.archived_at,
             }
             for project in projects
         ]
@@ -143,9 +157,67 @@ def delete_project(
             detail="Project not found",
         )
 
-    db.delete(item)
+    item.archived_at = datetime.now(timezone.utc)
+    db.add(AuditLog(action="project_archived", entity_type="project", entity_id=item.id, details=f"Project: {item.name}"))
     db.commit()
 
     return {
-        "deleted": project_id,
+        "archived": project_id,
     }
+
+
+@router.post("/{project_id}/restore")
+def restore_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "owner")
+    item = db.get(Project, project_id)
+    if item is None:
+        raise HTTPException(404, "Project not found")
+    item.archived_at = None
+    db.add(AuditLog(action="project_restored", entity_type="project", entity_id=item.id, details=f"Project: {item.name}"))
+    db.commit()
+    return {"restored": project_id}
+
+
+def _safe_copy_sessions(db: Session, project_id: int):
+    rows = db.scalars(select(OrganizerSession).where(
+        OrganizerSession.project_id == project_id,
+        OrganizerSession.copy_folder_id.is_not(None),
+    ).order_by(OrganizerSession.id.desc())).all()
+    seen: set[str] = set()
+    result = []
+    for row in rows:
+        copy_id = row.copy_folder_id or ""
+        if not copy_id or copy_id in seen or copy_id in {"manual", row.source_folder_id} or copy_id.startswith("virtual:"):
+            continue
+        seen.add(copy_id)
+        result.append(row)
+    return result
+
+
+@router.get("/{project_id}/safe-copies")
+def safe_copy_summary(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "owner")
+    return {"count": len(_safe_copy_sessions(db, project_id)), "recoverable": True, "originals_affected": False}
+
+
+@router.post("/{project_id}/safe-copies/trash")
+def trash_safe_copies(project_id: int, payload: SafeCopyCleanup,
+                      db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "owner")
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    if payload.confirmation != project.name:
+        raise HTTPException(422, "Введите точное название проекта для подтверждения")
+    rows = _safe_copy_sessions(db, project_id)
+    drive = DriveClient(get_drive_service(project_id=project_id, db=db))
+    trashed = 0
+    for row in rows:
+        drive.trash_safe_copy(row.copy_folder_id)
+        row.copy_folder_id = None
+        row.copy_folder_name = None
+        trashed += 1
+    db.add(AuditLog(action="project_safe_copies_trashed", entity_type="project", entity_id=project_id,
+                    details=f"count={trashed}; originals_affected=false"))
+    db.commit()
+    return {"trashed": trashed, "recoverable": True, "originals_affected": False}

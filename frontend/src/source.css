@@ -93,6 +93,11 @@
 .project-create button:disabled { opacity: .5; cursor: default; }
 .project-cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(360px,1fr)); gap: 18px; }
 .project-card.current { border-color: #a8c4f5; box-shadow: 0 8px 30px rgba(24,90,219,.08); }
+.project-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; border: 1px solid #185adb; border-radius: 9px; background: #185adb; color: #fff; font-weight: 650; cursor: pointer; }
+.project-actions button svg { width: 16px; height: 16px; }
+.project-actions button.secondary { border-color: #cad3df; background: #fff; color: #334155; }
+.project-actions button.danger { border-color: #f0b9b9; background: #fff7f7; color: #b42318; }
 .project-title { display: flex; align-items: center; gap: 13px; }
 .project-title h2 { margin: 3px 0 0; }
 .project-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 22px 0; }

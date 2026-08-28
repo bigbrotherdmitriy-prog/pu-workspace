@@ -25,6 +25,8 @@ import {
   ShieldCheck,
   Users,
   Wallet,
+  Archive,
+  Trash2,
 } from "lucide-react";
 
 type InstallPromptEvent = Event & {
@@ -32,7 +34,7 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type Project = { id: number; name: string };
+type Project = { id: number; name: string; archived_at?: string };
 type ProjectStats = {
   attention: number;
   open_tasks: number;
@@ -779,6 +781,45 @@ export function App() {
       setNewProjectName("");
       setNotice(`Проект «${created.name}» создан`);
       await activateProject(created.id);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function archiveProject(project: Project) {
+    if (projects.length <= 1) {
+      setError("Нельзя архивировать единственный рабочий проект. Сначала создайте другой проект.");
+      return;
+    }
+    if (!window.confirm(`Архивировать проект «${project.name}»? Данные сохранятся, безопасные копии на Drive останутся.`)) return;
+    try {
+      setError("");
+      await api(`/projects/${project.id}`, { method: "DELETE" });
+      const remaining = projects.filter((item) => item.id !== project.id);
+      setProjects(remaining);
+      if (project.id === projectId) await activateProject(remaining[0].id);
+      setNotice(`Проект «${project.name}» перемещён в архив`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function cleanupProjectCopies(project: Project) {
+    try {
+      setError("");
+      const summary = await api(`/projects/${project.id}/safe-copies`);
+      if (!summary.count) {
+        setNotice("Безопасных копий PU Workspace для очистки нет");
+        return;
+      }
+      const confirmation = window.prompt(
+        `Будут перемещены в корзину Google Drive только ${summary.count} безопасных копий PU Workspace. Оригиналы не затрагиваются. Для подтверждения введите точное название проекта:`,
+      );
+      if (confirmation === null) return;
+      const result = await api(`/projects/${project.id}/safe-copies/trash`, {
+        method: "POST",
+        body: JSON.stringify({ confirmation }),
+      });
+      setNotice(`В корзину Google Drive перемещено безопасных копий: ${result.trashed}. Оригиналы не изменены.`);
+      await load();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -4033,13 +4074,17 @@ export function App() {
                           Внимание<strong>{stats?.attention || 0}</strong>
                         </span>
                       </div>
-                      <button
-                        onClick={() => activateProject(item.id)}
-                      >
-                        {item.id === projectId
-                          ? "Открыть рабочий центр"
-                          : "Переключиться на проект"}
-                      </button>
+                      <div className="project-actions">
+                        <button onClick={() => activateProject(item.id)}>
+                          {item.id === projectId ? "Открыть рабочий центр" : "Переключиться на проект"}
+                        </button>
+                        <button className="secondary" onClick={() => cleanupProjectCopies(item)} title="Переместить созданные системой копии в корзину Google Drive">
+                          <Trash2 /> Очистить копии
+                        </button>
+                        <button className="danger" onClick={() => archiveProject(item)} title="Скрыть проект без удаления данных">
+                          <Archive /> Архивировать
+                        </button>
+                      </div>
                     </article>
                   );
                 })}
