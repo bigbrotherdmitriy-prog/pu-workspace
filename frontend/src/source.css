@@ -221,7 +221,7 @@
 .contract-card h2 { margin: 7px 0 3px; }
 .contract-card p, .contract-card small { display: block; margin: 0; color: #748091; }
 .contract-card small { margin-top: 8px; }
-.contract-source-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.contract-source-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .contract-source-tabs button { padding: 8px 6px; font-size: 12px; }
 .contract-source-tabs button.selected { background: #0d8d70; border-color: #0d8d70; color: #fff; }
 .contract-links > input { width: 100%; padding: 10px 12px; border: 1px solid #d7e0dc; border-radius: 8px; }
@@ -232,6 +232,10 @@
 .contract-links button { padding: 9px 12px; border: 1px solid #087a59; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
 .contract-links button.secondary { background: #fff; color: #087a59; }
 .contract-links button:disabled { cursor: not-allowed; opacity: .5; }
+.contract-candidate { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #dbe7e1; border-radius: 9px; background: #f5faf7; }
+.contract-candidate span { min-width: 0; display: grid; gap: 3px; }
+.contract-candidate strong { overflow: hidden; color: #26322d; text-overflow: ellipsis; white-space: nowrap; }
+.contract-candidate small { color: #718078; }
 .contract-analysis-status { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
 .contract-analysis-status span { padding: 7px; border-radius: 7px; background: #edf8f4; }
 .contract-analysis-status b { display: block; margin-top: 3px; color: #087a59; }
@@ -428,6 +432,9 @@
   .contract-card { grid-template-columns: 1fr; }
   .contract-number { justify-self: start; }
   .contract-links { text-align: left; }
+  .contract-source-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .contract-candidate { grid-template-columns: 1fr; }
+  .contract-candidate button { justify-self: start; }
   .contract-chain-status { grid-template-columns: 1fr; }
   .contract-analysis-status { grid-template-columns: 1fr 1fr; }
   .inbox-head { display: block; }

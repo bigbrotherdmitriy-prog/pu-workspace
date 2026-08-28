@@ -1,14 +1,16 @@
 from datetime import date
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
 from app.models.organization_contract import Contract, Organization
 from app.models.document import Document
+from app.models.document_version import DocumentVersion
 from app.models.governance import Decision, Risk
 from app.models.management import Obligation
 from app.models.task import Task
@@ -41,6 +43,54 @@ class ContractCreate(BaseModel):
 
 class ContractLinkUpdate(BaseModel):
     source_document_id: int | None = None
+
+
+def _normalized(value: str | None) -> str:
+    return re.sub(r"[^0-9a-zа-яё]+", " ", (value or "").casefold()).strip()
+
+
+def _contract_document_score(row: Contract, document: Document, content: str) -> tuple[int, list[str]]:
+    """Rank a possible contract source without mutating either record."""
+    name = _normalized(document.name)
+    body = _normalized(content[:120_000])
+    haystack = f"{name} {body}"
+    score = 0
+    reasons: list[str] = []
+
+    number = _normalized(row.number)
+    compact_number = re.sub(r"\s+", "", number)
+    compact_haystack = re.sub(r"\s+", "", haystack)
+    if compact_number and len(compact_number) >= 4 and compact_number in compact_haystack:
+        score += 60
+        reasons.append("совпадает номер договора")
+
+    counterparty = _normalized(row.counterparty)
+    if counterparty and len(counterparty) >= 4 and counterparty in haystack:
+        score += 25
+        reasons.append("совпадает контрагент")
+
+    title_tokens = {
+        token for token in _normalized(row.title).split()
+        if len(token) >= 5 and token not in {"выполнению", "работ", "системы", "области"}
+    }
+    matched = sorted(token for token in title_tokens if token in haystack)
+    if matched:
+        score += min(30, len(matched) * 5)
+        reasons.append(f"совпадает предмет договора: {', '.join(matched[:3])}")
+
+    contract_markers = ("договор", "контракт", "государственн контракт", "заказчик", "подрядчик")
+    marker_count = sum(1 for marker in contract_markers if marker in haystack)
+    if marker_count:
+        score += min(15, marker_count * 4)
+        reasons.append("обнаружены реквизиты договора")
+
+    if any(marker in name for marker in ("договор", "контракт", "гк ", "гк-")):
+        score += 15
+        reasons.append("название похоже на договор")
+    if any(marker in name for marker in ("приложение", "график", "акт", "письмо", "счет", "счёт")):
+        score -= 12
+        reasons.append("возможно приложение или связанный документ")
+    return max(0, min(score, 100)), reasons
 
 
 @router.get("/organizations")
@@ -102,8 +152,54 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
     return _contract(row, db)
 
 
-def _contract_source_text(document: Document) -> str:
-    return "\n".join(part.strip() for part in (document.summary, document.notes) if part and part.strip())
+def _contract_source_text(document: Document, db: Session | None = None) -> str:
+    parts = [part.strip() for part in (document.summary, document.notes) if part and part.strip()]
+    if db is not None:
+        latest = db.scalar(select(DocumentVersion).where(
+            DocumentVersion.document_id == document.id,
+        ).order_by(DocumentVersion.version_number.desc()))
+        if latest and latest.content and latest.content.strip():
+            parts.append(latest.content.strip())
+    return "\n".join(dict.fromkeys(parts))
+
+
+@router.get("/projects/{project_id}/contracts/{contract_id}/source-candidates")
+def contract_source_candidates(project_id: int, contract_id: int,
+                               db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Return explainable, read-only source suggestions for a contract."""
+    require_project_role(db, user, project_id, "viewer")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    documents = db.execute(select(Document, DocumentVersion.content).outerjoin(
+        DocumentVersion,
+        and_(
+            DocumentVersion.document_id == Document.id,
+            DocumentVersion.version_number == Document.current_version,
+        ),
+    ).where(Document.project_id == project_id).order_by(Document.id.desc())).all()
+    candidates = []
+    for document, extracted_content in documents:
+        content = "\n".join(dict.fromkeys(
+            part.strip() for part in (document.summary, document.notes, extracted_content)
+            if part and part.strip()
+        ))
+        score, reasons = _contract_document_score(row, document, content)
+        candidates.append({
+            "document_id": document.id,
+            "name": document.name,
+            "source": document.source,
+            "mime_type": document.mime_type,
+            "score": score,
+            "reasons": reasons,
+            "text_ready": bool(content),
+        })
+    candidates.sort(key=lambda item: (item["score"], item["text_ready"], item["document_id"]), reverse=True)
+    return {
+        "contract_id": row.id,
+        "recommended_document_id": candidates[0]["document_id"] if candidates and candidates[0]["score"] >= 50 else None,
+        "candidates": candidates[:100],
+    }
 
 
 @router.post("/projects/{project_id}/contracts/{contract_id}/analyze")
@@ -121,7 +217,7 @@ def analyze_contract(project_id: int, contract_id: int,
     ))
     if document is None:
         raise HTTPException(404, "Contract source document not found")
-    content = _contract_source_text(document)
+    content = _contract_source_text(document, db)
     if not content:
         raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
     source_id = document.external_id or f"document:{document.id}"
@@ -208,7 +304,7 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
             Task.project_id == row.project_id, Task.source_file_id == source_id,
         ))) if source_id else []
         result["analysis"] = {
-            "source_ready": bool(document and _contract_source_text(document)),
+            "source_ready": bool(document and _contract_source_text(document, db)),
             "tasks": len(task_ids),
             "obligations": db.scalar(select(func.count(Obligation.id)).where(
                 Obligation.project_id == row.project_id, Obligation.contract_id == row.id,

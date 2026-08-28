@@ -19,3 +19,7 @@ def test_contract_document_picker_has_source_tabs_and_search():
     assert "Облако / загрузки" in source
     assert "Google Drive" in source
     assert "Поиск документа по названию" in source
+    assert "Найти договор по номеру, контрагенту и тексту" in source
+    assert "/source-candidates" in source
+    assert "Рекомендованные" in source
+    assert "candidate.reasons.join" in source

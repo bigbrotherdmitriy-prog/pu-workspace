@@ -77,6 +77,15 @@ type DocumentDetail = DocumentRow & {
   versions: { version: number; created_at: string }[];
   links: { tasks: number; risks: number; decisions: number; drafts: number };
 };
+type ContractSourceCandidate = {
+  document_id: number;
+  name: string;
+  source: string;
+  mime_type?: string;
+  score: number;
+  reasons: string[];
+  text_ready: boolean;
+};
 type TaskRow = {
   id: number;
   title: string;
@@ -590,8 +599,10 @@ export function App() {
     [newContractNumber, setNewContractNumber] = useState(""),
     [newContractTitle, setNewContractTitle] = useState(""),
     [newCounterparty, setNewCounterparty] = useState(""),
-    [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "server" | "upload" | "google">>({}),
+    [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "recommended" | "server" | "upload" | "google">>({}),
     [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
+    [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
+    [contractCandidateBusy, setContractCandidateBusy] = useState(0),
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
       {},
     ),
@@ -961,6 +972,22 @@ export function App() {
       await load();
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+  async function suggestContractDocuments(contractId: number) {
+    try {
+      setError("");
+      setContractCandidateBusy(contractId);
+      const result = await api(`/projects/${projectId}/contracts/${contractId}/source-candidates`);
+      setContractSourceCandidates((current) => ({ ...current, [contractId]: result.candidates || [] }));
+      setContractDocumentTabs((current) => ({ ...current, [contractId]: "recommended" }));
+      setNotice(result.recommended_document_id
+        ? "Вероятный документ договора найден. Проверьте объяснение и подтвердите привязку."
+        : "Точного совпадения не найдено. Используйте поиск или сначала завершите анализ документов.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setContractCandidateBusy(0);
     }
   }
   async function analyzeContract(contractId: number) {
@@ -3329,15 +3356,26 @@ export function App() {
                     </div>
                     <div className="contract-links">
                       <label>1. Документ-источник</label>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={contractCandidateBusy === item.id}
+                        onClick={() => suggestContractDocuments(item.id)}
+                      >
+                        {contractCandidateBusy === item.id
+                          ? "Анализирую реестр…"
+                          : "Найти договор по номеру, контрагенту и тексту"}
+                      </button>
                       <div className="contract-source-tabs">
                         {([
+                          ["recommended", "Рекомендованные"],
                           ["server", "Сервер / реестр"],
                           ["upload", "Облако / загрузки"],
                           ["google", "Google Drive"],
                         ] as const).map(([source, title]) => (
                           <button
                             type="button"
-                            className={(contractDocumentTabs[item.id] || "server") === source ? "selected" : "secondary"}
+                            className={(contractDocumentTabs[item.id] || "recommended") === source ? "selected" : "secondary"}
                             onClick={() => setContractDocumentTabs((current) => ({ ...current, [item.id]: source }))}
                             key={source}
                           >
@@ -3357,9 +3395,12 @@ export function App() {
                         <option value={0}>Выберите документ договора</option>
                         {documentRows
                           .filter((document) => {
-                            const tab = contractDocumentTabs[item.id] || "server";
+                            const tab = contractDocumentTabs[item.id] || "recommended";
                             const source = (document.source || "").toLowerCase();
-                            const sourceMatches = tab === "server"
+                            const candidate = (contractSourceCandidates[item.id] || []).find((row) => row.document_id === document.id);
+                            const sourceMatches = tab === "recommended"
+                              ? Boolean(candidate && candidate.score > 0)
+                              : tab === "server"
                               ? true
                               : tab === "upload"
                                 ? !source.includes("google")
@@ -3367,12 +3408,43 @@ export function App() {
                             const search = (contractDocumentQueries[item.id] || "").trim().toLocaleLowerCase("ru-RU");
                             return sourceMatches && (!search || document.name.toLocaleLowerCase("ru-RU").includes(search));
                           })
+                          .sort((left, right) => {
+                            const scores = contractSourceCandidates[item.id] || [];
+                            const leftScore = scores.find((row) => row.document_id === left.id)?.score || 0;
+                            const rightScore = scores.find((row) => row.document_id === right.id)?.score || 0;
+                            return rightScore - leftScore || right.id - left.id;
+                          })
                           .map((document) => (
-                            <option value={document.id} key={document.id}>{document.name}</option>
+                            <option value={document.id} key={document.id}>
+                              {(() => {
+                                const score = (contractSourceCandidates[item.id] || []).find((row) => row.document_id === document.id)?.score;
+                                return `${score ? `${score}% · ` : ""}${document.name}`;
+                              })()}
+                            </option>
                           ))}
                       </select>
+                      {(contractDocumentTabs[item.id] || "recommended") === "recommended" &&
+                        !(contractSourceCandidates[item.id] || []).length && (
+                          <small>Нажмите «Найти договор…»: система проверит не только имя файла, но и извлечённый текст.</small>
+                        )}
+                      {(contractSourceCandidates[item.id] || []).slice(0, 3).map((candidate) => (
+                        <div className="contract-candidate" key={candidate.document_id}>
+                          <span>
+                            <strong>{candidate.score}% · {candidate.name}</strong>
+                            <small>{candidate.reasons.join("; ") || "слабое совпадение"}</small>
+                          </span>
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={item.source_document_id === candidate.document_id}
+                            onClick={() => linkContractDocument(item.id, candidate.document_id)}
+                          >
+                            {item.source_document_id === candidate.document_id ? "Привязан" : "Привязать"}
+                          </button>
+                        </div>
+                      ))}
                       <small>
-                        «Сервер / реестр» показывает все документы проекта; «Облако / загрузки» — загруженные файлы;
+                        «Рекомендованные» ранжируются по реквизитам и тексту; «Сервер / реестр» показывает все документы проекта; «Облако / загрузки» — загруженные файлы;
                         «Google Drive» — документы, проиндексированные из подключённого Диска.
                       </small>
                       <button
