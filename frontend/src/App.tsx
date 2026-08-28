@@ -512,6 +512,8 @@ export function App() {
     [busyFolder, setBusyFolder] = useState(""),
     [busyProposal, setBusyProposal] = useState(0),
     [busyAll, setBusyAll] = useState(false),
+    [gmailSyncing, setGmailSyncing] = useState(false),
+    [gmailSyncStatus, setGmailSyncStatus] = useState(""),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
   const [obligations, setObligations] = useState<ObligationRow[]>([]),
@@ -650,18 +652,27 @@ export function App() {
   }
   async function syncGmail() {
     try {
-      setNotice("Получаю последние разрешённые письма Gmail…");
+      setError("");
+      setGmailSyncing(true);
+      setGmailSyncStatus("Получаю последние письма за 7 дней…");
       const result = await api(`/projects/${projectId}/gmail/sync`, {
         method: "POST",
         body: JSON.stringify({ query: "newer_than:7d", max_results: 25 }),
       });
-      setNotice(
-        `Gmail: обработано ${result.processed}, пропущено ${result.skipped}, ошибок ${result.failed}`,
-      );
+      const message = `Получено: ${result.processed}. Уже были загружены: ${result.skipped}. Ошибок: ${result.failed}.`;
+      setGmailSyncStatus(message);
+      setNotice(`Gmail: ${message}`);
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      setGmailSyncStatus(`Не удалось получить письма: ${message}`);
+      setError(message);
+    } finally {
+      setGmailSyncing(false);
     }
+  }
+  function openGmailResults() {
+    setActive("AI Secretary");
   }
   async function saveAIPolicy() {
     if (!projectId || !aiPolicy) return;
@@ -2750,13 +2761,25 @@ export function App() {
                     {connected ? "Подключено" : "Не подключено"}
                   </span>
                   {name === "Gmail" && connected ? (
-                    <button onClick={syncGmail}>Получить письма</button>
+                    <button onClick={syncGmail} disabled={gmailSyncing}>
+                      {gmailSyncing ? "Получаю…" : "Получить письма"}
+                    </button>
                   ) : (
                     name !== "Telegram" && (
                       <button onClick={connectGoogle}>
                         {connected ? "Переподключить" : "Подключить"}
                       </button>
                     )
+                  )}
+                  {name === "Gmail" && gmailSyncStatus && (
+                    <div className="integration-sync-result">
+                      <small>{gmailSyncStatus}</small>
+                      {!gmailSyncing && (
+                        <button onClick={openGmailResults}>
+                          Открыть AI Secretary
+                        </button>
+                      )}
+                    </div>
                   )}
                 </article>
               ))}

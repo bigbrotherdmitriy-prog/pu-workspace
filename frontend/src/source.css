@@ -125,6 +125,9 @@
 .integration-card > span { padding: 6px 9px; border-radius: 999px; background: #fff0f0; color: #b83232; font-size: 11px; }
 .integration-card > span.connected { background: #eaf7f3; color: #13745f; }
 .integration-card > button { grid-column: 2 / 4; justify-self: start; padding: 8px 11px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; cursor: pointer; }
+.integration-card > button:disabled { cursor: wait; opacity: .65; }
+.integration-sync-result { grid-column: 2 / 4; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: #526173; }
+.integration-sync-result button { padding: 7px 10px; border: 1px solid #c7d2e2; border-radius: 8px; background: #fff; cursor: pointer; }
 .integration-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: #f0f2f5; color: #748091; }
 .integration-icon.connected { background: #eaf7f3; color: #13745f; }
 .system-checks .card-head button { padding: 8px 11px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; cursor: pointer; }
