@@ -861,9 +861,21 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  function openContractControl(contractId: number) {
-    setSelectedFinanceContractId(contractId);
-    setActive("Исполнение и финансы");
+  async function openContractControl(contractId: number) {
+    try {
+      setError("");
+      const result = await api(`/projects/${projectId}/contracts/${contractId}/initialize-control`, {
+        method: "POST",
+      });
+      setSelectedFinanceContractId(contractId);
+      setActive("Исполнение и финансы");
+      setNotice(result.created
+        ? "Цепочка договора создана: заполните этапы ГПР, затем бюджет и ДДС"
+        : "Цепочка договора открыта: ГПР, бюджет и ДДС связаны с договором");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
   async function openSources(folderId = "root") {
     try {
@@ -2977,7 +2989,11 @@ export function App() {
                         <span>3. ДДС <b>{finance?.cash_flow.filter((row) => row.contract_id === item.id).length || 0} записей</b></span>
                         <span>4. Бюджет <b>{finance?.budget.filter((row) => row.contract_id === item.id).length || 0} строк</b></span>
                       </div>
-                      <button onClick={() => openContractControl(item.id)}>Открыть ГПР и ДДС</button>
+                      <button onClick={() => openContractControl(item.id)}>
+                        {finance?.baselines.some((row) => row.contract_id === item.id)
+                          ? "Открыть ГПР и ДДС"
+                          : "Создать ГПР и открыть ДДС"}
+                      </button>
                     </div>
                   </article>
                 ))}

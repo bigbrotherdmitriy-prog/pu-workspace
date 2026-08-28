@@ -96,6 +96,44 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
     return _contract(row)
 
 
+@router.post("/projects/{project_id}/contracts/{contract_id}/initialize-control")
+def initialize_contract_control(project_id: int, contract_id: int,
+                                db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Create the missing GPR anchor after an explicit user action; safe to repeat."""
+    require_project_role(db, user, project_id, "editor")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    baseline = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.project_id == project_id,
+        ScheduleBaseline.contract_id == contract_id,
+    ).order_by(ScheduleBaseline.version.desc()))
+    created = baseline is None
+    if created:
+        version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(
+            ScheduleBaseline.project_id == project_id,
+        )) or 0) + 1
+        baseline = ScheduleBaseline(
+            project_id=project_id,
+            contract_id=contract_id,
+            created_by_user_id=user.id,
+            name=f"ГПР по договору {row.number}",
+            version=version,
+            note="Создано по команде пользователя; заполните этапы и сроки.",
+        )
+        db.add(baseline)
+        db.flush()
+        db.add(AuditLog(
+            action="contract_control_initialized",
+            entity_type="contract",
+            entity_id=row.id,
+            details=f"baseline={baseline.id}",
+        ))
+        db.commit()
+        db.refresh(baseline)
+    return {"created": created, "baseline_id": baseline.id, "contract_id": contract_id}
+
+
 def _contract(row: Contract) -> dict:
     return {
         "id": row.id, "project_id": row.project_id, "number": row.number,
