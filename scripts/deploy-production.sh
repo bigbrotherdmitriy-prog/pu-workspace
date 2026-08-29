@@ -6,6 +6,7 @@ set -eu
 
 RELEASE_DIR=${1:-}
 CANDIDATE_IMAGE=${2:-}
+DEPLOY_RELAY=${DEPLOY_RELAY:-true}
 APP_ROOT=/opt/pu-workspace
 CURRENT_LINK=$APP_ROOT/current
 PROXY_OVERRIDE=/opt/pu-workspace/docker-compose.proxy.yml
@@ -44,7 +45,11 @@ rollback() {
     if [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
       ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
       cd "$PREVIOUS_RELEASE"
-      $COMPOSE up -d --no-build --force-recreate backend telegram-relay || true
+      if [ "$DEPLOY_RELAY" = true ]; then
+        $COMPOSE up -d --no-build --force-recreate backend telegram-relay || true
+      else
+        $COMPOSE up -d --no-build --force-recreate backend || true
+      fi
     fi
   fi
   exit "$code"
@@ -77,7 +82,12 @@ docker tag "$CANDIDATE_IMAGE" app-backend:latest
 docker tag "$CANDIDATE_IMAGE" app-backend
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 SWITCHED=true
-$COMPOSE up -d --no-build --force-recreate backend telegram-relay
+if [ "$DEPLOY_RELAY" = true ]; then
+  $COMPOSE up -d --no-build --force-recreate backend telegram-relay
+else
+  echo "relay restart skipped by DEPLOY_RELAY=false"
+  $COMPOSE up -d --no-build --force-recreate backend
+fi
 
 echo "[5/6] waiting for backend readiness"
 ready=false
@@ -93,7 +103,19 @@ done
 [ "$ready" = true ] || fail "backend readiness did not become green"
 
 echo "[6/6] checking relay and public endpoint"
-docker exec pu-workspace-backend python -c 'import json,urllib.request; data=json.load(urllib.request.urlopen("http://172.19.0.1:18080/health", timeout=5)); raise SystemExit(0 if data.get("status") in ("ok", "healthy") else 1)'
+if [ "$DEPLOY_RELAY" = true ]; then
+  relay_ready=false
+  attempt=1
+  while [ "$attempt" -le 15 ]; do
+    if docker exec pu-workspace-backend python -c 'import json,urllib.request; data=json.load(urllib.request.urlopen("http://172.19.0.1:18080/health", timeout=5)); raise SystemExit(0 if data.get("status") in ("ok", "healthy") else 1)' 2>/dev/null; then
+      relay_ready=true
+      break
+    fi
+    sleep 3
+    attempt=$((attempt + 1))
+  done
+  [ "$relay_ready" = true ] || fail "telegram relay did not become healthy"
+fi
 curl -fsS --max-time 15 https://pu-workspace.duckdns.org/new/ >/dev/null
 
 SWITCHED=false
