@@ -1,0 +1,9 @@
+# Backend-only safe-copy organizer release. The verified production image keeps
+# its frontend and integrations; only the organizer modules are replaced.
+FROM app-backend:latest
+
+WORKDIR /app
+COPY app/organizer.py ./app/organizer.py
+COPY app/organizer_engine/executor.py ./app/organizer_engine/executor.py
+COPY app/organizer_engine/naming.py ./app/organizer_engine/naming.py
+COPY app/organizer_engine/repository.py ./app/organizer_engine/repository.py
