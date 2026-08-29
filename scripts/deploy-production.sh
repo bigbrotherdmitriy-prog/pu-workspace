@@ -62,6 +62,7 @@ $COMPOSE config --quiet
 docker run --rm -e PYTHONPATH=/app \
   -v "$RELEASE_DIR/backend/tests:/workspace/backend/tests:ro" \
   -v "$RELEASE_DIR/backend/app:/workspace/backend/app:ro" \
+  -v "$RELEASE_DIR/backend/migrations:/workspace/backend/migrations:ro" \
   -v "$RELEASE_DIR/frontend:/workspace/frontend:ro" \
   -v "$RELEASE_DIR/scripts:/workspace/scripts:ro" \
   -v "$RELEASE_DIR/.github:/workspace/.github:ro" \
