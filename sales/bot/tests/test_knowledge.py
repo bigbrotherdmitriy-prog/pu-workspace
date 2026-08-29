@@ -12,10 +12,10 @@ class ApprovedKnowledgeProviderTest(unittest.TestCase):
         self.assertIn("roadmap", answer)
         self.assertIn("Google Workspace", answer)
 
-    def test_early_access_status_is_explicit(self) -> None:
+    def test_ready_license_status_is_explicit(self) -> None:
         answer = self.provider.answer("Продукт уже готов?")
-        self.assertIn("Early Access", answer)
-        self.assertIn("находится в разработке", answer)
+        self.assertIn("готовую самостоятельную лицензионную версию", answer)
+        self.assertIn("конкретный проверенный релиз", answer)
 
     def test_external_ai_can_be_forbidden(self) -> None:
         answer = self.provider.answer("Как защищены данные?")
@@ -24,4 +24,3 @@ class ApprovedKnowledgeProviderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

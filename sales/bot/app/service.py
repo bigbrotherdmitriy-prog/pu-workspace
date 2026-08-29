@@ -27,7 +27,7 @@ def main_menu() -> dict[str, Any]:
                 {"text": "🎬 Посмотреть демо", "url": "https://puworkspace.ru/materials.html"},
                 {"text": "💻 Разработка", "callback_data": "development"},
             ],
-            [{"text": "🚀 Получить Early Access", "callback_data": "early_access"}],
+            [{"text": "📦 Запросить лицензию", "callback_data": "early_access"}],
         ]
     }
 
@@ -79,7 +79,7 @@ class SalesBotService:
             text = (
                 "<b>PU Workspace</b> — единое рабочее пространство для проектов, договоров, "
                 "документов, задач и коммуникаций. AI Secretary понимает контекст, показывает важное "
-                "и предлагает действия. Решение находится в Early Access."
+                "и предлагает действия. Доступна самостоятельная лицензионная версия."
             )
         elif action == "capabilities":
             text = (
@@ -111,7 +111,7 @@ class SalesBotService:
             text = (
                 "<b>Связаться с PU Workspace</b>\n\n"
                 "Почта: <a href=\"mailto:hello@puworkspace.ru\">hello@puworkspace.ru</a>\n"
-                "Или оставьте заявку на Early Access — она сразу поступит владельцу проекта."
+                "Или запросите лицензионное предложение — заявка сразу поступит владельцу проекта."
             )
         elif action == "development":
             self.storage.set_session(
@@ -155,7 +155,7 @@ class SalesBotService:
             self.telegram.send_message(
                 chat_id,
                 "Перед заявкой подтвердите согласие на обработку указанных вами контактных данных "
-                "исключительно для связи по Early Access.",
+                "исключительно для обсуждения лицензии PU Workspace.",
                 {
                     "inline_keyboard": [
                         [{"text": "Согласен, продолжить", "callback_data": "lead_consent"}],
@@ -202,7 +202,7 @@ class SalesBotService:
                 "<b>PU Workspace</b>\n"
                 "Бизнес, который понимает сам себя.\n\n"
                 "AI-секретарь для проектов, договоров, документов и задач. "
-                "Посмотрите возможности, демо или оставьте заявку на Early Access."
+                "Посмотрите возможности, демо или запросите самостоятельную лицензионную версию."
             )
             if source.startswith("development"):
                 caption += "\n\nТакже мы разрабатываем сайты, корпоративные сервисы и автоматизацию."
