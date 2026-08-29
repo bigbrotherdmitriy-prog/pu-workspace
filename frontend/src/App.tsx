@@ -4144,16 +4144,26 @@ export function App() {
               </div>
               <small>Сначала выберите договор, затем укажите email получателя. Переменные: {"{project}"}, {"{contract}"}, {"{month}"}, {"{next_month}"}, {"{date}"}.</small>
               <div className="automation-list">
-                {automationRules.map((rule) => <article key={rule.id}>
-                  <div>
-                    <span className={`draft-status ${rule.active ? "ready" : "completed"}`}>{rule.active ? "Активен" : "Пауза"}</span>
-                    <strong>{rule.name}</strong>
-                    <small>Каждого {rule.day_of_month} числа · следующий запуск {new Date(`${rule.next_run_on}T00:00:00`).toLocaleDateString("ru-RU")} · {rule.recipient_to}</small>
-                    <small>{rule.contract_id ? `Договор привязан · ` : ""}{rule.source_document_id ? "Опорный документ привязан" : "Без опорного документа"}</small>
-                  </div>
-                  <button onClick={() => runAutomationNow(rule)}>Подготовить сейчас</button>
-                  <button className="secondary" onClick={() => setAutomationActive(rule, !rule.active)}>{rule.active ? "Приостановить" : "Включить"}</button>
-                </article>)}
+                {automationRules.map((rule) => {
+                  const latestRun = rule.runs[0];
+                  return <article key={rule.id}>
+                    <div>
+                      <span className={`draft-status ${rule.active ? "ready" : "completed"}`}>{rule.active ? "Активен" : "Пауза"}</span>
+                      <strong>{rule.name}</strong>
+                      <small>Каждого {rule.day_of_month} числа · следующий запуск {new Date(`${rule.next_run_on}T00:00:00`).toLocaleDateString("ru-RU")} · {rule.recipient_to}</small>
+                      <small>{rule.contract_id ? `Договор привязан · ` : ""}{rule.source_document_id ? "Опорный документ привязан" : "Без опорного документа"}</small>
+                      {latestRun && <span className="automation-result">
+                        Последняя подготовка: {new Date(`${latestRun.scheduled_for}T00:00:00`).toLocaleDateString("ru-RU")} · задача и письмо ожидают проверки
+                      </span>}
+                    </div>
+                    <div className="automation-actions">
+                      <button onClick={() => runAutomationNow(rule)}>Подготовить сейчас</button>
+                      {latestRun?.task_id && <button className="secondary" onClick={() => setActive("Задачи")}>Открыть задачу</button>}
+                      {latestRun?.response_draft_id && <button className="secondary" onClick={() => setActive("Письма")}>Открыть черновик</button>}
+                      <button className="secondary" onClick={() => setAutomationActive(rule, !rule.active)}>{rule.active ? "Приостановить" : "Включить"}</button>
+                    </div>
+                  </article>;
+                })}
                 {!automationRules.length && <p>Регламентов пока нет. Заполните форму выше — например, ежемесячное письмо на пропуска.</p>}
               </div>
             </section>}

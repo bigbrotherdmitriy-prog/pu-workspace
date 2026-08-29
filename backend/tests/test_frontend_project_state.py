@@ -94,4 +94,12 @@ def test_finance_workflow_suggests_analyzed_project_documents_without_mutating_s
     assert "Проверить и использовать" in source
     assert "source_document_id: financeSourceDocumentId || null" in source
     assert "document_id: financeSourceDocumentId || null" in source
+
+
+def test_ai_secretary_automation_exposes_prepared_task_and_draft_for_review():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    assert "Последняя подготовка:" in source
+    assert "Открыть задачу" in source
+    assert "Открыть черновик" in source
+    assert "Внешняя отправка всегда требует вашего подтверждения" in source
     assert "Связать со строкой бюджета" in source
