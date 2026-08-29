@@ -43,6 +43,8 @@ class IncomingMessage(BaseModel):
     source_thread_id: str | None = Field(default=None, max_length=500)
     content: str = Field(min_length=1, max_length=100000)
     attachments: list[dict] = Field(default_factory=list)
+    routing_contract_id: int | None = None
+    routing_evidence: str | None = Field(default=None, max_length=1000)
 
 
 class ContextConfirmation(BaseModel):
@@ -220,7 +222,15 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
     existing = db.scalar(select(Message).where(Message.source_type == payload.source_type, Message.source_external_id == external_id))
     if existing:
         return _message_payload(db, existing)
-    contract, confidence, evidence = _contract_candidate(db, payload.project_id, payload.content)
+    if payload.routing_contract_id is not None:
+        contract = db.get(Contract, payload.routing_contract_id)
+        if contract is None or contract.project_id != payload.project_id:
+            raise HTTPException(422, "Контакт связан с договором другого проекта")
+        confidence, evidence = 0.99, payload.routing_evidence or "Проект и договор определены по email клиента"
+    else:
+        contract, confidence, evidence = _contract_candidate(db, payload.project_id, payload.content)
+        if payload.routing_evidence:
+            confidence, evidence = max(confidence, 0.99), payload.routing_evidence
     row = Message(
         organization_id=project.organization_id, project_id=project.id, contract_id=contract.id if contract else None,
         created_by_user_id=user.id, source_type=payload.source_type, source_external_id=external_id,

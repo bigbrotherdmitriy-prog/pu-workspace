@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.ai_secretary import IncomingMessage, ingest_message, project_candidate
+from app.api.project_contacts import contact_for_sender, discover_contact_from_message
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
@@ -133,22 +134,34 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 existing_attachments = json.loads(existing.attachments_json or "[]")
                 if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
+                if existing.source_sender:
+                    discover_contact_from_message(db, existing.project_id, existing.source_sender, existing.content, user)
                 skipped += 1
                 continue
             attachments = _attachments(item.get("payload", {}), item["id"])
             if not content.strip():
                 skipped += 1
                 continue
-            target_project_id, _, _ = project_candidate(
-                db, project_id, f"{subject}\n{sender}\n{content}", user,
-            )
+            contact = contact_for_sender(db, project_id, sender, user)
+            if contact is not None:
+                target_project_id = contact.project_id
+                routing_evidence = f"Проект определён по email клиента: {contact.email}"
+                routing_contract_id = contact.contract_id
+            else:
+                target_project_id, _, _ = project_candidate(
+                    db, project_id, f"{subject}\n{sender}\n{content}", user,
+                )
+                routing_evidence = None
+                routing_contract_id = None
             result = ingest_message(IncomingMessage(
                 project_id=target_project_id, source_type="email", source_external_id=item["id"],
                 source_name=f"{sender} — {subject}", source_url=f"https://mail.google.com/mail/u/0/#inbox/{item['id']}",
                 source_sender=sender, source_thread_id=item.get("threadId"), content=content,
                 attachments=attachments,
+                routing_contract_id=routing_contract_id, routing_evidence=routing_evidence,
             ), db, user)
             processed += 1 if result["status"] else 0
+            discover_contact_from_message(db, target_project_id, sender, content, user)
             notify_telegram(_gmail_telegram_notice(sender, subject, result))
         except Exception as exc:
             db.rollback()

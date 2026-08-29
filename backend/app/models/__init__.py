@@ -26,6 +26,7 @@ from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import Meeting, Notification, Obligation
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.external_resource import ExternalResourceLink
+from app.models.project_contact import ProjectContact
 
 __all__ = [
     "Project",
@@ -69,4 +70,5 @@ __all__ = [
     "ProcurementItem",
     "AcceptanceAct",
     "ExternalResourceLink",
+    "ProjectContact",
 ]
