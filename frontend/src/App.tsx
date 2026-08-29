@@ -149,6 +149,19 @@ type ResponseDraft = {
   source_excerpt: string;
   confidence: number;
   reviewer_name: string;
+  recipient_to?: string;
+};
+type ProjectContact = {
+  id: number;
+  project_id: number;
+  contract_id?: number;
+  name: string;
+  company?: string;
+  email: string;
+  active: boolean;
+  confirmed: boolean;
+  source: string;
+  company_activity?: string;
 };
 type AuditRow = {
   id: number;
@@ -476,6 +489,12 @@ export function App() {
     [decisions, setDecisions] = useState<DecisionRow[]>([]),
     [drafts, setDrafts] = useState<ResponseDraft[]>([]),
     [inbox, setInbox] = useState<InboxMessage[]>([]),
+    [projectContacts, setProjectContacts] = useState<ProjectContact[]>([]),
+    [mailView, setMailView] = useState<"inbox" | "companies">("inbox"),
+    [contactName, setContactName] = useState(""),
+    [contactCompany, setContactCompany] = useState(""),
+    [contactEmail, setContactEmail] = useState(""),
+    [contactContractId, setContactContractId] = useState(0),
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
     [inboxFilter, setInboxFilter] = useState("all"),
     [selectedInboxIds, setSelectedInboxIds] = useState<number[]>([]),
@@ -583,6 +602,7 @@ export function App() {
           analyticsData,
           integrationData,
           automationData,
+          contactData,
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
@@ -615,6 +635,7 @@ export function App() {
           api(`/analytics/project?project_id=${id}`).catch(() => null),
           api(`/integrations/project?project_id=${id}`).catch(() => ({ adapters: [] })),
           api(`/ai-secretary/automations?project_id=${id}`).catch(() => ({ rules: [] })),
+          api(`/project-contacts?project_id=${id}`).catch(() => ({ contacts: [] })),
         ]);
         if (
           loadSequence !== loadSequenceRef.current ||
@@ -644,6 +665,7 @@ export function App() {
         setAnalytics(analyticsData);
         setIntegrationItems(integrationData.adapters);
         setAutomationRules(automationData.rules);
+        setProjectContacts(contactData.contacts);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1131,6 +1153,54 @@ export function App() {
       setError((e as Error).message);
     }
   }
+  async function createProjectContact() {
+    if (!contactName.trim() || !contactEmail.trim()) return;
+    try {
+      await api("/project-contacts", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          contract_id: contactContractId || null,
+          name: contactName.trim(),
+          company: contactCompany.trim() || null,
+          email: contactEmail.trim(),
+        }),
+      });
+      setContactName(""); setContactCompany(""); setContactEmail(""); setContactContractId(0);
+      setNotice("Контакт клиента сохранён и закреплён за текущим проектом");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function confirmProjectContact(contact: ProjectContact) {
+    try {
+      await api(`/project-contacts/${contact.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ confirmed: true }),
+      });
+      setNotice(`Контакт ${contact.email} подтверждён. Следующие письма будут направляться в этот проект.`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function prepareContactEmail(contact: ProjectContact) {
+    const subject = window.prompt(`Тема письма для ${contact.name}`)?.trim();
+    if (!subject) return;
+    const body = window.prompt("Текст письма. После создания потребуется отдельное подтверждение перед отправкой.")?.trim();
+    if (!body) return;
+    try {
+      await api(`/project-contacts/${contact.id}/draft`, {
+        method: "POST",
+        body: JSON.stringify({ subject, body }),
+      });
+      setNotice(`Черновик для ${contact.email} создан. Проверьте его ниже и подтвердите перед отправкой.`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function createAutomationRule() {
     const day = Number(automationDay);
     if (!automationContractId) {
@@ -1416,6 +1486,25 @@ export function App() {
       });
       setNotice(
         `Откат завершён: ${result.rolled_back}, ошибок: ${result.errors}.`,
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyProposal(0);
+    }
+  }
+  async function standardizeProposal(proposal: Proposal) {
+    if (!window.confirm("Переименовать и разложить оставшиеся файлы в безопасной копии по единому стандарту? Оригиналы не изменятся."))
+      return;
+    try {
+      setBusyProposal(proposal.id);
+      const result = await api(
+        `/organizer/proposals/${proposal.id}/standardize-copy`,
+        { method: "POST" },
+      );
+      setNotice(
+        `Стандартизация копии завершена: переименовано ${result.stats.renamed}, перемещено ${result.stats.moved}, пропущено ${result.stats.skipped}.`,
       );
       await load();
     } catch (e) {
@@ -1773,6 +1862,11 @@ export function App() {
     tasks: inbox.filter((item) => item.tasks.length > 0).length,
     drafts: inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length,
   };
+  const companyGroups = Object.entries(projectContacts.reduce<Record<string, ProjectContact[]>>((groups, contact) => {
+    const key = contact.company?.trim() || "Компания не указана";
+    (groups[key] ||= []).push(contact);
+    return groups;
+  }, {}));
   const visibleInbox = inbox.filter((item) => {
     const matchesQuery = !query || `${item.source_name} ${item.source_sender || ""} ${item.summary}`
       .toLocaleLowerCase("ru-RU").includes(query.toLocaleLowerCase("ru-RU"));
@@ -3353,6 +3447,17 @@ export function App() {
                         proposal.status,
                       ) && (
                         <button
+                          className="apply-safe"
+                          disabled={busyProposal === proposal.id}
+                          onClick={() => standardizeProposal(proposal)}
+                        >
+                          Стандартизировать все файлы в копии
+                        </button>
+                      )}
+                      {["applied", "rollback_partial"].includes(
+                        proposal.status,
+                      ) && (
+                        <button
                           className="rollback"
                           disabled={busyProposal === proposal.id}
                           onClick={() => rollbackProposal(proposal)}
@@ -3798,6 +3903,62 @@ export function App() {
                 </button>
               )}
             </section>
+            {active === "Письма" && <div className="mail-view-tabs">
+              <button className={mailView === "inbox" ? "selected" : ""} onClick={() => setMailView("inbox")}>Входящие</button>
+              <button className={mailView === "companies" ? "selected" : ""} onClick={() => setMailView("companies")}>Компании и контакты <b>{companyGroups.length}</b></button>
+            </div>}
+            {active === "Письма" && mailView === "companies" && <section className="company-directory">
+              <section className="card company-create">
+                <div>
+                  <span className="eyebrow">КАРТОЧКА КЛИЕНТА</span>
+                  <h2>Добавить контакт и закрепить за проектом</h2>
+                  <p>Входящие от подтверждённого email будут автоматически направляться в текущий проект и выбранный договор.</p>
+                </div>
+                <div className="company-create-form">
+                  <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Имя контактного лица" />
+                  <input value={contactCompany} onChange={(e) => setContactCompany(e.target.value)} placeholder="Компания" />
+                  <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="client@company.ru" />
+                  <select value={contactContractId} onChange={(e) => setContactContractId(Number(e.target.value))}>
+                    <option value={0}>Без договора</option>
+                    {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
+                  </select>
+                  <button disabled={!contactName.trim() || !contactEmail.trim()} onClick={createProjectContact}>Сохранить контакт</button>
+                </div>
+              </section>
+              <section className="company-grid">
+                {companyGroups.map(([company, contacts]) => <article className="card company-card" key={company}>
+                  <div className="company-card-head">
+                    <div><span className="eyebrow">КОМПАНИЯ</span><h2>{company}</h2></div>
+                    <b>{contacts.length} контакт(а)</b>
+                  </div>
+                  {contacts.map((contact) => <div className="company-contact" key={contact.id}>
+                    <div>
+                      <strong>{contact.name}</strong>
+                      <a href={`mailto:${contact.email}`}>{contact.email}</a>
+                      <small>{contact.contract_id ? "Связан с договором" : "Без договора"} · {contact.source === "gmail" ? "найден во входящих" : "добавлен вручную"}</small>
+                      {contact.company_activity && <p><b>О чём переписка:</b> {contact.company_activity}</p>}
+                    </div>
+                    <div>
+                      {!contact.confirmed && <button className="secondary" onClick={() => confirmProjectContact(contact)}>Подтвердить проект</button>}
+                      <button disabled={!contact.confirmed} onClick={() => prepareContactEmail(contact)}>Подготовить письмо</button>
+                    </div>
+                  </div>)}
+                </article>)}
+                {!companyGroups.length && <div className="card empty"><Users /><p>Контактов пока нет. Получите письма из Gmail или добавьте клиента выше.</p></div>}
+              </section>
+              {drafts.some((draft) => draft.recipient_to) && <section className="card company-drafts">
+                <h2>Исходящие клиентам</h2>
+                <p>Отправка возможна только после отдельного подтверждения.</p>
+                {drafts.filter((draft) => draft.recipient_to).map((draft) => <article key={draft.id}>
+                  <div><strong>{draft.subject}</strong><small>{draft.recipient_to} · {draft.status}</small><p>{draft.body}</p></div>
+                  <div>
+                    {draft.status === "draft" && <><button className="secondary" onClick={() => updateDraft(draft, "rejected")}>Отклонить</button><button onClick={() => updateDraft(draft, "approved")}>Подтвердить</button></>}
+                    {draft.status === "approved" && <button onClick={() => sendGmailDraft(draft)}>Отправить через Gmail</button>}
+                    {draft.status === "sent" && <span className="draft-status ready">Отправлено</span>}
+                  </div>
+                </article>)}
+              </section>}
+            </section>}
             {active === "AI Secretary" && <section className="card automation-control">
               <div className="automation-heading">
                 <div>
@@ -3874,7 +4035,7 @@ export function App() {
                 Проанализировать
               </button>
             </section>}
-            <section className="inbox-list">
+            <section className="inbox-list" style={{ display: active === "Письма" && mailView !== "inbox" ? "none" : undefined }}>
               <div className="inbox-toolbar">
                 <div>
                   <strong>Входящие письма и сообщения</strong>

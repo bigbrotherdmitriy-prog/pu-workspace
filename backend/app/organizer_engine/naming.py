@@ -66,3 +66,28 @@ def build_name(
     if len(candidate) > 240:
         candidate = candidate[: 240 - len(ext)].rstrip(" .-_—") + ext
     return candidate
+
+
+def build_standard_name(
+    original_filename: str,
+    folder: str,
+    project: str | None = None,
+) -> str:
+    """Build a portable, readable name without discarding the original subject."""
+    ext = ""
+    stem = original_filename
+    if "." in original_filename:
+        stem, ext0 = original_filename.rsplit(".", 1)
+        ext = "." + ext0.lower()
+    stem = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" .-_—") or "Документ"
+    doc_type = _specific_doc_type(
+        original_filename,
+        folder,
+        _FOLDER_TO_DOC_TYPE.get(folder) or "Неразобранное",
+    )
+    parts = list(dict.fromkeys(p for p in (project, doc_type, stem) if p))
+    candidate = NAME_SEPARATOR.join(parts) + ext
+    if len(candidate) > 240:
+        candidate = candidate[: 240 - len(ext)].rstrip(" .-_—") + ext
+    return candidate

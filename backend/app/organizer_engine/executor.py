@@ -4,6 +4,7 @@ from collections import Counter
 
 from .config import FOLDER_STRUCTURE, MIN_AUTO_CONFIDENCE
 from .drive import DriveClient
+from .naming import build_standard_name
 from .repository import OrganizerRepository
 
 
@@ -344,10 +345,109 @@ class OrganizerExecutor:
         self.repo.mark_source_applied(proposal_id)
         return {"renamed": 1, "already_applied": 0}
 
+    def standardize_remaining(self, proposal_id: int, project_name: str) -> dict[str, int]:
+        """Standardize skipped files inside an already-created safe copy only."""
+        proposal = self.repo.proposal(proposal_id)
+        if not proposal or proposal["status"] != "applied":
+            raise ValueError("An applied safe-copy proposal is required")
+        if proposal["originals_modified"] or not proposal["copy_folder_id"]:
+            raise ValueError("Standardization is allowed only inside a safe copy")
+
+        copy_root = proposal["copy_folder_id"]
+        session_id = int(proposal["session_id"])
+        folders = self._target_folders(copy_root)
+        completed = {
+            (row["file_id"], row["op_type"])
+            for row in self.repo.operations(proposal_id)
+            if row["rolled_back_at"] is None
+        }
+        occupied: dict[str, set[str]] = {
+            folder: {row.name for row in self.drive.list_children(folder_id) if not row.is_folder}
+            for folder, folder_id in folders.items()
+        }
+        stats = {"renamed": 0, "moved": 0, "skipped": 0, "errors": 0}
+        applied: list[tuple[str, str, dict, dict]] = []
+
+        def unique_name(folder: str, candidate: str, current_name: str, current_parent: str) -> str:
+            used = occupied[folder]
+            if current_parent == folders[folder]:
+                used.discard(current_name)
+            if candidate not in used:
+                used.add(candidate)
+                return candidate
+            stem, dot, ext = candidate.rpartition(".")
+            if not dot:
+                stem, ext = candidate, ""
+            for number in range(2, 10000):
+                suffix = f" — {number:02d}"
+                value = f"{stem}{suffix}{('.' + ext) if ext else ''}"
+                if value not in used:
+                    used.add(value)
+                    return value
+            raise ValueError("Could not resolve target-name collision")
+
+        try:
+            for item in self.repo.proposal_items(proposal_id):
+                file_id = item["file_id"]
+                if item["user_decision"] != "skipped":
+                    continue
+                rename_done = (file_id, "standardize_rename") in completed
+                move_done = (file_id, "standardize_move") in completed
+                if rename_done and move_done:
+                    stats["skipped"] += 1
+                    continue
+                self.drive.assert_inside_copy(file_id, copy_root)
+                current = self.drive.get_file_meta(file_id)
+                target_folder = item["target_folder"]
+                if target_folder not in folders:
+                    target_folder = "00_НЕРАЗОБРАННОЕ"
+                target_name = current.name
+                if not rename_done:
+                    target_name = unique_name(
+                        target_folder,
+                        build_standard_name(current.name, target_folder, project_name),
+                        current.name,
+                        current.parent_id,
+                    )
+                if not rename_done and current.name != target_name:
+                    before = {"name": current.name, "parent_id": current.parent_id}
+                    after = {"name": target_name, "parent_id": current.parent_id}
+                    self.drive.rename_file(file_id, target_name, copy_root)
+                    self.repo.log_operation(
+                        proposal_id, session_id, file_id, "standardize_rename", before, after
+                    )
+                    applied.append(("rename", file_id, before, after))
+                    stats["renamed"] += 1
+                    current = self.drive.get_file_meta(file_id)
+                target_parent = folders[target_folder]
+                if not move_done and current.parent_id != target_parent:
+                    before = {"name": current.name, "parent_id": current.parent_id}
+                    after = {"name": current.name, "parent_id": target_parent}
+                    self.drive.move_file(file_id, target_parent, current.parent_id, copy_root)
+                    self.repo.log_operation(
+                        proposal_id, session_id, file_id, "standardize_move", before, after
+                    )
+                    applied.append(("move", file_id, before, after))
+                    stats["moved"] += 1
+            self.repo.db.commit()
+            return stats
+        except Exception:
+            stats["errors"] += 1
+            for op_type, file_id, before, after in reversed(applied):
+                try:
+                    if op_type == "rename":
+                        self.drive.rename_file(file_id, before["name"], copy_root)
+                    else:
+                        self.drive.move_file(file_id, before["parent_id"], after["parent_id"], copy_root)
+                except Exception:
+                    pass
+            self.repo.db.rollback()
+            raise
+
     def rollback(
         self,
         proposal_id: int,
-        limit: int = 500,
+        limit: int = 5000,
     ) -> dict[str, int]:
         proposal = self.repo.proposal(proposal_id)
 
@@ -379,14 +479,14 @@ class OrganizerExecutor:
                 before = op["before_json"]
                 after = op["after_json"]
 
-                if op["op_type"] in {"rename", "source_rename"}:
+                if op["op_type"] in {"rename", "source_rename", "standardize_rename"}:
                     self.drive.rename_file(
                         op["file_id"],
                         before["name"],
                         copy_root,
                     )
 
-                elif op["op_type"] == "move":
+                elif op["op_type"] in {"move", "standardize_move"}:
                     self.drive.move_file(
                         op["file_id"],
                         before["parent_id"],

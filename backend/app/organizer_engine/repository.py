@@ -223,7 +223,7 @@ class OrganizerRepository:
                  "before":json.dumps(before,ensure_ascii=False),"after":json.dumps(after,ensure_ascii=False),
                  "idempotency_key": idempotency_key}).scalar_one())
 
-    def operations(self, proposal_id: int, limit: int = 500):
+    def operations(self, proposal_id: int, limit: int = 5000):
         return self.db.execute(text("""
             SELECT * FROM organizer_operations WHERE proposal_id=:id ORDER BY id DESC LIMIT :lim
         """), {"id":proposal_id,"lim":limit}).mappings().all()

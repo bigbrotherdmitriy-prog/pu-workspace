@@ -392,6 +392,34 @@ def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(500, str(exc)) from exc
 
 
+@router.post("/proposals/{proposal_id}/standardize-copy")
+def standardize_copy(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Apply a readable common naming standard to skipped files in the safe copy."""
+    repo = OrganizerRepository(db)
+    proposal = _proposal_for_user(repo, db, user, proposal_id, "manager")
+    if (
+        not proposal["copy_folder_id"]
+        or proposal["copy_folder_id"] == "manual"
+        or proposal["copy_folder_id"].startswith("virtual:")
+    ):
+        raise HTTPException(409, "Standardization requires a real Google Drive safe copy")
+    project = repo.project(int(proposal["project_id"]))
+    try:
+        drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
+        stats = OrganizerExecutor(repo, drive).standardize_remaining(
+            proposal_id,
+            project["name"],
+        )
+        _audit(db, "proposal_safe_copy_standardized", "organizer_proposal", proposal_id, f"Result: {stats}")
+        return {"proposal": _proposal_payload(repo, proposal_id), "stats": stats}
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, str(exc)) from exc
+
+
 @router.post("/proposals/{proposal_id}/apply-source-one")
 def apply_source_one(proposal_id: int, payload: SourceApplyRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     if payload.confirmation != "APPLY_ONE_TO_SOURCE":
