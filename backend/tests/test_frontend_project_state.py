@@ -122,5 +122,7 @@ def test_contextual_ai_help_is_available_on_hover_and_keyboard_focus_without_ext
     assert "<ContextualAssistant section={active}" in source
     assert 'document.addEventListener("mouseover", show)' in helper
     assert 'document.addEventListener("focusin", show)' in helper
-    assert "Наведение ничего не изменяет" in helper
+    assert 'document.addEventListener("mouseout", hide)' in helper
+    assert 'className="ai-hover-bubble"' in helper
+    assert 'className="ai-mascot"' in helper
     assert "api(" not in helper
