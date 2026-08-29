@@ -3,6 +3,7 @@ import { api } from "./api/client";
 import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
+import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import {
   Activity,
   AlertTriangle,
@@ -458,6 +459,7 @@ export function App() {
     [newCounterparty, setNewCounterparty] = useState(""),
     [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "recommended" | "server" | "upload" | "google">>({}),
     [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
+    [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
     [contractCandidateBusy, setContractCandidateBusy] = useState(0),
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
@@ -1701,6 +1703,12 @@ export function App() {
       return;
     }
     if (label === "Уведомления") setActive("Уведомления");
+  }
+  function openContextualAssistant(prompt: string) {
+    setIncomingName(`Контекстная помощь · ${active}`);
+    setIncomingText(prompt);
+    setActive("AI Secretary");
+    window.setTimeout(() => document.querySelector<HTMLTextAreaElement>(".inbox-compose textarea")?.focus(), 0);
   }
   const latestSnapshot =
     snapshots.find((item) => item.is_primary) || snapshots[0];
@@ -3143,6 +3151,16 @@ export function App() {
                       <label>1. Документ-источник</label>
                       <button
                         type="button"
+                        data-ai-help="Выбрать существующий файл договора из каталога документов проекта"
+                        onClick={() => {
+                          setContractCatalogOpen((current) => ({ ...current, [item.id]: !current[item.id] }));
+                          setContractDocumentTabs((current) => ({ ...current, [item.id]: "server" }));
+                        }}
+                      >
+                        {contractCatalogOpen[item.id] ? "Скрыть каталог документов" : "Выбрать файл из каталога"}
+                      </button>
+                      <button
+                        type="button"
                         className="secondary"
                         disabled={contractCandidateBusy === item.id}
                         onClick={() => suggestContractDocuments(item.id)}
@@ -3151,6 +3169,7 @@ export function App() {
                           ? "Анализирую реестр…"
                           : "Найти договор по номеру, контрагенту и тексту"}
                       </button>
+                      {contractCatalogOpen[item.id] && <div className="contract-catalog-picker">
                       <div className="contract-source-tabs">
                         {([
                           ["recommended", "Рекомендованные"],
@@ -3208,6 +3227,8 @@ export function App() {
                             </option>
                           ))}
                       </select>
+                      <small>Выберите файл в списке — связь сохранится сразу. Сам файл и его название не изменяются.</small>
+                      </div>}
                       {(contractDocumentTabs[item.id] || "recommended") === "recommended" &&
                         !(contractSourceCandidates[item.id] || []).length && (
                           <small>Нажмите «Найти договор…»: система проверит не только имя файла, но и извлечённый текст.</small>
@@ -4353,6 +4374,7 @@ export function App() {
           </div>
         </section>
       )}
+      <ContextualAssistant section={active} onAsk={openContextualAssistant} />
     </div>
   );
 }

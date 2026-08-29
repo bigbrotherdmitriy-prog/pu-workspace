@@ -4,6 +4,7 @@ from pathlib import Path
 APP_SOURCE = Path(__file__).parents[2] / "frontend" / "src" / "App.tsx"
 PROJECT_SELECTION_SOURCE = APP_SOURCE.parent / "context" / "useProjectSelection.ts"
 FINANCE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "useFinanceController.ts"
+CONTEXTUAL_AI_SOURCE = APP_SOURCE.parent / "modules" / "ai-secretary" / "ContextualAssistant.tsx"
 
 
 def test_new_project_reload_uses_created_project_id():
@@ -79,6 +80,8 @@ def test_unconfirmed_mail_can_be_bulk_moved_to_one_project():
 def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
     source = APP_SOURCE.read_text(encoding="utf-8")
     assert "linkContractDocument" in source
+    assert "Выбрать файл из каталога" in source
+    assert "contractCatalogOpen" in source
     assert "Открыть ГПР, бюджет и ДДС" in source
     assert "Договор → ГПР → бюджет → ДДС → акты" in source
 
@@ -111,3 +114,13 @@ def test_ai_secretary_automation_exposes_prepared_task_and_draft_for_review():
     assert "Открыть черновик" in source
     assert "Внешняя отправка всегда требует вашего подтверждения" in source
     assert "Связать со строкой бюджета" in source
+
+
+def test_contextual_ai_help_is_available_on_hover_and_keyboard_focus_without_external_call():
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    helper = CONTEXTUAL_AI_SOURCE.read_text(encoding="utf-8")
+    assert "<ContextualAssistant section={active}" in source
+    assert 'document.addEventListener("mouseover", show)' in helper
+    assert 'document.addEventListener("focusin", show)' in helper
+    assert "Наведение ничего не изменяет" in helper
+    assert "api(" not in helper

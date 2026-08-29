@@ -510,3 +510,34 @@
   .finance-grid { grid-template-columns: 1fr; }
   .finance-list > div { grid-template-columns: 1fr; }
 }
+.contract-catalog-picker {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft, #f6f9f7);
+}
+.ai-context-chip {
+  position: fixed; right: 24px; bottom: 24px; z-index: 120;
+  display: flex; align-items: center; gap: 8px; border-radius: 999px;
+  box-shadow: 0 12px 32px rgba(7, 31, 23, 0.22);
+}
+.ai-context-chip svg, .ai-context-head svg { width: 18px; }
+.ai-context-panel {
+  position: fixed; right: 24px; bottom: 24px; z-index: 120;
+  width: min(360px, calc(100vw - 32px)); padding: 18px;
+  border: 1px solid rgba(29, 177, 127, 0.35); border-radius: 18px;
+  background: rgba(17, 23, 20, 0.97); color: #f6fbf8;
+  box-shadow: 0 18px 50px rgba(7, 31, 23, 0.3);
+}
+.ai-context-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ai-context-head span { display: flex; align-items: center; gap: 8px; color: #65ddb3; font-weight: 800; }
+.ai-context-panel > strong { display: block; margin-bottom: 6px; }
+.ai-context-panel p { margin: 0 0 12px; color: #d6e5de; line-height: 1.45; }
+.ai-context-panel > button { width: 100%; background: #16a575; }
+.ai-context-panel small { display: block; margin-top: 10px; color: #9eb2a9; line-height: 1.35; }
+.ai-context-panel .icon { color: #d6e5de; background: transparent; padding: 4px; }
+@media (max-width: 720px) {
+  .ai-context-chip, .ai-context-panel { right: 16px; bottom: 16px; }
+}
