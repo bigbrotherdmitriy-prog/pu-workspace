@@ -2,6 +2,8 @@ from pathlib import Path
 
 
 APP_SOURCE = Path(__file__).parents[2] / "frontend" / "src" / "App.tsx"
+PROJECT_SELECTION_SOURCE = APP_SOURCE.parent / "context" / "useProjectSelection.ts"
+FINANCE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "useFinanceController.ts"
 
 
 def test_new_project_reload_uses_created_project_id():
@@ -9,21 +11,23 @@ def test_new_project_reload_uses_created_project_id():
 
     assert "async function load(preferredProjectId?: number)" in source
     assert "await activateProject(created.id);" in source
-    assert 'sessionStorage.setItem("pu_active_project_id", String(id));' in source
+    project_source = PROJECT_SELECTION_SOURCE.read_text(encoding="utf-8")
+    assert 'sessionStorage.setItem("pu_active_project_id", String(id));' in project_source
 
 
 def test_oauth_callback_restores_project_before_initial_load():
-    source = APP_SOURCE.read_text(encoding="utf-8")
+    source = PROJECT_SELECTION_SOURCE.read_text(encoding="utf-8")
 
     assert 'new URLSearchParams(window.location.search).get("project_id")' in source
-    assert "[projectId, setProjectId] = useState(restoredProjectId)" in source
+    assert "const [projectId, setProjectId] = useState(initialProjectId)" in source
 
 
 def test_project_switch_is_persisted_and_stale_loads_cannot_restore_old_project():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
     assert "async function activateProject(id: number)" in source
-    assert "projectIdRef.current = id;" in source
+    project_source = PROJECT_SELECTION_SOURCE.read_text(encoding="utf-8")
+    assert "projectIdRef.current = id;" in project_source
     assert "const loadSequence = ++loadSequenceRef.current;" in source
     assert "loadSequence !== loadSequenceRef.current" in source
     assert "onClick={() => activateProject(item.id)}" in source
@@ -89,11 +93,15 @@ def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
 
 def test_finance_workflow_suggests_analyzed_project_documents_without_mutating_sources():
     source = APP_SOURCE.read_text(encoding="utf-8")
-    assert "/execution/document-candidates" in source
+    controller = FINANCE_SOURCE.read_text(encoding="utf-8")
+    assert "/execution/document-candidates" in controller
     assert "Найденные ГПР, бюджеты, ДДС, счета и акты" in source
     assert "Проверить и использовать" in source
-    assert "source_document_id: financeSourceDocumentId || null" in source
-    assert "document_id: financeSourceDocumentId || null" in source
+    assert "source_document_id: financeSourceDocumentId || null" in controller
+    assert "document_id: financeSourceDocumentId || null" in controller
+    assert "/structured-preview" in controller
+    assert "/structured-import" in controller
+    assert "Создать пакет предложений" in source
 
 
 def test_ai_secretary_automation_exposes_prepared_task_and_draft_for_review():

@@ -5,7 +5,9 @@ import hashlib
 import hmac
 import os
 import secrets
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,6 +21,35 @@ from app.models.user import User
 
 bearer = HTTPBearer(auto_error=False)
 ROLE_LEVEL = {"viewer": 10, "member": 20, "editor": 30, "manager": 40, "owner": 50}
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW = timedelta(minutes=15)
+_login_failures: dict[str, deque[datetime]] = defaultdict(deque)
+_login_failure_lock = Lock()
+
+
+def _recent_failures(key: str, now: datetime) -> deque[datetime]:
+    failures = _login_failures[key]
+    cutoff = now - LOGIN_FAILURE_WINDOW
+    while failures and failures[0] <= cutoff:
+        failures.popleft()
+    return failures
+
+
+def login_is_throttled(key: str, now: datetime | None = None) -> bool:
+    current = now or datetime.now(timezone.utc)
+    with _login_failure_lock:
+        return len(_recent_failures(key, current)) >= LOGIN_FAILURE_LIMIT
+
+
+def record_login_failure(key: str, now: datetime | None = None) -> None:
+    current = now or datetime.now(timezone.utc)
+    with _login_failure_lock:
+        _recent_failures(key, current).append(current)
+
+
+def clear_login_failures(key: str) -> None:
+    with _login_failure_lock:
+        _login_failures.pop(key, None)
 
 
 def hash_password(password: str) -> str:

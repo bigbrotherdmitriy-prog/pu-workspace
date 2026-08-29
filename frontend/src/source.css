@@ -419,6 +419,19 @@
 .finance-candidates article button { justify-self: start; padding: 7px 9px; border: 1px solid #0b9068; border-radius: 7px; background: #fff; color: #087a59; font-weight: 650; cursor: pointer; }
 .finance-candidates article button:disabled { cursor: default; }
 .finance-source-note { color: #087a59!important; font-weight: 650; }
+.structured-import { display: grid; gap: 14px; }
+.structured-import .card-head { margin: 0; }
+.structured-import h2, .structured-import p { margin: 4px 0 0; }
+.structured-import button { padding: 9px 12px; border: 1px solid #0b9068; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
+.structured-import button.secondary { background: #fff; color: #526071; border-color: #cfd7df; }
+.structured-import button:disabled { opacity: .5; cursor: default; }
+.structured-table { overflow: auto; max-height: 460px; border: 1px solid #dbe3df; border-radius: 9px; }
+.structured-table table { width: 100%; border-collapse: collapse; min-width: 820px; }
+.structured-table th, .structured-table td { padding: 9px 10px; border-bottom: 1px solid #e8eeeb; text-align: left; vertical-align: top; }
+.structured-table th { position: sticky; top: 0; z-index: 1; background: #f4f7f5; color: #526071; font-size: 12px; }
+.structured-table td small { display: block; margin-top: 3px; color: #718078; }
+.structured-table tr.invalid { background: #fff8e8; color: #8a5a00; }
+.structured-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .finance-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .finance-grid h2 { margin: 0 0 12px; }
 .finance-list { display: grid; }

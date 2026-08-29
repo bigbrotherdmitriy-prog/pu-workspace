@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { api } from "./api/client";
+import { Login } from "./auth/Login";
+import { useProjectSelection } from "./context/useProjectSelection";
+import { useFinanceController } from "./modules/finance/useFinanceController";
 import {
   Activity,
   AlertTriangle,
@@ -373,91 +377,6 @@ type NotificationRow = {
   is_read: boolean;
   created_at: string;
 };
-type FinanceOverview = {
-  summary: {
-    budget_planned: number;
-    budget_actual: number;
-    budget_forecast: number;
-    budget_variance: number;
-    cash_balance_forecast: number;
-    cash_gap: number;
-    cash_gap_date?: string;
-    delayed_schedule: number;
-    late_procurement: number;
-    acts_pending: number;
-  };
-  baselines: {
-    id: number;
-    contract_id?: number;
-    name: string;
-    version: number;
-    status: string;
-    note?: string;
-  }[];
-  schedule: {
-    id: number;
-    baseline_id: number;
-    title: string;
-    planned_finish?: string;
-    planned_progress: number;
-    actual_progress: number;
-    status: string;
-  }[];
-  budget: {
-    id: number;
-    contract_id?: number;
-    category: string;
-    description: string;
-    planned_amount: number;
-    actual_amount: number;
-    forecast_amount: number;
-    currency: string;
-    status: string;
-  }[];
-  cash_flow: {
-    id: number;
-    contract_id?: number;
-    schedule_item_id?: number;
-    budget_line_id?: number;
-    source_document_id?: number;
-    direction: string;
-    title: string;
-    planned_date: string;
-    planned_amount: number;
-    actual_amount: number;
-    status: string;
-  }[];
-  procurement: {
-    id: number;
-    contract_id?: number;
-    title: string;
-    supplier?: string;
-    stage: string;
-    planned_delivery?: string;
-    planned_amount: number;
-    actual_amount: number;
-  }[];
-  acts: {
-    id: number;
-    contract_id?: number;
-    number: string;
-    title: string;
-    act_date?: string;
-    amount: number;
-    status: string;
-  }[];
-};
-type FinanceDocumentCandidate = {
-  document_id: number;
-  name: string;
-  source: string;
-  kind: "schedule" | "budget" | "invoice" | "cash-flow" | "act";
-  score: number;
-  reasons: string[];
-  hints: { amount?: string; date?: string; number?: string };
-  already_linked: boolean;
-  originals_changed: boolean;
-};
 type AnalyticsDistribution = { key: string; count: number }[];
 type ProjectAnalytics = {
   summary: {
@@ -524,81 +443,8 @@ const targetFolders = [
   "99_АРХИВ",
 ];
 
-async function api(path: string, options: RequestInit = {}) {
-  const token = sessionStorage.getItem("pu_token");
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
-  return body;
-}
-
-function restoredProjectId(): number {
-  const callbackProjectId = Number(
-    new URLSearchParams(window.location.search).get("project_id"),
-  );
-  if (Number.isSafeInteger(callbackProjectId) && callbackProjectId > 0) {
-    return callbackProjectId;
-  }
-  const storedProjectId = Number(sessionStorage.getItem("pu_active_project_id"));
-  return Number.isSafeInteger(storedProjectId) && storedProjectId > 0
-    ? storedProjectId
-    : 0;
-}
-
-function Login({ onDone }: { onDone: () => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  async function submit() {
-    try {
-      const d = await api("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      sessionStorage.setItem("pu_token", d.access_token);
-      onDone();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  return (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="brand-mark">PU</div>
-        <h1>Вход в PU Workspace</h1>
-        <p>Единое рабочее пространство проектов и документов</p>
-        <label>
-          Email
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-          />
-        </label>
-        <label>
-          Пароль
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-          />
-        </label>
-        <button onClick={submit}>Войти</button>
-        {error && <div className="error">{error}</div>}
-        <a href="/">Открыть прежний интерфейс</a>
-      </div>
-    </div>
-  );
-}
-
 export function App() {
+  const { projectId, projectIdRef, rememberProject, initialProjectId } = useProjectSelection();
   const [ready, setReady] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [mobile, setMobile] = useState(false),
@@ -631,7 +477,7 @@ export function App() {
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
     [inboxFilter, setInboxFilter] = useState("all"),
     [selectedInboxIds, setSelectedInboxIds] = useState<number[]>([]),
-    [bulkInboxProjectId, setBulkInboxProjectId] = useState(restoredProjectId),
+    [bulkInboxProjectId, setBulkInboxProjectId] = useState(initialProjectId),
     [bulkInboxContractId, setBulkInboxContractId] = useState(0),
     [incomingName, setIncomingName] = useState(""),
     [incomingText, setIncomingText] = useState(""),
@@ -650,7 +496,6 @@ export function App() {
       null,
     );
   const [projects, setProjects] = useState<Project[]>([]),
-    [projectId, setProjectId] = useState(restoredProjectId),
     [summary, setSummary] = useState<Summary | null>(null),
     [documents, setDocuments] = useState<DocumentCard[]>([]),
     [snapshots, setSnapshots] = useState<Snapshot[]>([]),
@@ -677,31 +522,23 @@ export function App() {
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
-  const [finance, setFinance] = useState<FinanceOverview | null>(null),
-    [financeCandidates, setFinanceCandidates] = useState<FinanceDocumentCandidate[]>([]),
-    [selectedFinanceContractId, setSelectedFinanceContractId] = useState(0),
-    [financeKind, setFinanceKind] = useState("budget"),
-    [financeTitle, setFinanceTitle] = useState(""),
-    [financeAmount, setFinanceAmount] = useState(""),
-    [financeDate, setFinanceDate] = useState(""),
-    [financeExtra, setFinanceExtra] = useState(""),
-    [financeSourceDocumentId, setFinanceSourceDocumentId] = useState(0),
-    [financeScheduleItemId, setFinanceScheduleItemId] = useState(0),
-    [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const [sourceFolderId, setSourceFolderId] = useState("root");
   const [sourceBreadcrumbs, setSourceBreadcrumbs] = useState<DriveBreadcrumb[]>([
     { id: "root", name: "Мой диск" },
   ]);
-  const projectIdRef = useRef(projectId);
+  const {
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
+    selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
+    financeExtra, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId,
+    setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
+    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
+    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
+    loadFinance, prepareFinanceItem, useFinanceCandidate, importStructuredFinance,
+    addFinanceItem, confirmFinance, confirmCashPayment, updateScheduleActual, recordFinanceActual,
+  } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
-
-  function rememberProject(id: number) {
-    projectIdRef.current = id;
-    setProjectId(id);
-    sessionStorage.setItem("pu_active_project_id", String(id));
-  }
 
   async function activateProject(id: number) {
     rememberProject(id);
@@ -1836,206 +1673,6 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  async function loadFinance() {
-    if (!projectId) return;
-    try {
-      const contractQuery = selectedFinanceContractId ? `&contract_id=${selectedFinanceContractId}` : "";
-      const [overview, suggestions] = await Promise.all([
-        api(`/execution/overview?project_id=${projectId}`),
-        api(`/execution/document-candidates?project_id=${projectId}${contractQuery}`),
-      ]);
-      setFinance(overview);
-      setFinanceCandidates(suggestions.candidates || []);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  useEffect(() => {
-    if (ready && projectId) loadFinance();
-  }, [ready, projectId, selectedFinanceContractId]);
-  function prepareFinanceItem(kind: string) {
-    setFinanceKind(kind);
-    setFinanceTitle("");
-    setFinanceAmount("");
-    setFinanceDate("");
-    setFinanceExtra("");
-    setFinanceSourceDocumentId(0);
-    window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
-  }
-  function useFinanceCandidate(candidate: FinanceDocumentCandidate) {
-    const kind = candidate.kind === "cash-flow" ? "cash-out" : candidate.kind;
-    setFinanceKind(kind);
-    setFinanceTitle(candidate.name.replace(/\.[^.]+$/, ""));
-    setFinanceAmount(candidate.hints.amount || "");
-    setFinanceDate(candidate.hints.date || "");
-    setFinanceExtra(candidate.kind === "act" ? candidate.hints.number || "" : "");
-    setFinanceSourceDocumentId(candidate.document_id);
-    setNotice(`Документ «${candidate.name}» выбран как источник. Проверьте поля и подтвердите предложение.`);
-    window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
-  }
-  async function addFinanceItem() {
-    const amount = Number(financeAmount || 0);
-    if (!financeTitle.trim()) return;
-    try {
-      let path = "/execution/budget";
-      let body: Record<string, unknown> = {
-        project_id: projectId,
-        contract_id: selectedFinanceContractId || null,
-      };
-      if (financeKind === "budget")
-        body = {
-          ...body,
-          category: financeExtra.trim() || "Прочее",
-          description: financeTitle.trim(),
-          planned_amount: amount,
-        };
-      if (financeKind === "cash-in" || financeKind === "cash-out") {
-        path = "/execution/cash-flow";
-        body = {
-          ...body,
-          direction: financeKind === "cash-in" ? "inflow" : "outflow",
-          title: financeTitle.trim(),
-          planned_date: financeDate,
-          planned_amount: amount,
-          counterparty: financeExtra.trim() || null,
-        };
-      }
-      if (financeKind === "invoice") {
-        path = "/execution/invoice-proposals";
-        body = {
-          ...body,
-          direction: "outflow",
-          title: financeTitle.trim(),
-          planned_date: financeDate,
-          planned_amount: amount,
-          counterparty: financeExtra.trim() || null,
-          schedule_item_id: financeScheduleItemId || null,
-          budget_line_id: financeBudgetLineId || null,
-          source_document_id: financeSourceDocumentId || null,
-        };
-      }
-      if (financeKind === "procurement") {
-        path = "/execution/procurement";
-        body = {
-          ...body,
-          title: financeTitle.trim(),
-          supplier: financeExtra.trim() || null,
-          planned_delivery: financeDate || null,
-          planned_amount: amount,
-        };
-      }
-      if (financeKind === "act") {
-        path = "/execution/acts";
-        body = {
-          ...body,
-          number: financeExtra.trim() || "б/н",
-          title: financeTitle.trim(),
-          act_date: financeDate || null,
-          amount,
-          document_id: financeSourceDocumentId || null,
-        };
-      }
-      if (financeKind === "baseline") {
-        path = "/execution/baselines";
-        body = {
-          ...body,
-          name: financeTitle.trim(),
-          note: financeExtra.trim() || null,
-        };
-      }
-      if (financeKind === "schedule") {
-        const baseline = finance?.baselines.find((x) => x.status === "draft");
-        if (!baseline) throw new Error("Сначала создайте черновик версии ГПР");
-        path = "/execution/schedule-items";
-        body = {
-          baseline_id: baseline.id,
-          title: financeTitle.trim(),
-          planned_finish: financeDate || null,
-          planned_progress: amount,
-        };
-      }
-      await api(path, { method: "POST", body: JSON.stringify(body) });
-      setFinanceTitle("");
-      setFinanceAmount("");
-      setFinanceDate("");
-      setFinanceExtra("");
-      setNotice("Запись создана как предложение и ожидает подтверждения");
-      await loadFinance();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  async function confirmFinance(kind: string, id: number, status: string) {
-    try {
-      await api(`/execution/${kind}/${id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      setNotice("Статус финансовой записи подтверждён и сохранён в аудите");
-      await loadFinance();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  async function confirmCashPayment(id: number, amount: number) {
-    if (!window.confirm(`Подтвердить факт оплаты ${money(amount)} сегодняшней датой?`)) return;
-    try {
-      await api(`/execution/cash-flow/${id}/confirm-payment`, {
-        method: "POST",
-        body: JSON.stringify({ actual_amount: amount }),
-      });
-      setNotice("Оплата подтверждена пользователем, факт записан в ДДС и бюджет");
-      await loadFinance();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  async function updateScheduleActual(id: number) {
-    const value = window.prompt("Фактическая готовность, %", "100");
-    if (value === null) return;
-    const progress = Number(value);
-    if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
-      setError("Введите число от 0 до 100");
-      return;
-    }
-    try {
-      await api(`/execution/schedule-items/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          actual_progress: progress,
-          actual_finish:
-            progress === 100 ? new Date().toISOString().slice(0, 10) : null,
-        }),
-      });
-      setNotice("Факт по работе ГПР обновлён");
-      await loadFinance();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  async function recordFinanceActual(kind: string, id: number, status: string) {
-    const raw = window.prompt("Фактическая сумма, ₽", "0");
-    if (raw === null) return;
-    const amount = Number(raw);
-    if (!Number.isFinite(amount) || amount < 0) {
-      setError("Введите корректную сумму");
-      return;
-    }
-    try {
-      await api(`/execution/${kind}/${id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          status,
-          actual_amount: amount,
-          actual_date: new Date().toISOString().slice(0, 10),
-        }),
-      });
-      setNotice("Фактическое исполнение записано и сохранено в аудите");
-      await loadFinance();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
   if (!ready) return <Login onDone={() => setReady(true)} />;
   const metrics = [
     ["Требуют внимания", summary?.attention || 0, "warn"],
@@ -2946,6 +2583,35 @@ export function App() {
                 )}
               </div>
             </section>
+            {financeStructuredPreview && <section className="card structured-import" id="structured-import">
+              <div className="card-head">
+                <div>
+                  <span className="eyebrow">ПАКЕТНОЕ ПРЕДЛОЖЕНИЕ</span>
+                  <h2>{financeStructuredPreview.name}</h2>
+                  <p>Сопоставлено колонок: {Object.keys(financeStructuredPreview.mapping).length}. Выберите строки; импорт создаст предложения со ссылкой на строку источника.</p>
+                </div>
+                <button className="secondary" onClick={() => { setFinanceStructuredPreview(null); setFinanceStructuredRows([]); }}>Закрыть</button>
+              </div>
+              {financeStructuredPreview.issues.map((issue) => <p className="finance-warning" key={issue}>{issue}</p>)}
+              <div className="structured-table">
+                <table>
+                  <thead><tr><th></th><th>Строка</th><th>Наименование</th><th>Дата / срок</th><th>Сумма / прогресс</th><th>Проверка</th></tr></thead>
+                  <tbody>{financeStructuredPreview.rows.slice(0, 100).map((row) => <tr className={row.importable ? "" : "invalid"} key={row.source_row}>
+                    <td><input type="checkbox" disabled={!row.importable} checked={financeStructuredRows.includes(row.source_row)} onChange={(e) => setFinanceStructuredRows((selected) => e.target.checked ? [...selected, row.source_row] : selected.filter((value) => value !== row.source_row))} /></td>
+                    <td>{row.source_row}</td>
+                    <td>{row.title || "—"}<small>{row.category}</small></td>
+                    <td>{row.planned_date || row.planned_finish || row.planned_start || "—"}</td>
+                    <td>{row.amount ? money(Number(row.amount)) : `${row.progress || 0}%`}</td>
+                    <td>{row.issues.length ? row.issues.join("; ") : "готово к предложению"}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+              {financeStructuredPreview.truncated && <p className="finance-warning">Показаны первые 500 строк. Разделите файл или импортируйте его частями.</p>}
+              <div className="structured-actions">
+                <span>Выбрано строк: <strong>{financeStructuredRows.length}</strong></span>
+                <button disabled={!financeStructuredRows.length} onClick={importStructuredFinance}>Создать пакет предложений</button>
+              </div>
+            </section>}
             <section className="card finance-entry" id="finance-entry">
               <div>
                 <h2>Добавить управленческую запись</h2>

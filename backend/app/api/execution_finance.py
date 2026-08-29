@@ -15,6 +15,7 @@ from app.models.document_version import DocumentVersion
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract
 from app.models.user import User
+from app.structured_import import parse_structured_rows
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
@@ -94,6 +95,15 @@ class StatusUpdate(BaseModel):
     status: str = Field(min_length=2, max_length=30)
     actual_amount: Decimal | None = Field(default=None, ge=0)
     actual_date: date | None = None
+
+
+class StructuredImportRequest(BaseModel):
+    project_id: int
+    contract_id: int | None = None
+    kind: str = Field(pattern="^(schedule|budget|cash-flow)$")
+    baseline_id: int | None = None
+    direction: str = Field(default="outflow", pattern="^(inflow|outflow)$")
+    source_rows: list[int] = Field(min_length=1, max_length=500)
 
 
 _DOCUMENT_KIND_MARKERS = {
@@ -248,6 +258,102 @@ def document_candidates(project_id: int, contract_id: int | None = None,
     candidates.sort(key=lambda item: (item["already_linked"], -item["score"], item["name"].casefold()))
     return {"project_id": project_id, "contract_id": contract_id, "candidates": candidates[:100],
             "requires_confirmation": True, "originals_changed": False}
+
+
+def _document_content(db: Session, project_id: int, document_id: int) -> tuple[Document, str]:
+    document = db.scalar(select(Document).where(Document.id == document_id, Document.project_id == project_id))
+    if document is None:
+        raise HTTPException(404, "Документ не найден в выбранном проекте")
+    version = db.scalar(select(DocumentVersion).where(
+        DocumentVersion.document_id == document.id,
+    ).order_by(DocumentVersion.version_number.desc()))
+    content = version.content if version and version.content else ""
+    if not content.strip():
+        raise HTTPException(409, "У документа ещё нет извлечённого табличного текста")
+    return document, content
+
+
+def _import_date(value: str | None) -> date | None:
+    """Convert the normalized parser value before assigning it to SQLAlchemy Date."""
+    return date.fromisoformat(value) if value else None
+
+
+@router.get("/documents/{document_id}/structured-preview")
+def structured_preview(document_id: int, project_id: int, kind: str,
+                       db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    if kind not in {"schedule", "budget", "cash-flow"}:
+        raise HTTPException(422, "Поддерживаются ГПР, бюджет и ДДС")
+    document, content = _document_content(db, project_id, document_id)
+    preview = parse_structured_rows(content, kind)
+    return {"document_id": document.id, "name": document.name, "kind": kind, **preview,
+            "requires_confirmation": True, "originals_changed": False}
+
+
+@router.post("/documents/{document_id}/structured-import")
+def structured_import(document_id: int, payload: StructuredImportRequest,
+                      db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    _check_contract(db, payload.project_id, payload.contract_id)
+    document, content = _document_content(db, payload.project_id, document_id)
+    preview = parse_structured_rows(content, payload.kind)
+    if len(payload.source_rows) != len(set(payload.source_rows)):
+        raise HTTPException(422, "Строки источника не должны повторяться")
+    selected = {row["source_row"]: row for row in preview["rows"] if row["source_row"] in set(payload.source_rows)}
+    if set(payload.source_rows) - set(selected):
+        raise HTTPException(422, "Выбраны отсутствующие строки источника")
+    if any(not row["importable"] for row in selected.values()):
+        raise HTTPException(422, "Сначала исправьте строки с ошибками")
+
+    baseline = None
+    if payload.kind == "schedule":
+        baseline = db.get(ScheduleBaseline, payload.baseline_id) if payload.baseline_id else None
+        if baseline is None or baseline.project_id != payload.project_id:
+            raise HTTPException(422, "Для импорта ГПР выберите черновик baseline проекта")
+        if baseline.status != "draft":
+            raise HTTPException(409, "Утверждённый baseline неизменяем")
+        if payload.contract_id and baseline.contract_id not in {None, payload.contract_id}:
+            raise HTTPException(422, "Baseline связан с другим договором")
+
+    created = []
+    for source_row in payload.source_rows:
+        row = selected[source_row]
+        source_name = f"{document.name}, строка {source_row}"
+        if payload.kind == "schedule":
+            item = ScheduleItem(
+                project_id=payload.project_id, baseline_id=baseline.id, title=row["title"],
+                planned_start=_import_date(row["planned_start"]),
+                planned_finish=_import_date(row["planned_finish"]),
+                planned_progress=min(100, max(0, row["progress"])),
+                source_name=source_name, source_excerpt=row["excerpt"], status="planned",
+            )
+        elif payload.kind == "budget":
+            amount = Decimal(row["amount"])
+            item = BudgetLine(
+                project_id=payload.project_id, contract_id=payload.contract_id,
+                category=row["category"], description=row["title"], planned_amount=amount,
+                forecast_amount=amount, status="proposed", source_name=source_name,
+                source_excerpt=row["excerpt"],
+            )
+        else:
+            item = CashFlowEntry(
+                project_id=payload.project_id, contract_id=payload.contract_id,
+                source_document_id=document.id, direction=row["direction"] or payload.direction,
+                title=row["title"], planned_date=_import_date(row["planned_date"]),
+                planned_amount=Decimal(row["amount"]), counterparty=row["counterparty"],
+                status="proposed", source_name=source_name, source_excerpt=row["excerpt"],
+            )
+        db.add(item)
+        db.flush()
+        created.append(item.id)
+    db.add(AuditLog(
+        action="structured_document_imported", entity_type="document", entity_id=document.id,
+        details=(f"user={user.id}; kind={payload.kind}; contract={payload.contract_id}; "
+                 f"rows={','.join(map(str, payload.source_rows))}; created={','.join(map(str, created))}; originals_changed=false"),
+    ))
+    db.commit()
+    return {"document_id": document.id, "kind": payload.kind, "created_ids": created,
+            "created": len(created), "status": "proposed", "originals_changed": False}
 
 
 @router.post("/baselines")

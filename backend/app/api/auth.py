@@ -2,12 +2,20 @@ import hashlib
 import hmac
 import os
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import hash_password, issue_session, require_user, verify_password
+from app.core.auth import (
+    clear_login_failures,
+    hash_password,
+    issue_session,
+    login_is_throttled,
+    record_login_failure,
+    require_user,
+    verify_password,
+)
 from app.database import get_db
 from app.models.auth_session import AuthSession
 from app.models.user import User
@@ -46,10 +54,17 @@ def bootstrap(payload: BootstrapRequest, x_bootstrap_token: str = Header(default
 
 
 @router.post("/login")
-def login(payload: Credentials, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(func.lower(User.email) == payload.email.strip().lower()))
+def login(payload: Credentials, request: Request, db: Session = Depends(get_db)):
+    normalized_email = payload.email.strip().lower()
+    client_host = request.client.host if request.client else "unknown"
+    throttle_key = hashlib.sha256(f"{client_host}:{normalized_email}".encode()).hexdigest()
+    if login_is_throttled(throttle_key):
+        raise HTTPException(429, "Too many failed login attempts. Try again later.", headers={"Retry-After": "900"})
+    user = db.scalar(select(User).where(func.lower(User.email) == normalized_email))
     if not user or not verify_password(payload.password, user.password_hash):
+        record_login_failure(throttle_key)
         raise HTTPException(401, "Invalid email or password")
+    clear_login_failures(throttle_key)
     token, expires = issue_session(db, user.id)
     return {"access_token": token, "token_type": "bearer", "expires_at": expires, "user": _user(user)}
 
