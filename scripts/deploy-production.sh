@@ -39,6 +39,14 @@ ROLLBACK_IMAGE=app-backend:rollback-${STAMP}
 rollback() {
   code=$?
   if [ "$SWITCHED" = true ]; then
+    DB_REVISION=$(docker exec pu-workspace-db psql -U pu_user -d pu_workspace -tAc 'select version_num from alembic_version' 2>/dev/null | tr -d '[:space:]' || true)
+    if [ -n "$DB_REVISION" ] && [ -n "$PREVIOUS_RELEASE" ] && \
+       ! grep -Rqs "revision = \"$DB_REVISION\"" "$PREVIOUS_RELEASE/backend/migrations/versions" 2>/dev/null; then
+      echo "readiness failed after schema advanced to $DB_REVISION; refusing incompatible application rollback" >&2
+      echo "candidate remains active for diagnosis; database backup: $BACKUP_FILE" >&2
+      SWITCHED=false
+      exit "$code"
+    fi
     echo "readiness failed; restoring previous release" >&2
     docker tag "$ROLLBACK_IMAGE" app-backend:latest || true
     docker tag "$ROLLBACK_IMAGE" app-backend || true

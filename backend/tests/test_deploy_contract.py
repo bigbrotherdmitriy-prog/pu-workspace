@@ -13,6 +13,8 @@ def test_production_deploy_is_fail_closed_and_uses_persistent_proxy_override():
     assert "api/readiness" in source
     assert "rollback()" in source
     assert "restoring previous release" in source
+    assert "refusing incompatible application rollback" in source
+    assert "select version_num from alembic_version" in source
     assert 'DEPLOY_RELAY=${DEPLOY_RELAY:-true}' in source
     assert 'relay restart skipped by DEPLOY_RELAY=false' in source
 
