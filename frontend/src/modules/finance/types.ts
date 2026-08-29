@@ -1,6 +1,7 @@
 export type FinanceOverview = {
   summary: {
     budget_planned: number;
+    budget_committed: number;
     budget_actual: number;
     budget_forecast: number;
     budget_variance: number;
@@ -10,6 +11,8 @@ export type FinanceOverview = {
     delayed_schedule: number;
     late_procurement: number;
     acts_pending: number;
+    pending_payments: number;
+    unlinked_invoices: number;
   };
   baselines: {
     id: number;
@@ -35,6 +38,7 @@ export type FinanceOverview = {
     description: string;
     planned_amount: number;
     actual_amount: number;
+    committed_amount: number;
     forecast_amount: number;
     currency: string;
     status: string;

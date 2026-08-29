@@ -27,6 +27,7 @@ from app.models.management import Meeting, Notification, Obligation
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.external_resource import ExternalResourceLink
 from app.models.project_contact import ProjectContact
+from app.models.task_completion_suggestion import TaskCompletionSuggestion
 
 __all__ = [
     "Project",
@@ -71,4 +72,5 @@ __all__ = [
     "AcceptanceAct",
     "ExternalResourceLink",
     "ProjectContact",
+    "TaskCompletionSuggestion",
 ]

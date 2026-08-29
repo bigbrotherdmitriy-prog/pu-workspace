@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from datetime import date
+from datetime import date, datetime, timezone
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -20,6 +21,8 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
+from app.models.task import TaskHistory
+from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.governance import Risk
 from app.models.user import User
 from app.models.automation_rule import AutomationRule, AutomationRun
@@ -35,7 +38,7 @@ router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
 
 class IncomingMessage(BaseModel):
     project_id: int
-    source_type: str = Field(default="manual", pattern="^(manual|email|telegram|document)$")
+    source_type: str = Field(default="manual", pattern="^(manual|email|email_outgoing|telegram|document)$")
     source_external_id: str | None = Field(default=None, max_length=500)
     source_name: str = Field(min_length=1, max_length=1000)
     source_url: str | None = Field(default=None, max_length=2000)
@@ -58,6 +61,10 @@ class BulkContextConfirmation(ContextConfirmation):
 
 class MessageStatusUpdate(BaseModel):
     status: str = Field(pattern="^(ready|needs_context_confirmation|in_progress|completed)$")
+
+
+class CompletionReview(BaseModel):
+    status: str = Field(pattern="^(confirmed|rejected)$")
 
 
 class AutomationRuleCreate(BaseModel):
@@ -129,6 +136,9 @@ def _message_payload(db: Session, row: Message) -> dict:
     tasks = list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
     risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
+    completion_rows = db.execute(select(TaskCompletionSuggestion, Task).join(Task, Task.id == TaskCompletionSuggestion.task_id).where(
+        TaskCompletionSuggestion.message_id == row.id,
+    ).order_by(TaskCompletionSuggestion.confidence.desc(), TaskCompletionSuggestion.id)).all()
     attachments = json.loads(row.attachments_json or "[]")
     attachment_ids = [item["document_external_id"] for item in attachments if item.get("document_external_id")]
     imported = {
@@ -176,7 +186,43 @@ def _message_payload(db: Session, row: Message) -> dict:
         "risks": [{"id": risk.id, "title": risk.title, "criticality": risk.criticality,
                    "status": risk.status, "confidence": risk.confidence,
                    "source_excerpt": risk.source_excerpt} for risk in risks],
+        "completion_suggestions": [{"id": suggestion.id, "task_id": task.id, "task_title": task.title,
+                                    "task_status": task.status, "confidence": suggestion.confidence,
+                                    "evidence": suggestion.evidence, "status": suggestion.status}
+                                   for suggestion, task in completion_rows],
     }
+
+
+def _completion_candidate_score(task: Task, content: str) -> tuple[float, str]:
+    words = lambda value: {word for word in re.findall(r"[A-Za-zА-Яа-яЁё0-9]+", (value or "").casefold()) if len(word) >= 4}
+    task_words = words(f"{task.title} {task.description or ''}")
+    message_words = words(content)
+    overlap = sorted(task_words & message_words)
+    lexical = len(overlap) / max(1, min(len(task_words), 8))
+    completion_markers = ("выполнено", "готово", "направили", "направлено", "отправили", "завершено", "устранено", "согласовано")
+    marker = next((value for value in completion_markers if value in content.casefold()), None)
+    confidence = min(0.98, lexical + (0.35 if marker else 0))
+    evidence = f"Совпали слова: {', '.join(overlap[:6]) or 'нет точных совпадений'}"
+    if marker:
+        evidence += f"; найден признак результата «{marker}»"
+    return confidence, evidence
+
+
+def _create_completion_suggestions(db: Session, row: Message) -> list[TaskCompletionSuggestion]:
+    suggestions = []
+    tasks = list(db.scalars(select(Task).where(
+        Task.project_id == row.project_id,
+        Task.status.not_in(("completed", "cancelled")),
+    ).order_by(Task.due_date, Task.id)))
+    for task in tasks:
+        confidence, evidence = _completion_candidate_score(task, row.content)
+        if confidence < 0.45:
+            continue
+        suggestion = TaskCompletionSuggestion(project_id=row.project_id, message_id=row.id, task_id=task.id,
+                                              confidence=confidence, evidence=evidence, status="proposed")
+        db.add(suggestion)
+        suggestions.append(suggestion)
+    return suggestions
 
 
 @router.get("/inbox")
@@ -243,19 +289,54 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
     )
     db.add(row); db.flush()
     synthetic = StorageObject(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)
-    tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
-    drafts = create_response_drafts(db, row.project_id, None, [synthetic])
-    risks, _ = create_governance_items(db, row.project_id, [synthetic], source_type=row.source_type)
+    if row.source_type == "email_outgoing":
+        tasks, drafts, risks = [], [], []
+        completion_suggestions = _create_completion_suggestions(db, row)
+    else:
+        tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
+        drafts = create_response_drafts(db, row.project_id, None, [synthetic])
+        risks, _ = create_governance_items(db, row.project_id, [synthetic], source_type=row.source_type)
+        completion_suggestions = []
     for task in tasks:
         task.message_id = row.id
         task.external_action_status = "proposed"
     for draft in drafts:
         draft.message_id = row.id
-    row.summary = brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0)
+    row.summary = (f"Исходящее письмо проверено. Возможных выполненных задач: {len(completion_suggestions)}. Требуется подтверждение пользователя."
+                   if row.source_type == "email_outgoing" else brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0))
     db.add(AuditLog(action="message_processed", entity_type="message", entity_id=row.id,
                     details=f"source={row.source_type}; tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}; context={confidence:.0%}"))
     db.commit(); db.refresh(row)
     return _message_payload(db, row)
+
+
+@router.post("/inbox/{message_id}/completion-suggestions/{suggestion_id}")
+def review_completion_suggestion(message_id: int, suggestion_id: int, payload: CompletionReview,
+                                 db: Session = Depends(get_db), user: User = Depends(require_user)):
+    suggestion = db.get(TaskCompletionSuggestion, suggestion_id)
+    if suggestion is None or suggestion.message_id != message_id:
+        raise HTTPException(404, "Предложение о выполнении задачи не найдено")
+    require_project_role(db, user, suggestion.project_id, "editor")
+    if suggestion.status != "proposed":
+        return {"id": suggestion.id, "status": suggestion.status, "already_reviewed": True}
+    task = db.get(Task, suggestion.task_id)
+    message = db.get(Message, message_id)
+    suggestion.status = payload.status
+    suggestion.reviewed_by_user_id = user.id
+    suggestion.reviewed_at = datetime.now(timezone.utc)
+    if payload.status == "confirmed" and task is not None and task.status != "completed":
+        old_status = task.status
+        task.status = "completed"
+        task.completed_at = datetime.now(timezone.utc)
+        task.result_note = f"Выполнение подтверждено по исходящему письму: {message.source_name if message else message_id}"
+        db.add(TaskHistory(task_id=task.id, action="completed_from_outgoing_email", old_status=old_status,
+                           new_status="completed", result_note=task.result_note, changed_by_user_id=user.id,
+                           details=f"message={message_id}; suggestion={suggestion.id}"))
+    db.add(AuditLog(action="outgoing_completion_reviewed", entity_type="task_completion_suggestion", entity_id=suggestion.id,
+                    details=f"message={message_id}; task={suggestion.task_id}; status={payload.status}"))
+    db.commit()
+    return {"id": suggestion.id, "status": suggestion.status, "task_id": suggestion.task_id,
+            "task_status": task.status if task else None, "already_reviewed": False}
 
 
 @router.post("/inbox")

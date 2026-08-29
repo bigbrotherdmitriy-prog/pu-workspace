@@ -124,6 +124,9 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         body = { ...body, direction: financeKind === "cash-in" ? "inflow" : "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null };
       }
       if (financeKind === "invoice") {
+        if (!selectedFinanceContractId) throw new Error("Сначала выберите договор для счёта");
+        if (!financeScheduleItemId) throw new Error("Свяжите счёт с этапом ГПР");
+        if (!financeBudgetLineId) throw new Error("Свяжите счёт со строкой бюджета");
         path = "/execution/invoice-proposals";
         body = { ...body, direction: "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null, schedule_item_id: financeScheduleItemId || null, budget_line_id: financeBudgetLineId || null, source_document_id: financeSourceDocumentId || null };
       }
@@ -166,9 +169,15 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   async function confirmCashPayment(id: number, amount: number) {
-    if (!window.confirm(`Подтвердить факт оплаты ${money(amount)} сегодняшней датой?`)) return;
+    const rawAmount = window.prompt("Фактически оплаченная сумма, ₽", String(amount));
+    if (rawAmount === null) return;
+    const actualAmount = Number(rawAmount);
+    if (!Number.isFinite(actualAmount) || actualAmount <= 0) { setError("Введите корректную сумму оплаты"); return; }
+    const actualDate = window.prompt("Дата оплаты, ГГГГ-ММ-ДД", new Date().toISOString().slice(0, 10));
+    if (!actualDate) return;
+    if (!window.confirm(`Подтвердить оплату ${money(actualAmount)} от ${actualDate}?`)) return;
     try {
-      await api(`/execution/cash-flow/${id}/confirm-payment`, { method: "POST", body: JSON.stringify({ actual_amount: amount }) });
+      await api(`/execution/cash-flow/${id}/confirm-payment`, { method: "POST", body: JSON.stringify({ actual_amount: actualAmount, actual_date: actualDate }) });
       setNotice("Оплата подтверждена пользователем, факт записан в ДДС и бюджет");
       await loadFinance();
     } catch (error) { setError((error as Error).message); }

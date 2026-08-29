@@ -10,6 +10,7 @@ from app.api.execution_finance import (
     StatusUpdate,
     _finance_document_hints,
     _finance_document_score,
+    _linked_budget_totals,
     router,
 )
 
@@ -63,6 +64,29 @@ def test_invoice_proposal_preserves_control_links_and_manual_fact():
     assert proposal.budget_line_id == 17
     assert proposal.source_document_id == 19
     assert confirmation.actual_amount == Decimal("74250")
+
+
+def test_linked_budget_totals_are_idempotent_and_ignore_cancelled_entries():
+    class Entry:
+        def __init__(self, status, planned, actual="0", direction="outflow"):
+            self.status = status
+            self.planned_amount = Decimal(planned)
+            self.actual_amount = Decimal(actual)
+            self.direction = direction
+
+    committed, actual = _linked_budget_totals([
+        Entry("approved", "100"),
+        Entry("paid", "200", "190"),
+        Entry("cancelled", "300"),
+        Entry("received", "400", "400", "inflow"),
+    ])
+    assert committed == Decimal("300")
+    assert actual == Decimal("190")
+
+
+def test_paid_status_is_reserved_for_explicit_payment_confirmation():
+    source = __import__("inspect").getsource(__import__("app.api.execution_finance", fromlist=["update_status"]).update_status)
+    assert '"cash-flow": {"approved", "cancelled"}' in source
 
 
 def test_finance_document_candidates_are_explainable_and_extract_hints():

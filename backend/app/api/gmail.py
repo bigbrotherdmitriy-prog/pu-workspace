@@ -124,8 +124,11 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             content = _message_text(item.get("payload", {})) or item.get("snippet", "")
             subject = headers.get("subject") or "Письмо без темы"
             sender = headers.get("from") or "Отправитель не указан"
+            recipient = headers.get("to") or "Получатель не указан"
+            is_outgoing = "SENT" in set(item.get("labelIds") or [])
+            source_type = "email_outgoing" if is_outgoing else "email"
+            correspondent = recipient if is_outgoing else sender
             existing = db.scalar(select(Message).where(
-                Message.source_type == "email",
                 Message.source_external_id == ref["id"],
             ))
             if existing:
@@ -142,27 +145,29 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             if not content.strip():
                 skipped += 1
                 continue
-            contact = contact_for_sender(db, project_id, sender, user)
+            contact = contact_for_sender(db, project_id, correspondent, user)
             if contact is not None:
                 target_project_id = contact.project_id
                 routing_evidence = f"Проект определён по email клиента: {contact.email}"
                 routing_contract_id = contact.contract_id
             else:
                 target_project_id, _, _ = project_candidate(
-                    db, project_id, f"{subject}\n{sender}\n{content}", user,
+                    db, project_id, f"{subject}\n{correspondent}\n{content}", user,
                 )
                 routing_evidence = None
                 routing_contract_id = None
             result = ingest_message(IncomingMessage(
-                project_id=target_project_id, source_type="email", source_external_id=item["id"],
-                source_name=f"{sender} — {subject}", source_url=f"https://mail.google.com/mail/u/0/#inbox/{item['id']}",
-                source_sender=sender, source_thread_id=item.get("threadId"), content=content,
+                project_id=target_project_id, source_type=source_type, source_external_id=item["id"],
+                source_name=(f"Исходящее: {recipient} — {subject}" if is_outgoing else f"{sender} — {subject}"),
+                source_url=f"https://mail.google.com/mail/u/0/#all/{item['id']}",
+                source_sender=correspondent, source_thread_id=item.get("threadId"), content=content,
                 attachments=attachments,
                 routing_contract_id=routing_contract_id, routing_evidence=routing_evidence,
             ), db, user)
             processed += 1 if result["status"] else 0
-            discover_contact_from_message(db, target_project_id, sender, content, user)
-            notify_telegram(_gmail_telegram_notice(sender, subject, result))
+            discover_contact_from_message(db, target_project_id, correspondent, content, user)
+            if not is_outgoing:
+                notify_telegram(_gmail_telegram_notice(sender, subject, result))
         except Exception as exc:
             db.rollback()
             failed += 1

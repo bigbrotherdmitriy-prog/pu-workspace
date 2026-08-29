@@ -164,6 +164,22 @@ def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, de
     db.add(AuditLog(action=action, entity_type=kind, entity_id=entity_id, details=f"user={user_id}; {details}"))
 
 
+def _linked_budget_totals(rows: list[CashFlowEntry]) -> tuple[Decimal, Decimal]:
+    committed = sum((row.planned_amount for row in rows if row.direction == "outflow" and row.status in {"approved", "paid"}), Decimal("0"))
+    actual = sum((row.actual_amount for row in rows if row.direction == "outflow" and row.status == "paid"), Decimal("0"))
+    return committed, actual
+
+
+def _refresh_budget_from_cash_flow(db: Session, budget_line_id: int | None) -> None:
+    if not budget_line_id:
+        return
+    budget = db.get(BudgetLine, budget_line_id)
+    if budget is None:
+        return
+    rows = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.budget_line_id == budget.id)))
+    budget.committed_amount, budget.actual_amount = _linked_budget_totals(rows)
+
+
 @router.get("/overview")
 def overview(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
@@ -187,10 +203,13 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     delayed = [x for x in schedule if x.planned_finish and x.planned_finish < today and x.actual_progress < 100]
     late_procurement = [x for x in procurement if x.planned_delivery and x.planned_delivery < today and x.stage not in {"delivered", "accepted", "cancelled"}]
     return {
-        "summary": {"budget_planned": planned, "budget_actual": actual, "budget_forecast": forecast,
+        "summary": {"budget_planned": planned, "budget_committed": sum((x.committed_amount for x in confirmed_budget), Decimal("0")),
+                    "budget_actual": actual, "budget_forecast": forecast,
                     "budget_variance": forecast - planned, "cash_balance_forecast": balance,
                     "cash_gap": minimum, "cash_gap_date": gap_date, "delayed_schedule": len(delayed),
-                    "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}])},
+                    "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
+                    "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
+                    "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note} for x in baselines],
         "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "planned_start": x.planned_start,
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
@@ -406,6 +425,10 @@ def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), use
 def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
+    if payload.direction != "outflow":
+        raise HTTPException(422, "Счёт на оплату должен быть расходом ДДС")
+    if payload.contract_id is None or payload.schedule_item_id is None or payload.budget_line_id is None:
+        raise HTTPException(422, "Для счёта обязательны договор, этап ГПР и строка бюджета")
     if payload.schedule_item_id is not None:
         stage = db.get(ScheduleItem, payload.schedule_item_id)
         if stage is None or stage.project_id != payload.project_id:
@@ -446,10 +469,7 @@ def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = De
     item.actual_amount = actual_amount
     item.actual_date = payload.actual_date or date.today()
     item.status = paid_status
-    if item.budget_line_id:
-        budget = db.get(BudgetLine, item.budget_line_id)
-        if budget is not None:
-            budget.actual_amount = (budget.actual_amount or Decimal("0")) + actual_amount
+    _refresh_budget_from_cash_flow(db, item.budget_line_id)
     _audit(db, "cash_flow_payment_confirmed", "cash_flow", item.id, user.id,
            f"status={paid_status}; amount={actual_amount}; date={item.actual_date}; budget={item.budget_line_id}")
     db.commit()
@@ -477,7 +497,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     item = db.get(model, item_id)
     if item is None: raise HTTPException(404, "Item not found")
     require_project_role(db, user, item.project_id, "manager")
-    allowed = {"budget": {"approved", "active", "closed", "rejected"}, "cash-flow": {"approved", "paid", "received", "cancelled"},
+    allowed = {"budget": {"approved", "active", "closed", "rejected"}, "cash-flow": {"approved", "cancelled"},
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved", "superseded"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
@@ -487,5 +507,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     if payload.actual_date is not None:
         if hasattr(item, "actual_date"): item.actual_date = payload.actual_date
         if hasattr(item, "actual_delivery"): item.actual_delivery = payload.actual_date
+    if kind == "cash-flow":
+        _refresh_budget_from_cash_flow(db, item.budget_line_id)
     _audit(db, f"{kind}_status_updated", kind, item.id, user.id, f"status={payload.status}"); db.commit()
     return {"id": item.id, "status": item.status}

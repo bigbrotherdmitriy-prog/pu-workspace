@@ -341,6 +341,15 @@ type InboxMessage = {
   tasks: InboxTask[];
   drafts: InboxDraft[];
   risks: InboxRisk[];
+  completion_suggestions: {
+    id: number;
+    task_id: number;
+    task_title: string;
+    task_status: string;
+    confidence: number;
+    evidence: string;
+    status: string;
+  }[];
 };
 type AutomationRule = {
   id: number;
@@ -1316,6 +1325,18 @@ export function App() {
       });
       setInbox((rows) => rows.map((row) => row.id === message.id ? updated : row));
       setNotice(status === "completed" ? "Письмо отмечено обработанным" : "Письмо взято в работу");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function reviewOutgoingCompletion(message: InboxMessage, suggestionId: number, status: "confirmed" | "rejected") {
+    try {
+      await api(`/ai-secretary/inbox/${message.id}/completion-suggestions/${suggestionId}`, {
+        method: "POST",
+        body: JSON.stringify({ status }),
+      });
+      setNotice(status === "confirmed" ? "Задача отмечена выполненной по исходящему письму" : "Предложение отклонено; задача не изменена");
+      await load();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2592,6 +2613,7 @@ export function App() {
             <section className="finance-metrics">
               {[
                 ["Бюджет", money(finance?.summary.budget_planned)],
+                ["Законтрактовано", money(finance?.summary.budget_committed)],
                 ["Факт", money(finance?.summary.budget_actual)],
                 ["Прогноз", money(finance?.summary.budget_forecast)],
                 ["Отклонение", money(finance?.summary.budget_variance)],
@@ -2838,7 +2860,7 @@ export function App() {
                         <strong>{item.description}</strong>
                         <small>
                           {item.category} · план {money(item.planned_amount)} ·
-                          прогноз {money(item.forecast_amount)}
+                          законтрактовано {money(item.committed_amount)} · факт {money(item.actual_amount)} · прогноз {money(item.forecast_amount)}
                         </small>
                       </span>
                       <b>{item.status}</b>
@@ -2975,6 +2997,8 @@ export function App() {
                 <p>
                   Прогноз бюджета: {money(finance?.summary.budget_forecast)}
                 </p>
+                <p>Ожидают подтверждения оплаты: <strong>{finance?.summary.pending_payments || 0}</strong></p>
+                <p>Счета без полной цепочки: <strong>{finance?.summary.unlinked_invoices || 0}</strong></p>
               </article>
             </section>
           </div>
@@ -3881,7 +3905,7 @@ export function App() {
                 <h2>{active === "Письма" ? "Входящие письма" : "Входящие AI Secretary"}</h2>
                 <p>
                   {active === "Письма"
-                    ? "Письма из Gmail с исходным текстом, AI-сводкой, задачами и черновиками ответов."
+                    ? "Входящие и исходящие Gmail: AI-сводка, задачи, черновики и проверка выполнения задач по отправленным ответам."
                     : "Источник → контекст проекта и договора → сводка → предложения задач и ответа. Ничего внешнего не создаётся без подтверждения."}
                 </p>
               </div>
@@ -4272,6 +4296,24 @@ export function App() {
                                   : "Подтвердить и создать"}
                               </button>
                             )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {message.completion_suggestions?.length > 0 && (
+                      <div className="inbox-proposals">
+                        <h3>Исходящий ответ — возможное выполнение задач</h3>
+                        {message.completion_suggestions.map((suggestion) => (
+                          <div className="inbox-task" key={suggestion.id}>
+                            <div>
+                              <strong>{suggestion.task_title}</strong>
+                              <p>{suggestion.evidence} · уверенность {Math.round(suggestion.confidence * 100)}%</p>
+                            </div>
+                            <span>{suggestion.status === "proposed" ? "Ожидает проверки" : suggestion.status === "confirmed" ? "Выполнение подтверждено" : "Отклонено"}</span>
+                            {suggestion.status === "proposed" && <div className="draft-actions">
+                              <button onClick={() => reviewOutgoingCompletion(message, suggestion.id, "rejected")}>Не выполнена</button>
+                              <button className="approve" onClick={() => reviewOutgoingCompletion(message, suggestion.id, "confirmed")}>Подтвердить выполнение</button>
+                            </div>}
                           </div>
                         ))}
                       </div>
