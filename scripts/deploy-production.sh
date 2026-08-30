@@ -19,6 +19,12 @@ fail() {
   exit 1
 }
 
+# Serialize production switches. Parallel deploys can otherwise race during
+# `docker compose --force-recreate` and temporarily contend for fixed names.
+command -v flock >/dev/null 2>&1 || fail "flock is required for safe deployment"
+exec 9>"$APP_ROOT/deploy.lock"
+flock -n 9 || fail "another deployment is already in progress"
+
 case "$RELEASE_DIR" in
   "$APP_ROOT"/releases/*) ;;
   *) fail "release must be inside $APP_ROOT/releases" ;;
