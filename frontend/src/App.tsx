@@ -13,6 +13,7 @@ import { NotificationsModule, type NotificationItem } from "./modules/notificati
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
+import { FolderAnalysisSummary } from "./modules/folder-analysis/FolderAnalysisSummary";
 import {
   Activity,
   AlertTriangle,
@@ -3273,6 +3274,10 @@ export function App() {
       {active === "Предложения" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page">
+            <FolderAnalysisSummary
+              proposals={proposals}
+              onOpenDocuments={() => setActive("Документы")}
+            />
             <section className="card proposal-intro">
               <div>
                 <h2>Предлагаемые изменения</h2>
