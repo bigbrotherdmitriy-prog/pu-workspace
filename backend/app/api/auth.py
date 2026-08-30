@@ -4,7 +4,7 @@ import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import (
@@ -18,6 +18,7 @@ from app.core.auth import (
 )
 from app.database import get_db
 from app.models.auth_session import AuthSession
+from app.models.audit_log import AuditLog
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -30,6 +31,11 @@ class Credentials(BaseModel):
 
 class BootstrapRequest(Credentials):
     name: str = Field(min_length=1, max_length=255)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)
 
 
 @router.post("/bootstrap")
@@ -82,6 +88,31 @@ def logout(user: User = Depends(require_user), authorization: str = Header(defau
         if row:
             db.delete(row); db.commit()
     return {"status": "logged_out"}
+
+
+@router.post("/change-password")
+def change_password(
+    payload: PasswordChange,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(401, "Текущий пароль указан неверно")
+    if hmac.compare_digest(payload.current_password, payload.new_password):
+        raise HTTPException(422, "Новый пароль должен отличаться от текущего")
+    try:
+        user.password_hash = hash_password(payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    revoked = db.execute(delete(AuthSession).where(AuthSession.user_id == user.id)).rowcount or 0
+    db.add(AuditLog(
+        action="password_changed",
+        entity_type="user",
+        entity_id=user.id,
+        details=f"sessions_revoked={revoked}; password_stored=false",
+    ))
+    db.commit()
+    return {"status": "password_changed", "reauthentication_required": True}
 
 
 def _user(user: User) -> dict:

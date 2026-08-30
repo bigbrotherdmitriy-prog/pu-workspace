@@ -4,7 +4,6 @@ import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
-import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
@@ -2480,300 +2479,40 @@ export function App() {
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
               onReload={() => void loadFinance()}
             />
-            {financeStructuredPreview && <section className="card structured-import" id="structured-import">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">ПАКЕТНОЕ ПРЕДЛОЖЕНИЕ</span>
-                  <h2>{financeStructuredPreview.name}</h2>
-                  <p>Сопоставлено колонок: {Object.keys(financeStructuredPreview.mapping).length}. Выберите строки; импорт создаст предложения со ссылкой на строку источника.</p>
-                </div>
-                <button className="secondary" onClick={() => { setFinanceStructuredPreview(null); setFinanceStructuredRows([]); }}>Закрыть</button>
-              </div>
-              {financeStructuredPreview.issues.map((issue) => <p className="finance-warning" key={issue}>{issue}</p>)}
-              <div className="structured-table">
-                <table>
-                  <thead><tr><th></th><th>Строка</th><th>Наименование</th><th>Дата / срок</th><th>Сумма / прогресс</th><th>Проверка</th></tr></thead>
-                  <tbody>{financeStructuredPreview.rows.slice(0, 100).map((row) => <tr className={row.importable ? "" : "invalid"} key={row.source_row}>
-                    <td><input type="checkbox" disabled={!row.importable} checked={financeStructuredRows.includes(row.source_row)} onChange={(e) => setFinanceStructuredRows((selected) => e.target.checked ? [...selected, row.source_row] : selected.filter((value) => value !== row.source_row))} /></td>
-                    <td>{row.source_row}</td>
-                    <td>{row.title || "—"}<small>{row.category}</small></td>
-                    <td>{row.planned_date || row.planned_finish || row.planned_start || "—"}</td>
-                    <td>{row.amount ? money(Number(row.amount)) : `${row.progress || 0}%`}</td>
-                    <td>{row.issues.length ? row.issues.join("; ") : "готово к предложению"}</td>
-                  </tr>)}</tbody>
-                </table>
-              </div>
-              {financeStructuredPreview.truncated && <p className="finance-warning">Показаны первые 500 строк. Разделите файл или импортируйте его частями.</p>}
-              <div className="structured-actions">
-                <span>Выбрано строк: <strong>{financeStructuredRows.length}</strong></span>
-                <button disabled={!financeStructuredRows.length} onClick={importStructuredFinance}>Создать пакет предложений</button>
-              </div>
-            </section>}
-            <section className="card finance-entry" id="finance-entry">
-              <div>
-                <h2>Добавить управленческую запись</h2>
-                <p>
-                  Новая запись создаётся как предложение и не влияет на
-                  подтверждённый прогноз.
-                </p>
-                {financeSourceDocumentId > 0 && <p className="finance-source-note">Источник: документ #{financeSourceDocumentId}. Связь сохранится для счёта или акта.</p>}
-              </div>
-              <div>
-                <select
-                  value={financeKind}
-                  onChange={(e) => setFinanceKind(e.target.value)}
-                >
-                  <option value="budget">Строка бюджета</option>
-                  <option value="cash-in">Поступление ДДС</option>
-                  <option value="cash-out">Выплата ДДС</option>
-                  <option value="invoice">Счёт → предложение ДДС</option>
-                  <option value="procurement">Закупка / поставка</option>
-                  <option value="act">Акт</option>
-                  <option value="baseline">Версия ГПР</option>
-                  <option value="schedule">Этап ГПР</option>
-                </select>
-                <input
-                  value={financeTitle}
-                  onChange={(e) => setFinanceTitle(e.target.value)}
-                  placeholder="Название"
-                />
-                {financeKind !== "baseline" && (
-                  <input
-                    type="number"
-                    min="0"
-                    value={financeAmount}
-                    onChange={(e) => setFinanceAmount(e.target.value)}
-                    placeholder="Сумма, ₽"
-                  />
-                )}
-                {["cash-in", "cash-out", "invoice", "procurement", "act"].includes(
-                  financeKind,
-                ) && (
-                  <input
-                    type="date"
-                    value={financeDate}
-                    onChange={(e) => setFinanceDate(e.target.value)}
-                  />
-                )}
-                <input
-                  value={financeExtra}
-                  onChange={(e) => setFinanceExtra(e.target.value)}
-                  placeholder={
-                    financeKind === "budget"
-                      ? "Категория"
-                      : financeKind === "act"
-                        ? "Номер акта"
-                        : financeKind === "baseline"
-                          ? "Комментарий"
-                          : financeKind === "schedule"
-                            ? "Комментарий к этапу"
-                          : "Контрагент / поставщик"
-                  }
-                />
-                {financeKind === "invoice" && (
-                  <>
-                    <select value={financeScheduleItemId} onChange={(e) => setFinanceScheduleItemId(Number(e.target.value))}>
-                      <option value={0}>Связать с этапом ГПР (не выбран)</option>
-                      {finance?.schedule.filter((stage) => {
-                        const baseline = finance.baselines.find((row) => row.id === stage.baseline_id);
-                        return !selectedFinanceContractId || baseline?.contract_id === selectedFinanceContractId;
-                      }).map((stage) => <option key={stage.id} value={stage.id}>{stage.title}</option>)}
-                    </select>
-                    <select value={financeBudgetLineId} onChange={(e) => setFinanceBudgetLineId(Number(e.target.value))}>
-                      <option value={0}>Связать со строкой бюджета (не выбрана)</option>
-                      {finance?.budget.filter((row) => !selectedFinanceContractId || row.contract_id === selectedFinanceContractId)
-                        .map((row) => <option key={row.id} value={row.id}>{row.description}</option>)}
-                    </select>
-                  </>
-                )}
-                <button
-                  disabled={!financeTitle.trim()}
-                  onClick={addFinanceItem}
-                >
-                  Создать предложение
-                </button>
-              </div>
-            </section>
-            <section className="finance-grid">
-              <article className="card">
-                <h2>ГПР: план / факт</h2>
-                <div className="finance-list">
-                  {finance?.baselines.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
-                    <div key={item.id}>
-                      <span>
-                        <strong>{item.name}</strong>
-                        <small>Версия {item.version}</small>
-                      </span>
-                      <b>{item.status}</b>
-                      {item.status === "draft" && (
-                        <button
-                          onClick={() =>
-                            confirmFinance("baselines", item.id, "approved")
-                          }
-                        >
-                          Утвердить baseline
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!finance?.baselines.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
-                    <p className="finance-empty">Добавьте первую версию ГПР.</p>
-                  )}
-                </div>
-                <p className="finance-warning">
-                  Отстающих работ: {finance?.summary.delayed_schedule || 0}
-                </p>
-              </article>
-              <article className="card">
-                <h2>Бюджет</h2>
-                <div className="finance-list">
-                  {finance?.budget.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
-                    <div key={item.id}>
-                      <span>
-                        <strong>{item.description}</strong>
-                        <small>
-                          {item.category} · план {money(item.planned_amount)} ·
-                          законтрактовано {money(item.committed_amount)} · факт {money(item.actual_amount)} · прогноз {money(item.forecast_amount)}
-                        </small>
-                      </span>
-                      <b>{item.status}</b>
-                      {item.status === "proposed" && (
-                        <button
-                          onClick={() =>
-                            confirmFinance("budget", item.id, "approved")
-                          }
-                        >
-                          Подтвердить
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!finance?.budget.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
-                    <p className="finance-empty">Строк бюджета пока нет.</p>
-                  )}
-                </div>
-              </article>
-              <article className="card">
-                <h2>ДДС</h2>
-                <div className="finance-list">
-                  {finance?.cash_flow.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
-                    <div key={item.id}>
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>
-                          {item.direction === "inflow"
-                            ? "Поступление"
-                            : "Выплата"}{" "}
-                          · {item.planned_date} · {money(item.planned_amount)}
-                        </small>
-                      </span>
-                      <b>{item.status}</b>
-                      {item.status === "proposed" && (
-                        <button
-                          onClick={() =>
-                            confirmFinance("cash-flow", item.id, "approved")
-                          }
-                        >
-                          Подтвердить
-                        </button>
-                      )}
-                      {item.status === "approved" && (
-                        <button onClick={() => confirmCashPayment(item.id, Number(item.planned_amount))}>
-                          Подтвердить оплату
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!finance?.cash_flow.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
-                    <p className="finance-empty">План ДДС пока пуст.</p>
-                  )}
-                </div>
-              </article>
-              <article className="card">
-                <h2>Закупки и поставки</h2>
-                <div className="finance-list">
-                  {finance?.procurement.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
-                    <div key={item.id}>
-                      <span>
-                        <strong>{item.title}</strong>
-                        <small>
-                          {item.supplier || "Поставщик не указан"} ·{" "}
-                          {item.planned_delivery || "без срока"} ·{" "}
-                          {money(item.planned_amount)}
-                        </small>
-                      </span>
-                      <b>{item.stage}</b>
-                      {item.stage === "request" && (
-                        <button
-                          onClick={() =>
-                            confirmFinance("procurement", item.id, "ordered")
-                          }
-                        >
-                          Заказано
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!finance?.procurement.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
-                    <p className="finance-empty">Закупок пока нет.</p>
-                  )}
-                </div>
-                <p className="finance-warning">
-                  Просроченных поставок:{" "}
-                  {finance?.summary.late_procurement || 0}
-                </p>
-              </article>
-              <article className="card">
-                <h2>Акты и закрытие</h2>
-                <div className="finance-list">
-                  {finance?.acts.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).map((item) => (
-                    <div key={item.id}>
-                      <span>
-                        <strong>
-                          №{item.number} · {item.title}
-                        </strong>
-                        <small>
-                          {item.act_date || "без даты"} · {money(item.amount)}
-                        </small>
-                      </span>
-                      <b>{item.status}</b>
-                      {item.status === "proposed" && (
-                        <button
-                          onClick={() =>
-                            confirmFinance("acts", item.id, "approved")
-                          }
-                        >
-                          Подтвердить
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!finance?.acts.filter((item) => !selectedFinanceContractId || item.contract_id === selectedFinanceContractId).length && (
-                    <p className="finance-empty">Актов пока нет.</p>
-                  )}
-                </div>
-              </article>
-              <article className="card finance-forecast">
-                <h2>Прогноз</h2>
-                <p
-                  className={
-                    (finance?.summary.cash_gap || 0) < 0 ? "bad" : "good"
-                  }
-                >
-                  {(finance?.summary.cash_gap || 0) < 0
-                    ? `Ожидаемый кассовый разрыв ${money(finance?.summary.cash_gap)}${finance?.summary.cash_gap_date ? ` к ${finance.summary.cash_gap_date}` : ""}`
-                    : "Кассовый разрыв по подтверждённому плану не выявлен"}
-                </p>
-                <p>
-                  Ожидают обработки актов: {finance?.summary.acts_pending || 0}
-                </p>
-                <p>
-                  Прогноз бюджета: {money(finance?.summary.budget_forecast)}
-                </p>
-                <p>Ожидают подтверждения оплаты: <strong>{finance?.summary.pending_payments || 0}</strong></p>
-                <p>Счета без полной цепочки: <strong>{finance?.summary.unlinked_invoices || 0}</strong></p>
-              </article>
-            </section>
+            <FinanceOperations
+              finance={finance}
+              preview={financeStructuredPreview}
+              selectedRows={financeStructuredRows}
+              setSelectedRows={setFinanceStructuredRows}
+              selectedContractId={selectedFinanceContractId}
+              kind={financeKind}
+              title={financeTitle}
+              amount={financeAmount}
+              date={financeDate}
+              extra={financeExtra}
+              sourceDocumentId={financeSourceDocumentId}
+              scheduleItemId={financeScheduleItemId}
+              budgetLineId={financeBudgetLineId}
+              setKind={setFinanceKind}
+              setTitle={setFinanceTitle}
+              setAmount={setFinanceAmount}
+              setDate={setFinanceDate}
+              setExtra={setFinanceExtra}
+              setScheduleItemId={setFinanceScheduleItemId}
+              setBudgetLineId={setFinanceBudgetLineId}
+              onClosePreview={() => {
+                setFinanceStructuredPreview(null);
+                setFinanceStructuredRows([]);
+              }}
+              onImport={() => void importStructuredFinance()}
+              onAdd={() => void addFinanceItem()}
+              onConfirm={(kind, id, status) =>
+                void confirmFinance(kind, id, status)
+              }
+              onConfirmPayment={(id, amount) =>
+                void confirmCashPayment(id, amount)
+              }
+            />
           </div>
         </section>
       )}
