@@ -17,6 +17,8 @@ def test_production_deploy_is_fail_closed_and_uses_persistent_proxy_override():
     assert "select version_num from alembic_version" in source
     assert 'DEPLOY_RELAY=${DEPLOY_RELAY:-true}' in source
     assert 'relay restart skipped by DEPLOY_RELAY=false' in source
+    assert 'exec 9>"$APP_ROOT/deploy.lock"' in source
+    assert 'flock -n 9 || fail "another deployment is already in progress"' in source
 
 
 def test_ci_runs_backend_tests_and_frontend_build():
