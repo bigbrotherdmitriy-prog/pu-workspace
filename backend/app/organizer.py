@@ -26,8 +26,17 @@ router = APIRouter(prefix="/organizer", tags=["organizer"])
 _workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
 
 
-def _audit(db: Session, action: str, entity_type: str, entity_id: int, details: str) -> None:
-    db.add(AuditLog(action=action, entity_type=entity_type, entity_id=entity_id, details=details))
+def _audit(
+    db: Session,
+    action: str,
+    entity_type: str,
+    entity_id: int,
+    details: str,
+    *,
+    user_id: int | None = None,
+) -> None:
+    actor = f"user={user_id}; " if user_id is not None else "user=system; "
+    db.add(AuditLog(action=action, entity_type=entity_type, entity_id=entity_id, details=actor + details))
     db.commit()
 
 
@@ -232,7 +241,7 @@ def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = 
         raise HTTPException(400, str(exc)) from exc
     session_id = repo.create_session(payload.project_id, source.id, source.name)
     db.commit()
-    _audit(db, "snapshot_scan_started", "organizer_session", session_id, f"Source folder: {source.name}")
+    _audit(db, "snapshot_scan_started", "organizer_session", session_id, f"Source folder: {source.name}", user_id=user.id)
     if payload.background:
         background_tasks.add_task(submit_scan, session_id, payload.project_id, source.id)
         return {"session_id": session_id, "status": "queued"}
@@ -317,7 +326,7 @@ def edit_action(action_id: int, payload: EditItemRequest, db: Session = Depends(
     if payload.save_as_rule and payload.edited_folder:
         repo.add_rule({"filename_contains": row["source"]}, {"folder": payload.edited_folder}, None, "user_correction", True)
         db.commit()
-    _audit(db, "proposal_action_reviewed", "organizer_action", action_id, f"Decision: {payload.decision}")
+    _audit(db, "proposal_action_reviewed", "organizer_action", action_id, f"Decision: {payload.decision}", user_id=user.id)
     return {"status": "ok", "action_id": action_id}
 
 
@@ -328,7 +337,7 @@ def decide(proposal_id: int, payload: DecisionRequest, db: Session = Depends(get
     if p["status"] != "waiting_confirmation":
         raise HTTPException(409, "Proposal already processed")
     repo.decide(proposal_id, payload.approved, payload.note)
-    _audit(db, "proposal_decided", "organizer_proposal", proposal_id, "Approved" if payload.approved else "Rejected")
+    _audit(db, "proposal_decided", "organizer_proposal", proposal_id, "Approved" if payload.approved else "Rejected", user_id=user.id)
     return _proposal_payload(repo, proposal_id)
 
 
@@ -340,7 +349,7 @@ def approve_safe(proposal_id: int, db: Session = Depends(get_db), user: User = D
     if proposal["status"] != "waiting_confirmation":
         raise HTTPException(409, "Proposal already processed")
     approved = repo.apply_auto_policy(proposal_id, AUTO_APPLY_CONFIDENCE)
-    _audit(db, "proposal_safe_actions_approved", "organizer_proposal", proposal_id, f"Approved: {approved}")
+    _audit(db, "proposal_safe_actions_approved", "organizer_proposal", proposal_id, f"Approved: {approved}", user_id=user.id)
     return {"approved": approved, "proposal": _proposal_payload(repo, proposal_id)}
 
 
@@ -363,7 +372,7 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
         if p["status"] == "approved" and not repo.mark_prepared(proposal_id):
             raise HTTPException(409, "Proposal is already being applied or was processed")
         stats = OrganizerExecutor(repo, drive).apply(proposal_id)
-        _audit(db, "proposal_applied_to_safe_copy", "organizer_proposal", proposal_id, f"Result: {stats}")
+        _audit(db, "proposal_applied_to_safe_copy", "organizer_proposal", proposal_id, f"Result: {stats}", user_id=user.id)
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": stats}
     except HTTPException:
         raise
@@ -382,7 +391,7 @@ def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depen
     try:
         drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
         result = OrganizerExecutor(repo, drive).rollback(proposal_id)
-        _audit(db, "proposal_rollback", "organizer_proposal", proposal_id, f"Result: {result}")
+        _audit(db, "proposal_rollback", "organizer_proposal", proposal_id, f"Result: {result}", user_id=user.id)
         return result
     except ValueError as exc:
         db.rollback()
@@ -410,7 +419,7 @@ def standardize_copy(proposal_id: int, db: Session = Depends(get_db), user: User
             proposal_id,
             project["name"],
         )
-        _audit(db, "proposal_safe_copy_standardized", "organizer_proposal", proposal_id, f"Result: {stats}")
+        _audit(db, "proposal_safe_copy_standardized", "organizer_proposal", proposal_id, f"Result: {stats}", user_id=user.id)
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": stats}
     except ValueError as exc:
         db.rollback()
@@ -429,7 +438,7 @@ def apply_source_one(proposal_id: int, payload: SourceApplyRequest, db: Session 
     try:
         drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
         result = OrganizerExecutor(repo, drive).apply_one_to_source(proposal_id, payload.action_id)
-        _audit(db, "proposal_applied_to_source", "organizer_proposal", proposal_id, f"Action: {payload.action_id}; result: {result}")
+        _audit(db, "proposal_applied_to_source", "organizer_proposal", proposal_id, f"Action: {payload.action_id}; result: {result}", user_id=user.id)
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": result}
     except ValueError as exc:
         db.rollback()
