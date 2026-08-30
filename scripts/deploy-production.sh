@@ -88,6 +88,14 @@ docker exec pu-workspace-db pg_dump -U pu_user -d pu_workspace -Fc -f /tmp/deplo
 docker cp pu-workspace-db:/tmp/deploy-backup.dump "$BACKUP_FILE"
 [ -s "$BACKUP_FILE" ] || fail "backup is empty"
 docker run --rm -v "$BACKUP_FILE:/backup.dump:ro" postgres:16-alpine pg_restore -l /backup.dump >/dev/null
+docker run --rm --user postgres -v "$BACKUP_FILE:/backup.dump:ro" postgres:16-alpine sh -ec '
+  initdb -D /tmp/restore-db >/dev/null
+  pg_ctl -D /tmp/restore-db -o "-c listen_addresses=" -w start >/dev/null
+  createdb restore_check
+  pg_restore --no-owner -d restore_check /backup.dump
+  table_count=$(psql -d restore_check -tAc "select count(*) from pg_tables where schemaname=current_schema()")
+  [ "$table_count" -gt 0 ]
+'
 
 echo "[3/6] preserving rollback image"
 docker tag app-backend:latest "$ROLLBACK_IMAGE"
