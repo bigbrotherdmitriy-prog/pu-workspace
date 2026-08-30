@@ -125,7 +125,11 @@ if [ "$DEPLOY_RELAY" = true ]; then
   done
   [ "$relay_ready" = true ] || fail "telegram relay did not become healthy"
 fi
-curl -fsS --max-time 15 https://pu-workspace.duckdns.org/new/ >/dev/null
+docker run --rm \
+  -v "$RELEASE_DIR/scripts:/workspace/scripts:ro" \
+  -w /workspace \
+  "$CANDIDATE_IMAGE" \
+  python scripts/check_public_smoke.py https://pu-workspace.duckdns.org/
 
 SWITCHED=false
 trap - INT TERM HUP EXIT
