@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
@@ -25,7 +26,7 @@ def _get(url: str, timeout: int = 20, token: str | None = None) -> tuple[int, st
         return int(response.status), response.read().decode("utf-8", errors="replace")
 
 
-def check_public(base_url: str) -> dict[str, object]:
+def check_public(base_url: str, expected_asset: str | None = None) -> dict[str, object]:
     base = base_url.rstrip("/") + "/"
     readiness_url = urljoin(base, "api/readiness")
     app_url = urljoin(base, "new/")
@@ -42,6 +43,11 @@ def check_public(base_url: str) -> dict[str, object]:
     if not asset_match:
         raise RuntimeError("public SPA JavaScript asset was not found")
     asset_url = urljoin(app_url, asset_match.group(1))
+    public_asset = asset_url.rsplit("/", 1)[-1]
+    if expected_asset and public_asset != expected_asset:
+        raise RuntimeError(
+            f"public SPA asset is stale: expected {expected_asset}, got {public_asset}"
+        )
     asset_status, bundle = _get(asset_url)
     if asset_status != 200:
         raise RuntimeError("public SPA JavaScript asset is unavailable")
@@ -89,7 +95,15 @@ def check_authenticated_flow(base_url: str, token: str) -> dict[str, object]:
 def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else "https://pu-workspace.duckdns.org/"
     try:
-        result = check_public(base_url)
+        expected_asset = None
+        image_index = Path("/app/app/react_dist/index.html")
+        if image_index.is_file():
+            image_html = image_index.read_text(encoding="utf-8")
+            image_match = re.search(r'<script[^>]+src="([^"]+\.js)"', image_html)
+            if not image_match:
+                raise RuntimeError("candidate SPA JavaScript asset was not found")
+            expected_asset = image_match.group(1).rsplit("/", 1)[-1]
+        result = check_public(base_url, expected_asset=expected_asset)
         token = os.getenv("PU_WORKSPACE_TOKEN", "").strip()
         if token:
             result["authenticated"] = check_authenticated_flow(base_url, token)

@@ -40,6 +40,22 @@ def test_public_smoke_rejects_stale_frontend(monkeypatch):
         raise AssertionError("stale frontend must fail production smoke")
 
 
+def test_public_smoke_rejects_different_asset_from_candidate(monkeypatch):
+    responses = {
+        "https://example.test/api/readiness": (200, json.dumps({"ready": True})),
+        "https://example.test/new/": (200, '<div id="root"></div><script src="/new/assets/old.js"></script>'),
+    }
+    monkeypatch.setattr(MODULE, "_get", lambda url, timeout=20: responses[url])
+
+    try:
+        MODULE.check_public("https://example.test/", expected_asset="current.js")
+    except RuntimeError as exc:
+        assert "asset is stale" in str(exc)
+        assert "expected current.js, got old.js" in str(exc)
+    else:
+        raise AssertionError("different deployed asset must fail production smoke")
+
+
 def test_authenticated_smoke_reads_project_launch_and_dashboard(monkeypatch):
     responses = {
         "https://example.test/projects/": (200, json.dumps({"projects": [{"id": 7, "name": "Pilot"}]})),
