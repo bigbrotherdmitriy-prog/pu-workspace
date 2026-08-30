@@ -119,6 +119,29 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "next_step": "Проверить и заполнить связи ДДС перед подтверждением оплаты",
         })
 
+    payment_confirmations = [
+        row for row in cash_flow
+        if row.status == "approved"
+        and row.actual_date is None
+        and row.contract_id is not None
+        and row.schedule_item_id is not None
+        and row.budget_line_id is not None
+    ]
+    for row in payment_confirmations:
+        overdue = row.planned_date < current
+        attention.append({
+            "kind": "payment_confirmation", "entity_id": row.id,
+            "priority": "critical" if overdue else "high",
+            "title": f"Подтвердите факт платежа «{row.title}»",
+            "due_date": row.planned_date,
+            "source_name": row.source_name or row.counterparty or "ДДС",
+            "evidence": (
+                f"Плановая дата {row.planned_date.isoformat()}, сумма {row.planned_amount}. "
+                "Банковская выписка не используется"
+            ),
+            "next_step": "Если платёж выполнен, вручную подтвердить дату и фактическую сумму; иначе оставить без изменений",
+        })
+
     priority_order = {"critical": 0, "high": 1, "normal": 2}
     attention.sort(key=lambda row: (priority_order[row["priority"]], row["due_date"] or date.max, row["entity_id"]))
     summary = {
@@ -133,6 +156,7 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
         "empty_schedules": len(empty_baselines),
         "unlinked_budget_rows": len(unlinked_budget),
         "unlinked_cash_flow": len(unlinked_cash_flow),
+        "payments_waiting_confirmation": len(payment_confirmations),
     }
     return {
         "project_id": project_id,
