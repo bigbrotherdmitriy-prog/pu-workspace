@@ -10,6 +10,7 @@ import { IntegrationsModule, type IntegrationItem, type SystemState } from "./mo
 import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
+import { InboxModule } from "./modules/inbox/InboxModule";
 import {
   Activity,
   AlertTriangle,
@@ -3676,40 +3677,13 @@ export function App() {
         </section>
       )}
       {(active === "AI Secretary" || active === "Письма") && (
-        <section
-          className={`secretary-overlay ${collapsed ? "collapsed" : ""}`}
+        <InboxModule
+          collapsed={collapsed}
+          mode={active === "Письма" ? "mail" : "secretary"}
+          attentionCount={inbox.filter((item) => !item.context_confirmed || item.tasks.some((task) => task.external_action_status === "proposed")).length}
+          syncing={gmailSyncing}
+          onSync={() => void syncGmail()}
         >
-          <div className="secretary-page">
-            <section className="card secretary-intro">
-              <div className="source-icon">
-                {active === "Письма" ? <Mail /> : <Bot />}
-              </div>
-              <div>
-                <h2>{active === "Письма" ? "Входящие письма" : "Входящие AI Secretary"}</h2>
-                <p>
-                  {active === "Письма"
-                    ? "Входящие и исходящие Gmail: AI-сводка, задачи, черновики и проверка выполнения задач по отправленным ответам."
-                    : "Источник → контекст проекта и договора → сводка → предложения задач и ответа. Ничего внешнего не создаётся без подтверждения."}
-                </p>
-              </div>
-              <span>
-                {
-                  inbox.filter(
-                    (item) =>
-                      !item.context_confirmed ||
-                      item.tasks.some(
-                        (task) => task.external_action_status === "proposed",
-                      ),
-                  ).length
-                }{" "}
-                требуют внимания
-              </span>
-              {active === "Письма" && (
-                <button className="inbox-sync" onClick={() => syncGmail()} disabled={gmailSyncing}>
-                  <RefreshCw /> {gmailSyncing ? "Получаю…" : "Получить новые"}
-                </button>
-              )}
-            </section>
             {active === "Письма" && <div className="mail-view-tabs">
               <button className={mailView === "inbox" ? "selected" : ""} onClick={() => setMailView("inbox")}>Входящие</button>
               <button className={mailView === "companies" ? "selected" : ""} onClick={() => setMailView("companies")}>Компании и контакты <b>{companyGroups.length}</b></button>
@@ -4179,8 +4153,7 @@ export function App() {
                 </div>
               )}
             </section>
-          </div>
-        </section>
+        </InboxModule>
       )}
       {active === "Проекты" && (
         <section className={`projects-overlay ${collapsed ? "collapsed" : ""}`}>
