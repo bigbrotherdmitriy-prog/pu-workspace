@@ -5,6 +5,7 @@ APP_SOURCE = Path(__file__).parents[2] / "frontend" / "src" / "App.tsx"
 PROJECT_SELECTION_SOURCE = APP_SOURCE.parent / "context" / "useProjectSelection.ts"
 FINANCE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "useFinanceController.ts"
 CONTEXTUAL_AI_SOURCE = APP_SOURCE.parent / "modules" / "ai-secretary" / "ContextualAssistant.tsx"
+CONTRACT_PICKER_SOURCE = APP_SOURCE.parent / "modules" / "contracts" / "ContractDocumentPicker.tsx"
 
 
 def test_new_project_reload_uses_created_project_id():
@@ -78,7 +79,7 @@ def test_unconfirmed_mail_can_be_bulk_moved_to_one_project():
 
 
 def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
-    source = APP_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + CONTRACT_PICKER_SOURCE.read_text(encoding="utf-8")
     assert "linkContractDocument" in source
     assert "Выбрать файл из каталога" in source
     assert "contractCatalogOpen" in source

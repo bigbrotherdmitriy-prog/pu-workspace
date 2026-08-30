@@ -2,7 +2,11 @@ from pathlib import Path
 
 
 def _source() -> str:
-    return (Path(__file__).parents[2] / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    frontend = Path(__file__).parents[2] / "frontend" / "src"
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (frontend / "App.tsx", frontend / "modules" / "contracts" / "ContractDocumentPicker.tsx")
+    )
 
 
 def test_task_completion_supports_optional_evidence_and_history():

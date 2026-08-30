@@ -8,6 +8,7 @@ import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/D
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
 import { ContractsModule } from "./modules/contracts/ContractsModule";
+import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import {
   Activity,
@@ -3196,111 +3197,24 @@ export function App() {
                       {item.notes && <small>{item.notes}</small>}
                     </div>
                     <div className="contract-links">
-                      <label>1. Документ-источник</label>
-                      <button
-                        type="button"
-                        data-ai-help="Выбрать существующий файл договора из каталога документов проекта"
-                        onClick={() => {
+                      <ContractDocumentPicker
+                        contractId={item.id}
+                        sourceDocumentId={item.source_document_id}
+                        open={Boolean(contractCatalogOpen[item.id])}
+                        busy={contractCandidateBusy === item.id}
+                        tab={contractDocumentTabs[item.id] || "recommended"}
+                        query={contractDocumentQueries[item.id] || ""}
+                        documents={documentRows}
+                        candidates={contractSourceCandidates[item.id] || []}
+                        onToggle={() => {
                           setContractCatalogOpen((current) => ({ ...current, [item.id]: !current[item.id] }));
                           setContractDocumentTabs((current) => ({ ...current, [item.id]: "server" }));
                         }}
-                      >
-                        {contractCatalogOpen[item.id] ? "Скрыть каталог документов" : "Выбрать файл из каталога"}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={contractCandidateBusy === item.id}
-                        onClick={() => suggestContractDocuments(item.id)}
-                      >
-                        {contractCandidateBusy === item.id
-                          ? "Анализирую реестр…"
-                          : "Найти договор по номеру, контрагенту и тексту"}
-                      </button>
-                      {contractCatalogOpen[item.id] && <div className="contract-catalog-picker">
-                      <div className="contract-source-tabs">
-                        {([
-                          ["recommended", "Рекомендованные"],
-                          ["server", "Сервер / реестр"],
-                          ["upload", "Облако / загрузки"],
-                          ["google", "Google Drive"],
-                        ] as const).map(([source, title]) => (
-                          <button
-                            type="button"
-                            className={(contractDocumentTabs[item.id] || "recommended") === source ? "selected" : "secondary"}
-                            onClick={() => setContractDocumentTabs((current) => ({ ...current, [item.id]: source }))}
-                            key={source}
-                          >
-                            {title}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        value={contractDocumentQueries[item.id] || ""}
-                        onChange={(event) => setContractDocumentQueries((current) => ({ ...current, [item.id]: event.target.value }))}
-                        placeholder="Поиск документа по названию"
+                        onSuggest={() => void suggestContractDocuments(item.id)}
+                        onTabChange={(tab) => setContractDocumentTabs((current) => ({ ...current, [item.id]: tab }))}
+                        onQueryChange={(value) => setContractDocumentQueries((current) => ({ ...current, [item.id]: value }))}
+                        onLink={(documentId) => void linkContractDocument(item.id, documentId)}
                       />
-                      <select
-                        value={item.source_document_id || 0}
-                        onChange={(e) => linkContractDocument(item.id, Number(e.target.value))}
-                      >
-                        <option value={0}>Выберите документ договора</option>
-                        {documentRows
-                          .filter((document) => {
-                            const tab = contractDocumentTabs[item.id] || "recommended";
-                            const source = (document.source || "").toLowerCase();
-                            const candidate = (contractSourceCandidates[item.id] || []).find((row) => row.document_id === document.id);
-                            const sourceMatches = tab === "recommended"
-                              ? Boolean(candidate && candidate.score > 0)
-                              : tab === "server"
-                              ? true
-                              : tab === "upload"
-                                ? !source.includes("google")
-                                : source.includes("google");
-                            const search = (contractDocumentQueries[item.id] || "").trim().toLocaleLowerCase("ru-RU");
-                            return sourceMatches && (!search || document.name.toLocaleLowerCase("ru-RU").includes(search));
-                          })
-                          .sort((left, right) => {
-                            const scores = contractSourceCandidates[item.id] || [];
-                            const leftScore = scores.find((row) => row.document_id === left.id)?.score || 0;
-                            const rightScore = scores.find((row) => row.document_id === right.id)?.score || 0;
-                            return rightScore - leftScore || right.id - left.id;
-                          })
-                          .map((document) => (
-                            <option value={document.id} key={document.id}>
-                              {(() => {
-                                const score = (contractSourceCandidates[item.id] || []).find((row) => row.document_id === document.id)?.score;
-                                return `${score ? `${score}% · ` : ""}${document.name}`;
-                              })()}
-                            </option>
-                          ))}
-                      </select>
-                      <small>Выберите файл в списке — связь сохранится сразу. Сам файл и его название не изменяются.</small>
-                      </div>}
-                      {(contractDocumentTabs[item.id] || "recommended") === "recommended" &&
-                        !(contractSourceCandidates[item.id] || []).length && (
-                          <small>Нажмите «Найти договор…»: система проверит не только имя файла, но и извлечённый текст.</small>
-                        )}
-                      {(contractSourceCandidates[item.id] || []).slice(0, 3).map((candidate) => (
-                        <div className="contract-candidate" key={candidate.document_id}>
-                          <span>
-                            <strong>{candidate.score}% · {candidate.name}</strong>
-                            <small>{candidate.reasons.join("; ") || "слабое совпадение"}</small>
-                          </span>
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={item.source_document_id === candidate.document_id}
-                            onClick={() => linkContractDocument(item.id, candidate.document_id)}
-                          >
-                            {item.source_document_id === candidate.document_id ? "Привязан" : "Привязать"}
-                          </button>
-                        </div>
-                      ))}
-                      <small>
-                        «Рекомендованные» ранжируются по реквизитам и тексту; «Сервер / реестр» показывает все документы проекта; «Облако / загрузки» — загруженные файлы;
-                        «Google Drive» — документы, проиндексированные из подключённого Диска.
-                      </small>
                       <button
                         className="secondary"
                         disabled={!item.source_document_id}
