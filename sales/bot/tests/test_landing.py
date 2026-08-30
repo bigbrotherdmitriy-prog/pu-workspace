@@ -1,3 +1,5 @@
+import json
+import re
 import unittest
 from pathlib import Path
 
@@ -27,6 +29,14 @@ class SalesLandingTest(unittest.TestCase):
         self.assertIn("/go.html?source=package_license", source)
         self.assertIn("/go.html?source=diagnostic_bar", source)
         self.assertIn("Значимые действия подтверждает человек", source)
+        self.assertIn('type="application/ld+json"', source)
+        self.assertIn('"@type": "FAQPage"', source)
+        self.assertIn('rel="canonical" href="https://puworkspace.ru/"', source)
+        structured = re.search(
+            r'<script type="application/ld\+json">(.*?)</script>', source, re.DOTALL
+        )
+        self.assertIsNotNone(structured)
+        self.assertEqual(json.loads(structured.group(1))["@context"], "https://schema.org")
 
     def test_tracking_redirect_is_first_party_and_validates_source(self) -> None:
         source = (LANDING / "go.html").read_text(encoding="utf-8")

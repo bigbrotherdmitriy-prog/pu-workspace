@@ -15,6 +15,7 @@ from campaign_report import (
     render_report,
     source_from_uri,
 )
+from submit_indexnow import payload, sitemap_urls
 
 
 class CampaignReportTest(unittest.TestCase):
@@ -74,3 +75,11 @@ class CampaignReportTest(unittest.TestCase):
         self.assertNotIn("telegram", script.casefold())
         self.assertIn("07:00:00 UTC", timer)
         self.assertIn("NoNewPrivileges=true", service)
+
+    def test_indexnow_payload_uses_only_same_host_sitemap_urls(self) -> None:
+        landing = ROOT / "landing"
+        urls = sitemap_urls(landing / "sitemap.xml", "puworkspace.ru")
+        data = payload("puworkspace.ru", "test-key-123", urls)
+        self.assertGreaterEqual(len(urls), 6)
+        self.assertTrue(all(url.startswith("https://puworkspace.ru/") for url in urls))
+        self.assertEqual(data["keyLocation"], "https://puworkspace.ru/test-key-123.txt")
