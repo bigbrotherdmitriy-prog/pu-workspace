@@ -32,6 +32,68 @@ def main_menu() -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class CampaignEntry:
+    title: str
+    promise: str
+    cta: str
+
+
+CAMPAIGN_ENTRIES = {
+    "obligations": CampaignEntry(
+        "Контроль договорных обязательств",
+        "Покажем, как собрать сроки, обязательства, риски и первоисточники в одном проектном контексте.",
+        "Разобрать договорный контур",
+    ),
+    "finance": CampaignEntry(
+        "Связка договора, ГПР, счетов и ДДС",
+        "Покажем управляемую цепочку от этапа договора до подтверждённой оплаты без автоматического списания данных.",
+        "Разобрать финансовый контур",
+    ),
+    "email": CampaignEntry(
+        "Контроль проектной переписки",
+        "Покажем, как относить письма к проектам, выделять задачи и проверять, закрыто ли обещанное действие.",
+        "Разобрать поток писем",
+    ),
+    "self_hosted": CampaignEntry(
+        "Самостоятельная версия PU Workspace",
+        "Обсудим проверенный релиз с кодом, тестами и документацией без обязательного обслуживания.",
+        "Запросить состав поставки",
+    ),
+    "construction": CampaignEntry(
+        "Рабочий контур строительного проекта",
+        "Покажем связь договоров, ГПР, ДДС, документов, писем, задач и контрольных сроков.",
+        "Разобрать проектный контур",
+    ),
+    "diagnostic": CampaignEntry(
+        "Диагностика проектного контура",
+        "Определим, где теряются документы, сроки, деньги и ответственность, и предложим минимальный первый этап.",
+        "Пройти диагностику",
+    ),
+}
+
+
+def campaign_entry(source: str) -> CampaignEntry | None:
+    normalized = source.casefold()
+    if normalized in {"package_license", "license_footer", "license_page"}:
+        return CAMPAIGN_ENTRIES["self_hosted"]
+    if normalized in {"diagnostic_bar", "package_diagnostic"}:
+        return CAMPAIGN_ENTRIES["diagnostic"]
+    for family in ("obligations", "finance", "email", "self_hosted", "construction"):
+        if normalized == f"ad_{family}" or normalized.startswith(f"ad_{family}_"):
+            return CAMPAIGN_ENTRIES[family]
+    return None
+
+
+def campaign_menu(entry: CampaignEntry | None) -> dict[str, Any]:
+    menu = main_menu()
+    if entry is not None:
+        menu["inline_keyboard"].insert(
+            0, [{"text": f"🎯 {entry.cta}", "callback_data": "early_access"}]
+        )
+    return menu
+
+
 STATUS_LABELS = {
     "new": "Новая",
     "contacted": "Связались",
@@ -204,12 +266,21 @@ class SalesBotService:
                 "AI-секретарь для проектов, договоров, документов и задач. "
                 "Посмотрите возможности, демо или запросите самостоятельную лицензионную версию."
             )
+            entry = campaign_entry(source)
+            if entry is not None:
+                caption = (
+                    f"<b>{html.escape(entry.title)}</b>\n\n"
+                    f"{html.escape(entry.promise)}\n\n"
+                    "PU Workspace связывает результат с исходными документами, а значимые действия "
+                    "оставляет под контролем пользователя."
+                )
             if source.startswith("development"):
                 caption += "\n\nТакже мы разрабатываем сайты, корпоративные сервисы и автоматизацию."
+            reply_markup = campaign_menu(entry)
             if text.startswith("/start"):
-                self._send_branded(chat_id, caption, main_menu())
+                self._send_branded(chat_id, caption, reply_markup)
             else:
-                self.telegram.send_message(chat_id, caption, main_menu())
+                self.telegram.send_message(chat_id, caption, reply_markup)
             return
         if text == "/cancel":
             self.storage.clear_session(user_id)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.knowledge import ApprovedKnowledgeProvider
-from app.service import SalesBotService
+from app.service import SalesBotService, campaign_entry, campaign_menu
 from app.storage import Lead, Storage
 from app.telegram import TelegramError
 
@@ -103,6 +103,43 @@ class SalesBotServiceTest(unittest.TestCase):
             for update_id, answer in enumerate(("Компания", "Иван", "Директор", "Контроль", "hello@example.com"), 13):
                 service.handle_update({"update_id": update_id, "message": {"chat": {"id": 20}, "from": {"id": 10, "username": "client"}, "text": answer}})
             self.assertEqual(storage.get_lead(1).source, "site_hero")
+
+    def test_ad_sources_open_relevant_campaign_entry(self):
+        expectations = {
+            "ad_obligations": "договорных обязательств",
+            "ad_finance_chain": "ГПР, счетов и ДДС",
+            "ad_email_control": "проектной переписки",
+            "ad_self_hosted": "Самостоятельная версия",
+            "ad_construction": "строительного проекта",
+            "package_diagnostic": "Диагностика",
+            "package_license": "Самостоятельная версия",
+        }
+        for source, expected in expectations.items():
+            with self.subTest(source=source):
+                entry = campaign_entry(source)
+                self.assertIsNotNone(entry)
+                self.assertIn(expected, entry.title)
+                self.assertEqual(
+                    campaign_menu(entry)["inline_keyboard"][0][0]["callback_data"],
+                    "early_access",
+                )
+
+    def test_campaign_start_personalizes_first_message_and_keeps_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "test.sqlite3")
+            telegram = FakeTelegram()
+            storage = Storage(path)
+            service = SalesBotService(self.settings(path), storage, telegram, ApprovedKnowledgeProvider())
+            service.handle_update({
+                "update_id": 20,
+                "message": {"chat": {"id": 20}, "from": {"id": 10}, "text": "/start ad_finance_chain"},
+            })
+            self.assertIn("ГПР, счетов и ДДС", telegram.messages[0][1])
+            self.assertEqual(storage.get_session(10)[1]["source"], "ad_finance_chain")
+            self.assertEqual(
+                telegram.messages[0][2]["inline_keyboard"][0][0]["callback_data"],
+                "early_access",
+            )
 
     def test_development_has_its_own_lead_flow(self):
         with tempfile.TemporaryDirectory() as directory:
