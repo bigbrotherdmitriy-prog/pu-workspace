@@ -23,5 +23,9 @@ def test_finance_module_preserves_contract_first_and_human_review_flow():
     assert "Договор → ГПР → бюджет → ДДС → акты" in module
     assert "Оригинал не меняется" in module
     assert "Проверить и использовать" in module
+    assert "Выбрать найденные" in module
+    assert "Начать разбор пакета" in module
+    assert "candidates.slice(0, 12)" not in module
+    assert "Минимальная уверенность" in module
     assert "onUseCandidate" in module
     assert "google_workspace" not in module.casefold()
