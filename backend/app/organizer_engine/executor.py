@@ -356,6 +356,11 @@ class OrganizerExecutor:
         copy_root = proposal["copy_folder_id"]
         session_id = int(proposal["session_id"])
         folders = self._target_folders(copy_root)
+        completed = {
+            (row["file_id"], row["op_type"])
+            for row in self.repo.operations(proposal_id)
+            if row["rolled_back_at"] is None
+        }
         occupied: dict[str, set[str]] = {
             folder: {row.name for row in self.drive.list_children(folder_id) if not row.is_folder}
             for folder, folder_id in folders.items()
@@ -384,6 +389,12 @@ class OrganizerExecutor:
             try:
                 file_id = item["file_id"]
                 if item["user_decision"] != "skipped":
+                    continue
+                if {
+                    (file_id, "standardize_rename"),
+                    (file_id, "standardize_move"),
+                }.issubset(completed):
+                    stats["skipped"] += 1
                     continue
                 self.drive.assert_inside_copy(file_id, copy_root)
                 current = self.drive.get_file_meta(file_id)
