@@ -86,7 +86,16 @@ def build_standard_name(
         folder,
         _FOLDER_TO_DOC_TYPE.get(folder) or "Неразобранное",
     )
-    parts = list(dict.fromkeys(p for p in (project, doc_type, stem) if p))
+    prefix_parts = [p for p in (project, doc_type) if p]
+    prefix = NAME_SEPARATOR.join(prefix_parts)
+    # A retry may encounter files that Drive changed before the database
+    # transaction was rolled back. Collapse any already-present (even doubled)
+    # standard prefix so retries converge to exactly one readable name.
+    if prefix:
+        marker = prefix + NAME_SEPARATOR
+        while stem.casefold().startswith(marker.casefold()):
+            stem = stem[len(marker):].strip(" .-_—") or "Документ"
+    parts = list(dict.fromkeys(p for p in (*prefix_parts, stem) if p))
     candidate = NAME_SEPARATOR.join(parts) + ext
     if len(candidate) > 240:
         candidate = candidate[: 240 - len(ext)].rstrip(" .-_—") + ext

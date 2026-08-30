@@ -18,6 +18,13 @@ def test_standard_name_keeps_subject_and_marks_gpr_dds():
     )
 
 
+def test_standard_name_is_idempotent_and_collapses_duplicate_prefixes():
+    once = "Проект А — ДДС — ДДС август.xlsx"
+    twice = "Проект А — ДДС — Проект А — ДДС — ДДС август.xlsx"
+    assert build_standard_name(once, "03_ФИНАНСЫ И СМЕТЫ", "Проект А") == once
+    assert build_standard_name(twice, "03_ФИНАНСЫ И СМЕТЫ", "Проект А") == once
+
+
 class Repo:
     def __init__(self):
         self.db = SimpleNamespace(commit=lambda: None, rollback=lambda: None)
