@@ -35,7 +35,7 @@ PU Workspace продаётся не как «ещё один AI» и не ка�
 
 Текст: PU Workspace связывает договор, документы, письма и задачи проекта. Показывает сроки и риски, но не действует без подтверждения пользователя.
 
-Переход: `?utm_source=yandex&utm_campaign=obligations` и Telegram `start=ad_obligations`.
+Переход: `https://puworkspace.ru/go.html?source=ad_obligations`.
 
 ### H2. ГПР и ДДС отдельно от документов
 
@@ -43,7 +43,7 @@ PU Workspace продаётся не как «ещё один AI» и не ка�
 
 Текст: Соберите договор, этапы, бюджет, счета и подтверждённые оплаты в одну логическую цепочку проекта.
 
-Переход: `start=ad_finance_chain`.
+Переход: `https://puworkspace.ru/go.html?source=ad_finance_chain`.
 
 ### H3. Почта руководителя как диспетчерская
 
@@ -51,7 +51,7 @@ PU Workspace продаётся не как «ещё один AI» и не ка�
 
 Текст: PU Workspace определяет проект и договор, предлагает задачу и черновик ответа. Отправку подтверждает человек.
 
-Переход: `start=ad_email_control`.
+Переход: `https://puworkspace.ru/go.html?source=ad_email_control`.
 
 ### H4. Самостоятельная лицензия
 
@@ -59,7 +59,7 @@ PU Workspace продаётся не как «ещё один AI» и не ка�
 
 Текст: Зафиксированный релиз PU Workspace: исходный код, Docker Compose, миграции, тесты и документация.
 
-Переход: `start=ad_self_hosted`.
+Переход: `https://puworkspace.ru/go.html?source=ad_self_hosted`.
 
 ### H5. Строительный подряд
 
@@ -67,7 +67,7 @@ PU Workspace продаётся не как «ещё один AI» и не ка�
 
 Текст: Руководитель видит, что требует решения сегодня, с каким документом и обязательством это связано.
 
-Переход: `start=ad_construction`.
+Переход: `https://puworkspace.ru/go.html?source=ad_construction`.
 
 ## Каналы запуска
 
@@ -127,6 +127,17 @@ PU Workspace продаётся не как «ещё один AI» и не ка�
 - отправленные коммерческие предложения;
 - принятые решения и причины отказов;
 - стоимость не клика, а проведённой квалифицированной диагностики.
+
+Сводный first-party отчёт на сервере:
+
+```bash
+volume_path=$(docker volume inspect pu_workspace_sales_bot_data --format '{{.Mountpoint}}')
+python3 /opt/pu-workspace-landing/campaign_report.py \
+  /var/log/caddy/puworkspace-access.log \
+  --database "$volume_path/sales_bot.sqlite3"
+```
+
+Отчёт читает только агрегаты `source/status/count` и не выводит имена, телефоны или email.
 
 ## Запрещённые обещания
 
