@@ -1,6 +1,6 @@
 import io
 import zipfile
-from app.api.telegram import _incoming_file, _public_download_error
+from app.api.telegram import _empty_extraction_message, _incoming_file, _public_download_error
 from app.organizer_engine.content import extract_text
 
 
@@ -22,3 +22,19 @@ def test_download_errors_do_not_expose_internal_urls():
     message = _public_download_error(RuntimeError("http://172.19.0.1:18080/file/secret"))
     assert "172.19.0.1" not in message
     assert "secret" not in message
+
+
+def test_empty_photo_extraction_reports_local_ocr_result_honestly():
+    without_caption = _empty_extraction_message("image/jpeg", False)
+    with_caption = _empty_extraction_message("image/jpeg", True)
+
+    assert "Локальный OCR не смог распознать" in without_caption
+    assert "не подключено" not in without_caption
+    assert "Анализирую текст из подписи" in with_caption
+
+
+def test_empty_scanned_document_suggests_a_better_source():
+    message = _empty_extraction_message("application/pdf", False)
+
+    assert "локальный OCR не дал результата" in message
+    assert "исходный PDF/DOCX" in message

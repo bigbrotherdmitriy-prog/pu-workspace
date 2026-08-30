@@ -97,6 +97,20 @@ def _public_download_error(_: Exception) -> str:
     return "Не удалось скачать файл из Telegram. Попробуйте отправить его ещё раз через несколько секунд."
 
 
+def _empty_extraction_message(mime_type: str, has_caption: bool) -> str:
+    if mime_type.startswith("image/") and has_caption:
+        return "Текст внутри изображения распознать не удалось. Анализирую текст из подписи."
+    if mime_type.startswith("image/"):
+        return (
+            "Локальный OCR не смог распознать текст на изображении. "
+            "Отправьте более чёткое фото без бликов либо документ PDF/DOCX."
+        )
+    return (
+        "В файле не найден машиночитаемый текст, а локальный OCR не дал результата. "
+        "Попробуйте более качественный скан или исходный PDF/DOCX."
+    )
+
+
 def _should_prepare_message_replies(message: dict, text: str) -> bool:
     if not text or text.startswith("/"):
         return False
@@ -245,13 +259,8 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                 notify_telegram_chat(chat_id, _public_download_error(exc))
                 return {"ok": True}
             if not extracted:
-                if mime_type.startswith("image/") and text:
-                    notify_telegram_chat(chat_id, "Изображение получено. Пока анализирую текст из подписи; OCR для текста внутри фото будет добавлен отдельно.")
-                elif mime_type.startswith("image/"):
-                    notify_telegram_chat(chat_id, "Изображение получено, но распознавание текста на фото пока не подключено. Отправьте документ DOCX/PDF или добавьте текст в подпись.")
-                    return {"ok": True}
-                else:
-                    notify_telegram_chat(chat_id, "В файле не найден машиночитаемый текст. Возможно, это скан — для него потребуется OCR.")
+                notify_telegram_chat(chat_id, _empty_extraction_message(mime_type, bool(text)))
+                if not (mime_type.startswith("image/") and text):
                     return {"ok": True}
             source_name = filename
             content = (text + "\n" + extracted).strip()
