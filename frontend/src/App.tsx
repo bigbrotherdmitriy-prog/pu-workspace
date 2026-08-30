@@ -17,6 +17,7 @@ import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
+import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
@@ -337,19 +338,6 @@ type AutomationRule = {
   next_run_on: string;
   last_run_on?: string;
   runs: { id: number; scheduled_for: string; task_id?: number; response_draft_id?: number; status: string }[];
-};
-type ObligationRow = {
-  id: number;
-  contract_id?: number;
-  task_id?: number;
-  title: string;
-  status: string;
-  due_date?: string;
-  result_note?: string;
-  source_type: string;
-  source_name: string;
-  source_excerpt: string;
-  confidence: number;
 };
 type MeetingRow = {
   id: number;
@@ -2519,83 +2507,11 @@ export function App() {
         </section>
       )}
       {active === "Обязательства" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page">
-            <section className="card management-intro">
-              <div>
-                <h2>Реестр обязательств</h2>
-                <p>
-                  Обязательства выделяются из документов, сообщений и
-                  протоколов. Каждый вывод хранит источник и требует
-                  подтверждения.
-                </p>
-              </div>
-              <span>
-                {
-                  obligations.filter(
-                    (item) => !["fulfilled", "dismissed"].includes(item.status),
-                  ).length
-                }{" "}
-                открыто
-              </span>
-            </section>
-            <section className="card management-list">
-              {obligations.map((item) => (
-                <article key={item.id}>
-                  <div>
-                    <span className={`management-status ${item.status}`}>
-                      {item.status}
-                    </span>
-                    <h3>{item.title}</h3>
-                    <p>
-                      {item.source_name} · уверенность{" "}
-                      {Math.round(item.confidence * 100)}%
-                    </p>
-                    <small>{item.source_excerpt}</small>
-                  </div>
-                  <div className="management-meta">
-                    <strong>
-                      {item.due_date
-                        ? `до ${item.due_date}`
-                        : "срок не определён"}
-                    </strong>
-                    {item.status === "needs_confirmation" && (
-                      <button
-                        onClick={() => updateObligation(item, "confirmed")}
-                      >
-                        Подтвердить
-                      </button>
-                    )}
-                    {item.status === "confirmed" && (
-                      <button
-                        onClick={() => updateObligation(item, "in_progress")}
-                      >
-                        В работу
-                      </button>
-                    )}
-                    {!["fulfilled", "dismissed"].includes(item.status) && (
-                      <button
-                        className="complete"
-                        onClick={() => updateObligation(item, "fulfilled")}
-                      >
-                        Исполнено
-                      </button>
-                    )}
-                  </div>
-                </article>
-              ))}
-              {!obligations.length && (
-                <div className="empty">
-                  <ClipboardCheck />
-                  <p>
-                    Обязательства появятся после анализа нового документа,
-                    сообщения или протокола.
-                  </p>
-                </div>
-              )}
-            </section>
-          </div>
-        </section>
+        <ObligationsModule
+          collapsed={collapsed}
+          obligations={obligations}
+          onUpdate={(item, status) => void updateObligation(item, status)}
+        />
       )}
       {active === "Совещания" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
