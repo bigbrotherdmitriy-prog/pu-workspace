@@ -50,8 +50,12 @@ def _exclusive_run():
     """Prevent overlapping passes both inside one process and across PostgreSQL workers."""
     if engine.dialect.name == "postgresql":
         connection = engine.connect()
-        acquired = bool(connection.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": _ADVISORY_LOCK_ID}).scalar())
+        acquired = False
         try:
+            acquired = bool(connection.execute(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": _ADVISORY_LOCK_ID},
+            ).scalar())
             yield acquired
         finally:
             if acquired:

@@ -28,3 +28,16 @@ def test_gmail_automation_uses_process_lock_outside_postgresql(monkeypatch):
         with gmail._exclusive_run() as second:
             assert first is True
             assert second is False
+
+
+def test_gmail_automation_releases_process_lock_after_error(monkeypatch):
+    monkeypatch.setattr(gmail.engine.dialect, "name", "sqlite")
+    try:
+        with gmail._exclusive_run() as acquired:
+            assert acquired is True
+            raise RuntimeError("simulated sync failure")
+    except RuntimeError:
+        pass
+
+    with gmail._exclusive_run() as acquired_again:
+        assert acquired_again is True
