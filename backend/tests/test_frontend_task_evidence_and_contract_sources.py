@@ -5,7 +5,11 @@ def _source() -> str:
     frontend = Path(__file__).parents[2] / "frontend" / "src"
     return "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (frontend / "App.tsx", frontend / "modules" / "contracts" / "ContractDocumentPicker.tsx")
+        for path in (
+            frontend / "App.tsx",
+            frontend / "modules" / "tasks" / "TasksModule.tsx",
+            frontend / "modules" / "contracts" / "ContractDocumentPicker.tsx",
+        )
     )
 
 

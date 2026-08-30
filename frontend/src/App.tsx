@@ -25,6 +25,7 @@ import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
+import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import {
   Activity,
@@ -111,36 +112,6 @@ type ContractSourceCandidate = {
   score: number;
   reasons: string[];
   text_ready: boolean;
-};
-type TaskRow = {
-  id: number;
-  title: string;
-  status: string;
-  priority: string;
-  due_date?: string;
-  assignee_user_id: number;
-  assignee_name: string;
-  source_file_name: string;
-  source_excerpt: string;
-  confidence: number;
-  needs_review: boolean;
-  message_id?: number;
-  external_action_status: string;
-  google_task_id?: string;
-  google_calendar_event_id?: string;
-  result_note?: string;
-  completion_document_id?: number;
-  completion_document_name?: string;
-};
-type TaskHistoryRow = {
-  action: string;
-  old_status?: string;
-  new_status?: string;
-  result_note?: string;
-  completion_document_name?: string;
-  details?: string;
-  changed_by: string;
-  changed_at: string;
 };
 type ResponseDraft = {
   id: number;
@@ -1652,20 +1623,6 @@ export function App() {
   }
   const latestSnapshot =
     snapshots.find((item) => item.is_primary) || snapshots[0];
-  const today = new Date().toISOString().slice(0, 10);
-  const visibleTasks = tasks.filter((task) =>
-    taskFilter === "all"
-      ? true
-      : taskFilter === "overdue"
-        ? Boolean(
-            task.due_date &&
-              task.due_date < today &&
-              task.status !== "completed",
-          )
-        : taskFilter === "review"
-          ? task.needs_review
-          : task.status === "assigned" || task.status === "in_progress",
-  );
   const money = (value: number | undefined) =>
     new Intl.NumberFormat("ru-RU", {
       style: "currency",
@@ -1864,151 +1821,26 @@ export function App() {
             />
           )}
           {active === "Задачи" ? (
-            <section className="card task-register">
-              <div className="card-head">
-                <div>
-                  <h2>Реестр задач</h2>
-                  <p>
-                    Автоматически выделенные поручения с проверяемым источником
-                  </p>
-                </div>
-                <div className="task-filters">
-                  {[
-                    ["open", "Открытые"],
-                    ["overdue", "Просроченные"],
-                    ["review", "На проверку"],
-                    ["all", "Все"],
-                  ].map(([id, label]) => (
-                    <button
-                      className={taskFilter === id ? "selected" : ""}
-                      onClick={() => setTaskFilter(id)}
-                      key={id}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="task-list">
-                {visibleTasks.map((task) => (
-                  <article key={task.id}>
-                    <div className={`task-priority ${task.priority}`}></div>
-                    <div className="task-body">
-                      <strong>{task.title}</strong>
-                      <p>
-                        {task.source_file_name} · {task.assignee_name} ·
-                        уверенность {Math.round(task.confidence * 100)}%
-                      </p>
-                      <small>{task.source_excerpt}</small>
-                    </div>
-                    <div className="task-meta">
-                      <span
-                        className={
-                          task.due_date &&
-                          task.due_date < today &&
-                          task.status !== "completed"
-                            ? "overdue"
-                            : ""
-                        }
-                      >
-                        {task.due_date || "Без срока"}
-                      </span>
-                      <span>
-                        {task.google_task_id
-                          ? "Google Tasks ✓"
-                          : task.external_action_status === "proposed"
-                            ? "Предложение"
-                            : "Локальная"}
-                        {task.google_calendar_event_id ? " · Calendar ✓" : ""}
-                      </span>
-                    </div>
-                    <div className="task-actions">
-                      <label className="task-assignee">
-                        <span>Исполнитель</span>
-                        <select
-                          aria-label={`Исполнитель задачи ${task.title}`}
-                          value={task.assignee_user_id}
-                          onChange={(event) => assignTask(task, Number(event.target.value))}
-                        >
-                          {members.map((member) => (
-                            <option value={member.user_id} key={member.user_id}>
-                              {member.name} · {member.role}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {task.external_action_status !== "executed" && (
-                        <button onClick={() => approveExternal(task)}>
-                          Поставить задачу
-                        </button>
-                      )}
-                      {task.status === "assigned" && (
-                        <button onClick={() => updateTask(task, "in_progress")}>
-                          В работу
-                        </button>
-                      )}
-                      {task.status !== "completed" && (
-                        <button
-                          className="complete"
-                          onClick={() => startTaskCompletion(task)}
-                        >
-                          Завершить
-                        </button>
-                      )}
-                      <button className="secondary" onClick={() => loadTaskHistory(task)}>
-                        История
-                      </button>
-                    </div>
-                    {completionTaskId === task.id && (
-                      <div className="task-completion">
-                        <strong>Подтверждение выполнения</strong>
-                        <textarea
-                          value={completionNote}
-                          onChange={(event) => setCompletionNote(event.target.value)}
-                          placeholder="Что выполнено и какой результат получен *"
-                        />
-                        <select
-                          value={completionDocumentId}
-                          onChange={(event) => setCompletionDocumentId(Number(event.target.value))}
-                        >
-                          <option value={0}>Без вложения — это допустимо</option>
-                          {documentRows.map((document) => (
-                            <option value={document.id} key={document.id}>{document.name}</option>
-                          ))}
-                        </select>
-                        <small>Необязательно: выберите акт, письмо, счёт, фото или другой документ проекта.</small>
-                        <div className="task-completion-actions">
-                          <button className="secondary" onClick={() => setCompletionTaskId(0)}>Отмена</button>
-                          <button className="complete" onClick={() => updateTask(task, "completed")}>Подтвердить завершение</button>
-                        </div>
-                      </div>
-                    )}
-                    {taskHistoryId === task.id && (
-                      <div className="task-history">
-                        <strong>История задачи и решений</strong>
-                        {taskHistory.map((item, index) => (
-                          <div className="task-history-row" key={`${item.changed_at}-${index}`}>
-                            <time>{new Date(item.changed_at).toLocaleString("ru-RU")}</time>
-                            <span>{item.changed_by}</span>
-                            <b>{item.action === "created" ? "Создана" : item.action === "completed" ? "Завершена" : "Изменена"}</b>
-                            {item.old_status !== item.new_status && <small>{item.old_status || "—"} → {item.new_status || "—"}</small>}
-                            {item.result_note && <p>{item.result_note}</p>}
-                            {item.completion_document_name && <p>Подтверждение: {item.completion_document_name}</p>}
-                            {item.details && <p>{item.details}</p>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ))}
-                {!visibleTasks.length && (
-                  <div className="empty">
-                    <ListTodo />
-                    <p>Задач в этом фильтре нет</p>
-                  </div>
-                )}
-              </div>
-            </section>
+            <TasksModule
+              tasks={tasks}
+              filter={taskFilter}
+              members={members}
+              documents={documentRows}
+              completionTaskId={completionTaskId}
+              completionNote={completionNote}
+              completionDocumentId={completionDocumentId}
+              historyTaskId={taskHistoryId}
+              history={taskHistory}
+              onFilterChange={setTaskFilter}
+              onAssign={(task, userId) => void assignTask(task, userId)}
+              onApproveExternal={(task) => void approveExternal(task)}
+              onUpdate={(task, status) => void updateTask(task, status)}
+              onStartCompletion={startTaskCompletion}
+              onCancelCompletion={() => setCompletionTaskId(0)}
+              onCompletionNoteChange={setCompletionNote}
+              onCompletionDocumentChange={setCompletionDocumentId}
+              onLoadHistory={(task) => void loadTaskHistory(task)}
+            />
           ) : active === "Риски и решения" ? (
             <GovernanceModule
               risks={risks}
