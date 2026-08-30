@@ -10,6 +10,7 @@ import { IntegrationsModule, type IntegrationItem, type SystemState } from "./mo
 import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
+import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import {
@@ -414,6 +415,7 @@ type ProjectAnalytics = {
 };
 
 const items = [
+  [CalendarDays, "Сегодня"],
   [LayoutDashboard, "Рабочий центр"],
   [Route, "Запуск проекта"],
   [FolderKanban, "Проекты"],
@@ -2003,6 +2005,15 @@ export function App() {
         <section className="content">
           {error && <div className="error">{error}</div>}
           {notice && <div className="notice">{notice}</div>}
+          {active === "Сегодня" && (
+            <TodayModule
+              projectName={projects.find((item) => item.id === projectId)?.name || ""}
+              briefing={dailyBriefing}
+              summary={summary}
+              inboxAttention={inbox.filter((item) => !item.context_confirmed || item.status !== "completed").length}
+              onOpen={setActive}
+            />
+          )}
           {active === "Запуск проекта" && (
             <ProjectLaunchWizard
               projectId={projectId}
