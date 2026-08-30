@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.api.history import router as history_router
 from app.api.auth import router as auth_router
@@ -130,6 +130,24 @@ app.include_router(organizer_router, dependencies=[Depends(require_user)])
 @app.get("/")
 def root():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+def android_asset_links():
+    fingerprint = os.getenv("PU_ANDROID_CERT_SHA256", "").strip().upper()
+    if not fingerprint:
+        return JSONResponse(
+            {"detail": "Android release certificate is not configured"},
+            status_code=503,
+        )
+    return [{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "ru.puworkspace.app",
+            "sha256_cert_fingerprints": [fingerprint],
+        },
+    }]
 
 
 @app.get("/api/status")

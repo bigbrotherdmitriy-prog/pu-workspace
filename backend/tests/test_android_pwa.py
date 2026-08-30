@@ -1,6 +1,10 @@
 import json
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from app.main import app
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,3 +33,22 @@ def test_android_shortcuts_open_the_requested_workspace_section():
     assert 'today: "Сегодня"' in app
     assert 'mail: "Письма"' in app
     assert 'tasks: "Задачи"' in app
+
+
+def test_android_app_link_requires_release_certificate(monkeypatch):
+    client = TestClient(app)
+    monkeypatch.delenv("PU_ANDROID_CERT_SHA256", raising=False)
+    response = client.get("/.well-known/assetlinks.json")
+    assert response.status_code == 503
+
+
+def test_android_app_link_is_bound_to_configured_release_certificate(monkeypatch):
+    fingerprint = "94:1A:D5:3C:AB:FE:EE:BA:8A:08:FE:2A:DB:69:4F:38:B1:C3:1B:CE:ED:6D:D5:B4:94:03:BB:DC:20:51:D3:CE"
+    monkeypatch.setenv("PU_ANDROID_CERT_SHA256", fingerprint)
+    client = TestClient(app)
+    response = client.get("/.well-known/assetlinks.json")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    target = response.json()[0]["target"]
+    assert target["package_name"] == "ru.puworkspace.app"
+    assert target["sha256_cert_fingerprints"] == [fingerprint]
