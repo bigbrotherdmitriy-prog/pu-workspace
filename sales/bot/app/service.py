@@ -37,6 +37,7 @@ class CampaignEntry:
     title: str
     promise: str
     cta: str
+    qualification: str
 
 
 CAMPAIGN_ENTRIES = {
@@ -44,31 +45,37 @@ CAMPAIGN_ENTRIES = {
         "Контроль договорных обязательств",
         "Покажем, как собрать сроки, обязательства, риски и первоисточники в одном проектном контексте.",
         "Разобрать договорный контур",
+        "Шаг 4 из 5. Где сейчас теряются обязательства: в договорах, приложениях, письмах или ручном контроле?",
     ),
     "finance": CampaignEntry(
         "Связка договора, ГПР, счетов и ДДС",
         "Покажем управляемую цепочку от этапа договора до подтверждённой оплаты без автоматического списания данных.",
         "Разобрать финансовый контур",
+        "Шаг 4 из 5. Что сейчас не связано между собой: договор, ГПР, счёт, этап, бюджет или подтверждённая оплата?",
     ),
     "email": CampaignEntry(
         "Контроль проектной переписки",
         "Покажем, как относить письма к проектам, выделять задачи и проверять, закрыто ли обещанное действие.",
         "Разобрать поток писем",
+        "Шаг 4 из 5. Какие письма чаще всего теряют проект, срок, ответственного или контроль исполнения?",
     ),
     "self_hosted": CampaignEntry(
         "Самостоятельная версия PU Workspace",
         "Обсудим проверенный релиз с кодом, тестами и документацией без обязательного обслуживания.",
         "Запросить состав поставки",
+        "Шаг 4 из 5. Где планируется размещение и какой состав самостоятельной поставки вам необходим?",
     ),
     "construction": CampaignEntry(
         "Рабочий контур строительного проекта",
         "Покажем связь договоров, ГПР, ДДС, документов, писем, задач и контрольных сроков.",
         "Разобрать проектный контур",
+        "Шаг 4 из 5. Какой участок проекта требует контроля в первую очередь: договоры, сроки, документы, снабжение или финансы?",
     ),
     "diagnostic": CampaignEntry(
         "Диагностика проектного контура",
         "Определим, где теряются документы, сроки, деньги и ответственность, и предложим минимальный первый этап.",
         "Пройти диагностику",
+        "Шаг 4 из 5. Опишите один процесс, где сейчас чаще всего теряются срок, документ, деньги или ответственность.",
     ),
 }
 
@@ -92,6 +99,20 @@ def campaign_menu(entry: CampaignEntry | None) -> dict[str, Any]:
             0, [{"text": f"🎯 {entry.cta}", "callback_data": "early_access"}]
         )
     return menu
+
+
+def qualification_prompt(source: str) -> str:
+    entry = campaign_entry(source)
+    return (
+        entry.qualification
+        if entry is not None
+        else "Шаг 4 из 5. Какую рабочую проблему вы хотите решить?"
+    )
+
+
+def source_label(source: str) -> str:
+    entry = campaign_entry(source)
+    return entry.title if entry is not None else source
 
 
 STATUS_LABELS = {
@@ -332,7 +353,7 @@ class SalesBotService:
         prompts = {
             "company": ("name", "company", "Шаг 2 из 5. Как к вам обращаться?"),
             "name": ("role", "name", "Шаг 3 из 5. Ваша должность или роль?"),
-            "role": ("need", "role", "Шаг 4 из 5. Какую рабочую проблему вы хотите решить?"),
+            "role": ("need", "role", qualification_prompt(payload.get("source", "direct"))),
             "need": ("contact", "need", "Шаг 5 из 5. Оставьте телефон, email или Telegram для связи."),
         }
         if state in prompts:
@@ -396,7 +417,8 @@ class SalesBotService:
             f"💬 <b>Что нужно решить</b>\n{html.escape(lead.need)}\n\n"
             f"☎️ <b>Контакт</b>: {html.escape(lead.contact)}\n"
             f"✈️ Telegram: {username}\n"
-            f"📍 Источник: <code>{html.escape(lead.source)}</code>"
+            f"📍 Сценарий: {html.escape(source_label(lead.source))}\n"
+            f"🏷 Метка: <code>{html.escape(lead.source)}</code>"
         )
 
     def _lead_card_keyboard(self, lead_id: int, status: str) -> dict[str, Any]:

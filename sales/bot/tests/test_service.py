@@ -4,7 +4,13 @@ from pathlib import Path
 
 from app.config import Settings
 from app.knowledge import ApprovedKnowledgeProvider
-from app.service import SalesBotService, campaign_entry, campaign_menu
+from app.service import (
+    SalesBotService,
+    campaign_entry,
+    campaign_menu,
+    qualification_prompt,
+    source_label,
+)
 from app.storage import Lead, Storage
 from app.telegram import TelegramError
 
@@ -140,6 +146,30 @@ class SalesBotServiceTest(unittest.TestCase):
                 telegram.messages[0][2]["inline_keyboard"][0][0]["callback_data"],
                 "early_access",
             )
+
+    def test_campaign_lead_asks_relevant_problem_question(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "test.sqlite3")
+            telegram = FakeTelegram()
+            storage = Storage(path)
+            service = SalesBotService(self.settings(path), storage, telegram, ApprovedKnowledgeProvider())
+            updates = [
+                {"update_id": 40, "message": {"chat": {"id": 20}, "from": {"id": 10}, "text": "/start ad_email_control"}},
+                {"update_id": 41, "callback_query": {"id": "q1", "from": {"id": 10}, "message": {"chat": {"id": 20}}, "data": "early_access"}},
+                {"update_id": 42, "callback_query": {"id": "q2", "from": {"id": 10}, "message": {"chat": {"id": 20}}, "data": "lead_consent"}},
+                {"update_id": 43, "message": {"chat": {"id": 20}, "from": {"id": 10}, "text": "Компания"}},
+                {"update_id": 44, "message": {"chat": {"id": 20}, "from": {"id": 10}, "text": "Иван"}},
+                {"update_id": 45, "message": {"chat": {"id": 20}, "from": {"id": 10}, "text": "Директор"}},
+            ]
+            for update in updates:
+                service.handle_update(update)
+            self.assertIn("Какие письма", telegram.messages[-1][1])
+            self.assertEqual(storage.get_session(10)[1]["source"], "ad_email_control")
+
+    def test_campaign_source_has_readable_admin_label(self):
+        self.assertEqual(source_label("ad_finance_chain"), "Связка договора, ГПР, счетов и ДДС")
+        self.assertEqual(source_label("site_hero"), "site_hero")
+        self.assertIn("размещение", qualification_prompt("package_license"))
 
     def test_development_has_its_own_lead_flow(self):
         with tempfile.TemporaryDirectory() as directory:
