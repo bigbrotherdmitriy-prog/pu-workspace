@@ -1502,6 +1502,14 @@ export function App() {
       .catch(() => setReady(false));
   }, []);
   useEffect(() => {
+    const shortcut = new URLSearchParams(window.location.search).get("section");
+    const sections: Record<string, string> = { today: "Сегодня", mail: "Письма", tasks: "Задачи" };
+    if (shortcut && sections[shortcut]) {
+      setActive(sections[shortcut]);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+  useEffect(() => {
     const handleOnline = () => setOnline(true);
     const handleOffline = () => setOnline(false);
     const handleInstall = (event: Event) => {
@@ -2576,103 +2584,16 @@ export function App() {
       {active === "Исполнение и финансы" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page finance-page">
-            <section className="finance-metrics">
-              {[
-                ["Бюджет", money(finance?.summary.budget_planned)],
-                ["Законтрактовано", money(finance?.summary.budget_committed)],
-                ["Факт", money(finance?.summary.budget_actual)],
-                ["Прогноз", money(finance?.summary.budget_forecast)],
-                ["Отклонение", money(finance?.summary.budget_variance)],
-                [
-                  "Прогноз остатка",
-                  money(finance?.summary.cash_balance_forecast),
-                ],
-                ["Кассовый разрыв", money(finance?.summary.cash_gap)],
-              ].map(([label, value]) => (
-                <article className="card" key={label}>
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                </article>
-              ))}
-            </section>
-            <section className="card finance-contract-chain">
-              <div>
-                <span className="eyebrow">ЛОГИЧЕСКАЯ ЦЕПОЧКА</span>
-                <h2>Договор → ГПР → бюджет → ДДС → акты</h2>
-                <p>Все новые записи ниже автоматически получают связь с выбранным договором.</p>
-              </div>
-              <select value={selectedFinanceContractId} onChange={(e) => setSelectedFinanceContractId(Number(e.target.value))}>
-                <option value={0}>Весь проект / без договора</option>
-                {contracts.map((contract) => <option value={contract.id} key={contract.id}>{contract.number} — {contract.title}</option>)}
-              </select>
-            </section>
-            <section className="card finance-chain-guide">
-              <div className="card-head">
-                <div>
-                  <h2>Мастер запуска исполнения</h2>
-                  <p>{financeContract
-                    ? `Договор ${financeContract.number}: выполните шаги слева направо.`
-                    : "Выберите договор выше — записи не должны терять договорный контекст."}</p>
-                </div>
-              </div>
-              <div className="finance-chain-steps">
-                {[
-                  ["1", "Договор", Boolean(financeContract), "contracts"],
-                  ["2", "ГПР", financeSchedule.length > 0, "schedule"],
-                  ["3", "Бюджет", financeBudget.length > 0, "budget"],
-                  ["4", "ДДС / счёт", financeCash.length > 0, "invoice"],
-                  ["5", "Акты", financeActs.length > 0, "act"],
-                ].map(([number, label, complete, kind]) => (
-                  <button
-                    type="button"
-                    className={complete ? "complete" : "pending"}
-                    disabled={!financeContract || kind === "contracts"}
-                    onClick={() => kind !== "contracts" && prepareFinanceItem(String(kind))}
-                    key={String(label)}
-                  >
-                    <b>{complete ? "✓" : number}</b>
-                    <span>{label}</span>
-                    <small>{complete ? "готово" : kind === "contracts" ? "выберите договор" : "добавить"}</small>
-                  </button>
-                ))}
-              </div>
-              {financeContract && !financeSchedule.length && (
-                <p className="finance-next-action">Следующий шаг: добавьте этапы ГПР с плановыми сроками. После этого создайте бюджет и связывайте счета с этапом и строкой бюджета.</p>
-              )}
-            </section>
-            <section className="card finance-document-assistant">
-              <div className="card-head">
-                <div>
-                  <span className="eyebrow">АНАЛИЗ ПРОЕКТНОЙ ПАПКИ</span>
-                  <h2>Найденные ГПР, бюджеты, ДДС, счета и акты</h2>
-                  <p>Система предлагает роль документа по названию и извлечённому тексту. Оригинал не меняется; перед созданием записи проверьте поля.</p>
-                </div>
-                <button type="button" onClick={loadFinance}>Обновить анализ</button>
-              </div>
-              <div className="finance-candidates">
-                {financeCandidates.slice(0, 12).map((candidate) => (
-                  <article className={candidate.already_linked ? "linked" : ""} key={candidate.document_id}>
-                    <div>
-                      <span>{({ schedule: "ГПР", budget: "Бюджет / смета", invoice: "Счёт", "cash-flow": "ДДС", act: "Акт" } as Record<string, string>)[candidate.kind]}</span>
-                      <b>{candidate.score}%</b>
-                    </div>
-                    <strong title={candidate.name}>{candidate.name}</strong>
-                    <small>{candidate.reasons.join("; ") || "совпадение по структуре документа"}</small>
-                    <small>{[
-                      candidate.hints.amount ? money(Number(candidate.hints.amount)) : "",
-                      candidate.hints.date || "",
-                      candidate.hints.number ? `№ ${candidate.hints.number}` : "",
-                    ].filter(Boolean).join(" · ")}</small>
-                    <button type="button" disabled={candidate.already_linked} onClick={() => useFinanceCandidate(candidate)}>
-                      {candidate.already_linked ? "Уже привязан" : "Проверить и использовать"}
-                    </button>
-                  </article>
-                ))}
-                {!financeCandidates.length && (
-                  <p className="finance-empty">Подходящие документы пока не распознаны. Завершите анализ подключённой рабочей копии и обновите этот блок.</p>
-                )}
-              </div>
-            </section>
+            <FinanceModule
+              finance={finance}
+              candidates={financeCandidates}
+              contracts={contracts}
+              selectedContractId={selectedFinanceContractId}
+              onSelectContract={setSelectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
+              onReload={() => void loadFinance()}
+            />
             {financeStructuredPreview && <section className="card structured-import" id="structured-import">
               <div className="card-head">
                 <div>

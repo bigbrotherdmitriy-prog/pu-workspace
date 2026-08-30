@@ -4,6 +4,7 @@ from pathlib import Path
 APP_SOURCE = Path(__file__).parents[2] / "frontend" / "src" / "App.tsx"
 PROJECT_SELECTION_SOURCE = APP_SOURCE.parent / "context" / "useProjectSelection.ts"
 FINANCE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "useFinanceController.ts"
+FINANCE_MODULE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "FinanceModule.tsx"
 CONTEXTUAL_AI_SOURCE = APP_SOURCE.parent / "modules" / "ai-secretary" / "ContextualAssistant.tsx"
 CONTRACT_PICKER_SOURCE = APP_SOURCE.parent / "modules" / "contracts" / "ContractDocumentPicker.tsx"
 
@@ -79,7 +80,7 @@ def test_unconfirmed_mail_can_be_bulk_moved_to_one_project():
 
 
 def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
-    source = APP_SOURCE.read_text(encoding="utf-8") + CONTRACT_PICKER_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + CONTRACT_PICKER_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8")
     assert "linkContractDocument" in source
     assert "Выбрать договор самому" in source
     assert "Привязать выбранный файл" in source
@@ -89,7 +90,7 @@ def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
 
 
 def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
-    source = APP_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8")
     assert "Мастер запуска исполнения" in source
     assert '<option value="schedule">Этап ГПР</option>' in source
     assert "finance-chain-steps" in source
@@ -97,7 +98,7 @@ def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
 
 
 def test_finance_workflow_suggests_analyzed_project_documents_without_mutating_sources():
-    source = APP_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8")
     controller = FINANCE_SOURCE.read_text(encoding="utf-8")
     assert "/execution/document-candidates" in controller
     assert "Найденные ГПР, бюджеты, ДДС, счета и акты" in source

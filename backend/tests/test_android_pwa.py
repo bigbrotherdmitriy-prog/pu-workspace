@@ -21,3 +21,11 @@ def test_android_navigation_and_safe_areas_are_present():
     assert "safe-area-inset-bottom" in styles
     assert "100dvh" in styles
     assert "font-size: 16px" in styles
+
+
+def test_android_shortcuts_open_the_requested_workspace_section():
+    app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
+    assert 'get("section")' in app
+    assert 'today: "Сегодня"' in app
+    assert 'mail: "Письма"' in app
+    assert 'tasks: "Задачи"' in app
