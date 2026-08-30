@@ -22,6 +22,7 @@ import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
+import { PasswordChangeCard } from "./modules/settings/PasswordChangeCard";
 import {
   Activity,
   AlertTriangle,
@@ -2868,6 +2869,7 @@ export function App() {
                 ))}
               </div>
             </section>
+            <PasswordChangeCard onChanged={() => window.location.reload()} />
             <section className="card span-settings">
               <div className="card-head">
                 <div>
