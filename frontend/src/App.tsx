@@ -7,6 +7,7 @@ import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant"
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
+import { ContractsModule } from "./modules/contracts/ContractsModule";
 import {
   Activity,
   AlertTriangle,
@@ -3202,42 +3203,16 @@ export function App() {
         </section>
       )}
       {active === "Договоры" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page contracts-page">
-            <section className="card contract-create">
-              <div>
-                <h2>Добавить договор</h2>
-                <p>
-                  Договор становится юридическим якорем документов, задач и
-                  решений проекта.
-                </p>
-              </div>
-              <div className="contract-form">
-                <input
-                  value={newContractNumber}
-                  onChange={(e) => setNewContractNumber(e.target.value)}
-                  placeholder="Номер договора"
-                />
-                <input
-                  value={newContractTitle}
-                  onChange={(e) => setNewContractTitle(e.target.value)}
-                  placeholder="Название"
-                />
-                <input
-                  value={newCounterparty}
-                  onChange={(e) => setNewCounterparty(e.target.value)}
-                  placeholder="Контрагент"
-                />
-                <button
-                  disabled={
-                    !newContractNumber.trim() || !newContractTitle.trim()
-                  }
-                  onClick={createContract}
-                >
-                  Добавить
-                </button>
-              </div>
-            </section>
+        <ContractsModule
+          collapsed={collapsed}
+          number={newContractNumber}
+          title={newContractTitle}
+          counterparty={newCounterparty}
+          onNumberChange={setNewContractNumber}
+          onTitleChange={setNewContractTitle}
+          onCounterpartyChange={setNewCounterparty}
+          onCreate={() => void createContract()}
+        >
             <section className="contract-list">
               {contracts
                 .filter(
@@ -3407,8 +3382,7 @@ export function App() {
                 </div>
               )}
             </section>
-          </div>
-        </section>
+        </ContractsModule>
       )}
       {active === "Предложения" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
