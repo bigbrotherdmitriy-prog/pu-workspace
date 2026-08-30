@@ -2006,7 +2006,10 @@ export function App() {
           {active === "Запуск проекта" && (
             <ProjectLaunchWizard
               projectId={projectId}
-              openSection={setActive}
+              openSection={(section, target) => {
+                if (target === "contacts") setMailView("companies");
+                setActive(section);
+              }}
             />
           )}
           {active === "Задачи" ? (

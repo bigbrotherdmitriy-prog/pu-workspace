@@ -15,6 +15,12 @@ def test_project_launch_is_a_separate_frontend_module():
     assert "Проект и рабочая папка" in wizard
     assert "ГПР, бюджет и ДДС" in wizard
     assert "Неподтверждённые контакты не маршрутизируют почту автоматически" in wizard
+    assert 'target: "contacts"' in wizard
+    assert 'target === "contacts"' in app
+    assert 'setMailView("companies")' in app
+    assert "Создать или импортировать ГПР для договора" in wizard
+    assert "Добавить бюджет и связать его с договором" in wizard
+    assert "Добавить плановую запись ДДС" in wizard
     assert "original" not in wizard.casefold()
 
 
