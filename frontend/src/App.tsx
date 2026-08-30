@@ -24,7 +24,7 @@ import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
-import { PasswordChangeCard } from "./modules/settings/PasswordChangeCard";
+import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import {
   Activity,
@@ -165,30 +165,6 @@ type GoogleState = {
   tasks_authorized: boolean;
   calendar_authorized: boolean;
   gmail_authorized: boolean;
-};
-type AIProjectPolicy = {
-  project_id: number;
-  mode: "local_only" | "external_allowed" | "redacted" | "metadata_only";
-  dlp_enabled: boolean;
-  prompt_version: string;
-};
-type ProcessingQueue = {
-  summary: { active: number; failed: number; dead_letter: number };
-  snapshots: Array<{
-    id: number;
-    status: string;
-    analysis_status: string;
-    retry_count: number;
-    analysis_retry_count: number;
-    error?: string;
-  }>;
-  sessions: Array<{
-    id: number;
-    status: string;
-    progress: number;
-    retry_count: number;
-    error_message?: string;
-  }>;
 };
 type CurrentUser = {
   id: number;
@@ -2564,145 +2540,19 @@ export function App() {
         />
       )}
       {active === "Настройки" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page settings-grid">
-            <section className="card profile-settings">
-              <span className="eyebrow">ПРОФИЛЬ</span>
-              <div className="settings-profile">
-                <div className="avatar">
-                  {currentUser?.name?.slice(0, 1) || "D"}
-                </div>
-                <div>
-                  <h2>{currentUser?.name || "Пользователь"}</h2>
-                  <p>{currentUser?.email}</p>
-                </div>
-              </div>
-              <div className="setting-row">
-                <span>Роль в системе</span>
-                <strong>
-                  {currentUser?.is_admin ? "Администратор" : "Пользователь"}
-                </strong>
-              </div>
-              <div className="setting-row">
-                <span>Активный проект</span>
-                <strong>
-                  {projects.find((item) => item.id === projectId)?.name}
-                </strong>
-              </div>
-            </section>
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <h2>Участники проекта</h2>
-                  <p>Доступ к выбранному проекту</p>
-                </div>
-              </div>
-              <div className="member-list">
-                {members.map((member) => (
-                  <article key={member.membership_id}>
-                    <div className="avatar">{member.name.slice(0, 1)}</div>
-                    <div>
-                      <strong>{member.name}</strong>
-                      <p>{member.email}</p>
-                    </div>
-                    <span>{member.role}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-            <PasswordChangeCard onChanged={() => window.location.reload()} />
-            <section className="card span-settings">
-              <div className="card-head">
-                <div>
-                  <h2>AI и защита данных</h2>
-                  <p>Что разрешено передавать внешней модели для выбранного проекта</p>
-                </div>
-              </div>
-              {aiPolicy && (
-                <div className="form-grid">
-                  <label>
-                    Режим обработки
-                    <select
-                      value={aiPolicy.mode}
-                      onChange={(event) =>
-                        setAiPolicy({
-                          ...aiPolicy,
-                          mode: event.target.value as AIProjectPolicy["mode"],
-                        })
-                      }
-                    >
-                      <option value="local_only">Только локально — внешний AI запрещён</option>
-                      <option value="redacted">С обезличиванием — рекомендовано</option>
-                      <option value="metadata_only">Только метаданные</option>
-                      <option value="external_allowed">Полный текст разрешён</option>
-                    </select>
-                  </label>
-                  <label className="setting-row">
-                    <span>Проверять персональные данные перед отправкой</span>
-                    <input
-                      type="checkbox"
-                      checked={aiPolicy.dlp_enabled}
-                      onChange={(event) =>
-                        setAiPolicy({ ...aiPolicy, dlp_enabled: event.target.checked })
-                      }
-                    />
-                  </label>
-                  <button onClick={saveAIPolicy}>Сохранить политику</button>
-                  <p>Версия правил и промпта: {aiPolicy.prompt_version}</p>
-                </div>
-              )}
-            </section>
-            <section className="card span-settings">
-              <h2>Принципы безопасности</h2>
-              <div className="safety-list">
-                <p>
-                  <ShieldCheck /> Оригиналы файлов никогда не перемещаются и не
-                  изменяются.
-                </p>
-                <p>
-                  <ShieldCheck /> Черновики ответов не отправляются без
-                  подтверждения.
-                </p>
-                <p>
-                  <ShieldCheck /> Изменения проекта фиксируются в журнале.
-                </p>
-              </div>
-            </section>
-            <section className="card span-settings">
-              <div className="card-head">
-                <div>
-                  <h2>Очередь массовой обработки</h2>
-                  <p>Прогресс, ошибки и операции, требующие диагностики</p>
-                </div>
-              </div>
-              {processingQueue && (
-                <div className="safety-list">
-                  <p>
-                    Активно: <strong>{processingQueue.summary.active}</strong> · Ошибок: {" "}
-                    <strong>{processingQueue.summary.failed}</strong> · Dead-letter: {" "}
-                    <strong>{processingQueue.summary.dead_letter}</strong>
-                  </p>
-                  {processingQueue.snapshots
-                    .filter((item) => item.status === "failed")
-                    .map((item) => (
-                      <p key={`snapshot-${item.id}`}>
-                        Снимок №{item.id}: {item.error || "ошибка без описания"}
-                        <button onClick={() => retrySnapshot(item.id)}>Повторить</button>
-                      </p>
-                    ))}
-                  {processingQueue.sessions
-                    .filter((item) => item.status === "failed")
-                    .map((item) => (
-                      <p key={`session-${item.id}`}>
-                        Обработка №{item.id}: {item.error_message || "ошибка без описания"}
-                        <button onClick={() => retryOrganizerSession(item.id)}>Повторить</button>
-                      </p>
-                    ))}
-                </div>
-              )}
-            </section>
-          </div>
-        </section>
+        <SettingsModule
+          collapsed={collapsed}
+          currentUser={currentUser}
+          activeProjectName={projects.find((item) => item.id === projectId)?.name}
+          members={members}
+          aiPolicy={aiPolicy}
+          processingQueue={processingQueue}
+          onPolicyChange={setAiPolicy}
+          onSavePolicy={() => void saveAIPolicy()}
+          onRetrySnapshot={(id) => void retrySnapshot(id)}
+          onRetrySession={(id) => void retryOrganizerSession(id)}
+          onPasswordChanged={() => window.location.reload()}
+        />
       )}
       {(active === "AI Secretary" || active === "Письма") && (
         <InboxModule
