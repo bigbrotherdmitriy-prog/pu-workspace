@@ -14,6 +14,7 @@ import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { FolderAnalysisSummary } from "./modules/folder-analysis/FolderAnalysisSummary";
+import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import {
   Activity,
@@ -1818,6 +1819,33 @@ export function App() {
     if (inboxFilter === "drafts") return item.drafts.some((draft) => draft.status !== "sent");
     return true;
   });
+  const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
+  const projectSearchHits: ProjectSearchHit[] = normalizedQuery.length < 2 ? [] : [
+    ...documentRows.filter((item) => `${item.name} ${item.summary || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
+      .map((item) => ({ id: item.id, kind: "document" as const, title: item.name, detail: item.summary || item.status })),
+    ...contracts.filter((item) => `${item.number} ${item.title} ${item.counterparty || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
+      .map((item) => ({ id: item.id, kind: "contract" as const, title: `${item.number} — ${item.title}`, detail: item.counterparty || item.status })),
+    ...tasks.filter((item) => `${item.title} ${item.source_excerpt || ""} ${item.source_file_name}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
+      .map((item) => ({ id: item.id, kind: "task" as const, title: item.title, detail: `${item.status}${item.due_date ? ` · до ${item.due_date}` : ""}` })),
+    ...inbox.filter((item) => `${item.source_name} ${item.source_sender || ""} ${item.summary}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
+      .map((item) => ({ id: item.id, kind: "message" as const, title: item.source_name, detail: item.source_sender || item.summary })),
+  ].slice(0, 30);
+  function openProjectSearchHit(hit: ProjectSearchHit) {
+    setQuery("");
+    if (hit.kind === "document") {
+      const document = documentRows.find((item) => item.id === hit.id);
+      setActive("Документы");
+      if (document) void openDocument(document);
+    } else if (hit.kind === "contract") {
+      setActive("Договоры");
+    } else if (hit.kind === "task") {
+      setActive("Задачи");
+    } else {
+      setActive("Письма");
+      setMailView("inbox");
+      setExpandedInboxId(hit.id);
+    }
+  }
   return (
     <div className="shell">
       <aside
@@ -1915,6 +1943,7 @@ export function App() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Поиск по проекту"
               />
+              <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
             </div>
             <select
               value={projectId}
