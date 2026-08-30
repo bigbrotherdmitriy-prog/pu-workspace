@@ -50,9 +50,12 @@ def project_dashboard(project_id: int, db: Session = Depends(get_db), user: User
     for item in drafts:
         key = (item.source_file_id, item.source_file_name)
         document_map[key]["drafts"] += 1
-    document_id_by_source = {item.external_id: item.id for item in registered_documents}
+    document_id_by_source = {
+        item.external_id or f"document:{item.id}": item.id
+        for item in registered_documents
+    }
     for item in registered_documents:
-        document_map[(item.external_id or f"db:{item.id}", item.name)]
+        document_map[(item.external_id or f"document:{item.id}", item.name)]
     documents = [
         {"source_id": source_id, "document_id": document_id_by_source.get(source_id), "name": name, **counts, "attention": counts["risks"] + counts["decisions"]}
         for (source_id, name), counts in document_map.items()
