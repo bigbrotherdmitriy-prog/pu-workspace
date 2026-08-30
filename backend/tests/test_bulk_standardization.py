@@ -129,3 +129,17 @@ def test_one_broken_file_does_not_rollback_successful_files():
     assert result == {"renamed": 1, "moved": 1, "skipped": 0, "errors": 1}
     assert drive.files["f1"].name.startswith("Проект А — Неразобранное")
     assert [entry[3] for entry in repo.logged] == ["standardize_rename", "standardize_move"]
+
+
+def test_repeated_bulk_standardization_does_not_apply_completed_operations_again():
+    repo = Repo()
+    repo.operations = lambda _proposal_id: [
+        {"file_id": "f1", "op_type": "standardize_rename", "rolled_back_at": None},
+        {"file_id": "f1", "op_type": "standardize_move", "rolled_back_at": None},
+    ]
+    drive = Drive()
+
+    result = OrganizerExecutor(repo, drive).standardize_remaining(8, "Проект А")
+
+    assert result == {"renamed": 0, "moved": 0, "skipped": 1, "errors": 0}
+    assert repo.logged == []
