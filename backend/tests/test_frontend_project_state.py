@@ -5,6 +5,7 @@ APP_SOURCE = Path(__file__).parents[2] / "frontend" / "src" / "App.tsx"
 PROJECT_SELECTION_SOURCE = APP_SOURCE.parent / "context" / "useProjectSelection.ts"
 FINANCE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "useFinanceController.ts"
 FINANCE_MODULE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "FinanceModule.tsx"
+FINANCE_OPERATIONS_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "FinanceOperations.tsx"
 CONTEXTUAL_AI_SOURCE = APP_SOURCE.parent / "modules" / "ai-secretary" / "ContextualAssistant.tsx"
 CONTRACT_PICKER_SOURCE = APP_SOURCE.parent / "modules" / "contracts" / "ContractDocumentPicker.tsx"
 
@@ -90,7 +91,7 @@ def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
 
 
 def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
-    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8") + FINANCE_OPERATIONS_SOURCE.read_text(encoding="utf-8")
     assert "Мастер запуска исполнения" in source
     assert '<option value="schedule">Этап ГПР</option>' in source
     assert "finance-chain-steps" in source
@@ -98,7 +99,7 @@ def test_finance_workflow_guides_contract_schedule_budget_cash_and_acts():
 
 
 def test_finance_workflow_suggests_analyzed_project_documents_without_mutating_sources():
-    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8") + FINANCE_OPERATIONS_SOURCE.read_text(encoding="utf-8")
     controller = FINANCE_SOURCE.read_text(encoding="utf-8")
     assert "/execution/document-candidates" in controller
     assert "Найденные ГПР, бюджеты, ДДС, счета и акты" in source
@@ -111,7 +112,7 @@ def test_finance_workflow_suggests_analyzed_project_documents_without_mutating_s
 
 
 def test_ai_secretary_automation_exposes_prepared_task_and_draft_for_review():
-    source = APP_SOURCE.read_text(encoding="utf-8")
+    source = APP_SOURCE.read_text(encoding="utf-8") + FINANCE_OPERATIONS_SOURCE.read_text(encoding="utf-8")
     assert "Последняя подготовка:" in source
     assert "Открыть задачу" in source
     assert "Открыть черновик" in source
