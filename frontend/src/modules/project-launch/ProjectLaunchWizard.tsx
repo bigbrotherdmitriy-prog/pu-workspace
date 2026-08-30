@@ -1,17 +1,16 @@
 import { Building2, Check, Circle, FileCheck2, FolderSearch2, Mail, Route, WalletCards } from "lucide-react";
 import "./project-launch.css";
+import { useProjectLaunchReadiness } from "./useProjectLaunchReadiness";
 
-export type ProjectLaunchState = {
-  projectName: string; documents: number; analyzedDocuments: number; contracts: number;
-  linkedContracts: number; scheduleRows: number; budgetRows: number; cashFlowRows: number;
-  contacts: number; confirmedContacts: number; inboxMessages: number;
-};
-type Props = { state: ProjectLaunchState; openSection: (section: string) => void };
+type Props = { projectId: number; openSection: (section: string) => void };
 type Step = { title: string; description: string; section: string; complete: boolean; status: string; icon: typeof Circle };
 
-export function ProjectLaunchWizard({ state, openSection }: Props) {
+export function ProjectLaunchWizard({ projectId, openSection }: Props) {
+  const { state, error, reload } = useProjectLaunchReadiness(projectId);
+  if (error) return <section className="card launch-load-error"><h2>Не удалось проверить запуск проекта</h2><p>{error}</p><button onClick={reload}>Повторить</button></section>;
+  if (!state) return <section className="card"><p>Проверяем готовность проекта…</p></section>;
   const steps: Step[] = [
-    { title: "Проект и рабочая папка", description: "Подключите папку проекта. Система создаст безопасную копию и поставит документы на анализ.", section: "Рабочий центр", complete: state.documents > 0, status: state.documents ? `${state.documents} документов обнаружено` : "папка ещё не проанализирована", icon: FolderSearch2 },
+    { title: "Проект и рабочая папка", description: "Подключите папку проекта. Система создаст безопасную копию и поставит документы на анализ.", section: "Рабочий центр", complete: state.sourceReady && state.documents > 0, status: state.sourceReady ? `${state.documents} документов обнаружено` : "папка ещё не проанализирована", icon: FolderSearch2 },
     { title: "Документы", description: "Проверьте состав, результаты анализа и предложения по единому стандарту имён.", section: "Документы", complete: state.analyzedDocuments > 0, status: state.analyzedDocuments ? `${state.analyzedDocuments} документов обработано` : "ожидается анализ", icon: FileCheck2 },
     { title: "Договор", description: "Создайте карточку договора и привяжите документ-источник из каталога проекта.", section: "Договоры", complete: state.contracts > 0 && state.linkedContracts > 0, status: !state.contracts ? "договор не создан" : state.linkedContracts < state.contracts ? `привязано документов: ${state.linkedContracts} из ${state.contracts}` : `${state.contracts} договоров с источником`, icon: Building2 },
     { title: "ГПР, бюджет и ДДС", description: "Свяжите этапы работ, бюджет и движение денег с выбранным договором.", section: "Исполнение и финансы", complete: state.scheduleRows > 0 && state.budgetRows > 0 && state.cashFlowRows > 0, status: `ГПР: ${state.scheduleRows} · бюджет: ${state.budgetRows} · ДДС: ${state.cashFlowRows}`, icon: WalletCards },

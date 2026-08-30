@@ -2022,19 +2022,7 @@ export function App() {
           {notice && <div className="notice">{notice}</div>}
           {active === "Запуск проекта" && (
             <ProjectLaunchWizard
-              state={{
-                projectName: projects.find((project) => project.id === projectId)?.name || "",
-                documents: documentRows.length,
-                analyzedDocuments: documentRows.filter((document) => ["analyzed", "indexed", "ready"].includes(document.status)).length,
-                contracts: contracts.length,
-                linkedContracts: contracts.filter((contract) => Boolean(contract.source_document_id)).length,
-                scheduleRows: finance?.schedule.length || 0,
-                budgetRows: finance?.budget.length || 0,
-                cashFlowRows: finance?.cash_flow.length || 0,
-                contacts: projectContacts.length,
-                confirmedContacts: projectContacts.filter((contact) => contact.confirmed).length,
-                inboxMessages: inbox.length,
-              }}
+              projectId={projectId}
               openSection={setActive}
             />
           )}

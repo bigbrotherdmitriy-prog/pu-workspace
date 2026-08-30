@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -12,6 +12,11 @@ from app.models.user import User
 from app.models.organization_contract import Organization
 from app.models.audit_log import AuditLog
 from app.models.organizer import OrganizerSession
+from app.models.document import Document
+from app.models.organization_contract import Contract
+from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleItem
+from app.models.project_contact import ProjectContact
+from app.models.ai_secretary import Message
 from app.core.auth import require_project_role, require_user
 from app.organizer import get_drive_service
 from app.organizer_engine.drive import DriveClient
@@ -113,6 +118,66 @@ def get_project(
         )
 
     return item
+
+
+@router.get("/{project_id}/launch-readiness")
+def project_launch_readiness(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Provider-neutral readiness of the minimum project management chain."""
+    require_project_role(db, user, project_id, "viewer")
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+
+    documents = db.scalar(select(func.count(Document.id)).where(Document.project_id == project_id)) or 0
+    analyzed_documents = db.scalar(select(func.count(Document.id)).where(
+        Document.project_id == project_id,
+        Document.status.in_({"analyzed", "indexed", "ready"}),
+    )) or 0
+    contracts = list(db.scalars(select(Contract).where(Contract.project_id == project_id)))
+    schedule_rows = db.scalar(select(func.count(ScheduleItem.id)).where(ScheduleItem.project_id == project_id)) or 0
+    budget_rows = db.scalar(select(func.count(BudgetLine.id)).where(BudgetLine.project_id == project_id)) or 0
+    cash_flow_rows = db.scalar(select(func.count(CashFlowEntry.id)).where(CashFlowEntry.project_id == project_id)) or 0
+    contacts = db.scalar(select(func.count(ProjectContact.id)).where(
+        ProjectContact.project_id == project_id, ProjectContact.active.is_(True),
+    )) or 0
+    confirmed_contacts = db.scalar(select(func.count(ProjectContact.id)).where(
+        ProjectContact.project_id == project_id,
+        ProjectContact.active.is_(True),
+        ProjectContact.confirmed.is_(True),
+    )) or 0
+    inbox_messages = db.scalar(select(func.count(Message.id)).where(Message.project_id == project_id)) or 0
+    sources = list(db.scalars(select(OrganizerSession).where(
+        OrganizerSession.project_id == project_id,
+    ).order_by(OrganizerSession.id.desc())))
+
+    result = {
+        "project_id": project_id,
+        "project_name": project.name,
+        "source_folders": len({row.source_folder_id for row in sources}),
+        "source_ready": any(row.status in {"ready", "completed"} for row in sources),
+        "documents": documents,
+        "analyzed_documents": analyzed_documents,
+        "contracts": len(contracts),
+        "linked_contracts": sum(bool(row.source_document_id) for row in contracts),
+        "schedule_rows": schedule_rows,
+        "budget_rows": budget_rows,
+        "cash_flow_rows": cash_flow_rows,
+        "contacts": contacts,
+        "confirmed_contacts": confirmed_contacts,
+        "inbox_messages": inbox_messages,
+    }
+    completed = sum([
+        result["source_ready"] and documents > 0,
+        analyzed_documents > 0,
+        bool(contracts) and result["linked_contracts"] == len(contracts),
+        schedule_rows > 0 and budget_rows > 0 and cash_flow_rows > 0,
+        confirmed_contacts > 0,
+    ])
+    return {**result, "completed_steps": completed, "total_steps": 5, "progress": completed * 20}
 
 
 @router.put(

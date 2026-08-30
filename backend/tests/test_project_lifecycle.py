@@ -7,3 +7,4 @@ def test_project_lifecycle_routes_are_registered():
     assert "/projects/{project_id}/restore" in paths
     assert "/projects/{project_id}/safe-copies" in paths
     assert "/projects/{project_id}/safe-copies/trash" in paths
+    assert "/projects/{project_id}/launch-readiness" in paths

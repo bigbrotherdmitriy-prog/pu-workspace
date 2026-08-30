@@ -20,6 +20,7 @@ def test_project_launch_is_a_separate_frontend_module():
 
 def test_project_launch_uses_loaded_core_state_without_provider_calls():
     wizard = (ROOT / "frontend" / "src" / "modules" / "project-launch" / "ProjectLaunchWizard.tsx").read_text(encoding="utf-8")
+    hook = (ROOT / "frontend" / "src" / "modules" / "project-launch" / "useProjectLaunchReadiness.ts").read_text(encoding="utf-8")
 
     assert "state.documents" in wizard
     assert "state.linkedContracts" in wizard
@@ -27,3 +28,6 @@ def test_project_launch_uses_loaded_core_state_without_provider_calls():
     assert "state.cashFlowRows" in wizard
     assert "state.confirmedContacts" in wizard
     assert "google" not in wizard.casefold()
+    assert "launch-readiness" in hook
+    assert "sourceReady" in hook
+    assert "google" not in hook.casefold()
