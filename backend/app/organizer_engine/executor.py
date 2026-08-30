@@ -366,8 +366,6 @@ class OrganizerExecutor:
             for folder, folder_id in folders.items()
         }
         stats = {"renamed": 0, "moved": 0, "skipped": 0, "errors": 0}
-        applied: list[tuple[str, str, dict, dict]] = []
-
         def unique_name(folder: str, candidate: str, current_name: str, current_parent: str) -> str:
             used = occupied[folder]
             if current_parent == folders[folder]:
@@ -386,8 +384,9 @@ class OrganizerExecutor:
                     return value
             raise ValueError("Could not resolve target-name collision")
 
-        try:
-            for item in self.repo.proposal_items(proposal_id):
+        for item in self.repo.proposal_items(proposal_id):
+            applied: list[tuple[str, str, dict, dict]] = []
+            try:
                 file_id = item["file_id"]
                 if item["user_decision"] != "skipped":
                     continue
@@ -429,20 +428,24 @@ class OrganizerExecutor:
                     )
                     applied.append(("move", file_id, before, after))
                     stats["moved"] += 1
-            self.repo.db.commit()
-            return stats
-        except Exception:
-            stats["errors"] += 1
-            for op_type, file_id, before, after in reversed(applied):
-                try:
-                    if op_type == "rename":
-                        self.drive.rename_file(file_id, before["name"], copy_root)
-                    else:
-                        self.drive.move_file(file_id, before["parent_id"], after["parent_id"], copy_root)
-                except Exception:
-                    pass
-            self.repo.db.rollback()
-            raise
+                self.repo.db.commit()
+            except Exception:
+                stats["errors"] += 1
+                for op_type, failed_file_id, before, after in reversed(applied):
+                    try:
+                        if op_type == "rename":
+                            self.drive.rename_file(failed_file_id, before["name"], copy_root)
+                        else:
+                            self.drive.move_file(
+                                failed_file_id,
+                                before["parent_id"],
+                                after["parent_id"],
+                                copy_root,
+                            )
+                    except Exception:
+                        pass
+                self.repo.db.rollback()
+        return stats
 
     def rollback(
         self,

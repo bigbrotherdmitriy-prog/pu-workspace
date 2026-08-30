@@ -74,6 +74,18 @@ class Drive:
         self.files[file_id].parent_id = target_parent
 
 
+class PartlyBrokenDrive(Drive):
+    def __init__(self):
+        super().__init__()
+        self.files["broken"] = DriveFile("broken", "битый.pdf", "application/pdf", "copy")
+        self.children["copy"].append("broken")
+
+    def get_file_meta(self, file_id):
+        if file_id == "broken":
+            raise RuntimeError("simulated missing provider object")
+        return super().get_file_meta(file_id)
+
+
 def test_bulk_standardization_changes_safe_copy_and_logs_rollback_data():
     repo = Repo()
     drive = Drive()
@@ -86,3 +98,18 @@ def test_bulk_standardization_changes_safe_copy_and_logs_rollback_data():
     )
     assert [entry[3] for entry in repo.logged] == ["standardize_rename", "standardize_move"]
     assert repo.logged[0][4]["name"] == "счёт №1.PDF"
+
+
+def test_one_broken_file_does_not_rollback_successful_files():
+    repo = Repo()
+    repo.proposal_items = lambda _proposal_id: [
+        {"file_id": "broken", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER},
+        {"file_id": "f1", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER},
+    ]
+    drive = PartlyBrokenDrive()
+
+    result = OrganizerExecutor(repo, drive).standardize_remaining(8, "Проект А")
+
+    assert result == {"renamed": 1, "moved": 1, "skipped": 0, "errors": 1}
+    assert drive.files["f1"].name.startswith("Проект А — Неразобранное")
+    assert [entry[3] for entry in repo.logged] == ["standardize_rename", "standardize_move"]
