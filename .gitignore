@@ -19,6 +19,8 @@ __pycache__/
 *.parallel
 backups/
 pu-workspace-*.tar.gz
+pu-workspace-*.tar
+.deploy-*.tar
 .tmp-pnpm/
 
 # OS / editors
