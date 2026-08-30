@@ -66,3 +66,12 @@ def test_catalog_supports_provider_neutral_source_selection_action():
     ).as_dict()
 
     assert status["action"] == "select_source"
+
+
+def test_task_api_serializes_the_configured_action_provider():
+    from pathlib import Path
+
+    source = (Path(__file__).parents[1] / "app" / "api" / "tasks.py").read_text(encoding="utf-8")
+    assert 'action_provider = configured_action_adapter(project_id, db).provider' in source
+    assert '{"provider": action_provider' in source
+    assert '{"provider": adapter.provider' in source

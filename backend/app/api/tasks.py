@@ -40,6 +40,7 @@ class ExternalActionApproval(BaseModel):
 @router.get("")
 def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
+    action_provider = configured_action_adapter(project_id, db).provider
     rows = db.execute(
         select(Task, User).join(User, User.id == Task.assignee_user_id)
         .where(Task.project_id == project_id).order_by(Task.created_at.desc(), Task.id.desc())
@@ -47,11 +48,11 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
     result = []
     for task, assignee in rows:
         external_task_id = external_id_for(
-            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="task", legacy_id=task.google_task_id,
         )
         external_calendar_id = external_id_for(
-            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
         )
         result.append({
@@ -65,8 +66,8 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
             "google_calendar_event_id": external_calendar_id,
             "google_calendar_sync_error": task.google_calendar_sync_error,
             "external_resources": [
-                *([{"provider": "google_workspace", "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
-                *([{"provider": "google_workspace", "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
+                *([{"provider": action_provider, "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
+                *([{"provider": action_provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
             "result_note": task.result_note, "completed_at": task.completed_at,
             "completion_document_id": task.completion_document_id,
@@ -238,8 +239,8 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
             "external_action_status": task.external_action_status,
             "google_task_id": external_task_id, "google_calendar_event_id": external_calendar_id,
             "external_resources": [
-                *([{"provider": "google_workspace", "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
-                *([{"provider": "google_workspace", "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
+                *([{"provider": adapter.provider, "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
+                *([{"provider": adapter.provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
             "task_failed": task_failed, "google_task_failed": task_failed,
             "calendar_failed": calendar_failed}
