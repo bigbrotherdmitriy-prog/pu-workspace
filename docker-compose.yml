@@ -48,6 +48,7 @@ services:
       GEMINI_API_BASE: ${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}
       GMAIL_AUTO_SYNC_ENABLED: ${GMAIL_AUTO_SYNC_ENABLED:-true}
       GMAIL_AUTO_SYNC_INTERVAL_SECONDS: ${GMAIL_AUTO_SYNC_INTERVAL_SECONDS:-300}
+      PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:-development}
     ports:
     - 3000:8000
   telegram-relay:

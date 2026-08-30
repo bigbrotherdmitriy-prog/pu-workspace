@@ -3,6 +3,7 @@ import { api } from "./api/client";
 import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
+import { FinanceModule } from "./modules/finance/FinanceModule";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
@@ -15,6 +16,7 @@ import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { FolderAnalysisSummary } from "./modules/folder-analysis/FolderAnalysisSummary";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
+import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import {
   Activity,
@@ -1789,13 +1791,6 @@ export function App() {
     indexed: "Проиндексированы",
     unknown: "Не определено",
   } as Record<string, string>)[value] || value.replaceAll("_", " ");
-  const financeContract = contracts.find((contract) => contract.id === selectedFinanceContractId);
-  const financeBaselines = finance?.baselines.filter((row) => row.contract_id === selectedFinanceContractId) || [];
-  const financeBaselineIds = new Set(financeBaselines.map((row) => row.id));
-  const financeSchedule = finance?.schedule.filter((row) => financeBaselineIds.has(row.baseline_id)) || [];
-  const financeBudget = finance?.budget.filter((row) => row.contract_id === selectedFinanceContractId) || [];
-  const financeCash = finance?.cash_flow.filter((row) => row.contract_id === selectedFinanceContractId) || [];
-  const financeActs = finance?.acts.filter((row) => row.contract_id === selectedFinanceContractId) || [];
   const visibleDocuments = documentRows.filter(
     (item) =>
       active === "Центр знаний" ||
@@ -1893,6 +1888,7 @@ export function App() {
           </button>
         </div>
       </aside>
+      {mobile && <button className="mobile-drawer-backdrop" aria-label="Закрыть меню" onClick={() => setMobile(false)} />}
       <main>
         <header>
           <button
@@ -2520,6 +2516,7 @@ export function App() {
           ) : null}
         </section>
       </main>
+      <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} />
       {active === "Аналитика" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page analytics-page">

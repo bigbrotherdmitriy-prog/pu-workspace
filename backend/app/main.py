@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -133,7 +134,12 @@ def root():
 
 @app.get("/api/status")
 def api_status():
-    return {"status": "ok", "service": "PU Workspace", "version": APP_VERSION}
+    return {
+        "status": "ok",
+        "service": "PU Workspace",
+        "version": APP_VERSION,
+        "release": os.getenv("PU_RELEASE_REVISION", "development"),
+    }
 
 
 @app.get("/api/readiness")

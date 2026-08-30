@@ -31,6 +31,8 @@ esac
 docker image inspect "$CANDIDATE_IMAGE" >/dev/null 2>&1 || fail "candidate image does not exist"
 
 REVISION=$(basename "$RELEASE_DIR")
+PU_RELEASE_REVISION=$REVISION
+export PU_RELEASE_REVISION
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP_FILE=$BACKUP_DIR/pu_workspace_before_${REVISION}_${STAMP}.dump
 PREVIOUS_RELEASE=$(readlink "$CURRENT_LINK" 2>/dev/null || true)
@@ -51,6 +53,8 @@ rollback() {
     docker tag "$ROLLBACK_IMAGE" app-backend:latest || true
     docker tag "$ROLLBACK_IMAGE" app-backend || true
     if [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
+      PU_RELEASE_REVISION=$(basename "$PREVIOUS_RELEASE")
+      export PU_RELEASE_REVISION
       ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
       cd "$PREVIOUS_RELEASE"
       if [ "$DEPLOY_RELAY" = true ]; then

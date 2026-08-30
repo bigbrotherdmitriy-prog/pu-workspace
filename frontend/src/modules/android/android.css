@@ -1,0 +1,21 @@
+.android-bottom-nav { display: none; }
+.mobile-drawer-backdrop { display: none; }
+@media (max-width: 760px) {
+  html, body, #root { min-height: 100%; background: #f1f4f2; }
+  body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+  button, a, select, input { touch-action: manipulation; }
+  .shell { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  .shell > main { min-height: 100dvh; }
+  header { height: calc(64px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+  .content { padding-bottom: calc(22px + env(safe-area-inset-bottom)); }
+  .shell > aside { top: 0; height: 100dvh; padding-top: calc(14px + env(safe-area-inset-top)); padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .mobile-drawer-backdrop { position: fixed; inset: 0; z-index: 25; display: block; border: 0; border-radius: 0; background: rgba(5, 14, 10, .52); }
+  .android-bottom-nav { position: fixed; z-index: 90; left: 0; right: 0; bottom: 0; height: calc(62px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, 1fr); margin: 0; padding: 5px 4px env(safe-area-inset-bottom); border-top: 1px solid #d3dfd9; background: rgba(255, 255, 255, .97); box-shadow: 0 -8px 30px rgba(12, 35, 26, .1); backdrop-filter: blur(14px); }
+  .android-bottom-nav button { min-width: 0; height: 52px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 3px 1px; border: 0; border-radius: 11px; background: transparent; color: #68776f; }
+  .android-bottom-nav button.active { color: #087a59; background: #e8f5ef; box-shadow: none; }
+  .android-bottom-nav svg { width: 21px; height: 21px; }
+  .android-bottom-nav span { max-width: 100%; overflow: hidden; font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+  .documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay { bottom: calc(62px + env(safe-area-inset-bottom)); }
+  .ai-mascot { bottom: calc(74px + env(safe-area-inset-bottom)); }
+  input, select, textarea { font-size: 16px; }
+}
