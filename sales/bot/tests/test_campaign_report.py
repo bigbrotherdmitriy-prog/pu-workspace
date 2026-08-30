@@ -61,3 +61,16 @@ class CampaignReportTest(unittest.TestCase):
             self.assertIn("direct", report)
             self.assertNotIn("secret@example.com", report)
             self.assertNotIn("+79990000000", report)
+
+    def test_daily_report_job_is_local_and_does_not_send_externally(self) -> None:
+        analytics = ROOT / "analytics"
+        script = (analytics / "generate_report.sh").read_text(encoding="utf-8")
+        timer = (analytics / "pu-workspace-sales-report.timer").read_text(encoding="utf-8")
+        service = (analytics / "pu-workspace-sales-report.service").read_text(encoding="utf-8")
+        self.assertIn('report_dir="$root/reports"', script)
+        self.assertIn('$report_dir/latest.txt', script)
+        self.assertIn("--database", script)
+        self.assertNotIn("curl", script)
+        self.assertNotIn("telegram", script.casefold())
+        self.assertIn("07:00:00 UTC", timer)
+        self.assertIn("NoNewPrivileges=true", service)

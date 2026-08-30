@@ -1,0 +1,11 @@
+[Unit]
+Description=Generate PU Workspace sales report daily
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+Unit=pu-workspace-sales-report.service
+
+[Install]
+WantedBy=timers.target

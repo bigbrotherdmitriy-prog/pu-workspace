@@ -138,6 +138,8 @@ python3 /opt/pu-workspace-landing/campaign_report.py \
 ```
 
 Отчёт читает только агрегаты `source/status/count` и не выводит имена, телефоны или email.
+На production-сервере он формируется ежедневно в 10:00 по Москве и сохраняется локально:
+`/opt/pu-workspace-landing/reports/latest.txt`. Автоматическая внешняя отправка не выполняется.
 
 ## Запрещённые обещания
 
