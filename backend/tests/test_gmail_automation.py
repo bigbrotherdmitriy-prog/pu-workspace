@@ -19,4 +19,12 @@ def test_gmail_automation_status_is_observable():
         result = gmail.status()
         assert result["enabled"] is True
         assert result["interval_seconds"] == 600
-        assert {"last_run_at", "last_result", "last_error"} <= result.keys()
+        assert {"last_run_at", "last_result", "last_error", "lock_scope"} <= result.keys()
+
+
+def test_gmail_automation_uses_process_lock_outside_postgresql(monkeypatch):
+    monkeypatch.setattr(gmail.engine.dialect, "name", "sqlite")
+    with gmail._exclusive_run() as first:
+        with gmail._exclusive_run() as second:
+            assert first is True
+            assert second is False
