@@ -356,11 +356,6 @@ class OrganizerExecutor:
         copy_root = proposal["copy_folder_id"]
         session_id = int(proposal["session_id"])
         folders = self._target_folders(copy_root)
-        completed = {
-            (row["file_id"], row["op_type"])
-            for row in self.repo.operations(proposal_id)
-            if row["rolled_back_at"] is None
-        }
         occupied: dict[str, set[str]] = {
             folder: {row.name for row in self.drive.list_children(folder_id) if not row.is_folder}
             for folder, folder_id in folders.items()
@@ -390,44 +385,52 @@ class OrganizerExecutor:
                 file_id = item["file_id"]
                 if item["user_decision"] != "skipped":
                     continue
-                rename_done = (file_id, "standardize_rename") in completed
-                move_done = (file_id, "standardize_move") in completed
-                if rename_done and move_done:
-                    stats["skipped"] += 1
-                    continue
                 self.drive.assert_inside_copy(file_id, copy_root)
                 current = self.drive.get_file_meta(file_id)
                 target_folder = item["target_folder"]
                 if target_folder not in folders:
                     target_folder = "00_НЕРАЗОБРАННОЕ"
-                target_name = current.name
-                if not rename_done:
-                    target_name = unique_name(
-                        target_folder,
-                        build_standard_name(current.name, target_folder, project_name),
-                        current.name,
-                        current.parent_id,
-                    )
-                if not rename_done and current.name != target_name:
+                target_name = unique_name(
+                    target_folder,
+                    build_standard_name(current.name, target_folder, project_name),
+                    current.name,
+                    current.parent_id,
+                )
+                if current.name != target_name:
                     before = {"name": current.name, "parent_id": current.parent_id}
                     after = {"name": target_name, "parent_id": current.parent_id}
                     self.drive.rename_file(file_id, target_name, copy_root)
-                    self.repo.log_operation(
-                        proposal_id, session_id, file_id, "standardize_rename", before, after
-                    )
                     applied.append(("rename", file_id, before, after))
                     stats["renamed"] += 1
                     current = self.drive.get_file_meta(file_id)
                 target_parent = folders[target_folder]
-                if not move_done and current.parent_id != target_parent:
+                if current.parent_id != target_parent:
                     before = {"name": current.name, "parent_id": current.parent_id}
                     after = {"name": current.name, "parent_id": target_parent}
                     self.drive.move_file(file_id, target_parent, current.parent_id, copy_root)
-                    self.repo.log_operation(
-                        proposal_id, session_id, file_id, "standardize_move", before, after
-                    )
                     applied.append(("move", file_id, before, after))
                     stats["moved"] += 1
+                    current = self.drive.get_file_meta(file_id)
+                original_parent = item["current_parent_id"]
+                original_name = item["source"]
+                if current.name != original_name:
+                    self.repo.reconcile_operation(
+                        proposal_id,
+                        session_id,
+                        file_id,
+                        "standardize_rename",
+                        {"name": original_name, "parent_id": original_parent},
+                        {"name": current.name, "parent_id": current.parent_id},
+                    )
+                if current.parent_id != original_parent:
+                    self.repo.reconcile_operation(
+                        proposal_id,
+                        session_id,
+                        file_id,
+                        "standardize_move",
+                        {"name": current.name, "parent_id": original_parent},
+                        {"name": current.name, "parent_id": current.parent_id},
+                    )
                 self.repo.db.commit()
             except Exception:
                 stats["errors"] += 1

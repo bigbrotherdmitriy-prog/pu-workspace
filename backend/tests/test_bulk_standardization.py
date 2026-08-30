@@ -47,6 +47,9 @@ class Repo:
     def log_operation(self, *args):
         self.logged.append(args)
 
+    def reconcile_operation(self, *args):
+        self.logged.append(args)
+
 
 class Drive:
     def __init__(self):

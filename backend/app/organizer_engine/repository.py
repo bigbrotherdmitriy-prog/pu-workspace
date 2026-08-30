@@ -223,6 +223,23 @@ class OrganizerRepository:
                  "before":json.dumps(before,ensure_ascii=False),"after":json.dumps(after,ensure_ascii=False),
                  "idempotency_key": idempotency_key}).scalar_one())
 
+    def reconcile_operation(self, proposal_id: int, session_id: int, file_id: str, op_type: str, before: dict, after: dict) -> int:
+        """Record the net safe-copy state after an interrupted provider operation."""
+        raw_key = f"{proposal_id}:{file_id}:{op_type}".encode("utf-8")
+        idempotency_key = hashlib.sha256(raw_key).hexdigest()
+        return int(self.db.execute(text("""
+            INSERT INTO organizer_operations(proposal_id,session_id,file_id,op_type,before_json,after_json,applied_at,idempotency_key)
+            VALUES (:proposal_id,:session_id,:file_id,:op_type,CAST(:before AS jsonb),CAST(:after AS jsonb),now(),:idempotency_key)
+            ON CONFLICT (idempotency_key) DO UPDATE
+            SET before_json=EXCLUDED.before_json,
+                after_json=EXCLUDED.after_json,
+                applied_at=EXCLUDED.applied_at,
+                rolled_back_at=NULL
+            RETURNING id
+        """), {"proposal_id":proposal_id,"session_id":session_id,"file_id":file_id,"op_type":op_type,
+                 "before":json.dumps(before,ensure_ascii=False),"after":json.dumps(after,ensure_ascii=False),
+                 "idempotency_key": idempotency_key}).scalar_one())
+
     def operations(self, proposal_id: int, limit: int = 5000):
         return self.db.execute(text("""
             SELECT * FROM organizer_operations WHERE proposal_id=:id ORDER BY id DESC LIMIT :lim
