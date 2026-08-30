@@ -42,6 +42,7 @@ from app.organizer import recover_incomplete_scans
 from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
+from app.core.observability import observe_request
 from app.automations.gmail import start as start_gmail_automation, stop as stop_gmail_automation
 from app.automations.ai_secretary import start as start_ai_secretary_automation, stop as stop_ai_secretary_automation
 
@@ -73,6 +74,8 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
 )
+
+app.middleware("http")(observe_request)
 
 
 @app.middleware("http")
