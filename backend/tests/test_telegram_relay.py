@@ -17,5 +17,17 @@ def test_polling_can_be_disabled():
 def test_ipv6_is_opt_in():
     with patch.dict(os.environ, {}, clear=True):
         assert _force_ipv6() is False
-    with patch.dict(os.environ, {"TELEGRAM_FORCE_IPV6": "true"}):
+    with patch.dict(os.environ, {"TELEGRAM_FORCE_IPV6": "true"}, clear=True):
         assert _force_ipv6() is True
+
+
+def test_proxy_takes_precedence_over_forced_ipv6():
+    with patch.dict(
+        os.environ,
+        {
+            "TELEGRAM_FORCE_IPV6": "true",
+            "HTTPS_PROXY": "http://proxy.example:8000",
+        },
+        clear=True,
+    ):
+        assert _force_ipv6() is False

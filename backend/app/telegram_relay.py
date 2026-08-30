@@ -11,6 +11,8 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from app.integrations.telegram import telegram_force_ipv6
+
 
 _poll_state = {
     "last_poll_at": None,
@@ -38,7 +40,7 @@ def _safe_error(exc: Exception) -> str:
 
 
 def _force_ipv6() -> bool:
-    return os.getenv("TELEGRAM_FORCE_IPV6", "false").lower() in {"1", "true", "yes"}
+    return telegram_force_ipv6()
 
 
 async def _poll_updates() -> None:

@@ -7,10 +7,19 @@ import httpx
 from app.integrations.contracts import AdapterHealth, ChannelMessage
 
 
+def telegram_force_ipv6() -> bool:
+    """Bind to IPv6 only for direct connections, never when a proxy is configured."""
+    proxy_configured = any(
+        os.getenv(name, "").strip()
+        for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy")
+    )
+    requested = os.getenv("TELEGRAM_FORCE_IPV6", "").lower() in {"1", "true", "yes"}
+    return requested and not proxy_configured
+
+
 def telegram_http_client(timeout: float = 10.0) -> httpx.Client:
-    """Use IPv6 when requested; some deployments cannot reach Telegram over IPv4."""
-    force_ipv6 = os.getenv("TELEGRAM_FORCE_IPV6", "").lower() in {"1", "true", "yes"}
-    transport = httpx.HTTPTransport(local_address="::") if force_ipv6 else None
+    """Use IPv6 only for direct deployments; proxy routing remains environment-driven."""
+    transport = httpx.HTTPTransport(local_address="::") if telegram_force_ipv6() else None
     return httpx.Client(transport=transport, timeout=timeout)
 
 
