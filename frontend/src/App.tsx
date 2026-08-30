@@ -4,6 +4,7 @@ import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
+import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import {
   Activity,
@@ -556,6 +557,7 @@ export function App() {
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
+  const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const [sourceFolderId, setSourceFolderId] = useState("root");
   const [sourceBreadcrumbs, setSourceBreadcrumbs] = useState<DriveBreadcrumb[]>([
@@ -615,6 +617,7 @@ export function App() {
           integrationData,
           automationData,
           contactData,
+          briefingData,
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
@@ -648,6 +651,7 @@ export function App() {
           api(`/integrations/project?project_id=${id}`).catch(() => ({ adapters: [] })),
           api(`/ai-secretary/automations?project_id=${id}`).catch(() => ({ rules: [] })),
           api(`/project-contacts?project_id=${id}`).catch(() => ({ contacts: [] })),
+          api(`/ai-secretary/daily-briefing?project_id=${id}`).catch(() => null),
         ]);
         if (
           loadSequence !== loadSequenceRef.current ||
@@ -678,6 +682,7 @@ export function App() {
         setIntegrationItems(integrationData.adapters);
         setAutomationRules(automationData.rules);
         setProjectContacts(contactData.contacts);
+        setDailyBriefing(briefingData);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -3992,6 +3997,9 @@ export function App() {
                 </article>)}
               </section>}
             </section>}
+            {active === "AI Secretary" && (
+              <DailyBriefingPanel briefing={dailyBriefing} onOpenSection={setActive} />
+            )}
             {active === "AI Secretary" && <section className="card automation-control">
               <div className="automation-heading">
                 <div>

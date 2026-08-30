@@ -249,6 +249,29 @@
 .inbox-compose textarea { min-height: 120px; resize: vertical; }
 .inbox-compose button { justify-self: start; padding: 10px 15px; border: 0; border-radius: 8px; background: #185adb; color: #fff; font-weight: 700; cursor: pointer; }
 .inbox-compose button:disabled { opacity: .5; cursor: default; }
+.daily-briefing { display: grid; gap: 16px; margin: 16px 0; }
+.daily-briefing-heading { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 14px; align-items: center; }
+.daily-briefing-heading h2, .daily-briefing-heading p { margin: 3px 0; }
+.daily-briefing-heading p { color: #68786f; }
+.daily-briefing-heading > b { padding: 8px 11px; border-radius: 999px; font-size: 12px; }
+.daily-briefing-heading .has-attention { color: #9a3e26; background: #fff0e9; }
+.daily-briefing-heading .all-clear { color: #087a59; background: #e8f7f1; }
+.daily-briefing-metrics { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 8px; }
+.daily-briefing-metrics span { padding: 10px; border: 1px solid #e2e9e5; border-radius: 10px; color: #6c7972; font-size: 11px; }
+.daily-briefing-metrics strong { display: block; color: #16241d; font-size: 21px; }
+.daily-briefing-list { display: grid; gap: 8px; }
+.daily-briefing-list article { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid #e2e9e5; border-left: 4px solid #89a398; border-radius: 10px; }
+.daily-briefing-list article.priority-critical { border-left-color: #d84c4c; background: #fffafa; }
+.daily-briefing-list article.priority-high { border-left-color: #e6a23c; }
+.daily-briefing-list article > div:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
+.daily-briefing-list article span, .daily-briefing-list article small { color: #748078; font-size: 11px; }
+.daily-briefing-list article strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daily-briefing-list article p { margin: 0; color: #53635b; font-size: 13px; }
+.daily-briefing-list article button { padding: 8px 11px; border: 1px solid #bfcfc7; border-radius: 8px; background: #fff; color: #31564a; cursor: pointer; }
+.daily-briefing-icon { color: #9a6a24; }
+.daily-briefing-icon svg { width: 20px; height: 20px; }
+.daily-briefing-empty { display: flex; gap: 9px; align-items: center; justify-content: center; padding: 18px; color: #16866f; }
+.daily-briefing-safety { color: #748078; }
 .automation-control { display: grid; gap: 16px; margin: 16px 0; }
 .automation-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
 .automation-heading h2, .automation-heading p { margin: 4px 0; }
@@ -269,6 +292,8 @@
 .automation-result { margin-top: 4px; padding: 7px 9px; border-radius: 7px; background: #eff9f5; color: #087a59; font-size: 12px; }
 .automation-actions { display: flex!important; grid-auto-flow: column; gap: 7px!important; }
 @media (max-width: 760px) {
+  .daily-briefing-heading, .daily-briefing-list article { grid-template-columns: 1fr; }
+  .daily-briefing-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .automation-form { grid-template-columns: 1fr; }
   .automation-form textarea { grid-column: auto; }
   .automation-list article { grid-template-columns: 1fr; }
