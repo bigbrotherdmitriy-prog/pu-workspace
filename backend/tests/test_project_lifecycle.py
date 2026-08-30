@@ -1,4 +1,6 @@
-from app.api.projects import router
+from types import SimpleNamespace
+
+from app.api.projects import _source_session_ready, router
 
 
 def test_project_lifecycle_routes_are_registered():
@@ -8,3 +10,10 @@ def test_project_lifecycle_routes_are_registered():
     assert "/projects/{project_id}/safe-copies" in paths
     assert "/projects/{project_id}/safe-copies/trash" in paths
     assert "/projects/{project_id}/launch-readiness" in paths
+
+
+def test_project_launch_source_is_ready_after_safe_copy_analysis_finishes():
+    assert _source_session_ready(SimpleNamespace(status="proposed", copy_folder_id="safe-copy"))
+    assert _source_session_ready(SimpleNamespace(status="applied", copy_folder_id="safe-copy"))
+    assert not _source_session_ready(SimpleNamespace(status="analyzing", copy_folder_id="safe-copy"))
+    assert not _source_session_ready(SimpleNamespace(status="proposed", copy_folder_id=None))

@@ -28,6 +28,14 @@ router = APIRouter(
 )
 
 
+LAUNCH_READY_SOURCE_STATUSES = frozenset({"proposed", "applied", "ready", "completed"})
+
+
+def _source_session_ready(session: OrganizerSession) -> bool:
+    """A source is ready only after a safe copy exists and scanning has finished."""
+    return bool(session.copy_folder_id) and session.status in LAUNCH_READY_SOURCE_STATUSES
+
+
 class ProjectCreate(BaseModel):
     name: str
     organization_id: int | None = None
@@ -157,8 +165,8 @@ def project_launch_readiness(
     result = {
         "project_id": project_id,
         "project_name": project.name,
-        "source_folders": len({row.source_folder_id for row in sources}),
-        "source_ready": any(row.status in {"ready", "completed"} for row in sources),
+        "source_folders": len({row.source_folder_id for row in sources if row.source_folder_id}),
+        "source_ready": any(_source_session_ready(row) for row in sources),
         "documents": documents,
         "analyzed_documents": analyzed_documents,
         "contracts": len(contracts),
