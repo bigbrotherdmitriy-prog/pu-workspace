@@ -4,6 +4,7 @@ import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
+import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import {
   Activity,
   AlertTriangle,
@@ -24,6 +25,7 @@ import {
   Mail,
   Menu,
   RefreshCw,
+  Route,
   RotateCcw,
   Search,
   Settings,
@@ -434,6 +436,7 @@ type IntegrationItem = {
 
 const items = [
   [LayoutDashboard, "Рабочий центр"],
+  [Route, "Запуск проекта"],
   [FolderKanban, "Проекты"],
   [FileText, "Договоры"],
   [FileText, "Документы"],
@@ -2017,6 +2020,24 @@ export function App() {
         <section className="content">
           {error && <div className="error">{error}</div>}
           {notice && <div className="notice">{notice}</div>}
+          {active === "Запуск проекта" && (
+            <ProjectLaunchWizard
+              state={{
+                projectName: projects.find((project) => project.id === projectId)?.name || "",
+                documents: documentRows.length,
+                analyzedDocuments: documentRows.filter((document) => ["analyzed", "indexed", "ready"].includes(document.status)).length,
+                contracts: contracts.length,
+                linkedContracts: contracts.filter((contract) => Boolean(contract.source_document_id)).length,
+                scheduleRows: finance?.schedule.length || 0,
+                budgetRows: finance?.budget.length || 0,
+                cashFlowRows: finance?.cash_flow.length || 0,
+                contacts: projectContacts.length,
+                confirmedContacts: projectContacts.filter((contact) => contact.confirmed).length,
+                inboxMessages: inbox.length,
+              }}
+              openSection={setActive}
+            />
+          )}
           {active === "Задачи" ? (
             <section className="card task-register">
               <div className="card-head">
@@ -2255,7 +2276,7 @@ export function App() {
                 </div>
               </div>
             </section>
-          ) : (
+          ) : active === "Рабочий центр" ? (
             <>
               <div className="metrics">
                 {metrics.map(([label, value, tone]) => (
@@ -2548,7 +2569,7 @@ export function App() {
                 </section>
               </div>
             </>
-          )}
+          ) : null}
         </section>
       </main>
       {active === "Аналитика" && (
