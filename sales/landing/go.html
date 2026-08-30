@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Переход в PU Workspace</title>
+  <style>
+    body{margin:0;background:#0d1713;color:#eef7f2;font:16px/1.5 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}
+    main{max-width:34rem;padding:2rem;text-align:center}.mark{color:#23b889;font-weight:800}a{color:#62ddb5}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">[PU] WORKSPACE</div>
+    <h1>Открываем Telegram…</h1>
+    <p>Если переход не начался, <a id="manual" href="https://t.me/puworkspace_bot">откройте бот вручную</a>.</p>
+  </main>
+  <script>
+    const requested = new URLSearchParams(location.search).get('source') || 'site_direct';
+    const source = /^[A-Za-z0-9_-]{1,64}$/.test(requested) ? requested : 'site_direct';
+    const destination = `https://t.me/puworkspace_bot?start=${encodeURIComponent(source)}`;
+    document.getElementById('manual').href = destination;
+    window.location.replace(destination);
+  </script>
+</body>
+</html>
