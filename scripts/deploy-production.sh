@@ -78,18 +78,8 @@ echo "[1/6] validating compose and candidate tests"
 cd "$RELEASE_DIR"
 $COMPOSE config --quiet
 docker run --rm -e PYTHONPATH=/app \
-  -v "$RELEASE_DIR/Dockerfile:/workspace/Dockerfile:ro" \
-  -v "$RELEASE_DIR/docker-compose.yml:/workspace/docker-compose.yml:ro" \
-  -v "$RELEASE_DIR/.env.example:/workspace/.env.example:ro" \
-  -v "$RELEASE_DIR/.gitignore:/workspace/.gitignore:ro" \
-  -v "$RELEASE_DIR/README.md:/workspace/README.md:ro" \
-  -v "$RELEASE_DIR/backend/tests:/workspace/backend/tests:ro" \
-  -v "$RELEASE_DIR/backend/app:/workspace/backend/app:ro" \
-  -v "$RELEASE_DIR/backend/migrations:/workspace/backend/migrations:ro" \
-  -v "$RELEASE_DIR/docs:/workspace/docs:ro" \
-  -v "$RELEASE_DIR/frontend:/workspace/frontend:ro" \
-  -v "$RELEASE_DIR/scripts:/workspace/scripts:ro" \
-  -v "$RELEASE_DIR/.github:/workspace/.github:ro" \
+  -v "$RELEASE_DIR:/workspace:ro" \
+  -v /dev/null:/workspace/.env:ro \
   -w /workspace/backend "$CANDIDATE_IMAGE" python -m pytest tests -q
 
 echo "[2/6] creating and validating PostgreSQL backup"

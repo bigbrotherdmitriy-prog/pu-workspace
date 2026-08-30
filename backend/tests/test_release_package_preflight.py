@@ -29,8 +29,9 @@ def test_production_candidate_mounts_the_complete_release_contract():
     root = repository_root()
     deploy = (root / "scripts" / "deploy-production.sh").read_text(encoding="utf-8")
 
-    for required in ("Dockerfile", "docker-compose.yml", ".env.example", ".gitignore", "README.md", "docs"):
-        assert f'$RELEASE_DIR/{required}' in deploy
+    assert '-v "$RELEASE_DIR:/workspace:ro"' in deploy
+    assert "-v /dev/null:/workspace/.env:ro" in deploy
+    assert "-w /workspace/backend" in deploy
 
 
 def test_preflight_rejects_incomplete_package(tmp_path):
