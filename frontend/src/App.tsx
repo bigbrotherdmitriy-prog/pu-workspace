@@ -18,6 +18,7 @@ import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./mod
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
 import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
+import { MeetingsModule, type MeetingRow } from "./modules/meetings/MeetingsModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
@@ -338,16 +339,6 @@ type AutomationRule = {
   next_run_on: string;
   last_run_on?: string;
   runs: { id: number; scheduled_for: string; task_id?: number; response_draft_id?: number; status: string }[];
-};
-type MeetingRow = {
-  id: number;
-  contract_id?: number;
-  title: string;
-  scheduled_at?: string;
-  participants?: string;
-  agenda?: string;
-  minutes?: string;
-  status: string;
 };
 type NotificationRow = NotificationItem;
 const items = [
@@ -2514,81 +2505,18 @@ export function App() {
         />
       )}
       {active === "Совещания" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page">
-            <section className="card meeting-create">
-              <div>
-                <h2>Новое совещание</h2>
-                <p>
-                  После встречи внесите протокол — система выделит поручения,
-                  риски и решения.
-                </p>
-              </div>
-              <div>
-                <input
-                  value={newMeetingTitle}
-                  onChange={(e) => setNewMeetingTitle(e.target.value)}
-                  placeholder="Название совещания"
-                />
-                <input
-                  type="datetime-local"
-                  value={newMeetingDate}
-                  onChange={(e) => setNewMeetingDate(e.target.value)}
-                />
-                <textarea
-                  value={newMeetingAgenda}
-                  onChange={(e) => setNewMeetingAgenda(e.target.value)}
-                  placeholder="Повестка"
-                />
-                <button
-                  disabled={!newMeetingTitle.trim()}
-                  onClick={createMeeting}
-                >
-                  Запланировать
-                </button>
-              </div>
-            </section>
-            <section className="meeting-grid">
-              {meetings.map((item) => (
-                <article className="card meeting-card" key={item.id}>
-                  <span className={`management-status ${item.status}`}>
-                    {item.status}
-                  </span>
-                  <h2>{item.title}</h2>
-                  <p>
-                    {item.scheduled_at
-                      ? new Date(item.scheduled_at).toLocaleString("ru-RU")
-                      : "Дата не назначена"}
-                  </p>
-                  {item.agenda && (
-                    <div className="meeting-agenda">
-                      <strong>Повестка</strong>
-                      <p>{item.agenda}</p>
-                    </div>
-                  )}
-                  {item.minutes && (
-                    <div className="meeting-agenda">
-                      <strong>Протокол</strong>
-                      <p>{item.minutes}</p>
-                    </div>
-                  )}
-                  {item.status !== "completed" &&
-                    item.status !== "cancelled" && (
-                      <button onClick={() => recordMinutes(item)}>
-                        Внести протокол и проанализировать
-                      </button>
-                    )}
-                </article>
-              ))}
-              {!meetings.length && (
-                <div className="card empty">
-                  <Users />
-                  <p>Совещаний пока нет.</p>
-                </div>
-              )}
-            </section>
-          </div>
-        </section>
+        <MeetingsModule
+          collapsed={collapsed}
+          meetings={meetings}
+          title={newMeetingTitle}
+          date={newMeetingDate}
+          agenda={newMeetingAgenda}
+          onTitleChange={setNewMeetingTitle}
+          onDateChange={setNewMeetingDate}
+          onAgendaChange={setNewMeetingAgenda}
+          onCreate={() => void createMeeting()}
+          onRecordMinutes={(meeting) => void recordMinutes(meeting)}
+        />
       )}
       {active === "Уведомления" && (
         <NotificationsModule
