@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -41,4 +42,18 @@ def test_observe_request_returns_correlation_header_and_scopes_context():
 
     assert response.headers["x-request-id"] == "demo-42"
     assert seen == ["demo-42"]
+    assert request_id_context.get() == ""
+
+
+def test_observe_request_returns_safe_support_code_for_unhandled_error():
+    async def failing_handler(_request):
+        raise RuntimeError("private backend detail")
+
+    response = asyncio.run(observe_request(_request("failure-42"), failing_handler))
+    payload = json.loads(response.body)
+
+    assert response.status_code == 500
+    assert response.headers["x-request-id"] == "failure-42"
+    assert payload == {"detail": "Внутренняя ошибка. Код: failure-42"}
+    assert "private backend detail" not in response.body.decode()
     assert request_id_context.get() == ""

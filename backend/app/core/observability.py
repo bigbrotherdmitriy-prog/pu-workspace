@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 
 
 log = logging.getLogger("uvicorn.error")
@@ -44,7 +45,12 @@ async def observe_request(
             request.url.path,
             (time.perf_counter() - started) * 1000,
         )
-        raise
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": f"Внутренняя ошибка. Код: {request_id}"},
+            headers={"X-Request-ID": request_id},
+        )
+        return response
     finally:
         if status_code != 500:
             log.info(
