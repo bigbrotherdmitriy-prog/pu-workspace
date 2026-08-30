@@ -2009,6 +2009,7 @@ export function App() {
               openSection={(section, target) => {
                 if (target === "contacts") setMailView("companies");
                 setActive(section);
+                if (target === "source") void openSources("root");
               }}
             />
           )}
