@@ -18,6 +18,16 @@ class SalesLandingTest(unittest.TestCase):
         self.assertIn("исходным кодом", source)
         self.assertIn("start=license_page", source)
 
+    def test_home_has_conversion_sections_and_distinct_lead_sources(self) -> None:
+        source = (LANDING / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="compare"', source)
+        self.assertIn('id="purchase"', source)
+        self.assertIn('id="faq"', source)
+        self.assertIn("ГПР, бюджет и ДДС", source)
+        self.assertIn("start=package_license", source)
+        self.assertIn("start=diagnostic_bar", source)
+        self.assertIn("Значимые действия подтверждает человек", source)
+
 
 if __name__ == "__main__":
     unittest.main()
