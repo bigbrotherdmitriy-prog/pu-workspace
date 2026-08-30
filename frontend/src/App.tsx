@@ -14,7 +14,7 @@ import { NotificationsModule, type NotificationItem } from "./modules/notificati
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
-import { FolderAnalysisSummary } from "./modules/folder-analysis/FolderAnalysisSummary";
+import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
@@ -214,27 +214,6 @@ type CurrentUser = {
   name: string;
   email: string;
   is_admin: boolean;
-};
-type ProposalAction = {
-  id: number;
-  source: string;
-  proposed_name: string;
-  target_folder: string;
-  edited_name?: string;
-  edited_folder?: string;
-  user_decision: string;
-  confidence: number;
-  special_case?: string;
-  reasoning: string;
-};
-type Proposal = {
-  id: number;
-  folder_name: string;
-  status: string;
-  copy_folder_id: string;
-  originals_modified: boolean;
-  note?: string;
-  actions: ProposalAction[];
 };
 type ContractRow = {
   id: number;
@@ -3151,218 +3130,25 @@ export function App() {
         </ContractsModule>
       )}
       {active === "Предложения" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page">
-            <FolderAnalysisSummary
-              proposals={proposals}
-              onOpenDocuments={() => setActive("Документы")}
-            />
-            <section className="card proposal-intro">
-              <div>
-                <h2>Предлагаемые изменения</h2>
-                <p>
-                  Пакеты «Безопасная копия» не затрагивают оригиналы. В пакетах
-                  «Оригинал» можно применить только одно явно выбранное
-                  изменение.
-                </p>
-              </div>
-              <span>{proposals.length} пакетов</span>
-            </section>
-            <div className="proposal-list">
-              {proposals.map((proposal) => (
-                <article className="card proposal-card" key={proposal.id}>
-                  <div className="proposal-head">
-                    <div>
-                      <span className={`proposal-status ${proposal.status}`}>
-                        {proposal.status}
-                      </span>
-                      <h2>{proposal.folder_name}</h2>
-                      <p>
-                        Пакет №{proposal.id} · действий{" "}
-                        {proposal.actions.length} ·{" "}
-                        <strong>
-                          {proposal.copy_folder_id.startsWith("virtual:")
-                            ? "ОРИГИНАЛ — только одно подтверждённое изменение"
-                            : "БЕЗОПАСНАЯ КОПИЯ"}
-                        </strong>
-                      </p>
-                    </div>
-                    <div className="proposal-controls">
-                      {proposal.status === "waiting_confirmation" &&
-                        !proposal.copy_folder_id.startsWith("virtual:") && (
-                          <button
-                            disabled={busyProposal === proposal.id}
-                            onClick={() => approveSafe(proposal)}
-                          >
-                            Подтвердить только безопасные
-                          </button>
-                        )}
-                      {["approved", "ready_to_apply_to_copy"].includes(
-                        proposal.status,
-                      ) &&
-                        !proposal.copy_folder_id.startsWith("virtual:") && (
-                          <button
-                            className="apply-safe"
-                            disabled={busyProposal === proposal.id}
-                            onClick={() => applyProposal(proposal)}
-                          >
-                            Dry-run и применить к копии
-                          </button>
-                        )}
-                      {["applied", "rollback_partial"].includes(
-                        proposal.status,
-                      ) && (
-                        <button
-                          className="apply-safe"
-                          disabled={busyProposal === proposal.id}
-                          onClick={() => standardizeProposal(proposal)}
-                        >
-                          Стандартизировать все файлы в копии
-                        </button>
-                      )}
-                      {["applied", "rollback_partial"].includes(
-                        proposal.status,
-                      ) && (
-                        <button
-                          className="rollback"
-                          disabled={busyProposal === proposal.id}
-                          onClick={() => rollbackProposal(proposal)}
-                        >
-                          <RotateCcw />
-                          Откатить
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {proposal.note && (
-                    <div className="proposal-note">{proposal.note}</div>
-                  )}
-                  <div className="proposal-actions-table">
-                    <div className="proposal-table-head">
-                      <span>Решение</span>
-                      <span>Было</span>
-                      <span>Станет</span>
-                      <span>Уверенность и основание</span>
-                    </div>
-                    {proposal.actions.slice(0, 500).map((action) => (
-                      <div className="proposal-action" key={action.id}>
-                        <select
-                          value={action.user_decision}
-                          onChange={(e) =>
-                            editProposalAction(action, e.target.value)
-                          }
-                          disabled={proposal.status !== "waiting_confirmation"}
-                        >
-                          <option value="pending">Проверить</option>
-                          <option value="approved">Одобрить</option>
-                          <option value="edited">Изменить</option>
-                          <option value="skipped">Пропустить</option>
-                        </select>
-                        <strong>{action.source}</strong>
-                        <div>
-                          <input
-                            value={action.edited_name || action.proposed_name}
-                            disabled={
-                              proposal.status !== "waiting_confirmation"
-                            }
-                            onBlur={() =>
-                              action.user_decision === "edited" &&
-                              saveProposalAction(proposal.id, action.id)
-                            }
-                            onChange={(e) =>
-                              setProposals((rows) =>
-                                rows.map((row) =>
-                                  row.id === proposal.id
-                                    ? {
-                                        ...row,
-                                        actions: row.actions.map((x) =>
-                                          x.id === action.id
-                                            ? {
-                                                ...x,
-                                                edited_name: e.target.value,
-                                                user_decision: "edited",
-                                              }
-                                            : x,
-                                        ),
-                                      }
-                                    : row,
-                                ),
-                              )
-                            }
-                          />
-                          <select
-                            value={action.edited_folder || action.target_folder}
-                            disabled={
-                              proposal.status !== "waiting_confirmation"
-                            }
-                            onChange={(e) =>
-                              setProposals((rows) =>
-                                rows.map((row) =>
-                                  row.id === proposal.id
-                                    ? {
-                                        ...row,
-                                        actions: row.actions.map((x) =>
-                                          x.id === action.id
-                                            ? {
-                                                ...x,
-                                                edited_folder: e.target.value,
-                                                user_decision: "edited",
-                                              }
-                                            : x,
-                                        ),
-                                      }
-                                    : row,
-                                ),
-                              )
-                            }
-                          >
-                            {targetFolders.map((folder) => (
-                              <option key={folder}>{folder}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <span
-                            className={
-                              action.special_case ? "needs-review" : ""
-                            }
-                          >
-                            {Math.round(action.confidence * 100)}%
-                            {action.special_case
-                              ? ` · ${action.special_case}`
-                              : ""}
-                          </span>
-                          <p>{action.reasoning}</p>
-                          {proposal.copy_folder_id.startsWith("virtual:") &&
-                            action.user_decision === "edited" && (
-                              <button
-                                className="apply-source-inline"
-                                disabled={busyProposal === proposal.id}
-                                onClick={() =>
-                                  applyOneToSource(proposal, action)
-                                }
-                              >
-                                Проверить и изменить этот оригинал
-                              </button>
-                            )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              ))}
-              {!proposals.length && (
-                <div className="card empty">
-                  <GitPullRequest />
-                  <p>
-                    Предложений пока нет. Запустите анализ подготовленного
-                    снимка папки.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
+        <ProposalsModule
+          collapsed={collapsed}
+          proposals={proposals}
+          busyProposal={busyProposal}
+          targetFolders={targetFolders}
+          onOpenDocuments={() => setActive("Документы")}
+          onApproveSafe={(proposal) => void approveSafe(proposal)}
+          onApply={(proposal) => void applyProposal(proposal)}
+          onStandardize={(proposal) => void standardizeProposal(proposal)}
+          onRollback={(proposal) => void rollbackProposal(proposal)}
+          onDecision={(action, decision) => void editProposalAction(action, decision)}
+          onSave={(proposalId, actionId) => void saveProposalAction(proposalId, actionId)}
+          onEdit={(proposalId, actionId, patch) => setProposals((rows) => rows.map((row) =>
+            row.id === proposalId
+              ? { ...row, actions: row.actions.map((action) => action.id === actionId ? { ...action, ...patch } : action) }
+              : row
+          ))}
+          onApplySource={(proposal, action) => void applyOneToSource(proposal, action)}
+        />
       )}
       {active === "Интеграции" && (
         <IntegrationsModule

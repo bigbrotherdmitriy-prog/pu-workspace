@@ -16,6 +16,8 @@ def test_folder_analysis_summary_explains_scan_result_and_next_step():
 
 def test_folder_analysis_summary_is_connected_to_proposals_screen():
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
-    assert 'import { FolderAnalysisSummary }' in app
-    assert "<FolderAnalysisSummary" in app
-    assert 'onOpenDocuments={() => setActive("Документы")}' in app
+    proposals = (ROOT / "frontend/src/modules/proposals/ProposalsModule.tsx").read_text(encoding="utf-8")
+    assert 'import { ProposalsModule' in app
+    assert "<ProposalsModule" in app
+    assert "<FolderAnalysisSummary" in proposals
+    assert "onOpenDocuments={props.onOpenDocuments}" in proposals
