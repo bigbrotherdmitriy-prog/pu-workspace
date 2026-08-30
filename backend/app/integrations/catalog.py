@@ -47,7 +47,11 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
             description=description,
             available=google.configured(),
             connected=google_health.ready and scope in google_scopes,
-            action="sync" if name == "Gmail" else "oauth",
+            action=(
+                "sync" if capability == "channel"
+                else "select_source" if capability == "storage" and google_health.ready and scope in google_scopes
+                else "oauth"
+            ),
             detail="scope granted" if google_health.ready and scope in google_scopes else (
                 "authorization required" if google.configured() else "provider is not configured"
             ),

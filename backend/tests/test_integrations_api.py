@@ -51,3 +51,18 @@ def test_catalog_status_serializes_provider_neutral_fields():
     assert status["capability"] == "channel"
     assert status["connected"] is False
     assert "google" not in status["key"]
+
+
+def test_catalog_supports_provider_neutral_source_selection_action():
+    status = IntegrationStatus(
+        key="demo:storage",
+        provider="demo",
+        capability="storage",
+        name="Demo storage",
+        description="Test storage adapter",
+        available=True,
+        connected=True,
+        action="select_source",
+    ).as_dict()
+
+    assert status["action"] == "select_source"

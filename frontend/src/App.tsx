@@ -6,6 +6,7 @@ import { useFinanceController } from "./modules/finance/useFinanceController";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
+import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
 import {
   Activity,
   AlertTriangle,
@@ -210,12 +211,6 @@ type ProcessingQueue = {
     retry_count: number;
     error_message?: string;
   }>;
-};
-type SystemState = {
-  ready: boolean;
-  google_drive_ready: boolean;
-  telegram_ready: boolean;
-  checks: Record<string, { ok: boolean; required: boolean; message: string }>;
 };
 type CurrentUser = {
   id: number;
@@ -422,17 +417,6 @@ type ProjectAnalytics = {
   tasks_by_status: AnalyticsDistribution;
   risks_by_criticality: AnalyticsDistribution;
   messages_by_channel: AnalyticsDistribution;
-};
-type IntegrationItem = {
-  key: string;
-  provider: string;
-  capability: "storage" | "channel" | "task" | "calendar" | "ai";
-  name: string;
-  description: string;
-  available: boolean;
-  connected: boolean;
-  action?: "oauth" | "sync" | "local_upload" | "ai_policy";
-  detail?: string;
 };
 
 const items = [
@@ -3637,84 +3621,20 @@ export function App() {
         </section>
       )}
       {active === "Интеграции" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page">
-            <div className="integration-grid">
-              {integrationItems.map((item) => (
-                <article className="card integration-card" key={item.key}>
-                  <div
-                    className={`integration-icon ${item.connected ? "connected" : ""}`}
-                  >
-                    {item.capability === "channel" ? <Mail /> : item.capability === "ai" ? <Bot /> : item.capability === "storage" ? <FolderTree /> : <CalendarDays />}
-                  </div>
-                  <div>
-                    <h2>{item.name}</h2>
-                    <p>{item.description}</p>
-                    <small>{item.capability} · {item.provider}</small>
-                    {item.detail && <small className="integration-detail">{item.detail}</small>}
-                  </div>
-                  <span className={item.connected ? "connected" : ""}>
-                    {item.connected ? "Готово" : item.available ? "Не подключено" : "Недоступно"}
-                  </span>
-                  {item.action === "sync" && item.connected ? (
-                    <button onClick={() => syncGmail()} disabled={gmailSyncing}>
-                      {gmailSyncing ? "Получаю…" : "Получить письма"}
-                    </button>
-                  ) : item.provider === "google_workspace" &&
-                    item.capability === "storage" &&
-                    item.connected ? (
-                    <button
-                      onClick={() => {
-                        setActive("Рабочий центр");
-                        void openSources("root");
-                      }}
-                    >
-                      Выбрать папку
-                    </button>
-                  ) : item.action === "oauth" ? (
-                    <button onClick={connectGoogle}>{item.connected ? "Переподключить" : "Подключить"}</button>
-                  ) : item.action === "local_upload" ? (
-                    <button onClick={() => { setActive("Рабочий центр"); setNotice("Нажмите «Загрузить рабочую папку» в рабочем центре"); }}>Загрузить папку</button>
-                  ) : item.action === "ai_policy" ? (
-                    <button onClick={() => setActive("Настройки")}>Политика AI</button>
-                  ) : null}
-                  {item.action === "sync" && gmailSyncStatus && (
-                    <div className="integration-sync-result">
-                      <small>{gmailSyncStatus}</small>
-                      {!gmailSyncing && (
-                        <button onClick={openGmailResults}>
-                          Открыть AI Secretary
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </article>
-              ))}
-              {!integrationItems.length && <div className="card empty"><Activity /><p>Каталог подключений загружается…</p></div>}
-            </div>
-            <section className="card system-checks">
-              <div className="card-head">
-                <div>
-                  <h2>Состояние системы</h2>
-                  <p>Проверка обязательных и внешних компонентов</p>
-                </div>
-                <button onClick={loadIntegrations}>Проверить снова</button>
-              </div>
-              {Object.entries(systemState?.checks || {}).map(
-                ([name, check]) => (
-                  <div className="check-row" key={name}>
-                    <span className={check.ok ? "ok" : "bad"}></span>
-                    <strong>{name.replaceAll("_", " ")}</strong>
-                    <p>{check.message}</p>
-                    <small>
-                      {check.required ? "обязательно" : "интеграция"}
-                    </small>
-                  </div>
-                ),
-              )}
-            </section>
-          </div>
-        </section>
+        <IntegrationsModule
+          collapsed={collapsed}
+          items={integrationItems}
+          systemState={systemState}
+          gmailSyncing={gmailSyncing}
+          gmailSyncStatus={gmailSyncStatus}
+          onSyncGmail={() => void syncGmail()}
+          onSelectFolder={() => { setActive("Рабочий центр"); void openSources("root"); }}
+          onConnectGoogle={() => void connectGoogle()}
+          onLocalUpload={() => { setActive("Рабочий центр"); setNotice("Нажмите «Загрузить рабочую папку» в рабочем центре"); }}
+          onOpenAIPolicy={() => setActive("Настройки")}
+          onOpenGmailResults={openGmailResults}
+          onReload={() => void loadIntegrations()}
+        />
       )}
       {active === "Журнал" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
