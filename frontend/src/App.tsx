@@ -25,6 +25,7 @@ import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import { PasswordChangeCard } from "./modules/settings/PasswordChangeCard";
+import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import {
   Activity,
   AlertTriangle,
@@ -140,25 +141,6 @@ type TaskHistoryRow = {
   details?: string;
   changed_by: string;
   changed_at: string;
-};
-type RiskRow = {
-  id: number;
-  title: string;
-  kind: string;
-  criticality: string;
-  status: string;
-  action_note?: string;
-  source_name: string;
-  confidence: number;
-};
-type DecisionRow = {
-  id: number;
-  question: string;
-  status: string;
-  decision_text?: string;
-  reason?: string;
-  source_name: string;
-  confidence: number;
 };
 type ResponseDraft = {
   id: number;
@@ -2052,97 +2034,12 @@ export function App() {
               </div>
             </section>
           ) : active === "Риски и решения" ? (
-            <section className="governance-grid">
-              <div className="card">
-                <div className="card-head">
-                  <div>
-                    <h2>Риски</h2>
-                    <p>Обнаружено: {risks.length}</p>
-                  </div>
-                </div>
-                <div className="governance-list">
-                  {risks.map((risk) => (
-                    <article key={risk.id}>
-                      <div>
-                        <strong>{risk.title}</strong>
-                        <p>
-                          {risk.source_name} · уверенность{" "}
-                          {Math.round(risk.confidence * 100)}%
-                        </p>
-                        <span
-                          className={`governance-status ${risk.criticality}`}
-                        >
-                          {risk.status}
-                        </span>
-                      </div>
-                      <div className="task-actions">
-                        {risk.status === "needs_confirmation" && (
-                          <button onClick={() => updateRisk(risk, "confirmed")}>
-                            Подтвердить
-                          </button>
-                        )}
-                        {!["resolved", "dismissed"].includes(risk.status) && (
-                          <button
-                            className="complete"
-                            onClick={() => updateRisk(risk, "resolved")}
-                          >
-                            Закрыть
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-              <div className="card">
-                <div className="card-head">
-                  <div>
-                    <h2>Решения</h2>
-                    <p>
-                      Ожидают фиксации:{" "}
-                      {
-                        decisions.filter(
-                          (x) => !["executed", "dismissed"].includes(x.status),
-                        ).length
-                      }
-                    </p>
-                  </div>
-                </div>
-                <div className="governance-list">
-                  {decisions.map((item) => (
-                    <article key={item.id}>
-                      <div>
-                        <strong>{item.question}</strong>
-                        <p>
-                          {item.source_name} · уверенность{" "}
-                          {Math.round(item.confidence * 100)}%
-                        </p>
-                        <span className="governance-status">{item.status}</span>
-                      </div>
-                      <div className="task-actions">
-                        {!["decided", "executed", "dismissed"].includes(
-                          item.status,
-                        ) && (
-                          <button
-                            className="complete"
-                            onClick={() => updateDecision(item, "decided")}
-                          >
-                            Принять
-                          </button>
-                        )}
-                        {!["executed", "dismissed"].includes(item.status) && (
-                          <button
-                            onClick={() => updateDecision(item, "dismissed")}
-                          >
-                            Отклонить
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            </section>
+            <GovernanceModule
+              risks={risks}
+              decisions={decisions}
+              onUpdateRisk={(risk, status) => void updateRisk(risk, status)}
+              onUpdateDecision={(decision, status) => void updateDecision(decision, status)}
+            />
           ) : active === "Рабочий центр" ? (
             <>
               <div className="metrics">
