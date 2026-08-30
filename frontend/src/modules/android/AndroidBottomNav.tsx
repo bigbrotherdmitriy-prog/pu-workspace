@@ -1,4 +1,4 @@
-import { Bot, CalendarDays, FileText, ListTodo, Mail } from "lucide-react";
+import { Bot, CalendarDays, FileText, ListTodo, Mail, Plus } from "lucide-react";
 import "./android.css";
 
 const items = [
@@ -12,10 +12,11 @@ const items = [
 type Props = {
   active: string;
   onNavigate: (section: string) => void;
+  onUpload: () => void;
 };
 
-export function AndroidBottomNav({ active, onNavigate }: Props) {
-  return <nav className="android-bottom-nav" aria-label="Основная мобильная навигация">
+export function AndroidBottomNav({ active, onNavigate, onUpload }: Props) {
+  return <><button type="button" className="android-upload-fab" aria-label="Добавить документ" onClick={onUpload}><Plus /></button><nav className="android-bottom-nav" aria-label="Основная мобильная навигация">
     {items.map(([Icon, label]) => <button
       type="button"
       className={active === label ? "active" : ""}
@@ -25,5 +26,5 @@ export function AndroidBottomNav({ active, onNavigate }: Props) {
     >
       <Icon /><span>{label === "AI Secretary" ? "AI" : label}</span>
     </button>)}
-  </nav>;
+  </nav></>;
 }

@@ -4,6 +4,7 @@ import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
+import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
@@ -15,9 +16,12 @@ import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
+import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
+import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
+import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import {
   Activity,
   AlertTriangle,
@@ -163,14 +167,6 @@ type ResponseDraft = {
   confidence: number;
   reviewer_name: string;
   recipient_to?: string;
-};
-type AuditRow = {
-  id: number;
-  action: string;
-  entity_type: string;
-  entity_id?: number;
-  details?: string;
-  created_at: string;
 };
 type MemberRow = {
   membership_id: number;
@@ -365,27 +361,6 @@ type MeetingRow = {
   status: string;
 };
 type NotificationRow = NotificationItem;
-type AnalyticsDistribution = { key: string; count: number }[];
-type ProjectAnalytics = {
-  summary: {
-    documents: number;
-    document_coverage: number;
-    open_tasks: number;
-    overdue_tasks: number;
-    open_risks: number;
-    pending_decisions: number;
-    contracts: number;
-    active_contracts: number;
-    messages: number;
-    pending_messages: number;
-  };
-  documents_by_source: AnalyticsDistribution;
-  documents_by_status: AnalyticsDistribution;
-  tasks_by_status: AnalyticsDistribution;
-  risks_by_criticality: AnalyticsDistribution;
-  messages_by_channel: AnalyticsDistribution;
-};
-
 const items = [
   [CalendarDays, "Сегодня"],
   [LayoutDashboard, "Рабочий центр"],
@@ -429,6 +404,7 @@ export function App() {
     [mobile, setMobile] = useState(false),
     [online, setOnline] = useState(navigator.onLine),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
   const [active, setActive] = useState("Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -519,7 +495,7 @@ export function App() {
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment, updateScheduleActual, recordFinanceActual,
+    addFinanceItem, confirmFinance, confirmCashPayment,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
 
@@ -1758,26 +1734,6 @@ export function App() {
       currency: "RUB",
       maximumFractionDigits: 0,
     }).format(Number(value || 0));
-  const analyticsLabel = (value: string) => ({
-    assigned: "Назначены",
-    in_progress: "В работе",
-    completed: "Выполнены",
-    needs_confirmation: "Требуют подтверждения",
-    confirmed: "Подтверждены",
-    mitigating: "Снижаются",
-    resolved: "Закрыты",
-    low: "Низкая",
-    medium: "Средняя",
-    high: "Высокая",
-    critical: "Критическая",
-    email: "Email",
-    telegram: "Telegram",
-    manual: "Вручную",
-    document: "Документ",
-    discovered: "Обнаружены",
-    indexed: "Проиндексированы",
-    unknown: "Не определено",
-  } as Record<string, string>)[value] || value.replaceAll("_", " ");
   const visibleDocuments = documentRows.filter(
     (item) =>
       active === "Центр знаний" ||
@@ -2503,63 +2459,14 @@ export function App() {
           ) : null}
         </section>
       </main>
-      <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} />
-      {active === "Аналитика" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page analytics-page">
-            <section className="analytics-hero card">
-              <div>
-                <span className="eyebrow">PROJECT CORE</span>
-                <h2>Состояние проекта</h2>
-                <p>Единая аналитика по документам, задачам, рискам и входящим — независимо от подключённых сервисов.</p>
-              </div>
-              <button onClick={() => load()}><RefreshCw /> Обновить</button>
-            </section>
-            {analytics ? (
-              <>
-                <section className="analytics-metrics">
-                  {[
-                    ["Документы", analytics.summary.documents],
-                    ["Извлечена сводка", `${analytics.summary.document_coverage}%`],
-                    ["Открытые задачи", analytics.summary.open_tasks],
-                    ["Просрочено", analytics.summary.overdue_tasks],
-                    ["Открытые риски", analytics.summary.open_risks],
-                    ["Входящие без реакции", analytics.summary.pending_messages],
-                  ].map(([label, value]) => <article key={String(label)}><span>{label}</span><strong>{value}</strong></article>)}
-                </section>
-                <section className="analytics-grid">
-                  {[
-                    ["Источники документов", analytics.documents_by_source],
-                    ["Состояние документов", analytics.documents_by_status],
-                    ["Состояние задач", analytics.tasks_by_status],
-                    ["Критичность рисков", analytics.risks_by_criticality],
-                    ["Каналы входящих", analytics.messages_by_channel],
-                  ].map(([title, rawRows]) => {
-                    const rows = rawRows as AnalyticsDistribution;
-                    const maximum = Math.max(1, ...rows.map((row) => row.count));
-                    return <section className="card analytics-panel" key={String(title)}>
-                      <h2>{title as string}</h2>
-                      <div className="analytics-bars">
-                        {rows.map((row) => <div key={row.key}>
-                          <span>{analyticsLabel(row.key)}</span><b>{row.count}</b>
-                          <i><em style={{ width: `${Math.max(4, row.count / maximum * 100)}%` }} /></i>
-                        </div>)}
-                        {!rows.length && <p className="analytics-empty">Данных пока нет</p>}
-                      </div>
-                    </section>;
-                  })}
-                  <section className="card analytics-panel analytics-summary">
-                    <h2>Контур управления</h2>
-                    <p><strong>{analytics.summary.active_contracts}</strong> активных договоров из {analytics.summary.contracts}</p>
-                    <p><strong>{analytics.summary.pending_decisions}</strong> решений требуют фиксации</p>
-                    <p><strong>{analytics.summary.messages}</strong> входящих обработано системой</p>
-                  </section>
-                </section>
-              </>
-            ) : <section className="card empty"><Activity /><p>Аналитика загружается…</p></section>}
-          </div>
-        </section>
-      )}
+      <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} onUpload={() => setMobileUploadOpen(true)} />
+      <MobileDocumentUpload
+        open={mobileUploadOpen}
+        projectId={projectId}
+        onClose={() => setMobileUploadOpen(false)}
+        onComplete={(message) => { setNotice(message); void load(); setActive("Документы"); }}
+      />
+      {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {active === "Исполнение и финансы" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page finance-page">
@@ -3167,54 +3074,12 @@ export function App() {
         />
       )}
       {active === "Журнал" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page">
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <h2>Журнал действий</h2>
-                  <p>Последние {auditLogs.length} зафиксированных операций</p>
-                </div>
-                <button onClick={() => load()}>Обновить</button>
-              </div>
-              <div className="audit-list">
-                {auditLogs
-                  .filter(
-                    (item) =>
-                      !query ||
-                      `${item.action} ${item.entity_type} ${item.details || ""}`
-                        .toLocaleLowerCase("ru-RU")
-                        .includes(query.toLocaleLowerCase("ru-RU")),
-                  )
-                  .map((item) => (
-                    <article key={item.id}>
-                      <div className="audit-dot"></div>
-                      <div>
-                        <strong>{item.action}</strong>
-                        <p>
-                          {item.entity_type}
-                          {item.entity_id ? ` №${item.entity_id}` : ""}
-                        </p>
-                        {item.details && <small>{item.details}</small>}
-                      </div>
-                      <time>
-                        {new Date(item.created_at).toLocaleString("ru-RU")}
-                      </time>
-                    </article>
-                  ))}
-                {!auditLogs.length && (
-                  <div className="empty">
-                    <ShieldCheck />
-                    <p>
-                      Записей журнала пока нет или доступ разрешён только
-                      администратору.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
-        </section>
+        <AuditModule
+          collapsed={collapsed}
+          logs={auditLogs}
+          query={query}
+          onReload={() => void load()}
+        />
       )}
       {active === "Настройки" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
