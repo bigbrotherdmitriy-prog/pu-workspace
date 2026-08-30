@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from urllib.parse import urljoin
@@ -15,8 +16,11 @@ REQUIRED_UI_MARKERS = (
 )
 
 
-def _get(url: str, timeout: int = 20) -> tuple[int, str]:
-    request = Request(url, headers={"User-Agent": "PU-Workspace-Deploy-Smoke/1.0"})
+def _get(url: str, timeout: int = 20, token: str | None = None) -> tuple[int, str]:
+    headers = {"User-Agent": "PU-Workspace-Deploy-Smoke/1.0"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(url, headers=headers)
     with urlopen(request, timeout=timeout) as response:
         return int(response.status), response.read().decode("utf-8", errors="replace")
 
@@ -53,10 +57,42 @@ def check_public(base_url: str) -> dict[str, object]:
     }
 
 
+def check_authenticated_flow(base_url: str, token: str) -> dict[str, object]:
+    """Read-only acceptance check for the deployed project workflow."""
+    base = base_url.rstrip("/") + "/"
+    projects_status, projects_text = _get(urljoin(base, "projects/"), token=token)
+    projects_payload = json.loads(projects_text)
+    projects = projects_payload.get("projects", projects_payload if isinstance(projects_payload, list) else [])
+    if projects_status != 200 or not projects:
+        raise RuntimeError("authenticated project catalog is unavailable or empty")
+    project_id = int(projects[0]["id"])
+    readiness_status, readiness_text = _get(
+        urljoin(base, f"projects/{project_id}/launch-readiness"), token=token,
+    )
+    dashboard_status, dashboard_text = _get(
+        urljoin(base, f"dashboard/project?project_id={project_id}"), token=token,
+    )
+    readiness = json.loads(readiness_text)
+    dashboard = json.loads(dashboard_text)
+    if readiness_status != 200 or readiness.get("project_id") not in {None, project_id}:
+        raise RuntimeError("project launch readiness is unavailable")
+    if dashboard_status != 200 or "summary" not in dashboard:
+        raise RuntimeError("project dashboard is unavailable")
+    return {
+        "project_id": project_id,
+        "project_name": projects[0].get("name", ""),
+        "launch_readiness": True,
+        "dashboard": True,
+    }
+
+
 def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else "https://pu-workspace.duckdns.org/"
     try:
         result = check_public(base_url)
+        token = os.getenv("PU_WORKSPACE_TOKEN", "").strip()
+        if token:
+            result["authenticated"] = check_authenticated_flow(base_url, token)
     except Exception as exc:
         print(f"public smoke failed: {exc}", file=sys.stderr)
         return 1

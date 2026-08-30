@@ -38,3 +38,27 @@ def test_public_smoke_rejects_stale_frontend(monkeypatch):
         assert "incomplete or stale" in str(exc)
     else:
         raise AssertionError("stale frontend must fail production smoke")
+
+
+def test_authenticated_smoke_reads_project_launch_and_dashboard(monkeypatch):
+    responses = {
+        "https://example.test/projects/": (200, json.dumps({"projects": [{"id": 7, "name": "Pilot"}]})),
+        "https://example.test/projects/7/launch-readiness": (200, json.dumps({"project_id": 7})),
+        "https://example.test/dashboard/project?project_id=7": (200, json.dumps({"summary": {"documents": 3}})),
+    }
+    seen_tokens = []
+
+    def fake_get(url, timeout=20, token=None):
+        seen_tokens.append(token)
+        return responses[url]
+
+    monkeypatch.setattr(MODULE, "_get", fake_get)
+    result = MODULE.check_authenticated_flow("https://example.test", "secret-test-token")
+
+    assert result == {
+        "project_id": 7,
+        "project_name": "Pilot",
+        "launch_readiness": True,
+        "dashboard": True,
+    }
+    assert seen_tokens == ["secret-test-token"] * 3
