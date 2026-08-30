@@ -30,3 +30,15 @@ def test_pilot_preflight_fails_when_launch_is_incomplete():
     )
 
     assert not dict((name, ok) for name, ok, _ in results)["Запуск проекта"]
+
+
+def test_pilot_preflight_accepts_current_launch_readiness_contract():
+    results = MODULE.evaluate(
+        {"ready": True},
+        {"adapters": [{"available": True, "connected": True}]},
+        {"completed_steps": 5, "total_steps": 5, "progress": 100},
+        {"summary": {}, "external_actions_created": False},
+    )
+
+    launch = next(item for item in results if item[0] == "Запуск проекта")
+    assert launch == ("Запуск проекта", True, "готово 5 из 5")

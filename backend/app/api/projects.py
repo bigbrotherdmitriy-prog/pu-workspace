@@ -178,14 +178,22 @@ def project_launch_readiness(
         "confirmed_contacts": confirmed_contacts,
         "inbox_messages": inbox_messages,
     }
-    completed = sum([
-        result["source_ready"] and documents > 0,
-        analyzed_documents > 0,
-        bool(contracts) and result["linked_contracts"] == len(contracts),
-        schedule_rows > 0 and budget_rows > 0 and cash_flow_rows > 0,
-        confirmed_contacts > 0,
-    ])
-    return {**result, "completed_steps": completed, "total_steps": 5, "progress": completed * 20}
+    steps = [
+        {"id": "source", "complete": result["source_ready"] and documents > 0},
+        {"id": "documents", "complete": analyzed_documents > 0},
+        {"id": "contract", "complete": bool(contracts) and result["linked_contracts"] == len(contracts)},
+        {"id": "finance", "complete": schedule_rows > 0 and budget_rows > 0 and cash_flow_rows > 0},
+        {"id": "contacts", "complete": confirmed_contacts > 0},
+    ]
+    completed = sum(step["complete"] for step in steps)
+    return {
+        **result,
+        "ready": completed == len(steps),
+        "steps": steps,
+        "completed_steps": completed,
+        "total_steps": len(steps),
+        "progress": completed * 20,
+    }
 
 
 @router.put(

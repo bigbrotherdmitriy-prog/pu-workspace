@@ -24,10 +24,17 @@ def evaluate(core: dict, integrations: dict, launch: dict, briefing: dict) -> li
     available = [row for row in adapters if row.get("available")]
     connected = [row for row in available if row.get("connected")]
     steps = launch.get("steps", [])
+    completed_steps = int(launch.get("completed_steps") or sum(bool(row.get("complete")) for row in steps))
+    total_steps = int(launch.get("total_steps") or len(steps))
+    launch_ready = (
+        bool(launch.get("ready"))
+        if "ready" in launch
+        else total_steps > 0 and completed_steps == total_steps
+    )
     return [
         ("Core и БД", bool(core.get("ready")), "readiness API"),
         ("Каталог адаптеров", bool(available), f"доступно {len(available)}, подключено {len(connected)}"),
-        ("Запуск проекта", bool(launch.get("ready")), f"готово {sum(bool(row.get('complete')) for row in steps)} из {len(steps)}"),
+        ("Запуск проекта", launch_ready, f"готово {completed_steps} из {total_steps}"),
         ("AI Secretary", briefing.get("external_actions_created") is False, f"требуют внимания {briefing.get('summary', {}).get('attention', 0)}"),
     ]
 
