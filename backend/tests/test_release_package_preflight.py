@@ -16,5 +16,13 @@ def test_current_repository_contains_commercial_release_contract():
     assert failed == []
 
 
+def test_production_candidate_mounts_the_complete_release_contract():
+    root = Path(__file__).resolve().parents[2]
+    deploy = (root / "scripts" / "deploy-production.sh").read_text(encoding="utf-8")
+
+    for required in ("Dockerfile", "docker-compose.yml", ".env.example", ".gitignore", "README.md", "docs"):
+        assert f'$RELEASE_DIR/{required}' in deploy
+
+
 def test_preflight_rejects_incomplete_package(tmp_path):
     assert any(not row["ok"] for row in MODULE.evaluate(tmp_path))
