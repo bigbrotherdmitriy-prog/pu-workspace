@@ -24,7 +24,8 @@ def test_finance_module_preserves_contract_first_and_human_review_flow():
     assert "Оригинал не меняется" in module
     assert "Проверить и использовать" in module
     assert "Выбрать найденные" in module
-    assert "Начать разбор пакета" in module
+    assert "Открыть первый выбранный" in module
+    assert "последовательной проверки" in module
     assert "candidates.slice(0, 12)" not in module
     assert "Минимальная уверенность" in module
     assert "onUseCandidate" in module
