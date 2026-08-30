@@ -75,11 +75,16 @@ def test_public_smoke_rejects_different_backend_release(monkeypatch):
         raise AssertionError("different backend release must fail production smoke")
 
 
-def test_authenticated_smoke_reads_project_launch_and_dashboard(monkeypatch):
+def test_authenticated_smoke_reads_core_project_contours(monkeypatch):
     responses = {
         "https://example.test/projects/": (200, json.dumps({"projects": [{"id": 7, "name": "Pilot"}]})),
         "https://example.test/projects/7/launch-readiness": (200, json.dumps({"project_id": 7})),
         "https://example.test/dashboard/project?project_id=7": (200, json.dumps({"summary": {"documents": 3}})),
+        "https://example.test/projects/7/documents?limit=1": (200, json.dumps({"total": 3, "documents": []})),
+        "https://example.test/projects/7/contracts": (200, json.dumps({"contracts": []})),
+        "https://example.test/execution/overview?project_id=7": (200, json.dumps({"summary": {}})),
+        "https://example.test/ai-secretary/daily-briefing?project_id=7": (200, json.dumps({"project_id": 7})),
+        "https://example.test/integrations/project?project_id=7": (200, json.dumps({"project_id": 7, "adapters": []})),
     }
     seen_tokens = []
 
@@ -95,5 +100,10 @@ def test_authenticated_smoke_reads_project_launch_and_dashboard(monkeypatch):
         "project_name": "Pilot",
         "launch_readiness": True,
         "dashboard": True,
+        "documents": True,
+        "contracts": True,
+        "execution_finance": True,
+        "ai_secretary": True,
+        "integrations": True,
     }
-    assert seen_tokens == ["secret-test-token"] * 3
+    assert seen_tokens == ["secret-test-token"] * 8

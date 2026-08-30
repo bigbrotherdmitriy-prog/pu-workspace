@@ -93,17 +93,52 @@ def check_authenticated_flow(base_url: str, token: str) -> dict[str, object]:
     dashboard_status, dashboard_text = _get(
         urljoin(base, f"dashboard/project?project_id={project_id}"), token=token,
     )
+    documents_status, documents_text = _get(
+        urljoin(base, f"projects/{project_id}/documents?limit=1"), token=token,
+    )
+    contracts_status, contracts_text = _get(
+        urljoin(base, f"projects/{project_id}/contracts"), token=token,
+    )
+    finance_status, finance_text = _get(
+        urljoin(base, f"execution/overview?project_id={project_id}"), token=token,
+    )
+    briefing_status, briefing_text = _get(
+        urljoin(base, f"ai-secretary/daily-briefing?project_id={project_id}"), token=token,
+    )
+    integrations_status, integrations_text = _get(
+        urljoin(base, f"integrations/project?project_id={project_id}"), token=token,
+    )
     readiness = json.loads(readiness_text)
     dashboard = json.loads(dashboard_text)
+    documents = json.loads(documents_text)
+    contracts = json.loads(contracts_text)
+    finance = json.loads(finance_text)
+    briefing = json.loads(briefing_text)
+    integrations = json.loads(integrations_text)
     if readiness_status != 200 or readiness.get("project_id") not in {None, project_id}:
         raise RuntimeError("project launch readiness is unavailable")
     if dashboard_status != 200 or "summary" not in dashboard:
         raise RuntimeError("project dashboard is unavailable")
+    if documents_status != 200 or not isinstance(documents.get("documents"), list):
+        raise RuntimeError("project document catalog is unavailable")
+    if contracts_status != 200 or not isinstance(contracts.get("contracts"), list):
+        raise RuntimeError("project contract catalog is unavailable")
+    if finance_status != 200 or "summary" not in finance:
+        raise RuntimeError("project execution and finance overview is unavailable")
+    if briefing_status != 200 or briefing.get("project_id") != project_id:
+        raise RuntimeError("AI Secretary daily briefing is unavailable")
+    if integrations_status != 200 or not isinstance(integrations.get("adapters"), list):
+        raise RuntimeError("project integration catalog is unavailable")
     return {
         "project_id": project_id,
         "project_name": projects[0].get("name", ""),
         "launch_readiness": True,
         "dashboard": True,
+        "documents": True,
+        "contracts": True,
+        "execution_finance": True,
+        "ai_secretary": True,
+        "integrations": True,
     }
 
 
