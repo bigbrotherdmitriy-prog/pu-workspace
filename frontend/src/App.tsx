@@ -11,6 +11,7 @@ import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
+import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import {
   Activity,
   AlertTriangle,
@@ -85,11 +86,9 @@ type DocumentRow = {
   status: string;
   current_version: number;
   summary?: string;
+  source_url?: string;
 };
-type DocumentDetail = DocumentRow & {
-  versions: { version: number; created_at: string }[];
-  links: { tasks: number; risks: number; decisions: number; drafts: number };
-};
+type DocumentDetail = DocumentDetailModel;
 type ContractSourceCandidate = {
   document_id: number;
   name: string;
@@ -4241,100 +4240,7 @@ export function App() {
         </section>
       )}
       {(active === "Документы" || active === "Центр знаний") && (
-        <section
-          className={`documents-overlay ${collapsed ? "collapsed" : ""}`}
-        >
-          <div className="documents-layout">
-            <div className="card">
-              <div className="card-head">
-                <div>
-                  <h2>{active === "Центр знаний" ? "Центр знаний" : "Реестр документов"}</h2>
-                  <p>
-                    {active === "Центр знаний"
-                      ? "Поиск по названиям, сводкам и извлечённому тексту"
-                      : `Найдено: ${visibleDocuments.length}`}
-                  </p>
-                </div>
-              </div>
-              <div className="document-register">
-                {visibleDocuments.map((item) => (
-                  <button
-                    className={
-                      selectedDocument?.id === item.id ? "selected" : ""
-                    }
-                    onClick={() => openDocument(item)}
-                    key={item.id}
-                  >
-                    <FileText />
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>
-                        {item.source} · версия {item.current_version || 1} ·{" "}
-                        {item.status}
-                      </small>
-                    </span>
-                  </button>
-                ))}
-                {!visibleDocuments.length && (
-                  <div className="empty">
-                    <FileText />
-                    <p>Документы не найдены</p>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="card document-detail">
-              {selectedDocument ? (
-                <>
-                  <div className="card-head">
-                    <div>
-                      <h2>{selectedDocument.name}</h2>
-                      <p>{selectedDocument.mime_type || "Документ"}</p>
-                    </div>
-                    {selectedDocument.external_id && (
-                      <a
-                        className="source-link"
-                        href={`https://drive.google.com/open?id=${selectedDocument.external_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Открыть оригинал
-                      </a>
-                    )}
-                  </div>
-                  <div className="document-links">
-                    <span>
-                      Задачи <strong>{selectedDocument.links.tasks}</strong>
-                    </span>
-                    <span>
-                      Риски <strong>{selectedDocument.links.risks}</strong>
-                    </span>
-                    <span>
-                      Решения{" "}
-                      <strong>{selectedDocument.links.decisions}</strong>
-                    </span>
-                    <span>
-                      Черновики <strong>{selectedDocument.links.drafts}</strong>
-                    </span>
-                  </div>
-                  <h3>Краткая сводка</h3>
-                  <p className="document-summary">
-                    {selectedDocument.summary ||
-                      "Сводка появится после анализа содержимого."}
-                  </p>
-                  <p className="versions">
-                    Версий: {selectedDocument.versions.length || 1}
-                  </p>
-                </>
-              ) : (
-                <div className="empty">
-                  <FileText />
-                  <p>Выберите документ слева</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
+        <DocumentsModule collapsed={collapsed} knowledgeMode={active === "Центр знаний"} documents={visibleDocuments} selected={selectedDocument} onSelect={(item) => void openDocument(item)} />
       )}
       <ContextualAssistant section={active} onAsk={openContextualAssistant} />
     </div>

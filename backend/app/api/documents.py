@@ -12,6 +12,7 @@ from app.models.governance import Decision, Risk
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.core.auth import require_project_role, require_user
+from app.integrations.source_urls import source_object_url
 
 
 router = APIRouter(
@@ -123,6 +124,7 @@ def list_documents(
                 "id": item.id,
                 "name": item.name,
                 "external_id": item.external_id,
+                "source_url": source_object_url(item.source, item.external_id),
                 "mime_type": item.mime_type,
                 "source": item.source,
                 "status": item.status,
@@ -148,6 +150,7 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.project_id == project_id, ResponseDraft.source_file_id == item.external_id)).all())
     return {
         "id": item.id, "name": item.name, "external_id": item.external_id,
+        "source_url": source_object_url(item.source, item.external_id),
         "mime_type": item.mime_type, "source": item.source,
         "status": item.status, "current_version": item.current_version,
         "source_modified_at": item.source_modified_at, "summary": item.summary,
