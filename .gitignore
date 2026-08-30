@@ -34,3 +34,11 @@ pu-workspace-*.tar
 # Frontend dependencies and compiler cache
 frontend/node_modules/
 frontend/*.tsbuildinfo
+
+# Android build outputs and signing secrets
+android/.gradle/
+android/local.properties
+android/**/build/
+android/*.jks
+android/*.keystore
+android/keystore.properties
