@@ -181,6 +181,14 @@
 .proposal-intro p { margin-top: 5px; color: #748091; }
 .proposal-intro > span { padding: 6px 10px; border-radius: 999px; background: #edf3ff; color: #185adb; font-size: 12px; }
 .proposal-list { display: grid; gap: 18px; }
+.version-comparison { margin-top: 18px; padding-top: 16px; border-top: 1px solid #dfe8e3; }
+.version-comparison-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.version-comparison-controls select { min-width: 125px; }
+.version-comparison-result { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.version-comparison-result > div { display: flex; justify-content: space-between; padding: 10px; border-radius: 10px; background: #f2f7f4; }
+.version-comparison-result > p, .version-comparison-result > pre { grid-column: 1 / -1; }
+.version-comparison-result pre { max-height: 280px; overflow: auto; white-space: pre-wrap; padding: 12px; border-radius: 10px; background: #101a16; color: #d8eee4; font-size: 12px; }
+.version-error { color: #b42318; }
 .proposal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
 .proposal-head h2 { margin: 8px 0 3px; }
 .proposal-head p { margin: 0; color: #748091; font-size: 12px; }

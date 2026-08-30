@@ -1,3 +1,5 @@
+from difflib import SequenceMatcher, unified_diff
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -19,6 +21,40 @@ router = APIRouter(
 
 class SnapshotRequest(BaseModel):
     content: str
+
+
+def compare_version_content(previous: str, current: str) -> dict:
+    previous_lines = previous.splitlines()
+    current_lines = current.splitlines()
+    matcher = SequenceMatcher(None, previous_lines, current_lines)
+    added = removed = changed = 0
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "insert":
+            added += new_end - new_start
+        elif tag == "delete":
+            removed += old_end - old_start
+        elif tag == "replace":
+            old_count = old_end - old_start
+            new_count = new_end - new_start
+            changed += min(old_count, new_count)
+            removed += max(0, old_count - new_count)
+            added += max(0, new_count - old_count)
+    preview = list(unified_diff(
+        previous_lines,
+        current_lines,
+        fromfile="previous",
+        tofile="current",
+        lineterm="",
+        n=2,
+    ))
+    return {
+        "added_lines": added,
+        "removed_lines": removed,
+        "changed_lines": changed,
+        "unchanged": previous == current,
+        "preview": preview[:120],
+        "preview_truncated": len(preview) > 120,
+    }
 
 
 def document_to_dict(document):
@@ -154,6 +190,31 @@ def get_version(
         "version_number": version.version_number,
         "content": version.content,
         "created_at": version.created_at,
+    }
+
+
+@router.get("/documents/{document_id}/compare")
+def compare_versions(
+    document_id: int,
+    previous: int,
+    current: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    accessible_document(db, user, document_id, "viewer")
+    rows = list(db.scalars(select(DocumentVersion).where(
+        DocumentVersion.document_id == document_id,
+        DocumentVersion.version_number.in_({previous, current}),
+    )))
+    versions = {row.version_number: row for row in rows}
+    missing = [number for number in (previous, current) if number not in versions]
+    if missing:
+        raise HTTPException(404, f"Version not found: {', '.join(map(str, missing))}")
+    return {
+        "document_id": document_id,
+        "previous_version": previous,
+        "current_version": current,
+        **compare_version_content(versions[previous].content, versions[current].content),
     }
 
 
