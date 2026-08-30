@@ -39,7 +39,13 @@ class Repo:
         }
 
     def proposal_items(self, _proposal_id):
-        return [{"file_id": "f1", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER}]
+        return [{
+            "file_id": "f1",
+            "source": "счёт №1.PDF",
+            "current_parent_id": "copy",
+            "user_decision": "skipped",
+            "target_folder": DEFAULT_FOLDER,
+        }]
 
     def operations(self, _proposal_id):
         return []
@@ -113,8 +119,8 @@ def test_bulk_standardization_changes_safe_copy_and_logs_rollback_data():
 def test_one_broken_file_does_not_rollback_successful_files():
     repo = Repo()
     repo.proposal_items = lambda _proposal_id: [
-        {"file_id": "broken", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER},
-        {"file_id": "f1", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER},
+        {"file_id": "broken", "source": "битый.pdf", "current_parent_id": "copy", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER},
+        {"file_id": "f1", "source": "счёт №1.PDF", "current_parent_id": "copy", "user_decision": "skipped", "target_folder": DEFAULT_FOLDER},
     ]
     drive = PartlyBrokenDrive()
 
