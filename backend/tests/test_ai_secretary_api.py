@@ -15,6 +15,17 @@ def test_external_action_requires_explicit_route():
     assert "/tasks/{task_id}/approve-external" in paths
 
 
+def test_ai_secretary_uses_configured_action_provider_for_external_resources():
+    from pathlib import Path
+
+    source = (Path(__file__).parents[1] / "app" / "api" / "ai_secretary.py").read_text(encoding="utf-8")
+    payload_source = source[source.index("def _message_payload"):]
+    assert "configured_action_adapter(row.project_id, db).provider" in payload_source
+    assert "provider=action_provider" in payload_source
+    assert '{"provider": action_provider' in payload_source
+    assert 'provider="google_workspace"' not in payload_source
+
+
 def test_incoming_message_defaults_to_manual_source():
     payload = IncomingMessage(project_id=1, source_name="Письмо", content="Просим подготовить ответ до 30.08.2026.")
     assert payload.source_type == "manual"

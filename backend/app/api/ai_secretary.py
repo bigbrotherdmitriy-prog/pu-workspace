@@ -32,6 +32,7 @@ from app.response_engine import create_response_drafts
 from app.summary_engine import brief_summary
 from app.task_engine import create_tasks_from_files
 from app.integrations.external_resources import external_id_for
+from app.integrations.actions import configured_action_adapter
 from app.daily_briefing import build_daily_briefing
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
@@ -139,7 +140,8 @@ def project_candidate(db: Session, fallback_project_id: int, content: str, user:
     return fallback_project_id, 0.55, "Проект по содержанию не определён; требуется подтверждение"
 
 
-def _message_payload(db: Session, row: Message) -> dict:
+def _message_payload(db: Session, row: Message, action_provider: str | None = None) -> dict:
+    action_provider = action_provider or configured_action_adapter(row.project_id, db).provider
     tasks = list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
     risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
@@ -162,11 +164,11 @@ def _message_payload(db: Session, row: Message) -> dict:
     task_payloads = []
     for task in tasks:
         external_task_id = external_id_for(
-            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="task", legacy_id=task.google_task_id,
         )
         external_calendar_id = external_id_for(
-            db, entity_type="task", entity_id=task.id, provider="google_workspace",
+            db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
         )
         task_payloads.append({
@@ -174,8 +176,8 @@ def _message_payload(db: Session, row: Message) -> dict:
             "external_action_status": task.external_action_status, "google_task_id": external_task_id,
             "google_calendar_event_id": external_calendar_id,
             "external_resources": [
-                *([{"provider": "google_workspace", "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
-                *([{"provider": "google_workspace", "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
+                *([{"provider": action_provider, "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
+                *([{"provider": action_provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
         })
     return {
