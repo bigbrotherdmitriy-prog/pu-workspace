@@ -12,6 +12,7 @@ from app.api.management import ObligationUpdate, refresh_notifications, update_o
 from app.api.responses import DraftUpdate, update_draft
 from app.api.tasks import ExternalActionApproval, approve_external
 from app.database import Base
+from app.daily_briefing import build_daily_briefing
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
 from app.models.management import Obligation
@@ -107,6 +108,7 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         )
         notifications = refresh_notifications(project.id, db, user)
         dashboard = project_dashboard(project.id, db, user)
+        briefing = build_daily_briefing(db, project.id, today=date.today())
 
         assert published["provider"] == "pilot_action_adapter"
         assert published["external_action_status"] == "executed"
@@ -115,4 +117,8 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         assert notifications["notifications"][0]["kind"] == "overdue"
         assert dashboard["summary"]["overdue_tasks"] == 1
         assert dashboard["summary"]["overdue_obligations"] == 1
+        assert briefing["summary"]["overdue_tasks"] == 1
+        assert briefing["summary"]["overdue_obligations"] == 1
+        assert briefing["attention"][0]["priority"] == "critical"
+        assert briefing["external_actions_created"] is False
         assert db.scalar(select(AuditLog).where(AuditLog.action == "external_task_action")) is not None

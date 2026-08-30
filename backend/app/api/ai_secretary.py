@@ -32,6 +32,7 @@ from app.response_engine import create_response_drafts
 from app.summary_engine import brief_summary
 from app.task_engine import create_tasks_from_files
 from app.integrations.external_resources import external_id_for
+from app.daily_briefing import build_daily_briefing
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
 
@@ -81,6 +82,12 @@ class AutomationRuleCreate(BaseModel):
 
 class AutomationRuleState(BaseModel):
     active: bool
+
+
+@router.get("/daily-briefing")
+def daily_briefing(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    return build_daily_briefing(db, project_id)
 
 
 def _contract_candidate(db: Session, project_id: int, content: str) -> tuple[Contract | None, float, str]:
