@@ -136,6 +136,7 @@ if [ "$DEPLOY_RELAY" = true ]; then
   [ "$relay_ready" = true ] || fail "telegram relay did not become healthy"
 fi
 docker run --rm \
+  -e PU_EXPECTED_RELEASE="$REVISION" \
   -v "$RELEASE_DIR/scripts:/workspace/scripts:ro" \
   -w /workspace \
   "$CANDIDATE_IMAGE" \

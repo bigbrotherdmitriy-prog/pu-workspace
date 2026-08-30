@@ -13,6 +13,7 @@ SPEC.loader.exec_module(MODULE)
 def test_public_smoke_checks_readiness_and_current_spa(monkeypatch):
     responses = {
         "https://example.test/api/readiness": (200, json.dumps({"ready": True})),
+        "https://example.test/api/status": (200, json.dumps({"status": "ok", "release": "current"})),
         "https://example.test/new/": (200, '<div id="root"></div><script src="./assets/current.js"></script>'),
         "https://example.test/new/assets/current.js": (200, " ".join(MODULE.REQUIRED_UI_MARKERS)),
     }
@@ -27,6 +28,7 @@ def test_public_smoke_checks_readiness_and_current_spa(monkeypatch):
 def test_public_smoke_rejects_stale_frontend(monkeypatch):
     responses = {
         "https://example.test/api/readiness": (200, json.dumps({"ready": True})),
+        "https://example.test/api/status": (200, json.dumps({"status": "ok", "release": "current"})),
         "https://example.test/new/": (200, '<div id="root"></div><script src="/new/assets/old.js"></script>'),
         "https://example.test/new/assets/old.js": (200, "Запуск проекта"),
     }
@@ -43,6 +45,7 @@ def test_public_smoke_rejects_stale_frontend(monkeypatch):
 def test_public_smoke_rejects_different_asset_from_candidate(monkeypatch):
     responses = {
         "https://example.test/api/readiness": (200, json.dumps({"ready": True})),
+        "https://example.test/api/status": (200, json.dumps({"status": "ok", "release": "current"})),
         "https://example.test/new/": (200, '<div id="root"></div><script src="/new/assets/old.js"></script>'),
     }
     monkeypatch.setattr(MODULE, "_get", lambda url, timeout=20: responses[url])
@@ -54,6 +57,22 @@ def test_public_smoke_rejects_different_asset_from_candidate(monkeypatch):
         assert "expected current.js, got old.js" in str(exc)
     else:
         raise AssertionError("different deployed asset must fail production smoke")
+
+
+def test_public_smoke_rejects_different_backend_release(monkeypatch):
+    responses = {
+        "https://example.test/api/readiness": (200, json.dumps({"ready": True})),
+        "https://example.test/api/status": (200, json.dumps({"status": "ok", "release": "old"})),
+    }
+    monkeypatch.setattr(MODULE, "_get", lambda url, timeout=20: responses[url])
+
+    try:
+        MODULE.check_public("https://example.test/", expected_release="new")
+    except RuntimeError as exc:
+        assert "backend release is stale" in str(exc)
+        assert "expected new, got old" in str(exc)
+    else:
+        raise AssertionError("different backend release must fail production smoke")
 
 
 def test_authenticated_smoke_reads_project_launch_and_dashboard(monkeypatch):
