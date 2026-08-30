@@ -38,6 +38,7 @@
   .mobile-upload-files small, .mobile-upload-files > p { color: #718078; font-size: 11px; }
   .mobile-upload-files > p { padding: 18px; border: 1px dashed #cbdad3; border-radius: 12px; text-align: center; }
   .mobile-upload-error { margin: 0; padding: 10px; border-radius: 9px; background: #fff0ef; color: #a4322c; }
+  .mobile-upload-progress { margin: 0; color: #087a59; font-size: 12px; font-weight: 800; text-align: center; }
   .mobile-upload-submit { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; background: #087a59; color: #fff; font-weight: 800; }
   .mobile-upload-submit:disabled { opacity: .5; }
   .documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay { bottom: calc(62px + env(safe-area-inset-bottom)); }
