@@ -101,6 +101,7 @@ type DocumentRow = {
   id: number;
   name: string;
   external_id?: string;
+  parent_external_id?: string;
   mime_type?: string;
   source: string;
   status: string;
@@ -480,7 +481,7 @@ export function App() {
           api(`/tasks?project_id=${id}`),
           api(`/governance/risks?project_id=${id}`),
           api(`/governance/decisions?project_id=${id}`),
-          api(`/projects/${id}/documents`),
+          api(`/projects/${id}/documents?limit=5000`),
           api(`/response-drafts?project_id=${id}`),
           api(`/ai-secretary/inbox?project_id=${id}`).catch(() => ({
             messages: [],
@@ -742,8 +743,10 @@ export function App() {
       });
       setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
       await load();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     }
   }
   async function linkContractParent(contractId: number, contractKind: string, parentContractId: number) {
@@ -2519,7 +2522,12 @@ export function App() {
                         onSuggest={() => void suggestContractDocuments(item.id)}
                         onTabChange={(tab) => setContractDocumentTabs((current) => ({ ...current, [item.id]: tab }))}
                         onQueryChange={(value) => setContractDocumentQueries((current) => ({ ...current, [item.id]: value }))}
-                        onLink={(documentId) => void linkContractDocument(item.id, documentId)}
+                        onLink={async (documentId) => {
+                          if (await linkContractDocument(item.id, documentId)) {
+                            setContractCatalogOpen((current) => ({ ...current, [item.id]: false }));
+                            setNotice("Договор привязан. Теперь нажмите «Проанализировать договор».");
+                          }
+                        }}
                       />
                       <button
                         className="secondary"

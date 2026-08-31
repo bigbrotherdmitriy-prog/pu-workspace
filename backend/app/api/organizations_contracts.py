@@ -69,43 +69,52 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
     """Rank a possible contract source without mutating either record."""
     name = _normalized(document.name)
     body = _normalized(content[:120_000])
-    haystack = f"{name} {body}"
     score = 0
     reasons: list[str] = []
 
     number = _normalized(row.number)
     compact_number = re.sub(r"\s+", "", number)
-    compact_haystack = re.sub(r"\s+", "", haystack)
-    if compact_number and len(compact_number) >= 4 and compact_number in compact_haystack:
-        score += 60
-        reasons.append("совпадает номер договора")
+    compact_name = re.sub(r"\s+", "", name)
+    compact_body = re.sub(r"\s+", "", body)
+    if compact_number and len(compact_number) >= 4 and compact_number in compact_name:
+        score += 70
+        reasons.append("номер договора указан в имени файла")
+    elif compact_number and len(compact_number) >= 4 and compact_number in compact_body:
+        score += 18
+        reasons.append("номер договора упоминается только в тексте")
 
     counterparty = _normalized(row.counterparty)
-    if counterparty and len(counterparty) >= 4 and counterparty in haystack:
-        score += 25
-        reasons.append("совпадает контрагент")
+    if counterparty and len(counterparty) >= 4 and counterparty in name:
+        score += 15
+        reasons.append("контрагент указан в имени файла")
+    elif counterparty and len(counterparty) >= 4 and counterparty in body:
+        score += 7
+        reasons.append("контрагент упоминается в тексте")
 
     title_tokens = {
         token for token in _normalized(row.title).split()
         if len(token) >= 5 and token not in {"выполнению", "работ", "системы", "области"}
     }
-    matched = sorted(token for token in title_tokens if token in haystack)
-    if matched:
-        score += min(30, len(matched) * 5)
-        reasons.append(f"совпадает предмет договора: {', '.join(matched[:3])}")
+    matched_name = sorted(token for token in title_tokens if token in name)
+    matched_body = sorted(token for token in title_tokens if token in body and token not in matched_name)
+    if matched_name:
+        score += min(20, len(matched_name) * 5)
+        reasons.append(f"предмет договора указан в имени: {', '.join(matched_name[:3])}")
+    if matched_body:
+        score += min(10, len(matched_body) * 2)
+        reasons.append(f"предмет договора упоминается в тексте: {', '.join(matched_body[:3])}")
 
     contract_markers = ("договор", "контракт", "государственн контракт", "заказчик", "подрядчик")
-    marker_count = sum(1 for marker in contract_markers if marker in haystack)
-    if marker_count:
-        score += min(15, marker_count * 4)
-        reasons.append("обнаружены реквизиты договора")
-
     if any(marker in name for marker in ("договор", "контракт", "гк ", "гк-")):
-        score += 15
+        score += 20
         reasons.append("название похоже на договор")
-    if any(marker in name for marker in ("приложение", "график", "акт", "письмо", "счет", "счёт")):
-        score -= 12
-        reasons.append("возможно приложение или связанный документ")
+    elif any(marker in body for marker in contract_markers):
+        score += 5
+        reasons.append("в тексте обнаружены реквизиты договора")
+    excluded_markers = ("пропуск", "инструкц", "приложение", "график", "акт", "письмо", "счет", "счёт", "накладн")
+    if any(marker in name for marker in excluded_markers):
+        score -= 55
+        reasons.append("имя указывает на связанный документ, а не договор")
     return max(0, min(score, 100)), reasons
 
 
