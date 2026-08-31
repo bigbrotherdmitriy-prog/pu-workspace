@@ -42,8 +42,8 @@ describe("ProjectLaunchWizard", () => {
     const openSection = vi.fn();
     render(<ProjectLaunchWizard projectId={2} storageAuthorized={false} openSection={openSection} />);
     fireEvent.click(screen.getByRole("button", { name: "Выбрать новый проект" }));
-    expect(screen.getByText(/подключите Google Drive/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Подключить Google Drive" }));
+    expect(screen.getByText(/подключите доступный адаптер рабочего хранилища/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить хранилище" }));
     expect(openSection).toHaveBeenCalledWith("Интеграции");
   });
 });
