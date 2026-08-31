@@ -80,7 +80,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
         score += 70
         reasons.append("номер договора указан в имени файла")
     elif compact_number and len(compact_number) >= 4 and compact_number in compact_body:
-        score += 18
+        score += 45
         reasons.append("номер договора упоминается только в тексте")
 
     counterparty = _normalized(row.counterparty)
@@ -88,7 +88,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
         score += 15
         reasons.append("контрагент указан в имени файла")
     elif counterparty and len(counterparty) >= 4 and counterparty in body:
-        score += 7
+        score += 15
         reasons.append("контрагент упоминается в тексте")
 
     title_tokens = {
@@ -101,7 +101,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
         score += min(20, len(matched_name) * 5)
         reasons.append(f"предмет договора указан в имени: {', '.join(matched_name[:3])}")
     if matched_body:
-        score += min(10, len(matched_body) * 2)
+        score += min(15, len(matched_body) * 5)
         reasons.append(f"предмет договора упоминается в тексте: {', '.join(matched_body[:3])}")
 
     contract_markers = ("договор", "контракт", "государственн контракт", "заказчик", "подрядчик")
@@ -109,7 +109,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
         score += 20
         reasons.append("название похоже на договор")
     elif any(marker in body for marker in contract_markers):
-        score += 5
+        score += 10
         reasons.append("в тексте обнаружены реквизиты договора")
     excluded_markers = ("пропуск", "инструкц", "приложение", "график", "акт", "письмо", "счет", "счёт", "накладн")
     if any(marker in name for marker in excluded_markers):
