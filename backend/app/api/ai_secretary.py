@@ -50,6 +50,8 @@ class IncomingMessage(BaseModel):
     attachments: list[dict] = Field(default_factory=list)
     routing_contract_id: int | None = None
     routing_evidence: str | None = Field(default=None, max_length=1000)
+    automation_suppressed: bool = False
+    automation_suppression_reason: str | None = Field(default=None, max_length=1000)
 
 
 class ContextConfirmation(BaseModel):
@@ -294,11 +296,14 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         content=payload.content.strip(), attachments_json=json.dumps(payload.attachments, ensure_ascii=False),
         summary="Анализируется", context_confidence=confidence,
         context_evidence=evidence, context_confirmed=confidence >= 0.90,
-        status="ready" if confidence >= 0.90 else "needs_context_confirmation",
+        status=("filtered" if payload.automation_suppressed else
+                "ready" if confidence >= 0.90 else "needs_context_confirmation"),
     )
     db.add(row); db.flush()
     synthetic = StorageObject(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)
-    if row.source_type == "email_outgoing":
+    if payload.automation_suppressed:
+        tasks, drafts, risks, completion_suggestions = [], [], [], []
+    elif row.source_type == "email_outgoing":
         tasks, drafts, risks = [], [], []
         completion_suggestions = _create_completion_suggestions(db, row)
     else:
@@ -314,8 +319,13 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         task.external_action_status = "proposed"
     for draft in drafts:
         draft.message_id = row.id
-    row.summary = (f"Исходящее письмо проверено. Возможных выполненных задач: {len(completion_suggestions)}. Требуется подтверждение пользователя."
-                   if row.source_type == "email_outgoing" else brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0))
+    row.summary = (
+        f"Автоматические действия не создавались: {payload.automation_suppression_reason or 'массовое или рекламное письмо'}."
+        if payload.automation_suppressed else
+        f"Исходящее письмо проверено. Возможных выполненных задач: {len(completion_suggestions)}. Требуется подтверждение пользователя."
+        if row.source_type == "email_outgoing" else
+        brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0)
+    )
     db.add(AuditLog(action="message_processed", entity_type="message", entity_id=row.id,
                     details=f"source={row.source_type}; tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}; context={confidence:.0%}"))
     db.commit(); db.refresh(row)

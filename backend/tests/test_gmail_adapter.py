@@ -3,7 +3,7 @@ import base64
 import inspect
 
 from app.api.ai_secretary import project_candidate
-from app.api.gmail import GmailSyncRequest, _attachments, _gmail_telegram_notice, _message_text, router, sync_gmail_project
+from app.api.gmail import GmailSyncRequest, _attachments, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
 from app.api.google_drive import SCOPES
 
 
@@ -63,6 +63,32 @@ def test_gmail_telegram_notice_is_concise_and_actionable():
     assert "задач 1" in text
     assert "рисков 1" in text
     assert "черновиков 1" in text
+
+
+def test_marketing_email_is_suppressed_by_strong_provider_evidence():
+    headers = {
+        "from": '"Деловые Линии" <info@marketing.dellin.ru>',
+        "list-unsubscribe": "<https://marketing.dellin.ru/unsubscribe>",
+    }
+    reason = _bulk_email_reason(
+        headers, ["INBOX", "CATEGORY_PROMOTIONS"],
+        "Надежная доставка для регулярных перевозок", "Подробности предложения",
+    )
+    assert reason
+
+
+def test_business_offer_is_not_suppressed_from_words_alone():
+    reason = _bulk_email_reason(
+        {"from": "supplier@example.ru"}, ["INBOX"],
+        "Коммерческое предложение по доставке", "Просим согласовать стоимость и срок",
+    )
+    assert reason is None
+
+
+def test_filtered_messages_do_not_backfill_drafts_or_notify_telegram():
+    source = inspect.getsource(sync_gmail_project)
+    assert 'not bulk_reason and existing.status != "filtered"' in source
+    assert "not is_outgoing and not bulk_reason" in source
 
 
 def test_oauth_callback_returns_to_new_interface():

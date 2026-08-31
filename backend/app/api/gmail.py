@@ -106,6 +106,33 @@ def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
     )
 
 
+def _bulk_email_reason(headers: dict[str, str], label_ids: list[str] | None, subject: str, content: str) -> str | None:
+    """Return an explainable reason only for strong bulk/marketing evidence.
+
+    Text alone is intentionally insufficient: legitimate supplier offers and
+    delivery correspondence must continue through the normal review workflow.
+    """
+    labels = {value.upper() for value in (label_ids or [])}
+    if "SPAM" in labels:
+        return "Gmail пометил письмо как спам"
+    if "CATEGORY_PROMOTIONS" in labels:
+        return "Gmail отнёс письмо к категории «Промоакции»"
+    if headers.get("list-unsubscribe"):
+        return "обнаружен заголовок массовой рассылки List-Unsubscribe"
+    if headers.get("list-id"):
+        return "обнаружен идентификатор списка рассылки List-Id"
+    precedence = headers.get("precedence", "").casefold().strip()
+    if precedence in {"bulk", "list", "junk"}:
+        return f"обнаружен заголовок массовой рассылки Precedence: {precedence}"
+    auto_submitted = headers.get("auto-submitted", "").casefold().strip()
+    if auto_submitted and auto_submitted != "no":
+        text = f"{subject}\n{content}".casefold()
+        marketing_markers = ("отписаться", "unsubscribe", "реклам", "рассылк", "специальное предложение")
+        if any(marker in text for marker in marketing_markers):
+            return "автоматическая рекламная рассылка"
+    return None
+
+
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -128,6 +155,9 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             is_outgoing = "SENT" in set(item.get("labelIds") or [])
             source_type = "email_outgoing" if is_outgoing else "email"
             correspondent = recipient if is_outgoing else sender
+            bulk_reason = None if is_outgoing else _bulk_email_reason(
+                headers, item.get("labelIds"), subject, content,
+            )
             existing = db.scalar(select(Message).where(
                 Message.source_external_id == ref["id"],
             ))
@@ -137,12 +167,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 existing_attachments = json.loads(existing.attachments_json or "[]")
                 if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
-                if existing.source_sender:
+                if existing.source_sender and not bulk_reason:
                     discover_contact_from_message(db, existing.project_id, existing.source_sender, existing.content, user)
                 # Older messages may have been synchronized before email fallback
                 # drafts existed. Backfill a reviewable draft without sending it
                 # and without changing the message's confirmed project context.
-                if existing.source_type == "email" and not db.scalar(select(ResponseDraft.id).where(
+                if existing.source_type == "email" and not bulk_reason and existing.status != "filtered" and not db.scalar(select(ResponseDraft.id).where(
                     ResponseDraft.message_id == existing.id,
                 )):
                     synthetic = StorageObject(
@@ -178,10 +208,13 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 source_sender=correspondent, source_thread_id=item.get("threadId"), content=content,
                 attachments=attachments,
                 routing_contract_id=routing_contract_id, routing_evidence=routing_evidence,
+                automation_suppressed=bool(bulk_reason),
+                automation_suppression_reason=bulk_reason,
             ), db, user)
             processed += 1 if result["status"] else 0
-            discover_contact_from_message(db, target_project_id, correspondent, content, user)
-            if not is_outgoing:
+            if not bulk_reason:
+                discover_contact_from_message(db, target_project_id, correspondent, content, user)
+            if not is_outgoing and not bulk_reason:
                 notify_telegram(_gmail_telegram_notice(sender, subject, result))
         except Exception as exc:
             db.rollback()
