@@ -30,6 +30,7 @@ import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/gove
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   Bell,
   Bot,
@@ -56,6 +57,7 @@ import {
   Wallet,
   Archive,
   Trash2,
+  TimerReset,
 } from "lucide-react";
 
 type InstallPromptEvent = Event & {
@@ -1876,7 +1878,26 @@ export function App() {
             />
           ) : active === "Рабочий центр" ? (
             <>
-              <div className="metrics">
+              <section className="dashboard-hero">
+                <div className="dashboard-hero-copy">
+                  <span className="dashboard-kicker">ЦЕНТР УПРАВЛЕНИЯ · {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</span>
+                  <h2>{projects.find((item) => item.id === projectId)?.name || "Текущий проект"}</h2>
+                  <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
+                  <div className="dashboard-hero-actions">
+                    <button onClick={() => setActive("Сегодня")}><Route /> План на сегодня</button>
+                    <button className="secondary" onClick={() => setActive("AI Secretary")}><Bot /> Спросить AI Secretary</button>
+                  </div>
+                </div>
+                <div className={`dashboard-focus ${summary?.attention ? "needs-attention" : "clear"}`}>
+                  <span>{summary?.attention ? "ГЛАВНЫЙ ФОКУС" : "СТАТУС ПРОЕКТА"}</span>
+                  <strong>{summary?.attention || 0}</strong>
+                  <p>{summary?.attention ? "пунктов ждут проверки" : "критичных пунктов нет"}</p>
+                  <button onClick={() => setActive(summary?.attention ? "Риски и решения" : "Сегодня")}>
+                    {summary?.attention ? "Разобрать сейчас" : "Открыть план"} <ArrowRight />
+                  </button>
+                </div>
+              </section>
+              <div className="metrics dashboard-metrics">
                 {metrics.map(([label, value, tone]) => (
                   <button
                     type="button"
@@ -1885,15 +1906,15 @@ export function App() {
                     onClick={() => openMetric(String(label))}
                     aria-label={`Открыть раздел: ${label}`}
                   >
-                    <span>{label}</span>
-                    <strong>{value}</strong>
+                    <span>{label}</span><strong>{value}</strong><small>Открыть раздел <ArrowRight /></small>
                   </button>
                 ))}
               </div>
-              <div className="grid">
-                <section className="card span-2">
+              <div className="dashboard-command-grid">
+                <section className="card dashboard-attention-card">
                   <div className="card-head">
                     <div>
+                      <span className="eyebrow">КОНТРОЛЬ И РЕШЕНИЯ</span>
                       <h2>Что требует внимания</h2>
                       <p>
                         Задачи, риски и решения из подтверждённых источников
@@ -1921,23 +1942,33 @@ export function App() {
                       <p>Критичных пунктов нет</p>
                     </div>
                   )}
+                  <div className="dashboard-control-links">
+                    <button onClick={() => { setTaskFilter("overdue"); setActive("Задачи"); }}><TimerReset /><span><strong>{summary?.overdue_tasks || 0}</strong> просроченных задач</span><ArrowRight /></button>
+                    <button onClick={() => setActive("Риски и решения")}><AlertTriangle /><span><strong>{summary?.open_risks || 0}</strong> открытых рисков</span><ArrowRight /></button>
+                    <button onClick={() => setActive("Риски и решения")}><ClipboardCheck /><span><strong>{summary?.pending_decisions || 0}</strong> решений ожидают</span><ArrowRight /></button>
+                  </div>
                 </section>
-                <section className="card">
+                <section className="card dashboard-actions-card">
                   <div className="card-head">
                     <div>
+                      <span className="eyebrow">БЫСТРЫЙ СТАРТ</span>
                       <h2>Быстрые действия</h2>
                       <p>Без изменения оригиналов</p>
                     </div>
                   </div>
                   <div className="quick">
-                    <button onClick={() => setActive("Интеграции")}>Подключения и источники</button>
-                    <button onClick={() => setActive("Письма")}>Открыть письма</button>
-                    <button onClick={() => setActive("Задачи")}>Открыть задачи</button>
+                    <button onClick={() => setActive("Письма")}><Mail /><span><strong>Разобрать письма</strong><small>Контекст и новые задачи</small></span><ArrowRight /></button>
+                    <button onClick={() => setActive("Задачи")}><ListTodo /><span><strong>Открыть задачи</strong><small>Сроки и исполнители</small></span><ArrowRight /></button>
+                    <button onClick={() => setActive("Запуск проекта")}><Route /><span><strong>Контур проекта</strong><small>Договор, ГПР и ДДС</small></span><ArrowRight /></button>
+                    <button onClick={() => setActive("Интеграции")}><GitPullRequest /><span><strong>Источники данных</strong><small>Почта, Drive и Telegram</small></span><ArrowRight /></button>
                   </div>
                 </section>
-                <section className="card span-3 dashboard-inbox">
+              </div>
+              <div className="dashboard-lower-grid">
+                <section className="card dashboard-inbox">
                   <div className="card-head">
                     <div>
+                      <span className="eyebrow">КОММУНИКАЦИИ</span>
                       <h2>Входящие, требующие реакции</h2>
                       <p>Новые письма, неподтверждённый контекст и работа в процессе</p>
                     </div>
@@ -1959,6 +1990,19 @@ export function App() {
                     )}
                   </div>
                 </section>
+                <section className="card dashboard-ai-card">
+                  <div className="dashboard-ai-icon"><Bot /></div>
+                  <span className="eyebrow">AI SECRETARY</span>
+                  <h2>Контекст проекта собран</h2>
+                  <p>{dailyBriefing?.next_step || "Секретарь проверяет письма, документы, сроки и договорные обязательства."}</p>
+                  <div className="dashboard-ai-facts">
+                    <span><b>{inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length}</b> черновиков</span>
+                    <span><b>{summary?.unread_notifications || 0}</b> уведомлений</span>
+                  </div>
+                  <button onClick={() => setActive("AI Secretary")}>Открыть брифинг <ArrowRight /></button>
+                </section>
+              </div>
+              <div className="grid dashboard-sources-grid">
                 {latestSnapshot && (
                   <section className="card span-3 source-card">
                     <div className="source-icon">
