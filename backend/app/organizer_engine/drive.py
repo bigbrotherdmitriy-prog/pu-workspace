@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import io
 import os
-from typing import Any
+from typing import Any, Callable
 
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -97,11 +97,18 @@ class DriveClient:
             if not page_token:
                 return out
 
-    def populate_content(self, items: list[DriveFile]) -> tuple[int, int]:
+    def populate_content(
+        self,
+        items: list[DriveFile],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> tuple[int, int]:
         extracted = 0
         failed = 0
-        for item in items:
+        total = len(items)
+        for processed, item in enumerate(items, start=1):
             if item.is_folder or (item.size is not None and item.size > MAX_CONTENT_BYTES):
+                if on_progress:
+                    on_progress(processed, total)
                 continue
             try:
                 export_mime = GOOGLE_EXPORTS.get(item.mime_type)
@@ -116,12 +123,16 @@ class DriveClient:
                 while not done and buffer.tell() <= MAX_CONTENT_BYTES:
                     _, done = downloader.next_chunk()
                 if buffer.tell() > MAX_CONTENT_BYTES:
+                    if on_progress:
+                        on_progress(processed, total)
                     continue
                 item.content_text = extract_text(buffer.getvalue(), export_mime or item.mime_type, item.name)
                 if item.content_text:
                     extracted += 1
             except Exception:
                 failed += 1
+            if on_progress:
+                on_progress(processed, total)
         return extracted, failed
 
     def walk_tree(self, root_folder_id: str, limit: int = MAX_FILES_PER_SCAN) -> list[DriveFile]:

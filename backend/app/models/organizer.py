@@ -21,6 +21,7 @@ class OrganizerSession(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     source_item_count: Mapped[int | None] = mapped_column(Integer)
     copy_item_count: Mapped[int | None] = mapped_column(Integer)
+    processed_item_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

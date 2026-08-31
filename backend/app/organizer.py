@@ -145,10 +145,19 @@ def _scan_worker(
                 copy_item_count=copy_result.item_count, status="analyzing", progress=55,
             )
         copy_items = drive.walk_tree(copy_folder_id)
-        drive.populate_content(copy_items)
+        last_reported = -1
+        def report_content_progress(processed: int, total: int) -> None:
+            nonlocal last_reported
+            percent = 55 + round((processed / max(total, 1)) * 35)
+            if processed == total or percent > last_reported:
+                repo.update_session(session_id, processed_item_count=processed, progress=percent)
+                last_reported = percent
+        drive.populate_content(copy_items, on_progress=report_content_progress)
+        repo.update_session(session_id, processed_item_count=len(copy_items), progress=92)
         index_documents(db, project_id, copy_items, "google_drive_copy")
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
+        repo.update_session(session_id, progress=95)
         tasks = create_tasks_from_files(db, project_id, session_id, copy_items)
         google_synced = calendar_synced = 0
         drafts = create_response_drafts(db, project_id, session_id, copy_items)

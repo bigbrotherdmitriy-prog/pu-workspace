@@ -177,6 +177,9 @@ type AnalysisResult = {
   risks?: number;
   drafts?: number;
   copy_folder_name?: string;
+  organizer_session_id?: number;
+  source_item_count?: number;
+  copy_item_count?: number;
   error?: string;
 };
 type Snapshot = {
@@ -2173,7 +2176,16 @@ export function App() {
                       ))}
                     </div>
                     <div className="source-list">
-                      {folders.map((folder) => (
+                      {folders.map((folder) => {
+                        const session = processingQueue?.sessions.find((item) => item.id === folder.analysis_result?.organizer_session_id);
+                        const activeProgress = folder.snapshot_status === "building" ? 5 : Math.max(0, Math.min(100, session?.progress || (folder.analysis_status === "ready" ? 100 : 10)));
+                        const totalItems = session?.copy_item_count || session?.source_item_count || folder.item_count || 0;
+                        const processedItems = Math.min(totalItems, session?.processed_item_count || (activeProgress >= 92 ? totalItems : 0));
+                        const remainingItems = Math.max(0, totalItems - processedItems);
+                        const elapsedMs = session?.created_at ? Date.now() - new Date(session.created_at).getTime() : 0;
+                        const etaMinutes = activeProgress > 5 && activeProgress < 100 ? Math.max(1, Math.round((elapsedMs / 60000) * (100 - activeProgress) / activeProgress)) : 0;
+                        const isProcessing = folder.snapshot_status === "building" || folder.analysis_status === "analyzing";
+                        return (
                         <article key={folder.id}>
                           <FolderKanban />
                           <div>
@@ -2202,6 +2214,11 @@ export function App() {
                                             ? `Изменена ${new Date(folder.modifiedTime).toLocaleDateString("ru-RU")}`
                                             : "Google Drive"}
                             </p>
+                            {isProcessing && <div className="source-progress" aria-label={`Прогресс анализа ${activeProgress}%`}>
+                              <div className="source-progress-head"><strong>{activeProgress}%</strong><span>{processedItems.toLocaleString("ru-RU")} обработано · {remainingItems.toLocaleString("ru-RU")} осталось{etaMinutes ? ` · примерно ${etaMinutes} мин` : ""}</span></div>
+                              <div className="source-progress-track"><i style={{ width: `${activeProgress}%` }} /></div>
+                              <small>{activeProgress < 15 ? "Сканирование структуры папки" : activeProgress < 55 ? "Создание безопасной копии" : activeProgress < 92 ? "Чтение и анализ файлов" : "Формирование документов, задач и предложений"}</small>
+                            </div>}
                           </div>
                           <div className="source-row-actions">
                             <button onClick={() => void openSources(folder.id)}>
@@ -2264,7 +2281,8 @@ export function App() {
                             )}
                           </div>
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 )}

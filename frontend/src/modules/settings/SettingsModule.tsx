@@ -11,7 +11,11 @@ export type AIProjectPolicy = {
 export type ProcessingQueue = {
   summary: { active: number; failed: number; dead_letter: number };
   snapshots: Array<{ id: number; status: string; analysis_status: string; retry_count: number; analysis_retry_count: number; error?: string }>;
-  sessions: Array<{ id: number; status: string; progress: number; retry_count: number; error_message?: string }>;
+  sessions: Array<{
+    id: number; status: string; progress: number; retry_count: number; error_message?: string;
+    source_item_count?: number; copy_item_count?: number; processed_item_count?: number;
+    copy_folder_id?: string; created_at?: string; updated_at?: string;
+  }>;
 };
 
 type Props = {

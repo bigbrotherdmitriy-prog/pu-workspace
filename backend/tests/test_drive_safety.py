@@ -52,6 +52,21 @@ class DriveBoundaryTests(unittest.TestCase):
         self.drive.rename_file("copied-file", "changed.pdf", "copy")
         self.assertEqual(len(self.service.resource.updates), 1)
 
+    def test_content_progress_counts_every_item_including_skipped_folders(self):
+        items = [
+            type("Item", (), {"is_folder": True, "size": None})(),
+            type("Item", (), {"is_folder": False, "size": 100_000_000})(),
+        ]
+        progress = []
+
+        extracted, failed = self.drive.populate_content(
+            items,
+            on_progress=lambda processed, total: progress.append((processed, total)),
+        )
+
+        self.assertEqual((extracted, failed), (0, 0))
+        self.assertEqual(progress, [(1, 2), (2, 2)])
+
 
 if __name__ == "__main__":
     unittest.main()

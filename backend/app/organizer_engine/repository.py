@@ -26,7 +26,7 @@ class OrganizerRepository:
         """), locals()).scalar_one())
 
     def update_session(self, session_id: int, **fields: Any) -> None:
-        allowed = {"copy_folder_id","copy_folder_name","status","progress","error_message","source_item_count","copy_item_count"}
+        allowed = {"copy_folder_id","copy_folder_name","status","progress","error_message","source_item_count","copy_item_count","processed_item_count"}
         fields = {k:v for k,v in fields.items() if k in allowed}
         if not fields:
             return
