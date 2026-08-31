@@ -1,7 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.api.projects import _source_session_ready, router
+from app.api.projects import _discover_project_safe_copies, _source_session_ready, router
 
 
 def test_project_lifecycle_routes_are_registered():
@@ -34,3 +34,45 @@ def test_frontend_keeps_cleanup_result_visible_on_project_card():
     assert "Копии удалены:" in app
     assert "Можно архивировать проект" in app
     assert "copyCleanupResults[item.id]" in app
+
+
+def test_cleanup_discovers_tracked_and_orphaned_safe_copies_only():
+    sessions = [
+        SimpleNamespace(
+            source_folder_id="source-dci", source_folder_name="DCI",
+            copy_folder_id="tracked-copy", copy_folder_name="DCI (безопасная копия 2026-08-31 05-23-58 UTC)",
+        )
+    ]
+
+    class Scalars:
+        def all(self):
+            return sessions
+
+        def __iter__(self):
+            return iter(sessions)
+
+    class Db:
+        def scalars(self, _query):
+            return Scalars()
+
+    class Drive:
+        def get_file_meta(self, file_id):
+            assert file_id == "source-dci"
+            return SimpleNamespace(parent_id="customer-folder")
+
+        def list_children(self, folder_id):
+            if folder_id == "root":
+                return [
+                    SimpleNamespace(id="other-project-copy", name="Мои (безопасная копия 2026-08-31 06-23-58 UTC)", is_folder=True),
+                ]
+            assert folder_id == "customer-folder"
+            return [
+                SimpleNamespace(id="source-dci", name="DCI", is_folder=True),
+                SimpleNamespace(id="tracked-copy", name="DCI (безопасная копия 2026-08-31 05-23-58 UTC)", is_folder=True),
+                SimpleNamespace(id="orphan-copy", name="DCI (безопасная копия 2026-08-31 06-23-58 UTC)", is_folder=True),
+                SimpleNamespace(id="lookalike", name="DCI (безопасная копия вручную)", is_folder=True),
+            ]
+
+    copies = _discover_project_safe_copies(Db(), 7, Drive())
+    assert set(copies) == {"tracked-copy", "orphan-copy"}
+    assert copies["orphan-copy"] is None

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
@@ -275,10 +276,46 @@ def _safe_copy_sessions(db: Session, project_id: int):
     return result
 
 
+_SAFE_COPY_NAME = re.compile(
+    r"^(?P<source>.+) \(безопасная копия \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} UTC\)$",
+    re.IGNORECASE,
+)
+
+
+def _discover_project_safe_copies(db: Session, project_id: int, drive: DriveClient):
+    """Find tracked and orphaned PU copies without ever matching source folders."""
+    sessions = list(db.scalars(select(OrganizerSession).where(OrganizerSession.project_id == project_id)))
+    source_names = {row.source_folder_name.strip().casefold() for row in sessions if row.source_folder_name}
+    tracked = {
+        row.copy_folder_id: row
+        for row in sessions
+        if row.copy_folder_id and row.copy_folder_id not in {"manual", row.source_folder_id}
+        and not row.copy_folder_id.startswith("virtual:")
+    }
+    discovered = dict(tracked)
+    parent_ids = {"root"}
+    for row in sessions:
+        if not row.source_folder_id or row.source_folder_id == "manual":
+            continue
+        try:
+            parent_ids.add(drive.get_file_meta(row.source_folder_id).parent_id or "root")
+        except (KeyError, ValueError):
+            # A removed source cannot broaden cleanup; tracked IDs remain eligible.
+            continue
+    for parent_id in parent_ids:
+        for item in drive.list_children(parent_id):
+            match = _SAFE_COPY_NAME.fullmatch(item.name.strip())
+            if item.is_folder and match and match.group("source").strip().casefold() in source_names:
+                discovered.setdefault(item.id, None)
+    return discovered
+
+
 @router.get("/{project_id}/safe-copies")
 def safe_copy_summary(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "owner")
-    return {"count": len(_safe_copy_sessions(db, project_id)), "recoverable": True, "originals_affected": False}
+    drive = DriveClient(get_drive_service(project_id=project_id, db=db))
+    copies = _discover_project_safe_copies(db, project_id, drive)
+    return {"count": len(copies), "recoverable": True, "originals_affected": False}
 
 
 @router.post("/{project_id}/safe-copies/trash")
@@ -290,13 +327,14 @@ def trash_safe_copies(project_id: int, payload: SafeCopyCleanup,
         raise HTTPException(404, "Project not found")
     if payload.confirmation != project.name:
         raise HTTPException(422, "Введите точное название проекта для подтверждения")
-    rows = _safe_copy_sessions(db, project_id)
     drive = DriveClient(get_drive_service(project_id=project_id, db=db))
+    copies = _discover_project_safe_copies(db, project_id, drive)
     trashed = 0
-    for row in rows:
-        drive.trash_safe_copy(row.copy_folder_id)
-        row.copy_folder_id = None
-        row.copy_folder_name = None
+    for copy_id, row in copies.items():
+        drive.trash_safe_copy(copy_id)
+        if row is not None:
+            row.copy_folder_id = None
+            row.copy_folder_name = None
         trashed += 1
     db.add(AuditLog(action="project_safe_copies_trashed", entity_type="project", entity_id=project_id,
                     details=f"count={trashed}; originals_affected=false"))
