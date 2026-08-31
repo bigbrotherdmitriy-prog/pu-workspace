@@ -2099,6 +2099,7 @@ export function App() {
           {active === "Запуск проекта" && (
             <ProjectLaunchWizard
               projectId={projectId}
+              storageAuthorized={googleState?.authorized === true}
               openSection={(section, target) => {
                 if (target === "contacts") setMailView("companies");
                 setActive(section);

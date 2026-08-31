@@ -27,7 +27,7 @@ describe("ProjectLaunchWizard", () => {
   it("separates an existing folder import from a new managed project", () => {
     localStorage.clear();
     const openSection = vi.fn();
-    render(<ProjectLaunchWizard projectId={1} openSection={openSection} />);
+    render(<ProjectLaunchWizard projectId={1} storageAuthorized openSection={openSection} />);
     expect(screen.getByText("Подключить готовую папку")).toBeInTheDocument();
     expect(screen.getByText("Создать постоянную структуру")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Выбрать существующий проект" }));
@@ -35,5 +35,15 @@ describe("ProjectLaunchWizard", () => {
     expect(screen.getByText("ПОДТВЕРЖДЕНИЕ")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить и продолжить" }));
     expect(openSection).toHaveBeenCalledWith("Рабочий центр", "source");
+  });
+
+  it("routes to integrations before creating a workspace without storage authorization", () => {
+    localStorage.clear();
+    const openSection = vi.fn();
+    render(<ProjectLaunchWizard projectId={2} storageAuthorized={false} openSection={openSection} />);
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать новый проект" }));
+    expect(screen.getByText(/подключите Google Drive/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить Google Drive" }));
+    expect(openSection).toHaveBeenCalledWith("Интеграции");
   });
 });
