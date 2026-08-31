@@ -789,7 +789,12 @@ export function App() {
     const result = await api(`/projects/${projectId}/contracts/discover-bulk`, {
       method: "POST", body: JSON.stringify({ document_ids: documentIds }),
     });
-    return result.proposals || [];
+    const proposals = result.proposals || [];
+    if (!proposals.length && result.rejected_count) {
+      throw new Error(`Самостоятельные договоры не найдены. Исключены приложения и связанные файлы: ${result.rejected_count}.`);
+    }
+    if (result.rejected_count) setNotice(`Найдено договоров: ${proposals.length}. Приложений и связанных файлов исключено: ${result.rejected_count}.`);
+    return proposals;
   }
   async function prepareDroppedContracts(documentIds: number[], parentContractId?: number) {
     try {

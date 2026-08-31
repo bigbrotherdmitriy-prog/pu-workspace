@@ -25,3 +25,15 @@ def test_discovers_supply_contract_but_keeps_result_reviewable():
     assert result["number"] == "П-17"
     assert result["contract_kind"] == "supply"
     assert result["confidence"] < 1
+    assert result["is_contract"] is True
+
+
+def test_does_not_treat_procurement_appendix_as_standalone_supply_contract():
+    result = discover_contract_fields(
+        "Приложение №2 к описанию объекта закупки Этапы ГК_v22.xlsx",
+        "Перечень поставляемого оборудования и этапы поставки.",
+    )
+    assert result["contract_kind"] == "supply"
+    assert result["confidence"] == 0.35
+    assert result["is_contract"] is False
+    assert "приложение" in result["evidence"][-1]

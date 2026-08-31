@@ -69,14 +69,21 @@ def discover_contract_fields(name: str, content: str) -> dict:
         "реквизиты сторон", "заказчик", "подрядчик",
     ))
     confidence = min(0.95, 0.35 + (0.25 if number_match else 0) + legal_markers * 0.06)
+    attachment_name = bool(re.search(
+        r"(?:^|\W)(?:приложени|спецификац|график|ведомост|смет|техническ.*задани)",
+        Path(name).stem.casefold(),
+    ))
+    is_contract = not attachment_name and (bool(number_match) or legal_markers >= 2)
     return {
         "number": number,
         "title": fallback_number,
         "counterparty": companies[-1] if companies else None,
         "contract_kind": kind,
         "confidence": round(confidence, 2),
+        "is_contract": is_contract,
         "evidence": [kind_reason, *( ["номер найден в тексте"] if number_match else ["номер взят из имени файла"]),
-                     f"юридических признаков: {legal_markers}"],
+                     f"юридических признаков: {legal_markers}",
+                     *( ["файл похож на приложение, а не на самостоятельный договор"] if attachment_name else [])],
     }
 
 
@@ -99,6 +106,7 @@ def discover_contracts_bulk(
         Contract.source_document_id.is_not(None),
     )))
     proposals = []
+    rejected = []
     content_by_document: dict[int, str] = {}
     for document in documents:
         if document.mime_type and "folder" in document.mime_type:
@@ -106,6 +114,12 @@ def discover_contracts_bulk(
         content = _text_for_document(db, document)
         content_by_document[document.id] = content
         proposal = discover_contract_fields(document.name, content)
+        if not proposal.pop("is_contract"):
+            rejected.append({
+                "document_id": document.id, "document_name": document.name,
+                "reason": proposal["evidence"][-1] if proposal["evidence"] else "недостаточно признаков договора",
+            })
+            continue
         proposals.append({
             "document_id": document.id,
             "document_name": document.name,
@@ -126,4 +140,7 @@ def discover_contracts_bulk(
         if parent:
             child["parent_document_id"] = parent["document_id"]
             child["evidence"].append(f"вышестоящий договор: {by_id[parent['document_id']]['number']}")
-    return {"proposals": proposals, "count": len(proposals), "originals_changed": False}
+    return {
+        "proposals": proposals, "count": len(proposals), "rejected": rejected,
+        "rejected_count": len(rejected), "originals_changed": False,
+    }
