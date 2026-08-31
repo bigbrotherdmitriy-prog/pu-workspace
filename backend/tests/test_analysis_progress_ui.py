@@ -23,3 +23,5 @@ def test_processing_queue_exposes_counts_required_by_progress_ui():
     assert "source_item_count" in workspace_source
     assert "copy_item_count" in workspace_source
     assert "processed_item_count" in workspace_source
+    assert "queue_position" in workspace_source
+    assert "queued.id <= s.id" in workspace_source

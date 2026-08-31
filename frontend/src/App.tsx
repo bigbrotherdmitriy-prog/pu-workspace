@@ -2180,7 +2180,8 @@ export function App() {
                         const session = processingQueue?.sessions.find((item) => item.id === folder.analysis_result?.organizer_session_id);
                         const isQueued = session?.status === "queued";
                         const queuedSessions = (processingQueue?.sessions || []).filter((item) => item.status === "queued").sort((left, right) => left.id - right.id);
-                        const queuePosition = isQueued ? queuedSessions.findIndex((item) => item.id === session?.id) + 1 : 0;
+                        const localQueuePosition = isQueued ? queuedSessions.findIndex((item) => item.id === session?.id) + 1 : 0;
+                        const queuePosition = session?.queue_position || localQueuePosition;
                         const activeProgress = isQueued ? 0 : folder.snapshot_status === "building" ? 5 : Math.max(0, Math.min(100, session?.progress || (folder.analysis_status === "ready" ? 100 : 10)));
                         const totalItems = session?.copy_item_count || session?.source_item_count || folder.item_count || 0;
                         const processedItems = Math.min(totalItems, session?.processed_item_count || (activeProgress >= 92 ? totalItems : 0));

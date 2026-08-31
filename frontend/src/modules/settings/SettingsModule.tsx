@@ -14,7 +14,7 @@ export type ProcessingQueue = {
   sessions: Array<{
     id: number; status: string; progress: number; retry_count: number; error_message?: string;
     source_item_count?: number; copy_item_count?: number; processed_item_count?: number;
-    copy_folder_id?: string; created_at?: string; updated_at?: string;
+    copy_folder_id?: string; created_at?: string; updated_at?: string; queue_position?: number;
   }>;
 };
 

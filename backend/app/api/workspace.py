@@ -527,9 +527,13 @@ def processing_queue(project_id: int, db: Session = Depends(get_db), user: User 
     require_project_role(db, user, project_id, "viewer")
     snapshots = list(db.scalars(select(WorkspaceSnapshot).where(WorkspaceSnapshot.project_id == project_id).order_by(WorkspaceSnapshot.id.desc()).limit(500)))
     sessions = db.execute(text("""
-        SELECT id,status,progress,error_message,retry_count,created_at,updated_at,
-               source_item_count,copy_item_count,processed_item_count,copy_folder_id
-        FROM organizer_sessions WHERE project_id=:project_id ORDER BY id DESC LIMIT 500
+        SELECT s.id,s.status,s.progress,s.error_message,s.retry_count,s.created_at,s.updated_at,
+               s.source_item_count,s.copy_item_count,s.processed_item_count,s.copy_folder_id,
+               CASE WHEN s.status='queued' THEN (
+                   SELECT count(1) FROM organizer_sessions queued
+                   WHERE queued.status='queued' AND queued.id <= s.id
+               ) END AS queue_position
+        FROM organizer_sessions s WHERE s.project_id=:project_id ORDER BY s.id DESC LIMIT 500
     """), {"project_id": project_id}).mappings().all()
     return {
         "summary": {
