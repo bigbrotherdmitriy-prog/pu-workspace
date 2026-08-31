@@ -11,6 +11,7 @@ import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizar
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
 import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
+import { buildContractTree } from "./modules/contracts/contractTree";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
@@ -2325,18 +2326,19 @@ export function App() {
           onCreate={() => void createContract()}
         >
             <section className="contract-list">
-              {contracts
-                .filter(
-                  (item) =>
-                    !query ||
-                    `${item.number} ${item.title} ${item.counterparty || ""}`
-                      .toLocaleLowerCase("ru-RU")
-                      .includes(query.toLocaleLowerCase("ru-RU")),
-                )
-                .map((item) => (
-                  <article className="card contract-card" key={item.id}>
+              <header className="contract-project-root">
+                <FolderKanban />
+                <div><span>ПРОЕКТ</span><h2>{projects.find((project) => project.id === projectId)?.name || "Выбранный проект"}</h2><p>Корень договорной структуры</p></div>
+              </header>
+              {buildContractTree(contracts, query).map(({ item, depth, hasChildren, parentMissing }) => (
+                  <article className="card contract-card contract-tree-node" data-depth={depth} style={{ "--contract-depth": depth } as React.CSSProperties} key={item.id}>
                     <div className="contract-number">{item.number}</div>
                     <div>
+                      <div className="contract-tree-position">
+                        <span>{depth === 0 ? "Корень договорной цепочки" : `Уровень ${depth + 1}`}</span>
+                        {hasChildren && <b>Есть дочерние договоры</b>}
+                        {parentMissing && <b className="warning">Вышестоящий договор не найден</b>}
+                      </div>
                       <span className={`contract-status ${item.status}`}>
                         {item.contract_kind === "prime_reference" ? "ГЕНПОДРЯД · КОНТЕКСТ" : item.contract_kind === "revenue_subcontract" ? "НАШ СУБПОДРЯД · ДОХОД" : item.contract_kind === "downstream_subcontract" ? "НАШ ИСПОЛНИТЕЛЬ · РАСХОД" : item.contract_kind === "supply" ? "ПОСТАВКА · РАСХОД" : "ПРЯМОЙ ДОГОВОР · ДОХОД"} · {item.status}
                       </span>

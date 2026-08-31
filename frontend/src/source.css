@@ -224,8 +224,21 @@
 .contract-form label { color: #748091; font-size: 12px; display: grid; gap: 3px; }
 .contract-form button { padding: 10px 14px; border: 1px solid #185adb; border-radius: 8px; background: #185adb; color: #fff; font-weight: 650; cursor: pointer; }
 .contract-form button:disabled { opacity: .5; cursor: default; }
-.contract-list { display: grid; gap: 14px; }
+.contract-list { position: relative; display: grid; gap: 14px; }
+.contract-project-root { position: relative; display: flex; align-items: center; gap: 14px; padding: 18px 20px; border: 1px solid #174b3d; border-radius: 14px; color: #fff; background: linear-gradient(135deg, #10251f, #174b3d); box-shadow: 0 10px 28px rgba(12, 45, 34, .12); }
+.contract-project-root::after { content: ""; position: absolute; left: 38px; top: 100%; width: 2px; height: 15px; background: #87b7a6; }
+.contract-project-root > svg { width: 28px; height: 28px; color: #65d4ad; }
+.contract-project-root div { display: grid; gap: 2px; }
+.contract-project-root span { color: #8ddabe; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.contract-project-root h2, .contract-project-root p { margin: 0; }
+.contract-project-root p { color: #b9d0c7; font-size: 12px; }
 .contract-card { display: grid; grid-template-columns: auto minmax(280px,1fr) minmax(320px,.8fr); gap: 16px; align-items: center; }
+.contract-tree-node { --tree-offset: min(calc(var(--contract-depth) * 28px), 168px); position: relative; width: calc(100% - var(--tree-offset)); margin-left: var(--tree-offset); }
+.contract-tree-node[data-depth="0"]::before { content: ""; position: absolute; left: 38px; top: -15px; width: 2px; height: 15px; background: #87b7a6; }
+.contract-tree-node[data-depth]:not([data-depth="0"])::before { content: ""; position: absolute; top: -15px; bottom: 50%; left: -18px; width: 16px; border-left: 2px solid #a9c9bd; border-bottom: 2px solid #a9c9bd; border-radius: 0 0 0 9px; }
+.contract-tree-position { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 7px; color: #6b7d74; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .035em; }
+.contract-tree-position b { padding: 3px 7px; border-radius: 999px; color: #087a59; background: #e7f5f0; font-size: 10px; }
+.contract-tree-position b.warning { color: #9a5d00; background: #fff2d6; }
 .contract-number { min-width: 110px; padding: 14px; border-radius: 10px; background: #edf3ff; color: #185adb; font-weight: 750; text-align: center; }
 .contract-card h2 { margin: 7px 0 3px; }
 .contract-card p, .contract-card small { display: block; margin: 0; color: #748091; }

@@ -19,4 +19,9 @@ def test_our_subcontract_is_revenue_and_links_to_prime_contract():
 def test_downstream_subcontract_and_supply_are_cost_contracts():
     assert cash_flow_direction("downstream_subcontract") == "outflow"
     assert cash_flow_direction("supply") == "outflow"
-    assert allowed_parent_kinds("downstream_subcontract") == {"customer", "revenue_subcontract"}
+    assert allowed_parent_kinds("downstream_subcontract") == {"customer", "revenue_subcontract", "downstream_subcontract"}
+
+
+def test_subcontract_chain_can_continue_to_any_depth():
+    assert "downstream_subcontract" in allowed_parent_kinds("downstream_subcontract")
+    assert "downstream_subcontract" in allowed_parent_kinds("supply")

@@ -67,15 +67,15 @@ export function ContractsModule({
               <option value="prime_reference">Генподрядный договор — только контекст</option>
               <option value="revenue_subcontract">Наш субподрядный договор — доходы, ГПР, бюджет и ДДС</option>
               <option value="customer">Прямой договор с заказчиком — доходы, ГПР, бюджет и ДДС</option>
-              <option value="downstream_subcontract">Договор с нашим субподрядчиком — расходы</option>
+              <option value="downstream_subcontract">Договор с субподрядчиком / субсубподрядчиком — расходы</option>
               <option value="supply">Договор поставки — расходы</option>
             </select>
             {!["prime_reference", "customer"].includes(kind) && <select value={parentContractId} onChange={(event) => onParentContractIdChange(Number(event.target.value))}>
-              <option value={0}>{kind === "revenue_subcontract" ? "Выберите генподрядный договор" : "Выберите наш доходный договор"}</option>
+              <option value={0}>{kind === "revenue_subcontract" ? "Выберите генподрядный договор" : "Выберите непосредственный вышестоящий договор"}</option>
               {contracts.filter((item) => kind === "revenue_subcontract"
                 ? item.contract_kind === "prime_reference"
-                : ["customer", "revenue_subcontract"].includes(item.contract_kind || "customer")
-              ).map((item) => <option value={item.id} key={item.id}>{item.number} — {item.title}</option>)}
+                : ["customer", "revenue_subcontract", "downstream_subcontract"].includes(item.contract_kind || "customer")
+              ).map((item) => <option value={item.id} key={item.id}>↳ {item.number} — {item.title}</option>)}
             </select>}
             <input type="number" min="0" step="0.01" value={amount} onChange={(event) => onAmountChange(event.target.value)} placeholder="Сумма договора, ₽" />
             <input type="number" min="0" step="0.01" value={advanceAmount} onChange={(event) => onAdvanceAmountChange(event.target.value)} placeholder="Аванс, ₽" />

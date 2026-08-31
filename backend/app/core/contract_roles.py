@@ -35,7 +35,7 @@ def allowed_parent_kinds(kind: str) -> set[str]:
     if kind == "revenue_subcontract":
         return {"prime_reference"}
     if kind in {"downstream_subcontract", "supply"}:
-        return {"customer", "revenue_subcontract"}
+        return {"customer", "revenue_subcontract", "downstream_subcontract"}
     return set()
 
 
