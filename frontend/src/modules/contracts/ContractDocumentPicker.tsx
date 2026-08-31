@@ -56,7 +56,7 @@ export function ContractDocumentPicker(props: Props) {
     <button type="button" className="secondary" disabled={props.busy} onClick={props.onSuggest}>
       {props.busy ? "Анализирую реестр…" : "Найти договор по номеру, контрагенту и тексту"}
     </button>
-    {props.open && <div className="contract-document-modal" role="dialog" aria-modal="true" aria-label="Ручной выбор документа договора">
+    {props.open && <div data-ai-overlay className="contract-document-modal" role="dialog" aria-modal="true" aria-label="Ручной выбор документа договора">
       <div className="contract-document-dialog">
         <div className="contract-document-dialog-head">
           <div><span className="eyebrow">РУЧНОЙ ВЫБОР</span><h2>Найдите файл договора</h2><p>Выберите источник, введите часть названия и подтвердите конкретный файл.</p></div>
@@ -69,14 +69,23 @@ export function ContractDocumentPicker(props: Props) {
         <div className="contract-document-results">
           {visible.slice(0, 100).map((document) => {
             const score = props.candidates.find((row) => row.document_id === document.id)?.score;
-            return <button type="button" className={selectedDocumentId === document.id ? "selected" : ""} onClick={() => setSelectedDocumentId(document.id)} key={document.id}>
-              <FileText /><span><strong>{document.name}</strong><small>{score ? `${score}% совпадения · ` : ""}{document.source}</small></span><b>{selectedDocumentId === document.id ? "Выбран" : "Выбрать"}</b>
-            </button>;
+            const selected = selectedDocumentId === document.id;
+            return <label className={selected ? "selected" : ""} key={document.id}>
+              <input
+                type="radio"
+                name={`contract-${props.contractId}-source-document`}
+                value={document.id}
+                checked={selected}
+                onChange={() => setSelectedDocumentId(document.id)}
+                aria-label={`Выбрать файл ${document.name}`}
+              />
+              <FileText /><span><strong>{document.name}</strong><small>{score ? `${score}% совпадения · ` : ""}{document.source}</small></span><b>{selected ? "Выбран" : "Выбрать"}</b>
+            </label>;
           })}
           {!visible.length && <div className="empty"><FileText /><p>Файлы не найдены. Смените источник или очистите поиск.</p></div>}
         </div>
         <div className="contract-document-dialog-actions">
-          <span>{selectedDocument ? `Выбран: ${selectedDocument.name}` : "Сначала выберите файл в списке"}</span>
+          <span aria-live="polite">{selectedDocument ? `Выбран: ${selectedDocument.name}` : "Сначала выберите файл в списке"}</span>
           <div>{selectedDocument?.source_url && <a href={selectedDocument.source_url} target="_blank" rel="noreferrer">Открыть оригинал</a>}<button type="button" disabled={!selectedDocumentId} onClick={() => props.onLink(selectedDocumentId)}>Привязать выбранный файл</button></div>
         </div>
       </div>
