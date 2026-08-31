@@ -343,8 +343,8 @@
 .contract-source-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .contract-source-tabs button { padding: 8px 6px; font-size: 12px; }
 .contract-source-tabs button.selected { background: #0d8d70; border-color: #0d8d70; color: #fff; }
-.contract-document-modal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(8, 20, 15, .62); backdrop-filter: blur(4px); }
-.contract-document-dialog { width: min(920px, 100%); max-height: min(820px, 92vh); display: grid; gap: 14px; padding: 22px; border-radius: 20px; background: #fff; box-shadow: 0 24px 80px rgba(0, 20, 12, .28); }
+.contract-document-modal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(8, 20, 15, .68); }
+.contract-document-dialog { width: min(920px, 100%); max-height: min(820px, 92vh); display: grid; gap: 14px; padding: 22px; border-radius: 20px; background: #fff; box-shadow: 0 24px 80px rgba(0, 20, 12, .28); transform: translateZ(0); contain: paint; }
 .contract-document-dialog-head { display: flex; justify-content: space-between; gap: 20px; }
 .contract-document-dialog-head h2, .contract-document-dialog-head p { margin: 4px 0; }
 .contract-document-dialog-head p { color: #6f7c75; }
