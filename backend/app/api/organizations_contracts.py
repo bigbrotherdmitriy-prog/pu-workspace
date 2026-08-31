@@ -131,7 +131,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
     number_in_body = bool(compact_number and len(compact_number) >= 4 and compact_number in compact_body)
     if number_in_name:
         # The filename is the strongest signal when OCR/text extraction is not ready.
-        score += 95
+        score += 100
         reasons.append("номер договора указан в имени файла")
     elif number_in_body:
         # References in acts, estimates and letters are useful context, but do not
@@ -172,7 +172,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
     # beginning. This semantic evidence distinguishes it from a document that only
     # mentions the contract number in a footer or reference field.
     legal_structure_markers = (
-        "стороны заключили", "именуем", "предмет договора", "права и обязанности",
+        "стороны заключили", "именуем", "предмет договора", "предмет", "государственн контракт", "права и обязанности",
         "цена договора", "срок действия", "реквизиты сторон", "заказчик", "подрядчик",
     )
     legal_structure_count = sum(marker in body_head for marker in legal_structure_markers)
