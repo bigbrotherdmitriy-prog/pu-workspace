@@ -93,6 +93,15 @@ class ContractCreate(BaseModel):
 
 
 class ContractLinkUpdate(BaseModel):
+    number: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    counterparty: str | None = Field(default=None, max_length=500)
+    amount: Decimal | None = Field(default=None, ge=0)
+    advance_amount: Decimal | None = Field(default=None, ge=0)
+    retention_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    signed_at: date | None = None
+    status: str | None = Field(default=None, pattern="^(draft|active|completed|terminated)$")
+    notes: str | None = Field(default=None, max_length=5000)
     source_document_id: int | None = None
     parent_contract_id: int | None = None
     contract_kind: str | None = Field(
@@ -314,8 +323,50 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
         row.source_document_id = payload.source_document_id
         db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
                         details=f"document={row.source_document_id or 'none'}"))
+    editable_fields = {
+        "number", "title", "counterparty", "amount", "advance_amount",
+        "retention_percent", "signed_at", "status", "notes",
+    }
+    changed_fields = editable_fields & payload.model_fields_set
+    for field in changed_fields:
+        value = getattr(payload, field)
+        setattr(row, field, value.strip() if isinstance(value, str) else value)
+    if changed_fields:
+        db.add(AuditLog(
+            action="contract_updated", entity_type="contract", entity_id=row.id,
+            details=f"fields={','.join(sorted(changed_fields))}; user={user.id}",
+        ))
     db.commit(); db.refresh(row)
     return _contract(row, db)
+
+
+class ContractDelete(BaseModel):
+    confirmation: str
+
+
+@router.delete("/projects/{project_id}/contracts/{contract_id}")
+def delete_contract(project_id: int, contract_id: int, payload: ContractDelete,
+                    db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "owner")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    if payload.confirmation.strip() != row.number.strip():
+        raise HTTPException(422, "Введите точный номер договора для подтверждения")
+    child = db.scalar(select(Contract.id).where(
+        Contract.project_id == project_id, Contract.parent_contract_id == row.id,
+    ).limit(1))
+    if child is not None:
+        raise HTTPException(409, "У договора есть дочерние договоры. Сначала измените их место в дереве")
+    number = row.number
+    db.delete(row)
+    db.flush()
+    db.add(AuditLog(
+        action="contract_deleted", entity_type="project", entity_id=project_id,
+        details=f"contract_id={contract_id}; number={number}; user={user.id}; source_documents_affected=false",
+    ))
+    db.commit()
+    return {"deleted": contract_id, "number": number, "source_documents_affected": False}
 
 
 def _contract_source_text(document: Document, db: Session | None = None) -> str:

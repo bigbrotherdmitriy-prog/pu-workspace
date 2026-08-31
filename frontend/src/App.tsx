@@ -189,6 +189,10 @@ type ContractRow = {
     decisions: number;
   };
 };
+type ContractEditDraft = {
+  number: string; title: string; counterparty: string; amount: string;
+  advanceAmount: string; retentionPercent: string; signedAt: string; status: string;
+};
 type AnalysisResult = {
   status: string;
   mode?: string;
@@ -362,6 +366,7 @@ export function App() {
     [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
     [contractStructureDrafts, setContractStructureDrafts] = useState<Record<number, { kind: string; parentId: number }>>({}),
+    [contractEditDrafts, setContractEditDrafts] = useState<Record<number, ContractEditDraft>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
     [droppedContractProposals, setDroppedContractProposals] = useState<BulkContractProposal[]>([]),
     [contractFinancialChecks, setContractFinancialChecks] = useState<Record<number, ContractFinancialCheck>>({}),
@@ -892,6 +897,48 @@ export function App() {
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  function beginContractEdit(item: ContractRow) {
+    setContractEditDrafts((current) => ({ ...current, [item.id]: {
+      number: item.number, title: item.title, counterparty: item.counterparty || "",
+      amount: item.amount?.toString() || "", advanceAmount: item.advance_amount?.toString() || "",
+      retentionPercent: item.retention_percent?.toString() || "", signedAt: item.signed_at?.slice(0, 10) || "",
+      status: item.status,
+    } }));
+  }
+  async function saveContractEdit(contractId: number) {
+    const draft = contractEditDrafts[contractId];
+    if (!draft?.number.trim() || !draft.title.trim()) return;
+    try {
+      setError("");
+      await api(`/projects/${projectId}/contracts/${contractId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          number: draft.number.trim(), title: draft.title.trim(), counterparty: draft.counterparty.trim() || null,
+          amount: draft.amount ? Number(draft.amount) : null,
+          advance_amount: draft.advanceAmount ? Number(draft.advanceAmount) : null,
+          retention_percent: draft.retentionPercent ? Number(draft.retentionPercent) : null,
+          signed_at: draft.signedAt || null, status: draft.status,
+        }),
+      });
+      setContractEditDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
+      setNotice("Договор обновлён. Связанные документы, ГПР, бюджет и ДДС сохранены.");
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function deleteContract(item: ContractRow) {
+    const confirmation = window.prompt(
+      `Удалить договор «${item.number}»? Исходные документы не удаляются. Введите точный номер договора:`,
+    );
+    if (confirmation === null) return;
+    try {
+      setError("");
+      await api(`/projects/${projectId}/contracts/${item.id}`, {
+        method: "DELETE", body: JSON.stringify({ confirmation }),
+      });
+      setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
+      await load();
+    } catch (e) { setError((e as Error).message); }
   }
   async function openContractControl(contractId: number) {
     try {
@@ -2618,6 +2665,33 @@ export function App() {
                         {item.retention_percent ? ` · удержание ${item.retention_percent}%` : ""}
                         {item.warranty_until ? ` · гарантия до ${new Date(item.warranty_until).toLocaleDateString("ru-RU")}` : ""}
                       </small>}
+                      {contractEditDrafts[item.id] ? (() => {
+                        const draft = contractEditDrafts[item.id];
+                        const change = (field: keyof ContractEditDraft, value: string) => setContractEditDrafts((current) => ({
+                          ...current, [item.id]: { ...current[item.id], [field]: value },
+                        }));
+                        return <div className="contract-edit-form">
+                          <strong>Редактирование договора</strong>
+                          <input value={draft.number} onChange={(event) => change("number", event.target.value)} placeholder="Номер договора" />
+                          <input value={draft.title} onChange={(event) => change("title", event.target.value)} placeholder="Название" />
+                          <input value={draft.counterparty} onChange={(event) => change("counterparty", event.target.value)} placeholder="Контрагент" />
+                          <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => change("amount", event.target.value)} placeholder="Сумма договора, ₽" />
+                          <input type="number" min="0" step="0.01" value={draft.advanceAmount} onChange={(event) => change("advanceAmount", event.target.value)} placeholder="Аванс, ₽" />
+                          <input type="number" min="0" max="100" step="0.01" value={draft.retentionPercent} onChange={(event) => change("retentionPercent", event.target.value)} placeholder="Удержание, %" />
+                          <label>Дата подписания<input type="date" value={draft.signedAt} onChange={(event) => change("signedAt", event.target.value)} /></label>
+                          <select value={draft.status} onChange={(event) => change("status", event.target.value)}>
+                            <option value="draft">Черновик</option><option value="active">Действует</option>
+                            <option value="completed">Завершён</option><option value="terminated">Расторгнут</option>
+                          </select>
+                          <div className="contract-edit-actions">
+                            <button className="secondary" onClick={() => setContractEditDrafts((current) => { const next = { ...current }; delete next[item.id]; return next; })}>Отмена</button>
+                            <button disabled={!draft.number.trim() || !draft.title.trim()} onClick={() => void saveContractEdit(item.id)}>Сохранить изменения</button>
+                          </div>
+                        </div>;
+                      })() : <div className="contract-record-actions">
+                        <button className="secondary" onClick={() => beginContractEdit(item)}>Редактировать</button>
+                        <button className="danger" onClick={() => void deleteContract(item)}><Trash2 /> Удалить договор</button>
+                      </div>}
                     </div>
                     <div className="contract-links">
                       <ContractDocumentPicker

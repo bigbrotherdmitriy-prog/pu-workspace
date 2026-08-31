@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.api.organizations_contracts import ContractCreate, _apply_contract_financial_terms, _contract_document_score, _contract_financial_terms, _contract_source_text, _payment_schedule_candidates, router
+from app.api.organizations_contracts import ContractCreate, ContractDelete, ContractLinkUpdate, _apply_contract_financial_terms, _contract_document_score, _contract_financial_terms, _contract_source_text, _payment_schedule_candidates, router
 from app.models.document import Document
 from app.models.organization_contract import Contract
 
@@ -13,6 +13,8 @@ def test_contract_routes_are_registered():
     assert "/projects/{project_id}/contracts/{contract_id}/initialize-control" in paths
     assert "/projects/{project_id}/contracts/{contract_id}/analyze" in paths
     assert "/projects/{project_id}/contracts/{contract_id}/source-candidates" in paths
+    delete_route = next(route for route in router.routes if route.path == "/projects/{project_id}/contracts/{contract_id}" and "DELETE" in route.methods)
+    assert delete_route
 
 
 def test_contract_payload_defaults_to_active():
@@ -30,6 +32,18 @@ def test_revenue_subcontract_payload_keeps_parent_and_terms():
     assert payload.parent_contract_id == 12
     assert payload.amount == Decimal("1250000.00")
     assert payload.retention_percent == Decimal("5")
+
+
+def test_contract_update_accepts_commercial_fields_and_delete_requires_confirmation():
+    update = ContractLinkUpdate(
+        number="СП-02", title="Монтаж и ПНР", counterparty="ООО Исполнитель",
+        amount=Decimal("1500000"), advance_amount=Decimal("300000"),
+        retention_percent=Decimal("5"), signed_at="2026-08-31", status="active",
+    )
+    assert update.number == "СП-02"
+    assert update.amount == Decimal("1500000")
+    assert update.signed_at.isoformat() == "2026-08-31"
+    assert ContractDelete(confirmation="СП-02").confirmation == "СП-02"
 
 
 def test_prime_reference_contract_has_an_explicit_non_financial_role():
