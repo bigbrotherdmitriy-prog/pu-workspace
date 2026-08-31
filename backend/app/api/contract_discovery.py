@@ -61,8 +61,12 @@ def discover_contract_fields(name: str, content: str) -> dict:
         if normalized.casefold() not in {item.casefold() for item in companies}:
             companies.append(normalized)
 
+    attachment_name = bool(re.search(
+        r"(?:^|\W)(?:приложени|спецификац|график|ведомост|смет|техническ.*задани)",
+        Path(name).stem.casefold(),
+    ))
     heading = f"{name}\n{text[:1_800]}".casefold()
-    if ("государственн" in heading and "контракт" in heading) or "генподряд" in heading or re.search(r"(?:^|\W)гк[-_№\s]", name.casefold()):
+    if not attachment_name and (("государственн" in heading and "контракт" in heading) or "генподряд" in heading or re.search(r"(?:^|\W)гк[-_№\s]", name.casefold())):
         kind, kind_reason = "prime_reference", "найден государственный/генподрядный контекст"
     elif "поставк" in lowered or "поставщик" in lowered:
         kind, kind_reason = "supply", "найдены признаки договора поставки"
@@ -76,10 +80,6 @@ def discover_contract_fields(name: str, content: str) -> dict:
         "реквизиты сторон", "заказчик", "подрядчик",
     ))
     confidence = min(0.95, 0.35 + (0.25 if number_match else 0) + legal_markers * 0.06)
-    attachment_name = bool(re.search(
-        r"(?:^|\W)(?:приложени|спецификац|график|ведомост|смет|техническ.*задани)",
-        Path(name).stem.casefold(),
-    ))
     is_contract = not attachment_name and (bool(number_match) or legal_markers >= 2)
     return {
         "number": number,
