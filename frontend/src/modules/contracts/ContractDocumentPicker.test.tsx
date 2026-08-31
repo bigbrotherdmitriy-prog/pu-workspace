@@ -5,6 +5,7 @@ import { ContractDocumentPicker } from "./ContractDocumentPicker";
 describe("ContractDocumentPicker", () => {
   it("lets the user select an exact file before linking it", () => {
     const onLink = vi.fn();
+    const onClose = vi.fn();
     render(<ContractDocumentPicker
       contractId={15}
       open
@@ -16,7 +17,8 @@ describe("ContractDocumentPicker", () => {
         { id: 2, name: "Договор ГК-08-194.pdf", source: "google_drive_copy" },
       ]}
       candidates={[]}
-      onToggle={vi.fn()}
+      onOpen={vi.fn()}
+      onClose={onClose}
       onSuggest={vi.fn()}
       onTabChange={vi.fn()}
       onQueryChange={vi.fn()}
@@ -30,5 +32,7 @@ describe("ContractDocumentPicker", () => {
     expect(linkButton).toBeEnabled();
     fireEvent.click(linkButton);
     expect(onLink).toHaveBeenCalledWith(2);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

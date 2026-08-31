@@ -2515,10 +2515,11 @@ export function App() {
                         query={contractDocumentQueries[item.id] || ""}
                         documents={documentRows}
                         candidates={contractSourceCandidates[item.id] || []}
-                        onToggle={() => {
-                          setContractCatalogOpen((current) => ({ ...current, [item.id]: !current[item.id] }));
+                        onOpen={() => {
+                          setContractCatalogOpen((current) => ({ ...current, [item.id]: true }));
                           setContractDocumentTabs((current) => ({ ...current, [item.id]: "server" }));
                         }}
+                        onClose={() => setContractCatalogOpen((current) => ({ ...current, [item.id]: false }))}
                         onSuggest={() => void suggestContractDocuments(item.id)}
                         onTabChange={(tab) => setContractDocumentTabs((current) => ({ ...current, [item.id]: tab }))}
                         onQueryChange={(value) => setContractDocumentQueries((current) => ({ ...current, [item.id]: value }))}

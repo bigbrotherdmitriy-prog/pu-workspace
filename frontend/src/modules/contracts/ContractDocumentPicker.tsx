@@ -15,7 +15,8 @@ type Props = {
   query: string;
   documents: DocumentItem[];
   candidates: Candidate[];
-  onToggle: () => void;
+  onOpen: () => void;
+  onClose: () => void;
   onSuggest: () => void;
   onTabChange: (tab: ContractDocumentTab) => void;
   onQueryChange: (query: string) => void;
@@ -50,8 +51,8 @@ export function ContractDocumentPicker(props: Props) {
 
   return <>
     <label>1. Документ-источник</label>
-    <button type="button" title="Выбрать файл из каталога" onClick={props.onToggle}>
-      {props.open ? "Закрыть ручной выбор" : "Выбрать договор самому"}
+    <button type="button" title="Выбрать файл из каталога" onClick={props.onOpen}>
+      Выбрать договор самому
     </button>
     <button type="button" className="secondary" disabled={props.busy} onClick={props.onSuggest}>
       {props.busy ? "Анализирую реестр…" : "Найти договор по номеру, контрагенту и тексту"}
@@ -60,7 +61,7 @@ export function ContractDocumentPicker(props: Props) {
       <div className="contract-document-dialog">
         <div className="contract-document-dialog-head">
           <div><span className="eyebrow">РУЧНОЙ ВЫБОР</span><h2>Найдите файл договора</h2><p>Выберите источник, введите часть названия и подтвердите конкретный файл.</p></div>
-          <button type="button" className="icon-button" aria-label="Закрыть" onClick={props.onToggle}><X /></button>
+          <button type="button" className="icon-button" aria-label="Закрыть" onClick={props.onClose}><X /></button>
         </div>
         <div className="contract-source-tabs">{tabs.map(([source, title]) =>
           <button type="button" className={props.tab === source ? "selected" : "secondary"} onClick={() => props.onTabChange(source)} key={source}>{title}</button>,
