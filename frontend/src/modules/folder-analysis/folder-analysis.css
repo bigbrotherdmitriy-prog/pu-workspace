@@ -1,19 +1,8 @@
-.folder-analysis-summary { display: grid; gap: 18px; margin-bottom: 18px; }
-.folder-analysis-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-.folder-analysis-heading h2 { margin: 5px 0 6px; }
-.folder-analysis-heading p { margin: 0; color: var(--muted, #728078); max-width: 760px; }
-.folder-analysis-heading .eyebrow { color: var(--brand, #0b8f72); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.folder-analysis-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.folder-analysis-metrics article { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 14px; border: 1px solid #dbe6e1; border-radius: 14px; background: #f7faf8; }
-.folder-analysis-metrics svg { width: 18px; color: #0b8f72; }
-.folder-analysis-metrics span { color: #66736c; font-size: 13px; }
+.folder-analysis { display: grid; gap: 16px; }
+.folder-analysis-metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 16px; }
+.folder-analysis-metrics article { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 20px; border: .5px solid var(--pu-border); border-radius: var(--pu-radius-card); background: #fff; }
+.folder-analysis-metrics article.warn { border-color: #e6c98e; background: #fffaf0; }
+.folder-analysis-metrics svg { width: 18px; color: var(--pu-green-700); }
+.folder-analysis-metrics span { color: var(--pu-muted); font-size: 12px; }
 .folder-analysis-metrics strong { font-size: 22px; }
-.folder-analysis-metrics article.warn { border-color: #efd39c; background: #fff8e9; }
-.folder-analysis-metrics article.warn svg { color: #c57a00; }
-.folder-analysis-next { padding: 12px 14px; border-left: 3px solid #0b8f72; background: #eff8f4; color: #38564a; }
-@media (max-width: 900px) {
-  .folder-analysis-heading { display: grid; }
-  .folder-analysis-heading button { width: 100%; }
-  .folder-analysis-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 520px) { .folder-analysis-metrics { grid-template-columns: 1fr; } }
+.folder-analysis-next { padding: 14px 16px; border-left: 3px solid var(--pu-green-700); background: var(--pu-canvas); color: #38564a; }

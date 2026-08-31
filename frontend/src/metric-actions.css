@@ -1,7 +1,7 @@
 .metrics button {
   background: #fff;
   border: 1px solid #e5e9ef;
-  border-radius: 14px;
+  border-radius: var(--pu-radius-card);
   padding: 18px;
   text-align: left;
   cursor: pointer;
@@ -11,8 +11,8 @@
 
 .metrics button:hover {
   border-color: #20ad83;
-  box-shadow: 0 8px 22px #12382c14;
-  transform: translateY(-1px);
+  box-shadow: none;
+  transform: none;
 }
 
 .metrics button:focus-visible {

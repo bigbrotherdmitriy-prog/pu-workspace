@@ -12,32 +12,32 @@
   .shell > aside { top: 0; height: 100dvh; padding-top: calc(14px + env(safe-area-inset-top)); padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
   .mobile-drawer-backdrop { position: fixed; inset: 0; z-index: 25; display: block; border: 0; border-radius: 0; background: rgba(5, 14, 10, .52); }
   .android-bottom-nav { position: fixed; z-index: 90; left: 0; right: 0; bottom: 0; height: calc(62px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, 1fr); margin: 0; padding: 5px 4px env(safe-area-inset-bottom); border-top: 1px solid #d3dfd9; background: rgba(255, 255, 255, .97); box-shadow: 0 -8px 30px rgba(12, 35, 26, .1); backdrop-filter: blur(14px); }
-  .android-bottom-nav button { min-width: 0; height: 52px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 3px 1px; border: 0; border-radius: 11px; background: transparent; color: #68776f; }
+  .android-bottom-nav button { min-width: 0; height: 52px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 3px 1px; border: 0; border-radius: var(--pu-radius-card); background: transparent; color: #68776f; }
   .android-bottom-nav button.active { color: #087a59; background: #e8f5ef; box-shadow: none; }
   .android-bottom-nav svg { width: 21px; height: 21px; }
   .android-bottom-nav span { max-width: 100%; overflow: hidden; font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
   .android-upload-fab { position: fixed; z-index: 92; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); width: 52px; height: 52px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #087a59; color: #fff; box-shadow: 0 10px 28px rgba(8, 122, 89, .34); }
   .android-upload-fab svg { width: 24px; }
   .mobile-upload-backdrop { position: fixed; inset: 0; z-index: 140; display: grid; align-items: end; background: rgba(5, 14, 10, .58); }
-  .mobile-upload-sheet { max-height: 92dvh; overflow: auto; display: grid; gap: 15px; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; background: #fff; box-shadow: 0 -20px 60px rgba(5, 22, 15, .26); }
+  .mobile-upload-sheet { max-height: 92dvh; overflow: auto; display: grid; gap: 15px; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: var(--pu-radius-shell) var(--pu-radius-shell) 0 0; background: #fff; box-shadow: 0 -20px 60px rgba(5, 22, 15, .26); }
   .mobile-upload-head { display: flex; justify-content: space-between; gap: 16px; }
   .mobile-upload-head span { color: #087a59; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
   .mobile-upload-head h2 { margin: 4px 0; }
   .mobile-upload-head p { margin: 0; color: #6c7a73; font-size: 13px; }
-  .mobile-upload-head > button, .mobile-upload-files button { flex: none; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 10px; background: #eef3f0; color: #42534b; }
+  .mobile-upload-head > button, .mobile-upload-files button { flex: none; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--pu-radius-card); background: #eef3f0; color: #42534b; }
   .mobile-upload-head svg, .mobile-upload-files svg { width: 18px; }
   .mobile-upload-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .mobile-upload-actions > button { display: grid; justify-items: start; gap: 8px; padding: 14px; border: 1px solid #cfe0d8; border-radius: 14px; background: #f4faf7; color: #173b2f; text-align: left; }
+  .mobile-upload-actions > button { display: grid; justify-items: start; gap: 8px; padding: 14px; border: 1px solid #cfe0d8; border-radius: var(--pu-radius-card); background: #f4faf7; color: #173b2f; text-align: left; }
   .mobile-upload-actions svg { color: #087a59; }
   .mobile-upload-actions span { display: grid; gap: 3px; }
   .mobile-upload-actions small { color: #6e7c75; font-size: 10px; }
   .mobile-upload-files { display: grid; gap: 7px; }
-  .mobile-upload-files article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid #dde7e2; border-radius: 10px; }
+  .mobile-upload-files article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid #dde7e2; border-radius: var(--pu-radius-card); }
   .mobile-upload-files article > span { min-width: 0; display: grid; }
   .mobile-upload-files strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-upload-files small, .mobile-upload-files > p { color: #718078; font-size: 11px; }
   .mobile-upload-files > p { padding: 18px; border: 1px dashed #cbdad3; border-radius: 12px; text-align: center; }
-  .mobile-upload-error { margin: 0; padding: 10px; border-radius: 9px; background: #fff0ef; color: #a4322c; }
+  .mobile-upload-error { margin: 0; padding: 10px; border-radius: var(--pu-radius-card); background: #fff0ef; color: #a4322c; }
   .mobile-upload-progress { margin: 0; color: #087a59; font-size: 12px; font-weight: 800; text-align: center; }
   .mobile-upload-submit { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; background: #087a59; color: #fff; font-weight: 800; }
   .mobile-upload-submit:disabled { opacity: .5; }
