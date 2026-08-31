@@ -1482,7 +1482,7 @@ export function App() {
     )
       return;
     const timer = window.setInterval(() => {
-      openSources();
+      openSources(sourceFolderId);
       load();
     }, 5000);
     return () => window.clearInterval(timer);
@@ -1490,6 +1490,7 @@ export function App() {
     ready,
     projectId,
     showSources,
+    sourceFolderId,
     folders.some(
       (item) =>
         item.snapshot_status === "building" ||
