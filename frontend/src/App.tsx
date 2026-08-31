@@ -436,6 +436,7 @@ export function App() {
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
+  const [contractDropStatus, setContractDropStatus] = useState("");
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const [copyCleanupResults, setCopyCleanupResults] = useState<Record<number, { count: number; message: string }>>({});
@@ -801,6 +802,7 @@ export function App() {
     try {
       setError("");
       const proposals = await discoverBulkContracts(documentIds);
+      if (!proposals.length) throw new Error("Файл распознан, но самостоятельный договор не найден. Откройте массовый мастер и выберите тип вручную.");
       setDroppedContractProposals(proposals.map((item) => parentContractId ? {
         ...item,
         contract_kind: ["supply", "downstream_subcontract"].includes(item.contract_kind) ? item.contract_kind : "downstream_subcontract",
@@ -808,7 +810,9 @@ export function App() {
         parent_contract_id: parentContractId,
         evidence: [...item.evidence, "вышестоящий договор выбран перетаскиванием на схеме"],
       } : item));
-    } catch (reason) { setError((reason as Error).message); }
+      const roles = proposals.map((item) => item.contract_kind === "prime_reference" ? "генподряд" : item.contract_kind === "supply" ? "поставщик" : item.contract_kind === "downstream_subcontract" ? "субподряд" : "прямой договор").join(", ");
+      setContractDropStatus(`Анализ завершён: найдено ${proposals.length}; предложенная роль: ${roles}. Открыт мастер проверки — подтвердите тип и связь.`);
+    } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Анализ завершён с замечанием: ${message}`); setError(message); }
   }
   async function uploadDroppedContracts(files: File[], parentContractId?: number) {
     const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
@@ -816,13 +820,14 @@ export function App() {
     if (!supported.length) { setError("Выберите договор в PDF, Word, Excel, CSV либо фото/скан JPG, PNG или TIFF."); return; }
     if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
-      setError(""); setNotice(`Загружаю и анализирую договоров: ${supported.length}…`);
+      setError(""); setContractDropStatus(`Получено файлов: ${supported.length}. Загружаю и запускаю OCR…`); setNotice(`Загружаю и анализирую договоров: ${supported.length}…`);
       const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
       const result = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
       const documentIds = (result.documents || []).map((item: { id: number }) => item.id);
       if (!documentIds.length) throw new Error(result.skipped?.[0]?.reason || "Текст договора не извлечён");
+      setContractDropStatus(`OCR завершён: документов ${documentIds.length}. Определяю роль и место в дереве…`);
       await load(); await prepareDroppedContracts(documentIds, parentContractId);
-    } catch (reason) { setError((reason as Error).message); }
+    } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Загрузка не завершена: ${message}`); setError(message); }
   }
   async function uploadContractApplications(files: File[], contractId: number) {
     const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
@@ -2633,6 +2638,7 @@ export function App() {
                 onDropFiles={(files, parentId) => void uploadDroppedContracts(files, parentId)}
                 onDropApplications={(files, contractId) => void uploadContractApplications(files, contractId)}
                 onDropFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
+                operationStatus={contractDropStatus}
               />
               <header className="contract-project-root">
                 <FolderKanban />

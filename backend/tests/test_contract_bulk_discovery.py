@@ -37,3 +37,22 @@ def test_does_not_treat_procurement_appendix_as_standalone_supply_contract():
     assert result["confidence"] == 0.35
     assert result["is_contract"] is False
     assert "приложение" in result["evidence"][-1]
+
+
+def test_rejects_short_ocr_noise_as_contract_number():
+    result = discover_contract_fields(
+        "Б-УЗП130-02-2026.pdf",
+        "Договором ом. Предмет договора. Цена договора. Права и обязанности. Реквизиты сторон.",
+    )
+    assert result["number"] == "Б-УЗП130-02-2026"
+
+
+def test_referenced_state_contract_does_not_turn_customer_contract_into_prime():
+    result = discover_contract_fields(
+        "Б-УЗП130-02-2026.pdf",
+        "Договор подряда № Б-УЗП130-02-2026. Заказчик и Подрядчик. Предмет договора. "
+        + ("условия выполнения работ " * 140)
+        + "Работы связаны с государственным контрактом и генподрядчиком.",
+    )
+    assert result["number"] == "Б-УЗП130-02-2026"
+    assert result["contract_kind"] == "customer"

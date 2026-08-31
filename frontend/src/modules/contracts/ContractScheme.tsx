@@ -23,6 +23,7 @@ type Props = {
   onDropFiles?: (files: File[], parentContractId?: number) => void;
   onDropApplications?: (files: File[], contractId: number) => void;
   onDropFinance?: (files: File[], contractId: number, kind: "schedule" | "budget" | "cash-flow") => void;
+  operationStatus?: string;
 };
 
 const nodeWidth = 230;
@@ -64,7 +65,7 @@ function kindLabel(kind?: string) {
   return "Заказчик";
 }
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDropDocuments, onDropFiles, onDropApplications, onDropFinance }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [positions, setPositions] = useState<Record<number, Point>>(() => defaultPositions(contracts));
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
@@ -135,7 +136,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       <FileUp /><span><strong>Перетащите сюда договор из Проводника</strong><small>PDF, Word, Excel, CSV или фото/скан JPG, PNG, TIFF до 10 МБ · либо нажмите и выберите файл</small></span>
       <input aria-label="Выбрать файлы договоров" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,image/png,image/jpeg,image/tiff,image/bmp,image/webp" multiple onChange={(event) => { deliverFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} />
     </label>
-    {dropFeedback && <p className="contract-drop-feedback" role="status">{dropFeedback}</p>}
+    {(operationStatus || dropFeedback) && <p className="contract-drop-feedback" role="status">{operationStatus || dropFeedback}</p>}
     <div className="contract-scheme-scroll">
       <div className={`contract-scheme-canvas ${dropTargetId === -1 ? "drop-active" : ""}`} style={{ width: canvasWidth, height: canvasHeight }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (event.target === event.currentTarget) setDropTargetId(-1); }} onDragLeave={(event) => { if (event.target === event.currentTarget) setDropTargetId(null); }} onDrop={(event) => acceptDrop(event)} onPointerMove={(event) => {
         if (!drag.current) return;

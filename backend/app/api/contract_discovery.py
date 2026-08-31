@@ -47,6 +47,12 @@ def discover_contract_fields(name: str, content: str) -> dict:
     text = " ".join((content or "").split())
     lowered = f"{name}\n{text[:20_000]}".casefold()
     number_match = _NUMBER_RE.search(text[:12_000]) or _NUMBER_RE.search(name)
+    if number_match:
+        candidate = number_match.group(1).strip(" .,:;№")
+        # OCR frequently turns headings such as "договором" into a bogus number "ом".
+        # A usable automatic number must contain a digit; otherwise the filename is safer.
+        if not any(character.isdigit() for character in candidate):
+            number_match = None
     fallback_number = Path(name).stem.strip()[:255]
     number = (number_match.group(1).strip(" .,:;№") if number_match else fallback_number) or "Без номера"
     companies = []
@@ -55,11 +61,12 @@ def discover_contract_fields(name: str, content: str) -> dict:
         if normalized.casefold() not in {item.casefold() for item in companies}:
             companies.append(normalized)
 
-    if "государственн" in lowered and "контракт" in lowered or "генподряд" in lowered:
+    heading = f"{name}\n{text[:1_800]}".casefold()
+    if ("государственн" in heading and "контракт" in heading) or "генподряд" in heading or re.search(r"(?:^|\W)гк[-_№\s]", name.casefold()):
         kind, kind_reason = "prime_reference", "найден государственный/генподрядный контекст"
     elif "поставк" in lowered or "поставщик" in lowered:
         kind, kind_reason = "supply", "найдены признаки договора поставки"
-    elif "субсубподряд" in lowered or "субподрядчик" in lowered or "субподряд" in lowered:
+    elif "субсубподряд" in heading or "субподрядчик" in heading or "субподряд" in heading:
         kind, kind_reason = "downstream_subcontract", "найдены признаки субподряда"
     else:
         kind, kind_reason = "customer", "роль сторон требует проверки пользователя"
