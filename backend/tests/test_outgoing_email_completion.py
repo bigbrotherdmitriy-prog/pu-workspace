@@ -35,8 +35,8 @@ def test_gmail_distinguishes_sent_mail_and_does_not_send_incoming_alert():
     assert "if not is_outgoing:" in source
 
 
-def test_schema_revision_tracks_latest_ai_cache_migration():
+def test_schema_revision_tracks_latest_migration():
     schema = (ROOT / "app/schema.py").read_text(encoding="utf-8")
-    migration = (ROOT / "migrations/versions/b7e1a2c3d4f5_add_ai_analysis_cache.py").read_text(encoding="utf-8")
-    assert 'CURRENT_SCHEMA_REVISION = "b7e1a2c3d4f5"' in schema
-    assert 'down_revision = "fa91b2c3d4e5"' in migration
+    migration = (ROOT / "migrations/versions/c8f3a4b5d6e7_add_organizer_processed_count.py").read_text(encoding="utf-8")
+    assert 'CURRENT_SCHEMA_REVISION = "c8f3a4b5d6e7"' in schema
+    assert 'down_revision = "b7e1a2c3d4f5"' in migration
