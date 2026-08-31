@@ -26,3 +26,11 @@ def test_launch_readiness_exposes_canonical_completion_contract():
     assert '"ready": completed == len(steps)' in source
     assert '"steps": steps' in source
     assert '"completed_steps": completed' in source
+
+
+def test_frontend_keeps_cleanup_result_visible_on_project_card():
+    app = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert "project-cleanup-result" in app
+    assert "Копии удалены:" in app
+    assert "Можно архивировать проект" in app
+    assert "copyCleanupResults[item.id]" in app

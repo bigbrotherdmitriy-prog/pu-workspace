@@ -126,6 +126,19 @@
 .project-actions button svg { width: 16px; height: 16px; }
 .project-actions button.secondary { border-color: #cad3df; background: #fff; color: #334155; }
 .project-actions button.danger { border-color: #f0b9b9; background: #fff7f7; color: #b42318; }
+.project-cleanup-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #9ad8c4;
+  border-radius: 12px;
+  background: #eaf8f2;
+  color: #116149;
+}
+.project-cleanup-result > svg { width: 20px; height: 20px; flex: none; }
+.project-cleanup-result strong, .project-cleanup-result small { display: block; }
+.project-cleanup-result small { margin-top: 3px; color: #52766a; }
 .project-title { display: flex; align-items: center; gap: 13px; }
 .project-title h2 { margin: 3px 0 0; }
 .project-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 22px 0; }

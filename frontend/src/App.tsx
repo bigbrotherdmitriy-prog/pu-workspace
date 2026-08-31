@@ -408,6 +408,7 @@ export function App() {
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
+  const [copyCleanupResults, setCopyCleanupResults] = useState<Record<number, { count: number; message: string }>>({});
   const [sourceFolderId, setSourceFolderId] = useState("root");
   const [sourceBreadcrumbs, setSourceBreadcrumbs] = useState<DriveBreadcrumb[]>([
     { id: "root", name: "Мой диск" },
@@ -591,6 +592,10 @@ export function App() {
       setError("");
       const summary = await api(`/projects/${project.id}/safe-copies`);
       if (!summary.count) {
+        setCopyCleanupResults((current) => ({
+          ...current,
+          [project.id]: { count: 0, message: "Безопасных копий нет. Можно архивировать проект." },
+        }));
         setNotice("Безопасных копий PU Workspace для очистки нет");
         return;
       }
@@ -602,6 +607,13 @@ export function App() {
         method: "POST",
         body: JSON.stringify({ confirmation }),
       });
+      setCopyCleanupResults((current) => ({
+        ...current,
+        [project.id]: {
+          count: result.trashed,
+          message: `Копии удалены: ${result.trashed}. Исходные папки не изменены. Можно архивировать проект.`,
+        },
+      }));
       setNotice(`В корзину Google Drive перемещено безопасных копий: ${result.trashed}. Оригиналы не изменены.`);
       await load();
     } catch (e) {
@@ -3084,6 +3096,15 @@ export function App() {
                           Внимание<strong>{stats?.attention || 0}</strong>
                         </span>
                       </div>
+                      {copyCleanupResults[item.id] && (
+                        <div className="project-cleanup-result" role="status">
+                          <ShieldCheck />
+                          <div>
+                            <strong>{copyCleanupResults[item.id].message}</strong>
+                            <small>Следующий шаг — архивировать карточку проекта.</small>
+                          </div>
+                        </div>
+                      )}
                       <div className="project-actions">
                         <button onClick={() => activateProject(item.id)}>
                           {item.id === projectId ? "Открыть рабочий центр" : "Переключиться на проект"}
@@ -3092,7 +3113,7 @@ export function App() {
                           <Trash2 /> Очистить копии
                         </button>
                         <button className="danger" onClick={() => archiveProject(item)} title="Скрыть проект без удаления данных">
-                          <Archive /> Архивировать
+                          <Archive /> {copyCleanupResults[item.id] ? "Архивировать проект" : "Архивировать"}
                         </button>
                       </div>
                     </article>
