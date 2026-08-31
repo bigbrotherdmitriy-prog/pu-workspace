@@ -25,12 +25,51 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.audit_log import AuditLog
+from app.organization_requisites import remember_contract_organizations
 
 router = APIRouter(tags=["organizations", "contracts"])
 
 
 class OrganizationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+
+
+class OrganizationUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    legal_name: str | None = Field(default=None, max_length=500)
+    inn: str | None = Field(default=None, pattern=r"^(?:\d{10}|\d{12})$")
+    kpp: str | None = Field(default=None, pattern=r"^\d{9}$")
+    ogrn: str | None = Field(default=None, pattern=r"^(?:\d{13}|\d{15})$")
+    okpo: str | None = Field(default=None, max_length=14)
+    okato: str | None = Field(default=None, max_length=20)
+    oktmo: str | None = Field(default=None, max_length=20)
+    okogu: str | None = Field(default=None, max_length=20)
+    okved: str | None = Field(default=None, max_length=500)
+    legal_address: str | None = Field(default=None, max_length=2000)
+    postal_address: str | None = Field(default=None, max_length=2000)
+    phone: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, max_length=255)
+    director_name: str | None = Field(default=None, max_length=255)
+    chief_accountant: str | None = Field(default=None, max_length=255)
+    registration_details: str | None = Field(default=None, max_length=2000)
+    tax_office: str | None = Field(default=None, max_length=500)
+    bank_name: str | None = Field(default=None, max_length=500)
+    bank_address: str | None = Field(default=None, max_length=2000)
+    settlement_account: str | None = Field(default=None, pattern=r"^\d{20}$")
+    correspondent_account: str | None = Field(default=None, pattern=r"^\d{20}$")
+    bik: str | None = Field(default=None, pattern=r"^\d{9}$")
+    requisites_status: str | None = Field(default=None, pattern="^(draft|extracted|confirmed)$")
+
+
+def _organization(row: Organization) -> dict:
+    fields = (
+        "id", "name", "legal_name", "inn", "kpp", "ogrn", "okpo", "okato", "oktmo",
+        "okogu", "okved", "legal_address", "postal_address", "phone", "email",
+        "director_name", "chief_accountant", "registration_details", "tax_office",
+        "bank_name", "bank_address", "settlement_account", "correspondent_account", "bik",
+        "requisites_status", "source_document_id",
+    )
+    return {field: getattr(row, field) for field in fields}
 
 
 class ContractCreate(BaseModel):
@@ -65,22 +104,39 @@ def _normalized(value: str | None) -> str:
     return re.sub(r"[^0-9a-zа-яё]+", " ", (value or "").casefold()).strip()
 
 
+_CONTRACT_TITLE_STOP_WORDS = {
+    "выполнению", "выполнение", "работ", "работы", "системы", "система",
+    "области", "область", "оказание", "услуг", "услуги", "договора",
+}
+
+
+def _identifier(value: str | None) -> str:
+    """Normalize contract identifiers independently from human-readable text."""
+    return re.sub(r"[^0-9a-zа-яё]+", "", (value or "").casefold())
+
+
 def _contract_document_score(row: Contract, document: Document, content: str) -> tuple[int, list[str]]:
     """Rank a possible contract source without mutating either record."""
     name = _normalized(document.name)
     body = _normalized(content[:120_000])
+    body_head = body[:5_000]
     score = 0
     reasons: list[str] = []
 
     number = _normalized(row.number)
-    compact_number = re.sub(r"\s+", "", number)
-    compact_name = re.sub(r"\s+", "", name)
-    compact_body = re.sub(r"\s+", "", body)
-    if compact_number and len(compact_number) >= 4 and compact_number in compact_name:
-        score += 70
+    compact_number = _identifier(number)
+    compact_name = _identifier(name)
+    compact_body = _identifier(body)
+    number_in_name = bool(compact_number and len(compact_number) >= 4 and compact_number in compact_name)
+    number_in_body = bool(compact_number and len(compact_number) >= 4 and compact_number in compact_body)
+    if number_in_name:
+        # The filename is the strongest signal when OCR/text extraction is not ready.
+        score += 95
         reasons.append("номер договора указан в имени файла")
-    elif compact_number and len(compact_number) >= 4 and compact_number in compact_body:
-        score += 45
+    elif number_in_body:
+        # References in acts, estimates and letters are useful context, but do not
+        # make those documents the legal source of the contract.
+        score += 35
         reasons.append("совпадает номер договора")
 
     counterparty = _normalized(row.counterparty)
@@ -93,7 +149,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
 
     title_tokens = {
         token for token in _normalized(row.title).split()
-        if len(token) >= 5 and token not in {"выполнению", "работ", "системы", "области"}
+        if len(token) >= 5 and token not in _CONTRACT_TITLE_STOP_WORDS
     }
     matched_name = sorted(token for token in title_tokens if token in name)
     matched_body = sorted(token for token in title_tokens if token in body and token not in matched_name)
@@ -111,9 +167,28 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
     elif any(marker in body for marker in contract_markers):
         score += 10
         reasons.append("в тексте обнаружены реквизиты договора")
-    excluded_markers = ("пропуск", "инструкц", "приложение", "график", "акт", "письмо", "счет", "счёт", "накладн")
-    if any(marker in name for marker in excluded_markers):
-        score -= 55
+
+    # A real contract normally contains several legal-structure signals near the
+    # beginning. This semantic evidence distinguishes it from a document that only
+    # mentions the contract number in a footer or reference field.
+    legal_structure_markers = (
+        "стороны заключили", "именуем", "предмет договора", "права и обязанности",
+        "цена договора", "срок действия", "реквизиты сторон", "заказчик", "подрядчик",
+    )
+    legal_structure_count = sum(marker in body_head for marker in legal_structure_markers)
+    if legal_structure_count >= 3:
+        score += 25
+        reasons.append("структура текста соответствует договору")
+    elif legal_structure_count >= 2:
+        score += 12
+        reasons.append("найдены юридические разделы договора")
+
+    excluded_markers = (
+        "пропуск", "инструкц", "приложение", "график", "акт", "письмо", "счет",
+        "счёт", "накладн", "кс 2", "кс 3", "ос 15", "справка о стоимости",
+    )
+    if not number_in_name and any(marker in name for marker in excluded_markers):
+        score -= 60
         reasons.append("имя указывает на связанный документ, а не договор")
     return max(0, min(score, 100)), reasons
 
@@ -132,6 +207,33 @@ def create_organization(payload: OrganizationCreate, db: Session = Depends(get_d
     row = Organization(name=payload.name.strip())
     db.add(row); db.commit(); db.refresh(row)
     return {"id": row.id, "name": row.name}
+
+
+@router.get("/organizations/current/requisites")
+def current_organization_requisites(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    project = db.scalar(select(Project).join(ProjectMember).where(ProjectMember.user_id == user.id).order_by(Project.id))
+    if project is None:
+        project = db.scalar(select(Project).order_by(Project.id))
+    if project is None:
+        raise HTTPException(404, "Organization not found")
+    row = db.get(Organization, project.organization_id)
+    if row is None:
+        raise HTTPException(404, "Organization not found")
+    return _organization(row)
+
+
+@router.put("/organizations/{organization_id}")
+def update_organization(organization_id: int, payload: OrganizationUpdate,
+                        db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    row = db.get(Organization, organization_id)
+    if row is None:
+        raise HTTPException(404, "Organization not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, field, value.strip() if isinstance(value, str) else value)
+    db.add(AuditLog(action="organization_requisites_updated", entity_type="organization", entity_id=row.id,
+                    details=f"status={row.requisites_status}; fields={','.join(payload.model_fields_set)}"))
+    db.commit(); db.refresh(row)
+    return _organization(row)
 
 
 @router.get("/projects/{project_id}/contracts")
@@ -357,6 +459,7 @@ def analyze_contract(project_id: int, contract_id: int,
         db, project_id, [source], source_type="contract_analysis",
     )
     payment_rows = _create_payment_schedule_proposals(db, row, document, content)
+    remembered_organizations = remember_contract_organizations(db, row, content, document.id)
     task_ids = list(db.scalars(select(Task.id).where(
         Task.project_id == project_id, Task.source_file_id == source_id,
     )))
@@ -369,13 +472,15 @@ def analyze_contract(project_id: int, contract_id: int,
         action="contract_analyzed", entity_type="contract", entity_id=row.id,
         details=(f"document={document.id}; tasks_created={len(created_tasks)}; "
                  f"obligations_linked={len(linked_obligations)}; risks_created={len(created_risks)}; "
-                 f"decisions_created={len(created_decisions)}; payment_proposals={len(payment_rows)}; originals_changed=false"),
+                 f"decisions_created={len(created_decisions)}; payment_proposals={len(payment_rows)}; "
+                 f"organizations_remembered={len(remembered_organizations)}; originals_changed=false"),
     ))
     db.commit()
     result = _contract(row, db)
     result["created"] = {
         "tasks": len(created_tasks), "risks": len(created_risks), "decisions": len(created_decisions),
         "payment_schedule": len(payment_rows),
+        "organizations": len(remembered_organizations),
     }
     return result
 
@@ -424,6 +529,7 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
     result = {
         "id": row.id, "project_id": row.project_id, "number": row.number,
         "title": row.title, "counterparty": row.counterparty,
+        "counterparty_organization_id": row.counterparty_organization_id,
         "contract_kind": row.contract_kind, "parent_contract_id": row.parent_contract_id,
         "amount": row.amount, "advance_amount": row.advance_amount,
         "retention_percent": row.retention_percent, "warranty_until": row.warranty_until,

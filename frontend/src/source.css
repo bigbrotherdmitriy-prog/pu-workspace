@@ -345,6 +345,30 @@
 .contract-source-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .contract-source-tabs button { padding: 8px 6px; font-size: 12px; }
 .contract-source-tabs button.selected { background: #0d8d70; border-color: #0d8d70; color: #fff; }
+.contract-bulk-launch { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.contract-bulk-launch>div,.contract-bulk-tree-head { display:flex; align-items:center; gap:12px; }
+.contract-bulk-launch svg,.contract-bulk-tree-head svg { color:#087a59; flex:none; }
+.contract-bulk-launch span,.contract-bulk-tree-head span { display:grid; gap:4px; }
+.contract-bulk-launch small,.contract-bulk-tree-head small { color:var(--pu-muted); }
+.contract-bulk-backdrop { position:fixed; inset:0; z-index:180; display:grid; place-items:center; padding:24px; background:#07140fa8; }
+.contract-bulk-dialog { width:min(1180px,96vw); max-height:92vh; overflow:auto; display:grid; gap:16px; padding:24px; border-radius:20px; background:#fff; box-shadow:0 28px 80px #07140f66; }
+.contract-bulk-dialog>header { display:flex; justify-content:space-between; gap:20px; }
+.contract-bulk-dialog h2 { margin:5px 0; }
+.contract-bulk-dialog p { margin:0; color:var(--pu-muted); }
+.contract-bulk-tools,.contract-bulk-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.contract-bulk-tools b { margin-left:auto; }
+.contract-bulk-files { max-height:50vh; overflow:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.contract-bulk-files label { display:flex; align-items:center; gap:10px; padding:11px; border:1px solid var(--pu-border); border-radius:10px; }
+.contract-bulk-files span { min-width:0; display:grid; }
+.contract-bulk-files strong,.contract-bulk-files small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.contract-bulk-proposals { display:grid; gap:10px; }
+.contract-bulk-proposals article { display:grid; grid-template-columns:34px 1fr; gap:10px; padding:14px; border:1px solid #c9ddd5; border-left:3px solid #087a59; border-radius:12px; }
+.contract-bulk-proposals article.linked { opacity:.58; }
+.contract-bulk-index { display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:#087a59; background:#e8f5ef; font-weight:800; }
+.contract-bulk-fields { display:grid; grid-template-columns:1fr 1.4fr 1fr 1.2fr 1.3fr; gap:8px; align-items:center; }
+.contract-bulk-fields>small:first-child,.contract-bulk-fields>small:last-child { grid-column:1/-1; }
+.contract-bulk-actions { justify-content:flex-end; }
+@media(max-width:760px){.contract-bulk-launch{align-items:stretch;flex-direction:column}.contract-bulk-backdrop{padding:0;align-items:end}.contract-bulk-dialog{width:100%;max-height:94dvh;border-radius:18px 18px 0 0}.contract-bulk-files{grid-template-columns:1fr}.contract-bulk-fields{grid-template-columns:1fr}.contract-bulk-fields>small:first-child,.contract-bulk-fields>small:last-child{grid-column:auto}}
 .contract-document-modal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(8, 20, 15, .68); }
 .contract-document-dialog { width: min(1000px, 100%); height: min(760px, calc(100vh - 32px)); max-height: calc(100vh - 32px); display: grid; grid-template-rows: auto auto auto auto minmax(180px, 1fr) auto; gap: 12px; padding: 22px; border-radius: 20px; background: #fff; box-shadow: 0 24px 80px rgba(0, 20, 12, .28); transform: translateZ(0); contain: paint; }
 .contract-document-dialog-head { display: flex; justify-content: space-between; gap: 20px; }
@@ -781,3 +805,17 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
   .ai-mascot { right: 12px; bottom: 12px; }
   .ai-hover-bubble { display: none; }
 }
+.contract-source-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin: 8px 0 4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.contract-source-badge.linked { color: #08785c; background: #e5f7f0; border: 1px solid #a8dfcd; }
+.contract-source-badge.missing { color: #965f00; background: #fff5dc; border: 1px solid #f1d28b; }
+.company-profile-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.company-profile-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }

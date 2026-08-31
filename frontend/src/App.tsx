@@ -13,6 +13,7 @@ import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
+import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
@@ -761,6 +762,34 @@ export function App() {
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  async function discoverBulkContracts(documentIds: number[]): Promise<BulkContractProposal[]> {
+    const result = await api(`/projects/${projectId}/contracts/discover-bulk`, {
+      method: "POST", body: JSON.stringify({ document_ids: documentIds }),
+    });
+    return result.proposals || [];
+  }
+  async function importBulkContracts(proposals: BulkContractProposal[]): Promise<number> {
+    const createdByDocument = new Map<number, number>();
+    const pending = [...proposals];
+    let created = 0;
+    while (pending.length) {
+      const index = pending.findIndex((item) => !item.parent_document_id || createdByDocument.has(item.parent_document_id));
+      if (index < 0) throw new Error("В выбранной структуре найден цикл. Проверьте вышестоящие договоры.");
+      const [item] = pending.splice(index, 1);
+      const parentId = item.parent_contract_id || (item.parent_document_id ? createdByDocument.get(item.parent_document_id) : undefined);
+      const row = await api(`/projects/${projectId}/contracts`, {
+        method: "POST",
+        body: JSON.stringify({
+          number: item.number.trim(), title: item.title.trim(), counterparty: item.counterparty?.trim() || undefined,
+          contract_kind: item.contract_kind, parent_contract_id: parentId, source_document_id: item.document_id,
+        }),
+      });
+      createdByDocument.set(item.document_id, row.id); created += 1;
+    }
+    setNotice(`Создано и привязано договоров: ${created}. Дерево построено; проверьте связи на схеме.`);
+    await load();
+    return created;
   }
   async function suggestContractDocuments(contractId: number) {
     try {
@@ -2434,6 +2463,12 @@ export function App() {
           onCreate={() => void createContract()}
         >
             <section className="contract-list">
+              <ContractBulkImportWizard
+                documents={documentRows}
+                contracts={contracts}
+                onDiscover={discoverBulkContracts}
+                onImport={importBulkContracts}
+              />
               <ContractScheme
                 projectId={projectId}
                 contracts={contracts}
@@ -2462,6 +2497,9 @@ export function App() {
                       </div>
                       <span className={`contract-status ${item.status}`}>
                         {item.contract_kind === "prime_reference" ? "ГЕНПОДРЯД · КОНТЕКСТ" : item.contract_kind === "revenue_subcontract" ? "НАШ СУБПОДРЯД · ДОХОД" : item.contract_kind === "downstream_subcontract" ? "НАШ ИСПОЛНИТЕЛЬ · РАСХОД" : item.contract_kind === "supply" ? "ПОСТАВКА · РАСХОД" : "ПРЯМОЙ ДОГОВОР · ДОХОД"} · {item.status}
+                      </span>
+                      <span className={`contract-source-badge ${item.source_document_id ? "linked" : "missing"}`}>
+                        {item.source_document_id ? "✓ Договор привязан к документу" : "! Документ договора не привязан"}
                       </span>
                       <h2>{item.title}</h2>
                       <p>

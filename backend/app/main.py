@@ -15,6 +15,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.local_upload import router as local_upload_router
 from app.api.workspace import recover_incomplete_analyses, recover_incomplete_snapshots, router as workspace_router
 from app.api.organizations_contracts import router as organizations_contracts_router
+from app.api.contract_discovery import router as contract_discovery_router
 from app.api.ai_secretary import router as ai_secretary_router
 from app.api.management import router as management_router
 from app.api.execution_finance import router as execution_finance_router
@@ -105,6 +106,7 @@ app.include_router(access_router, dependencies=[Depends(require_user)])
 app.include_router(drive_router, dependencies=[Depends(require_user)])
 app.include_router(documents_router, dependencies=[Depends(require_user)])
 app.include_router(organizations_contracts_router)
+app.include_router(contract_discovery_router)
 app.include_router(ai_secretary_router)
 app.include_router(management_router)
 app.include_router(execution_finance_router)

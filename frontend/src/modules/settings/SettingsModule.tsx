@@ -1,5 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 import { PasswordChangeCard } from "./PasswordChangeCard";
+import { CompanyProfileCard } from "./CompanyProfileCard";
 
 export type AIProjectPolicy = {
   project_id: number;
@@ -46,6 +47,7 @@ export function SettingsModule(props: Props) {
         <div className="member-list">{props.members.map((member) => <article key={member.membership_id}><div className="avatar">{member.name.slice(0, 1)}</div><div><strong>{member.name}</strong><p>{member.email}</p></div><span>{member.role}</span></article>)}</div>
       </section>
       <PasswordChangeCard onChanged={props.onPasswordChanged} />
+      <CompanyProfileCard editable={Boolean(props.currentUser?.is_admin)} />
       <section className="card span-settings">
         <div className="card-head"><div><h2>AI и защита данных</h2><p>Что разрешено передавать внешней модели для выбранного проекта</p></div></div>
         {props.aiPolicy && <div className="form-grid">
