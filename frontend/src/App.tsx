@@ -29,6 +29,7 @@ import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/Anal
 import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
 import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
+import { formatMoney } from "./utils/numberFormat";
 import {
   Activity,
   AlertTriangle,
@@ -1736,12 +1737,7 @@ export function App() {
   }
   const latestSnapshot =
     snapshots.find((item) => item.is_primary) || snapshots[0];
-  const money = (value: number | undefined) =>
-    new Intl.NumberFormat("ru-RU", {
-      style: "currency",
-      currency: "RUB",
-      maximumFractionDigits: 0,
-    }).format(Number(value || 0));
+  const money = formatMoney;
   const visibleDocuments = documentRows.filter(
     (item) =>
       active === "Центр знаний" ||
@@ -2499,8 +2495,8 @@ export function App() {
                         </div>;
                       })()}
                       {(item.amount || item.advance_amount || item.retention_percent || item.warranty_until) && <small>
-                        {item.amount ? `Сумма ${Number(item.amount).toLocaleString("ru-RU")} ₽` : "Сумма не указана"}
-                        {item.advance_amount ? ` · аванс ${Number(item.advance_amount).toLocaleString("ru-RU")} ₽` : ""}
+                        {item.amount ? `Сумма ${money(item.amount)}` : "Сумма не указана"}
+                        {item.advance_amount ? ` · аванс ${money(item.advance_amount)}` : ""}
                         {item.retention_percent ? ` · удержание ${item.retention_percent}%` : ""}
                         {item.warranty_until ? ` · гарантия до ${new Date(item.warranty_until).toLocaleDateString("ru-RU")}` : ""}
                       </small>}

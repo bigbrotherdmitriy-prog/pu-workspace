@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { FinanceOverview, FinanceStructuredPreview } from "./types";
+import { formatMoney } from "../../utils/numberFormat";
 
 type Props = {
   finance: FinanceOverview | null; preview: FinanceStructuredPreview | null; selectedRows: number[];
@@ -13,7 +14,7 @@ type Props = {
   includeEditor?: boolean; includeRegisters?: boolean;
 };
 
-const money = (value?: number) => `${new Intl.NumberFormat("ru-RU").format(value || 0)} ₽`;
+const money = formatMoney;
 
 export function FinanceOperations(props: Props) {
   const { finance, preview, selectedRows, setSelectedRows, selectedContractId, kind, title, amount, date, extra,

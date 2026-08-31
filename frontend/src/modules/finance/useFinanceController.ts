@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
+import { formatMoney } from "../../utils/numberFormat";
 import type {
   FinanceDocumentCandidate,
   FinanceOverview,
@@ -14,7 +15,7 @@ type FinanceControllerOptions = {
   setError: (message: string) => void;
 };
 
-const money = (value: number) => `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
+const money = formatMoney;
 
 export function useFinanceController({ ready, projectId, setNotice, setError }: FinanceControllerOptions) {
   const [finance, setFinance] = useState<FinanceOverview | null>(null);

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { FinanceDocumentCandidate, FinanceOverview } from "./types";
+import { formatMoney } from "../../utils/numberFormat";
 
 type ContractOption = { id: number; number: string; title: string; contract_kind?: string; parent_contract_id?: number };
 type Props = {
@@ -13,7 +14,7 @@ type Props = {
   onReload: () => void;
 };
 
-const money = (value?: number) => `${new Intl.NumberFormat("ru-RU").format(value || 0)} ₽`;
+const money = formatMoney;
 
 export function FinanceModule({ finance, candidates, contracts, selectedContractId, onSelectContract, onPrepare, onUseCandidate, onReload }: Props) {
   const [candidateKind, setCandidateKind] = useState("all");
