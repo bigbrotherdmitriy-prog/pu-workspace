@@ -5,6 +5,7 @@ export type ProjectLaunchState = {
   projectName: string; sourceReady: boolean; documents: number; analyzedDocuments: number;
   contracts: number; linkedContracts: number; scheduleRows: number; budgetRows: number;
   cashFlowRows: number; contacts: number; confirmedContacts: number; inboxMessages: number;
+  workspaceMode?: "managed" | "imported"; managedFolderId?: string;
 };
 
 export function useProjectLaunchReadiness(projectId: number) {
@@ -24,6 +25,7 @@ export function useProjectLaunchReadiness(projectId: number) {
         scheduleRows: data.schedule_rows, budgetRows: data.budget_rows,
         cashFlowRows: data.cash_flow_rows, contacts: data.contacts,
         confirmedContacts: data.confirmed_contacts, inboxMessages: data.inbox_messages,
+        workspaceMode: data.workspace_mode || undefined, managedFolderId: data.managed_folder_id || undefined,
       });
     }).catch((reason) => active && setError(reason.message));
     return () => { active = false; };

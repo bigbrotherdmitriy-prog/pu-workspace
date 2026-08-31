@@ -18,6 +18,7 @@ from app.models.organization_contract import Contract
 from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleItem
 from app.models.project_contact import ProjectContact
 from app.models.ai_secretary import Message
+from app.models.workspace import SourceFolder
 from app.core.auth import require_project_role, require_user
 from app.organizer import get_drive_service
 from app.organizer_engine.drive import DriveClient
@@ -162,12 +163,18 @@ def project_launch_readiness(
     sources = list(db.scalars(select(OrganizerSession).where(
         OrganizerSession.project_id == project_id,
     ).order_by(OrganizerSession.id.desc())))
+    managed_source = db.scalar(select(SourceFolder).where(
+        SourceFolder.project_id == project_id,
+        SourceFolder.provider == "google_drive_managed",
+    ).order_by(SourceFolder.id.desc()))
 
     result = {
         "project_id": project_id,
         "project_name": project.name,
-        "source_folders": len({row.source_folder_id for row in sources if row.source_folder_id}),
-        "source_ready": any(_source_session_ready(row) for row in sources),
+        "source_folders": len({row.source_folder_id for row in sources if row.source_folder_id}) + int(bool(managed_source)),
+        "source_ready": bool(managed_source) or any(_source_session_ready(row) for row in sources),
+        "workspace_mode": "managed" if managed_source else ("imported" if sources else None),
+        "managed_folder_id": managed_source.external_id if managed_source else None,
         "documents": documents,
         "analyzed_documents": analyzed_documents,
         "contracts": len(contracts),
@@ -180,7 +187,7 @@ def project_launch_readiness(
         "inbox_messages": inbox_messages,
     }
     steps = [
-        {"id": "source", "complete": result["source_ready"] and documents > 0},
+        {"id": "source", "complete": result["source_ready"] and (documents > 0 or bool(managed_source))},
         {"id": "documents", "complete": analyzed_documents > 0},
         {"id": "contract", "complete": bool(contracts) and result["linked_contracts"] == len(contracts)},
         {"id": "finance", "complete": schedule_rows > 0 and budget_rows > 0 and cash_flow_rows > 0},

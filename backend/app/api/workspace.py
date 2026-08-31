@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from googleapiclient.discovery import build
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -28,6 +29,27 @@ _snapshot_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("SNAPSHO
 _analysis_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ANALYSIS_WORKERS", "1"))))
 _analysis_in_progress: set[int] = set()
 _analysis_results: dict[int, dict] = {}
+
+
+class ManagedWorkspaceCreate(BaseModel):
+    parent_folder_id: str = Field(default="root", min_length=1, max_length=255)
+
+
+MANAGED_PROJECT_STRUCTURE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("00_Управление", ("01_Совещания", "02_Решения", "03_Риски")),
+    ("01_Договоры", ("01_Заказчик", "02_Субподрядчики", "03_Поставщики")),
+    ("02_Проектная_документация", ()),
+    ("03_ГПР", ()),
+    ("04_Финансы", ("01_Бюджет", "02_ДДС", "03_Счета_и_оплаты")),
+    ("05_Переписка", ("01_Входящие", "02_Исходящие")),
+    ("06_Исполнение", ("01_Акты", "02_Фото", "03_Исполнительная_документация")),
+    ("99_Архив", ()),
+)
+
+
+def _ensure_child_folder(drive: DriveClient, parent_id: str, name: str) -> tuple[str, bool]:
+    existing = next((item for item in drive.list_children(parent_id) if item.is_folder and item.name == name), None)
+    return (existing.id, False) if existing else (drive.create_folder(name, parent_id), True)
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -201,6 +223,62 @@ def recover_incomplete_analyses() -> int:
             _analysis_in_progress.add(snapshot_id)
             _analysis_workers.submit(_analyze_snapshot_worker, snapshot_id, project_id)
     return len(rows)
+
+
+@router.post("/{project_id}/managed-workspace")
+def create_managed_workspace(
+    project_id: int,
+    payload: ManagedWorkspaceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Create an idempotent permanent project tree for a new project."""
+    require_project_role(db, user, project_id, "manager")
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    drive = DriveClient(build(
+        "drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False,
+    ))
+    source = db.scalar(select(SourceFolder).where(
+        SourceFolder.project_id == project_id,
+        SourceFolder.provider == "google_drive_managed",
+    ).order_by(SourceFolder.id.desc()))
+    created_count = 0
+    if source is None:
+        root_id = drive.create_folder(f"PU Workspace — {project.name}", payload.parent_folder_id)
+        for row in db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)):
+            row.is_primary = False
+        source = SourceFolder(
+            project_id=project_id, external_id=root_id, name=f"PU Workspace — {project.name}",
+            provider="google_drive_managed", is_primary=True,
+        )
+        db.add(source); db.commit(); db.refresh(source)
+        created_count += 1
+    for top_name, child_names in MANAGED_PROJECT_STRUCTURE:
+        top_id, created = _ensure_child_folder(drive, source.external_id, top_name)
+        created_count += int(created)
+        for child_name in child_names:
+            _, child_created = _ensure_child_folder(drive, top_id, child_name)
+            created_count += int(child_created)
+    snapshot = db.scalar(select(WorkspaceSnapshot).where(
+        WorkspaceSnapshot.project_id == project_id,
+        WorkspaceSnapshot.source_folder_id == source.id,
+    ).order_by(WorkspaceSnapshot.id.desc()))
+    if snapshot is None:
+        snapshot = WorkspaceSnapshot(
+            project_id=project_id, source_folder_id=source.id, status="ready",
+            item_count=sum(1 + len(children) for _, children in MANAGED_PROJECT_STRUCTURE),
+            analysis_status="ready", completed_at=datetime.now(timezone.utc),
+            analysis_result={"mode": "managed_template", "originals_modified": False},
+        )
+        db.add(snapshot)
+    db.commit()
+    return {
+        "project_id": project_id, "folder_id": source.external_id, "folder_name": source.name,
+        "created_folders": created_count, "structure_folders": snapshot.item_count,
+        "mode": "managed_template", "originals_modified": False,
+    }
 
 
 def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:

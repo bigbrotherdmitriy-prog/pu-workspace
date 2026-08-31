@@ -24,11 +24,13 @@ vi.mock("./useProjectLaunchReadiness", () => ({
 }));
 
 describe("ProjectLaunchWizard", () => {
-  it("opens the first incomplete project launch action", () => {
+  it("separates an existing folder import from a new managed project", () => {
+    localStorage.clear();
     const openSection = vi.fn();
     render(<ProjectLaunchWizard projectId={1} openSection={openSection} />);
-    expect(screen.getByText("0%")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Продолжить запуск" }));
+    expect(screen.getByText("Разобрать существующую папку")).toBeInTheDocument();
+    expect(screen.getByText("Создать постоянную структуру")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать существующую папку" }));
     expect(openSection).toHaveBeenCalledWith("Рабочий центр", "source");
   });
 });

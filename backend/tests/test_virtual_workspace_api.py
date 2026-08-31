@@ -1,6 +1,7 @@
 import inspect
 
 from app.api.workspace import (
+    MANAGED_PROJECT_STRUCTURE,
     _build_snapshot,
     _drive_folder_breadcrumb,
     _run_safe_copy_pipeline,
@@ -18,6 +19,14 @@ def test_virtual_snapshot_routes_are_exposed():
     assert "/projects/{project_id}/source-folders/{external_id}/primary" in paths
     assert "/projects/{project_id}/snapshots/{snapshot_id}/analyze" in paths
     assert "/projects/{project_id}/snapshots/{snapshot_id}/standardize" in paths
+    assert "/projects/{project_id}/managed-workspace" in paths
+
+
+def test_managed_project_structure_covers_core_project_domains():
+    names = {name for name, _ in MANAGED_PROJECT_STRUCTURE}
+    assert {"01_Договоры", "03_ГПР", "04_Финансы", "05_Переписка", "99_Архив"} <= names
+    finance = dict(MANAGED_PROJECT_STRUCTURE)["04_Финансы"]
+    assert {"01_Бюджет", "02_ДДС", "03_Счета_и_оплаты"} <= set(finance)
 
 
 def test_snapshot_analysis_is_explicitly_read_only_in_contract():
