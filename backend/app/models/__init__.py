@@ -4,6 +4,7 @@ from app.models.project_member import ProjectMember
 from app.models.drive_connection import DriveConnection
 from app.models.document import Document
 from app.models.google_token import GoogleOAuthToken
+from app.models.ai_cache import AIAnalysisCache
 from app.models.document_version import DocumentVersion
 from app.models.audit_log import AuditLog
 from app.models.organizer import (

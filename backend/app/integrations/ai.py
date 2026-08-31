@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import os
 
 from app.gemini_analysis import analyze_document_with_gemini, analyze_message_with_gemini, gemini_configured
 from app.integrations.contracts import AdapterHealth
@@ -10,6 +11,10 @@ class GeminiAIAdapter:
     """Current external AI implementation behind the provider-neutral contract."""
 
     provider = "gemini"
+
+    @property
+    def model(self) -> str:
+        return os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
     def health(self) -> AdapterHealth:
         ready = gemini_configured()
