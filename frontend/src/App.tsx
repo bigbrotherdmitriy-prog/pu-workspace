@@ -1886,7 +1886,7 @@ export function App() {
               onUpdateRisk={(risk, status) => void updateRisk(risk, status)}
               onUpdateDecision={(decision, status) => void updateDecision(decision, status)}
             />
-          ) : active === "Рабочий центр" ? (
+          ) : active === "Рабочий центр" || showSources ? (
             <>
               <section className="dashboard-hero">
                 <div className="dashboard-hero-copy">
@@ -2068,7 +2068,7 @@ export function App() {
                   </section>
                 )}
                 {showSources && (
-                  <section className="card span-3" id="drive-source-picker">
+                  <section className="card span-3 drive-source-picker-modal" id="drive-source-picker">
                     <div className="card-head">
                       <div>
                         <h2>Папки для последовательного разбора</h2>
@@ -2345,15 +2345,16 @@ export function App() {
             <section className="contract-list">
               <header className="contract-project-root">
                 <FolderKanban />
-                <div><span>ПРОЕКТ</span><h2>{projects.find((project) => project.id === projectId)?.name || "Выбранный проект"}</h2><p>Корень договорной структуры</p></div>
+                <div><span>ПРОЕКТ · КОРЕНЬ ДЕРЕВА</span><h2>{projects.find((project) => project.id === projectId)?.name || "Выбранный проект"}</h2><p>Все договоры проекта собраны в единую цепочку подчинённости</p></div>
+                <strong className="contract-project-count">{contracts.length}<small>договоров</small></strong>
               </header>
               {buildContractTree(contracts, query).map(({ item, depth, hasChildren, parentMissing }) => (
-                  <article className="card contract-card contract-tree-node" data-depth={depth} style={{ "--contract-depth": depth } as React.CSSProperties} key={item.id}>
+                  <article className="card contract-card contract-tree-node" data-depth={depth} data-kind={item.contract_kind || "customer"} style={{ "--contract-depth": depth } as React.CSSProperties} key={item.id}>
                     <div className="contract-number">{item.number}</div>
                     <div>
                       <div className="contract-tree-position">
-                        <span>{depth === 0 ? "Корень договорной цепочки" : `Уровень ${depth + 1}`}</span>
-                        {hasChildren && <b>Есть дочерние договоры</b>}
+                        <span className="contract-tree-level">{depth === 0 ? "Головной договор" : `Уровень ${depth + 1}`}</span>
+                        {hasChildren && <b>Ветвь продолжается</b>}
                         {parentMissing && <b className="warning">Вышестоящий договор не найден</b>}
                       </div>
                       <span className={`contract-status ${item.status}`}>
@@ -2465,7 +2466,7 @@ export function App() {
           gmailSyncing={gmailSyncing}
           gmailSyncStatus={gmailSyncStatus}
           onSyncGmail={() => void syncGmail()}
-          onSelectFolder={() => { setActive("Рабочий центр"); void openSources("root"); }}
+          onSelectFolder={() => void openSources("root")}
           onConnectGoogle={() => void connectGoogle()}
           onLocalUpload={() => { setActive("Рабочий центр"); setNotice("Нажмите «Загрузить рабочую папку» в рабочем центре"); }}
           onOpenAIPolicy={() => setActive("Настройки")}
