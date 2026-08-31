@@ -214,7 +214,12 @@ def submit_scan(session_id: int, project_id: int, source_folder_id: str) -> None
 def recover_incomplete_scans() -> int:
     db = SessionLocal()
     try:
-        rows = list(OrganizerRepository(db).incomplete_sessions())
+        repo = OrganizerRepository(db)
+        rows = list(repo.incomplete_sessions())
+        # A process restart terminates all in-memory workers. Mark every recovered
+        # job as queued before resubmitting it; _scan_worker changes the status
+        # to scanning only after a worker slot is actually available.
+        repo.requeue_incomplete_sessions([int(row["id"]) for row in rows])
     finally:
         db.close()
     for row in rows:

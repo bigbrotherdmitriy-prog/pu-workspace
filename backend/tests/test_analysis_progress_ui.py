@@ -11,6 +11,8 @@ def test_folder_analysis_shows_exact_progress_and_remaining_count():
     assert "processed_item_count" in app_source
     assert "обработано" in app_source
     assert "осталось" in app_source
+    assert "В очереди" in app_source
+    assert "Ожидает свободного обработчика" in app_source
     assert "source-progress-track" in app_source
     assert ".source-progress-track" in css_source
 

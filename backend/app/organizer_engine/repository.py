@@ -4,7 +4,7 @@ import json
 import hashlib
 from typing import Any
 
-from sqlalchemy import func, text, update
+from sqlalchemy import case, func, text, update
 from sqlalchemy.orm import Session
 
 from app.models.organizer import OrganizerSession
@@ -49,6 +49,24 @@ class OrganizerRepository:
             WHERE status IN ('queued','scanning','analyzing')
             ORDER BY id
         """)).mappings().all()
+
+    def requeue_incomplete_sessions(self, session_ids: list[int]) -> None:
+        if not session_ids:
+            return
+        self.db.execute(
+            update(OrganizerSession)
+            .where(
+                OrganizerSession.id.in_(session_ids),
+                OrganizerSession.status.in_(("queued", "scanning", "analyzing")),
+            )
+            .values(
+                status="queued",
+                progress=case((OrganizerSession.copy_folder_id.is_(None), 0), else_=55),
+                processed_item_count=0,
+                updated_at=func.now(),
+            )
+        )
+        self.db.commit()
 
     def retry_failed_session(self, session_id: int) -> bool:
         result = self.db.execute(text("""

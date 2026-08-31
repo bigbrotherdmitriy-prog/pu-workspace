@@ -34,3 +34,13 @@ def test_update_session_uses_sqlalchemy_update_and_allowlist():
     assert "UPDATE organizer_sessions" in compiled
     assert "malicious" not in compiled
     assert db.committed
+
+
+def test_requeue_incomplete_sessions_resets_stale_runtime_status():
+    db = FakeDb(2)
+    OrganizerRepository(db).requeue_incomplete_sessions([7, 8])
+    assert isinstance(db.statement, Update)
+    compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "UPDATE organizer_sessions" in compiled
+    assert "processed_item_count=0" in compiled.replace(" ", "")
+    assert db.committed

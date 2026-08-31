@@ -2178,12 +2178,13 @@ export function App() {
                     <div className="source-list">
                       {folders.map((folder) => {
                         const session = processingQueue?.sessions.find((item) => item.id === folder.analysis_result?.organizer_session_id);
-                        const activeProgress = folder.snapshot_status === "building" ? 5 : Math.max(0, Math.min(100, session?.progress || (folder.analysis_status === "ready" ? 100 : 10)));
+                        const isQueued = session?.status === "queued";
+                        const queuedSessions = (processingQueue?.sessions || []).filter((item) => item.status === "queued").sort((left, right) => left.id - right.id);
+                        const queuePosition = isQueued ? queuedSessions.findIndex((item) => item.id === session?.id) + 1 : 0;
+                        const activeProgress = isQueued ? 0 : folder.snapshot_status === "building" ? 5 : Math.max(0, Math.min(100, session?.progress || (folder.analysis_status === "ready" ? 100 : 10)));
                         const totalItems = session?.copy_item_count || session?.source_item_count || folder.item_count || 0;
                         const processedItems = Math.min(totalItems, session?.processed_item_count || (activeProgress >= 92 ? totalItems : 0));
                         const remainingItems = Math.max(0, totalItems - processedItems);
-                        const elapsedMs = session?.created_at ? Date.now() - new Date(session.created_at).getTime() : 0;
-                        const etaMinutes = activeProgress > 5 && activeProgress < 100 ? Math.max(1, Math.round((elapsedMs / 60000) * (100 - activeProgress) / activeProgress)) : 0;
                         const isProcessing = folder.snapshot_status === "building" || folder.analysis_status === "analyzing";
                         return (
                         <article key={folder.id}>
@@ -2215,9 +2216,9 @@ export function App() {
                                             : "Google Drive"}
                             </p>
                             {isProcessing && <div className="source-progress" aria-label={`Прогресс анализа ${activeProgress}%`}>
-                              <div className="source-progress-head"><strong>{activeProgress}%</strong><span>{processedItems.toLocaleString("ru-RU")} обработано · {remainingItems.toLocaleString("ru-RU")} осталось{etaMinutes ? ` · примерно ${etaMinutes} мин` : ""}</span></div>
+                              <div className="source-progress-head"><strong>{isQueued ? "В очереди" : `${activeProgress}%`}</strong><span>{isQueued && queuePosition ? `позиция ${queuePosition} · ` : ""}{processedItems.toLocaleString("ru-RU")} обработано · {remainingItems.toLocaleString("ru-RU")} осталось</span></div>
                               <div className="source-progress-track"><i style={{ width: `${activeProgress}%` }} /></div>
-                              <small>{activeProgress < 15 ? "Сканирование структуры папки" : activeProgress < 55 ? "Создание безопасной копии" : activeProgress < 92 ? "Чтение и анализ файлов" : "Формирование документов, задач и предложений"}</small>
+                              <small>{isQueued ? "Ожидает свободного обработчика" : activeProgress < 15 ? "Сканирование структуры папки" : activeProgress < 55 ? "Создание безопасной копии" : activeProgress < 92 ? "Чтение и анализ файлов" : "Формирование документов, задач и предложений"}</small>
                             </div>}
                           </div>
                           <div className="source-row-actions">
