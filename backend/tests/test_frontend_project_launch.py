@@ -11,7 +11,9 @@ def test_project_launch_is_a_separate_frontend_module():
     assert 'from "./modules/project-launch/ProjectLaunchWizard"' in app
     assert '[Route, "Запуск проекта"]' in app
     assert 'active === "Запуск проекта"' in app
-    assert 'active === "Рабочий центр" ? (' in app
+    assert 'active === "Рабочий центр" || showSources ? (' in app
+    assert 'onSelectFolder={() => void openSources("root")}' in app
+    assert 'setActive("Рабочий центр"); void openSources("root")' not in app
     assert "Проект и рабочая папка" in wizard
     assert "ГПР, бюджет и ДДС" in wizard
     assert "Неподтверждённые контакты не маршрутизируют почту автоматически" in wizard
