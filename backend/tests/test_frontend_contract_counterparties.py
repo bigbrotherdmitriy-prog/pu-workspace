@@ -14,6 +14,8 @@ def test_contract_ui_separates_prime_context_from_our_financial_contracts():
     assert "Выберите непосредственный вышестоящий договор" in module
     assert "downstream_subcontract\"].includes" in module
     assert "contract-project-root" in app
+    assert "contract-project-count" in app
+    assert 'data-kind={item.contract_kind || "customer"}' in app
     assert "buildContractTree(contracts, query)" in app
     assert "retention_percent" in app
     assert "строк графика платежей" in app
