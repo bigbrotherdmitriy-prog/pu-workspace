@@ -44,6 +44,12 @@ def test_gmail_sync_routes_new_messages_through_semantic_project_matching():
     assert "project_id=target_project_id" in source
 
 
+def test_gmail_sync_backfills_safe_reply_for_older_messages():
+    source = inspect.getsource(sync_gmail_project)
+    assert "ensure_response=True" in source
+    assert "ResponseDraft.message_id == existing.id" in source
+
+
 def test_project_candidate_is_available_for_cross_project_routing():
     assert callable(project_candidate)
 

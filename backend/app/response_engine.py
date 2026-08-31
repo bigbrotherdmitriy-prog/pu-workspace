@@ -21,7 +21,13 @@ class ResponseCandidate:
     confidence: float
 
 
-def extract_response_candidates(text: str | None, source_name: str, limit: int = 3) -> list[ResponseCandidate]:
+def extract_response_candidates(
+    text: str | None,
+    source_name: str,
+    limit: int = 3,
+    *,
+    ensure_response: bool = False,
+) -> list[ResponseCandidate]:
     if not text:
         return []
     result: list[ResponseCandidate] = []
@@ -45,6 +51,17 @@ def extract_response_candidates(text: str | None, source_name: str, limit: int =
         ))
         if len(result) >= limit:
             break
+    if not result and ensure_response and len(" ".join(text.split())) >= 15:
+        excerpt = " ".join(text.split())[:1200]
+        result.append(ResponseCandidate(
+            f"Ответ на письмо «{source_name}»"[:500],
+            "Добрый день!\n\n"
+            "Благодарим за письмо. Информация получена и передана на проверку. "
+            "После проверки мы направим содержательный ответ.\n\n"
+            "С уважением,\n[ФИО / должность]",
+            excerpt,
+            0.55,
+        ))
     return result
 
 
@@ -57,7 +74,14 @@ def _reviewer(db: Session, project_id: int) -> User | None:
     return db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id))
 
 
-def create_response_drafts(db: Session, project_id: int, session_id: int | None, files: list[StorageObject]) -> list[ResponseDraft]:
+def create_response_drafts(
+    db: Session,
+    project_id: int,
+    session_id: int | None,
+    files: list[StorageObject],
+    *,
+    ensure_response: bool = False,
+) -> list[ResponseDraft]:
     reviewer = _reviewer(db, project_id)
     if not reviewer:
         return []
@@ -65,7 +89,9 @@ def create_response_drafts(db: Session, project_id: int, session_id: int | None,
     for file in files:
         if file.is_folder:
             continue
-        for candidate in extract_response_candidates(file.content_text, file.name):
+        for candidate in extract_response_candidates(
+            file.content_text, file.name, ensure_response=ensure_response,
+        ):
             digest = hashlib.sha256(candidate.excerpt.casefold().encode()).hexdigest()
             if db.scalar(select(ResponseDraft.id).where(ResponseDraft.project_id == project_id, ResponseDraft.source_file_id == file.id, ResponseDraft.source_excerpt_hash == digest)):
                 continue

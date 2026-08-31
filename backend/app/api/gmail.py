@@ -139,6 +139,21 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
                 if existing.source_sender:
                     discover_contact_from_message(db, existing.project_id, existing.source_sender, existing.content, user)
+                # Older messages may have been synchronized before email fallback
+                # drafts existed. Backfill a reviewable draft without sending it
+                # and without changing the message's confirmed project context.
+                if existing.source_type == "email" and not db.scalar(select(ResponseDraft.id).where(
+                    ResponseDraft.message_id == existing.id,
+                )):
+                    synthetic = StorageObject(
+                        id=f"message:{existing.id}", name=existing.source_name,
+                        mime_type="text/plain", parent_id="ai-secretary", content_text=existing.content,
+                    )
+                    drafts = create_response_drafts(
+                        db, existing.project_id, None, [synthetic], ensure_response=True,
+                    )
+                    for draft in drafts:
+                        draft.message_id = existing.id
                 skipped += 1
                 continue
             attachments = _attachments(item.get("payload", {}), item["id"])

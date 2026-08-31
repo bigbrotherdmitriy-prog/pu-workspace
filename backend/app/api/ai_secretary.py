@@ -303,7 +303,10 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         completion_suggestions = _create_completion_suggestions(db, row)
     else:
         tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
-        drafts = create_response_drafts(db, row.project_id, None, [synthetic])
+        drafts = create_response_drafts(
+            db, row.project_id, None, [synthetic],
+            ensure_response=row.source_type == "email",
+        )
         risks, _ = create_governance_items(db, row.project_id, [synthetic], source_type=row.source_type)
         completion_suggestions = []
     for task in tasks:
