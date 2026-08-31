@@ -120,6 +120,12 @@ type ContractSourceCandidate = {
   reasons: string[];
   text_ready: boolean;
 };
+type ContractFinancialCheck = {
+  applied: string[];
+  mismatches: { field: string; label: string; current: string; extracted: string; evidence?: string }[];
+  terms: { amount?: string; advance_amount?: string; retention_percent?: string };
+  sourceName?: string;
+};
 type ResponseDraft = {
   id: number;
   subject: string;
@@ -348,6 +354,7 @@ export function App() {
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
     [contractStructureDrafts, setContractStructureDrafts] = useState<Record<number, { kind: string; parentId: number }>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
+    [contractFinancialChecks, setContractFinancialChecks] = useState<Record<number, ContractFinancialCheck>>({}),
     [contractCandidateBusy, setContractCandidateBusy] = useState(0),
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
       {},
@@ -813,9 +820,12 @@ export function App() {
       const result = await api(`/projects/${projectId}/contracts/${contractId}/analyze`, {
         method: "POST",
       });
-      setNotice(
-        `Договор проанализирован: первичных задач ${result.analysis.tasks}, обязательств ${result.analysis.obligations}, рисков ${result.analysis.risks}, решений ${result.analysis.decisions}, строк графика платежей ${result.created?.payment_schedule || 0}. Проверьте привязку платежей к этапам ГПР и подтвердите план ДДС.`,
-      );
+      const financial = result.financial_check;
+      setContractFinancialChecks((current) => ({ ...current, [contractId]: { ...financial, sourceName: result.source?.name } }));
+      const linked = result.source?.automatically_linked ? ` Автоматически прикреплён файл «${result.source.name}».` : "";
+      const applied = financial?.applied?.length ? ` Заполнены условия: ${financial.applied.join(", ")}.` : "";
+      const mismatches = financial?.mismatches?.length ? ` ВНИМАНИЕ: расхождений в финансовых условиях — ${financial.mismatches.length}; проверьте карточку договора.` : " Финансовые расхождения не обнаружены.";
+      setNotice(`Договор проанализирован.${linked}${applied}${mismatches} Задач ${result.analysis.tasks}, обязательств ${result.analysis.obligations}, строк платежей ${result.created?.payment_schedule || 0}.`);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -2569,10 +2579,9 @@ export function App() {
                       />
                       <button
                         className="secondary"
-                        disabled={!item.source_document_id}
                         onClick={() => analyzeContract(item.id)}
                       >
-                        2. Проанализировать договор и создать первичные задачи
+                        2. Автоматически прикрепить, прочитать и проверить условия
                       </button>
                       {item.source_document_id && !item.analysis?.source_ready && (
                         <small>Сначала дождитесь завершения анализа рабочей папки: текст договора ещё не извлечён.</small>
@@ -2583,6 +2592,18 @@ export function App() {
                           <span>Обязательства <b>{item.analysis.obligations}</b></span>
                           <span>Риски <b>{item.analysis.risks}</b></span>
                           <span>Решения <b>{item.analysis.decisions}</b></span>
+                        </div>
+                      )}
+                      {contractFinancialChecks[item.id] && (
+                        <div className={`contract-analysis-status ${contractFinancialChecks[item.id].mismatches.length ? "warning" : ""}`} role="status">
+                          <span>Источник <b>{contractFinancialChecks[item.id].sourceName || "договор"}</b></span>
+                          <span>Сумма <b>{item.amount ? money(item.amount) : "не найдена"}</b></span>
+                          <span>Аванс <b>{item.advance_amount ? money(item.advance_amount) : "не найден"}</b></span>
+                          <span>Удержание <b>{item.retention_percent ? `${item.retention_percent}%` : "не найдено"}</b></span>
+                          <span>Сверка <b>{contractFinancialChecks[item.id].mismatches.length ? `расхождений: ${contractFinancialChecks[item.id].mismatches.length}` : "совпадает"}</b></span>
+                          {contractFinancialChecks[item.id].mismatches.map((mismatch) => <small key={mismatch.field}>
+                            {mismatch.label}: в карточке {mismatch.current}, в договоре {mismatch.extracted}. {mismatch.evidence || "Проверьте исходный пункт договора."}
+                          </small>)}
                         </div>
                       )}
                       <div className="contract-chain-status">

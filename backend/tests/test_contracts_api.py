@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.api.organizations_contracts import ContractCreate, _contract_document_score, _contract_source_text, _payment_schedule_candidates, router
+from app.api.organizations_contracts import ContractCreate, _apply_contract_financial_terms, _contract_document_score, _contract_financial_terms, _contract_source_text, _payment_schedule_candidates, router
 from app.models.document import Document
 from app.models.organization_contract import Contract
 
@@ -83,3 +83,26 @@ def test_contract_candidate_prefers_requisites_in_extracted_text_over_generic_fi
     assert score >= 85
     assert score > appendix_score
     assert "совпадает номер договора" in reasons
+
+
+def test_extracts_and_applies_contract_price_advance_and_retention():
+    terms = _contract_financial_terms(
+        "Цена настоящего договора составляет 10 000 000,00 руб.\n"
+        "Заказчик выплачивает аванс в размере 20%.\n"
+        "Гарантийное удержание составляет 5%."
+    )
+    assert terms["amount"] == Decimal("10000000.00")
+    assert terms["advance_amount"] == Decimal("2000000.00")
+    assert terms["retention_percent"] == Decimal("5")
+    contract = Contract(project_id=1, number="1", title="Работы", status="active")
+    check = _apply_contract_financial_terms(contract, terms)
+    assert set(check["applied"]) == {"amount", "advance_amount", "retention_percent"}
+
+
+def test_financial_check_reports_mismatch_without_overwriting_user_value():
+    contract = Contract(project_id=1, number="1", title="Работы", status="active", amount=Decimal("9000000"))
+    check = _apply_contract_financial_terms(contract, _contract_financial_terms(
+        "Стоимость работ составляет 10 000 000 руб."
+    ))
+    assert contract.amount == Decimal("9000000")
+    assert check["mismatches"][0]["field"] == "amount"

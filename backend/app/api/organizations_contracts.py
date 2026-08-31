@@ -328,6 +328,88 @@ def _contract_source_text(document: Document, db: Session | None = None) -> str:
     return "\n".join(dict.fromkeys(parts))
 
 
+def _decimal_value(raw: str) -> Decimal:
+    return Decimal(re.sub(r"\s+", "", raw).replace(",", "."))
+
+
+def _contract_financial_terms(content: str) -> dict:
+    """Extract explicit contract price, advance and retention with source evidence."""
+    result: dict[str, Decimal | str | None] = {
+        "amount": None, "advance_amount": None, "advance_percent": None,
+        "retention_percent": None, "amount_evidence": None,
+        "advance_evidence": None, "retention_evidence": None,
+    }
+    money_pattern = r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:руб(?:\.|лей|ля)?|₽)"
+    percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
+    lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines() if line.strip()]
+    for line in lines:
+        lowered = line.casefold()
+        money = re.search(money_pattern, line, re.IGNORECASE)
+        percent = re.search(percent_pattern, line)
+        if result["amount"] is None and money and re.search(
+            r"цена\s+(?:настоящего\s+)?договора|стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость",
+            lowered,
+        ):
+            result["amount"] = _decimal_value(money.group(1))
+            result["amount_evidence"] = line[:500]
+        if "аванс" in lowered:
+            if result["advance_amount"] is None and money:
+                result["advance_amount"] = _decimal_value(money.group(1))
+            if result["advance_percent"] is None and percent:
+                result["advance_percent"] = _decimal_value(percent.group(1))
+            if money or percent:
+                result["advance_evidence"] = line[:500]
+        if result["retention_percent"] is None and percent and re.search(r"удержан|удержива|гарантийн.*удерж", lowered):
+            result["retention_percent"] = _decimal_value(percent.group(1))
+            result["retention_evidence"] = line[:500]
+    if result["advance_amount"] is None and result["advance_percent"] is not None and result["amount"] is not None:
+        result["advance_amount"] = (result["amount"] * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
+    return result
+
+
+def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
+    applied: list[str] = []
+    mismatches: list[dict] = []
+    for field, label, evidence_field, tolerance in (
+        ("amount", "Сумма договора", "amount_evidence", Decimal("1")),
+        ("advance_amount", "Аванс", "advance_evidence", Decimal("1")),
+        ("retention_percent", "Удержание", "retention_evidence", Decimal("0.01")),
+    ):
+        extracted = terms.get(field)
+        if extracted is None:
+            continue
+        current = getattr(row, field)
+        if current is None:
+            setattr(row, field, extracted)
+            applied.append(field)
+        elif abs(Decimal(current) - Decimal(extracted)) > tolerance:
+            mismatches.append({
+                "field": field, "label": label, "current": str(current),
+                "extracted": str(extracted), "evidence": terms.get(evidence_field),
+            })
+    return {"applied": applied, "mismatches": mismatches, "terms": terms}
+
+
+def _rank_contract_documents(db: Session, project_id: int, row: Contract) -> list[dict]:
+    documents = db.execute(select(Document, DocumentVersion.content).outerjoin(
+        DocumentVersion,
+        and_(DocumentVersion.document_id == Document.id, DocumentVersion.version_number == Document.current_version),
+    ).where(Document.project_id == project_id).order_by(Document.id.desc())).all()
+    candidates = []
+    for document, extracted_content in documents:
+        content = "\n".join(dict.fromkeys(
+            part.strip() for part in (document.summary, document.notes, extracted_content) if part and part.strip()
+        ))
+        score, reasons = _contract_document_score(row, document, content)
+        candidates.append({
+            "document_id": document.id, "name": document.name, "source": document.source,
+            "mime_type": document.mime_type, "score": score, "reasons": reasons,
+            "text_ready": bool(content),
+        })
+    candidates.sort(key=lambda item: (item["score"], item["text_ready"], item["document_id"]), reverse=True)
+    return candidates
+
+
 def _payment_schedule_candidates(content: str) -> list[dict]:
     """Extract conservative payment proposals; never marks anything as paid."""
     candidates: list[dict] = []
@@ -399,30 +481,7 @@ def contract_source_candidates(project_id: int, contract_id: int,
     row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if row is None:
         raise HTTPException(404, "Contract not found")
-    documents = db.execute(select(Document, DocumentVersion.content).outerjoin(
-        DocumentVersion,
-        and_(
-            DocumentVersion.document_id == Document.id,
-            DocumentVersion.version_number == Document.current_version,
-        ),
-    ).where(Document.project_id == project_id).order_by(Document.id.desc())).all()
-    candidates = []
-    for document, extracted_content in documents:
-        content = "\n".join(dict.fromkeys(
-            part.strip() for part in (document.summary, document.notes, extracted_content)
-            if part and part.strip()
-        ))
-        score, reasons = _contract_document_score(row, document, content)
-        candidates.append({
-            "document_id": document.id,
-            "name": document.name,
-            "source": document.source,
-            "mime_type": document.mime_type,
-            "score": score,
-            "reasons": reasons,
-            "text_ready": bool(content),
-        })
-    candidates.sort(key=lambda item: (item["score"], item["text_ready"], item["document_id"]), reverse=True)
+    candidates = _rank_contract_documents(db, project_id, row)
     return {
         "contract_id": row.id,
         "recommended_document_id": candidates[0]["document_id"] if candidates and candidates[0]["score"] >= 50 else None,
@@ -438,8 +497,15 @@ def analyze_contract(project_id: int, contract_id: int,
     row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if row is None:
         raise HTTPException(404, "Contract not found")
+    automatically_linked = False
     if row.source_document_id is None:
-        raise HTTPException(409, "Сначала выберите документ договора")
+        candidates = _rank_contract_documents(db, project_id, row)
+        best = candidates[0] if candidates else None
+        runner_up_score = candidates[1]["score"] if len(candidates) > 1 else 0
+        if not best or not best["text_ready"] or best["score"] < 85 or best["score"] - runner_up_score < 10:
+            raise HTTPException(409, "Однозначный документ договора не найден. Проверьте предложенные файлы вручную")
+        row.source_document_id = best["document_id"]
+        automatically_linked = True
     document = db.scalar(select(Document).where(
         Document.id == row.source_document_id, Document.project_id == project_id,
     ))
@@ -449,6 +515,7 @@ def analyze_contract(project_id: int, contract_id: int,
     if not content:
         raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
     source_id = document.external_id or f"document:{document.id}"
+    financial_check = _apply_contract_financial_terms(row, _contract_financial_terms(content))
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",
         parent_id=document.parent_external_id or "contracts", content_text=content,
@@ -473,7 +540,9 @@ def analyze_contract(project_id: int, contract_id: int,
         details=(f"document={document.id}; tasks_created={len(created_tasks)}; "
                  f"obligations_linked={len(linked_obligations)}; risks_created={len(created_risks)}; "
                  f"decisions_created={len(created_decisions)}; payment_proposals={len(payment_rows)}; "
-                 f"organizations_remembered={len(remembered_organizations)}; originals_changed=false"),
+                 f"organizations_remembered={len(remembered_organizations)}; automatically_linked={automatically_linked}; "
+                 f"financial_fields_applied={','.join(financial_check['applied']) or 'none'}; "
+                 f"financial_mismatches={len(financial_check['mismatches'])}; originals_changed=false"),
     ))
     db.commit()
     result = _contract(row, db)
@@ -482,6 +551,8 @@ def analyze_contract(project_id: int, contract_id: int,
         "payment_schedule": len(payment_rows),
         "organizations": len(remembered_organizations),
     }
+    result["source"] = {"automatically_linked": automatically_linked, "document_id": document.id, "name": document.name}
+    result["financial_check"] = financial_check
     return result
 
 
