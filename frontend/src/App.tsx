@@ -594,8 +594,9 @@ export function App() {
         body: JSON.stringify({ name }),
       });
       setNewProjectName("");
-      setNotice(`Проект «${created.name}» создан`);
       await activateProject(created.id);
+      setActive("Запуск проекта");
+      setNotice(`Проект «${created.name}» создан. Выберите, как начать работу: с существующей папки или с новой постоянной структуры.`);
     } catch (e) {
       setError((e as Error).message);
     }

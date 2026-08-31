@@ -28,9 +28,12 @@ describe("ProjectLaunchWizard", () => {
     localStorage.clear();
     const openSection = vi.fn();
     render(<ProjectLaunchWizard projectId={1} openSection={openSection} />);
-    expect(screen.getByText("Разобрать существующую папку")).toBeInTheDocument();
+    expect(screen.getByText("Подключить готовую папку")).toBeInTheDocument();
     expect(screen.getByText("Создать постоянную структуру")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Выбрать существующую папку" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать существующий проект" }));
+    expect(openSection).not.toHaveBeenCalled();
+    expect(screen.getByText("ПОДТВЕРЖДЕНИЕ")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и продолжить" }));
     expect(openSection).toHaveBeenCalledWith("Рабочий центр", "source");
   });
 });
