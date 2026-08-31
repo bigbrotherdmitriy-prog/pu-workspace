@@ -272,6 +272,10 @@
 .contract-tree-level::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: #0d8d70; transform: rotate(45deg); }
 .contract-tree-position b { padding: 3px 7px; border-radius: 999px; color: #087a59; background: #e7f5f0; font-size: 10px; }
 .contract-tree-position b.warning { color: #9a5d00; background: #fff2d6; }
+.contract-parent-link { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(190px, 1fr) auto; align-items: center; gap: 7px; margin-top: 10px; padding: 9px; border: 1px solid #cfe2da; border-radius: 10px; background: #f5faf8; }
+.contract-parent-link > span { grid-column: 1 / -1; color: #597168; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.contract-parent-link select { min-width: 0; padding: 8px 9px; border: 1px solid #bcd5cb; border-radius: 8px; background: #fff; color: #173b30; font: inherit; font-size: 12px; }
+.contract-parent-link button { padding: 8px 10px; white-space: nowrap; }
 .contract-number { min-width: 110px; padding: 14px; border-radius: 10px; background: #edf3ff; color: #185adb; font-weight: 750; text-align: center; }
 .contract-card h2 { margin: 7px 0 3px; }
 .contract-card p, .contract-card small { display: block; margin: 0; color: #748091; }
@@ -616,6 +620,7 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
   .contract-tree-node[data-depth="0"]::before { left: -2px; }
   .contract-tree-node[data-depth="0"]::after { left: -8px; }
   .contract-number { justify-self: start; }
+  .contract-parent-link { grid-template-columns: 1fr; }
   .contract-links { text-align: left; }
   .contract-source-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .contract-document-modal { padding: 0; place-items: stretch; }

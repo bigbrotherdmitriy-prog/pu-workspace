@@ -54,6 +54,11 @@ class ContractCreate(BaseModel):
 
 class ContractLinkUpdate(BaseModel):
     source_document_id: int | None = None
+    parent_contract_id: int | None = None
+    contract_kind: str | None = Field(
+        default=None,
+        pattern="^(prime_reference|customer|revenue_subcontract|downstream_subcontract|supply)$",
+    )
 
 
 def _normalized(value: str | None) -> str:
@@ -164,13 +169,39 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
     row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if row is None:
         raise HTTPException(404, "Contract not found")
-    if payload.source_document_id is not None and not db.scalar(select(Document.id).where(
+    if "source_document_id" in payload.model_fields_set and payload.source_document_id is not None and not db.scalar(select(Document.id).where(
         Document.id == payload.source_document_id, Document.project_id == project_id,
     )):
         raise HTTPException(422, "Документ не принадлежит выбранному проекту")
-    row.source_document_id = payload.source_document_id
-    db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
-                    details=f"document={row.source_document_id or 'none'}"))
+    structure_changed = bool({"parent_contract_id", "contract_kind"} & payload.model_fields_set)
+    if structure_changed:
+        target_kind = payload.contract_kind or row.contract_kind
+        target_parent_id = payload.parent_contract_id if "parent_contract_id" in payload.model_fields_set else row.parent_contract_id
+        parent_kinds = allowed_parent_kinds(target_kind)
+        parent = db.get(Contract, target_parent_id) if target_parent_id else None
+        if parent_kinds and parent is None:
+            raise HTTPException(422, "Для выбранной роли укажите вышестоящий договор")
+        if not parent_kinds and parent is not None:
+            raise HTTPException(422, "Головной договор не может иметь вышестоящий договор")
+        if parent is not None and (parent.project_id != project_id or parent.contract_kind not in parent_kinds):
+            raise HTTPException(422, "Выбранный договор не может быть родителем в этой цепочке")
+        if parent is not None and parent.id == row.id:
+            raise HTTPException(422, "Договор нельзя связать с самим собой")
+        cursor = parent
+        seen: set[int] = set()
+        while cursor is not None and cursor.id not in seen:
+            if cursor.id == row.id:
+                raise HTTPException(422, "Связь создаёт цикл в дереве договоров")
+            seen.add(cursor.id)
+            cursor = db.get(Contract, cursor.parent_contract_id) if cursor.parent_contract_id else None
+        row.contract_kind = target_kind
+        row.parent_contract_id = parent.id if parent else None
+        db.add(AuditLog(action="contract_parent_linked", entity_type="contract", entity_id=row.id,
+                        details=f"parent={row.parent_contract_id or 'none'}"))
+    if "source_document_id" in payload.model_fields_set:
+        row.source_document_id = payload.source_document_id
+        db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
+                        details=f"document={row.source_document_id or 'none'}"))
     db.commit(); db.refresh(row)
     return _contract(row, db)
 

@@ -1,5 +1,7 @@
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+import pytest
+from fastapi import HTTPException
 
 import app.models  # noqa: F401
 from app.api.organizations_contracts import (
@@ -65,3 +67,26 @@ def test_document_contract_control_chain_is_safe_and_idempotent():
         assert second["created"] is False
         assert len(baselines) == 1
         assert document.name == "Договор ГК-01.pdf"
+
+
+def test_existing_contract_can_be_reclassified_and_linked_atomically():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        organization = Organization(name="Tree")
+        user = User(name="Owner", email="tree@test.local", is_admin=False)
+        db.add_all([organization, user]); db.flush()
+        project = Project(name="Дерево", organization_id=organization.id)
+        db.add(project); db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner")); db.commit()
+        prime = create_contract(project.id, ContractCreate(number="ГК", title="Генподряд", contract_kind="prime_reference"), db, user)
+        legacy = create_contract(project.id, ContractCreate(number="СП", title="Наш договор", contract_kind="customer"), db, user)
+        linked = update_contract_links(project.id, legacy["id"], ContractLinkUpdate(
+            contract_kind="revenue_subcontract", parent_contract_id=prime["id"],
+        ), db, user)
+        assert linked["contract_kind"] == "revenue_subcontract"
+        assert linked["parent_contract_id"] == prime["id"]
+        with pytest.raises(HTTPException, match="самим собой"):
+            update_contract_links(project.id, legacy["id"], ContractLinkUpdate(
+                contract_kind="downstream_subcontract", parent_contract_id=legacy["id"],
+            ), db, user)

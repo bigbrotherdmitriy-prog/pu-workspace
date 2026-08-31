@@ -338,6 +338,7 @@ export function App() {
     [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "recommended" | "server" | "upload" | "google">>({}),
     [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
+    [contractStructureDrafts, setContractStructureDrafts] = useState<Record<number, { kind: string; parentId: number }>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
     [contractCandidateBusy, setContractCandidateBusy] = useState(0),
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
@@ -722,6 +723,19 @@ export function App() {
         body: JSON.stringify({ source_document_id: documentId || null }),
       });
       setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function linkContractParent(contractId: number, contractKind: string, parentContractId: number) {
+    try {
+      await api(`/projects/${projectId}/contracts/${contractId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ contract_kind: contractKind, parent_contract_id: parentContractId || null }),
+      });
+      setNotice("Вышестоящий договор сохранён — дерево перестроено");
+      setContractStructureDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -2372,6 +2386,29 @@ export function App() {
                       {item.parent_contract_id && <small>
                         Связан с договором {contracts.find((parent) => parent.id === item.parent_contract_id)?.number || `№${item.parent_contract_id}`}
                       </small>}
+                      {(() => {
+                        const draft = contractStructureDrafts[item.id] || { kind: item.contract_kind || "customer", parentId: item.parent_contract_id || 0 };
+                        const needsParent = !["prime_reference", "customer"].includes(draft.kind);
+                        return <div className="contract-parent-link">
+                          <span>Место в дереве</span>
+                          <select value={draft.kind} onChange={(event) => setContractStructureDrafts((current) => ({ ...current, [item.id]: { kind: event.target.value, parentId: 0 } }))}>
+                            <option value="prime_reference">Генподрядный договор — корень</option>
+                            <option value="customer">Прямой договор — корень</option>
+                            <option value="revenue_subcontract">Наш договор под генподрядным</option>
+                            <option value="downstream_subcontract">Субподрядчик / субсубподрядчик</option>
+                            <option value="supply">Поставщик</option>
+                          </select>
+                          {needsParent && <select value={draft.parentId} onChange={(event) => setContractStructureDrafts((current) => ({ ...current, [item.id]: { ...draft, parentId: Number(event.target.value) } }))}>
+                            <option value={0}>Выберите непосредственный вышестоящий договор</option>
+                            {contracts.filter((candidate) => {
+                              if (candidate.id === item.id) return false;
+                              if (draft.kind === "revenue_subcontract") return ["prime_reference", "customer"].includes(candidate.contract_kind || "customer");
+                              return ["prime_reference", "customer", "revenue_subcontract", "downstream_subcontract"].includes(candidate.contract_kind || "customer");
+                            }).map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.number} — {candidate.counterparty || candidate.title}</option>)}
+                          </select>}
+                          <button className="secondary" disabled={needsParent && !draft.parentId} onClick={() => void linkContractParent(item.id, draft.kind, draft.parentId)}>Сохранить связь</button>
+                        </div>;
+                      })()}
                       {(item.amount || item.advance_amount || item.retention_percent || item.warranty_until) && <small>
                         {item.amount ? `Сумма ${Number(item.amount).toLocaleString("ru-RU")} ₽` : "Сумма не указана"}
                         {item.advance_amount ? ` · аванс ${Number(item.advance_amount).toLocaleString("ru-RU")} ₽` : ""}
