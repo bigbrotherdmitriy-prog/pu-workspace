@@ -4,6 +4,7 @@ import os
 
 import httpx
 
+from app.core.external_retry import RATE_LIMIT_ONLY_RETRY, request_with_retry
 from app.integrations.contracts import AdapterHealth, ChannelMessage
 
 
@@ -56,19 +57,20 @@ class TelegramChannelAdapter:
         relay = os.getenv("TELEGRAM_RELAY_URL", "")
         relay_secret = os.getenv("TELEGRAM_RELAY_SECRET", "")
         if relay and relay_secret:
-            response = httpx.post(
-                f"{relay.rstrip('/')}/send",
-                json={"chat_id": destination, "message": text[:4000]},
-                headers={"X-Relay-Secret": relay_secret},
-                timeout=12.0,
-            )
+            with httpx.Client(timeout=12.0) as client:
+                response = request_with_retry(
+                    client, "POST", f"{relay.rstrip('/')}/send",
+                    policy=RATE_LIMIT_ONLY_RETRY,
+                    json={"chat_id": destination, "message": text[:4000]},
+                    headers={"X-Relay-Secret": relay_secret},
+                )
         else:
             with telegram_http_client() as client:
-                response = client.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
+                response = request_with_retry(
+                    client, "POST", f"https://api.telegram.org/bot{token}/sendMessage",
+                    policy=RATE_LIMIT_ONLY_RETRY,
                     json={"chat_id": destination, "text": text[:4000]},
                 )
-        response.raise_for_status()
         payload = response.json() if response.content else {}
         return str(payload.get("result", {}).get("message_id", "sent"))
 

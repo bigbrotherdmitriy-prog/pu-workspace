@@ -4,13 +4,13 @@ from contextlib import asynccontextmanager, suppress
 import hmac
 import os
 import re
-import time
 from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from app.core.external_retry import RATE_LIMIT_ONLY_RETRY, request_with_retry
 from app.integrations.telegram import telegram_force_ipv6
 
 
@@ -126,17 +126,10 @@ def _client() -> httpx.Client:
 
 
 def _get_with_retry(client: httpx.Client, url: str, **kwargs) -> httpx.Response:
-    last_error: Exception | None = None
-    for attempt in range(3):
-        try:
-            response = client.get(url, **kwargs)
-            response.raise_for_status()
-            return response
-        except httpx.HTTPError as exc:
-            last_error = exc
-            if attempt < 2:
-                time.sleep(attempt + 1)
-    raise HTTPException(502, "Telegram file service is temporarily unavailable") from last_error
+    try:
+        return request_with_retry(client, "GET", url, **kwargs)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Telegram file service is temporarily unavailable") from exc
 
 
 @app.post("/send")
@@ -144,8 +137,11 @@ def send(payload: SendRequest, x_relay_secret: str | None = Header(default=None)
     _check(x_relay_secret)
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     with _client() as client:
-        result = client.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": payload.chat_id, "text": payload.message[:4000]})
-        result.raise_for_status()
+        request_with_retry(
+            client, "POST", f"https://api.telegram.org/bot{token}/sendMessage",
+            policy=RATE_LIMIT_ONLY_RETRY,
+            json={"chat_id": payload.chat_id, "text": payload.message[:4000]},
+        )
     return {"ok": True}
 
 

@@ -4,6 +4,8 @@ import json
 import os
 from typing import Any
 
+from app.core.external_retry import HEAVY_AI_RETRY, request_with_retry
+
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -83,12 +85,12 @@ def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
         },
     }
     with httpx.Client(timeout=90.0) as client:
-        response = client.post(
-            f"{base_url}/models/{model}:generateContent",
+        response = request_with_retry(
+            client, "POST", f"{base_url}/models/{model}:generateContent",
+            policy=HEAVY_AI_RETRY,
             headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
             json=payload,
         )
-        response.raise_for_status()
     parts = response.json()["candidates"][0]["content"]["parts"]
     raw = "".join(part.get("text", "") for part in parts)
     result = json.loads(raw)
@@ -123,12 +125,12 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
         },
     }
     with httpx.Client(timeout=90.0) as client:
-        response = client.post(
-            f"{base_url}/models/{model}:generateContent",
+        response = request_with_retry(
+            client, "POST", f"{base_url}/models/{model}:generateContent",
+            policy=HEAVY_AI_RETRY,
             headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
             json=payload,
         )
-        response.raise_for_status()
     parts = response.json()["candidates"][0]["content"]["parts"]
     result = json.loads("".join(part.get("text", "") for part in parts))
     if not isinstance(result, dict):
