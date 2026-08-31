@@ -81,7 +81,7 @@ def _contract_document_score(row: Contract, document: Document, content: str) ->
         reasons.append("номер договора указан в имени файла")
     elif compact_number and len(compact_number) >= 4 and compact_number in compact_body:
         score += 45
-        reasons.append("номер договора упоминается только в тексте")
+        reasons.append("совпадает номер договора")
 
     counterparty = _normalized(row.counterparty)
     if counterparty and len(counterparty) >= 4 and counterparty in name:
