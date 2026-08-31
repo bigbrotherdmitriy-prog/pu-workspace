@@ -1448,6 +1448,16 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [ready, projectId, snapshots.some((item) => item.status === "building")]);
   useEffect(() => {
+    if (active !== "Рабочий центр" || !showSources) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("drive-source-picker")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, showSources]);
+  useEffect(() => {
     if (!ready || !projectId || !processingQueue?.summary.active) return;
     const timer = window.setInterval(async () => {
       try {
@@ -2058,7 +2068,7 @@ export function App() {
                   </section>
                 )}
                 {showSources && (
-                  <section className="card span-3">
+                  <section className="card span-3" id="drive-source-picker">
                     <div className="card-head">
                       <div>
                         <h2>Папки для последовательного разбора</h2>
@@ -2137,27 +2147,34 @@ export function App() {
                               </button>
                             )}
                             {folder.snapshot_status === "ready" ? (
-                              <button
-                                className="analyze"
-                                disabled={
-                                  busyFolder === folder.id ||
-                                  folder.analyzed ||
-                                  folder.analysis_status === "analyzing" ||
-                                  folder.analysis_result?.mode === "safe_copy"
-                                }
-                                onClick={() => analyzeFolder(folder)}
-                              >
-                                {busyFolder === folder.id ||
-                                folder.analysis_status === "analyzing"
-                                  ? "Анализ…"
-                                  : folder.analysis_result?.mode === "safe_copy"
-                                    ? "Стандартизирована"
-                                  : folder.analyzed
-                                    ? "Проанализирована"
-                                    : folder.analysis_status === "failed"
-                                      ? "Повторить стандартизацию"
-                                      : "Создать копию и стандартизировать"}
-                              </button>
+                              <>
+                                <button
+                                  disabled={busyFolder === folder.id}
+                                  onClick={() => queueFolder(folder)}
+                                >
+                                  {busyFolder === folder.id ? "Обновляю…" : "Найти новые файлы"}
+                                </button>
+                                <button
+                                  className="analyze"
+                                  disabled={
+                                    busyFolder === folder.id ||
+                                    folder.analysis_status === "analyzing" ||
+                                    folder.analysis_result?.mode === "safe_copy"
+                                  }
+                                  onClick={() => analyzeFolder(folder)}
+                                >
+                                  {busyFolder === folder.id ||
+                                  folder.analysis_status === "analyzing"
+                                    ? "Анализ…"
+                                    : folder.analysis_result?.mode === "safe_copy"
+                                      ? "Текущая копия готова"
+                                    : folder.analyzed
+                                      ? "Проанализирована"
+                                      : folder.analysis_status === "failed"
+                                        ? "Повторить стандартизацию"
+                                        : "Создать копию и стандартизировать"}
+                                </button>
+                              </>
                             ) : (
                               <button
                                 disabled={
