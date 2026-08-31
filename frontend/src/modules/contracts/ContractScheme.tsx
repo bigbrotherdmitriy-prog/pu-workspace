@@ -34,6 +34,24 @@ function defaultPositions(contracts: SchemeContract[]): Record<number, Point> {
   }));
 }
 
+function restoreWithoutOverlaps(contracts: SchemeContract[], restored: Record<number, Point>) {
+  const defaults = defaultPositions(contracts);
+  const result: Record<number, Point> = {};
+  const occupied: Point[] = [];
+  for (const contract of contracts) {
+    let point = restored[contract.id] || defaults[contract.id] || { x: 34, y: 34 };
+    if (occupied.some((other) => Math.abs(other.x - point.x) < nodeWidth - 20 && Math.abs(other.y - point.y) < nodeHeight - 20)) {
+      point = defaults[contract.id] || point;
+      while (occupied.some((other) => Math.abs(other.x - point.x) < nodeWidth - 20 && Math.abs(other.y - point.y) < nodeHeight - 20)) {
+        point = { x: point.x + 270, y: point.y };
+      }
+    }
+    result[contract.id] = point;
+    occupied.push(point);
+  }
+  return result;
+}
+
 function kindLabel(kind?: string) {
   if (kind === "prime_reference") return "Генподряд";
   if (kind === "revenue_subcontract") return "Наш договор";
@@ -48,13 +66,17 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const drag = useRef<{ id: number; dx: number; dy: number } | null>(null);
+  const layoutRef = useRef<{ storageKey: string; hierarchy: string } | null>(null);
+  const hierarchy = contracts.map((item) => `${item.id}:${item.parent_contract_id || 0}`).sort().join("|");
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
     const restored = saved ? JSON.parse(saved) as Record<number, Point> : {};
-    const defaults = defaultPositions(contracts);
-    setPositions(Object.fromEntries(contracts.map((item) => [item.id, restored[item.id] || defaults[item.id]])));
-  }, [storageKey, contracts]);
+    const previous = layoutRef.current;
+    const hierarchyChanged = previous?.storageKey === storageKey && previous.hierarchy !== hierarchy;
+    setPositions(hierarchyChanged ? defaultPositions(contracts) : restoreWithoutOverlaps(contracts, restored));
+    layoutRef.current = { storageKey, hierarchy };
+  }, [storageKey, hierarchy]);
 
   useEffect(() => {
     if (contracts.length) window.localStorage.setItem(storageKey, JSON.stringify(positions));
@@ -94,7 +116,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       }} onPointerUp={() => { drag.current = null; }} onPointerLeave={() => { drag.current = null; }}>
         <svg className="contract-scheme-lines" width={canvasWidth} height={canvasHeight} aria-label="Связи договоров">
           <defs><marker id="contract-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
-          {links.map(({ child, parent, own }) => <path key={child.id} d={`M ${parent.x + nodeWidth / 2} ${parent.y + nodeHeight} C ${parent.x + nodeWidth / 2} ${parent.y + nodeHeight + 36}, ${own.x + nodeWidth / 2} ${own.y - 36}, ${own.x + nodeWidth / 2} ${own.y}`} markerEnd="url(#contract-arrow)" />)}
+          {links.map(({ child, parent, own }) => <g key={child.id}><path className="contract-link-underlay" d={`M ${parent.x + nodeWidth / 2} ${parent.y + nodeHeight} C ${parent.x + nodeWidth / 2} ${parent.y + nodeHeight + 36}, ${own.x + nodeWidth / 2} ${own.y - 36}, ${own.x + nodeWidth / 2} ${own.y}`} /><path d={`M ${parent.x + nodeWidth / 2} ${parent.y + nodeHeight} C ${parent.x + nodeWidth / 2} ${parent.y + nodeHeight + 36}, ${own.x + nodeWidth / 2} ${own.y - 36}, ${own.x + nodeWidth / 2} ${own.y}`} markerEnd="url(#contract-arrow)" /></g>)}
         </svg>
         {contracts.map((contract) => {
           const point = positions[contract.id] || { x: 20, y: 20 };
@@ -108,6 +130,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
             <button className="contract-node-open" onClick={() => connectMode ? chooseForConnection(contract.id) : setSelectedId(contract.id)}>
               <span>{kindLabel(contract.contract_kind)}</span><strong>{contract.number}</strong><small>{contract.counterparty || contract.title}</small>
               <b>{contract.linked_documents?.length || 0} док.</b>
+              {contract.parent_contract_id && <em>← {contracts.find((item) => item.id === contract.parent_contract_id)?.number || `договор ${contract.parent_contract_id}`}</em>}
             </button>
           </article>;
         })}

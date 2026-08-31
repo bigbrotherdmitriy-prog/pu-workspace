@@ -274,7 +274,8 @@
 .contract-scheme-scroll { overflow: auto; border: 1px solid #cfe1d9; border-radius: 14px; background-color: #f7faf8; background-image: radial-gradient(#bcd2c8 1px, transparent 1px); background-size: 20px 20px; }
 .contract-scheme-canvas { position: relative; min-width: 100%; }
 .contract-scheme-lines { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.contract-scheme-lines path { fill: none; stroke: #6d9f8d; stroke-width: 2.5; }
+.contract-scheme-lines path { fill: none; stroke: #28785e; stroke-width: 4; }
+.contract-scheme-lines path.contract-link-underlay { stroke: #fff; stroke-width: 8; }
 .contract-scheme-lines marker path { fill: #397d67; stroke: none; }
 .contract-scheme-node { position: absolute; z-index: 2; width: 230px; height: 112px; display: grid; grid-template-columns: 34px 1fr; border: 2px solid #5aa88d; border-radius: 13px; background: #fff; box-shadow: 0 8px 22px rgba(16, 53, 41, .12); overflow: hidden; }
 .contract-scheme-node[data-kind="prime_reference"] { border-color: #163f33; }
@@ -290,6 +291,7 @@
 .contract-node-open strong, .contract-node-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contract-node-open small { color: #687a72; }
 .contract-node-open b { justify-self: start; padding: 2px 6px; border-radius: 99px; color: #17644f; background: #e8f5f0; font-size: 10px; }
+.contract-node-open em { overflow: hidden; color: #7a5a12; font-size: 9px; font-style: normal; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
 .contract-scheme-hint { margin: 0; padding: 10px 13px; border-radius: 9px; color: #695016; background: #fff4d9; font-size: 13px; font-weight: 700; }
 .contract-scheme-detail { position: absolute; z-index: 6; top: 100px; right: 28px; width: min(390px, calc(100% - 56px)); max-height: 430px; overflow: auto; padding: 20px; border: 1px solid #a8c9bc; border-radius: 16px; background: #fff; box-shadow: 0 20px 55px rgba(7, 39, 28, .24); }
 .contract-scheme-detail > .icon-button { float: right; width: 36px; height: 36px; padding: 8px; }
