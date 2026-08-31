@@ -219,8 +219,9 @@
 .contract-create { margin-bottom: 18px; }
 .contract-create h2, .contract-create p { margin: 0; }
 .contract-create p { margin-top: 5px; color: #748091; }
-.contract-form { display: grid; grid-template-columns: 180px 1fr 1fr auto; gap: 8px; margin-top: 18px; }
-.contract-form input { min-width: 0; padding: 10px 12px; border: 1px solid #d6dde7; border-radius: 8px; font: inherit; }
+.contract-form { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 8px; margin-top: 18px; }
+.contract-form input, .contract-form select { min-width: 0; padding: 10px 12px; border: 1px solid #d6dde7; border-radius: 8px; font: inherit; background: #fff; }
+.contract-form label { color: #748091; font-size: 12px; display: grid; gap: 3px; }
 .contract-form button { padding: 10px 14px; border: 1px solid #185adb; border-radius: 8px; background: #185adb; color: #fff; font-weight: 650; cursor: pointer; }
 .contract-form button:disabled { opacity: .5; cursor: default; }
 .contract-list { display: grid; gap: 14px; }

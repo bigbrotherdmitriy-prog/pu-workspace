@@ -148,6 +148,12 @@ type ContractRow = {
   number: string;
   title: string;
   counterparty?: string;
+  contract_kind?: "prime_reference" | "customer" | "revenue_subcontract" | "downstream_subcontract" | "supply";
+  parent_contract_id?: number;
+  amount?: number;
+  advance_amount?: number;
+  retention_percent?: number;
+  warranty_until?: string;
   signed_at?: string;
   status: string;
   source_document_id?: number;
@@ -320,6 +326,12 @@ export function App() {
     [newContractNumber, setNewContractNumber] = useState(""),
     [newContractTitle, setNewContractTitle] = useState(""),
     [newCounterparty, setNewCounterparty] = useState(""),
+    [newContractKind, setNewContractKind] = useState<"prime_reference" | "customer" | "revenue_subcontract" | "downstream_subcontract" | "supply">("customer"),
+    [newParentContractId, setNewParentContractId] = useState(0),
+    [newContractAmount, setNewContractAmount] = useState(""),
+    [newAdvanceAmount, setNewAdvanceAmount] = useState(""),
+    [newRetentionPercent, setNewRetentionPercent] = useState(""),
+    [newWarrantyUntil, setNewWarrantyUntil] = useState(""),
     [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "recommended" | "server" | "upload" | "google">>({}),
     [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
@@ -674,13 +686,27 @@ export function App() {
           number: newContractNumber.trim(),
           title: newContractTitle.trim(),
           counterparty: newCounterparty.trim() || undefined,
+          contract_kind: newContractKind,
+          parent_contract_id: ["prime_reference", "customer"].includes(newContractKind) ? undefined : newParentContractId,
+          amount: newContractAmount ? Number(newContractAmount) : undefined,
+          advance_amount: newAdvanceAmount ? Number(newAdvanceAmount) : undefined,
+          retention_percent: newRetentionPercent ? Number(newRetentionPercent) : undefined,
+          warranty_until: newWarrantyUntil || undefined,
         }),
       });
       setNewContractNumber("");
       setNewContractTitle("");
       setNewCounterparty("");
-      setSelectedFinanceContractId(created.id);
-      setNotice("Договор добавлен; черновик ГПР создан, контур ДДС готов к заполнению");
+      setNewContractKind("customer");
+      setNewParentContractId(0);
+      setNewContractAmount("");
+      setNewAdvanceAmount("");
+      setNewRetentionPercent("");
+      setNewWarrantyUntil("");
+      if (created.contract_kind !== "prime_reference") setSelectedFinanceContractId(created.id);
+      setNotice(created.contract_kind === "prime_reference"
+        ? "Генподрядный договор добавлен как контекст. Теперь добавьте наш субподрядный договор и свяжите его с генподрядным."
+        : "Финансовый договор добавлен; черновик ГПР создан, контур бюджета и ДДС готов к заполнению");
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -721,7 +747,7 @@ export function App() {
         method: "POST",
       });
       setNotice(
-        `Договор проанализирован: первичных задач ${result.analysis.tasks}, обязательств ${result.analysis.obligations}, рисков ${result.analysis.risks}, решений ${result.analysis.decisions}. Теперь привяжите ГПР, бюджет и ДДС.`,
+        `Договор проанализирован: первичных задач ${result.analysis.tasks}, обязательств ${result.analysis.obligations}, рисков ${result.analysis.risks}, решений ${result.analysis.decisions}, строк графика платежей ${result.created?.payment_schedule || 0}. Проверьте привязку платежей к этапам ГПР и подтвердите план ДДС.`,
       );
       await load();
     } catch (e) {
@@ -2237,9 +2263,22 @@ export function App() {
           number={newContractNumber}
           title={newContractTitle}
           counterparty={newCounterparty}
+          kind={newContractKind}
+          parentContractId={newParentContractId}
+          amount={newContractAmount}
+          advanceAmount={newAdvanceAmount}
+          retentionPercent={newRetentionPercent}
+          warrantyUntil={newWarrantyUntil}
+          contracts={contracts}
           onNumberChange={setNewContractNumber}
           onTitleChange={setNewContractTitle}
           onCounterpartyChange={setNewCounterparty}
+          onKindChange={setNewContractKind}
+          onParentContractIdChange={setNewParentContractId}
+          onAmountChange={setNewContractAmount}
+          onAdvanceAmountChange={setNewAdvanceAmount}
+          onRetentionPercentChange={setNewRetentionPercent}
+          onWarrantyUntilChange={setNewWarrantyUntil}
           onCreate={() => void createContract()}
         >
             <section className="contract-list">
@@ -2256,7 +2295,7 @@ export function App() {
                     <div className="contract-number">{item.number}</div>
                     <div>
                       <span className={`contract-status ${item.status}`}>
-                        {item.status}
+                        {item.contract_kind === "prime_reference" ? "ГЕНПОДРЯД · КОНТЕКСТ" : item.contract_kind === "revenue_subcontract" ? "НАШ СУБПОДРЯД · ДОХОД" : item.contract_kind === "downstream_subcontract" ? "НАШ ИСПОЛНИТЕЛЬ · РАСХОД" : item.contract_kind === "supply" ? "ПОСТАВКА · РАСХОД" : "ПРЯМОЙ ДОГОВОР · ДОХОД"} · {item.status}
                       </span>
                       <h2>{item.title}</h2>
                       <p>
@@ -2266,6 +2305,15 @@ export function App() {
                           : ""}
                       </p>
                       {item.notes && <small>{item.notes}</small>}
+                      {item.parent_contract_id && <small>
+                        Связан с договором {contracts.find((parent) => parent.id === item.parent_contract_id)?.number || `№${item.parent_contract_id}`}
+                      </small>}
+                      {(item.amount || item.advance_amount || item.retention_percent || item.warranty_until) && <small>
+                        {item.amount ? `Сумма ${Number(item.amount).toLocaleString("ru-RU")} ₽` : "Сумма не указана"}
+                        {item.advance_amount ? ` · аванс ${Number(item.advance_amount).toLocaleString("ru-RU")} ₽` : ""}
+                        {item.retention_percent ? ` · удержание ${item.retention_percent}%` : ""}
+                        {item.warranty_until ? ` · гарантия до ${new Date(item.warranty_until).toLocaleDateString("ru-RU")}` : ""}
+                      </small>}
                     </div>
                     <div className="contract-links">
                       <ContractDocumentPicker

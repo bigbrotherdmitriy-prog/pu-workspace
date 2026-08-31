@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,8 +15,9 @@ from app.models.document_version import DocumentVersion
 from app.models.governance import Decision, Risk
 from app.models.management import Obligation
 from app.models.task import Task
-from app.models.execution_finance import ScheduleBaseline
+from app.models.execution_finance import CashFlowEntry, ScheduleBaseline, ScheduleItem
 from app.core.integration_types import StorageObject
+from app.core.contract_roles import allowed_parent_kinds, cash_flow_direction, is_financial_contract
 from app.governance_engine import create_governance_items
 from app.task_engine import create_tasks_from_files
 from sqlalchemy import func
@@ -35,6 +37,15 @@ class ContractCreate(BaseModel):
     number: str = Field(min_length=1, max_length=255)
     title: str = Field(min_length=1, max_length=500)
     counterparty: str | None = Field(default=None, max_length=500)
+    contract_kind: str = Field(
+        default="customer",
+        pattern="^(prime_reference|customer|revenue_subcontract|downstream_subcontract|supply)$",
+    )
+    parent_contract_id: int | None = None
+    amount: Decimal | None = Field(default=None, ge=0)
+    advance_amount: Decimal | None = Field(default=None, ge=0)
+    retention_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    warranty_until: date | None = None
     signed_at: date | None = None
     status: str = Field(default="active", pattern="^(draft|active|completed|terminated)$")
     source_document_id: int | None = None
@@ -121,15 +132,27 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
     require_project_role(db, user, project_id, "editor")
     if db.get(Project, project_id) is None:
         raise HTTPException(404, "Project not found")
+    parent_kinds = allowed_parent_kinds(payload.contract_kind)
+    parent = db.get(Contract, payload.parent_contract_id) if payload.parent_contract_id else None
+    if parent_kinds and parent is None:
+        raise HTTPException(422, "Для выбранной роли укажите связанный вышестоящий договор")
+    if parent is not None and parent.project_id != project_id:
+        raise HTTPException(422, "Связанный договор не принадлежит выбранному проекту")
+    if parent is not None and parent.contract_kind not in parent_kinds:
+        raise HTTPException(422, "Роль вышестоящего договора не соответствует выбранной цепочке")
+    if not parent_kinds and payload.parent_contract_id is not None:
+        raise HTTPException(422, "Для этой роли вышестоящий договор не используется")
     row = Contract(project_id=project_id, **payload.model_dump())
     db.add(row); db.flush()
-    version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == project_id)) or 0) + 1
-    db.add(ScheduleBaseline(
-        project_id=project_id, contract_id=row.id, created_by_user_id=user.id,
-        name=f"ГПР по договору {row.number}", version=version,
-        note="Автоматически создано при добавлении договора; заполните этапы и сроки.",
-    ))
-    db.add(AuditLog(action="contract_created", entity_type="contract", entity_id=row.id, details=f"Contract: {row.number}"))
+    if is_financial_contract(row.contract_kind):
+        version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == project_id)) or 0) + 1
+        db.add(ScheduleBaseline(
+            project_id=project_id, contract_id=row.id, created_by_user_id=user.id,
+            name=f"ГПР по договору {row.number}", version=version,
+            note="Автоматически создано при добавлении договора; заполните этапы и сроки.",
+        ))
+    db.add(AuditLog(action="contract_created", entity_type="contract", entity_id=row.id,
+                    details=f"Contract: {row.number}; kind={row.contract_kind}"))
     db.commit(); db.refresh(row)
     return _contract(row, db)
 
@@ -161,6 +184,69 @@ def _contract_source_text(document: Document, db: Session | None = None) -> str:
         if latest and latest.content and latest.content.strip():
             parts.append(latest.content.strip())
     return "\n".join(dict.fromkeys(parts))
+
+
+def _payment_schedule_candidates(content: str) -> list[dict]:
+    """Extract conservative payment proposals; never marks anything as paid."""
+    candidates: list[dict] = []
+    for line in (part.strip() for part in content.splitlines() if part.strip()):
+        if not re.search(r"плат[её]ж|оплат|аванс", line, re.IGNORECASE):
+            continue
+        date_match = re.search(r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)", line)
+        amount_matches = re.findall(r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:₽|руб(?:\.|лей)?)", line, re.IGNORECASE)
+        if not date_match or not amount_matches:
+            continue
+        try:
+            planned_date = date(int(date_match.group(3)), int(date_match.group(2)), int(date_match.group(1)))
+            amount = max(Decimal(value.replace(" ", "").replace(",", ".")) for value in amount_matches)
+        except (ValueError, ArithmeticError):
+            continue
+        if amount <= 0:
+            continue
+        candidates.append({"planned_date": planned_date, "amount": amount, "excerpt": line[:1000]})
+    unique: dict[tuple[date, Decimal], dict] = {}
+    for item in candidates:
+        unique[(item["planned_date"], item["amount"])] = item
+    return list(unique.values())[:50]
+
+
+def _create_payment_schedule_proposals(db: Session, row: Contract, document: Document, content: str) -> list[CashFlowEntry]:
+    direction = cash_flow_direction(row.contract_kind)
+    if direction is None:
+        return []
+    baseline = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.project_id == row.project_id,
+        ScheduleBaseline.contract_id == row.id,
+    ).order_by(ScheduleBaseline.version.desc()))
+    stages = list(db.scalars(select(ScheduleItem).where(
+        ScheduleItem.project_id == row.project_id,
+        ScheduleItem.baseline_id == baseline.id if baseline else False,
+    ).order_by(ScheduleItem.planned_finish, ScheduleItem.id)))
+    created: list[CashFlowEntry] = []
+    for candidate in _payment_schedule_candidates(content):
+        existing = db.scalar(select(CashFlowEntry.id).where(
+            CashFlowEntry.project_id == row.project_id,
+            CashFlowEntry.contract_id == row.id,
+            CashFlowEntry.planned_date == candidate["planned_date"],
+            CashFlowEntry.planned_amount == candidate["amount"],
+            CashFlowEntry.source_document_id == document.id,
+        ))
+        if existing:
+            continue
+        eligible = [stage for stage in stages if stage.planned_finish and stage.planned_finish <= candidate["planned_date"]]
+        stage = eligible[-1] if eligible else (stages[0] if len(stages) == 1 else None)
+        item = CashFlowEntry(
+            project_id=row.project_id, contract_id=row.id,
+            schedule_item_id=stage.id if stage else None,
+            source_document_id=document.id, direction=direction,
+            title=f"Платёж по договору {row.number}", planned_date=candidate["planned_date"],
+            planned_amount=candidate["amount"], actual_amount=Decimal("0"),
+            counterparty=row.counterparty, status="proposed", source_name=document.name,
+            source_excerpt=candidate["excerpt"],
+        )
+        db.add(item)
+        created.append(item)
+    return created
 
 
 @router.get("/projects/{project_id}/contracts/{contract_id}/source-candidates")
@@ -230,6 +316,7 @@ def analyze_contract(project_id: int, contract_id: int,
     created_risks, created_decisions = create_governance_items(
         db, project_id, [source], source_type="contract_analysis",
     )
+    payment_rows = _create_payment_schedule_proposals(db, row, document, content)
     task_ids = list(db.scalars(select(Task.id).where(
         Task.project_id == project_id, Task.source_file_id == source_id,
     )))
@@ -242,12 +329,13 @@ def analyze_contract(project_id: int, contract_id: int,
         action="contract_analyzed", entity_type="contract", entity_id=row.id,
         details=(f"document={document.id}; tasks_created={len(created_tasks)}; "
                  f"obligations_linked={len(linked_obligations)}; risks_created={len(created_risks)}; "
-                 f"decisions_created={len(created_decisions)}; originals_changed=false"),
+                 f"decisions_created={len(created_decisions)}; payment_proposals={len(payment_rows)}; originals_changed=false"),
     ))
     db.commit()
     result = _contract(row, db)
     result["created"] = {
         "tasks": len(created_tasks), "risks": len(created_risks), "decisions": len(created_decisions),
+        "payment_schedule": len(payment_rows),
     }
     return result
 
@@ -260,6 +348,8 @@ def initialize_contract_control(project_id: int, contract_id: int,
     row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if row is None:
         raise HTTPException(404, "Contract not found")
+    if not is_financial_contract(row.contract_kind):
+        raise HTTPException(422, "Генподрядный договор хранится как контекст; выберите наш доходный договор для ГПР, бюджета и ДДС")
     baseline = db.scalar(select(ScheduleBaseline).where(
         ScheduleBaseline.project_id == project_id,
         ScheduleBaseline.contract_id == contract_id,
@@ -294,6 +384,9 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
     result = {
         "id": row.id, "project_id": row.project_id, "number": row.number,
         "title": row.title, "counterparty": row.counterparty,
+        "contract_kind": row.contract_kind, "parent_contract_id": row.parent_contract_id,
+        "amount": row.amount, "advance_amount": row.advance_amount,
+        "retention_percent": row.retention_percent, "warranty_until": row.warranty_until,
         "signed_at": row.signed_at, "status": row.status,
         "source_document_id": row.source_document_id, "notes": row.notes,
     }
