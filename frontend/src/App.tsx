@@ -337,7 +337,7 @@ export function App() {
     [newContractAmount, setNewContractAmount] = useState(""),
     [newAdvanceAmount, setNewAdvanceAmount] = useState(""),
     [newRetentionPercent, setNewRetentionPercent] = useState(""),
-    [newWarrantyUntil, setNewWarrantyUntil] = useState(""),
+    [newContractSignedAt, setNewContractSignedAt] = useState(""),
     [contractDocumentTabs, setContractDocumentTabs] = useState<Record<number, "recommended" | "server" | "upload" | "google">>({}),
     [contractDocumentQueries, setContractDocumentQueries] = useState<Record<number, string>>({}),
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
@@ -710,7 +710,7 @@ export function App() {
           amount: newContractAmount ? Number(newContractAmount) : undefined,
           advance_amount: newAdvanceAmount ? Number(newAdvanceAmount) : undefined,
           retention_percent: newRetentionPercent ? Number(newRetentionPercent) : undefined,
-          warranty_until: newWarrantyUntil || undefined,
+          signed_at: newContractSignedAt || undefined,
         }),
       });
       setNewContractNumber("");
@@ -721,7 +721,7 @@ export function App() {
       setNewContractAmount("");
       setNewAdvanceAmount("");
       setNewRetentionPercent("");
-      setNewWarrantyUntil("");
+      setNewContractSignedAt("");
       if (created.contract_kind !== "prime_reference") setSelectedFinanceContractId(created.id);
       setNotice(created.contract_kind === "prime_reference"
         ? "Генподрядный договор добавлен как контекст. Теперь добавьте наш субподрядный договор и свяжите его с генподрядным."
@@ -2417,7 +2417,7 @@ export function App() {
           amount={newContractAmount}
           advanceAmount={newAdvanceAmount}
           retentionPercent={newRetentionPercent}
-          warrantyUntil={newWarrantyUntil}
+          signedAt={newContractSignedAt}
           contracts={contracts}
           onNumberChange={setNewContractNumber}
           onTitleChange={setNewContractTitle}
@@ -2427,7 +2427,7 @@ export function App() {
           onAmountChange={setNewContractAmount}
           onAdvanceAmountChange={setNewAdvanceAmount}
           onRetentionPercentChange={setNewRetentionPercent}
-          onWarrantyUntilChange={setNewWarrantyUntil}
+          onSignedAtChange={setNewContractSignedAt}
           onCreate={() => void createContract()}
         >
             <section className="contract-list">

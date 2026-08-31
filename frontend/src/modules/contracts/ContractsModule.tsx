@@ -12,7 +12,7 @@ type Props = {
   amount: string;
   advanceAmount: string;
   retentionPercent: string;
-  warrantyUntil: string;
+  signedAt: string;
   contracts: { id: number; number: string; title: string; contract_kind?: string }[];
   onNumberChange: (value: string) => void;
   onTitleChange: (value: string) => void;
@@ -22,7 +22,7 @@ type Props = {
   onAmountChange: (value: string) => void;
   onAdvanceAmountChange: (value: string) => void;
   onRetentionPercentChange: (value: string) => void;
-  onWarrantyUntilChange: (value: string) => void;
+  onSignedAtChange: (value: string) => void;
   onCreate: () => void;
   children: ReactNode;
 };
@@ -37,7 +37,7 @@ export function ContractsModule({
   amount,
   advanceAmount,
   retentionPercent,
-  warrantyUntil,
+  signedAt,
   contracts,
   onNumberChange,
   onTitleChange,
@@ -47,7 +47,7 @@ export function ContractsModule({
   onAmountChange,
   onAdvanceAmountChange,
   onRetentionPercentChange,
-  onWarrantyUntilChange,
+  onSignedAtChange,
   onCreate,
   children,
 }: Props) {
@@ -80,7 +80,7 @@ export function ContractsModule({
             <input type="number" min="0" step="0.01" value={amount} onChange={(event) => onAmountChange(event.target.value)} placeholder="Сумма договора, ₽" />
             <input type="number" min="0" step="0.01" value={advanceAmount} onChange={(event) => onAdvanceAmountChange(event.target.value)} placeholder="Аванс, ₽" />
             <input type="number" min="0" max="100" step="0.01" value={retentionPercent} onChange={(event) => onRetentionPercentChange(event.target.value)} placeholder="Удержание, %" />
-            <label>Гарантия до<input type="date" value={warrantyUntil} onChange={(event) => onWarrantyUntilChange(event.target.value)} /></label>
+            <label>Дата подписания<input aria-label="Дата подписания договора" type="date" value={signedAt} onChange={(event) => onSignedAtChange(event.target.value)} /></label>
             <button disabled={!number.trim() || !title.trim() || (!["prime_reference", "customer"].includes(kind) && !parentContractId)} onClick={onCreate}>Добавить</button>
           </div>
         </section>

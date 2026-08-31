@@ -14,7 +14,7 @@ function renderModule(onCreate = vi.fn()) {
     amount="100000"
     advanceAmount="0"
     retentionPercent="5"
-    warrantyUntil=""
+    signedAt="2026-08-31"
     contracts={[]}
     onNumberChange={noop}
     onTitleChange={noop}
@@ -24,7 +24,7 @@ function renderModule(onCreate = vi.fn()) {
     onAmountChange={noop}
     onAdvanceAmountChange={noop}
     onRetentionPercentChange={noop}
-    onWarrantyUntilChange={noop}
+    onSignedAtChange={noop}
     onCreate={onCreate}
   ><div>Каталог документов</div></ContractsModule>);
   return onCreate;
@@ -36,5 +36,6 @@ describe("ContractsModule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
     expect(onCreate).toHaveBeenCalledOnce();
     expect(screen.getByText("Каталог документов")).toBeInTheDocument();
+    expect(screen.getByLabelText("Дата подписания договора")).toHaveValue("2026-08-31");
   });
 });
