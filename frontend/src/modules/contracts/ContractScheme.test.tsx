@@ -54,4 +54,14 @@ describe("ContractScheme", () => {
     fireEvent.drop(container.querySelector(".contract-finance-drops label")!, { dataTransfer: { files: [file] } });
     expect(onDropFinance).toHaveBeenCalledWith([file], 4, "schedule");
   });
+
+  it("accepts a photographed contract from the file picker", () => {
+    const onDropFiles = vi.fn();
+    const { container } = render(<ContractScheme projectId={11} contracts={[]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropFiles={onDropFiles} />);
+    const input = container.querySelector<HTMLInputElement>('.contract-scheme-file-drop input[type="file"]')!;
+    expect(input.accept).toContain(".jpg");
+    const photo = new File(["photo"], "Договор-фото.jpg", { type: "image/jpeg" });
+    fireEvent.change(input, { target: { files: [photo] } });
+    expect(onDropFiles).toHaveBeenCalledWith([photo]);
+  });
 });

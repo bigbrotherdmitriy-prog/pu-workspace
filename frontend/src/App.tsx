@@ -811,10 +811,10 @@ export function App() {
     } catch (reason) { setError((reason as Error).message); }
   }
   async function uploadDroppedContracts(files: File[], parentContractId?: number) {
-    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv)$/i.test(file.name));
+    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
     const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
-    if (!supported.length) { setError("Перетащите PDF, DOCX, XLSX, TXT или CSV договор."); return; }
-    if (oversized) { setError(`${oversized.name}: файл больше 4 МБ`); return; }
+    if (!supported.length) { setError("Выберите договор в PDF, Word, Excel, CSV либо фото/скан JPG, PNG или TIFF."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
       setError(""); setNotice(`Загружаю и анализирую договоров: ${supported.length}…`);
       const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
@@ -825,10 +825,10 @@ export function App() {
     } catch (reason) { setError((reason as Error).message); }
   }
   async function uploadContractApplications(files: File[], contractId: number) {
-    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv)$/i.test(file.name));
+    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
     const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
-    if (!supported.length) { setError("Перетащите PDF, DOCX, XLSX, TXT или CSV приложение."); return; }
-    if (oversized) { setError(`${oversized.name}: файл больше 4 МБ`); return; }
+    if (!supported.length) { setError("Выберите приложение в PDF, Word, Excel, CSV либо фото/скан JPG, PNG или TIFF."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
       setError(""); setNotice(`Загружаю приложения к договору: ${supported.length}…`);
       const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
@@ -843,10 +843,10 @@ export function App() {
     } catch (reason) { setError((reason as Error).message); }
   }
   async function uploadContractFinance(files: File[], contractId: number, kind: "schedule" | "budget" | "cash-flow") {
-    const supported = files.filter((file) => /\.(xlsx?|csv|docx?|pdf|txt)$/i.test(file.name));
+    const supported = files.filter((file) => /\.(xlsx?|csv|docx?|pdf|txt|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
     const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
-    if (!supported.length) { setError("Перетащите XLSX, CSV, DOCX, PDF или TXT."); return; }
-    if (oversized) { setError(`${oversized.name}: файл больше 4 МБ`); return; }
+    if (!supported.length) { setError("Выберите Excel, CSV, Word, PDF либо фото/скан JPG, PNG или TIFF."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
       const label = kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС";
       setError(""); setNotice(`Загружаю и разбираю ${label}: ${supported.length} файл(ов)…`);

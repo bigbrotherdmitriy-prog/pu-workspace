@@ -34,6 +34,74 @@ def _zip_xml_text(data: bytes, prefixes: tuple[str, ...]) -> str:
     return " ".join(parts)
 
 
+def _xlsx_text(data: bytes) -> str:
+    """Preserve spreadsheet rows and columns for the structured import preview."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+            shared = [" ".join(node.itertext()).strip() for node in root]
+        lines: list[str] = []
+        for name in sorted(item for item in archive.namelist() if item.startswith("xl/worksheets/") and item.endswith(".xml")):
+            root = ElementTree.fromstring(archive.read(name))
+            for row in (node for node in root.iter() if node.tag.endswith("}row")):
+                values: list[str] = []
+                for cell in (node for node in row if node.tag.endswith("}c")):
+                    kind = cell.attrib.get("t")
+                    raw = next((node.text or "" for node in cell.iter() if node.tag.endswith("}v")), "")
+                    if kind == "s" and raw.isdigit() and int(raw) < len(shared):
+                        value = shared[int(raw)]
+                    elif kind == "inlineStr":
+                        value = " ".join(node.text or "" for node in cell.iter() if node.tag.endswith("}t"))
+                    else:
+                        value = raw
+                    values.append(value.replace("\t", " ").replace("\n", " ").strip())
+                if any(values):
+                    lines.append("\t".join(values))
+        return "\n".join(lines)
+
+
+def _xls_text(data: bytes) -> str:
+    import xlrd
+
+    workbook = xlrd.open_workbook(file_contents=data, on_demand=True)
+    lines: list[str] = []
+    for sheet in workbook.sheets():
+        for row_index in range(min(sheet.nrows, 10_000)):
+            values = [str(sheet.cell_value(row_index, column)).replace("\t", " ").replace("\n", " ").strip()
+                      for column in range(min(sheet.ncols, 200))]
+            if any(values):
+                lines.append("\t".join(values))
+    return "\n".join(lines)
+
+
+def _legacy_doc_text(data: bytes) -> str:
+    if not shutil.which("antiword"):
+        return ""
+    with tempfile.TemporaryDirectory(prefix="pu-doc-") as temp:
+        source = Path(temp) / "source.doc"
+        source.write_bytes(data)
+        result = subprocess.run(["antiword", str(source)], capture_output=True, timeout=OCR_TIMEOUT_SECONDS, check=False)
+        if result.returncode != 0:
+            return ""
+        for encoding in ("utf-8", "cp1251"):
+            try:
+                return result.stdout.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return result.stdout.decode("utf-8", errors="replace")
+
+
+def _normalise_table_text(text: str) -> str:
+    """Keep row/column boundaries used by schedule, budget and cash-flow importers."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        cells = [re.sub(r"[ \r\f\v]+", " ", cell).strip() for cell in line.split("\t")]
+        if any(cells):
+            lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
 def _ocr_enabled() -> bool:
     return os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -94,7 +162,11 @@ def extract_text(data: bytes, mime_type: str, filename: str = "") -> str:
     elif suffix == "docx" or mime_type.endswith("wordprocessingml.document"):
         text = _zip_xml_text(data, ("word/document.xml", "word/header", "word/footer"))
     elif suffix == "xlsx" or mime_type.endswith("spreadsheetml.sheet"):
-        text = _zip_xml_text(data, ("xl/sharedStrings.xml", "xl/worksheets/"))
+        text = _xlsx_text(data)
+    elif suffix == "xls" or mime_type in {"application/vnd.ms-excel", "application/xls"}:
+        text = _xls_text(data)
+    elif suffix == "doc" or mime_type == "application/msword":
+        text = _legacy_doc_text(data)
     elif mime_type.startswith("text/") or suffix in {"txt", "csv", "md", "log"}:
         text = data.decode("utf-8", errors="replace")
     if len(text.strip()) < OCR_MIN_NATIVE_CHARS:
@@ -105,5 +177,12 @@ def extract_text(data: bytes, mime_type: str, filename: str = "") -> str:
         except (OSError, subprocess.SubprocessError):
             # OCR is a best-effort local fallback; native extraction remains valid.
             pass
-    text = re.sub(r"\s+", " ", text).strip()
+    if suffix in {"xls", "xlsx", "csv"} or mime_type in {
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv",
+    }:
+        text = _normalise_table_text(text)
+    else:
+        text = re.sub(r"\s+", " ", text).strip()
     return text[:MAX_EXTRACTED_CHARS]

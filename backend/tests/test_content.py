@@ -22,6 +22,29 @@ class ContentExtractionTests(unittest.TestCase):
     def test_extracts_utf8_text(self):
         self.assertEqual(extract_text("Смета объекта".encode(), "text/plain", "x.txt"), "Смета объекта")
 
+    def test_extracts_xlsx_and_preserves_rows_and_columns(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr(
+                "xl/sharedStrings.xml",
+                '<sst xmlns="urn:x"><si><t>Этап</t></si><si><t>Сумма</t></si><si><t>Монтаж</t></si></sst>',
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                '<worksheet xmlns="urn:x"><sheetData>'
+                '<row><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>'
+                '<row><c t="s"><v>2</v></c><c><v>1250000</v></c></row>'
+                '</sheetData></worksheet>',
+            )
+        self.assertEqual(
+            extract_text(
+                buffer.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "ГПР.xlsx",
+            ),
+            "Этап\tСумма\nМонтаж\t1250000",
+        )
+
     @patch("app.organizer_engine.content._ocr_text", return_value="Распознанный текст сканированного акта")
     def test_uses_local_ocr_for_image(self, ocr):
         self.assertEqual(
