@@ -84,6 +84,20 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
 
+  async function prepareDroppedFinanceDocument(documentId: number, name: string,
+                                                kind: "schedule" | "budget" | "cash-flow",
+                                                contractId: number) {
+    setSelectedFinanceContractId(contractId);
+    try {
+      const preview = await api<FinanceStructuredPreview>(`/execution/documents/${documentId}/structured-preview?project_id=${projectId}&kind=${kind}`);
+      setFinanceStructuredPreview(preview);
+      setFinanceStructuredRows(preview.rows.filter((row) => row.importable).map((row) => row.source_row));
+      setNotice(`«${name}» распознан как ${kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС"}. Проверьте строки перед созданием предложений.`);
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
+
   async function importStructuredFinance() {
     if (!financeStructuredPreview || !financeStructuredRows.length) return;
     const baseline = finance?.baselines.find((row) => row.status === "draft" && (!selectedFinanceContractId || row.contract_id === selectedFinanceContractId));
@@ -221,7 +235,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
-    loadFinance, prepareFinanceItem, useFinanceCandidate, importStructuredFinance,
+    loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, confirmFinance, confirmCashPayment, updateScheduleActual, recordFinanceActual,
   };
 }

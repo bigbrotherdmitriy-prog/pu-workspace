@@ -290,10 +290,23 @@
 .contract-scheme-node.drop-target { box-shadow:0 0 0 5px #20a77c55,0 14px 34px #093b2b33; transform:scale(1.03); }
 .contract-scheme-drop-hint { display:flex; align-items:center; gap:8px; margin:10px 0 0; padding:11px 13px; border:1px dashed #85bca9; border-radius:10px; color:#176b53; background:#f1faf6; }
 .contract-scheme-drop-hint svg { width:18px; flex:none; }
+.contract-scheme-file-drop { display:flex; align-items:center; gap:12px; margin:14px 0; padding:18px; border:2px dashed #58a98c; border-radius:14px; color:#145f4b; background:#f4fbf8; cursor:pointer; transition:.15s ease; }
+.contract-scheme-file-drop:hover,.contract-scheme-file-drop.active { border-color:#07865f; background:#e4f7ef; box-shadow:0 0 0 4px rgba(7,134,95,.08); }
+.contract-scheme-file-drop>svg { width:28px; height:28px; flex:none; }
+.contract-scheme-file-drop>span { display:grid; gap:4px; }
+.contract-scheme-file-drop small { color:#62776f; }
+.contract-scheme-file-drop input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
 .contract-application-drop { display:flex; align-items:center; gap:10px; margin-top:14px; padding:14px; border:2px dashed #81b9a5; border-radius:12px; color:#176b53; background:#f1faf6; }
 .contract-application-drop svg { width:22px; flex:none; }
 .contract-application-drop span { display:grid; gap:4px; }
 .contract-application-drop small { color:#60776e; }
+.contract-finance-drops { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:10px; }
+.contract-finance-drops label { display:flex; align-items:center; gap:8px; padding:12px; border:1px dashed #77a99a; border-radius:10px; color:#145f4b; background:#f7fbf9; cursor:copy; }
+.contract-finance-drops svg { width:19px; flex:none; }
+.contract-finance-drops span { display:grid; gap:2px; }
+.contract-finance-drops small,.contract-finance-confirmation { color:#657a72; }
+.contract-finance-confirmation { margin:8px 0 0; font-size:12px; }
+@media (max-width:760px) { .contract-finance-drops { grid-template-columns:1fr; } }
 .contract-node-open { min-width: 0; display: grid; align-content: center; gap: 3px; padding: 10px 11px; border: 0; text-align: left; color: #14271f; background: transparent; cursor: pointer; }
 .contract-node-open span { color: #0b7d61; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
 .contract-node-open strong, .contract-node-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

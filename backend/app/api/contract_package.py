@@ -29,6 +29,7 @@ router = APIRouter(tags=["contracts"])
 
 class ContractApplicationsRequest(BaseModel):
     document_ids: list[int] = Field(min_length=1, max_length=200)
+    role: str = Field(default="application", pattern="^(application|schedule|budget|cash_flow)$")
 
 
 def _financial_issues(contract: Contract, document: Document, content: str) -> list[dict]:
@@ -45,6 +46,7 @@ def _financial_issues(contract: Contract, document: Document, content: str) -> l
 
 
 @router.post("/projects/{project_id}/contracts/{contract_id}/applications")
+@router.post("/projects/{project_id}/contracts/{contract_id}/documents")
 def attach_contract_applications(project_id: int, contract_id: int, payload: ContractApplicationsRequest,
                                  db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -61,12 +63,13 @@ def attach_contract_applications(project_id: int, contract_id: int, payload: Con
         ))
         if not existing and document.id != contract.source_document_id:
             db.add(ContractDocumentLink(project_id=project_id, contract_id=contract_id,
-                                        document_id=document.id, role="application"))
+                                        document_id=document.id, role=payload.role))
             created += 1
-    db.add(AuditLog(action="contract_applications_attached", entity_type="contract", entity_id=contract_id,
-                    details=f"documents={len(documents)}; created={created}; originals_changed=false"))
+    db.add(AuditLog(action="contract_documents_attached", entity_type="contract", entity_id=contract_id,
+                    details=f"role={payload.role}; documents={len(documents)}; created={created}; originals_changed=false"))
     db.commit()
-    return {"contract_id": contract_id, "attached": created, "documents": len(documents), "originals_changed": False}
+    return {"contract_id": contract_id, "role": payload.role, "attached": created,
+            "documents": len(documents), "originals_changed": False}
 
 
 @router.post("/projects/{project_id}/contracts/{contract_id}/analyze-package")

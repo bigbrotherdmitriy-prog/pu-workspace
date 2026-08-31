@@ -22,6 +22,7 @@ type Props = {
   onDropDocuments?: (documentIds: number[], parentContractId?: number) => void;
   onDropFiles?: (files: File[], parentContractId?: number) => void;
   onDropApplications?: (files: File[], contractId: number) => void;
+  onDropFinance?: (files: File[], contractId: number, kind: "schedule" | "budget" | "cash-flow") => void;
 };
 
 const nodeWidth = 230;
@@ -63,7 +64,7 @@ function kindLabel(kind?: string) {
   return "Заказчик";
 }
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDropDocuments, onDropFiles, onDropApplications }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDropDocuments, onDropFiles, onDropApplications, onDropFinance }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [positions, setPositions] = useState<Record<number, Point>>(() => defaultPositions(contracts));
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
@@ -120,6 +121,10 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
         <button className="secondary" onClick={() => setPositions(defaultPositions(contracts))}><Network /> Выровнять</button>
       </div>
     </header>
+    <label className={`contract-scheme-file-drop ${dropTargetId === -1 ? "active" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDropTargetId(-1); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropTargetId(-1); }} onDragLeave={() => setDropTargetId(null)} onDrop={(event) => acceptDrop(event)}>
+      <FileUp /><span><strong>Перетащите сюда договор из Проводника</strong><small>PDF, DOCX, XLSX, TXT или CSV до 10 МБ · либо нажмите и выберите файл</small></span>
+      <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropFiles?.(files); event.currentTarget.value = ""; }} />
+    </label>
     <div className="contract-scheme-scroll">
       <div className={`contract-scheme-canvas ${dropTargetId === -1 ? "drop-active" : ""}`} style={{ width: canvasWidth, height: canvasHeight }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (event.target === event.currentTarget) setDropTargetId(-1); }} onDragLeave={(event) => { if (event.target === event.currentTarget) setDropTargetId(null); }} onDrop={(event) => acceptDrop(event)} onPointerMove={(event) => {
         if (!drag.current) return;
@@ -148,7 +153,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
         })}
       </div>
     </div>
-    <p className="contract-scheme-drop-hint"><FileUp /> Перетащите PDF/DOCX из папки на пустое место для корневого договора или прямо на вышестоящий договор для создания подчинённой связи.</p>
+    <p className="contract-scheme-drop-hint"><FileUp /> На пустую область — новый корневой договор; прямо на карточку — договор будет предложен как подчинённый выбранному.</p>
     {connectingFrom === -1 && <p className="contract-scheme-hint">Нажмите на блок вышестоящего договора.</p>}
     {connectingFrom && connectingFrom > 0 && <p className="contract-scheme-hint">Выбран вышестоящий договор №{contracts.find((item) => item.id === connectingFrom)?.number}. Теперь нажмите на подчинённый блок.</p>}
     {selected && <aside className="contract-scheme-detail">
@@ -161,6 +166,13 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       <label className="contract-application-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropApplications?.(files, selected.id); }}>
         <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите приложения, графики, спецификации и дополнительные соглашения. Они будут проверены вместе с договором.</small></span>
       </label>
+      <div className="contract-finance-drops">
+        {([['schedule', 'ГПР', 'Этапы и сроки'], ['budget', 'Бюджет', 'Смета и план затрат'], ['cash-flow', 'ДДС', 'Платёжный календарь']] as const).map(([kind, title, hint]) =>
+          <label key={kind} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropFinance?.(files, selected.id, kind); }}>
+            <FileUp /><span><strong>{title}</strong><small>{hint}</small></span>
+          </label>)}
+      </div>
+      <p className="contract-finance-confirmation">После анализа откроется предварительный просмотр. Строки ГПР, бюджета и ДДС создаются только после вашего подтверждения.</p>
     </aside>}
   </section>;
 }

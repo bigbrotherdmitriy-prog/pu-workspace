@@ -120,7 +120,7 @@ type ContractSourceCandidate = {
   reasons: string[];
   text_ready: boolean;
 };
-const MAX_DROPPED_CONTRACT_BYTES = 4 * 1024 * 1024;
+const MAX_DROPPED_CONTRACT_BYTES = 10 * 1024 * 1024;
 function fileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -450,7 +450,7 @@ export function App() {
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
-    loadFinance, prepareFinanceItem, useFinanceCandidate, importStructuredFinance,
+    loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, confirmFinance, confirmCashPayment,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
@@ -834,6 +834,28 @@ export function App() {
       const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
       setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
       await load();
+    } catch (reason) { setError((reason as Error).message); }
+  }
+  async function uploadContractFinance(files: File[], contractId: number, kind: "schedule" | "budget" | "cash-flow") {
+    const supported = files.filter((file) => /\.(xlsx?|csv|docx?|pdf|txt)$/i.test(file.name));
+    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
+    if (!supported.length) { setError("Перетащите XLSX, CSV, DOCX, PDF или TXT."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 4 МБ`); return; }
+    try {
+      const label = kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС";
+      setError(""); setNotice(`Загружаю и разбираю ${label}: ${supported.length} файл(ов)…`);
+      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
+      const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
+      const documents = (uploaded.documents || []) as { id: number; name: string }[];
+      if (!documents.length) throw new Error(uploaded.skipped?.[0]?.reason || `Не удалось извлечь таблицу ${label}`);
+      await api(`/projects/${projectId}/contracts/${contractId}/documents`, {
+        method: "POST",
+        body: JSON.stringify({ document_ids: documents.map((item) => item.id), role: kind === "cash-flow" ? "cash_flow" : kind }),
+      });
+      await prepareDroppedFinanceDocument(documents[0].id, documents[0].name, kind, contractId);
+      setActive("Исполнение и финансы");
+      window.setTimeout(() => document.getElementById("structured-import")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+      await loadFinance();
     } catch (reason) { setError((reason as Error).message); }
   }
   async function importBulkContracts(proposals: BulkContractProposal[]): Promise<number> {
@@ -2604,6 +2626,7 @@ export function App() {
                 onDropDocuments={(documentIds, parentId) => void prepareDroppedContracts(documentIds, parentId)}
                 onDropFiles={(files, parentId) => void uploadDroppedContracts(files, parentId)}
                 onDropApplications={(files, contractId) => void uploadContractApplications(files, contractId)}
+                onDropFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
               />
               <header className="contract-project-root">
                 <FolderKanban />

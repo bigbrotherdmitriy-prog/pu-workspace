@@ -43,4 +43,15 @@ describe("ContractScheme", () => {
     });
     expect(onDropApplications).toHaveBeenCalledWith([file], 3);
   });
+
+  it("routes dropped GPR, budget and DDS files through the selected contract", () => {
+    const onDropFinance = vi.fn();
+    const { container } = render(<ContractScheme projectId={10} contracts={[
+      { id: 4, number: "СП-4", title: "Субподряд", contract_kind: "downstream_subcontract" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropFinance={onDropFinance} />);
+    fireEvent.click(container.querySelector(".contract-node-open")!);
+    const file = new File(["work;date\nЭтап;2026-09-01"], "ГПР.csv", { type: "text/csv" });
+    fireEvent.drop(container.querySelector(".contract-finance-drops label")!, { dataTransfer: { files: [file] } });
+    expect(onDropFinance).toHaveBeenCalledWith([file], 4, "schedule");
+  });
 });
