@@ -423,6 +423,22 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
     }
     if db is not None:
         document = db.get(Document, row.source_document_id) if row.source_document_id else None
+        linked_document_ids = {row.source_document_id} if row.source_document_id else set()
+        linked_document_ids.update(db.scalars(select(CashFlowEntry.source_document_id).where(
+            CashFlowEntry.project_id == row.project_id,
+            CashFlowEntry.contract_id == row.id,
+            CashFlowEntry.source_document_id.is_not(None),
+        )))
+        linked_documents = db.scalars(select(Document).where(
+            Document.project_id == row.project_id,
+            Document.id.in_(linked_document_ids),
+        ).order_by(Document.name)).all() if linked_document_ids else []
+        result["linked_documents"] = [{
+            "id": linked.id,
+            "name": linked.name,
+            "source": linked.source,
+            "source_url": linked.source_url if hasattr(linked, "source_url") else None,
+        } for linked in linked_documents]
         source_id = (document.external_id or f"document:{document.id}") if document else None
         task_ids = list(db.scalars(select(Task.id).where(
             Task.project_id == row.project_id, Task.source_file_id == source_id,

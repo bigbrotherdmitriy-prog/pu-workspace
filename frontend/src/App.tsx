@@ -12,6 +12,7 @@ import { IntegrationsModule, type IntegrationItem, type SystemState } from "./mo
 import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { buildContractTree } from "./modules/contracts/contractTree";
+import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
@@ -161,6 +162,7 @@ type ContractRow = {
   status: string;
   source_document_id?: number;
   notes?: string;
+  linked_documents?: SchemeDocument[];
   analysis?: {
     source_ready: boolean;
     tasks: number;
@@ -2433,6 +2435,18 @@ export function App() {
           onCreate={() => void createContract()}
         >
             <section className="contract-list">
+              <ContractScheme
+                projectId={projectId}
+                contracts={contracts}
+                onConnect={(parentId, childId) => {
+                  const child = contracts.find((item) => item.id === childId);
+                  if (child) void linkContractParent(child.id, child.contract_kind || "customer", parentId);
+                }}
+                onOpenDocument={(documentId) => {
+                  const document = documentRows.find((item) => item.id === documentId);
+                  if (document) { void openDocument(document); setActive("Документы"); }
+                }}
+              />
               <header className="contract-project-root">
                 <FolderKanban />
                 <div><span>ПРОЕКТ · КОРЕНЬ ДЕРЕВА</span><h2>{projects.find((project) => project.id === projectId)?.name || "Выбранный проект"}</h2><p>Все договоры проекта собраны в единую цепочку подчинённости</p></div>
