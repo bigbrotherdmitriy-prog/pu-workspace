@@ -27,7 +27,7 @@ describe("ProjectLaunchWizard", () => {
   it("separates an existing folder import from a new managed project", () => {
     localStorage.clear();
     const openSection = vi.fn();
-    render(<ProjectLaunchWizard projectId={1} storageAuthorized openSection={openSection} />);
+    render(<ProjectLaunchWizard projectId={1} storageAuthorized onConnectStorage={vi.fn()} openSection={openSection} />);
     expect(screen.getByText("Подключить готовую папку")).toBeInTheDocument();
     expect(screen.getByText("Создать постоянную структуру")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Выбрать существующий проект" }));
@@ -40,10 +40,13 @@ describe("ProjectLaunchWizard", () => {
   it("routes to integrations before creating a workspace without storage authorization", () => {
     localStorage.clear();
     const openSection = vi.fn();
-    render(<ProjectLaunchWizard projectId={2} storageAuthorized={false} openSection={openSection} />);
+    const connectStorage = vi.fn();
+    render(<ProjectLaunchWizard projectId={2} storageAuthorized={false} onConnectStorage={connectStorage} openSection={openSection} />);
     fireEvent.click(screen.getByRole("button", { name: "Выбрать новый проект" }));
-    expect(screen.getByText(/подключите доступный адаптер рабочего хранилища/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Подключить хранилище" }));
-    expect(openSection).toHaveBeenCalledWith("Интеграции");
+    expect(screen.getByText(/подключить рабочее хранилище именно к этому проекту/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить хранилище к проекту" }));
+    expect(connectStorage).toHaveBeenCalledOnce();
+    expect(localStorage.getItem("pu-project-pending-start-mode:2")).toBe("managed");
+    expect(openSection).not.toHaveBeenCalled();
   });
 });

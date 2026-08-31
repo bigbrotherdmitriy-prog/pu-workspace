@@ -350,7 +350,7 @@ export function App() {
     [online, setOnline] = useState(navigator.onLine),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
-  const [active, setActive] = useState("Рабочий центр"),
+  const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("oauth") === "connected" ? "Запуск проекта" : "Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
     [newContractNumber, setNewContractNumber] = useState(""),
@@ -2105,6 +2105,7 @@ export function App() {
             <ProjectLaunchWizard
               projectId={projectId}
               storageAuthorized={googleState?.authorized === true}
+              onConnectStorage={() => void connectGoogle()}
               openSection={(section, target) => {
                 if (target === "contacts") setMailView("companies");
                 setActive(section);

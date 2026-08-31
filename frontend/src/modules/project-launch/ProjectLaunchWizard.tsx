@@ -5,13 +5,13 @@ import "./project-launch.css";
 import { useProjectLaunchReadiness } from "./useProjectLaunchReadiness";
 
 type LaunchTarget = "source" | "contacts";
-type Props = { projectId: number; storageAuthorized: boolean; openSection: (section: string, target?: LaunchTarget) => void };
+type Props = { projectId: number; storageAuthorized: boolean; onConnectStorage: () => void; openSection: (section: string, target?: LaunchTarget) => void };
 type Step = {
   title: string; description: string; section: string; target?: LaunchTarget;
   complete: boolean; status: string; nextAction: string; icon: typeof Circle;
 };
 
-export function ProjectLaunchWizard({ projectId, storageAuthorized, openSection }: Props) {
+export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectStorage, openSection }: Props) {
   const { state, error, reload } = useProjectLaunchReadiness(projectId);
   const [selectedMode, setSelectedMode] = useState<"managed" | "imported" | null>(() => {
     const saved = localStorage.getItem(`pu-project-start-mode:${projectId}`);
@@ -19,11 +19,15 @@ export function ProjectLaunchWizard({ projectId, storageAuthorized, openSection 
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
-  const [pendingMode, setPendingMode] = useState<"managed" | "imported" | null>(null);
+  const [pendingMode, setPendingMode] = useState<"managed" | "imported" | null>(() => {
+    const saved = localStorage.getItem(`pu-project-pending-start-mode:${projectId}`);
+    return saved === "managed" || saved === "imported" ? saved : null;
+  });
   useEffect(() => {
     const saved = localStorage.getItem(`pu-project-start-mode:${projectId}`);
     setSelectedMode(saved === "managed" || saved === "imported" ? saved : null);
-    setPendingMode(null);
+    const pending = localStorage.getItem(`pu-project-pending-start-mode:${projectId}`);
+    setPendingMode(pending === "managed" || pending === "imported" ? pending : null);
   }, [projectId]);
   if (error) return <section className="card launch-load-error"><h2>Не удалось проверить запуск проекта</h2><p>{error}</p><button onClick={reload}>Повторить</button></section>;
   if (!state) return <section className="card"><p>Проверяем готовность проекта…</p></section>;
@@ -33,32 +37,39 @@ export function ProjectLaunchWizard({ projectId, storageAuthorized, openSection 
     try {
       await api(`/projects/${projectId}/managed-workspace`, { method: "POST", body: JSON.stringify({ parent_folder_id: "root" }) });
       localStorage.setItem(`pu-project-start-mode:${projectId}`, "managed");
+      localStorage.removeItem(`pu-project-pending-start-mode:${projectId}`);
       setSelectedMode("managed"); reload();
     } catch (reason) { setCreateError((reason as Error).message); }
     finally { setCreating(false); }
   }
   function confirmImportedWorkspace() {
     localStorage.setItem(`pu-project-start-mode:${projectId}`, "imported");
+    localStorage.removeItem(`pu-project-pending-start-mode:${projectId}`);
     setSelectedMode("imported");
     setPendingMode(null);
     openSection("Рабочий центр", "source");
   }
   function confirmMode() {
     if (!storageAuthorized) {
-      setCreateError("Для продолжения подключите доступный адаптер рабочего хранилища. После подключения вернитесь в «Запуск проекта» — выбранный сценарий сохранится.");
-      openSection("Интеграции");
+      setCreateError("Открываем подключение рабочего хранилища. После авторизации вы автоматически вернётесь к этому шагу; выбранный сценарий сохранится.");
+      onConnectStorage();
       return;
     }
     if (pendingMode === "managed") void createManagedWorkspace();
     else confirmImportedWorkspace();
   }
+  function chooseMode(next: "managed" | "imported") {
+    localStorage.setItem(`pu-project-pending-start-mode:${projectId}`, next);
+    setPendingMode(next);
+    setCreateError("");
+  }
   if (!mode && !state.sourceReady) return <section className="project-launch-page">
     <div className="launch-hero card"><div><span className="launch-eyebrow">ОБЯЗАТЕЛЬНЫЙ ШАГ · ВЫБОР СЦЕНАРИЯ</span><h2>{state.projectName || "Новый проект"}</h2><p>Проект создан, но работа ещё не начата. Выберите один сценарий и подтвердите его ниже.</p></div></div>
     <div className="launch-mode-grid">
-      <article className={`card launch-mode-card ${pendingMode === "imported" ? "selected" : ""}`}><Import /><span className="launch-eyebrow">СУЩЕСТВУЮЩИЙ ПРОЕКТ</span><h2>Подключить готовую папку</h2><p>Подключим выбранную папку, сохраним исходную иерархию, создадим безопасную копию и проанализируем все доступные файлы.</p><ul><li>Оригиналы не изменяются</li><li>Вложенные папки сохраняются</li><li>Все найденные документы анализируются</li></ul><button onClick={() => setPendingMode("imported")}>{pendingMode === "imported" ? "Выбрано" : "Выбрать существующий проект"}</button></article>
-      <article className={`card launch-mode-card managed ${pendingMode === "managed" ? "selected" : ""}`}><FolderPlus /><span className="launch-eyebrow">НОВЫЙ ПРОЕКТ</span><h2>Создать постоянную структуру</h2><p>Создадим постоянную папку проекта и стандартные разделы для договоров, ГПР, финансов, переписки, исполнения и архива.</p><ul><li>Единая структура с первого дня</li><li>Папка остаётся рабочей</li><li>Структура сохраняется при наполнении</li></ul><button onClick={() => setPendingMode("managed")}>{pendingMode === "managed" ? "Выбрано" : "Выбрать новый проект"}</button></article>
+      <article className={`card launch-mode-card ${pendingMode === "imported" ? "selected" : ""}`}><Import /><span className="launch-eyebrow">СУЩЕСТВУЮЩИЙ ПРОЕКТ</span><h2>Подключить готовую папку</h2><p>Подключим выбранную папку, сохраним исходную иерархию, создадим безопасную копию и проанализируем все доступные файлы.</p><ul><li>Оригиналы не изменяются</li><li>Вложенные папки сохраняются</li><li>Все найденные документы анализируются</li></ul><button onClick={() => chooseMode("imported")}>{pendingMode === "imported" ? "Выбрано" : "Выбрать существующий проект"}</button></article>
+      <article className={`card launch-mode-card managed ${pendingMode === "managed" ? "selected" : ""}`}><FolderPlus /><span className="launch-eyebrow">НОВЫЙ ПРОЕКТ</span><h2>Создать постоянную структуру</h2><p>Создадим постоянную папку проекта и стандартные разделы для договоров, ГПР, финансов, переписки, исполнения и архива.</p><ul><li>Единая структура с первого дня</li><li>Папка остаётся рабочей</li><li>Структура сохраняется при наполнении</li></ul><button onClick={() => chooseMode("managed")}>{pendingMode === "managed" ? "Выбрано" : "Выбрать новый проект"}</button></article>
     </div>{createError && <p className="launch-create-error">{createError}</p>}
-    {pendingMode && <section className="card launch-mode-confirm" role="status"><div><span className="launch-eyebrow">ПОДТВЕРЖДЕНИЕ</span><h3>{pendingMode === "imported" ? "Подключить существующую папку" : "Создать новый проект с постоянной структурой"}</h3><p>{pendingMode === "imported" ? "Далее вы выберете папку. PU Workspace создаст безопасную копию, сохранит дерево и запустит анализ файлов." : "PU Workspace создаст в подключённом хранилище постоянную папку и стандартное дерево разделов. Это станет основной рабочей структурой проекта."}</p>{!storageAuthorized && <p className="launch-storage-warning"><strong>Перед продолжением:</strong> подключите доступный адаптер рабочего хранилища проекта.</p>}</div><div className="launch-confirm-actions"><button className="secondary" onClick={() => { setPendingMode(null); setCreateError(""); }}>Изменить выбор</button><button disabled={creating} onClick={confirmMode}>{creating ? "Создаю структуру…" : storageAuthorized ? "Подтвердить и продолжить" : "Подключить хранилище"}</button></div></section>}
+    {pendingMode && <section className="card launch-mode-confirm" role="status"><div><span className="launch-eyebrow">ПОДТВЕРЖДЕНИЕ</span><h3>{pendingMode === "imported" ? "Подключить существующую папку" : "Создать новый проект с постоянной структурой"}</h3><p>{pendingMode === "imported" ? "Далее вы выберете папку. PU Workspace создаст безопасную копию, сохранит дерево и запустит анализ файлов." : "PU Workspace создаст в подключённом хранилище постоянную папку и стандартное дерево разделов. Это станет основной рабочей структурой проекта."}</p>{!storageAuthorized && <p className="launch-storage-warning"><strong>Следующий шаг:</strong> подключить рабочее хранилище именно к этому проекту. После авторизации мастер откроется снова автоматически.</p>}</div><div className="launch-confirm-actions"><button className="secondary" onClick={() => { localStorage.removeItem(`pu-project-pending-start-mode:${projectId}`); setPendingMode(null); setCreateError(""); }}>Изменить выбор</button><button disabled={creating} onClick={confirmMode}>{creating ? "Создаю структуру…" : storageAuthorized ? "Подтвердить и продолжить" : "Подключить хранилище к проекту"}</button></div></section>}
   </section>;
   const financeNextAction = !state.scheduleRows
     ? "Создать или импортировать ГПР для договора"
