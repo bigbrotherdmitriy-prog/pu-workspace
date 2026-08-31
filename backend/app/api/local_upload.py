@@ -19,8 +19,8 @@ from app.task_engine import create_tasks_from_files
 from app.document_engine import index_documents
 
 router = APIRouter(prefix="/local-upload", tags=["local-upload"])
-MAX_FILE_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_FILE_BYTES", str(4 * 1024 * 1024)))
-MAX_BATCH_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_BATCH_BYTES", str(20 * 1024 * 1024)))
+MAX_FILE_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_FILE_BYTES", str(10 * 1024 * 1024)))
+MAX_BATCH_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_BATCH_BYTES", str(30 * 1024 * 1024)))
 MAX_FILES = int(os.getenv("LOCAL_UPLOAD_MAX_FILES", "50"))
 
 
