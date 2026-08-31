@@ -62,6 +62,16 @@ describe("ContractScheme", () => {
     expect(input.accept).toContain(".jpg");
     const photo = new File(["photo"], "Договор-фото.jpg", { type: "image/jpeg" });
     fireEvent.change(input, { target: { files: [photo] } });
-    expect(onDropFiles).toHaveBeenCalledWith([photo]);
+    expect(onDropFiles).toHaveBeenCalledWith([photo], undefined);
+    expect(container.querySelector('[role="status"]')).toHaveTextContent("Получено файлов: 1");
+  });
+
+  it("accepts a contract dropped anywhere on the constructor", () => {
+    const onDropFiles = vi.fn();
+    const { container } = render(<ContractScheme projectId={12} contracts={[]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropFiles={onDropFiles} />);
+    const pdf = new File(["contract"], "Договор.pdf", { type: "application/pdf" });
+    fireEvent.drop(container.querySelector(".contract-scheme")!, { dataTransfer: { files: [pdf], types: ["Files"], getData: () => "" } });
+    expect(onDropFiles).toHaveBeenCalledWith([pdf], undefined);
+    expect(container.querySelector('[role="status"]')).toHaveTextContent("Передаю на загрузку и анализ");
   });
 });

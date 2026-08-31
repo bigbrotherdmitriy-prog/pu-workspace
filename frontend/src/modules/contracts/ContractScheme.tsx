@@ -70,6 +70,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+  const [dropFeedback, setDropFeedback] = useState("");
   const drag = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const layoutRef = useRef<{ storageKey: string; hierarchy: string } | null>(null);
   const hierarchy = contracts.map((item) => `${item.id}:${item.parent_contract_id || 0}`).sort().join("|");
@@ -105,15 +106,24 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     setConnectingFrom(null);
   }
 
+  function deliverFiles(files: File[], parentContractId?: number) {
+    if (!files.length) {
+      setDropFeedback("Файл не получен. Перетащите его из Проводника или нажмите на зелёную область и выберите вручную.");
+      return;
+    }
+    setDropFeedback(`Получено файлов: ${files.length}. Передаю на загрузку и анализ…`);
+    onDropFiles?.(files, parentContractId);
+  }
+
   function acceptDrop(event: React.DragEvent, parentContractId?: number) {
     event.preventDefault(); event.stopPropagation(); setDropTargetId(null);
     const projectDocumentId = Number(event.dataTransfer.getData("application/x-pu-document-id"));
     if (projectDocumentId) { onDropDocuments?.([projectDocumentId], parentContractId); return; }
     const files = Array.from(event.dataTransfer.files || []);
-    if (files.length) onDropFiles?.(files, parentContractId);
+    deliverFiles(files, parentContractId);
   }
 
-  return <section className="card contract-scheme">
+  return <section className={`card contract-scheme ${dropTargetId === -1 ? "drop-active" : ""}`} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) setDropTargetId(-1); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={(event) => acceptDrop(event)}>
     <header className="contract-scheme-head">
       <div><span className="eyebrow">СХЕМА ДОГОВОРОВ</span><h2>Конструктор связей</h2><p>Перемещайте блоки. Чтобы провести линию, выберите вышестоящий договор, затем подчинённый.</p></div>
       <div className="contract-scheme-tools">
@@ -123,8 +133,9 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     </header>
     <label className={`contract-scheme-file-drop ${dropTargetId === -1 ? "active" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDropTargetId(-1); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropTargetId(-1); }} onDragLeave={() => setDropTargetId(null)} onDrop={(event) => acceptDrop(event)}>
       <FileUp /><span><strong>Перетащите сюда договор из Проводника</strong><small>PDF, Word, Excel, CSV или фото/скан JPG, PNG, TIFF до 10 МБ · либо нажмите и выберите файл</small></span>
-      <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,image/png,image/jpeg,image/tiff,image/bmp,image/webp" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropFiles?.(files); event.currentTarget.value = ""; }} />
+      <input aria-label="Выбрать файлы договоров" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,image/png,image/jpeg,image/tiff,image/bmp,image/webp" multiple onChange={(event) => { deliverFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} />
     </label>
+    {dropFeedback && <p className="contract-drop-feedback" role="status">{dropFeedback}</p>}
     <div className="contract-scheme-scroll">
       <div className={`contract-scheme-canvas ${dropTargetId === -1 ? "drop-active" : ""}`} style={{ width: canvasWidth, height: canvasHeight }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (event.target === event.currentTarget) setDropTargetId(-1); }} onDragLeave={(event) => { if (event.target === event.currentTarget) setDropTargetId(null); }} onDrop={(event) => acceptDrop(event)} onPointerMove={(event) => {
         if (!drag.current) return;
@@ -163,12 +174,12 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       <div className="contract-scheme-documents">{selected.linked_documents?.map((document) => <button key={document.id} onClick={() => onOpenDocument(document.id)}><FileText /><span><strong>{document.name}</strong><small>{document.source || "Документ проекта"}</small></span></button>)}
         {!selected.linked_documents?.length && <p>Документы ещё не привязаны. Добавьте документ-источник в карточке договора ниже.</p>}
       </div>
-      <label className="contract-application-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropApplications?.(files, selected.id); }}>
+      <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropApplications?.(files, selected.id); }}>
         <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите приложения, графики, спецификации и дополнительные соглашения — включая фото и сканы. Они будут проверены вместе с договором.</small></span>
       </label>
       <div className="contract-finance-drops">
         {([['schedule', 'ГПР', 'Этапы и сроки'], ['budget', 'Бюджет', 'Смета и план затрат'], ['cash-flow', 'ДДС', 'Платёжный календарь']] as const).map(([kind, title, hint]) =>
-          <label key={kind} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropFinance?.(files, selected.id, kind); }}>
+          <label key={kind} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropFinance?.(files, selected.id, kind); }}>
             <FileUp /><span><strong>{title}</strong><small>{hint}</small></span>
           </label>)}
       </div>
