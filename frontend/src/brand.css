@@ -225,6 +225,28 @@ button:not(:disabled):active { transform: translateY(1px); }
 .analytics-summary p:first-of-type { border-top: 0; }
 .analytics-summary strong { color: var(--pu-green-700); font-size: 20px; margin-right: 5px; }
 
+/* Keep the long navigation inside the viewport. Without min-height: 0 the
+   flex child grows past the sidebar and the last items are clipped. */
+.shell > aside {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell > aside nav {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 8px;
+  scrollbar-color: #50635a transparent;
+  scrollbar-width: thin;
+}
+.shell > aside .profile {
+  flex: none;
+  background: inherit;
+}
+
 @media (max-width: 760px) {
   .shell > aside { box-shadow: 12px 0 38px rgba(10, 18, 14, .32); }
   .content, .documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay {
