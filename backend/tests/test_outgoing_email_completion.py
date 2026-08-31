@@ -35,8 +35,8 @@ def test_gmail_distinguishes_sent_mail_and_does_not_send_incoming_alert():
     assert "if not is_outgoing:" in source
 
 
-def test_schema_revision_tracks_outgoing_completion_migration():
+def test_schema_revision_tracks_latest_contract_roles_migration():
     schema = (ROOT / "app/schema.py").read_text(encoding="utf-8")
-    migration = (ROOT / "migrations/versions/f47a50d44d91_add_outgoing_task_completion_suggestions.py").read_text(encoding="utf-8")
-    assert 'CURRENT_SCHEMA_REVISION = "f47a50d44d91"' in schema
-    assert 'down_revision = "e6b24a91c301"' in migration
+    migration = (ROOT / "migrations/versions/fa91b2c3d4e5_add_contract_kinds_and_terms.py").read_text(encoding="utf-8")
+    assert 'CURRENT_SCHEMA_REVISION = "fa91b2c3d4e5"' in schema
+    assert 'down_revision = "f47a50d44d91"' in migration
