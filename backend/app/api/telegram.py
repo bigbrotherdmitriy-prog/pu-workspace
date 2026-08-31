@@ -15,6 +15,7 @@ from app.models.task import Task, TaskDueDateHistory
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.ai_secretary import Message
+from app.models.response_draft import ResponseDraft
 from app.models.audit_log import AuditLog
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.content import extract_text
@@ -123,6 +124,50 @@ def _should_prepare_message_replies(message: dict, text: str) -> bool:
         or message.get("forward_sender_name")
         or message.get("forward_from_chat")
     )
+
+
+def _store_ai_message_result(
+    db, inbox_message: Message, drafts: list[ResponseDraft], result: dict,
+    owner: User, synthetic: DriveFile,
+) -> list[ResponseDraft]:
+    """Persist the useful AI result instead of only sending it to Telegram."""
+    summary = str(result.get("message_summary") or "").strip()
+    action = str(result.get("recommended_action") or "").strip()
+    inbox_message.summary = "\n".join(
+        part for part in (
+            f"🧠 Анализ сообщения: {summary}" if summary else "",
+            f"➡️ Рекомендация: {action}" if action else "",
+        ) if part
+    ) or inbox_message.summary
+
+    body = str(result.get("business_reply") or result.get("short_reply") or "").strip()
+    if not body:
+        return drafts
+    confidence = {"high": 0.9, "medium": 0.75, "low": 0.55}.get(result.get("confidence"), 0.65)
+    if drafts:
+        drafts[0].body = body
+        drafts[0].confidence = confidence
+        return drafts
+
+    # The local extractor can legitimately find no explicit request. Gemini may
+    # still determine that a reply is useful, so keep one reviewable draft.
+    import hashlib
+    digest = hashlib.sha256(("telegram-ai:" + body).casefold().encode()).hexdigest()
+    draft = ResponseDraft(
+        project_id=inbox_message.project_id,
+        reviewer_user_id=owner.id,
+        message_id=inbox_message.id,
+        subject=f"Ответ на сообщение из «{inbox_message.source_name}»"[:500],
+        body=body,
+        source_file_id=synthetic.id,
+        source_file_name=synthetic.name,
+        source_excerpt=inbox_message.content[:1200],
+        source_excerpt_hash=digest,
+        confidence=confidence,
+    )
+    db.add(draft)
+    drafts.append(draft)
+    return drafts
 
 
 @router.post("/webhook")
@@ -292,7 +337,10 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         index_documents(db, link.project_id, [synthetic], "telegram")
         tasks = create_tasks_from_files(db, link.project_id, None, [synthetic], source_type="telegram")
         google_synced = calendar_synced = 0
-        drafts = create_response_drafts(db, link.project_id, None, [synthetic])
+        prepare_replies = _should_prepare_message_replies(message, text)
+        drafts = create_response_drafts(
+            db, link.project_id, None, [synthetic], ensure_response=prepare_replies,
+        )
         risks, decisions = create_governance_items(db, link.project_id, [synthetic], source_type="telegram")
         for task in tasks:
             task.message_id = inbox_message.id
@@ -324,7 +372,8 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             else:
                 summary = "⚠️ Gemini API ещё не настроен. Ниже резервная локальная сводка.\n\n" + brief_summary(content, source_name, len(tasks), len(drafts), calendar_synced)
             notify_telegram_chat(chat_id, summary + f"\n\nПредложено: задач {len(tasks)} · рисков {len(risks)} · решений {len(decisions)}. Внешние действия требуют подтверждения в web.")
-        elif _should_prepare_message_replies(message, text) and configured_ai_provider().health().ready:
+        elif prepare_replies and configured_ai_provider().health().ready:
+            notify_telegram_chat(chat_id, "⏳ Сообщение получено. Готовлю анализ и варианты ответа…")
             try:
                 ai_content, ai_mode = prepare_external_ai_text(db, link.project_id, content)
                 ai_provider = configured_ai_provider()
@@ -336,6 +385,7 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                     policy_mode=ai_mode, text=ai_content, context=source_name,
                     compute=lambda: ai_provider.analyze_message(ai_content, source_name),
                 )
+                drafts = _store_ai_message_result(db, inbox_message, drafts, replies, owner, synthetic)
                 notify_telegram_chat(chat_id, format_message_replies(replies))
                 db.add(AuditLog(action="external_ai_used", entity_type="message", entity_id=inbox_message.id,
                                 details=f"provider={ai_provider.provider}; model={ai_provider.model}; mode={ai_mode}; prompt={prompt_version}; cache_hit={str(cache_hit).lower()}"))
