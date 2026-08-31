@@ -1,8 +1,9 @@
 import hashlib
 import hmac
 import os
+import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -38,8 +39,23 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=12, max_length=256)
 
 
+def _secure_cookie(request: Request) -> bool:
+    return request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https"
+
+
+def _set_session_cookies(response: Response, request: Request, token: str, expires) -> None:
+    secure = _secure_cookie(request)
+    response.set_cookie("pu_session", token, expires=expires, httponly=True, secure=secure, samesite="strict", path="/")
+    response.set_cookie("pu_csrf", secrets.token_urlsafe(24), expires=expires, httponly=False, secure=secure, samesite="strict", path="/")
+
+
+def _clear_session_cookies(response: Response) -> None:
+    response.delete_cookie("pu_session", path="/")
+    response.delete_cookie("pu_csrf", path="/")
+
+
 @router.post("/bootstrap")
-def bootstrap(payload: BootstrapRequest, x_bootstrap_token: str = Header(default=""), db: Session = Depends(get_db)):
+def bootstrap(payload: BootstrapRequest, request: Request, response: Response, x_bootstrap_token: str = Header(default=""), db: Session = Depends(get_db)):
     configured = os.getenv("BOOTSTRAP_TOKEN", "")
     if len(configured) < 24 or not hmac.compare_digest(configured, x_bootstrap_token):
         raise HTTPException(403, "Invalid bootstrap token")
@@ -56,11 +72,12 @@ def bootstrap(payload: BootstrapRequest, x_bootstrap_token: str = Header(default
     user.is_admin = True
     db.commit(); db.refresh(user)
     token, expires = issue_session(db, user.id)
-    return {"access_token": token, "token_type": "bearer", "expires_at": expires, "user": _user(user)}
+    _set_session_cookies(response, request, token, expires)
+    return {"token_type": "cookie", "expires_at": expires, "user": _user(user)}
 
 
 @router.post("/login")
-def login(payload: Credentials, request: Request, db: Session = Depends(get_db)):
+def login(payload: Credentials, request: Request, response: Response, db: Session = Depends(get_db)):
     normalized_email = payload.email.strip().lower()
     client_host = request.client.host if request.client else "unknown"
     throttle_key = hashlib.sha256(f"{client_host}:{normalized_email}".encode()).hexdigest()
@@ -72,7 +89,8 @@ def login(payload: Credentials, request: Request, db: Session = Depends(get_db))
         raise HTTPException(401, "Invalid email or password")
     clear_login_failures(throttle_key)
     token, expires = issue_session(db, user.id)
-    return {"access_token": token, "token_type": "bearer", "expires_at": expires, "user": _user(user)}
+    _set_session_cookies(response, request, token, expires)
+    return {"token_type": "cookie", "expires_at": expires, "user": _user(user)}
 
 
 @router.get("/me")
@@ -81,18 +99,20 @@ def me(user: User = Depends(require_user)):
 
 
 @router.post("/logout")
-def logout(user: User = Depends(require_user), authorization: str = Header(default=""), db: Session = Depends(get_db)):
-    raw = authorization.removeprefix("Bearer ").strip()
+def logout(request: Request, response: Response, user: User = Depends(require_user), authorization: str = Header(default=""), db: Session = Depends(get_db)):
+    raw = authorization.removeprefix("Bearer ").strip() or request.cookies.get("pu_session", "")
     if raw:
         row = db.scalar(select(AuthSession).where(AuthSession.token_hash == hashlib.sha256(raw.encode()).hexdigest(), AuthSession.user_id == user.id))
         if row:
             db.delete(row); db.commit()
+    _clear_session_cookies(response)
     return {"status": "logged_out"}
 
 
 @router.post("/change-password")
 def change_password(
     payload: PasswordChange,
+    response: Response,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -112,6 +132,7 @@ def change_password(
         details=f"sessions_revoked={revoked}; password_stored=false",
     ))
     db.commit()
+    _clear_session_cookies(response)
     return {"status": "password_changed", "reauthentication_required": True}
 
 

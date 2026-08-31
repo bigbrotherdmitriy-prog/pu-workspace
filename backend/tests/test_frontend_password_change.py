@@ -18,7 +18,7 @@ def test_settings_exposes_safe_self_service_password_change():
     assert 'from "./PasswordChangeCard"' in settings
     assert "<PasswordChangeCard" in settings
     assert 'api("/auth/change-password"' in component
-    assert 'sessionStorage.removeItem("pu_token")' in component
+    assert 'sessionStorage.removeItem("pu_token")' not in component
     assert 'autoComplete="current-password"' in component
     assert component.count('autoComplete="new-password"') == 2
     assert "не менее 12 символов" in component

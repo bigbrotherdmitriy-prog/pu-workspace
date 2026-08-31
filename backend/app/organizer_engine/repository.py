@@ -4,8 +4,10 @@ import json
 import hashlib
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import func, text, update
 from sqlalchemy.orm import Session
+
+from app.models.organizer import OrganizerSession
 
 from .types import ProposalItem
 
@@ -28,9 +30,11 @@ class OrganizerRepository:
         fields = {k:v for k,v in fields.items() if k in allowed}
         if not fields:
             return
-        assigns = ",".join(f"{k}=:{k}" for k in fields) + ",updated_at=now()"
-        fields["id"] = session_id
-        self.db.execute(text(f"UPDATE organizer_sessions SET {assigns} WHERE id=:id"), fields)
+        self.db.execute(
+            update(OrganizerSession)
+            .where(OrganizerSession.id == session_id)
+            .values(**fields, updated_at=func.now())
+        )
         self.db.commit()
 
     def get_session(self, session_id: int):

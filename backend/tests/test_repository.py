@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from app.organizer_engine.repository import OrganizerRepository
+from sqlalchemy.sql.dml import Update
 
 
 class FakeDb:
@@ -7,7 +8,8 @@ class FakeDb:
         self.rowcount = rowcount
         self.committed = False
 
-    def execute(self, *_args, **_kwargs):
+    def execute(self, statement, *_args, **_kwargs):
+        self.statement = statement
         return SimpleNamespace(rowcount=self.rowcount)
 
     def commit(self):
@@ -22,3 +24,13 @@ def test_mark_prepared_reports_successful_transition():
 
 def test_mark_prepared_reports_rejected_transition():
     assert OrganizerRepository(FakeDb(0)).mark_prepared(5) is False
+
+
+def test_update_session_uses_sqlalchemy_update_and_allowlist():
+    db = FakeDb(1)
+    OrganizerRepository(db).update_session(7, status="ready", progress=80, malicious="ignored")
+    assert isinstance(db.statement, Update)
+    compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "UPDATE organizer_sessions" in compiled
+    assert "malicious" not in compiled
+    assert db.committed

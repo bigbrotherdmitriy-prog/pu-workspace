@@ -1746,8 +1746,7 @@ export function App() {
           <button
             className="icon"
             onClick={() => {
-              sessionStorage.removeItem("pu_token");
-              setReady(false);
+              void api("/auth/logout", { method: "POST" }).finally(() => setReady(false));
             }}
           >
             <LogOut />

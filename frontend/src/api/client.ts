@@ -10,17 +10,27 @@ function newRequestId(): string {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function cookie(name: string): string {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const value = document.cookie.split("; ").find((item) => item.startsWith(prefix));
+  return value ? decodeURIComponent(value.slice(prefix.length)) : "";
+}
+
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = sessionStorage.getItem("pu_token");
   const requestId = newRequestId();
+  const method = (options.method || "GET").toUpperCase();
+  const csrfToken = cookie("pu_csrf");
   let response: Response;
   try {
     response = await fetch(path, {
       ...options,
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
         "X-Request-ID": requestId,
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken
+          ? { "X-CSRF-Token": csrfToken }
+          : {}),
         ...options.headers,
       },
     });

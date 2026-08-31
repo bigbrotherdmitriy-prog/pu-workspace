@@ -28,7 +28,6 @@ export function PasswordChangeCard({ onChanged }: { onChanged: () => void }) {
           new_password: newPassword,
         }),
       });
-      sessionStorage.removeItem("pu_token");
       onChanged();
     } catch (reason) {
       setError((reason as Error).message);

@@ -13,6 +13,7 @@ __pycache__/
 # Backups / temporary files
 *.bak
 *.bak.*
+*.bak*
 *.backup.*
 *.before_*
 *.fast

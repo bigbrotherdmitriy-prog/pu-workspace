@@ -8,6 +8,23 @@ on:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: pu_workspace_test
+          POSTGRES_USER: pu_test
+          POSTGRES_PASSWORD: pu_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pu_test -d pu_workspace_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pu_test:pu_test_password@127.0.0.1:5432/pu_workspace_test
+      PU_TEST_POSTGRES: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,11 +33,16 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
+      - name: Apply migrations to clean PostgreSQL
+        working-directory: backend
+        run: alembic -c alembic.ini upgrade head
       - name: Backend and contract tests
         working-directory: backend
         env:
           PYTHONPATH: .
-        run: pytest tests -q
+        run: |
+          set -o pipefail
+          pytest tests -q 2>&1 | tee ../pytest.log
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -32,6 +54,30 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Typecheck and build frontend
+      - name: Typecheck frontend
         working-directory: frontend
-        run: pnpm run build
+        run: |
+          set -o pipefail
+          pnpm run check 2>&1 | tee ../frontend-check.log
+      - name: Frontend component tests
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          pnpm run test 2>&1 | tee ../frontend-test.log
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          pnpm run build 2>&1 | tee ../frontend-build.log
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-logs-${{ github.sha }}
+          path: |
+            pytest.log
+            frontend-check.log
+            frontend-test.log
+            frontend-build.log
+          if-no-files-found: warn
+          retention-days: 30

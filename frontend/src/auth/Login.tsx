@@ -9,11 +9,10 @@ export function Login({ onDone }: { onDone: () => void }) {
 
   async function submit() {
     try {
-      const data = await api<{ access_token: string }>("/auth/login", {
+      await api("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
-      sessionStorage.setItem("pu_token", data.access_token);
       onDone();
     } catch (failure) {
       setError((failure as Error).message);

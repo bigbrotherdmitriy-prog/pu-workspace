@@ -52,6 +52,22 @@ MVP безопасного органайзера проектных докум�
 python -m pytest -q
 ```
 
+По умолчанию приложение ожидает PostgreSQL по адресу из `DATABASE_URL`; hostname
+`db` доступен только внутри Docker Compose. Для локального интеграционного
+прогона сначала запустите `docker compose up -d db`, задайте отдельную тестовую
+базу с именем, оканчивающимся на `_test`, примените миграции и включите тесты:
+
+```text
+DATABASE_URL=postgresql://pu_test:password@127.0.0.1:5432/pu_workspace_test
+PU_TEST_POSTGRES=1
+alembic -c alembic.ini upgrade head
+python -m pytest -q
+```
+
+CI создаёт чистый PostgreSQL 16, применяет все Alembic-миграции, запускает
+полный `pytest`, `pnpm run check` и `pnpm run build`, после чего сохраняет три
+лога проверки как artifact конкретного commit SHA.
+
 Для интерфейса из каталога `frontend`:
 
 ```text
@@ -66,6 +82,12 @@ production-сборку.
 
 Перед демонстрацией покупателю используйте read-only preflight и сценарий из
 [`docs/DEMO_RUNBOOK_RU.md`](docs/DEMO_RUNBOOK_RU.md).
+
+## Безопасность сессии и Telegram
+
+Новый интерфейс использует серверную сессию в `HttpOnly`, `SameSite=Strict` cookie. Изменяющие запросы дополнительно проверяются CSRF-токеном; bearer-токен остаётся совместимым только для API-клиентов и не хранится фронтендом в `sessionStorage`.
+
+Порядок ротации скомпрометированного Telegram-токена описан в `docs/TELEGRAM_TOKEN_ROTATION_RUNBOOK_RU.md`.
 
 ## MVP3 — управленческий контур
 

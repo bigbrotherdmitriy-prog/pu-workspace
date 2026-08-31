@@ -9,7 +9,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -88,12 +88,21 @@ def cleanup_expired_sessions(db: Session) -> int:
 
 
 def require_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
 ) -> User:
-    if not credentials or credentials.scheme.lower() != "bearer":
+    bearer_token = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else ""
+    cookie_token = request.cookies.get("pu_session", "")
+    raw_token = bearer_token or cookie_token
+    if not raw_token:
         raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Bearer"})
-    token_hash = hashlib.sha256(credentials.credentials.encode()).hexdigest()
+    if cookie_token and not bearer_token and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        csrf_cookie = request.cookies.get("pu_csrf", "")
+        csrf_header = request.headers.get("X-CSRF-Token", "")
+        if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+            raise HTTPException(403, "CSRF validation failed")
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     now = datetime.now(timezone.utc)
     row = db.scalar(select(AuthSession).where(AuthSession.token_hash == token_hash, AuthSession.expires_at > now))
     if not row:
