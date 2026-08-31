@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Link2, Move, Network, X } from "lucide-react";
+import { FileText, FileUp, Link2, Move, Network, X } from "lucide-react";
 import { buildContractTree } from "./contractTree";
 
 export type SchemeDocument = { id: number; name: string; source?: string; source_url?: string };
@@ -19,6 +19,9 @@ type Props = {
   contracts: SchemeContract[];
   onConnect: (parentId: number, childId: number) => void;
   onOpenDocument: (documentId: number) => void;
+  onDropDocuments?: (documentIds: number[], parentContractId?: number) => void;
+  onDropFiles?: (files: File[], parentContractId?: number) => void;
+  onDropApplications?: (files: File[], contractId: number) => void;
 };
 
 const nodeWidth = 230;
@@ -60,11 +63,12 @@ function kindLabel(kind?: string) {
   return "Заказчик";
 }
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDropDocuments, onDropFiles, onDropApplications }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [positions, setPositions] = useState<Record<number, Point>>(() => defaultPositions(contracts));
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
   const drag = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const layoutRef = useRef<{ storageKey: string; hierarchy: string } | null>(null);
   const hierarchy = contracts.map((item) => `${item.id}:${item.parent_contract_id || 0}`).sort().join("|");
@@ -100,6 +104,14 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     setConnectingFrom(null);
   }
 
+  function acceptDrop(event: React.DragEvent, parentContractId?: number) {
+    event.preventDefault(); event.stopPropagation(); setDropTargetId(null);
+    const projectDocumentId = Number(event.dataTransfer.getData("application/x-pu-document-id"));
+    if (projectDocumentId) { onDropDocuments?.([projectDocumentId], parentContractId); return; }
+    const files = Array.from(event.dataTransfer.files || []);
+    if (files.length) onDropFiles?.(files, parentContractId);
+  }
+
   return <section className="card contract-scheme">
     <header className="contract-scheme-head">
       <div><span className="eyebrow">СХЕМА ДОГОВОРОВ</span><h2>Конструктор связей</h2><p>Перемещайте блоки. Чтобы провести линию, выберите вышестоящий договор, затем подчинённый.</p></div>
@@ -109,7 +121,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       </div>
     </header>
     <div className="contract-scheme-scroll">
-      <div className="contract-scheme-canvas" style={{ width: canvasWidth, height: canvasHeight }} onPointerMove={(event) => {
+      <div className={`contract-scheme-canvas ${dropTargetId === -1 ? "drop-active" : ""}`} style={{ width: canvasWidth, height: canvasHeight }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (event.target === event.currentTarget) setDropTargetId(-1); }} onDragLeave={(event) => { if (event.target === event.currentTarget) setDropTargetId(null); }} onDrop={(event) => acceptDrop(event)} onPointerMove={(event) => {
         if (!drag.current) return;
         const bounds = event.currentTarget.getBoundingClientRect();
         setPositions((current) => ({ ...current, [drag.current!.id]: { x: Math.max(12, event.clientX - bounds.left - drag.current!.dx), y: Math.max(12, event.clientY - bounds.top - drag.current!.dy) } }));
@@ -121,7 +133,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
         {contracts.map((contract) => {
           const point = positions[contract.id] || { x: 20, y: 20 };
           const connectMode = connectingFrom !== null;
-          return <article key={contract.id} className={`contract-scheme-node ${selectedId === contract.id ? "selected" : ""} ${connectingFrom === contract.id ? "link-source" : ""}`} data-kind={contract.contract_kind || "customer"} style={{ left: point.x, top: point.y }}>
+          return <article key={contract.id} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDropTargetId(contract.id); }} onDragLeave={() => setDropTargetId(null)} onDrop={(event) => acceptDrop(event, contract.id)} className={`contract-scheme-node ${selectedId === contract.id ? "selected" : ""} ${connectingFrom === contract.id ? "link-source" : ""} ${dropTargetId === contract.id ? "drop-target" : ""}`} data-kind={contract.contract_kind || "customer"} style={{ left: point.x, top: point.y }}>
             <button className="contract-node-drag" aria-label={`Переместить договор ${contract.number}`} onPointerDown={(event) => {
               const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
               drag.current = { id: contract.id, dx: event.clientX - bounds.left, dy: event.clientY - bounds.top };
@@ -136,6 +148,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
         })}
       </div>
     </div>
+    <p className="contract-scheme-drop-hint"><FileUp /> Перетащите PDF/DOCX из папки на пустое место для корневого договора или прямо на вышестоящий договор для создания подчинённой связи.</p>
     {connectingFrom === -1 && <p className="contract-scheme-hint">Нажмите на блок вышестоящего договора.</p>}
     {connectingFrom && connectingFrom > 0 && <p className="contract-scheme-hint">Выбран вышестоящий договор №{contracts.find((item) => item.id === connectingFrom)?.number}. Теперь нажмите на подчинённый блок.</p>}
     {selected && <aside className="contract-scheme-detail">
@@ -145,6 +158,9 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       <div className="contract-scheme-documents">{selected.linked_documents?.map((document) => <button key={document.id} onClick={() => onOpenDocument(document.id)}><FileText /><span><strong>{document.name}</strong><small>{document.source || "Документ проекта"}</small></span></button>)}
         {!selected.linked_documents?.length && <p>Документы ещё не привязаны. Добавьте документ-источник в карточке договора ниже.</p>}
       </div>
+      <label className="contract-application-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropApplications?.(files, selected.id); }}>
+        <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите приложения, графики, спецификации и дополнительные соглашения. Они будут проверены вместе с договором.</small></span>
+      </label>
     </aside>}
   </section>;
 }

@@ -25,6 +25,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.audit_log import AuditLog
+from app.models.contract_document_link import ContractDocumentLink
 from app.organization_requisites import remember_contract_organizations
 
 router = APIRouter(tags=["organizations", "contracts"])
@@ -614,6 +615,10 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
             CashFlowEntry.project_id == row.project_id,
             CashFlowEntry.contract_id == row.id,
             CashFlowEntry.source_document_id.is_not(None),
+        )))
+        linked_document_ids.update(db.scalars(select(ContractDocumentLink.document_id).where(
+            ContractDocumentLink.project_id == row.project_id,
+            ContractDocumentLink.contract_id == row.id,
         )))
         linked_documents = db.scalars(select(Document).where(
             Document.project_id == row.project_id,

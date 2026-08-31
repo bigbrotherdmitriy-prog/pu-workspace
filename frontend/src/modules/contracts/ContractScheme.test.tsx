@@ -29,4 +29,18 @@ describe("ContractScheme", () => {
     expect(`${nodes[0].style.left}:${nodes[0].style.top}`).not.toBe(`${nodes[1].style.left}:${nodes[1].style.top}`);
     expect(screen.getByText("← ГП-1")).toBeInTheDocument();
   });
+
+  it("accepts application files on the selected contract", () => {
+    const onDropApplications = vi.fn();
+    render(<ContractScheme projectId={9} contracts={[
+      { id: 3, number: "Д-3", title: "Договор", contract_kind: "customer" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropApplications={onDropApplications} />);
+    fireEvent.click(screen.getByRole("button", { name: /Заказчик Д-3/ }));
+    const file = new File(["application"], "Приложение №1.txt", { type: "text/plain" });
+    const applicationLabels = screen.getAllByText("Приложения к этому договору");
+    fireEvent.drop(applicationLabels[applicationLabels.length - 1].closest("label")!, {
+      dataTransfer: { files: [file] },
+    });
+    expect(onDropApplications).toHaveBeenCalledWith([file], 3);
+  });
 });

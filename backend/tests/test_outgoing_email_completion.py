@@ -37,6 +37,6 @@ def test_gmail_distinguishes_sent_mail_and_does_not_send_incoming_alert():
 
 def test_schema_revision_tracks_latest_migration():
     schema = (ROOT / "app/schema.py").read_text(encoding="utf-8")
-    migration = (ROOT / "migrations/versions/d20f6a7b8c91_add_organization_requisites.py").read_text(encoding="utf-8")
-    assert 'CURRENT_SCHEMA_REVISION = "d20f6a7b8c91"' in schema
-    assert 'down_revision = "c8f3a4b5d6e7"' in migration
+    migration = (ROOT / "migrations/versions/e31a7b8c9d02_add_contract_document_links.py").read_text(encoding="utf-8")
+    assert 'CURRENT_SCHEMA_REVISION = "e31a7b8c9d02"' in schema
+    assert 'down_revision = "d20f6a7b8c91"' in migration

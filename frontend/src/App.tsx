@@ -120,6 +120,15 @@ type ContractSourceCandidate = {
   reasons: string[];
   text_ready: boolean;
 };
+const MAX_DROPPED_CONTRACT_BYTES = 4 * 1024 * 1024;
+function fileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Не удалось прочитать ${file.name}`));
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+    reader.readAsDataURL(file);
+  });
+}
 type ContractFinancialCheck = {
   applied: string[];
   mismatches: { field: string; label: string; current: string; extracted: string; evidence?: string }[];
@@ -354,6 +363,7 @@ export function App() {
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
     [contractStructureDrafts, setContractStructureDrafts] = useState<Record<number, { kind: string; parentId: number }>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
+    [droppedContractProposals, setDroppedContractProposals] = useState<BulkContractProposal[]>([]),
     [contractFinancialChecks, setContractFinancialChecks] = useState<Record<number, ContractFinancialCheck>>({}),
     [contractCandidateBusy, setContractCandidateBusy] = useState(0),
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
@@ -776,10 +786,56 @@ export function App() {
     });
     return result.proposals || [];
   }
+  async function prepareDroppedContracts(documentIds: number[], parentContractId?: number) {
+    try {
+      setError("");
+      const proposals = await discoverBulkContracts(documentIds);
+      setDroppedContractProposals(proposals.map((item) => parentContractId ? {
+        ...item,
+        contract_kind: ["supply", "downstream_subcontract"].includes(item.contract_kind) ? item.contract_kind : "downstream_subcontract",
+        parent_document_id: undefined,
+        parent_contract_id: parentContractId,
+        evidence: [...item.evidence, "вышестоящий договор выбран перетаскиванием на схеме"],
+      } : item));
+    } catch (reason) { setError((reason as Error).message); }
+  }
+  async function uploadDroppedContracts(files: File[], parentContractId?: number) {
+    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv)$/i.test(file.name));
+    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
+    if (!supported.length) { setError("Перетащите PDF, DOCX, XLSX, TXT или CSV договор."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 4 МБ`); return; }
+    try {
+      setError(""); setNotice(`Загружаю и анализирую договоров: ${supported.length}…`);
+      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
+      const result = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
+      const documentIds = (result.documents || []).map((item: { id: number }) => item.id);
+      if (!documentIds.length) throw new Error(result.skipped?.[0]?.reason || "Текст договора не извлечён");
+      await load(); await prepareDroppedContracts(documentIds, parentContractId);
+    } catch (reason) { setError((reason as Error).message); }
+  }
+  async function uploadContractApplications(files: File[], contractId: number) {
+    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv)$/i.test(file.name));
+    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
+    if (!supported.length) { setError("Перетащите PDF, DOCX, XLSX, TXT или CSV приложение."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 4 МБ`); return; }
+    try {
+      setError(""); setNotice(`Загружаю приложения к договору: ${supported.length}…`);
+      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
+      const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
+      const documentIds = (uploaded.documents || []).map((item: { id: number }) => item.id);
+      if (!documentIds.length) throw new Error(uploaded.skipped?.[0]?.reason || "Текст приложений не извлечён");
+      await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ document_ids: documentIds }) });
+      const checked = await api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" });
+      const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
+      setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
+      await load();
+    } catch (reason) { setError((reason as Error).message); }
+  }
   async function importBulkContracts(proposals: BulkContractProposal[]): Promise<number> {
     const createdByDocument = new Map<number, number>();
     const pending = [...proposals];
     let created = 0;
+    const createdContractIds: number[] = [];
     while (pending.length) {
       const index = pending.findIndex((item) => !item.parent_document_id || createdByDocument.has(item.parent_document_id));
       if (index < 0) throw new Error("В выбранной структуре найден цикл. Проверьте вышестоящие договоры.");
@@ -793,8 +849,14 @@ export function App() {
         }),
       });
       createdByDocument.set(item.document_id, row.id); created += 1;
+      createdContractIds.push(row.id);
     }
-    setNotice(`Создано и привязано договоров: ${created}. Дерево построено; проверьте связи на схеме.`);
+    let analyzed = 0;
+    for (const contractId of createdContractIds) {
+      try { await api(`/projects/${projectId}/contracts/${contractId}/analyze`, { method: "POST" }); analyzed += 1; }
+      catch { /* Карточка и источник уже сохранены; повтор анализа доступен в карточке. */ }
+    }
+    setNotice(`Создано и привязано договоров: ${created}. Полностью проанализировано: ${analyzed}. Дерево построено; проверьте связи на схеме.`);
     await load();
     return created;
   }
@@ -2478,6 +2540,8 @@ export function App() {
                 contracts={contracts}
                 onDiscover={discoverBulkContracts}
                 onImport={importBulkContracts}
+                incomingProposals={droppedContractProposals}
+                onIncomingConsumed={() => setDroppedContractProposals([])}
               />
               <ContractScheme
                 projectId={projectId}
@@ -2490,6 +2554,9 @@ export function App() {
                   const document = documentRows.find((item) => item.id === documentId);
                   if (document) { void openDocument(document); setActive("Документы"); }
                 }}
+                onDropDocuments={(documentIds, parentId) => void prepareDroppedContracts(documentIds, parentId)}
+                onDropFiles={(files, parentId) => void uploadDroppedContracts(files, parentId)}
+                onDropApplications={(files, contractId) => void uploadContractApplications(files, contractId)}
               />
               <header className="contract-project-root">
                 <FolderKanban />

@@ -286,6 +286,14 @@
 .contract-node-drag { display: grid; place-items: center; padding: 0; border: 0; border-right: 1px solid #d7e5df; color: #57766a; background: #eef6f2; cursor: grab; touch-action: none; }
 .contract-node-drag:active { cursor: grabbing; }
 .contract-node-drag svg { width: 17px; }
+.contract-scheme-canvas.drop-active { outline:3px dashed #20a77c; outline-offset:-10px; background:#effaf5; }
+.contract-scheme-node.drop-target { box-shadow:0 0 0 5px #20a77c55,0 14px 34px #093b2b33; transform:scale(1.03); }
+.contract-scheme-drop-hint { display:flex; align-items:center; gap:8px; margin:10px 0 0; padding:11px 13px; border:1px dashed #85bca9; border-radius:10px; color:#176b53; background:#f1faf6; }
+.contract-scheme-drop-hint svg { width:18px; flex:none; }
+.contract-application-drop { display:flex; align-items:center; gap:10px; margin-top:14px; padding:14px; border:2px dashed #81b9a5; border-radius:12px; color:#176b53; background:#f1faf6; }
+.contract-application-drop svg { width:22px; flex:none; }
+.contract-application-drop span { display:grid; gap:4px; }
+.contract-application-drop small { color:#60776e; }
 .contract-node-open { min-width: 0; display: grid; align-content: center; gap: 3px; padding: 10px 11px; border: 0; text-align: left; color: #14271f; background: transparent; cursor: pointer; }
 .contract-node-open span { color: #0b7d61; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
 .contract-node-open strong, .contract-node-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -66,7 +66,7 @@ def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), use
             extracted.append(DriveFile(id=f"local:{path_digest}", name=item.path, mime_type=item.mime_type, parent_id="local-upload", md5_checksum=content_digest, size=len(data), content_text=text))
         except ValueError as exc:
             skipped.append({"path": item.path, "reason": str(exc)})
-    index_documents(db, payload.project_id, extracted, "local_upload")
+    documents = index_documents(db, payload.project_id, extracted, "local_upload")
     tasks = create_tasks_from_files(db, payload.project_id, None, extracted, source_type="local_upload")
     google_synced = calendar_synced = 0
     drafts = create_response_drafts(db, payload.project_id, None, extracted)
@@ -81,4 +81,5 @@ def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), use
         "google_tasks": google_synced, "calendar": calendar_synced,
         "external_actions": "proposed",
         "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts),
+        "documents": [{"id": row.id, "name": row.name} for row in documents],
     }

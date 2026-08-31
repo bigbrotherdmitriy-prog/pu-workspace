@@ -29,6 +29,7 @@ from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntr
 from app.models.external_resource import ExternalResourceLink
 from app.models.project_contact import ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
+from app.models.contract_document_link import ContractDocumentLink
 
 __all__ = [
     "Project",
@@ -74,4 +75,5 @@ __all__ = [
     "ExternalResourceLink",
     "ProjectContact",
     "TaskCompletionSuggestion",
+    "ContractDocumentLink",
 ]

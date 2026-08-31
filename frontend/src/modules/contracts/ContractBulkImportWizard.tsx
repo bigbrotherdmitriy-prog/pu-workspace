@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileSearch, Network, X } from "lucide-react";
 
 export type BulkContractProposal = {
@@ -22,6 +22,8 @@ type Props = {
   contracts: ContractOption[];
   onDiscover: (documentIds: number[]) => Promise<BulkContractProposal[]>;
   onImport: (proposals: BulkContractProposal[]) => Promise<number>;
+  incomingProposals?: BulkContractProposal[];
+  onIncomingConsumed?: () => void;
 };
 
 const kindLabel: Record<string, string> = {
@@ -32,7 +34,7 @@ const kindLabel: Record<string, string> = {
   supply: "Поставщик",
 };
 
-export function ContractBulkImportWizard({ documents, contracts, onDiscover, onImport }: Props) {
+export function ContractBulkImportWizard({ documents, contracts, onDiscover, onImport, incomingProposals, onIncomingConsumed }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number[]>([]);
@@ -44,6 +46,12 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
   const needsParent = (kind: string) => !["prime_reference", "customer"].includes(kind);
   const invalid = proposals.some((item) => !item.number.trim() || !item.title.trim() ||
     (needsParent(item.contract_kind) && !item.parent_document_id && !item.parent_contract_id));
+
+  useEffect(() => {
+    if (!incomingProposals?.length) return;
+    setProposals(incomingProposals); setOpen(true); setError("");
+    onIncomingConsumed?.();
+  }, [incomingProposals, onIncomingConsumed]);
 
   async function analyze() {
     if (!selected.length) return;
@@ -71,7 +79,7 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
         {!proposals.length ? <>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по названию файла" />
           <div className="contract-bulk-tools"><button className="secondary" onClick={() => setSelected(files.map((item) => item.id))}>Выбрать все найденные ({files.length})</button><button className="secondary" onClick={() => setSelected([])}>Снять выбор</button><b>Выбрано: {selected.length}</b></div>
-          <div className="contract-bulk-files">{files.slice(0, 300).map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.name}</strong><small>{item.source}</small></span></label>)}</div>
+          <div className="contract-bulk-files">{files.slice(0, 300).map((item) => <label draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-pu-document-id", String(item.id)); event.dataTransfer.effectAllowed = "copy"; }} key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.name}</strong><small>{item.source} · можно перетащить на схему</small></span></label>)}</div>
           <button disabled={!selected.length || busy} onClick={analyze}>{busy ? "Анализирую выбранные файлы…" : `Проанализировать ${selected.length} файлов`}</button>
         </> : <>
           <div className="contract-bulk-tree-head"><Network /><span><strong>Проверьте порядок договоров</strong><small>Для каждого нижнего договора укажите непосредственный вышестоящий.</small></span></div>
