@@ -894,6 +894,24 @@ export function App() {
       setBusyFolder("");
     }
   }
+  async function prepareSourceChanges(folder: DriveFolder) {
+    if (!folder.snapshot_id) return;
+    try {
+      setBusyFolder(folder.id);
+      setError("");
+      await api(`/projects/${projectId}/snapshots/${folder.snapshot_id}/analyze`, {
+        method: "POST",
+      });
+      setShowSources(false);
+      setActive("Предложения");
+      setNotice("Готовится таблица «Было → Станет» для рабочей папки. Обновите раздел через несколько секунд.");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyFolder("");
+    }
+  }
   async function queueAllFolders() {
     try {
       setBusyAll(true);
@@ -1386,6 +1404,30 @@ export function App() {
       );
       setNotice(
         `Оригинал безопасно переименован. Выполнено: ${result.stats.renamed}. Доступен rollback.`,
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyProposal(0);
+    }
+  }
+  async function applyApprovedToSource(proposal: Proposal) {
+    const approved = proposal.actions.filter((action) =>
+      ["approved", "edited"].includes(action.user_decision),
+    ).length;
+    const phrase = window.prompt(
+      `Будут применены ${approved} подтверждённых изменений к РАБОЧЕЙ папке. Безопасная копия уже проверена. Введите APPLY_APPROVED_TO_SOURCE`,
+    );
+    if (phrase !== "APPLY_APPROVED_TO_SOURCE") return;
+    try {
+      setBusyProposal(proposal.id);
+      const result = await api(
+        `/organizer/proposals/${proposal.id}/apply-source-approved`,
+        { method: "POST", body: JSON.stringify({ confirmation: phrase }) },
+      );
+      setNotice(
+        `Рабочая папка стандартизирована: переименовано ${result.stats.renamed}, перемещено ${result.stats.moved}. Все операции записаны; доступен откат.`,
       );
       await load();
     } catch (e) {
@@ -2173,16 +2215,17 @@ export function App() {
                                   className="analyze"
                                   disabled={
                                     busyFolder === folder.id ||
-                                    folder.analysis_status === "analyzing" ||
-                                    folder.analysis_result?.mode === "safe_copy"
+                                    folder.analysis_status === "analyzing"
                                   }
-                                  onClick={() => analyzeFolder(folder)}
+                                  onClick={() => folder.analysis_result?.mode === "safe_copy"
+                                    ? prepareSourceChanges(folder)
+                                    : analyzeFolder(folder)}
                                 >
                                   {busyFolder === folder.id ||
                                   folder.analysis_status === "analyzing"
                                     ? "Анализ…"
                                     : folder.analysis_result?.mode === "safe_copy"
-                                      ? "Текущая копия готова"
+                                      ? "Подготовить стандарт рабочей папки"
                                     : folder.analyzed
                                       ? "Проанализирована"
                                       : folder.analysis_status === "failed"
@@ -2494,6 +2537,7 @@ export function App() {
               : row
           ))}
           onApplySource={(proposal, action) => void applyOneToSource(proposal, action)}
+          onApplySourceBulk={(proposal) => void applyApprovedToSource(proposal)}
         />
       )}
       {active === "Интеграции" && (

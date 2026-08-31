@@ -345,6 +345,78 @@ class OrganizerExecutor:
         self.repo.mark_source_applied(proposal_id)
         return {"renamed": 1, "already_applied": 0}
 
+    def apply_approved_to_source(self, proposal_id: int) -> dict[str, int]:
+        """Apply all explicitly approved virtual-snapshot actions to the source tree."""
+        proposal = self.repo.proposal(proposal_id)
+        if not proposal or not str(proposal["copy_folder_id"]).startswith("virtual:"):
+            raise ValueError("Bulk source apply requires a virtual snapshot proposal")
+        if proposal["status"] not in {"waiting_confirmation", "approved"}:
+            if proposal["status"] == "applied":
+                return {"renamed": 0, "moved": 0, "skipped": 0, "errors": 0, "already_applied": 1}
+            raise ValueError("Proposal is not available for bulk source apply")
+        items = self._approved_items(proposal_id)
+        if not items:
+            raise ValueError("Approve or edit at least one proposed action")
+
+        # Nothing on Drive is changed before confidence, collisions and source
+        # metadata are checked for the complete selected batch.
+        self._preflight(proposal_id)
+        self._recheck_sources(proposal_id)
+        source_root = proposal["source_folder_id"]
+        session_id = int(proposal["session_id"])
+        folders = self._target_folders(source_root)
+        completed = {
+            (row["file_id"], row["op_type"])
+            for row in self.repo.operations(proposal_id)
+            if row["rolled_back_at"] is None
+        }
+        stats = {"renamed": 0, "moved": 0, "skipped": 0, "errors": 0, "already_applied": 0}
+
+        for item in items:
+            file_id = item["file_id"]
+            try:
+                current = self.drive.get_file_meta(file_id)
+                self.drive.assert_inside_copy(file_id, source_root)
+                target_name = item["edited_name"] or item["proposed_name"]
+                target_folder = item["edited_folder"] or item["target_folder"]
+                target_parent = folders.get(target_folder, folders["00_НЕРАЗОБРАННОЕ"])
+
+                if current.name != target_name and (file_id, "source_rename") not in completed:
+                    siblings = self.drive.list_children(current.parent_id)
+                    if any(row.id != current.id and row.name == target_name for row in siblings):
+                        raise ValueError(f"Target name already exists: {target_name}")
+                    before = {"name": current.name, "parent_id": current.parent_id}
+                    after = {"name": target_name, "parent_id": current.parent_id}
+                    self.drive.rename_file(file_id, target_name, source_root)
+                    self.repo.log_operation(proposal_id, session_id, file_id, "source_rename", before, after)
+                    self.repo.db.commit()
+                    stats["renamed"] += 1
+                    current = self.drive.get_file_meta(file_id)
+
+                if current.parent_id != target_parent and (file_id, "source_move") not in completed:
+                    siblings = self.drive.list_children(target_parent)
+                    if any(row.id != current.id and row.name == current.name for row in siblings):
+                        raise ValueError(f"Target folder already contains: {current.name}")
+                    before = {"name": current.name, "parent_id": current.parent_id}
+                    after = {"name": current.name, "parent_id": target_parent}
+                    self.drive.move_file(file_id, target_parent, current.parent_id, source_root)
+                    self.repo.log_operation(proposal_id, session_id, file_id, "source_move", before, after)
+                    self.repo.db.commit()
+                    stats["moved"] += 1
+                if current.name == target_name and current.parent_id == target_parent:
+                    stats["skipped"] += 1
+            except Exception:
+                self.repo.db.rollback()
+                stats["errors"] += 1
+
+        if stats["errors"]:
+            raise ValueError(
+                f"Bulk source apply stopped with {stats['errors']} error(s); "
+                "successful operations are logged and can be rolled back"
+            )
+        self.repo.mark_source_applied(proposal_id)
+        return stats
+
     def standardize_remaining(self, proposal_id: int, project_name: str) -> dict[str, int]:
         """Standardize skipped files inside an already-created safe copy only."""
         proposal = self.repo.proposal(proposal_id)
@@ -503,7 +575,7 @@ class OrganizerExecutor:
                         copy_root,
                     )
 
-                elif op["op_type"] in {"move", "standardize_move"}:
+                elif op["op_type"] in {"move", "source_move", "standardize_move"}:
                     self.drive.move_file(
                         op["file_id"],
                         before["parent_id"],

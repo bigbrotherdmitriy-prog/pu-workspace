@@ -6,6 +6,7 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -72,6 +73,10 @@ class RuleRequest(BaseModel):
 
 class SourceApplyRequest(BaseModel):
     action_id: int
+    confirmation: str
+
+
+class BulkSourceApplyRequest(BaseModel):
     confirmation: str
 
 
@@ -439,6 +444,46 @@ def apply_source_one(proposal_id: int, payload: SourceApplyRequest, db: Session 
         drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
         result = OrganizerExecutor(repo, drive).apply_one_to_source(proposal_id, payload.action_id)
         _audit(db, "proposal_applied_to_source", "organizer_proposal", proposal_id, f"Action: {payload.action_id}; result: {result}", user_id=user.id)
+        return {"proposal": _proposal_payload(repo, proposal_id), "stats": result}
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, str(exc)) from exc
+
+
+@router.post("/proposals/{proposal_id}/apply-source-approved")
+def apply_source_approved(
+    proposal_id: int,
+    payload: BulkSourceApplyRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    if payload.confirmation != "APPLY_APPROVED_TO_SOURCE":
+        raise HTTPException(422, "Exact confirmation phrase is required")
+    repo = OrganizerRepository(db)
+    proposal = _proposal_for_user(repo, db, user, proposal_id, "owner")
+    if not str(proposal["copy_folder_id"]).startswith("virtual:"):
+        raise HTTPException(409, "Bulk source apply requires an original-folder proposal")
+    backup_exists = db.execute(text("""
+        SELECT 1 FROM organizer_sessions
+        WHERE project_id=:project_id AND source_folder_id=:source_folder_id
+          AND copy_folder_id IS NOT NULL AND status='applied'
+        LIMIT 1
+    """), {
+        "project_id": proposal["project_id"],
+        "source_folder_id": proposal["source_folder_id"],
+    }).scalar_one_or_none()
+    if not backup_exists:
+        raise HTTPException(409, "Create and finish a safe copy before changing the working folder")
+    try:
+        drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
+        result = OrganizerExecutor(repo, drive).apply_approved_to_source(proposal_id)
+        _audit(
+            db, "proposal_applied_to_source_bulk", "organizer_proposal", proposal_id,
+            f"Result: {result}; safe_copy_verified=true", user_id=user.id,
+        )
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": result}
     except ValueError as exc:
         db.rollback()
