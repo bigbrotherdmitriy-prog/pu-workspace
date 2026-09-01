@@ -1,4 +1,4 @@
-from app.api.contract_discovery import ContractDiscoveryRequest, _contract_parties, _party_chain_parent, _referenced_existing_contract, discover_contract_fields, router
+from app.api.contract_discovery import ContractDiscoveryRequest, _contract_parties, _party_chain_parent, _referenced_existing_contract, _short_contract_title, discover_contract_fields, router
 from app.models.organization_contract import Contract
 
 
@@ -82,3 +82,19 @@ def test_builds_contract_chain_when_parent_contractor_becomes_child_customer():
     assert _contract_parties(prime_text) == {"заказчик": "налогсервис", "подрядчик": "булат"}
     assert _contract_parties(subcontract_text) == {"заказчик": "булат", "подрядчик": "дисиайсолюшнс"}
     assert _party_chain_parent(subcontract_text, [(prime, prime_text)]) is prime
+
+
+def test_uses_exact_number_and_short_subject_as_contract_name():
+    result = discover_contract_fields(
+        "scan.pdf",
+        "Договор № Б-УЗП/130-02-2026. Заказчик и Подрядчик заключили договор. "
+        "1. Предмет Договора 1.1. Подрядчик по условиям настоящего Договора принимает на себя "
+        "обязательство по выполнению работ по модернизации системы бесперебойного электропитания "
+        "в ЦОД г. Дубна и г. Городец, а Заказчик обязуется принять и оплатить Работы. 1.2. Срок работ.",
+    )
+    assert result["number"] == "Б-УЗП/130-02-2026"
+    assert result["title"] == "Модернизации системы бесперебойного электропитания в ЦОД г. Дубна и г. Городец"
+
+
+def test_short_subject_falls_back_to_filename_when_clause_is_missing():
+    assert _short_contract_title("Реквизиты сторон.", "Договор П-17") == "Договор П-17"

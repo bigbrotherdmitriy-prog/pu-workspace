@@ -87,6 +87,39 @@ def _contract_parties(content: str) -> dict[str, str]:
     return parties
 
 
+def _short_contract_title(content: str, fallback: str) -> str:
+    """Build a compact, reviewable name from the contract subject clause."""
+    compact = " ".join((content or "").split())[:20_000]
+    subject_match = re.search(
+        r"предмет\s+(?:договора|контракта)\s*(?:\d+(?:\.\d+)*[.)]?\s*)?(.{20,1800}?)"
+        r"(?=\s+\d+\.\d+[.)]?\s|\s+2[.)]\s|$)",
+        compact, re.IGNORECASE,
+    )
+    subject = subject_match.group(1) if subject_match else ""
+    if not subject:
+        obligation = re.search(
+            r"(?:принимает\s+на\s+себя\s+обязательств\w*|обязуется)\s+(.{20,900}?)"
+            r"(?=\s+заказчик\s+обязуется|\s+в\s+соответствии\s+с|[.;])",
+            compact, re.IGNORECASE,
+        )
+        subject = obligation.group(1) if obligation else ""
+    subject = re.sub(r"\([^)]{0,180}\)", " ", subject)
+    subject = re.sub(
+        r"^.*?(?:выполнени[ея]\s+работ\s+по|оказани[ея]\s+услуг\s+по|поставк[еи]\s+|поставить\s+|выполнить\s+)",
+        "", subject, flags=re.IGNORECASE,
+    )
+    subject = re.split(
+        r"\s+(?:в\s+соответствии\s+с|а\s+заказчик\s+обязуется|заказчик\s+обязуется|по\s+адресу)\b",
+        subject, maxsplit=1, flags=re.IGNORECASE,
+    )[0]
+    subject = re.sub(r"\s+", " ", subject).strip(" .,:;-–—")
+    if len(subject) < 12:
+        return fallback
+    if len(subject) > 180:
+        subject = subject[:181].rsplit(" ", 1)[0].rstrip(" ,;:-") + "…"
+    return subject[0].upper() + subject[1:]
+
+
 def _party_chain_parent(content: str, contract_contents: list[tuple[Contract, str]], excluded_id: int | None = None) -> Contract | None:
     child_customer = _contract_parties(content).get("заказчик")
     if not child_customer:
@@ -142,7 +175,7 @@ def discover_contract_fields(name: str, content: str) -> dict:
     is_contract = not attachment_name and (bool(number_match) or legal_markers >= 2)
     return {
         "number": number,
-        "title": fallback_number,
+        "title": _short_contract_title(content, fallback_number),
         "counterparty": companies[-1] if companies else None,
         "contract_kind": kind,
         "confidence": round(confidence, 2),
