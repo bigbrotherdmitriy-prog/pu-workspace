@@ -282,6 +282,10 @@
 .contract-scheme-node[data-kind="downstream_subcontract"] { border-color: #d79731; }
 .contract-scheme-node[data-kind="supply"] { border-color: #7583ae; }
 .contract-scheme-node.selected { box-shadow: 0 0 0 4px rgba(13,141,112,.16), 0 10px 28px rgba(16,53,41,.2); }
+.contract-node-delete { position:absolute; z-index:4; top:7px; right:7px; display:grid; place-items:center; width:28px; height:28px; padding:6px; border:1px solid transparent; border-radius:8px; color:#8e2f2f; background:rgba(255,255,255,.9); opacity:0; cursor:pointer; transition:.15s ease; }
+.contract-scheme-node:hover .contract-node-delete,.contract-node-delete:focus-visible { opacity:1; border-color:#e7b8b8; }
+.contract-node-delete:hover { color:#fff; border-color:#b93a3a; background:#b93a3a; }
+.contract-node-delete svg { width:15px; height:15px; }
 .contract-scheme-node.link-source { border-color: #e2a329; box-shadow: 0 0 0 4px rgba(226,163,41,.22); }
 .contract-node-drag { display: grid; place-items: center; padding: 0; border: 0; border-right: 1px solid #d7e5df; color: #57766a; background: #eef6f2; cursor: grab; touch-action: none; }
 .contract-node-drag:active { cursor: grabbing; }
@@ -328,6 +332,11 @@
 .contract-scheme-documents span { display: grid; min-width: 0; }
 .contract-scheme-documents strong, .contract-scheme-documents small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contract-scheme-documents small { color: #718078; }
+.contract-scheme-delete-zone { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:18px; padding-top:15px; border-top:1px solid #ead5d5; }
+.contract-scheme-delete-zone p { display:grid; gap:3px; margin:0; }
+.contract-scheme-delete-zone small { color:#7b6b6b; font-weight:400; }
+.contract-scheme-delete-zone button { display:inline-flex; align-items:center; gap:7px; flex:none; }
+.contract-scheme-delete-zone button svg { width:16px; }
 .contract-project-root { position: relative; display: flex; align-items: center; gap: 14px; min-height: 74px; padding: 18px 20px; border: 1px solid #174b3d; border-radius: 16px; color: #fff; background: linear-gradient(135deg, #0c1d18, #174b3d); box-shadow: 0 12px 32px rgba(12, 45, 34, .16); }
 .contract-project-root::after { content: ""; position: absolute; left: 40px; top: 100%; width: 3px; height: 20px; background: var(--contract-tree-line); }
 .contract-project-root > svg { width: 30px; height: 30px; padding: 7px; border-radius: 10px; color: #65d4ad; background: rgba(101, 212, 173, .11); box-sizing: content-box; }

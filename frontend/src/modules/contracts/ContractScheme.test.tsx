@@ -74,4 +74,16 @@ describe("ContractScheme", () => {
     expect(onDropFiles).toHaveBeenCalledWith([pdf], undefined);
     expect(container.querySelector('[role="status"]')).toHaveTextContent("Передаю на загрузку и анализ");
   });
+
+  it("offers contract deletion from the node and detail panel", () => {
+    const onDelete = vi.fn();
+    render(<ContractScheme projectId={13} contracts={[
+      { id: 5, number: "Д-5", title: "Удаляемый договор", contract_kind: "customer" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDelete={onDelete} />);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить договор Д-5" }));
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 5, number: "Д-5" }));
+    fireEvent.click(screen.getByRole("button", { name: /Заказчик Д-5/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Удалить договор$/ }));
+    expect(onDelete).toHaveBeenCalledTimes(2);
+  });
 });

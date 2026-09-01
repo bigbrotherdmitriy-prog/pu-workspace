@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, FileUp, Link2, Move, Network, X } from "lucide-react";
+import { FileText, FileUp, Link2, Move, Network, Trash2, X } from "lucide-react";
 import { buildContractTree } from "./contractTree";
 
 export type SchemeDocument = { id: number; name: string; source?: string; source_url?: string };
@@ -19,6 +19,7 @@ type Props = {
   contracts: SchemeContract[];
   onConnect: (parentId: number, childId: number) => void;
   onOpenDocument: (documentId: number) => void;
+  onDelete?: (contract: SchemeContract) => void;
   onDropDocuments?: (documentIds: number[], parentContractId?: number) => void;
   onDropFiles?: (files: File[], parentContractId?: number) => void;
   onDropApplications?: (files: File[], contractId: number) => void;
@@ -65,7 +66,7 @@ function kindLabel(kind?: string) {
   return "Заказчик";
 }
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [positions, setPositions] = useState<Record<number, Point>>(() => defaultPositions(contracts));
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
@@ -161,6 +162,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
               <b>{contract.linked_documents?.length || 0} док.</b>
               {contract.parent_contract_id && <em>← {contracts.find((item) => item.id === contract.parent_contract_id)?.number || `договор ${contract.parent_contract_id}`}</em>}
             </button>
+            {onDelete && <button className="contract-node-delete" aria-label={`Удалить договор ${contract.number}`} title="Удалить договор" onClick={(event) => { event.stopPropagation(); onDelete(contract); }}><Trash2 /></button>}
           </article>;
         })}
       </div>
@@ -185,6 +187,10 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
           </label>)}
       </div>
       <p className="contract-finance-confirmation">После анализа откроется предварительный просмотр. Строки ГПР, бюджета и ДДС создаются только после вашего подтверждения.</p>
+      {onDelete && <div className="contract-scheme-delete-zone">
+        <p><strong>Удаление карточки договора</strong><small>Исходные файлы и документы проекта останутся на месте.</small></p>
+        <button className="danger" onClick={() => onDelete(selected)}><Trash2 /> Удалить договор</button>
+      </div>}
     </aside>}
   </section>;
 }

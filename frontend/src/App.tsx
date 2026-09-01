@@ -2635,6 +2635,7 @@ export function App() {
                   const document = documentRows.find((item) => item.id === documentId);
                   if (document) { void openDocument(document); setActive("Документы"); }
                 }}
+                onDelete={(contract) => void deleteContract(contract as ContractRow)}
                 onDropDocuments={(documentIds, parentId) => void prepareDroppedContracts(documentIds, parentId)}
                 onDropFiles={(files, parentId) => void uploadDroppedContracts(files, parentId)}
                 onDropApplications={(files, contractId) => void uploadContractApplications(files, contractId)}
