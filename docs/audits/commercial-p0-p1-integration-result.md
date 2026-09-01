@@ -34,6 +34,9 @@ OCR job payloads carry project/document/job identifiers only, not file content. 
 - Alembic heads: one, `c83d0a24b512`.
 - `git diff --check`: passed (Git reports Windows line-ending notices only).
 - Compose YAML: parsed successfully; services are `backend`, `db`, `scheduler`, `telegram-relay`, `worker`; backend starts two Uvicorn workers and Compose declares two durable workers.
+- Immutable release-kit generation for integration SHA succeeded: source archive, release manifest, checksums and three SPDX 2.3 SBOM files were produced. The built-in secret scan returned `PASS_WITH_DOCUMENTED_EXCLUSIONS`; test fixtures and the separate sales tree are explicitly excluded from the commercial source bundle.
+- Root `NOTICE` is included by the release allowlist. Its unresolved `NOASSERTION` license fields remain a commercial release gate, as documented in the legal kit.
+- All relative Markdown links under `docs/legal` resolve.
 - Docker executable and a local PostgreSQL server are unavailable in this environment.
 
 The result is therefore `CONDITIONAL`, not `PASS`: real PostgreSQL migration/recovery and the multi-process failure protocol remain external gates.
