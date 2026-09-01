@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.organizer_engine import DriveClient, OrganizerExecutor, OrganizerRepository, build_proposal
-from app.organizer_engine.drive_factory import get_drive_service
+from app.integrations.storage import storage_for_project
+from app.organizer_engine.drive_factory import get_drive_service  # compatibility for legacy project lifecycle API
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.config import AUTO_APPLY_CONFIDENCE, AUTO_APPLY_ENABLED, FOLDER_STRUCTURE
 from app.core.auth import require_admin, require_project_role, require_user
@@ -121,17 +122,16 @@ def _scan_worker(
         project = repo.project(project_id)
         if not project:
             raise ValueError("Project not found")
-        service = get_drive_service(project_id=project_id, db=db)
-        drive = DriveClient(service)
+        drive = storage_for_project(project_id, db)
         if session["copy_folder_id"]:
             copy_folder_id = session["copy_folder_id"]
             source_name = session["source_folder_name"]
             repo.update_session(session_id, status="analyzing", progress=max(55, session["progress"] or 0))
         else:
             repo.update_session(session_id, status="scanning", progress=5)
-            source = drive.get_file_meta(source_folder_id)
+            source = drive.get_object(source_folder_id)
             if not source.is_folder:
-                raise ValueError("Source ID is not a Google Drive folder")
+                raise ValueError("Source ID is not a storage folder")
             source_name = source.name
             source_items = drive.walk_tree(source_folder_id)
             repo.update_session(session_id, source_item_count=len(source_items), progress=15)
@@ -154,7 +154,7 @@ def _scan_worker(
                 last_reported = percent
         drive.populate_content(copy_items, on_progress=report_content_progress)
         repo.update_session(session_id, processed_item_count=len(copy_items), progress=92)
-        index_documents(db, project_id, copy_items, "google_drive_copy")
+        index_documents(db, project_id, copy_items, f"{drive.provider}_copy")
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         repo.update_session(session_id, progress=95)
@@ -265,8 +265,8 @@ def scan(payload: ScanRequest, request: Request, db: Session = Depends(get_db), 
         raise HTTPException(404, "Project not found")
     # Resolve metadata before creating the job so invalid IDs fail fast.
     try:
-        drive = DriveClient(get_drive_service(project_id=payload.project_id, db=db))
-        source = drive.get_file_meta(payload.source_folder_id)
+        drive = storage_for_project(payload.project_id, db)
+        source = drive.get_object(payload.source_folder_id)
         if not source.is_folder:
             raise ValueError("Source ID is not a folder")
         if "(безопасная копия " in source.name:
@@ -391,9 +391,9 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
     repo = OrganizerRepository(db)
     p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     if not p["copy_folder_id"] or p["copy_folder_id"] == "manual" or p["copy_folder_id"].startswith("virtual:"):
-        raise HTTPException(409, "Apply requires a real Google Drive safe copy created by /scan")
+        raise HTTPException(409, "Apply requires a real storage safe copy created by /scan")
     if p["status"] == "conflict_source_changed":
-        drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
+        drive = storage_for_project(p["project_id"], db)
         result = OrganizerExecutor(repo, drive).revalidate_source_conflicts(proposal_id)
         if result["remaining"]:
             repo.skip_remaining_source_conflicts(proposal_id)
@@ -401,7 +401,7 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
     if p["status"] not in {"approved", "ready_to_apply_to_copy", "applied"}:
         raise HTTPException(409, "Proposal must be approved before apply")
     try:
-        drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
+        drive = storage_for_project(p["project_id"], db)
         if p["status"] == "approved" and not repo.mark_prepared(proposal_id):
             raise HTTPException(409, "Proposal is already being applied or was processed")
         stats = OrganizerExecutor(repo, drive).apply(proposal_id)
@@ -422,7 +422,7 @@ def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depen
     repo = OrganizerRepository(db)
     p = _proposal_for_user(repo, db, user, proposal_id, "manager")
     try:
-        drive = DriveClient(get_drive_service(project_id=p["project_id"], db=db))
+        drive = storage_for_project(p["project_id"], db)
         result = OrganizerExecutor(repo, drive).rollback(proposal_id)
         _audit(db, "proposal_rollback", "organizer_proposal", proposal_id, f"Result: {result}", user_id=user.id)
         return result
@@ -444,10 +444,10 @@ def standardize_copy(proposal_id: int, db: Session = Depends(get_db), user: User
         or proposal["copy_folder_id"] == "manual"
         or proposal["copy_folder_id"].startswith("virtual:")
     ):
-        raise HTTPException(409, "Standardization requires a real Google Drive safe copy")
+        raise HTTPException(409, "Standardization requires a real storage safe copy")
     project = repo.project(int(proposal["project_id"]))
     try:
-        drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
+        drive = storage_for_project(proposal["project_id"], db)
         stats = OrganizerExecutor(repo, drive).standardize_remaining(
             proposal_id,
             project["name"],
@@ -469,7 +469,7 @@ def apply_source_one(proposal_id: int, payload: SourceApplyRequest, db: Session 
     repo = OrganizerRepository(db)
     proposal = _proposal_for_user(repo, db, user, proposal_id, "owner")
     try:
-        drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
+        drive = storage_for_project(proposal["project_id"], db)
         result = OrganizerExecutor(repo, drive).apply_one_to_source(proposal_id, payload.action_id)
         _audit(db, "proposal_applied_to_source", "organizer_proposal", proposal_id, f"Action: {payload.action_id}; result: {result}", user_id=user.id)
         return {"proposal": _proposal_payload(repo, proposal_id), "stats": result}
@@ -506,7 +506,7 @@ def apply_source_approved(
     if not backup_exists:
         raise HTTPException(409, "Create and finish a safe copy before changing the working folder")
     try:
-        drive = DriveClient(get_drive_service(project_id=proposal["project_id"], db=db))
+        drive = storage_for_project(proposal["project_id"], db)
         result = OrganizerExecutor(repo, drive).apply_approved_to_source(proposal_id)
         _audit(
             db, "proposal_applied_to_source_bulk", "organizer_proposal", proposal_id,

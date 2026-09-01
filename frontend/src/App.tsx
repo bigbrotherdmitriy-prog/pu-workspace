@@ -223,6 +223,7 @@ type Snapshot = {
 type DriveFolder = {
   id: string;
   name: string;
+  provider?: string;
   modifiedTime?: string;
   registered: boolean;
   is_primary: boolean;
@@ -441,6 +442,7 @@ export function App() {
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const [copyCleanupResults, setCopyCleanupResults] = useState<Record<number, { count: number; message: string }>>({});
   const [sourceFolderId, setSourceFolderId] = useState("root");
+  const [sourceProvider, setSourceProvider] = useState("google_drive");
   const [sourceBreadcrumbs, setSourceBreadcrumbs] = useState<DriveBreadcrumb[]>([
     { id: "root", name: "Мой диск" },
   ]);
@@ -659,6 +661,30 @@ export function App() {
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  async function connectStorageProvider(provider: string) {
+    if (provider !== "yandex_disk") return connectGoogle();
+    try {
+      const result = await api(`/projects/${projectId}/yandex/auth`);
+      window.location.href = result.authorization_url;
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function openProviderSources(provider: string) {
+    if (provider === "yandex_disk") {
+      try {
+        await api(`/projects/${projectId}/yandex/root`, {
+          method: "PUT",
+          body: JSON.stringify({ root_locator: "disk:/", display_name: "Яндекс Диск", sync_settings: { recursive: true } }),
+        });
+        await openSources("disk:/");
+      } catch (e) {
+        setError((e as Error).message);
+      }
+      return;
+    }
+    await openSources("root");
   }
   async function syncGmail(options: { silent?: boolean } = {}) {
     if (gmailSyncing || !projectId) return;
@@ -1000,6 +1026,7 @@ export function App() {
         `/projects/${targetProjectId}/source-folders/discover?folder_id=${encodeURIComponent(folderId)}`,
       );
       setFolders(d.folders);
+      setSourceProvider(d.provider || "google_drive");
       setSourceFolderId(d.folder_id || folderId);
       setSourceBreadcrumbs(
         d.breadcrumbs || [{ id: "root", name: "Мой диск" }],
@@ -1014,6 +1041,16 @@ export function App() {
       const targetProjectId = projectIdRef.current;
       setBusyFolder(folder.id);
       setError("");
+      if (folder.provider === "yandex_disk") {
+        await api(`/projects/${targetProjectId}/yandex/root`, {
+          method: "PUT",
+          body: JSON.stringify({
+            root_locator: folder.id,
+            display_name: folder.name,
+            sync_settings: { recursive: true, safe_copy: true },
+          }),
+        });
+      }
       const queued = await api(
         `/projects/${targetProjectId}/source-folders/${folder.id}/snapshot-queue`,
         { method: "POST" },
@@ -2332,12 +2369,12 @@ export function App() {
                       <div>
                         <h2>Папки для последовательного разбора</h2>
                         <p>
-                          Каждая папка получает отдельный виртуальный снимок;
+                          {sourceProvider === "yandex_disk" ? "Яндекс Диск" : "Google Drive"}. Каждая папка получает отдельный виртуальный снимок;
                           файлы не перемещаются.
                         </p>
                       </div>
                       <div className="source-head-actions">
-                        {sourceFolderId === "root" && (
+                        {["root", "disk:/"].includes(sourceFolderId) && (
                           <button
                             className="queue-all"
                             disabled={busyAll}
@@ -2840,8 +2877,8 @@ export function App() {
           gmailSyncing={gmailSyncing}
           gmailSyncStatus={gmailSyncStatus}
           onSyncGmail={() => void syncGmail()}
-          onSelectFolder={() => void openSources("root")}
-          onConnectGoogle={() => void connectGoogle()}
+          onSelectFolder={(provider) => void openProviderSources(provider)}
+          onConnectProvider={(provider) => void connectStorageProvider(provider)}
           onLocalUpload={() => { setActive("Рабочий центр"); setNotice("Нажмите «Загрузить рабочую папку» в рабочем центре"); }}
           onOpenAIPolicy={() => setActive("Настройки")}
           onOpenGmailResults={openGmailResults}

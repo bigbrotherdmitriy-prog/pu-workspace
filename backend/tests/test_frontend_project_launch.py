@@ -12,7 +12,7 @@ def test_project_launch_is_a_separate_frontend_module():
     assert '[Route, "Запуск проекта"]' in app
     assert 'active === "Запуск проекта"' in app
     assert 'active === "Рабочий центр" || showSources ? (' in app
-    assert 'onSelectFolder={() => void openSources("root")}' in app
+    assert 'onSelectFolder={(provider) => void openProviderSources(provider)}' in app
     assert 'setActive("Рабочий центр"); void openSources("root")' not in app
     assert "openSources(sourceFolderId);" in app
     assert "Проект и рабочая папка" in wizard

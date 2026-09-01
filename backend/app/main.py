@@ -31,6 +31,7 @@ from app.api.access import router as access_router
 from app.api.documents import router as documents_router
 from app.api.drive import router as drive_router
 from app.api.google_drive import router as google_drive_router
+from app.api.yandex_disk import router as yandex_disk_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
 from app.models import (
@@ -46,6 +47,10 @@ from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
 from app.core.observability import observe_request
+from app.integrations.contracts import (
+    StorageAccessDenied, StorageCredentialsExpired, StorageQuotaExceeded,
+    StorageRateLimited, StorageUnavailable,
+)
 
 
 APP_VERSION = "1.0.3"
@@ -70,6 +75,31 @@ app = FastAPI(
 )
 
 app.middleware("http")(observe_request)
+
+
+@app.exception_handler(StorageCredentialsExpired)
+async def storage_credentials_expired_handler(_: Request, exc: StorageCredentialsExpired):
+    return JSONResponse({"detail": str(exc)}, status_code=401)
+
+
+@app.exception_handler(StorageAccessDenied)
+async def storage_access_denied_handler(_: Request, exc: StorageAccessDenied):
+    return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
+@app.exception_handler(StorageRateLimited)
+async def storage_rate_limited_handler(_: Request, exc: StorageRateLimited):
+    return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": "30"})
+
+
+@app.exception_handler(StorageQuotaExceeded)
+async def storage_quota_handler(_: Request, exc: StorageQuotaExceeded):
+    return JSONResponse({"detail": str(exc)}, status_code=507)
+
+
+@app.exception_handler(StorageUnavailable)
+async def storage_unavailable_handler(_: Request, exc: StorageUnavailable):
+    return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
 @app.middleware("http")
@@ -110,6 +140,7 @@ app.include_router(integrations_router)
 app.include_router(project_contacts_router)
 app.include_router(jobs_router)
 app.include_router(google_drive_router)
+app.include_router(yandex_disk_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)
 app.include_router(telegram_router)

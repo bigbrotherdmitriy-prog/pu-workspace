@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import io
 import os
@@ -9,7 +8,7 @@ from typing import Any, Callable
 
 from googleapiclient.http import MediaIoBaseDownload
 
-from app.integrations.contracts import AdapterHealth
+from app.integrations.contracts import AdapterHealth, StorageCopyResult
 
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
 from .content import extract_text
@@ -32,12 +31,7 @@ class CopyLimitExceeded(RuntimeError):
     pass
 
 
-@dataclass(slots=True)
-class CopyResult:
-    copy_root_id: str
-    copy_root_name: str
-    id_map: dict[str, str]
-    item_count: int
+CopyResult = StorageCopyResult
 
 
 class DriveClient:
@@ -238,7 +232,7 @@ class DriveClient:
             fields="id,trashed",
         ).execute()
 
-    def copy_folder_tree(self, source_folder_id: str, new_parent_id: str, source_name: str, source_items: list[DriveFile] | None = None) -> CopyResult:
+    def copy_folder_tree(self, source_folder_id: str, new_parent_id: str, source_name: str, source_items: list[DriveFile] | None = None, *, idempotency_key: str | None = None) -> CopyResult:
         # Reuse the scan we already performed in organizer.py.
         # This avoids walking the whole Google Drive a second time.
         if source_items is None:
@@ -254,8 +248,12 @@ class DriveClient:
         children_by_parent: dict[str, list[DriveFile]] = {}
         for item in source_items:
             children_by_parent.setdefault(item.parent_id, []).append(item)
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H-%M-%S UTC")
+        ts = idempotency_key or datetime.now(timezone.utc).strftime("%Y-%m-%d %H-%M-%S UTC")
         copy_name = source_name + SAFE_COPY_SUFFIX.format(ts=ts)
+        if idempotency_key:
+            existing = next((item for item in self.list_children(new_parent_id or "root") if item.is_folder and item.name == copy_name), None)
+            if existing:
+                return CopyResult(existing.id, existing.name, {source_folder_id: existing.id}, len(source_items))
         root_copy_id = self.create_folder(copy_name, new_parent_id or "root")
         id_map: dict[str, str] = {source_folder_id: root_copy_id}
         queue: deque[str] = deque([source_folder_id])
