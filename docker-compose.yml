@@ -72,6 +72,7 @@ services:
     command: ["python", "-m", "app.jobs.worker"]
     deploy:
       replicas: 2
+    stop_grace_period: ${PU_WORKER_STOP_GRACE_PERIOD:-35m}
   scheduler:
     image: app-backend:latest
     build: ./backend
@@ -87,6 +88,7 @@ services:
       AI_SECRETARY_AUTOMATION_ENABLED: ${AI_SECRETARY_AUTOMATION_ENABLED:-true}
       AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS: ${AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS:-300}
     command: ["python", "-m", "app.jobs.scheduler"]
+    stop_grace_period: 30s
   telegram-relay:
     image: app-backend:latest
     container_name: pu-workspace-telegram-relay

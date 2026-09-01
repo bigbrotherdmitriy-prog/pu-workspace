@@ -191,7 +191,7 @@ def create_ocr_batch(
             raise HTTPException(404, "One or more documents were not found in this project")
     active = db.scalar(select(BackgroundJob).where(
         BackgroundJob.kind == "documents.ocr",
-        BackgroundJob.status.in_(("queued", "running")),
+        BackgroundJob.status.in_(("queued", "retrying", "running")),
         BackgroundJob.payload["project_id"].as_integer() == project_id,
     ).order_by(BackgroundJob.id.desc()))
     if active is not None:
@@ -213,7 +213,10 @@ def get_ocr_batch(
     if job is None or job.kind != "documents.ocr" or int(job.payload.get("project_id", -1)) != project_id:
         raise HTTPException(404, "OCR batch not found")
     return {
-        "job_id": job.id, "status": job.status, "attempts": job.attempts,
-        "result": job.result, "error": job.last_error if job.status == "dead_letter" else None,
+        # Compatibility for the existing OCR panel; the canonical admin queue
+        # contract uses `completed`.
+        "job_id": job.id, "status": "succeeded" if job.status == "completed" else job.status, "attempts": job.attempts,
+        "progress": job.progress, "duration_ms": job.duration_ms, "worker_id": job.worker_id,
+        "result": job.result, "error": job.last_error if job.status in {"failed", "dead_letter"} else None,
         "created_at": job.created_at, "updated_at": job.updated_at,
     }

@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Optional
 import os
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -17,6 +17,7 @@ from app.core.auth import require_admin, require_project_role, require_user
 from app.integrations.telegram import notify_telegram
 from app.models.user import User
 from app.models.audit_log import AuditLog
+from app.models.job import BackgroundJob
 from app.task_engine import create_tasks_from_files
 from app.response_engine import create_response_drafts
 from app.governance_engine import create_governance_items
@@ -208,13 +209,14 @@ def _scan_worker(
         db.close()
 
 
-def submit_scan(session_id: int, project_id: int, source_folder_id: str, *, force: bool = False) -> int:
+def submit_scan(session_id: int, project_id: int, source_folder_id: str, *, force: bool = False,
+                idempotency_key: str | None = None) -> int:
     from app.jobs.queue import enqueue
     with SessionLocal() as db:
         job = enqueue(
             db, "organizer.scan",
             {"session_id": session_id, "project_id": project_id, "source_folder_id": source_folder_id},
-            idempotency_key=None if force else f"organizer.scan:{session_id}",
+            idempotency_key=None if force else (idempotency_key or f"organizer.scan:{session_id}"),
         )
         return job.id
 
@@ -248,8 +250,15 @@ def status():
 
 
 @router.post("/scan")
-def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def scan(payload: ScanRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "manager")
+    request_key = request.headers.get("Idempotency-Key", "").strip()[:200]
+    durable_key = f"http:organizer.scan:{user.id}:{payload.project_id}:{request_key}" if request_key else None
+    if durable_key:
+        existing = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == durable_key))
+        if existing is not None:
+            return {"session_id": int(existing.payload["session_id"]), "job_id": existing.id,
+                    "status": existing.status, "idempotent_replay": True}
     repo = OrganizerRepository(db)
     project = repo.project(payload.project_id)
     if not project:
@@ -269,11 +278,8 @@ def scan(payload: ScanRequest, background_tasks: BackgroundTasks, db: Session = 
     session_id = repo.create_session(payload.project_id, source.id, source.name)
     db.commit()
     _audit(db, "snapshot_scan_started", "organizer_session", session_id, f"Source folder: {source.name}", user_id=user.id)
-    if payload.background:
-        background_tasks.add_task(submit_scan, session_id, payload.project_id, source.id)
-        return {"session_id": session_id, "status": "queued"}
-    _scan_worker(session_id, payload.project_id, source.id)
-    return dict(repo.get_session(session_id) or {})
+    job_id = submit_scan(session_id, payload.project_id, source.id, idempotency_key=durable_key)
+    return {"session_id": session_id, "job_id": job_id, "status": "queued", "idempotent_replay": False}
 
 
 @router.get("/sessions/{session_id}")

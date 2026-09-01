@@ -1,47 +1,51 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.job import BackgroundJob, ServiceHeartbeat
 
+READY_STATUSES = ("queued", "retrying")
+TERMINAL_STATUSES = ("failed", "dead_letter", "completed", "cancelled")
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
+def safe_error(error: BaseException | str) -> str:
+    if isinstance(error, BaseException):
+        name = error.__class__.__name__
+        message = str(error) if isinstance(error, (ValueError, TimeoutError, ConnectionError)) else ""
+    else:
+        name, message = "JobError", str(error)
+    message = re.sub(r"(?i)(token|secret|password|authorization|api[_-]?key)\s*[:=]\s*\S+", r"\1=[REDACTED]", message)
+    message = re.sub(r"https?://\S+", "[URL REDACTED]", message)
+    message = " ".join(message.split())[:500]
+    return f"{name}: {message}" if message else name
 
 def touch_service(db: Session, service_id: str, service_kind: str, metadata: dict | None = None) -> None:
+    now = utcnow()
     row = db.get(ServiceHeartbeat, service_id)
     if row is None:
-        row = ServiceHeartbeat(
-            service_id=service_id, service_kind=service_kind,
-            last_seen=utcnow(), metadata_json=metadata or {},
-        )
-        db.add(row)
+        db.add(ServiceHeartbeat(service_id=service_id, service_kind=service_kind, last_seen=now, metadata_json=metadata or {}))
     else:
-        row.last_seen = utcnow()
+        row.last_seen = now
         row.metadata_json = metadata or row.metadata_json
     db.commit()
 
-
-def enqueue(
-    db: Session, kind: str, payload: dict[str, Any], *, priority: int = 100,
-    max_attempts: int = 3, idempotency_key: str | None = None,
-    available_at: datetime | None = None,
-) -> BackgroundJob:
-    """Persist work before returning to the caller; duplicate keys are idempotent."""
+def enqueue(db: Session, kind: str, payload: dict[str, Any], *, priority: int = 100,
+            max_attempts: int = 3, idempotency_key: str | None = None,
+            available_at: datetime | None = None) -> BackgroundJob:
     if idempotency_key:
         existing = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == idempotency_key))
         if existing is not None:
             return existing
-    job = BackgroundJob(
-        kind=kind, payload=payload, priority=priority, max_attempts=max_attempts,
-        idempotency_key=idempotency_key, available_at=available_at or utcnow(),
-    )
+    job = BackgroundJob(kind=kind, payload=payload, priority=priority, max_attempts=max_attempts,
+                        idempotency_key=idempotency_key, available_at=available_at or utcnow(), progress=0)
     db.add(job)
     try:
         db.commit()
@@ -56,89 +60,108 @@ def enqueue(
     db.refresh(job)
     return job
 
-
 def recover_expired(db: Session) -> int:
-    """Return abandoned leased jobs to the queue after a worker crash."""
-    now = utcnow()
-    rows = list(db.scalars(select(BackgroundJob).where(
-        BackgroundJob.status == "running", BackgroundJob.lease_expires_at < now,
-    )))
-    for job in rows:
-        job.status = "dead_letter" if job.attempts >= job.max_attempts else "queued"
-        job.available_at = now
-        job.worker_id = None
-        job.locked_at = None
-        job.lease_expires_at = None
-        job.last_error = ((job.last_error or "") + "\nWorker lease expired; job recovered.").strip()
+    if db.bind is not None and db.bind.dialect.name != "postgresql":
+        rows = list(db.scalars(select(BackgroundJob).where(BackgroundJob.status == "running", BackgroundJob.lease_expires_at < utcnow()).with_for_update()))
+        for job in rows:
+            job.status = "dead_letter" if job.attempts >= job.max_attempts else "retrying"
+            job.available_at = utcnow(); job.worker_id = job.locked_at = job.lease_expires_at = None
+            job.last_error = "Worker lease expired; job recovered."
+        db.commit()
+        return len(rows)
+    result = db.execute(text("""
+        UPDATE background_jobs
+        SET status=CASE WHEN attempts >= max_attempts THEN 'dead_letter' ELSE 'retrying' END,
+            available_at=now(), worker_id=NULL, locked_at=NULL, lease_expires_at=NULL,
+            last_error='Worker lease expired; job recovered.', updated_at=now()
+        WHERE status='running' AND lease_expires_at < now()
+    """))
     db.commit()
-    return len(rows)
-
+    return result.rowcount or 0
 
 def claim(db: Session, worker_id: str, lease_seconds: int = 300) -> BackgroundJob | None:
-    """Atomically claim one ready job. PostgreSQL workers never block each other."""
-    now = utcnow()
-    lease_until = now + timedelta(seconds=lease_seconds)
+    now = utcnow(); lease_until = now + timedelta(seconds=lease_seconds)
     if db.bind is not None and db.bind.dialect.name == "postgresql":
         job_id = db.execute(text("""
             WITH candidate AS (
                 SELECT id FROM background_jobs
-                WHERE status = 'queued' AND available_at <= now()
-                ORDER BY priority ASC, id ASC
-                FOR UPDATE SKIP LOCKED LIMIT 1
+                WHERE status IN ('queued','retrying') AND available_at <= now()
+                ORDER BY priority ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 1
             )
             UPDATE background_jobs AS job
             SET status='running', attempts=attempts+1, worker_id=:worker_id,
-                locked_at=now(), lease_expires_at=:lease_until, updated_at=now()
+                locked_at=now(), started_at=COALESCE(started_at, now()),
+                lease_expires_at=:lease_until, progress=GREATEST(progress, 1), updated_at=now()
             FROM candidate WHERE job.id=candidate.id RETURNING job.id
         """), {"worker_id": worker_id, "lease_until": lease_until}).scalar()
         db.commit()
         return db.get(BackgroundJob, job_id) if job_id is not None else None
-    job = db.scalar(select(BackgroundJob).where(
-        BackgroundJob.status == "queued", BackgroundJob.available_at <= now,
-    ).order_by(BackgroundJob.priority, BackgroundJob.id).limit(1))
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.status.in_(READY_STATUSES), BackgroundJob.available_at <= now).with_for_update().order_by(BackgroundJob.priority, BackgroundJob.id).limit(1))
     if job is None:
         return None
-    job.status = "running"
-    job.attempts += 1
-    job.worker_id = worker_id
-    job.locked_at = now
-    job.lease_expires_at = lease_until
-    db.commit()
-    db.refresh(job)
+    job.status, job.attempts, job.worker_id = "running", job.attempts + 1, worker_id
+    job.locked_at, job.lease_expires_at, job.started_at = now, lease_until, job.started_at or now
+    job.progress = max(job.progress or 0, 1)
+    db.commit(); db.refresh(job)
     return job
 
-
 def heartbeat(db: Session, job_id: int, worker_id: str, lease_seconds: int = 300) -> bool:
-    job = db.get(BackgroundJob, job_id)
-    if job is None or job.status != "running" or job.worker_id != worker_id:
-        return False
-    job.lease_expires_at = utcnow() + timedelta(seconds=lease_seconds)
-    db.commit()
-    return True
+    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).values(lease_expires_at=utcnow() + timedelta(seconds=lease_seconds), updated_at=utcnow()))
+    db.commit(); return bool(result.rowcount)
 
+def set_progress(db: Session, job_id: int, worker_id: str, progress: int) -> bool:
+    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).values(progress=max(1, min(99, int(progress))), updated_at=utcnow()))
+    db.commit(); return bool(result.rowcount)
+
+def _duration(job: BackgroundJob, ended: datetime) -> int | None:
+    return max(0, int((ended - job.started_at).total_seconds() * 1000)) if job.started_at else None
 
 def succeed(db: Session, job_id: int, worker_id: str, result: dict | None = None) -> bool:
-    job = db.get(BackgroundJob, job_id)
-    if job is None or job.status != "running" or job.worker_id != worker_id:
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).with_for_update())
+    if job is None:
         return False
-    job.status = "succeeded"
-    job.result = result or {}
-    job.completed_at = utcnow()
-    job.lease_expires_at = None
-    db.commit()
-    return True
+    ended = utcnow(); job.status, job.result, job.progress = "completed", result or {}, 100
+    job.completed_at, job.duration_ms, job.lease_expires_at = ended, _duration(job, ended), None
+    db.commit(); return True
 
-
-def fail(db: Session, job_id: int, worker_id: str, error: str) -> str:
-    job = db.get(BackgroundJob, job_id)
-    if job is None or job.status != "running" or job.worker_id != worker_id:
+def fail(db: Session, job_id: int, worker_id: str, error: BaseException | str, *, retryable: bool = True) -> str:
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).with_for_update())
+    if job is None:
         return "lost"
     terminal = job.attempts >= job.max_attempts
-    job.status = "dead_letter" if terminal else "queued"
-    job.last_error = error[:4000]
-    job.worker_id = None
-    job.locked_at = None
-    job.lease_expires_at = None
+    job.status = "failed" if not retryable else "dead_letter" if terminal else "retrying"
+    job.last_error = safe_error(error)
+    job.worker_id = job.locked_at = job.lease_expires_at = None
     job.available_at = utcnow() + timedelta(seconds=min(300, 5 * (2 ** max(job.attempts - 1, 0))))
-    db.commit()
-    return job.status
+    if job.status in TERMINAL_STATUSES:
+        job.completed_at = utcnow(); job.duration_ms = _duration(job, job.completed_at)
+    db.commit(); return job.status
+
+def cancel(db: Session, job_id: int) -> bool:
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status.in_(READY_STATUSES)).with_for_update())
+    if job is None:
+        return False
+    ended = utcnow(); job.status, job.cancelled_at, job.completed_at = "cancelled", ended, ended
+    job.duration_ms = _duration(job, ended)
+    db.commit(); return True
+
+def retry(db: Session, job_id: int, *, redrive: bool = False) -> bool:
+    allowed = ("dead_letter",) if redrive else ("failed",)
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status.in_(allowed)).with_for_update())
+    if job is None:
+        return False
+    job.status, job.available_at, job.completed_at = "queued", utcnow(), None
+    job.worker_id = job.locked_at = job.lease_expires_at = None
+    job.last_error, job.progress, job.started_at, job.duration_ms = None, 0, None, None
+    if redrive:
+        job.attempts = 0
+    db.commit(); return True
+
+def metrics(db: Session, heartbeat_seconds: int = 90) -> dict:
+    now = utcnow()
+    counts = dict(db.execute(select(BackgroundJob.status, func.count()).group_by(BackgroundJob.status)).all())
+    oldest = db.scalar(select(func.min(BackgroundJob.created_at)).where(BackgroundJob.status.in_(READY_STATUSES)))
+    if oldest is not None and oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=timezone.utc)
+    workers = db.scalar(select(func.count()).select_from(ServiceHeartbeat).where(ServiceHeartbeat.service_kind == "worker", ServiceHeartbeat.last_seen >= now - timedelta(seconds=heartbeat_seconds))) or 0
+    return {"queue_length": sum(int(counts.get(s, 0)) for s in READY_STATUSES), "oldest_job_age_seconds": max(0, int((now - oldest).total_seconds())) if oldest else 0, "errors": int(counts.get("failed", 0)) + int(counts.get("dead_letter", 0)), "workers": int(workers), "statuses": {str(k): int(v) for k, v in counts.items()}}
