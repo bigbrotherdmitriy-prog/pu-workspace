@@ -106,26 +106,77 @@ def claim(db: Session, worker_id: str, lease_seconds: int = 300) -> BackgroundJo
     return job
 
 def heartbeat(db: Session, job_id: int, worker_id: str, lease_seconds: int = 300) -> bool:
-    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).values(lease_expires_at=utcnow() + timedelta(seconds=lease_seconds), updated_at=utcnow()))
+    owner_id = worker_id
+    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).values(lease_expires_at=utcnow() + timedelta(seconds=lease_seconds), updated_at=utcnow()))
     db.commit(); return bool(result.rowcount)
 
 def set_progress(db: Session, job_id: int, worker_id: str, progress: int) -> bool:
-    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).values(progress=max(1, min(99, int(progress))), updated_at=utcnow()))
+    owner_id = worker_id
+    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).values(progress=max(1, min(99, int(progress))), updated_at=utcnow()))
     db.commit(); return bool(result.rowcount)
 
+def update_cooperative_progress(
+    db: Session, job_id: int, progress: int, detail: dict[str, Any] | None = None,
+) -> tuple[bool, bool]:
+    """Update progress from a running handler and return (updated, cancel_requested)."""
+    job = db.scalar(select(BackgroundJob).where(
+        BackgroundJob.id == job_id, BackgroundJob.status == "running",
+    ).with_for_update())
+    if job is None:
+        return False, True
+    current = dict(job.result or {})
+    cancel_requested = bool(current.get("cancel_requested"))
+    job.progress = max(1, min(99, int(progress)))
+    job.result = {**current, "progress": detail or {"percent": job.progress},
+                  "cancel_requested": cancel_requested}
+    db.commit()
+    return True, cancel_requested
+
+def request_cancel(db: Session, job_id: int, *, allow_running: bool = False) -> str | None:
+    """Cancel waiting work or request cooperative cancellation of a running job."""
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id).with_for_update())
+    if job is None:
+        return None
+    if job.status in READY_STATUSES:
+        ended = utcnow()
+        job.status, job.cancelled_at, job.completed_at = "cancelled", ended, ended
+        job.result = {**dict(job.result or {}), "cancelled": True}
+        job.duration_ms = _duration(job, ended)
+        db.commit()
+        return "cancelled"
+    if allow_running and job.status == "running":
+        job.result = {**dict(job.result or {}), "cancel_requested": True}
+        db.commit()
+        return "cancellation_requested"
+    return job.status
+
 def _duration(job: BackgroundJob, ended: datetime) -> int | None:
-    return max(0, int((ended - job.started_at).total_seconds() * 1000)) if job.started_at else None
+    if not job.started_at:
+        return None
+    started = job.started_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if ended.tzinfo is None:
+        ended = ended.replace(tzinfo=timezone.utc)
+    return max(0, int((ended - started).total_seconds() * 1000))
 
 def succeed(db: Session, job_id: int, worker_id: str, result: dict | None = None) -> bool:
-    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).with_for_update())
+    owner_id = worker_id
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).with_for_update())
     if job is None:
         return False
-    ended = utcnow(); job.status, job.result, job.progress = "completed", result or {}, 100
+    ended = utcnow()
+    cancelled = bool((result or {}).get("cancelled"))
+    job.status, job.result = ("cancelled" if cancelled else "completed"), (result or {})
+    job.progress = min(99, job.progress or 0) if cancelled else 100
+    if cancelled:
+        job.cancelled_at = ended
     job.completed_at, job.duration_ms, job.lease_expires_at = ended, _duration(job, ended), None
     db.commit(); return True
 
 def fail(db: Session, job_id: int, worker_id: str, error: BaseException | str, *, retryable: bool = True) -> str:
-    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == worker_id).with_for_update())
+    owner_id = worker_id
+    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).with_for_update())
     if job is None:
         return "lost"
     terminal = job.attempts >= job.max_attempts
@@ -138,12 +189,7 @@ def fail(db: Session, job_id: int, worker_id: str, error: BaseException | str, *
     db.commit(); return job.status
 
 def cancel(db: Session, job_id: int) -> bool:
-    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status.in_(READY_STATUSES)).with_for_update())
-    if job is None:
-        return False
-    ended = utcnow(); job.status, job.cancelled_at, job.completed_at = "cancelled", ended, ended
-    job.duration_ms = _duration(job, ended)
-    db.commit(); return True
+    return request_cancel(db, job_id) == "cancelled"
 
 def retry(db: Session, job_id: int, *, redrive: bool = False) -> bool:
     allowed = ("dead_letter",) if redrive else ("failed",)

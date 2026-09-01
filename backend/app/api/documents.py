@@ -12,7 +12,7 @@ from app.models.governance import Decision, Risk
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.job import BackgroundJob
-from app.jobs.queue import enqueue
+from app.jobs.queue import enqueue, request_cancel
 from app.core.auth import require_project_role, require_user
 from app.integrations.source_urls import source_object_url
 
@@ -287,12 +287,7 @@ def cancel_ocr_batch(
     job = db.get(BackgroundJob, job_id)
     if job is None or job.kind != "documents.ocr" or int(job.payload.get("project_id", -1)) != project_id:
         raise HTTPException(404, "OCR batch not found")
-    if job.status == "queued":
-        job.status = "cancelled"
-        job.result = {"cancelled": True, "progress": {"completed": 0, "total": 0, "percent": 0}}
-    elif job.status == "running":
-        job.result = {**dict(job.result or {}), "cancel_requested": True}
-    elif job.status not in {"cancelled", "succeeded", "dead_letter"}:
+    status = request_cancel(db, job.id, allow_running=True)
+    if status not in {"cancelled", "cancellation_requested", "completed", "dead_letter"}:
         raise HTTPException(409, "OCR batch cannot be cancelled")
-    db.commit()
-    return {"job_id": job.id, "status": "cancellation_requested" if job.status == "running" else job.status}
+    return {"job_id": job.id, "status": status}

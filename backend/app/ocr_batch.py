@@ -9,7 +9,7 @@ from app.database import SessionLocal
 from app.document_engine import index_documents
 from app.governance_engine import create_governance_items
 from app.models.document import Document
-from app.models.job import BackgroundJob
+from app.jobs.queue import update_cooperative_progress
 from app.organizer_engine.content import extract_text_result
 from app.organizer_engine.drive import DriveClient
 from app.organizer_engine.drive_factory import get_drive_service
@@ -33,20 +33,11 @@ def _job_control(db, job_id: int | None, *, completed: int, total: int, document
     """Publish bounded progress and read cooperative cancellation without changing queue internals."""
     if job_id is None:
         return False
-    job = db.get(BackgroundJob, job_id)
-    if job is None:
-        return True
-    current = dict(job.result or {})
-    cancel_requested = bool(current.get("cancel_requested")) or job.status == "cancelled"
-    job.result = {
-        "progress": {
-            "completed": completed, "total": total,
-            "percent": round((completed / total) * 100) if total else 100,
-            "document_id": document_id,
-        },
-        "cancel_requested": cancel_requested,
-    }
-    db.commit()
+    percent = round((completed / total) * 100) if total else 100
+    _, cancel_requested = update_cooperative_progress(
+        db, job_id, percent,
+        {"completed": completed, "total": total, "percent": percent, "document_id": document_id},
+    )
     return cancel_requested
 
 

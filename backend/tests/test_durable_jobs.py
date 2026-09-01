@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from app.jobs.queue import cancel, claim, enqueue, fail, metrics, recover_expired, retry, safe_error, succeed, utcnow
+from app.jobs.queue import cancel, claim, enqueue, fail, metrics, recover_expired, request_cancel, retry, safe_error, succeed, update_cooperative_progress, utcnow
 from app.models.job import BackgroundJob
 
 
@@ -68,3 +68,18 @@ def test_metrics_and_error_redaction(db_session):
     redacted = safe_error(ValueError("token=abc https://private.example/document"))
     assert "abc" not in redacted
     assert "private.example" not in redacted
+
+
+def test_running_job_cooperative_cancel_uses_queue_contract(db_session):
+    job = enqueue(db_session, "documents.ocr", {"project_id": 1})
+    claimed = claim(db_session, "ocr-worker")
+    assert request_cancel(db_session, job.id, allow_running=True) == "cancellation_requested"
+    updated, requested = update_cooperative_progress(
+        db_session, job.id, 40, {"completed": 2, "total": 5, "percent": 40},
+    )
+    assert updated and requested
+    assert succeed(db_session, claimed.id, "ocr-worker", {"cancelled": True})
+    cancelled = db_session.get(BackgroundJob, job.id)
+    assert cancelled.status == "cancelled"
+    assert cancelled.cancelled_at is not None
+    assert cancelled.progress < 100
