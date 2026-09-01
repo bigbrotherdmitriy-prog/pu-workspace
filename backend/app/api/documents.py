@@ -35,6 +35,10 @@ class OcrBatchCreate(BaseModel):
     document_ids: list[int] | None = Field(default=None, max_length=500)
 
 
+class OcrReviewUpdate(BaseModel):
+    status: str = Field(pattern="^(confirmed|rejected)$")
+
+
 @router.post("/{project_id}/documents")
 def create_document(
     project_id: int,
@@ -141,11 +145,53 @@ def list_documents(
                 "extraction_method": item.extraction_method,
                 "extraction_quality": item.extraction_quality,
                 "ocr_pages": item.ocr_pages,
+                "ocr_confidence": item.ocr_confidence,
+                "ocr_review_status": item.ocr_review_status,
                 "ocr_updated_at": item.ocr_updated_at,
             }
             for item in documents
         ]
     }
+
+
+@router.get("/{project_id}/documents/ocr-review")
+def list_ocr_review_queue(
+    project_id: int, limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db), user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    rows = list(db.scalars(select(Document).where(
+        Document.project_id == project_id,
+        Document.ocr_review_status == "needs_review",
+    ).order_by(Document.ocr_confidence.asc(), Document.id.asc()).limit(limit)))
+    return {
+        "count": len(rows),
+        "documents": [
+            {
+                "id": item.id, "name": item.name,
+                "confidence": item.ocr_confidence,
+                "review_status": item.ocr_review_status,
+                "evidence": item.ocr_metadata or {},
+            }
+            for item in rows
+        ],
+    }
+
+
+@router.post("/{project_id}/documents/{document_id}/ocr-review")
+def update_ocr_review(
+    project_id: int, document_id: int, payload: OcrReviewUpdate,
+    db: Session = Depends(get_db), user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    item = db.get(Document, document_id)
+    if item is None or item.project_id != project_id:
+        raise HTTPException(404, "Document not found")
+    if item.ocr_review_status not in {"needs_review", "confirmed", "rejected"}:
+        raise HTTPException(409, "Document does not require OCR review")
+    item.ocr_review_status = payload.status
+    db.commit()
+    return {"document_id": item.id, "review_status": item.ocr_review_status}
 
 
 @router.get("/{project_id}/documents/{document_id}")
@@ -168,6 +214,9 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
         "extraction_method": item.extraction_method,
         "extraction_quality": item.extraction_quality,
         "ocr_pages": item.ocr_pages,
+        "ocr_confidence": item.ocr_confidence,
+        "ocr_review_status": item.ocr_review_status,
+        "ocr_metadata": item.ocr_metadata,
         "ocr_updated_at": item.ocr_updated_at,
         "versions": [{"version": x.version_number, "created_at": x.created_at} for x in versions],
         "links": {"tasks": len(tasks), "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts)},
@@ -200,6 +249,8 @@ def create_ocr_batch(
         db, "documents.ocr", {"project_id": project_id, "document_ids": document_ids},
         priority=60, max_attempts=2,
     )
+    job.payload = {**dict(job.payload or {}), "job_id": job.id}
+    db.commit()
     return {"job_id": job.id, "status": job.status, "already_running": False}
 
 
@@ -212,11 +263,36 @@ def get_ocr_batch(
     job = db.get(BackgroundJob, job_id)
     if job is None or job.kind != "documents.ocr" or int(job.payload.get("project_id", -1)) != project_id:
         raise HTTPException(404, "OCR batch not found")
+    result = dict(job.result or {})
+    effective_status = "cancelled" if result.get("cancelled") else job.status
     return {
-        # Compatibility for the existing OCR panel; the canonical admin queue
-        # contract uses `completed`.
-        "job_id": job.id, "status": "succeeded" if job.status == "completed" else job.status, "attempts": job.attempts,
-        "progress": job.progress, "duration_ms": job.duration_ms, "worker_id": job.worker_id,
-        "result": job.result, "error": job.last_error if job.status in {"failed", "dead_letter"} else None,
+        # Keep the existing OCR panel compatible while the canonical admin
+        # queue contract uses `completed`.
+        "job_id": job.id,
+        "status": "succeeded" if effective_status == "completed" else effective_status,
+        "attempts": job.attempts, "progress": job.progress,
+        "duration_ms": job.duration_ms, "worker_id": job.worker_id,
+        "result": job.result,
+        "error": job.last_error if job.status in {"failed", "dead_letter"} else None,
         "created_at": job.created_at, "updated_at": job.updated_at,
     }
+
+
+@router.post("/{project_id}/documents/ocr-batches/{job_id}/cancel")
+def cancel_ocr_batch(
+    project_id: int, job_id: int,
+    db: Session = Depends(get_db), user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    job = db.get(BackgroundJob, job_id)
+    if job is None or job.kind != "documents.ocr" or int(job.payload.get("project_id", -1)) != project_id:
+        raise HTTPException(404, "OCR batch not found")
+    if job.status == "queued":
+        job.status = "cancelled"
+        job.result = {"cancelled": True, "progress": {"completed": 0, "total": 0, "percent": 0}}
+    elif job.status == "running":
+        job.result = {**dict(job.result or {}), "cancel_requested": True}
+    elif job.status not in {"cancelled", "succeeded", "dead_letter"}:
+        raise HTTPException(409, "OCR batch cannot be cancelled")
+    db.commit()
+    return {"job_id": job.id, "status": "cancellation_requested" if job.status == "running" else job.status}

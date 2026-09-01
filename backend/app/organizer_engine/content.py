@@ -10,6 +10,7 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 
@@ -19,6 +20,47 @@ OCR_MAX_PAGES = max(1, min(50, int(os.getenv("OCR_MAX_PAGES", "20"))))
 OCR_TIMEOUT_SECONDS = max(10, min(300, int(os.getenv("OCR_TIMEOUT_SECONDS", "120"))))
 OCR_DPI = max(200, min(400, int(os.getenv("OCR_DPI", "300"))))
 OCR_PSM = max(1, min(13, int(os.getenv("OCR_PSM", "1"))))
+OCR_REVIEW_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("OCR_REVIEW_CONFIDENCE", "0.72"))))
+
+
+@dataclass(slots=True)
+class OcrToken:
+    text: str
+    confidence: float
+    bbox: tuple[int, int, int, int]
+    line_id: tuple[int, int, int]
+
+
+@dataclass(slots=True)
+class PageExtraction:
+    page: int
+    text: str
+    confidence: float
+    method: str
+    width: int = 0
+    height: int = 0
+    tokens: list[OcrToken] = field(default_factory=list)
+    preprocessing: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class FieldEvidence:
+    field: str
+    value: str
+    page: int
+    confidence: float
+    excerpt: str
+    bbox: tuple[int, int, int, int] | None = None
+
+
+@dataclass(slots=True)
+class TableCell:
+    page: int
+    row: int
+    column: int
+    text: str
+    bbox: tuple[int, int, int, int]
+    confidence: float
 
 
 @dataclass(slots=True)
@@ -28,7 +70,46 @@ class ExtractionResult:
     quality: str
     total_pages: int = 0
     ocr_pages: int = 0
+    confidence: float = 0.0
+    pages: list[PageExtraction] = field(default_factory=list)
+    fields: dict[str, list[FieldEvidence]] = field(default_factory=dict)
+    table_cells: list[TableCell] = field(default_factory=list)
+    needs_review: bool = False
     warnings: list[str] = field(default_factory=list)
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "confidence": round(self.confidence, 4),
+            "needs_review": self.needs_review,
+            "pages": [
+                {
+                    "page": page.page, "confidence": round(page.confidence, 4),
+                    "method": page.method, "width": page.width, "height": page.height,
+                    "preprocessing": page.preprocessing, "excerpt": page.text[:500],
+                }
+                for page in self.pages
+            ],
+            "fields": {
+                name: [
+                    {
+                        "value": evidence.value, "page": evidence.page,
+                        "confidence": round(evidence.confidence, 4),
+                        "excerpt": evidence.excerpt, "bbox": evidence.bbox,
+                    }
+                    for evidence in values
+                ]
+                for name, values in self.fields.items()
+            },
+            "table_cells": [
+                {
+                    "page": cell.page, "row": cell.row, "column": cell.column,
+                    "text": cell.text, "bbox": cell.bbox,
+                    "confidence": round(cell.confidence, 4),
+                }
+                for cell in self.table_cells[:2000]
+            ],
+            "warnings": self.warnings,
+        }
 
 
 def _xml_text(data: bytes) -> str:
@@ -120,22 +201,146 @@ def _ocr_enabled() -> bool:
     return os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _tesseract(path: Path, timeout: float | None = None) -> str:
+def _projection_score(image) -> float:
+    """Reward rotations that concentrate dark pixels into horizontal text rows."""
+    width, height = image.size
+    if not width or not height:
+        return 0.0
+    pixels = image.load()
+    rows = []
+    step = max(1, width // 1200)
+    for y in range(height):
+        rows.append(sum(1 for x in range(0, width, step) if pixels[x, y] < 180))
+    mean = sum(rows) / max(1, len(rows))
+    return sum((value - mean) ** 2 for value in rows) / max(1, len(rows))
+
+
+def _detect_orientation(path: Path, timeout: float) -> int:
     if not shutil.which("tesseract"):
-        return ""
+        return 0
+    try:
+        result = subprocess.run(
+            ["tesseract", str(path), "stdout", "-l", "osd", "--psm", "0"],
+            capture_output=True, text=True, timeout=max(1, timeout), check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    match = re.search(r"Rotate:\s*(0|90|180|270)", result.stdout + "\n" + result.stderr)
+    return int(match.group(1)) if match else 0
+
+
+def _preprocess_image(source: Path, target: Path, timeout: float) -> tuple[int, int, list[str]]:
+    """Local deterministic preprocessing; originals are read-only and never replaced."""
+    from PIL import Image, ImageFilter, ImageOps
+
+    actions: list[str] = []
+    with Image.open(source) as opened:
+        image = ImageOps.exif_transpose(opened).convert("L")
+    actions.append("grayscale")
+    orientation = _detect_orientation(source, min(15, timeout))
+    if orientation:
+        image = image.rotate(orientation, expand=True, fillcolor=255)
+        actions.append(f"autorotate:{orientation}")
+    image = ImageOps.autocontrast(image, cutoff=1)
+    actions.append("autocontrast")
+    image = image.filter(ImageFilter.MedianFilter(size=3))
+    actions.append("median_denoise")
+
+    # A bounded projection search corrects typical scanner skew without OpenCV.
+    preview = image.copy()
+    preview.thumbnail((1400, 1400))
+    best_angle, best_score = 0.0, _projection_score(preview)
+    for angle in (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0):
+        candidate = preview.rotate(angle, expand=True, fillcolor=255)
+        score = _projection_score(candidate)
+        if score > best_score * 1.03:
+            best_angle, best_score = angle, score
+    if best_angle:
+        image = image.rotate(best_angle, expand=True, fillcolor=255)
+        actions.append(f"deskew:{best_angle:g}")
+    image.save(target, format="PNG", optimize=True)
+    return image.width, image.height, actions
+
+
+def _parse_tsv(tsv: str) -> list[OcrToken]:
+    tokens: list[OcrToken] = []
+    lines = tsv.splitlines()
+    if not lines:
+        return tokens
+    headers = lines[0].split("\t")
+    positions = {name: index for index, name in enumerate(headers)}
+    required = {"text", "conf", "left", "top", "width", "height", "block_num", "par_num", "line_num"}
+    if not required.issubset(positions):
+        return tokens
+    for line in lines[1:]:
+        values = line.split("\t")
+        if len(values) < len(headers):
+            continue
+        text_value = values[positions["text"]].strip()
+        if not text_value:
+            continue
+        try:
+            raw_confidence = float(values[positions["conf"]])
+            left, top = int(values[positions["left"]]), int(values[positions["top"]])
+            width, height = int(values[positions["width"]]), int(values[positions["height"]])
+            line_id = tuple(int(values[positions[name]]) for name in ("block_num", "par_num", "line_num"))
+        except (TypeError, ValueError):
+            continue
+        if raw_confidence < 0:
+            continue
+        tokens.append(OcrToken(
+            text=text_value, confidence=max(0.0, min(1.0, raw_confidence / 100.0)),
+            bbox=(left, top, width, height), line_id=line_id,
+        ))
+    return tokens
+
+
+def _page_from_tokens(page: int, tokens: list[OcrToken], width: int, height: int, actions: list[str]) -> PageExtraction:
+    grouped: dict[tuple[int, int, int], list[OcrToken]] = {}
+    for token in tokens:
+        grouped.setdefault(token.line_id, []).append(token)
+    lines = [" ".join(item.text for item in sorted(line, key=lambda token: token.bbox[0]))
+             for _, line in sorted(grouped.items())]
+    confidence = sum(token.confidence for token in tokens) / len(tokens) if tokens else 0.0
+    return PageExtraction(
+        page=page, text="\n".join(lines), confidence=confidence,
+        method="ocr", width=width, height=height, tokens=tokens,
+        preprocessing=actions,
+    )
+
+
+def _tesseract_page(path: Path, page: int = 1, timeout: float | None = None) -> PageExtraction:
+    if not shutil.which("tesseract"):
+        return PageExtraction(page=page, text="", confidence=0.0, method="ocr")
+    budget = max(1, timeout or OCR_TIMEOUT_SECONDS)
+    processed = path.with_name(f"{path.stem}-processed.png")
+    try:
+        width, height, actions = _preprocess_image(path, processed, budget)
+    except Exception:
+        processed = path
+        width, height, actions = 0, 0, ["preprocessing_failed"]
     result = subprocess.run(
         [
-            "tesseract", str(path), "stdout",
+            "tesseract", str(processed), "stdout",
             "-l", os.getenv("OCR_LANGUAGES", "rus+eng"),
             "--psm", str(OCR_PSM),
-            "-c", "preserve_interword_spaces=1",
+            "-c", "preserve_interword_spaces=1", "tsv",
         ],
-        capture_output=True,
-        text=True,
-        timeout=max(1, timeout or OCR_TIMEOUT_SECONDS),
-        check=False,
+        capture_output=True, text=True, timeout=budget, check=False,
     )
-    return result.stdout if result.returncode == 0 else ""
+    tokens = _parse_tsv(result.stdout) if result.returncode == 0 else []
+    return _page_from_tokens(page, tokens, width, height, actions)
+
+
+def _tesseract(path: Path, timeout: float | None = None) -> str:
+    return _tesseract_page(path, timeout=timeout).text
+
+
+def _ocr_image_page(data: bytes, suffix: str) -> PageExtraction:
+    with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
+        source = Path(temp) / f"source.{suffix or 'png'}"
+        source.write_bytes(data)
+        return _tesseract_page(source, 1)
 
 
 def _ocr_text(data: bytes, suffix: str, mime_type: str) -> str:
@@ -149,9 +354,7 @@ def _ocr_text(data: bytes, suffix: str, mime_type: str) -> str:
     with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
         temp_dir = Path(temp)
         if is_image:
-            source = temp_dir / f"source.{suffix or 'png'}"
-            source.write_bytes(data)
-            return _tesseract(source)
+            return _ocr_image_page(data, suffix).text
         if not shutil.which("pdftoppm"):
             return ""
         source = temp_dir / "source.pdf"
@@ -169,7 +372,7 @@ def _ocr_text(data: bytes, suffix: str, mime_type: str) -> str:
         return " ".join(_tesseract(page) for page in sorted(temp_dir.glob("page-*.jpg")))
 
 
-def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, str]:
+def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtraction]:
     """OCR selected one-based PDF pages within one total time budget."""
     if not page_numbers or not _ocr_enabled() or not shutil.which("pdftoppm"):
         return {}
@@ -178,7 +381,7 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, str]:
         temp_dir = Path(temp)
         source = temp_dir / "source.pdf"
         source.write_bytes(data)
-        result: dict[int, str] = {}
+        result: dict[int, PageExtraction] = {}
         for page_number in sorted(page_numbers):
             remaining = deadline - time.monotonic()
             if remaining <= 1:
@@ -195,8 +398,119 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, str]:
             if rendered.returncode == 0 and image.exists():
                 remaining = deadline - time.monotonic()
                 if remaining > 1:
-                    result[page_number] = _tesseract(image, remaining)
+                    result[page_number] = _tesseract_page(image, page_number, remaining)
         return result
+
+
+def _coerce_page(value: PageExtraction | str, page_number: int, method: str = "ocr") -> PageExtraction:
+    if isinstance(value, PageExtraction):
+        return value
+    confidence = 0.8 if value.strip() else 0.0
+    return PageExtraction(page=page_number, text=value, confidence=confidence, method=method)
+
+
+def _native_page(page_number: int, text: str) -> PageExtraction:
+    compact = "".join(text.split())
+    confidence = 0.98 if len(compact) >= OCR_MIN_NATIVE_CHARS else 0.65 if compact else 0.0
+    return PageExtraction(page=page_number, text=text, confidence=confidence, method="native")
+
+
+def _excerpt(text: str, start: int, end: int, radius: int = 80) -> str:
+    return re.sub(r"\s+", " ", text[max(0, start - radius):min(len(text), end + radius)]).strip()
+
+
+def _union_bbox(tokens: list[OcrToken], value: str) -> tuple[int, int, int, int] | None:
+    normalized_value = re.sub(r"\W+", "", value, flags=re.UNICODE).casefold()
+    matches = []
+    for token in tokens:
+        normalized_token = re.sub(r"\W+", "", token.text, flags=re.UNICODE).casefold()
+        if normalized_token and (normalized_token in normalized_value or normalized_value in normalized_token):
+            matches.append(token)
+    if not matches:
+        return None
+    left = min(token.bbox[0] for token in matches)
+    top = min(token.bbox[1] for token in matches)
+    right = max(token.bbox[0] + token.bbox[2] for token in matches)
+    bottom = max(token.bbox[1] + token.bbox[3] for token in matches)
+    return left, top, right - left, bottom - top
+
+
+_FIELD_PATTERNS = {
+    "number": re.compile(r"(?:договор|контракт|сч[её]т|акт)\s*(?:№|N|номер)?\s*([A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9./_-]{2,})", re.I),
+    "date": re.compile(r"\b([0-3]?\d[./-][01]?\d[./-](?:19|20)\d{2})\b"),
+    "amount": re.compile(r"\b(\d{1,3}(?:[\s\u00a0]\d{3})*(?:[,.]\d{1,2})?)\s*(?:руб(?:лей|ля|ль|\.)?|₽)", re.I),
+    "party": re.compile(r"\b((?:ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|МУП)\s+(?:«[^»\n]{2,80}»|\"[^\"\n]{2,80}\"|'[^'\n]{2,80}'|[А-ЯЁA-Z][^,;\n]{1,60}))", re.I),
+}
+
+
+def _extract_fields(pages: list[PageExtraction]) -> dict[str, list[FieldEvidence]]:
+    result: dict[str, list[FieldEvidence]] = {}
+    for page in pages:
+        for name, pattern in _FIELD_PATTERNS.items():
+            seen: set[str] = set()
+            for match in pattern.finditer(page.text):
+                value = match.group(1).strip(" .,:;\"'")
+                normalized = value.casefold()
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                confidence = page.confidence
+                if name == "number" and len(value) < 4:
+                    confidence *= 0.65
+                result.setdefault(name, []).append(FieldEvidence(
+                    field=name, value=value, page=page.page,
+                    confidence=max(0.0, min(1.0, confidence)),
+                    excerpt=_excerpt(page.text, match.start(), match.end()),
+                    bbox=_union_bbox(page.tokens, value),
+                ))
+    return result
+
+
+def _extract_table_cells(pages: list[PageExtraction]) -> list[TableCell]:
+    """Foundation for table reconstruction: stable row/column coordinates from OCR tokens."""
+    cells: list[TableCell] = []
+    for page in pages:
+        grouped: dict[tuple[int, int, int], list[OcrToken]] = {}
+        for token in page.tokens:
+            grouped.setdefault(token.line_id, []).append(token)
+        row_number = 0
+        for _, line in sorted(grouped.items()):
+            ordered = sorted(line, key=lambda item: item.bbox[0])
+            if len(ordered) < 2:
+                continue
+            heights = [max(1, item.bbox[3]) for item in ordered]
+            gap_threshold = max(25, int(sum(heights) / len(heights) * 2.2))
+            groups: list[list[OcrToken]] = [[ordered[0]]]
+            for token in ordered[1:]:
+                previous = groups[-1][-1]
+                gap = token.bbox[0] - (previous.bbox[0] + previous.bbox[2])
+                if gap > gap_threshold:
+                    groups.append([])
+                groups[-1].append(token)
+            if len(groups) < 2:
+                continue
+            row_number += 1
+            for column, group in enumerate(groups, start=1):
+                left = min(item.bbox[0] for item in group)
+                top = min(item.bbox[1] for item in group)
+                right = max(item.bbox[0] + item.bbox[2] for item in group)
+                bottom = max(item.bbox[1] + item.bbox[3] for item in group)
+                cells.append(TableCell(
+                    page=page.page, row=row_number, column=column,
+                    text=" ".join(item.text for item in group),
+                    bbox=(left, top, right - left, bottom - top),
+                    confidence=sum(item.confidence for item in group) / len(group),
+                ))
+    return cells
+
+
+def _result_confidence(pages: list[PageExtraction], fields: dict[str, list[FieldEvidence]]) -> float:
+    nonempty = [page.confidence for page in pages if page.text.strip()]
+    if not nonempty:
+        return 0.0
+    page_score = sum(nonempty) / len(nonempty)
+    field_scores = [item.confidence for values in fields.values() for item in values]
+    return max(0.0, min(1.0, page_score * 0.8 + (sum(field_scores) / len(field_scores) if field_scores else page_score) * 0.2))
 
 
 def _quality(text: str, *, used_ocr: bool) -> str:
@@ -220,18 +534,28 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
     if not is_pdf:
         text = _extract_native_text(data, mime_type, filename)
         used_ocr = False
+        page = _native_page(1, text)
         if len(text.strip()) < OCR_MIN_NATIVE_CHARS:
             try:
-                ocr_text = _ocr_text(data, suffix, mime_type)
-                if len(ocr_text.strip()) > len(text.strip()):
-                    text, used_ocr = ocr_text, True
+                is_image = mime_type.startswith("image/") or suffix in {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}
+                ocr_page = _ocr_image_page(data, suffix) if is_image else _coerce_page(_ocr_text(data, suffix, mime_type), 1)
+                if len(ocr_page.text.strip()) > len(text.strip()):
+                    text, page, used_ocr = ocr_page.text, ocr_page, True
             except (OSError, subprocess.SubprocessError):
                 pass
+        finalized = _finalize_text(text, suffix, mime_type)
+        page.text = finalized
+        pages = [page]
+        fields = _extract_fields(pages)
+        confidence = _result_confidence(pages, fields)
         return ExtractionResult(
-            text=_finalize_text(text, suffix, mime_type),
+            text=finalized,
             method="ocr" if used_ocr else "native",
             quality=_quality(text, used_ocr=used_ocr),
             ocr_pages=1 if used_ocr else 0,
+            confidence=confidence, pages=pages, fields=fields,
+            table_cells=_extract_table_cells(pages),
+            needs_review=used_ocr and confidence < OCR_REVIEW_CONFIDENCE,
         )
 
     from pypdf import PdfReader
@@ -256,22 +580,38 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
     except (OSError, subprocess.SubprocessError):
         recognized = {}
         warnings.append("ocr_failed")
+    page_results: list[PageExtraction] = []
     if native_pages:
-        pages = []
+        selected_text: list[str] = []
         for index, native in enumerate(native_pages):
-            ocr = recognized.get(index + 1, "")
-            pages.append(ocr if len(ocr.strip()) > len(native.strip()) else native)
-        text = "\n\n".join(pages)
+            ocr = _coerce_page(recognized.get(index + 1, ""), index + 1)
+            if len(ocr.text.strip()) > len(native.strip()):
+                page_results.append(ocr)
+                selected_text.append(ocr.text)
+            else:
+                native_result = _native_page(index + 1, native)
+                page_results.append(native_result)
+                selected_text.append(native)
+        text = "\n\n".join(selected_text)
     else:
-        text = "\n\n".join(recognized[index] for index in sorted(recognized))
-    used_ocr = bool(recognized)
+        page_results = [_coerce_page(recognized[index], index) for index in sorted(recognized)]
+        text = "\n\n".join(page.text for page in page_results)
+    used_ocr = any(page.method == "ocr" and page.text.strip() for page in page_results)
     method = "hybrid" if used_ocr and any(page.strip() for page in native_pages) else "ocr" if used_ocr else "native"
     finalized = _finalize_text(text, suffix, mime_type)
     if total_pages > OCR_MAX_PAGES and weak_pages:
         warnings.append(f"ocr_page_limit:{OCR_MAX_PAGES}")
+    fields = _extract_fields(page_results)
+    confidence = _result_confidence(page_results, fields)
+    needs_review = used_ocr and confidence < OCR_REVIEW_CONFIDENCE
+    if needs_review:
+        warnings.append("manual_review_required")
     return ExtractionResult(
         text=finalized, method=method, quality=_quality(finalized, used_ocr=used_ocr),
-        total_pages=total_pages, ocr_pages=len([value for value in recognized.values() if value.strip()]),
+        total_pages=total_pages,
+        ocr_pages=len([value for value in recognized.values() if _coerce_page(value, 0).text.strip()]),
+        confidence=confidence, pages=page_results, fields=fields,
+        table_cells=_extract_table_cells(page_results), needs_review=needs_review,
         warnings=warnings,
     )
 

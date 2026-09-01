@@ -45,8 +45,10 @@ class ContentExtractionTests(unittest.TestCase):
             "Этап\tСумма\nМонтаж\t1250000",
         )
 
-    @patch("app.organizer_engine.content._ocr_text", return_value="Распознанный текст сканированного акта")
+    @patch("app.organizer_engine.content._ocr_image_page")
     def test_uses_local_ocr_for_image(self, ocr):
+        from app.organizer_engine.content import PageExtraction
+        ocr.return_value = PageExtraction(1, "Распознанный текст сканированного акта", .9, "ocr")
         self.assertEqual(
             extract_text(b"image", "image/png", "scan.png"),
             "Распознанный текст сканированного акта",

@@ -12,6 +12,7 @@ def run(kind: str, payload: dict) -> dict:
         return reprocess_documents(
             int(payload["project_id"]),
             [int(value) for value in (payload.get("document_ids") or [])] or None,
+            int(payload["job_id"]) if payload.get("job_id") is not None else None,
         )
     if kind == "workspace.snapshot":
         from app.api.workspace import _build_snapshot
