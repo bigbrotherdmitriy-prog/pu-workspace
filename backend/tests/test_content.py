@@ -3,7 +3,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 
-from app.organizer_engine.content import extract_text
+from app.organizer_engine.content import extract_text, extract_text_result
 
 
 class ContentExtractionTests(unittest.TestCase):
@@ -53,12 +53,36 @@ class ContentExtractionTests(unittest.TestCase):
         )
         ocr.assert_called_once()
 
-    @patch("app.organizer_engine.content._ocr_text", return_value="")
+    @patch("app.organizer_engine.content._ocr_pdf_pages", return_value={})
     def test_keeps_native_pdf_text_when_ocr_has_no_better_result(self, ocr):
         with patch("pypdf.PdfReader") as reader:
             reader.return_value.pages = [type("Page", (), {"extract_text": lambda self: "Коротко"})()]
             self.assertEqual(extract_text(b"pdf", "application/pdf", "x.pdf"), "Коротко")
         ocr.assert_called_once()
+
+    @patch("app.organizer_engine.content._ocr_pdf_pages", return_value={2: "Распознанный акт выполненных работ"})
+    def test_hybrid_pdf_keeps_native_page_and_ocrs_scanned_page(self, ocr):
+        with patch("pypdf.PdfReader") as reader:
+            reader.return_value.pages = [
+                type("Page", (), {"extract_text": lambda self: "Договор поставки с достаточно длинным текстовым слоем"})(),
+                type("Page", (), {"extract_text": lambda self: ""})(),
+            ]
+            result = extract_text_result(b"pdf", "application/pdf", "mixed.pdf")
+        self.assertIn("Договор поставки", result.text)
+        self.assertIn("Распознанный акт", result.text)
+        self.assertEqual(result.method, "hybrid")
+        self.assertEqual(result.ocr_pages, 1)
+        ocr.assert_called_once_with(b"pdf", {2})
+
+    @patch("app.organizer_engine.content._ocr_pdf_pages", return_value={1: "Счёт на оплату № 42 сумма 125 000 рублей"})
+    def test_scanned_pdf_reports_ocr_quality_metadata(self, _ocr):
+        with patch("pypdf.PdfReader") as reader:
+            reader.return_value.pages = [type("Page", (), {"extract_text": lambda self: ""})()]
+            result = extract_text_result(b"pdf", "application/pdf", "invoice.pdf")
+        self.assertEqual(result.method, "ocr")
+        self.assertEqual(result.total_pages, 1)
+        self.assertEqual(result.ocr_pages, 1)
+        self.assertIn(result.quality, {"medium", "high"})
 
 
 if __name__ == "__main__":
