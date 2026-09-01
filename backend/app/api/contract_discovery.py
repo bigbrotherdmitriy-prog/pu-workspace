@@ -42,6 +42,65 @@ def _text_for_document(db: Session, document: Document) -> str:
     ).order_by(DocumentVersion.version_number.desc()).limit(1)) or ""
 
 
+def _normalized_reference(value: str) -> str:
+    return re.sub(r"[^0-9a-zа-яё]+", "", (value or "").casefold())
+
+
+def _referenced_existing_contract(content: str, contracts: list[Contract], excluded_id: int | None = None) -> Contract | None:
+    """Find an existing parent explicitly referenced in the OCR text."""
+    body = _normalized_reference(content)
+    candidates = []
+    for contract in contracts:
+        if contract.id == excluded_id:
+            continue
+        number = _normalized_reference(contract.number)
+        if len(number) >= 4 and number in body:
+            candidates.append((len(number), contract))
+    return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+_PARTY_RE = re.compile(
+    r"(?P<org>(?:(?:общество\s+с\s+ограниченной\s+ответственностью)|ООО|АО|ПАО|ЗАО|ФКУ|ФГУП)"
+    r"\s+.{1,220}?)\s*,?\s*именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
+    r"(?P<role>заказчик|подрядчик)[»\"']?",
+    re.IGNORECASE,
+)
+
+
+def _organization_key(value: str) -> str:
+    quoted = re.findall(r"[«\"]([^»\"]{2,100})[»\"]", value)
+    candidate = min(quoted, key=len) if quoted else value
+    candidate = re.sub(
+        r"\b(?:общество\s+с\s+ограниченной\s+ответственностью|ООО|АО|ПАО|ЗАО|ФКУ|ФГУП)\b",
+        " ", candidate, flags=re.IGNORECASE,
+    )
+    return _normalized_reference(candidate)
+
+
+def _contract_parties(content: str) -> dict[str, str]:
+    parties: dict[str, str] = {}
+    compact = " ".join((content or "").split())[:8_000]
+    for match in _PARTY_RE.finditer(compact):
+        key = _organization_key(match.group("org"))
+        if key:
+            parties[match.group("role").casefold()] = key
+    return parties
+
+
+def _party_chain_parent(content: str, contract_contents: list[tuple[Contract, str]], excluded_id: int | None = None) -> Contract | None:
+    child_customer = _contract_parties(content).get("заказчик")
+    if not child_customer:
+        return None
+    matches = []
+    for contract, parent_content in contract_contents:
+        if contract.id == excluded_id:
+            continue
+        parent_contractor = _contract_parties(parent_content).get("подрядчик")
+        if parent_contractor and parent_contractor == child_customer:
+            matches.append(contract)
+    return matches[0] if len(matches) == 1 else None
+
+
 def discover_contract_fields(name: str, content: str) -> dict:
     """Return a reviewable proposal. It never creates or links records."""
     text = " ".join((content or "").split())
@@ -108,10 +167,15 @@ def discover_contracts_bulk(
     )))
     if len(documents) != len(set(payload.document_ids)):
         raise HTTPException(404, "Один или несколько документов проекта не найдены")
-    linked_ids = set(db.scalars(select(Contract.source_document_id).where(
-        Contract.project_id == project_id,
-        Contract.source_document_id.is_not(None),
-    )))
+    project_contracts = list(db.scalars(select(Contract).where(Contract.project_id == project_id)))
+    existing_contract_contents = [
+        (contract, _text_for_document(db, db.get(Document, contract.source_document_id)))
+        for contract in project_contracts if contract.source_document_id and db.get(Document, contract.source_document_id)
+    ]
+    linked_by_document = {
+        contract.source_document_id: contract for contract in project_contracts if contract.source_document_id is not None
+    }
+    linked_ids = set(linked_by_document)
     proposals = []
     rejected = []
     content_by_document: dict[int, str] = {}
@@ -131,19 +195,41 @@ def discover_contracts_bulk(
             "document_id": document.id,
             "document_name": document.name,
             "already_linked": document.id in linked_ids,
+            "linked_contract_id": linked_by_document.get(document.id).id if document.id in linked_by_document else None,
             "parent_document_id": None,
+            "parent_contract_id": None,
             **proposal,
         })
 
     by_id = {item["document_id"]: item for item in proposals}
     roots = [item for item in proposals if item["contract_kind"] in {"prime_reference", "customer"}]
     for child in proposals:
+        linked_contract = linked_by_document.get(child["document_id"])
+        existing_parent = _referenced_existing_contract(
+            content_by_document.get(child["document_id"], ""), project_contracts,
+            linked_contract.id if linked_contract else None,
+        )
+        party_parent = _party_chain_parent(
+            content_by_document.get(child["document_id"], ""), existing_contract_contents,
+            linked_contract.id if linked_contract else None,
+        )
+        inferred_parent = existing_parent or party_parent
+        if inferred_parent and child["contract_kind"] == "customer":
+            child["contract_kind"] = (
+                "revenue_subcontract" if inferred_parent.contract_kind == "prime_reference"
+                else "downstream_subcontract"
+            )
+            child["parent_contract_id"] = inferred_parent.id
+            reason = "совпали роли сторон: подрядчик верхнего договора стал заказчиком нижнего" if party_parent is inferred_parent else "найдена явная ссылка в тексте"
+            child["evidence"].append(
+                f"вышестоящий договор {inferred_parent.number}: {reason}"
+            )
         if child["contract_kind"] in {"prime_reference", "customer"}:
             continue
         body = re.sub(r"[^0-9a-zа-яё]+", "", content_by_document.get(child["document_id"], "").casefold())
         referenced = [item for item in proposals if item is not child and len(re.sub(r"\W+", "", item["number"])) >= 4
                       and re.sub(r"[^0-9a-zа-яё]+", "", item["number"].casefold()) in body]
-        parent = referenced[0] if referenced else (roots[0] if len(roots) == 1 else None)
+        parent = referenced[0] if referenced else (roots[0] if len(roots) == 1 and not child["parent_contract_id"] else None)
         if parent:
             child["parent_document_id"] = parent["document_id"]
             child["evidence"].append(f"вышестоящий договор: {by_id[parent['document_id']]['number']}")

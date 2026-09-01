@@ -878,14 +878,17 @@ export function App() {
       if (index < 0) throw new Error("В выбранной структуре найден цикл. Проверьте вышестоящие договоры.");
       const [item] = pending.splice(index, 1);
       const parentId = item.parent_contract_id || (item.parent_document_id ? createdByDocument.get(item.parent_document_id) : undefined);
-      const row = await api(`/projects/${projectId}/contracts`, {
-        method: "POST",
+      const row = await api(item.already_linked && item.linked_contract_id
+        ? `/projects/${projectId}/contracts/${item.linked_contract_id}`
+        : `/projects/${projectId}/contracts`, {
+        method: item.already_linked && item.linked_contract_id ? "PATCH" : "POST",
         body: JSON.stringify({
           number: item.number.trim(), title: item.title.trim(), counterparty: item.counterparty?.trim() || undefined,
-          contract_kind: item.contract_kind, parent_contract_id: parentId, source_document_id: item.document_id,
+          contract_kind: item.contract_kind, parent_contract_id: parentId,
+          ...(!item.already_linked ? { source_document_id: item.document_id } : {}),
         }),
       });
-      createdByDocument.set(item.document_id, row.id); created += 1;
+      createdByDocument.set(item.document_id, row.id); created += item.already_linked ? 0 : 1;
       createdContractIds.push(row.id);
     }
     let analyzed = 0;
@@ -893,7 +896,8 @@ export function App() {
       try { await api(`/projects/${projectId}/contracts/${contractId}/analyze`, { method: "POST" }); analyzed += 1; }
       catch { /* Карточка и источник уже сохранены; повтор анализа доступен в карточке. */ }
     }
-    setNotice(`Создано и привязано договоров: ${created}. Полностью проанализировано: ${analyzed}. Дерево построено; проверьте связи на схеме.`);
+    const updated = proposals.filter((item) => item.already_linked).length;
+    setNotice(`Создано договоров: ${created}. Обновлено существующих: ${updated}. Полностью проанализировано: ${analyzed}. Дерево построено; проверьте связи на схеме.`);
     await load();
     return created;
   }

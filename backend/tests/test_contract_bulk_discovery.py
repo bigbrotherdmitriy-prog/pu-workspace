@@ -1,4 +1,5 @@
-from app.api.contract_discovery import ContractDiscoveryRequest, discover_contract_fields, router
+from app.api.contract_discovery import ContractDiscoveryRequest, _contract_parties, _party_chain_parent, _referenced_existing_contract, discover_contract_fields, router
+from app.models.organization_contract import Contract
 
 
 def test_bulk_contract_discovery_route_is_available():
@@ -56,3 +57,28 @@ def test_referenced_state_contract_does_not_turn_customer_contract_into_prime():
     )
     assert result["number"] == "Б-УЗП130-02-2026"
     assert result["contract_kind"] == "customer"
+
+
+def test_finds_existing_prime_contract_referenced_by_ocr_for_hierarchy():
+    prime = Contract(id=4, project_id=1, number="ГК-08-194/25", title="Генподряд", contract_kind="prime_reference")
+    wrong_existing = Contract(id=16, project_id=1, number="ом", title="Ошибочная карточка", contract_kind="prime_reference")
+    parent = _referenced_existing_contract(
+        "Работы выполняются во исполнение государственного контракта № ГК-08-194/25.",
+        [prime, wrong_existing], excluded_id=16,
+    )
+    assert parent is prime
+
+
+def test_builds_contract_chain_when_parent_contractor_becomes_child_customer():
+    prime = Contract(id=4, project_id=1, number="ГК-08-194/25", title="Генподряд", contract_kind="prime_reference")
+    prime_text = (
+        'ФКУ «Налог-Сервис» ФНС России, именуемое в дальнейшем «Заказчик», с одной стороны, '
+        'и ООО «БУЛАТ», именуемое в дальнейшем «Подрядчик», заключили контракт.'
+    )
+    subcontract_text = (
+        'Общество с ограниченной ответственностью «БУЛАТ», именуемое в дальнейшем «Заказчик», '
+        'и ООО «ДИСИАЙ СОЛЮШНС», именуемое в дальнейшем «Подрядчик», заключили договор.'
+    )
+    assert _contract_parties(prime_text) == {"заказчик": "налогсервис", "подрядчик": "булат"}
+    assert _contract_parties(subcontract_text) == {"заказчик": "булат", "подрядчик": "дисиайсолюшнс"}
+    assert _party_chain_parent(subcontract_text, [(prime, prime_text)]) is prime

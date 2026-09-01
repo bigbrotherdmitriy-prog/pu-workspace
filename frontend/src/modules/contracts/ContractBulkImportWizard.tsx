@@ -13,6 +13,7 @@ export type BulkContractProposal = {
   confidence: number;
   evidence: string[];
   already_linked: boolean;
+  linked_contract_id?: number;
 };
 
 type DocumentOption = { id: number; name: string; mime_type?: string; source: string };
@@ -64,7 +65,7 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
   async function apply() {
     setBusy(true); setError("");
     try {
-      await onImport(proposals.filter((item) => !item.already_linked));
+      await onImport(proposals);
       setOpen(false); setSelected([]); setProposals([]);
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
@@ -98,7 +99,7 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
               <small>{item.evidence.join("; ")}</small>
             </div>
           </article>)}</div>
-          <div className="contract-bulk-actions"><button className="secondary" onClick={() => setProposals([])}>Назад к файлам</button><button disabled={invalid || busy || proposals.every((item) => item.already_linked)} onClick={apply}>{busy ? "Создаю дерево…" : "Создать и привязать всё дерево"}</button></div>
+          <div className="contract-bulk-actions"><button className="secondary" onClick={() => setProposals([])}>Назад к файлам</button><button disabled={invalid || busy} onClick={apply}>{busy ? "Сохраняю дерево…" : proposals.some((item) => item.already_linked) ? "Подтвердить и обновить всё дерево" : "Создать и привязать всё дерево"}</button></div>
         </>}
         {error && <p className="error">{error}</p>}
       </div>
