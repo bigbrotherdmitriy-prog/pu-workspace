@@ -105,7 +105,7 @@ def _short_contract_title(content: str, fallback: str) -> str:
         subject = obligation.group(1) if obligation else ""
     subject = re.sub(r"\([^)]{0,180}\)", " ", subject)
     subject = re.sub(
-        r"^.*?(?:выполнени[ея]\s+работ\s+по|оказани[ея]\s+услуг\s+по|поставк[еи]\s+|поставить\s+|выполнить\s+)",
+        r"^.*?(?:выполнени[еяю]\s+работ\s+по|оказани[еяю]\s+услуг\s+по|поставк[еи]\s+|поставить\s+|выполнить\s+)",
         "", subject, flags=re.IGNORECASE,
     )
     subject = re.split(
