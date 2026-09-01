@@ -1,7 +1,7 @@
 import os
 from unittest.mock import patch
 
-from app.api.telegram import _authorized_admin, _should_prepare_message_replies, _store_ai_message_result
+from app.api.telegram import _authorized_admin, _project_choices_message, _should_prepare_message_replies, _store_ai_message_result
 from app.models.ai_secretary import Message
 from app.models.organization_contract import Organization
 from app.models.project import Project
@@ -33,6 +33,20 @@ def test_private_message_prepares_replies_but_commands_do_not():
     message = {"chat": {"type": "private"}}
     assert _should_prepare_message_replies(message, "Подготовь ответ")
     assert not _should_prepare_message_replies(message, "/tasks")
+
+
+def test_project_choices_show_connect_commands(db_session):
+    organization = Organization(name="Test")
+    db_session.add(organization); db_session.flush()
+    db_session.add_all([
+        Project(organization_id=organization.id, name="Первый проект"),
+        Project(organization_id=organization.id, name="Второй проект"),
+    ])
+    db_session.flush()
+    text = _project_choices_message(db_session)
+    assert "Выберите проект" in text
+    assert "— Второй проект" in text
+    assert text.count("/connect ") == 2
 
 
 def test_ai_message_result_is_kept_as_reviewable_draft(db_session, user_factory):

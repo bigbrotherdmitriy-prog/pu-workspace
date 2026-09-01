@@ -47,6 +47,19 @@ def _project_owner(db, project_id: int) -> User | None:
     return db.scalar(select(User).join(ProjectMember, ProjectMember.user_id == User.id).where(ProjectMember.project_id == project_id).order_by((ProjectMember.role == "owner").desc(), User.id))
 
 
+def _project_choices_message(db) -> str:
+    projects = list(db.scalars(select(Project).order_by(Project.id.desc()).limit(20)))
+    if not projects:
+        return "В PU Workspace пока нет проектов. Сначала создайте проект в web-интерфейсе."
+    lines = ["Выберите проект и отправьте команду:"]
+    for project in projects:
+        title = " ".join(project.name.split())[:120]
+        lines.append(f"/connect {project.id} — {title}")
+    if len(projects) == 20:
+        lines.append("Показаны последние 20 проектов.")
+    return "\n".join(lines)
+
+
 def _download_document(document: dict) -> tuple[str, str, bytes]:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not token:
@@ -219,14 +232,26 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             notify_telegram_chat(chat_id, "Чат отключён от анализа PU Workspace.")
             return {"ok": True}
 
+        if text.startswith("/projects"):
+            if not _authorized_admin(user_id):
+                notify_telegram_chat(chat_id, "Список проектов доступен только владельцу PU Workspace.")
+            else:
+                notify_telegram_chat(chat_id, _project_choices_message(db))
+            return {"ok": True}
+
         if text.startswith("/help") or text.startswith("/start"):
-            notify_telegram_chat(chat_id, "PU Workspace: /connect ID — подключить чат; /disconnect — отключить; /tasks — открытые задачи; /take ID — принять; /done ID результат — выполнить; /move ID ДД.ММ.ГГГГ причина — перенести срок.")
+            help_text = "PU Workspace: /projects — выбрать проект; /disconnect — отключить; /tasks — открытые задачи; /take ID — принять; /done ID результат — выполнить; /move ID ДД.ММ.ГГГГ причина — перенести срок."
+            if _authorized_admin(user_id):
+                help_text += "\n\n" + _project_choices_message(db)
+            notify_telegram_chat(chat_id, help_text)
             return {"ok": True}
 
         link = db.get(TelegramChatLink, chat_id)
         if not link or not link.enabled:
-            if document:
-                notify_telegram_chat(chat_id, "Этот чат ещё не подключён к проекту. Владелец должен отправить: /connect 1")
+            if _authorized_admin(user_id):
+                notify_telegram_chat(chat_id, "Этот чат ещё не подключён к проекту.\n\n" + _project_choices_message(db))
+            else:
+                notify_telegram_chat(chat_id, "Этот чат ещё не подключён к проекту. Попросите владельца PU Workspace выполнить /projects и выбрать проект.")
             return {"ok": True}
         if text.startswith("/tasks"):
             rows = list(db.scalars(select(Task).where(Task.project_id == link.project_id, Task.status.in_(["assigned", "in_progress"])).order_by(Task.due_date.asc().nullslast(), Task.id).limit(20)).all())
