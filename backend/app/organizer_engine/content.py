@@ -204,7 +204,9 @@ def _quality(text: str, *, used_ocr: bool) -> str:
     if not compact:
         return "empty"
     readable = sum(character.isalnum() for character in compact) / len(compact)
-    if len(compact) < 40 or readable < 0.45:
+    # A short invoice heading with a number and amount can be useful even below
+    # the native-text threshold; reserve `low` for fragments/noise.
+    if len(compact) < 20 or readable < 0.45:
         return "low"
     if used_ocr and (len(compact) < 150 or readable < 0.65):
         return "medium"
