@@ -117,11 +117,20 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     onDropFiles?.(files, parentContractId);
   }
 
+  function filesFromTransfer(transfer: DataTransfer): File[] {
+    const direct = Array.from(transfer.files || []);
+    if (direct.length) return direct;
+    return Array.from(transfer.items || [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+  }
+
   function acceptDrop(event: React.DragEvent, parentContractId?: number) {
     event.preventDefault(); event.stopPropagation(); setDropTargetId(null);
     const projectDocumentId = Number(event.dataTransfer.getData("application/x-pu-document-id"));
     if (projectDocumentId) { onDropDocuments?.([projectDocumentId], parentContractId); return; }
-    const files = Array.from(event.dataTransfer.files || []);
+    const files = filesFromTransfer(event.dataTransfer);
     deliverFiles(files, parentContractId);
   }
 

@@ -29,6 +29,10 @@ _NUMBER_RE = re.compile(
     r"([A-ZА-ЯЁ0-9][A-ZА-ЯЁa-zа-яё0-9./_-]{2,80})",
     re.IGNORECASE,
 )
+_FILENAME_CONTRACT_NUMBER_RE = re.compile(
+    r"^(?P<number>[A-ZА-ЯЁ0-9]{1,12}(?:[-_/][A-ZА-ЯЁ0-9]{2,24}){2,8})$",
+    re.IGNORECASE,
+)
 _COMPANY_RE = re.compile(
     r"\b((?:ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\s*[«\"']?[^\n,;]{2,100}?[»\"']?)"
     r"(?=\s*(?:,|именуем|в лице|$))",
@@ -146,7 +150,9 @@ def discover_contract_fields(name: str, content: str) -> dict:
         if not any(character.isdigit() for character in candidate):
             number_match = None
     fallback_number = Path(name).stem.strip()[:255]
-    number = (number_match.group(1).strip(" .,:;№") if number_match else fallback_number) or "Без номера"
+    filename_number_match = _FILENAME_CONTRACT_NUMBER_RE.fullmatch(fallback_number.replace(" ", ""))
+    filename_number = filename_number_match.group("number") if filename_number_match else None
+    number = (number_match.group(1).strip(" .,:;№") if number_match else filename_number or fallback_number) or "Без номера"
     companies = []
     for value in _COMPANY_RE.findall(text[:15_000]):
         normalized = " ".join(value.split()).strip(" .,:;")
@@ -171,8 +177,8 @@ def discover_contract_fields(name: str, content: str) -> dict:
         "предмет договора", "права и обязанности", "цена договора", "срок действия",
         "реквизиты сторон", "заказчик", "подрядчик",
     ))
-    confidence = min(0.95, 0.35 + (0.25 if number_match else 0) + legal_markers * 0.06)
-    is_contract = not attachment_name and (bool(number_match) or legal_markers >= 2)
+    confidence = min(0.95, 0.35 + (0.25 if number_match else 0.18 if filename_number else 0) + legal_markers * 0.06)
+    is_contract = not attachment_name and (bool(number_match) or bool(filename_number) or legal_markers >= 2)
     return {
         "number": number,
         "title": _short_contract_title(content, fallback_number),
@@ -180,7 +186,9 @@ def discover_contract_fields(name: str, content: str) -> dict:
         "contract_kind": kind,
         "confidence": round(confidence, 2),
         "is_contract": is_contract,
-        "evidence": [kind_reason, *( ["номер найден в тексте"] if number_match else ["номер взят из имени файла"]),
+        "evidence": [kind_reason, *( ["номер найден в тексте"] if number_match else
+                     ["структурированный номер договора найден в имени файла"] if filename_number else
+                     ["название взято из имени файла; номер требует проверки"]),
                      f"юридических признаков: {legal_markers}",
                      *( ["файл похож на приложение, а не на самостоятельный договор"] if attachment_name else [])],
     }

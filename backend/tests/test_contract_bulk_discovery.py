@@ -7,6 +7,18 @@ def test_bulk_contract_discovery_route_is_available():
     assert ContractDiscoveryRequest(document_ids=[1, 2]).document_ids == [1, 2]
 
 
+def test_scanned_contract_with_structured_number_in_filename_is_not_rejected():
+    result = discover_contract_fields("Б-УЗП130-02-2026.pdf", "")
+    assert result["is_contract"] is True
+    assert result["number"] == "Б-УЗП130-02-2026"
+    assert "структурированный номер договора найден в имени файла" in result["evidence"]
+
+
+def test_operational_form_filename_is_not_mistaken_for_contract():
+    result = discover_contract_fields("ОС-15 №6 от 31.07.2026.pdf", "Акт о приеме-передаче оборудования")
+    assert result["is_contract"] is False
+
+
 def test_discovers_prime_contract_number_and_kind_from_text():
     result = discover_contract_fields(
         "scan1412.pdf",

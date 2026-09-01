@@ -75,6 +75,19 @@ describe("ContractScheme", () => {
     expect(container.querySelector('[role="status"]')).toHaveTextContent("Передаю на загрузку и анализ");
   });
 
+  it("accepts Windows Explorer drops exposed through DataTransfer.items", () => {
+    const onDropFiles = vi.fn();
+    const { container } = render(<ContractScheme projectId={14} contracts={[]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropFiles={onDropFiles} />);
+    const pdf = new File(["scan"], "Б-УЗП130-02-2026.pdf", { type: "application/pdf" });
+    fireEvent.drop(container.querySelector(".contract-scheme-file-drop")!, {
+      dataTransfer: {
+        files: [], types: ["Files"], getData: () => "",
+        items: [{ kind: "file", getAsFile: () => pdf }],
+      },
+    });
+    expect(onDropFiles).toHaveBeenCalledWith([pdf], undefined);
+  });
+
   it("offers contract deletion from the node and detail panel", () => {
     const onDelete = vi.fn();
     render(<ContractScheme projectId={13} contracts={[
