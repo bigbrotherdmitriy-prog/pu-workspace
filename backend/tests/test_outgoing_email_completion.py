@@ -32,7 +32,7 @@ def test_gmail_distinguishes_sent_mail_and_does_not_send_incoming_alert():
     source = (ROOT / "app/api/gmail.py").read_text(encoding="utf-8")
     assert '"SENT" in set(item.get("labelIds") or [])' in source
     assert 'source_type = "email_outgoing" if is_outgoing else "email"' in source
-    assert "if not is_outgoing and not bulk_reason:" in source
+    assert "if not is_outgoing and not bulk_reason and thread_key not in notified_threads:" in source
 
 
 def test_schema_revision_tracks_latest_migration():

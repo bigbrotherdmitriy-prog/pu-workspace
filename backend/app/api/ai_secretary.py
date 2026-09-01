@@ -52,6 +52,7 @@ class IncomingMessage(BaseModel):
     routing_evidence: str | None = Field(default=None, max_length=1000)
     automation_suppressed: bool = False
     automation_suppression_reason: str | None = Field(default=None, max_length=1000)
+    response_suppressed: bool = False
 
 
 class ContextConfirmation(BaseModel):
@@ -308,7 +309,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         completion_suggestions = _create_completion_suggestions(db, row)
     else:
         tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
-        drafts = create_response_drafts(
+        drafts = [] if payload.response_suppressed else create_response_drafts(
             db, row.project_id, None, [synthetic],
             ensure_response=row.source_type == "email",
         )

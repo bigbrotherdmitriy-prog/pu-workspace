@@ -71,7 +71,10 @@ def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), use
     google_synced = calendar_synced = 0
     drafts = create_response_drafts(db, payload.project_id, None, extracted)
     risks, decisions = create_governance_items(db, payload.project_id, extracted, source_type="local_upload")
-    if extracted:
+    # A repeated scan may successfully extract the same file while creating no
+    # new work.  Keep the HTTP result, but do not turn that no-op into Telegram
+    # noise for the owner.
+    if tasks or risks or decisions or drafts:
         notify_telegram(
             f"PU Workspace: локальная рабочая папка — обработано файлов: {len(extracted)}; "
             f"задач: {len(tasks)}; рисков: {len(risks)}; решений: {len(decisions)}; ответов: {len(drafts)}."

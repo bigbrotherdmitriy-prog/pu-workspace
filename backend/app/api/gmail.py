@@ -133,6 +133,25 @@ def _bulk_email_reason(headers: dict[str, str], label_ids: list[str] | None, sub
     return None
 
 
+def _automated_sender_reason(headers: dict[str, str]) -> str | None:
+    """Explain why a message must not receive an automatic reply draft.
+
+    The message remains visible and can still produce tasks or risks.  We only
+    prevent nonsensical replies to machine-only addresses and mail systems.
+    """
+    sender = parseaddr(headers.get("from", ""))[1].casefold()
+    local_part = sender.partition("@")[0]
+    auto_submitted = headers.get("auto-submitted", "").casefold().strip()
+    if auto_submitted and auto_submitted != "no":
+        return "автоматическое служебное письмо"
+    if headers.get("x-auto-response-suppress"):
+        return "отправитель запретил автоматические ответы"
+    machine_addresses = ("noreply", "no-reply", "do-not-reply", "donotreply")
+    if any(marker in local_part for marker in machine_addresses):
+        return "адрес отправителя не принимает ответы"
+    return None
+
+
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -144,6 +163,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
     page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
+    notified_threads: set[str] = set()
     for ref in page.get("messages", []):
         try:
             item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
@@ -158,6 +178,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             bulk_reason = None if is_outgoing else _bulk_email_reason(
                 headers, item.get("labelIds"), subject, content,
             )
+            automated_sender_reason = None if is_outgoing else _automated_sender_reason(headers)
             existing = db.scalar(select(Message).where(
                 Message.source_external_id == ref["id"],
             ))
@@ -172,7 +193,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 # Older messages may have been synchronized before email fallback
                 # drafts existed. Backfill a reviewable draft without sending it
                 # and without changing the message's confirmed project context.
-                if existing.source_type == "email" and not bulk_reason and existing.status != "filtered" and not db.scalar(select(ResponseDraft.id).where(
+                if existing.source_type == "email" and not bulk_reason and not automated_sender_reason and existing.status != "filtered" and not db.scalar(select(ResponseDraft.id).where(
                     ResponseDraft.message_id == existing.id,
                 )):
                     synthetic = StorageObject(
@@ -210,12 +231,15 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 routing_contract_id=routing_contract_id, routing_evidence=routing_evidence,
                 automation_suppressed=bool(bulk_reason),
                 automation_suppression_reason=bulk_reason,
+                response_suppressed=bool(automated_sender_reason),
             ), db, user)
             processed += 1 if result["status"] else 0
             if not bulk_reason:
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
-            if not is_outgoing and not bulk_reason:
+            thread_key = item.get("threadId") or item["id"]
+            if not is_outgoing and not bulk_reason and thread_key not in notified_threads:
                 notify_telegram(_gmail_telegram_notice(sender, subject, result))
+                notified_threads.add(thread_key)
         except Exception as exc:
             db.rollback()
             failed += 1

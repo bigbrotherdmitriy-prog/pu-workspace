@@ -3,7 +3,7 @@ import base64
 import inspect
 
 from app.api.ai_secretary import project_candidate
-from app.api.gmail import GmailSyncRequest, _attachments, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
+from app.api.gmail import GmailSyncRequest, _attachments, _automated_sender_reason, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
 from app.api.google_drive import SCOPES
 
 
@@ -85,9 +85,21 @@ def test_business_offer_is_not_suppressed_from_words_alone():
     assert reason is None
 
 
+def test_machine_sender_suppresses_reply_draft_without_filtering_message():
+    assert _automated_sender_reason({"from": 'REG.RU support <noreply@support.reg.ru>'})
+    assert _automated_sender_reason({"from": "client@example.ru"}) is None
+
+
+def test_gmail_notifications_are_collapsed_by_thread_per_sync():
+    source = inspect.getsource(sync_gmail_project)
+    assert "notified_threads" in source
+    assert "thread_key not in notified_threads" in source
+    assert "response_suppressed=bool(automated_sender_reason)" in source
+
+
 def test_filtered_messages_do_not_backfill_drafts_or_notify_telegram():
     source = inspect.getsource(sync_gmail_project)
-    assert 'not bulk_reason and existing.status != "filtered"' in source
+    assert 'not bulk_reason and not automated_sender_reason and existing.status != "filtered"' in source
     assert "not is_outgoing and not bulk_reason" in source
 
 
