@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileScan, FileText, RefreshCw } from "lucide-react";
 import { api } from "../../api/client";
 
 export type DocumentListItem = {
   id: number; name: string; source: string; status: string; current_version: number;
+  extraction_method?: string; extraction_quality?: string; ocr_pages?: number; ocr_updated_at?: string;
 };
 export type DocumentCard = DocumentListItem & {
   mime_type?: string; source_url?: string; summary?: string;
@@ -17,9 +18,13 @@ type Props = {
   documents: DocumentListItem[];
   selected: DocumentCard | null;
   onSelect: (document: DocumentListItem) => void;
+  projectId: number;
+  onOcrComplete: () => void;
 };
 
-export function DocumentsModule({ collapsed, knowledgeMode, documents, selected, onSelect }: Props) {
+type OcrBatch = { job_id: number; status: string; result?: { total: number; processed: unknown[]; skipped: unknown[]; tasks: number; risks: number; decisions: number; drafts: number }; error?: string };
+
+export function DocumentsModule({ collapsed, knowledgeMode, documents, selected, onSelect, projectId, onOcrComplete }: Props) {
   const [previousVersion, setPreviousVersion] = useState(0);
   const [currentVersion, setCurrentVersion] = useState(0);
   const [comparison, setComparison] = useState<null | {
@@ -27,6 +32,8 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
     unchanged: boolean; preview: string[]; preview_truncated: boolean;
   }>(null);
   const [comparisonError, setComparisonError] = useState("");
+  const [ocrBatch, setOcrBatch] = useState<OcrBatch | null>(null);
+  const [ocrError, setOcrError] = useState("");
 
   useEffect(() => {
     const versions = selected?.versions.map((item) => item.version) || [];
@@ -35,6 +42,35 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
     setComparison(null);
     setComparisonError("");
   }, [selected?.id, selected?.versions.length]);
+
+  useEffect(() => {
+    if (!ocrBatch || !["queued", "running"].includes(ocrBatch.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const next: OcrBatch = await api(`/projects/${projectId}/documents/ocr-batches/${ocrBatch.job_id}`);
+        setOcrBatch(next);
+        if (next.status === "succeeded") onOcrComplete();
+        if (next.status === "dead_letter") setOcrError(next.error || "OCR завершился с ошибкой");
+      } catch (error) {
+        setOcrError((error as Error).message);
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [ocrBatch?.job_id, ocrBatch?.status, onOcrComplete, projectId]);
+
+  async function startOcr(documentIds?: number[]) {
+    try {
+      setOcrError("");
+      setOcrBatch(await api(`/projects/${projectId}/documents/ocr-batches`, {
+        method: "POST", body: JSON.stringify({ document_ids: documentIds || null }),
+      }));
+    } catch (error) {
+      setOcrError((error as Error).message);
+    }
+  }
+
+  const ocrBusy = ocrBatch && ["queued", "running"].includes(ocrBatch.status);
+  const ocrResult = ocrBatch?.status === "succeeded" ? ocrBatch.result : null;
 
   async function compareVersions() {
     if (!selected || !previousVersion || !currentVersion) return;
@@ -49,10 +85,14 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
   return <section className={`documents-overlay ${collapsed ? "collapsed" : ""}`}>
     <div className="documents-layout">
       <div className="card">
-        <div className="card-head"><div><h2>{knowledgeMode ? "Центр знаний" : "Реестр документов"}</h2><p>{knowledgeMode ? "Поиск по названиям, сводкам и извлечённому тексту" : `Найдено: ${documents.length}`}</p></div></div>
+        <div className="card-head"><div><h2>{knowledgeMode ? "Центр знаний" : "Реестр документов"}</h2><p>{knowledgeMode ? "Поиск по названиям, сводкам и извлечённому тексту" : `Найдено: ${documents.length}`}</p></div>
+          <button disabled={Boolean(ocrBusy)} onClick={() => void startOcr()} title="Повторно распознать PDF и изображения, не изменяя оригиналы"><RefreshCw className={ocrBusy ? "spin" : ""} />{ocrBusy ? (ocrBatch?.status === "queued" ? "В очереди" : "Распознаю…") : "Повторно распознать сканы"}</button>
+        </div>
+        {ocrResult && <div className="ocr-batch-result" role="status"><strong>OCR завершён</strong><span>Распознано: {ocrResult.processed.length} из {ocrResult.total}</span><span>Пропущено: {ocrResult.skipped.length}</span><span>Новых предложений: задач {ocrResult.tasks}, рисков {ocrResult.risks}, решений {ocrResult.decisions}</span></div>}
+        {ocrError && <p className="version-error">{ocrError}</p>}
         <div className="document-register">
           {documents.map((item) => <button className={selected?.id === item.id ? "selected" : ""} onClick={() => onSelect(item)} key={item.id}>
-            <FileText /><span><strong>{item.name}</strong><small>{item.source} · версия {item.current_version || 1} · {item.status}</small></span>
+            <FileText /><span><strong>{item.name}</strong><small>{item.source} · версия {item.current_version || 1} · {item.status}</small>{item.extraction_method && <small className={`ocr-quality ${item.extraction_quality || ""}`}>OCR: {item.extraction_method} · качество {item.extraction_quality || "не определено"}{item.ocr_pages ? ` · страниц ${item.ocr_pages}` : ""}</small>}</span>
           </button>)}
           {!documents.length && <div className="empty"><FileText /><p>Документы не найдены</p></div>}
         </div>
@@ -64,6 +104,7 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
           </div>
           <div className="document-links"><span>Задачи <strong>{selected.links.tasks}</strong></span><span>Риски <strong>{selected.links.risks}</strong></span><span>Решения <strong>{selected.links.decisions}</strong></span><span>Черновики <strong>{selected.links.drafts}</strong></span></div>
           <h3>Краткая сводка</h3><p className="document-summary">{selected.summary || "Сводка появится после анализа содержимого."}</p>
+          <div className="document-ocr-actions"><button disabled={Boolean(ocrBusy)} onClick={() => void startOcr([selected.id])}><FileScan />Повторно распознать этот документ</button>{selected.extraction_method && <span>Метод: {selected.extraction_method} · качество: {selected.extraction_quality || "не определено"} · OCR-страниц: {selected.ocr_pages || 0}</span>}</div>
           <p className="versions">Версий: {selected.versions.length || 1}</p>
           {selected.versions.length > 1 && <section className="version-comparison">
             <h3>Что изменилось между версиями</h3>

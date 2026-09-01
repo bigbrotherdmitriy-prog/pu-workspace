@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -24,7 +23,6 @@ from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
-_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ORGANIZER_WORKERS", "2"))))
 
 
 def _audit(
@@ -108,6 +106,7 @@ def _scan_worker(
     project_id: int,
     source_folder_id: str,
     auto_apply: bool | None = None,
+    raise_errors: bool = False,
 ):
     db = SessionLocal()
     repo = OrganizerRepository(db)
@@ -203,12 +202,21 @@ def _scan_worker(
             notify_telegram(f"PU Workspace: ошибка обработки сессии {session_id}: {str(exc)[:500]}")
         except Exception:
             pass
+        if raise_errors:
+            raise
     finally:
         db.close()
 
 
-def submit_scan(session_id: int, project_id: int, source_folder_id: str) -> None:
-    _workers.submit(_scan_worker, session_id, project_id, source_folder_id)
+def submit_scan(session_id: int, project_id: int, source_folder_id: str, *, force: bool = False) -> int:
+    from app.jobs.queue import enqueue
+    with SessionLocal() as db:
+        job = enqueue(
+            db, "organizer.scan",
+            {"session_id": session_id, "project_id": project_id, "source_folder_id": source_folder_id},
+            idempotency_key=None if force else f"organizer.scan:{session_id}",
+        )
+        return job.id
 
 
 def recover_incomplete_scans() -> int:
@@ -280,7 +288,7 @@ def retry_session(session_id: int, db: Session = Depends(get_db), user: User = D
     row = _session_for_user(repo, db, user, session_id, "manager")
     if not repo.retry_failed_session(session_id):
         raise HTTPException(409, "Only a failed session with fewer than three attempts can be retried")
-    submit_scan(session_id, row["project_id"], row["source_folder_id"])
+    submit_scan(session_id, row["project_id"], row["source_folder_id"], force=True)
     return {"session_id": session_id, "status": "queued"}
 
 

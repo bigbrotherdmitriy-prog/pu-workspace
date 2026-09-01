@@ -3404,7 +3404,7 @@ export function App() {
         </section>
       )}
       {(active === "Документы" || active === "Центр знаний") && (
-        <DocumentsModule collapsed={collapsed} knowledgeMode={active === "Центр знаний"} documents={visibleDocuments} selected={selectedDocument} onSelect={(item) => void openDocument(item)} />
+        <DocumentsModule collapsed={collapsed} knowledgeMode={active === "Центр знаний"} documents={visibleDocuments} selected={selectedDocument} onSelect={(item) => void openDocument(item)} projectId={projectId} onOcrComplete={() => { setNotice("Повторное OCR завершено. Реестр и связи обновлены."); void load(); }} />
       )}
       <ContextualAssistant section={active} onAsk={openContextualAssistant} />
     </div>

@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,8 +24,6 @@ from app.governance_engine import create_governance_items
 
 
 router = APIRouter(prefix="/projects", tags=["virtual-workspace"])
-_snapshot_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("SNAPSHOT_WORKERS", "1"))))
-_analysis_workers = ThreadPoolExecutor(max_workers=max(1, int(os.getenv("ANALYSIS_WORKERS", "1"))))
 _analysis_in_progress: set[int] = set()
 _analysis_results: dict[int, dict] = {}
 
@@ -83,11 +80,11 @@ def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
     return [{"id": "root", "name": "Мой диск"}, *trail]
 
 
-def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, source_folder_id: str) -> None:
+def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, source_folder_id: str, raise_errors: bool = False) -> None:
     """Organize one explicitly selected folder copy and mirror its result on the snapshot."""
     from app.organizer import _scan_worker
 
-    _scan_worker(session_id, project_id, source_folder_id, auto_apply=True)
+    _scan_worker(session_id, project_id, source_folder_id, auto_apply=True, raise_errors=raise_errors)
     db = SessionLocal()
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
@@ -138,13 +135,16 @@ def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_i
         db.commit()
     finally:
         db.close()
-    _analysis_workers.submit(
-        _run_safe_copy_pipeline, snapshot_id, session_id, project_id, source_folder_id,
-    )
+    from app.jobs.queue import enqueue
+    with SessionLocal() as job_db:
+        enqueue(job_db, "workspace.safe_copy", {
+            "snapshot_id": snapshot_id, "session_id": session_id,
+            "project_id": project_id, "source_folder_id": source_folder_id,
+        }, idempotency_key=f"workspace.safe_copy:{snapshot_id}")
     return session_id
 
 
-def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None:
+def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_errors: bool = False) -> None:
     db = SessionLocal()
     start_pipeline = False
     source_name = ""
@@ -180,6 +180,8 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str) -> None
             failed.status = "dead_letter" if failed.retry_count >= 2 else "failed"
             failed.error_message = str(exc)[:2000]
             db.commit()
+        if raise_errors:
+            raise
     finally:
         db.close()
     if start_pipeline:
@@ -199,7 +201,7 @@ def recover_incomplete_snapshots() -> int:
     finally:
         db.close()
     for snapshot_id, project_id, external_id in rows:
-        _snapshot_workers.submit(_build_snapshot, snapshot_id, project_id, external_id)
+        _enqueue_snapshot(snapshot_id, project_id, external_id)
     return len(rows)
 
 
@@ -221,7 +223,7 @@ def recover_incomplete_analyses() -> int:
     for snapshot_id, project_id in rows:
         if snapshot_id not in _analysis_in_progress:
             _analysis_in_progress.add(snapshot_id)
-            _analysis_workers.submit(_analyze_snapshot_worker, snapshot_id, project_id)
+            _enqueue_analysis(snapshot_id, project_id)
     return len(rows)
 
 
@@ -281,7 +283,7 @@ def create_managed_workspace(
     }
 
 
-def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
+def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bool = False) -> None:
     db = SessionLocal()
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
@@ -329,9 +331,29 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int) -> None:
             failed.analysis_status = "dead_letter" if failed.analysis_retry_count >= 2 else "failed"
             failed.analysis_error = str(exc)[:2000]
             db.commit()
+        if raise_errors:
+            raise
     finally:
         _analysis_in_progress.discard(snapshot_id)
         db.close()
+
+
+def _enqueue_snapshot(snapshot_id: int, project_id: int, external_id: str, *, force: bool = False) -> int:
+    from app.jobs.queue import enqueue
+    with SessionLocal() as db:
+        job = enqueue(db, "workspace.snapshot", {
+            "snapshot_id": snapshot_id, "project_id": project_id, "external_id": external_id,
+        }, idempotency_key=None if force else f"workspace.snapshot:{snapshot_id}")
+        return job.id
+
+
+def _enqueue_analysis(snapshot_id: int, project_id: int, *, force: bool = False) -> int:
+    from app.jobs.queue import enqueue
+    with SessionLocal() as db:
+        job = enqueue(db, "workspace.analysis", {
+            "snapshot_id": snapshot_id, "project_id": project_id,
+        }, idempotency_key=None if force else f"workspace.analysis:{snapshot_id}")
+        return job.id
 
 
 @router.get("/{project_id}/source-folders/discover")
@@ -425,7 +447,7 @@ def queue_workspace_snapshot(
         return {"id": active.id, "status": active.status, "source_folder": source.name, "already_queued": True}
     snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building")
     db.add(snapshot); db.commit(); db.refresh(snapshot)
-    _snapshot_workers.submit(_build_snapshot, snapshot.id, project_id, external_id)
+    _enqueue_snapshot(snapshot.id, project_id, external_id)
     return {"id": snapshot.id, "status": snapshot.status, "source_folder": source.name, "already_queued": False}
 
 
@@ -470,7 +492,7 @@ def queue_all_workspace_snapshots(
         queued.append((snapshot.id, item["id"], item["name"]))
     db.commit()
     for snapshot_id, external_id, _ in queued:
-        _snapshot_workers.submit(_build_snapshot, snapshot_id, project_id, external_id)
+        _enqueue_snapshot(snapshot_id, project_id, external_id)
     return {
         "queued": len(queued), "skipped": skipped,
         "folders": [{"snapshot_id": snapshot_id, "external_id": external_id, "name": name} for snapshot_id, external_id, name in queued],
@@ -641,7 +663,7 @@ def retry_snapshot_build(project_id: int, snapshot_id: int, db: Session = Depend
     snapshot.error_message = None
     snapshot.retry_count += 1
     db.commit()
-    _snapshot_workers.submit(_build_snapshot, snapshot.id, project_id, source.external_id)
+    _enqueue_snapshot(snapshot.id, project_id, source.external_id, force=True)
     return {"snapshot_id": snapshot.id, "status": snapshot.status, "retry_count": snapshot.retry_count}
 
 
@@ -727,7 +749,7 @@ def analyze_workspace_snapshot(
     snapshot.analysis_result = None
     snapshot.analysis_error = None
     db.commit()
-    _analysis_workers.submit(_analyze_snapshot_worker, snapshot_id, project_id)
+    _enqueue_analysis(snapshot_id, project_id, force=True)
     return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": False}
 
 

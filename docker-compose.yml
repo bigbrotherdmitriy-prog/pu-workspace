@@ -50,8 +50,43 @@ services:
       GMAIL_AUTO_SYNC_INTERVAL_SECONDS: ${GMAIL_AUTO_SYNC_INTERVAL_SECONDS:-300}
       PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:-development}
       PU_ANDROID_CERT_SHA256: ${PU_ANDROID_CERT_SHA256:-}
+      PU_BACKGROUND_EXECUTION: durable
+      AI_SECRETARY_AUTOMATION_ENABLED: ${AI_SECRETARY_AUTOMATION_ENABLED:-true}
+      AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS: ${AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS:-300}
+    command: ["sh", "-c", "alembic -c alembic.ini upgrade head && python -m scripts.preflight && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${API_WORKERS:-2}"]
     ports:
     - 3000:8000
+  worker:
+    image: app-backend:latest
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:-pu_change_me}@db:5432/pu_workspace
+      PU_JOB_LEASE_SECONDS: ${PU_JOB_LEASE_SECONDS:-1800}
+      PU_JOB_POLL_SECONDS: ${PU_JOB_POLL_SECONDS:-1}
+      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY:-app.api.google_drive:drive_service_for_project}
+    command: ["python", "-m", "app.jobs.worker"]
+    deploy:
+      replicas: 2
+  scheduler:
+    image: app-backend:latest
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:-pu_change_me}@db:5432/pu_workspace
+      GMAIL_AUTO_SYNC_ENABLED: ${GMAIL_AUTO_SYNC_ENABLED:-true}
+      GMAIL_AUTO_SYNC_INTERVAL_SECONDS: ${GMAIL_AUTO_SYNC_INTERVAL_SECONDS:-300}
+      AI_SECRETARY_AUTOMATION_ENABLED: ${AI_SECRETARY_AUTOMATION_ENABLED:-true}
+      AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS: ${AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS:-300}
+    command: ["python", "-m", "app.jobs.scheduler"]
   telegram-relay:
     image: app-backend:latest
     container_name: pu-workspace-telegram-relay

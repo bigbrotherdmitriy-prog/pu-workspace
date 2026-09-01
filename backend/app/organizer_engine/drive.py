@@ -135,6 +135,27 @@ class DriveClient:
                 on_progress(processed, total)
         return extracted, failed
 
+    def read_bytes(self, object_id: str, max_bytes: int = MAX_CONTENT_BYTES) -> tuple[bytes, str]:
+        """Read one object through the storage-adapter boundary without mutating it."""
+        item = self.get_file_meta(object_id)
+        if item.is_folder:
+            raise ValueError("Storage object is a folder")
+        if item.size is not None and item.size > max_bytes:
+            raise ValueError(f"Storage object exceeds {max_bytes} bytes")
+        export_mime = GOOGLE_EXPORTS.get(item.mime_type)
+        request = (
+            self.service.files().export_media(fileId=item.id, mimeType=export_mime)
+            if export_mime else self.service.files().get_media(fileId=item.id)
+        )
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request, chunksize=1024 * 1024)
+        done = False
+        while not done and buffer.tell() <= max_bytes:
+            _, done = downloader.next_chunk()
+        if buffer.tell() > max_bytes:
+            raise ValueError(f"Storage object exceeds {max_bytes} bytes")
+        return buffer.getvalue(), export_mime or item.mime_type
+
     def walk_tree(self, root_folder_id: str, limit: int = MAX_FILES_PER_SCAN) -> list[DriveFile]:
         out: list[DriveFile] = []
         queue: deque[str] = deque([root_folder_id])

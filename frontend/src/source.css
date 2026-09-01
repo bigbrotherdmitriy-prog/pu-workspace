@@ -110,6 +110,16 @@
 .document-register small { margin-top: 4px; color: #748091; }
 .document-detail { min-height: 430px; }
 .document-detail h3 { margin: 25px 0 8px; }
+.ocr-batch-result { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 12px; padding: 12px; border: 1px solid #b8dfcf; border-radius: 12px; background: #eef8f3; color: #27463b; font-size: 13px; }
+.ocr-batch-result strong { color: #087c5b; }
+.ocr-quality { color: #087c5b !important; }
+.ocr-quality.low { color: #b45309 !important; }
+.document-ocr-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding: 12px; border-radius: 12px; background: #f2f7f4; }
+.document-ocr-actions button { display: inline-flex; align-items: center; gap: 7px; }
+.document-ocr-actions button svg { width: 17px; }
+.document-ocr-actions span { color: #617168; font-size: 13px; }
+.spin { animation: pu-spin 1s linear infinite; }
+@keyframes pu-spin { to { transform: rotate(360deg); } }
 .document-links { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-top: 20px; }
 .document-links span { padding: 14px; border-radius: 10px; background: #f5f7fa; color: #748091; font-size: 12px; }
 .document-links strong { display: block; margin-top: 4px; color: #17243a; font-size: 20px; }

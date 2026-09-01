@@ -13,7 +13,7 @@ from app.api.telegram import router as telegram_router
 from app.api.governance import router as governance_router
 from app.api.dashboard import router as dashboard_router
 from app.api.local_upload import router as local_upload_router
-from app.api.workspace import recover_incomplete_analyses, recover_incomplete_snapshots, router as workspace_router
+from app.api.workspace import router as workspace_router
 from app.api.organizations_contracts import router as organizations_contracts_router
 from app.api.contract_discovery import router as contract_discovery_router
 from app.api.contract_package import router as contract_package_router
@@ -41,13 +41,10 @@ from app.models import (
     User,
 )
 from app.organizer import router as organizer_router
-from app.organizer import recover_incomplete_scans
 from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
 from app.core.observability import observe_request
-from app.automations.gmail import start as start_gmail_automation, stop as stop_gmail_automation
-from app.automations.ai_secretary import start as start_ai_secretary_automation, stop as stop_ai_secretary_automation
 
 
 APP_VERSION = "1.0.3"
@@ -60,16 +57,9 @@ async def lifespan(_: FastAPI):
         cleanup_expired_sessions(db)
     finally:
         db.close()
-    recover_incomplete_scans()
-    recover_incomplete_snapshots()
-    recover_incomplete_analyses()
-    start_gmail_automation()
-    start_ai_secretary_automation()
-    try:
-        yield
-    finally:
-        stop_gmail_automation()
-        stop_ai_secretary_automation()
+    # Background work is executed by durable worker/scheduler services. Keeping
+    # API startup side-effect free allows multiple API processes to run safely.
+    yield
 
 
 app = FastAPI(

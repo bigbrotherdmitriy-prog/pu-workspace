@@ -1,18 +1,22 @@
 import os
 import shutil
+from datetime import datetime, timedelta, timezone
 
 from cryptography.fernet import Fernet
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import engine
 from app.schema import CURRENT_SCHEMA_REVISION
 from app.automations.gmail import status as gmail_automation_status
 from app.automations.ai_secretary import status as ai_secretary_automation_status
+from app.database import SessionLocal
+from app.models.job import BackgroundJob, ServiceHeartbeat
 
 
 def readiness_report() -> dict:
     checks: dict[str, dict] = {}
+    durable_execution = os.getenv("PU_BACKGROUND_EXECUTION", "in_process") == "durable"
     app_secret = os.getenv("APP_SECRET_KEY", "")
     bootstrap = os.getenv("BOOTSTRAP_TOKEN", "")
     token_key = os.getenv("TOKEN_ENCRYPTION_KEY", "")
@@ -43,8 +47,10 @@ def readiness_report() -> dict:
         f"; processed {last_result.get('processed', 0)}; failed {last_result.get('failed', 0)}"
     )
     checks["gmail_automation"] = _check(
-        not gmail_automation["enabled"] or (gmail_automation["running"] and not gmail_automation["last_error"]),
+        durable_execution or not gmail_automation["enabled"] or (gmail_automation["running"] and not gmail_automation["last_error"]),
         (
+            "managed by durable scheduler"
+            if durable_execution else
             automation_message
             if gmail_automation["running"]
             else "disabled" if not gmail_automation["enabled"] else "not running"
@@ -54,8 +60,10 @@ def readiness_report() -> dict:
     ai_automation = ai_secretary_automation_status()
     ai_last_result = ai_automation.get("last_result") or {}
     checks["ai_secretary_automation"] = _check(
-        not ai_automation["enabled"] or (ai_automation["running"] and not ai_automation["last_error"]),
+        durable_execution or not ai_automation["enabled"] or (ai_automation["running"] and not ai_automation["last_error"]),
         (
+            "managed by durable scheduler"
+            if durable_execution else
             f"running every {ai_automation['interval_seconds']} seconds; "
             f"last run {ai_automation['last_run_at'] or 'pending'}; "
             f"prepared {ai_last_result.get('prepared', 0)}"
@@ -83,6 +91,21 @@ def readiness_report() -> dict:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
         checks["database"] = _check(True, "reachable")
         checks["schema"] = _check(revision == CURRENT_SCHEMA_REVISION, revision or "migration version missing")
+        if durable_execution:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=90)
+            with SessionLocal() as db:
+                worker_count = len(list(db.scalars(select(ServiceHeartbeat.service_id).where(
+                    ServiceHeartbeat.service_kind == "worker", ServiceHeartbeat.last_seen >= cutoff,
+                ))))
+                scheduler_count = len(list(db.scalars(select(ServiceHeartbeat.service_id).where(
+                    ServiceHeartbeat.service_kind == "scheduler", ServiceHeartbeat.last_seen >= cutoff,
+                ))))
+                dead_letters = len(list(db.scalars(select(BackgroundJob.id).where(
+                    BackgroundJob.status == "dead_letter",
+                ))))
+            checks["durable_workers"] = _check(worker_count >= 2, f"active workers: {worker_count}; required: 2")
+            checks["durable_scheduler"] = _check(scheduler_count >= 1, f"active schedulers: {scheduler_count}; required: 1")
+            checks["dead_letter_queue"] = _check(dead_letters == 0, f"dead-letter jobs: {dead_letters}", required=False)
     except SQLAlchemyError as exc:
         checks["database"] = _check(False, exc.__class__.__name__)
         checks["schema"] = _check(False, "database unavailable")

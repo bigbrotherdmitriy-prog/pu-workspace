@@ -14,6 +14,13 @@ BACKUP_DIR=$APP_ROOT/backups
 COMPOSE="docker compose -p app -f docker-compose.yml -f $PROXY_OVERRIDE"
 SWITCHED=false
 
+compose_app_services() {
+  services="backend"
+  $COMPOSE config --services | grep -qx worker && services="$services worker"
+  $COMPOSE config --services | grep -qx scheduler && services="$services scheduler"
+  echo "$services"
+}
+
 fail() {
   echo "deploy failed: $*" >&2
   exit 1
@@ -63,10 +70,11 @@ rollback() {
       export PU_RELEASE_REVISION
       ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
       cd "$PREVIOUS_RELEASE"
+      APP_SERVICES=$(compose_app_services)
       if [ "$DEPLOY_RELAY" = true ]; then
-        $COMPOSE up -d --no-build --force-recreate backend telegram-relay || true
+        $COMPOSE up -d --no-build --force-recreate $APP_SERVICES telegram-relay || true
       else
-        $COMPOSE up -d --no-build --force-recreate backend || true
+        $COMPOSE up -d --no-build --force-recreate $APP_SERVICES || true
       fi
     fi
   fi
@@ -105,11 +113,12 @@ docker tag "$CANDIDATE_IMAGE" app-backend:latest
 docker tag "$CANDIDATE_IMAGE" app-backend
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 SWITCHED=true
+APP_SERVICES=$(compose_app_services)
 if [ "$DEPLOY_RELAY" = true ]; then
-  $COMPOSE up -d --no-build --force-recreate backend telegram-relay
+  $COMPOSE up -d --no-build --force-recreate $APP_SERVICES telegram-relay
 else
   echo "relay restart skipped by DEPLOY_RELAY=false"
-  $COMPOSE up -d --no-build --force-recreate backend
+  $COMPOSE up -d --no-build --force-recreate $APP_SERVICES
 fi
 
 echo "[5/6] waiting for backend readiness"

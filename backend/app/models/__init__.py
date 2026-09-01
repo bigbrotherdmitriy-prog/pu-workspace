@@ -30,6 +30,7 @@ from app.models.external_resource import ExternalResourceLink
 from app.models.project_contact import ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.contract_document_link import ContractDocumentLink
+from app.models.job import BackgroundJob, ServiceHeartbeat
 
 __all__ = [
     "Project",
@@ -76,4 +77,6 @@ __all__ = [
     "ProjectContact",
     "TaskCompletionSuggestion",
     "ContractDocumentLink",
+    "BackgroundJob",
+    "ServiceHeartbeat",
 ]

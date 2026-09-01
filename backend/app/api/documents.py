@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,8 @@ from app.models.document_version import DocumentVersion
 from app.models.governance import Decision, Risk
 from app.models.response_draft import ResponseDraft
 from app.models.task import Task
+from app.models.job import BackgroundJob
+from app.jobs.queue import enqueue
 from app.core.auth import require_project_role, require_user
 from app.integrations.source_urls import source_object_url
 
@@ -27,6 +29,10 @@ class DocumentCreate(BaseModel):
     mime_type: str | None = None
     parent_external_id: str | None = None
     source: str = "google_drive"
+
+
+class OcrBatchCreate(BaseModel):
+    document_ids: list[int] | None = Field(default=None, max_length=500)
 
 
 @router.post("/{project_id}/documents")
@@ -132,6 +138,10 @@ def list_documents(
                 "current_version": item.current_version,
                 "source_modified_at": item.source_modified_at,
                 "summary": item.summary,
+                "extraction_method": item.extraction_method,
+                "extraction_quality": item.extraction_quality,
+                "ocr_pages": item.ocr_pages,
+                "ocr_updated_at": item.ocr_updated_at,
             }
             for item in documents
         ]
@@ -155,6 +165,55 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
         "mime_type": item.mime_type, "source": item.source,
         "status": item.status, "current_version": item.current_version,
         "source_modified_at": item.source_modified_at, "summary": item.summary,
+        "extraction_method": item.extraction_method,
+        "extraction_quality": item.extraction_quality,
+        "ocr_pages": item.ocr_pages,
+        "ocr_updated_at": item.ocr_updated_at,
         "versions": [{"version": x.version_number, "created_at": x.created_at} for x in versions],
         "links": {"tasks": len(tasks), "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts)},
+    }
+
+
+@router.post("/{project_id}/documents/ocr-batches")
+def create_ocr_batch(
+    project_id: int, payload: OcrBatchCreate,
+    db: Session = Depends(get_db), user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    document_ids = sorted(set(payload.document_ids or [])) or None
+    if document_ids:
+        found = set(db.scalars(select(Document.id).where(
+            Document.project_id == project_id, Document.id.in_(document_ids),
+        )))
+        if found != set(document_ids):
+            raise HTTPException(404, "One or more documents were not found in this project")
+    active = db.scalar(select(BackgroundJob).where(
+        BackgroundJob.kind == "documents.ocr",
+        BackgroundJob.status.in_(("queued", "running")),
+        BackgroundJob.payload["project_id"].as_integer() == project_id,
+    ).order_by(BackgroundJob.id.desc()))
+    if active is not None:
+        return {"job_id": active.id, "status": active.status, "already_running": True}
+    job = enqueue(
+        db, "documents.ocr", {"project_id": project_id, "document_ids": document_ids},
+        priority=60, max_attempts=2,
+    )
+    return {"job_id": job.id, "status": job.status, "already_running": False}
+
+
+@router.get("/{project_id}/documents/ocr-batches/{job_id}")
+def get_ocr_batch(
+    project_id: int, job_id: int,
+    db: Session = Depends(get_db), user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    job = db.get(BackgroundJob, job_id)
+    if job is None or job.kind != "documents.ocr" or int(job.payload.get("project_id", -1)) != project_id:
+        raise HTTPException(404, "OCR batch not found")
+    return {
+        "job_id": job.id, "status": job.status, "attempts": job.attempts,
+        "result": job.result, "error": job.last_error if job.status == "dead_letter" else None,
+        "created_at": job.created_at, "updated_at": job.updated_at,
     }
