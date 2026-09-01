@@ -1,32 +1,32 @@
-# Юридический комплект PU Workspace
+# Юридическое и реестровое досье PU Workspace
 
-Статус: проекты документов для заполнения правообладателем и письменной проверки российским юристом по интеллектуальной собственности и персональным данным. Все отсутствующие сведения собраны в `../release/00_OWNER_INPUT_REGISTER_RU.md`.
+Статус: проекты документов для заполнения правообладателем и проверки российским юристом по интеллектуальной собственности, ИТ и персональным данным. Материалы не подтверждают включение PU Workspace в Реестр российского ПО или российское происхождение сторонних компонентов.
 
-## Состав
+## Юридический комплект
 
-1. `01_RIGHTS_CONFIRMATION_RU.md` — досье происхождения исключительных прав.
-2. `02_NONEXCLUSIVE_LICENSE_AGREEMENT_RU.md` — основная рекомендуемая модель поставки.
-3. `03_EXCLUSIVE_LICENSE_OPTION_RU.md` — вариант исключительной лицензии без отчуждения права.
-4. `04_DELIVERY_SPECIFICATION_RU.md` — состав и технические границы поставки.
-5. `05_TRANSFER_ACCEPTANCE_ACT_RU.md` — акт передачи и приёмки.
-6. `06_THIRD_PARTY_COMPONENTS_RU.md` — реестр зависимостей и обязательная проверка лицензий.
-7. `07_AI_AND_CLIENT_DATA_POLICY_RU.md` — режим AI, данных и подтверждений пользователя.
-8. `08_INSTALLATION_RECOVERY_RU.md` — установка, резервирование и восстановление.
-9. `09_RUSSIAN_SOFTWARE_REGISTER_READINESS_RU.md` — досье готовности к Реестру российского ПО.
+1. [01_RIGHTS_CONFIRMATION_RU.md](01_RIGHTS_CONFIRMATION_RU.md) — происхождение исключительных прав.
+2. [02_NONEXCLUSIVE_LICENSE_AGREEMENT_RU.md](02_NONEXCLUSIVE_LICENSE_AGREEMENT_RU.md) — проект неисключительной лицензии.
+3. [03_EXCLUSIVE_LICENSE_OPTION_RU.md](03_EXCLUSIVE_LICENSE_OPTION_RU.md) — альтернативные сценарии прав.
+4. [04_DELIVERY_SPECIFICATION_RU.md](04_DELIVERY_SPECIFICATION_RU.md) — состав поставки.
+5. [05_TRANSFER_ACCEPTANCE_ACT_RU.md](05_TRANSFER_ACCEPTANCE_ACT_RU.md) — акт передачи.
+6. [06_THIRD_PARTY_COMPONENTS_RU.md](06_THIRD_PARTY_COMPONENTS_RU.md) — зависимости и лицензии.
+7. [07_AI_AND_CLIENT_DATA_POLICY_RU.md](07_AI_AND_CLIENT_DATA_POLICY_RU.md) — AI и данные.
+8. [08_INSTALLATION_RECOVERY_RU.md](08_INSTALLATION_RECOVERY_RU.md) — установка и восстановление.
+9. [09_RUSSIAN_SOFTWARE_REGISTER_READINESS_RU.md](09_RUSSIAN_SOFTWARE_REGISTER_READINESS_RU.md) — checklist Реестра.
 
-## Обязательные действия до сделки
+## Дополнение для Реестра
 
-- установить и документально подтвердить правообладателя каждого существенного фрагмента;
-- получить письменные документы от работников и подрядчиков, участвовавших в разработке;
-- проверить историю Git и материалы, созданные внешними AI-сервисами;
-- сформировать SBOM и сверить лицензии по lock-файлам именно передаваемого релиза;
-- исключить секреты, production-данные и доступы из архива;
-- выбрать только одну модель сделки: неисключительная лицензия, исключительная лицензия либо отдельный договор отчуждения;
-- согласовать поручение обработки персональных данных и применимое размещение;
-- провести юридическую проверку финальной редакции.
+- [registry/REQUIREMENTS_MATRIX_RU.md](registry/REQUIREMENTS_MATRIX_RU.md) — требования и предполагаемая классификация;
+- [registry/FUNCTIONAL_AND_TECHNICAL_DESCRIPTION_RU.md](registry/FUNCTIONAL_AND_TECHNICAL_DESCRIPTION_RU.md) — функции и размещение;
+- [registry/PUBLIC_INSTALLATION_AND_OPERATION_RU.md](registry/PUBLIC_INSTALLATION_AND_OPERATION_RU.md) — публичная инструкция;
+- [registry/ARCHITECTURE_RU.md](registry/ARCHITECTURE_RU.md) — схема;
+- [registry/COMPONENTS_AND_AI_MATRIX_RU.md](registry/COMPONENTS_AND_AI_MATRIX_RU.md) — SBOM/AI-матрица;
+- [registry/EXPERT_ACCESS_PROCEDURE_RU.md](registry/EXPERT_ACCESS_PROCEDURE_RU.md) — экспертный доступ;
+- [registry/OWNER_INPUT_FORM_RU.md](registry/OWNER_INPUT_FORM_RU.md) — решения владельца;
+- [registry/PUBLIC_MATERIALS_INDEX_RU.md](registry/PUBLIC_MATERIALS_INDEX_RU.md) — публикации.
 
-Документы этого каталога не являются подписанным договором и сами по себе не подтверждают возникновение прав.
+Реестровые материалы ссылаются на юридические документы и не создают их копии. Все отсутствующие сведения консолидируются также в `../release/00_OWNER_INPUT_REGISTER_RU.md`.
 
-## Повторяемая сборка
+## Release gate
 
-После чистого commit: `python scripts/legal_release_kit.py all --ref <FULL_SHA> --out <EMPTY_DIR>`. Команда читает только immutable Git ref, строит три SPDX, архив по allowlist, manifest, SHA-256 и audit result. Если обнаружен секрет или клиентоподобный маркер, архив не создаётся. Одинаковый commit и версия скрипта дают одинаковый архив.
+До сделки подтвердить цепочку прав, выбрать одну модель сделки, проверить SBOM и лицензии, исключить секреты/production-данные, согласовать обработку данных и пройти юридическую проверку. Повторяемый комплект создаётся командой `python scripts/legal_release_kit.py all --ref <FULL_SHA> --out <EMPTY_DIR>` только после чистого commit.
