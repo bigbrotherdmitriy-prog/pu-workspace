@@ -1,5 +1,7 @@
 from pathlib import Path
+from dataclasses import dataclass
 import importlib.util
+import pickle
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +9,11 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class PicklePolicy:
+    authority: object
 
 
 def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
@@ -115,6 +122,39 @@ def test_successful_probe_cleanup_preserves_prior_checkpoint():
     module.cleanup_probe([child], fixture)
 
     assert module.CHECKPOINT == "first_claim"
+
+
+def test_process_probe_cleanup_tolerates_process_not_started():
+    path = ROOT / "scripts/ci/v54_pilot_runtime.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_runtime_unstarted_cleanup_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    closed = []
+    child = SimpleNamespace(
+        pid=None,
+        is_alive=lambda: False,
+        join=lambda _timeout: (_ for _ in ()).throw(AssertionError("not started")),
+    )
+    fixture = SimpleNamespace(close=lambda: closed.append(True))
+
+    module.cleanup_probe([child], fixture)
+
+    assert closed == [True]
+
+
+def test_process_probe_strips_unpicklable_authority_before_spawn():
+    path = ROOT / "scripts/ci/v54_pilot_runtime.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_runtime_policy_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    policy = PicklePolicy(authority=lambda: None)
+
+    safe_policy = module.spawn_policy(policy)
+
+    assert safe_policy.authority is None
+    pickle.dumps(safe_policy)
 
 
 def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_path):

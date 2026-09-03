@@ -251,3 +251,39 @@ join созданного дочернего процесса, либо в `fixt
 allowlisted checkpoint `cleanup_child` и `cleanup_fixture`, затем минимально
 исправить обнаруженный путь и повторить workflow. До этого решение остаётся
 **CONDITIONAL**. Merge и production deploy не выполнять.
+
+## Локализация process-fault после run 33801015730
+
+Локальная проверка установила точную последовательность сбоя:
+
+1. `SyntheticPolicy` передавался в дочерний процесс вместе с DB-backed
+   `AuthorityResolver`;
+2. resolver содержал тестовые `lambda`-часы и не сериализовался механизмом
+   `multiprocessing` с методом `spawn`;
+3. `Process.start()` завершался до присвоения PID;
+4. объект процесса уже находился в списке cleanup;
+5. `join()` незапущенного процесса выбрасывал `AssertionError` и маскировал
+   исходную ошибку сериализации checkpoint-значением `cleanup`.
+
+Regression-тесты сначала воспроизвели оба дефекта. Минимальное исправление:
+
+- перед `spawn` из policy удаляется только runtime-объект resolver; все
+  неизменяемые policy-факты сохраняются;
+- дочерний процесс восстанавливает DB-backed `AuthorityResolver` и проверяет
+  полномочия по той же изолированной PostgreSQL schema;
+- процесс добавляется в cleanup только после успешного `start()`;
+- cleanup безопасно пропускает объект без PID, чтобы не маскировать исходный
+  failure.
+
+Проверки после исправления:
+
+- сериализация фактического policy из synthetic composition: PASS,
+  1346 bytes;
+- `scripts/ci`: 91 passed;
+- целевой v5.4 regression: 261 passed / 1 PostgreSQL skip;
+- полный backend: 754 passed / 9 skipped;
+- `git diff --check`: PASS.
+
+Production-код, миграции и продуктовые данные не менялись. Исправление ещё не
+проверено в GitHub PostgreSQL runtime, поэтому общий статус остаётся
+**CONDITIONAL** до отдельного разрешённого push и повторного workflow.

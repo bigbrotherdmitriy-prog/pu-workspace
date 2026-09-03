@@ -8,6 +8,7 @@ This does NOT prove production authority, migration correctness or external once
 import multiprocessing as mp
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 import sys
 import tempfile
@@ -22,9 +23,23 @@ def checkpoint(value):
     CHECKPOINT = value
 
 
+def spawn_policy(policy):
+    """Return the policy facts that are safe to serialize into a spawn child.
+
+    Authority is reconstructed in the child from the same DB-backed resolver.  Its
+    test clock is intentionally a local callable and therefore must never cross a
+    multiprocessing spawn boundary.
+    """
+    return replace(policy, authority=None)
+
+
 def cleanup_probe(children, fixture):
     try:
         for child in children:
+            # A failed Process.start() leaves pid unset; join() would raise and
+            # mask the original spawn error with "can only join a started process".
+            if getattr(child, "pid", "unknown") is None:
+                continue
             if child.is_alive():
                 child.terminate()
             child.join(10)
@@ -35,16 +50,19 @@ def cleanup_probe(children, fixture):
 
 
 def contender(url, schema, policy, output, stop, pause_after_claim):
+    from dataclasses import replace
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from app.jobs.queue import claim, execution_owner, succeed
     from app.jobs.handlers import run
     from app.pilot_composition import SyntheticComposition
     from app.pilot_dispatch import SyntheticDispatch, install_synthetic_runtime
+    from app.core.v54_authority import AuthorityResolver
     from v54_pilot_fixture import NOW
     engine = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5,
         "options": f"-csearch_path={schema} -clock_timeout=8000 -cstatement_timeout=15000"})
     sessions = sessionmaker(engine, expire_on_commit=False)
+    policy = replace(policy, authority=AuthorityResolver(clock=lambda: NOW))
     component = SyntheticComposition(policy=policy, clock=lambda: NOW, enabled=True)
     install_synthetic_runtime(SyntheticDispatch(sessions=sessions, composition_for_scope=lambda s: component))
     try:
@@ -97,16 +115,17 @@ def main():
             checkpoint("enqueue")
             job_id = runtime.enqueue_action(envelope.action_ref.id.value, uid(999))
             output, stop = ctx.Queue(), ctx.Event()
-            args = (os.environ["PUW_V54_INTEGRATION_DATABASE_URL"], engine.v54_test_schema, component.policy, output, stop)
+            args = (os.environ["PUW_V54_INTEGRATION_DATABASE_URL"], engine.v54_test_schema,
+                    spawn_policy(component.policy), output, stop)
             first = ctx.Process(target=contender, args=(*args, True))
-            children.append(first)
             first.start()
+            children.append(first)
             checkpoint("first_claim")
             claimed = output.get(timeout=25)
             assert claimed["state"] == "claimed"
             rival = ctx.Process(target=contender, args=(*args, False))
-            children.append(rival)
             rival.start()
+            children.append(rival)
             checkpoint("rival_no_claim")
             assert output.get(timeout=25)["state"] == "no_claim"
             rival.join(10)
@@ -130,8 +149,8 @@ def main():
             else:
                 raise AssertionError("stale worker accepted before recovery")
             second = ctx.Process(target=contender, args=(*args, False))
-            children.append(second)
             second.start()
+            children.append(second)
             checkpoint("second_claim")
             assert output.get(timeout=25)["state"] == "claimed"
             checkpoint("second_completion")
