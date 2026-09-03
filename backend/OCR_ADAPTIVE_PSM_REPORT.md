@@ -16,6 +16,11 @@ PSM 6 recognized the clause continuously. On the complete page the candidate:
 - retained 95.2% similarity of the ordered digit stream;
 - added no replacement, control, or mixed-script corruption signals.
 
+The complete PSM 6 page is nevertheless rejected because individual table
+digits differ from PSM 1. Only clause 7 satisfies the strict numbered-prose
+merge checks; the table and all surrounding financial data stay byte-for-byte
+from the primary OCR result.
+
 This is evidence for this scan, not a general OCR accuracy claim. The stricter
 policy below was subsequently verified with repository-only synthetic fixtures;
 the customer PDF was not added to tests or committed.
