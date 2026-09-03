@@ -2,6 +2,13 @@
 
 PROPOSED. Ничего из описанных новых сущностей/endpoint здесь не реализовано.
 
+Общие ObjectRef/VersionPin и трактовка bound versions определены в
+[integration glossary](../integration/glossary.md). В I03/I04/I05 и §6 ниже
+version означает semantic pin, не изменяемый assessment.record_version.
+last_checked_at не инвалидирует approval, но live ACL/freshness проверка обязательна.
+Pre-action Context/Claim events используют тот же audit writer со stream subject,
+без фиктивного action; [единая транзакционная граница](../integration/ownership-transactions.md).
+
 ## 1. Независимые оси
 
 | Ось | Значения | Семантика |

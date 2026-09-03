@@ -15,7 +15,7 @@ MUST означает условие приёмки пилота. Техниче
 | relation_id | UUID, обязательно | ID конкретного утверждения; не ID объекта |
 | lineage_id, revision | UUID + positive int | Цепочка ручных исправлений; unique(lineage_id, revision) |
 | organization_id | существующий ID, обязательно | Один tenant; выводится сервером |
-| source, target | `{type,id}` | Тип из allowlist; внутренний ID как opaque string; не provider ID |
+| source, target | ObjectRef из [glossary](../integration/glossary.md) | Typed ID + tenant; не provider ID |
 | relation_type | versioned string | Семантика и допустимые пары типов из реестра ниже |
 | scope | `{kind,id}` | project или mailbox; ограничивает действие, не предоставляет доступ |
 | state | hypothesis / confirmed / rejected / superseded | Текущее состояние с audited transition |
@@ -47,7 +47,7 @@ ACL и invalidation rules; String вместо PostgreSQL enum. Это изме�
 | communication.task | Message → Task | Создаётся после результата общего create-internal-task |
 | communication.draft | Message → ResponseDraft | Ссылка на draft/proposal, не разрешение отправки |
 
-Договорный срок — claim Evidence owner, на него ссылается proposal задачи.
+Договорный срок — DeadlineClaim Task domain owner, на него ссылается proposal задачи.
 Не создавать здесь вторую сущность Deadline/Clause/Evidence. Готовая связь
 Project–Contract из Contract.project_id читается через resolver, не backfill
 всех договоров в граф. Company identity/справочник контрагентов переиспользуется
@@ -111,8 +111,8 @@ Hard-delete target блокируется для объектов пилота �
 
 ## 2. Идентичность сообщения и контакта
 
-`MailConnection` — стабильная связь tenant ↔ provider mailbox. Логическая identity:
-`(organization_id, provider, provider_account_key)`. Не использовать текущий
+`MailConnection` — mailbox extension единственного ConnectionIdentity registry
+integration owner (см. glossary), не самостоятельный account master. Не использовать текущий
 project_id, display email, OAuth token ciphertext или threadId как identity.
 Credential reference/epoch может меняться при обновлении того же account;
 смена самого account создаёт новое connection_id и никогда не переименовывает старое.
@@ -224,7 +224,7 @@ Retry того же запуска не меняет generation. Reanalyse — �
 но не новая бизнес-задача по умолчанию.
 
 Proposal dedup отделён от job dedup: `intent_key=(organization,message,claim_anchor,
-action_type)` стабилен при изменении формулировки AI. claim_anchor выдаёт Evidence
+action_type)` стабилен при изменении формулировки AI. claim_anchor выдаёт Task domain
 owner либо сопоставляет подтверждающий человек; hash текста/срока/порядковый
 номер AI-пункта не является стабильной business identity. Если новое выделение
 нельзя однозначно сопоставить старому claim, оно требует reconcile, а не create.

@@ -1,5 +1,10 @@
 # Action trust v5.4 — проект контракта
 
+Стыки общего пилота уточняет [integration contract](../integration/README.md).
+Общие ID/версии/owners определены там. Исходные standalone примеры сохранены
+для истории design proposal; AUTO/send/reply/escalation не входят в первый срез.
+Единственный интегрированный wire-пример — [pilot.json](../integration/pilot.json).
+
 Статус: **PROPOSED / NOT IMPLEMENTED / OWNER DECISION REQUIRED**.
 База аудита: `66129dca3a4cb92f9f09bd87f19f5433ceeb87a0`.
 Дата: 2026-09-03. Этот пакет не меняет действующие права, политику или roadmap.

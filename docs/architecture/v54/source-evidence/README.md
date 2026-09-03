@@ -1,5 +1,10 @@
 # SourceReference / Evidence — v5.4, внутренний черновик
 
+Стыки общего пилота уточняет [integration contract](../integration/README.md).
+Общие ID/версии/owners определены там. Исходные standalone примеры сохранены
+для истории design proposal; AUTO/send/reply/escalation не входят в первый срез.
+Единственный интегрированный wire-пример — [pilot.json](../integration/pilot.json).
+
 Статус: **DRAFT / NOT APPROVED**. Контрактный этап, не реализованный API и
 не разрешение на перенос/копирование данных. База аудита:
 `66129dca3a4cb92f9f09bd87f19f5433ceeb87a0`.

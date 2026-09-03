@@ -5,10 +5,9 @@
 
 ## Общие типы
 
-- `Id`: существующий положительный integer ID. Для новых PK возможен bigint;
-  до выхода за safe integer JSON-клиентов интегратор утверждает string encoding
-  **нового** API, без изменения старых endpoint. UUID `public_id` опционален
-  и additive, не является разрешением на чтение или причиной сменить все PK.
+- Общие ObjectRef/TaggedId/VersionPin определены только в
+  [integration glossary](../integration/glossary.md). Id ниже — shorthand
+  локального PK исходного proposal, не wire-format. Existing PK сохраняются.
 - `Timestamp`: UTC RFC3339. null = неизвестно/не выполнялось, не «сейчас».
 - `record_version`: монотонный integer для optimistic concurrency; не revision
   внешнего файла. `schema_version`: `source-evidence.v54-draft.1`.
@@ -162,6 +161,10 @@ claim/ContextRelation. Ни граф, ни approval record здесь не ду�
 | access_policy_ref, retention_policy_ref | Required; читатель evidence не обязательно читатель quote |
 | fragment | {representation_id, retention_state}; inline text только в отдельном авторизованном ответе fragment API |
 | created_at | Timestamp; correction/supersession создаёт новый evidence ID, старый остаётся либо обезличивается по policy |
+
+Integrated Evidence имеет immutable revision=1; record_version относится только
+к assessment. Claim/anchor пишет Task domain, не Evidence. Approval pins и
+freshness-only recheck согласованы в integration glossary.
 
 `extractor` поля version/model/prompt могут быть null для исторической записи
 или отсутствующего AI; reason unknown/not_applicable различается через method

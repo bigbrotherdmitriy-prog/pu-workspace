@@ -1,8 +1,8 @@
 # Migration proposal — без Alembic и без исполнения SQL
 
 Это перечень изменений для согласования. Ветка не меняет модели, handlers или
-данные. Существующие integer PK не заменяются массово на UUID: typed refs
-инкапсулируют их строковое представление; новые записи контракта получают UUID.
+данные. Существующие integer PK не заменяются массово на UUID: общий
+[ObjectRef](../integration/glossary.md) явно маркирует kind, без неявного cast.
 Не переносить schema/миграции из соседних веток без решения интегратора.
 
 ## Предлагаемое хранение
@@ -32,9 +32,10 @@ Assertion payload immutable. Изменение lifecycle хранит event ref
 
 ### Mail connection / Message
 
-`mail_connections`: id UUID, organization_id FK, provider, provider_account_key,
-credential_reference (без токена), credential_epoch, state, created_by/at,
-record_version. Unique(organization_id, provider, provider_account_key).
+`mail_connections`: mailbox extension с connection_identity_ref, namespace,
+state и record_version. Unique(connection_identity_ref, namespace).
+Account key/credential generation принадлежат общему identity registry;
+здесь не создаётся конкурентный credential/account master.
 Mailbox ACL владеет существующий permissions-поток; требуются проверяемые
 read/analyze/reconcile/send grants с project ограничениям. Простая строка
 `created_by_user_id` не заменяет ACL shared mailbox.

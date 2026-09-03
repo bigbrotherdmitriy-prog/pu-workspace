@@ -1,5 +1,10 @@
 # ContextRelation и Communication-to-Action — контракт одного MVP5-пилота
 
+Стыки общего пилота уточняет [integration contract](../integration/README.md).
+Общие ID/версии/owners определены там. Исходные standalone примеры сохранены
+для истории design proposal; AUTO/send/reply/escalation не входят в первый срез.
+Единственный интегрированный wire-пример — [pilot.json](../integration/pilot.json).
+
 Статус: **design proposal / требуется согласование интегратором**, не реализованный API.
 База кода: `66129dca3a4cb92f9f09bd87f19f5433ceeb87a0`.
 Версия контракта: `v54-context-communication/1`.

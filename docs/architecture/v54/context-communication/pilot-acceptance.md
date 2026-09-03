@@ -1,5 +1,11 @@
 # Пилот и приёмка
 
+Ниже сохранена расширенная исходная спецификация, НЕ scope первого integrated
+среза. Send/reply/escalation и AUTO — future-only; единая актуальная
+[матрица](../integration/acceptance.md) и [fixture](../integration/pilot.json)
+исключают внешнее исполнение. Сценарий «internal effect без receipt» должен
+падать как нарушение общей атомарной транзакции, не считаться штатным исходом.
+
 Fixtures: [examples.json](examples.json). Все ID условные, адреса example.test,
 provider — fake Gmail и mock AIProviderAdapter. Никаких подключений или отправок.
 Source/Evidence примеры даны как opaque refs; synthetic текст ниже не имитирует
