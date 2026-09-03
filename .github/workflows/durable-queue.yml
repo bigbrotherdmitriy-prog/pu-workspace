@@ -1,0 +1,53 @@
+name: Durable queue recovery
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/app/jobs/**'
+      - 'backend/app/models/job.py'
+      - 'backend/tests/test_durable_jobs.py'
+      - 'scripts/ci/durable_queue/**'
+      - 'docker-compose.queue-ci.yml'
+      - '.github/workflows/durable-queue.yml'
+permissions:
+  contents: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Validate workflow with actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint" .github/workflows/durable-queue.yml
+      - name: Install test dependencies
+        run: python -m pip install -r backend/requirements.txt PyYAML
+      - name: Regression tests
+        env:
+          DATABASE_URL: 'sqlite+pysqlite:///:memory:'
+          PYTHONPATH: backend
+        run: python -m pytest backend/tests/test_durable_jobs.py backend/tests/test_worker_topology.py backend/tests/test_job_hardening_contract.py scripts/ci/durable_queue/test_contract.py -q
+      - name: Real PostgreSQL recovery and backup protocol
+        timeout-minutes: 22
+        run: python scripts/ci/durable_queue/run.py
+      - name: Unconditional exact-project cleanup
+        if: always()
+        run: python scripts/ci/durable_queue/cleanup.py
+      - name: Publish safe protocol only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-queue-${{ github.run_id }}-${{ github.run_attempt }}
+          path: queue-artifacts/*.json
+          if-no-files-found: warn
+          retention-days: 7

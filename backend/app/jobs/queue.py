@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -12,20 +13,28 @@ from app.models.job import BackgroundJob, ServiceHeartbeat
 
 READY_STATUSES = ("queued", "retrying")
 TERMINAL_STATUSES = ("failed", "dead_letter", "completed", "cancelled")
+_execution_owner = ContextVar("job_execution_owner", default=None)
+
+
+@contextmanager
+def execution_owner(job_id: int, worker_id: str):
+    token = _execution_owner.set((job_id, worker_id))
+    try:
+        yield
+    finally:
+        _execution_owner.reset(token)
+
+
+def _live_owner(job_id: int, owner_id: str):
+    return (BackgroundJob.id == job_id, BackgroundJob.status == "running",
+            BackgroundJob.worker_id == owner_id, BackgroundJob.lease_expires_at > utcnow())
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 def safe_error(error: BaseException | str) -> str:
-    if isinstance(error, BaseException):
-        name = error.__class__.__name__
-        message = str(error) if isinstance(error, (ValueError, TimeoutError, ConnectionError)) else ""
-    else:
-        name, message = "JobError", str(error)
-    message = re.sub(r"(?i)(token|secret|password|authorization|api[_-]?key)\s*[:=]\s*\S+", r"\1=[REDACTED]", message)
-    message = re.sub(r"https?://\S+", "[URL REDACTED]", message)
-    message = " ".join(message.split())[:500]
-    return f"{name}: {message}" if message else name
+    # Arbitrary exception text can contain document content or unlabelled secrets.
+    return error.__class__.__name__ if isinstance(error, BaseException) else "JobError"
 
 def touch_service(db: Session, service_id: str, service_kind: str, metadata: dict | None = None) -> None:
     now = utcnow()
@@ -107,21 +116,25 @@ def claim(db: Session, worker_id: str, lease_seconds: int = 300) -> BackgroundJo
 
 def heartbeat(db: Session, job_id: int, worker_id: str, lease_seconds: int = 300) -> bool:
     owner_id = worker_id
-    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).values(lease_expires_at=utcnow() + timedelta(seconds=lease_seconds), updated_at=utcnow()))
+    result = db.execute(update(BackgroundJob).where(*_live_owner(job_id, owner_id)).values(lease_expires_at=utcnow() + timedelta(seconds=lease_seconds), updated_at=utcnow()).execution_options(synchronize_session="fetch"))
     db.commit(); return bool(result.rowcount)
 
 def set_progress(db: Session, job_id: int, worker_id: str, progress: int) -> bool:
     owner_id = worker_id
-    result = db.execute(update(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).values(progress=max(1, min(99, int(progress))), updated_at=utcnow()))
+    result = db.execute(update(BackgroundJob).where(*_live_owner(job_id, owner_id)).values(progress=max(1, min(99, int(progress))), updated_at=utcnow()).execution_options(synchronize_session="fetch"))
     db.commit(); return bool(result.rowcount)
 
 def update_cooperative_progress(
     db: Session, job_id: int, progress: int, detail: dict[str, Any] | None = None,
 ) -> tuple[bool, bool]:
     """Update progress from a running handler and return (updated, cancel_requested)."""
-    job = db.scalar(select(BackgroundJob).where(
+    owner = _execution_owner.get()
+    if owner is not None and owner[0] != job_id:
+        return False, True
+    conditions = _live_owner(*owner) if owner else (
         BackgroundJob.id == job_id, BackgroundJob.status == "running",
-    ).with_for_update())
+    )
+    job = db.scalar(select(BackgroundJob).where(*conditions).with_for_update())
     if job is None:
         return False, True
     current = dict(job.result or {})
@@ -162,7 +175,7 @@ def _duration(job: BackgroundJob, ended: datetime) -> int | None:
 
 def succeed(db: Session, job_id: int, worker_id: str, result: dict | None = None) -> bool:
     owner_id = worker_id
-    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).with_for_update())
+    job = db.scalar(select(BackgroundJob).where(*_live_owner(job_id, owner_id)).with_for_update())
     if job is None:
         return False
     ended = utcnow()
@@ -176,7 +189,7 @@ def succeed(db: Session, job_id: int, worker_id: str, result: dict | None = None
 
 def fail(db: Session, job_id: int, worker_id: str, error: BaseException | str, *, retryable: bool = True) -> str:
     owner_id = worker_id
-    job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id, BackgroundJob.status == "running", BackgroundJob.worker_id == owner_id).with_for_update())
+    job = db.scalar(select(BackgroundJob).where(*_live_owner(job_id, owner_id)).with_for_update())
     if job is None:
         return "lost"
     terminal = job.attempts >= job.max_attempts

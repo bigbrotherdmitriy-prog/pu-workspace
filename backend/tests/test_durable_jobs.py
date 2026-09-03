@@ -2,6 +2,42 @@ from datetime import timedelta
 
 from app.jobs.queue import cancel, claim, enqueue, fail, metrics, recover_expired, request_cancel, retry, safe_error, succeed, update_cooperative_progress, utcnow
 from app.models.job import BackgroundJob
+from app.jobs.queue import execution_owner, heartbeat, set_progress
+import pytest
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "progress", "succeed", "fail"])
+def test_expired_owner_cannot_mutate_before_recovery(db_session, operation):
+    job = enqueue(db_session, "example", {})
+    claim(db_session, "stale")
+    job.lease_expires_at = utcnow() - timedelta(seconds=1)
+    db_session.commit()
+    actions = {
+        "heartbeat": lambda: heartbeat(db_session, job.id, "stale"),
+        "progress": lambda: set_progress(db_session, job.id, "stale", 90),
+        "succeed": lambda: succeed(db_session, job.id, "stale"),
+        "fail": lambda: fail(db_session, job.id, "stale", RuntimeError()),
+    }
+    result = actions[operation]()
+    assert result == "lost" if operation == "fail" else result is False
+
+
+def test_safe_error_never_persists_document_or_unlabelled_secret():
+    for error in (ValueError("PRIVATE DOCUMENT 9182"), TimeoutError("unlabelled-secret"), "PRIVATE DOCUMENT"):
+        assert safe_error(error) in {"ValueError", "TimeoutError", "JobError"}
+
+
+def test_stale_cooperative_handler_cannot_update_new_owners_progress(db_session):
+    job = enqueue(db_session, "example", {})
+    claim(db_session, "old")
+    job.lease_expires_at = utcnow() - timedelta(seconds=1)
+    db_session.commit()
+    recover_expired(db_session)
+    claim(db_session, "new")
+    with execution_owner(job.id, "old"):
+        assert update_cooperative_progress(db_session, job.id, 90) == (False, True)
+    with execution_owner(job.id, "new"):
+        assert update_cooperative_progress(db_session, job.id, 30) == (True, False)
 
 
 def test_job_is_durable_idempotent_and_claimed(db_session):

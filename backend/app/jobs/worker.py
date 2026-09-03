@@ -10,14 +10,15 @@ from threading import Event, Thread
 
 from app.database import SessionLocal
 from app.jobs.handlers import run
-from app.jobs.queue import claim, fail, heartbeat, recover_expired, set_progress, succeed, touch_service
+from app.jobs.queue import claim, execution_owner, fail, heartbeat, recover_expired, set_progress, succeed, touch_service
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("pu.jobs.worker")
 
 
 def main() -> None:
-    worker_id = os.getenv("PU_WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    # A configured label must not let a restarted process inherit an old lease.
+    worker_id = f"{os.getenv('PU_WORKER_ID') or socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:12]}"
     poll_seconds = max(0.2, float(os.getenv("PU_JOB_POLL_SECONDS", "1")))
     lease_seconds = max(60, int(os.getenv("PU_JOB_LEASE_SECONDS", "900")))
     shutdown = Event()
@@ -37,7 +38,7 @@ def main() -> None:
             continue
         heartbeat_stop = Event()
 
-        def keep_lease() -> None:
+        def keep_lease(job=job, heartbeat_stop=heartbeat_stop) -> None:
             while not heartbeat_stop.wait(max(20, lease_seconds // 3)):
                 with SessionLocal() as heartbeat_db:
                     if not heartbeat(heartbeat_db, job.id, worker_id, lease_seconds):
@@ -49,7 +50,8 @@ def main() -> None:
         try:
             with SessionLocal() as db:
                 set_progress(db, job.id, worker_id, 10)
-            result = run(job.kind, dict(job.payload or {}))
+            with execution_owner(job.id, worker_id):
+                result = run(job.kind, dict(job.payload or {}))
         except Exception as exc:
             log.error("Job %s (%s) failed; error_type=%s", job.id, job.kind, exc.__class__.__name__)
             with SessionLocal() as db:
