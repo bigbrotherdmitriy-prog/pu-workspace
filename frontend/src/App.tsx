@@ -343,7 +343,7 @@ const targetFolders = [
 ];
 
 export function App() {
-  const { projectId, projectIdRef, rememberProject, initialProjectId } = useProjectSelection();
+  const { projectId, projectIdRef, rememberProject: persistProjectSelection, initialProjectId } = useProjectSelection();
   const [ready, setReady] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [mobile, setMobile] = useState(false),
@@ -455,6 +455,16 @@ export function App() {
     addFinanceItem, confirmFinance, confirmCashPayment,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
+  const documentRequestRef = useRef(0);
+
+  function rememberProject(id: number) {
+    if (id !== projectIdRef.current) {
+      ++documentRequestRef.current;
+      setDocumentRows([]);
+      setSelectedDocument(null);
+    }
+    persistProjectSelection(id);
+  }
 
   async function activateProject(id: number) {
     rememberProject(id);
@@ -545,6 +555,7 @@ export function App() {
         setRisks(r.risks);
         setDecisions(g.decisions);
         setDocumentRows(docs.documents);
+        setSelectedDocument((current) => current && docs.documents.some((item: DocumentRow) => item.id === current.id) ? current : null);
         setDrafts(responseDrafts.drafts);
         setInbox(inboxData.messages);
         setProposals(proposalData.proposals);
@@ -1642,12 +1653,15 @@ export function App() {
     }
   }
   async function openDocument(item: DocumentRow) {
+    const requestedProject = projectIdRef.current;
+    const requestSequence = ++documentRequestRef.current;
     try {
-      setSelectedDocument(
-        await api(`/projects/${projectId}/documents/${item.id}`),
-      );
+      const detail = await api(`/projects/${requestedProject}/documents/${item.id}`);
+      if (requestedProject === projectIdRef.current && requestSequence === documentRequestRef.current)
+        setSelectedDocument(detail);
     } catch (e) {
-      setError((e as Error).message);
+      if (requestedProject === projectIdRef.current && requestSequence === documentRequestRef.current)
+        setError((e as Error).message);
     }
   }
   useEffect(() => {
@@ -1761,7 +1775,7 @@ export function App() {
   useEffect(() => {
     if ((active === "Документы" || active === "Центр знаний") && documentRows.length && !selectedDocument)
       openDocument(documentRows[0]);
-  }, [active, documentRows.length, projectId]);
+  }, [active, documentRows, projectId]);
   useEffect(() => {
     if (!ready || !projectId || active !== "Центр знаний") return;
     const timer = window.setTimeout(async () => {
@@ -1770,6 +1784,7 @@ export function App() {
           ? `?search=${encodeURIComponent(query.trim())}&limit=200`
           : "?limit=200";
         const result = await api(`/projects/${projectId}/documents${suffix}`);
+        if (projectId !== projectIdRef.current) return;
         setDocumentRows(result.documents);
         if (result.documents.length) await openDocument(result.documents[0]);
         else setSelectedDocument(null);
