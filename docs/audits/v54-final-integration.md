@@ -228,3 +228,26 @@ regression сначала воспроизвёл потерю checkpoint. Cleanu
 стадию во всех остальных случаях. После исправления `scripts/ci` — 89 passed,
 safe-failure contract — PASS. Runtime остаётся **CONDITIONAL** до следующего
 run с достоверным checkpoint.
+
+## Точка остановки — GitHub runtime 33801015730
+
+Run №7 для `114e01f10a6a9e761b6433f1b21d893925412f2c` завершён и artifact
+проверен локально:
+
+- migration: PASS;
+- backend: PASS, 754 passed / 9 skipped;
+- PostgreSQL A/B/C/integration: PASS, 275 passed;
+- corpus: PASS;
+- durable gzip regression: PASS, 10 passed;
+- process-fault: FAIL, `AssertionError`, достоверный checkpoint `cleanup`;
+- общий cleanup тестовых БД: PASS;
+- artifact SHA-256:
+  `2a89c569b3a494a9fe1693960e2cd2289a7fc11df72815b05ba0a8813702538a`.
+
+Это означает, что ошибка возникает внутри `cleanup_probe`: либо при завершении/
+join созданного дочернего процесса, либо в `fixture.close()` при удалении
+изолированной schema. Основные PostgreSQL-функции до process-fault probe
+подтверждены. Первая задача следующей сессии: добавить regression с отдельными
+allowlisted checkpoint `cleanup_child` и `cleanup_fixture`, затем минимально
+исправить обнаруженный путь и повторить workflow. До этого решение остаётся
+**CONDITIONAL**. Merge и production deploy не выполнять.
