@@ -1552,6 +1552,42 @@ export function App() {
       setBusyProposal(0);
     }
   }
+  async function confirmSelectedProposal(proposal: Proposal) {
+    const selected = proposal.actions.filter((action) =>
+      ["approved", "edited"].includes(action.user_decision),
+    ).length;
+    if (!selected) return;
+    if (!window.confirm(
+      `Подтвердить выбранные изменения: ${selected}? Непроверенные строки будут пропущены. Оригиналы не изменятся.`,
+    )) return;
+    try {
+      setBusyProposal(proposal.id);
+      await Promise.all(
+        proposal.actions
+          .filter((action) => action.user_decision === "edited")
+          .map((action) => api(`/organizer/actions/${action.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              decision: "edited",
+              edited_name: action.edited_name || action.proposed_name,
+              edited_folder: action.edited_folder || action.target_folder,
+            }),
+          })),
+      );
+      const result = await api(
+        `/organizer/proposals/${proposal.id}/confirm-selected`,
+        { method: "POST" },
+      );
+      setNotice(
+        `Вручную подтверждено: ${result.approved}. Непроверенные строки пропущены. Теперь изменения можно применить к безопасной копии.`,
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyProposal(0);
+    }
+  }
   async function applyProposal(proposal: Proposal) {
     try {
       setBusyProposal(proposal.id);
@@ -2842,6 +2878,7 @@ export function App() {
           targetFolders={targetFolders}
           onOpenDocuments={() => setActive("Документы")}
           onApproveSafe={(proposal) => void approveSafe(proposal)}
+          onConfirmSelected={(proposal) => void confirmSelectedProposal(proposal)}
           onApply={(proposal) => void applyProposal(proposal)}
           onStandardize={(proposal) => void standardizeProposal(proposal)}
           onRollback={(proposal) => void rollbackProposal(proposal)}

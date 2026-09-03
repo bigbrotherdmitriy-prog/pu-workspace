@@ -130,6 +130,29 @@ class OrganizerRepository:
             self.db.execute(text("UPDATE organizer_actions SET user_decision='approved' WHERE proposal_id=:id AND user_decision='pending'"), {"id":proposal_id})
         self.db.commit()
 
+    def confirm_selected(self, proposal_id: int) -> int:
+        """Approve an explicitly reviewed subset and skip every untouched row."""
+        selected = int(self.db.execute(text("""
+            SELECT count(*) FROM organizer_actions
+            WHERE proposal_id=:id AND user_decision IN ('approved','edited')
+        """), {"id": proposal_id}).scalar_one())
+        if selected == 0:
+            return 0
+        self.db.execute(text("""
+            UPDATE organizer_actions SET user_decision='skipped'
+            WHERE proposal_id=:id AND user_decision='pending'
+        """), {"id": proposal_id})
+        self.db.execute(text("""
+            UPDATE organizer_proposals
+            SET status='approved', note=:note
+            WHERE id=:id AND status='waiting_confirmation'
+        """), {
+            "id": proposal_id,
+            "note": f"Пользователь вручную подтвердил выбранные действия: {selected}. Остальные строки пропущены.",
+        })
+        self.db.commit()
+        return selected
+
     def mark_prepared(self, proposal_id: int) -> bool:
         result = self.db.execute(text("""
             UPDATE organizer_proposals

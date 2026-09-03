@@ -380,6 +380,29 @@ def approve_safe(proposal_id: int, db: Session = Depends(get_db), user: User = D
     return {"approved": approved, "proposal": _proposal_payload(repo, proposal_id)}
 
 
+@router.post("/proposals/{proposal_id}/confirm-selected")
+def confirm_selected(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Confirm only rows explicitly approved or edited during manual review."""
+    repo = OrganizerRepository(db)
+    proposal = _proposal_for_user(repo, db, user, proposal_id, "manager")
+    if proposal["status"] != "waiting_confirmation":
+        raise HTTPException(409, "Proposal already processed")
+    if str(proposal["copy_folder_id"]).startswith("virtual:"):
+        raise HTTPException(409, "Original-folder changes use explicit source confirmation")
+    selected = repo.confirm_selected(proposal_id)
+    if selected == 0:
+        raise HTTPException(409, "Select at least one action before confirmation")
+    _audit(
+        db,
+        "proposal_selected_actions_confirmed",
+        "organizer_proposal",
+        proposal_id,
+        f"Selected: {selected}; untouched actions skipped",
+        user_id=user.id,
+    )
+    return {"approved": selected, "proposal": _proposal_payload(repo, proposal_id)}
+
+
 @router.post("/proposals/{proposal_id}/apply")
 def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
