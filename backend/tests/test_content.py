@@ -90,6 +90,54 @@ class ContentExtractionTests(unittest.TestCase):
         self.assertEqual(_tesseract(Path("scan.jpg"), 30), broken)
         self.assertEqual(run.call_count, 1)
 
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.OCR_ADAPTIVE_FALLBACK", True)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_empty_primary_can_use_bounded_fallback(self, run, _which):
+        useful = "Покупатель обязан принять оплаченный товар лично через уполномоченного представителя."
+        run.side_effect = [SimpleNamespace(returncode=0, stdout=""), SimpleNamespace(returncode=0, stdout=useful)]
+
+        self.assertEqual(_tesseract(Path("scan.jpg"), 30), useful)
+        self.assertEqual(run.call_count, 2)
+
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run", side_effect=subprocess.TimeoutExpired("tesseract", 1))
+    def test_primary_timeout_returns_empty_page_instead_of_discarding_batch(self, run, _which):
+        self.assertEqual(_tesseract(Path("scan.jpg"), 1), "")
+        self.assertEqual(run.call_count, 1)
+
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.OCR_ADAPTIVE_FALLBACK", True)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_table_stays_primary_while_damaged_numbered_clause_is_replaced(self, run, _which):
+        primary = (
+            "Счет 951 от 22 января 2026. Условия поставки и оплаты согласованы сторонами.\n"
+            "7. Поку обязан при ый товар лично или через у го пред теля. Передача товара выполняется "
+            "после проверки договора и предъявления документов покупателем поставщику.\n"
+            "Сумма     Товар     Количество\n"
+            "1 | Конвектор А | 2 | 147360\n"
+            "2 | Конвектор Б | 4 | 26573\n"
+        )
+        fallback = (
+            "Счет 951 от 22 января 2026. Условия поставки и оплаты согласованы сторонами.\n"
+            "7. Покупатель обязан принять оплаченный товар лично или через уполномоченного представителя. "
+            "Передача товара выполняется после проверки договора и предъявления документов покупателем поставщику.\n"
+            "Сумма     Товар     Количество\n"
+            "1 | Конвектор Б | 2 | 147360\n"
+            "2 | Конвектор А | 4 | 26573\n"
+        )
+        run.side_effect = [SimpleNamespace(returncode=0, stdout=primary), SimpleNamespace(returncode=0, stdout=fallback)]
+
+        result = _tesseract(Path("invoice.jpg"), 30)
+        self.assertIn("Покупатель обязан принять оплаченный товар", result)
+        self.assertIn("1 | Конвектор А | 2 | 147360", result)
+        self.assertIn("2 | Конвектор Б | 4 | 26573", result)
+        self.assertNotIn("1 | Конвектор Б", result)
+
     def test_extracts_docx_xml_text(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:

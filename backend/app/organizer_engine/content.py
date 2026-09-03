@@ -25,6 +25,10 @@ OCR_ADAPTIVE_FALLBACK = os.getenv("OCR_ADAPTIVE_FALLBACK", "true").strip().lower
 OCR_FALLBACK_MAX_PAGES = max(0, min(5, int(os.getenv("OCR_FALLBACK_MAX_PAGES", "2"))))
 
 OCR_ORPHAN_ENDINGS = frozenset({"ый", "ий", "ая", "яя", "ое", "ые", "ую", "юю", "ых", "ым", "ть", "ться", "го"})
+NUMBERED_PROSE_RE = re.compile(
+    r"(?ms)^[ \t]*(?P<number>\d{1,2})[.)]\s+(?P<body>.*?)"
+    r"(?=^[ \t]*\d{1,2}[.)]\s+|^[ \t]*(?:№|Артикул|Сумма(?:\s|$)|Итого:)|\Z)"
+)
 
 
 @dataclass(slots=True)
@@ -145,21 +149,12 @@ def _run_tesseract(path: Path, psm: int, timeout: float) -> str:
 def _ocr_fragment_penalty(text: str) -> tuple[int, int]:
     """Return review-only fragmentation evidence and Cyrillic prose volume."""
     words = re.findall(r"(?iu)(?<![\w/-])[а-яё]+(?![\w/-])", text)
-    endings = {word.casefold() for word in words if word.casefold() in OCR_ORPHAN_ENDINGS}
+    endings = [word.casefold() for word in words if word.casefold() in OCR_ORPHAN_ENDINGS]
     return len(endings), sum(len(word) >= 3 for word in words)
 
 
-def _numeric_token_preservation(primary: str, candidate: str) -> float:
-    from difflib import SequenceMatcher
-
-    # OCR may change ``147 360,00`` into ``14736000`` without losing the value.
-    # Compare the ordered digit stream so formatting alone does not reject a
-    # better pass, while dropped or reordered table values still count.
-    expected = "".join(re.findall(r"\d", primary))
-    if not expected:
-        return 1.0
-    found = "".join(re.findall(r"\d", candidate))
-    return SequenceMatcher(None, expected, found, autojunk=False).ratio()
+def _numeric_tokens(text: str) -> list[str]:
+    return re.findall(r"\d+", text)
 
 
 def _non_fragment_corruption(text: str) -> int:
@@ -171,17 +166,74 @@ def _non_fragment_corruption(text: str) -> int:
     return text.count("\ufffd") + controls + mixed
 
 
+def _looks_tabular(text: str) -> bool:
+    table_rows = sum(
+        bool(re.search(r"\d", line)) and ("|" in line or len(re.findall(r"\s{3,}", line)) >= 2)
+        for line in text.splitlines()
+    )
+    return table_rows >= 2
+
+
+def _merge_safe_numbered_prose(primary: str, fallback: str) -> tuple[str, int]:
+    """Replace only damaged numbered prose; never rewrite the surrounding table."""
+    fallback_sections = {match.group("number"): match for match in NUMBERED_PROSE_RE.finditer(fallback)}
+    replacements: list[tuple[int, int, str]] = []
+    for match in NUMBERED_PROSE_RE.finditer(primary):
+        candidate = fallback_sections.get(match.group("number"))
+        if candidate is None:
+            continue
+        old_body, new_body = match.group("body"), candidate.group("body")
+        old_penalty, old_words = _ocr_fragment_penalty(old_body)
+        new_penalty, new_words = _ocr_fragment_penalty(new_body)
+        old_volume = max(1, sum(character.isalnum() for character in old_body))
+        new_volume = sum(character.isalnum() for character in new_body)
+        if (
+            old_penalty >= 2
+            and old_words >= 12
+            and new_penalty < old_penalty
+            and 0.75 <= new_volume / old_volume <= 1.6
+            and _numeric_tokens(old_body) == _numeric_tokens(new_body)
+            and _non_fragment_corruption(new_body) <= _non_fragment_corruption(old_body)
+            and new_words >= old_words * 0.75
+        ):
+            replacements.append((match.start(), match.end(), candidate.group(0)))
+    merged = primary
+    for start, end, replacement in reversed(replacements):
+        merged = merged[:start] + replacement + merged[end:]
+    return merged, len(replacements)
+
+
+def _safe_whole_page_fallback(primary: str, fallback: str) -> bool:
+    primary_penalty, primary_words = _ocr_fragment_penalty(primary)
+    fallback_penalty, fallback_words = _ocr_fragment_penalty(fallback)
+    primary_volume = max(1, sum(character.isalnum() for character in primary))
+    fallback_volume = sum(character.isalnum() for character in fallback)
+    return (
+        not _looks_tabular(primary)
+        and not _looks_tabular(fallback)
+        and fallback_penalty < primary_penalty
+        and 0.75 <= fallback_volume / primary_volume <= 1.35
+        and _numeric_tokens(primary) == _numeric_tokens(fallback)
+        and _non_fragment_corruption(fallback) <= _non_fragment_corruption(primary)
+        and fallback_words >= primary_words * 0.75
+    )
+
+
 def _tesseract(path: Path, timeout: float | None = None, *, allow_fallback: bool = True) -> str:
     if not shutil.which("tesseract"):
         return ""
     budget = max(1, timeout or OCR_TIMEOUT_SECONDS)
     started = time.monotonic()
-    primary = _run_tesseract(path, OCR_PSM, budget)
+    try:
+        primary = _run_tesseract(path, OCR_PSM, budget)
+    except (OSError, subprocess.SubprocessError):
+        return ""
     primary_penalty, primary_words = _ocr_fragment_penalty(primary)
+    primary_volume = sum(character.isalnum() for character in primary)
     remaining = budget - (time.monotonic() - started)
     if (
         not allow_fallback or not OCR_ADAPTIVE_FALLBACK or OCR_FALLBACK_PSM == OCR_PSM
-        or primary_penalty < 2 or primary_words < 20 or remaining <= 1
+        or (primary_volume >= 20 and (primary_penalty < 2 or primary_words < 20)) or remaining <= 1
     ):
         return primary
 
@@ -189,18 +241,19 @@ def _tesseract(path: Path, timeout: float | None = None, *, allow_fallback: bool
         fallback = _run_tesseract(path, OCR_FALLBACK_PSM, remaining)
     except (OSError, subprocess.SubprocessError):
         return primary
-    fallback_penalty, fallback_words = _ocr_fragment_penalty(fallback)
-    primary_volume = max(1, sum(character.isalnum() for character in primary))
     fallback_volume = sum(character.isalnum() for character in fallback)
-    volume_ratio = fallback_volume / primary_volume
-    # Never trade layout data or identifiers for a superficially cleaner result.
-    if (
-        fallback_penalty < primary_penalty
-        and 0.75 <= volume_ratio <= 1.35
-        and _numeric_token_preservation(primary, fallback) >= 0.9
-        and _non_fragment_corruption(fallback) <= _non_fragment_corruption(primary)
-        and fallback_words >= primary_words * 0.75
-    ):
+    if primary_volume < 20:
+        if (
+            fallback_volume >= 20
+            and _numeric_tokens(primary) == _numeric_tokens(fallback)[:len(_numeric_tokens(primary))]
+            and _non_fragment_corruption(fallback) <= 2
+        ):
+            return fallback
+        return primary
+    merged, replacements = _merge_safe_numbered_prose(primary, fallback)
+    if replacements:
+        return merged
+    if _safe_whole_page_fallback(primary, fallback):
         return fallback
     return primary
 
