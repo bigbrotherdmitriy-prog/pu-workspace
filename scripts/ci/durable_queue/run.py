@@ -20,6 +20,28 @@ ROOT = Path(__file__).resolve().parents[3]
 EVENTS = []
 
 
+def safe_failure(stdout, stderr):
+    """Emit only allowlisted classifications, never provider/document/log text.
+
+    Classification is a diagnostic hint, not proof of the underlying cause.
+    Unknown output stays unclassified rather than being published as a tail.
+    """
+    message = (stderr or b"").lower()
+    signatures = (
+        ("dockerfile_missing", (b"failed to read dockerfile", b"cannot locate specified dockerfile")),
+        ("registry_rate_limit", (b"toomanyrequests", b"pull rate limit")),
+        ("registry_access_denied", (b"pull access denied", b"unauthorized: authentication required")),
+        ("daemon_unavailable", (b"cannot connect to the docker daemon",)),
+        ("buildx_unavailable", (b"buildx component is missing", b"buildx is not a docker command")),
+        ("network_failure", (b"no such host", b"tls handshake timeout", b"network is unreachable")),
+        ("disk_full", (b"no space left on device",)),
+        ("permission_denied", (b"permission denied",)),
+    )
+    category = next((name for name, patterns in signatures if any(p in message for p in patterns)), "unclassified")
+    return {"category": category, "stdout_bytes": len(stdout or b""),
+            "stderr_bytes": len(stderr or b""), "raw_published": False}
+
+
 def main():
     project = f"puw-queue-{os.environ.get('GITHUB_RUN_ID', str(time.time_ns()))}-{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
     assert re.fullmatch(r"puw-queue-\d+-\d+", project)
@@ -35,6 +57,7 @@ def main():
         r = subprocess.run(args, input=data, capture_output=True, env=env, cwd=ROOT, timeout=timeout)
         EVENTS.append({"command": args, "exit": r.returncode, "seconds": round(time.monotonic()-start, 2)})
         if r.returncode != expected:
+            EVENTS[-1]["failure"] = safe_failure(r.stdout, r.stderr)
             raise RuntimeError("command failed; raw output withheld")
         return r.stdout
 

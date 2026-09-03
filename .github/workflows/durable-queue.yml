@@ -38,7 +38,7 @@ jobs:
         env:
           DATABASE_URL: 'sqlite+pysqlite:///:memory:'
           PYTHONPATH: backend
-        run: python -m pytest backend/tests/test_durable_jobs.py backend/tests/test_worker_topology.py backend/tests/test_job_hardening_contract.py scripts/ci/durable_queue/test_contract.py -q
+        run: python -m pytest backend/tests/test_durable_jobs.py backend/tests/test_worker_topology.py backend/tests/test_job_hardening_contract.py scripts/ci/durable_queue/test_contract.py scripts/ci/durable_queue/test_run.py -q
       - name: Real PostgreSQL recovery and backup protocol
         timeout-minutes: 22
         run: python scripts/ci/durable_queue/run.py
