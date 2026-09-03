@@ -36,7 +36,10 @@ def test_gmail_distinguishes_sent_mail_and_does_not_send_incoming_alert():
 
 
 def test_schema_revision_tracks_latest_migration():
-    schema = (ROOT / "app/schema.py").read_text(encoding="utf-8")
-    migration = (ROOT / "migrations/versions/c83d0a24b512_merge_job_and_ocr_heads.py").read_text(encoding="utf-8")
-    assert 'CURRENT_SCHEMA_REVISION = "c83d0a24b512"' in schema
-    assert 'down_revision = ("b71d2e4f9a10", "b72c9f13a401")' in migration
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from app.schema import CURRENT_SCHEMA_REVISION
+
+    config = Config()
+    config.set_main_option("script_location", str(ROOT / "migrations"))
+    assert ScriptDirectory.from_config(config).get_heads() == [CURRENT_SCHEMA_REVISION]
