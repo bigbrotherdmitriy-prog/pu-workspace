@@ -19,9 +19,6 @@ jobs:
         shell: bash
     env:
       CI_COMPOSE_PROJECT: puw-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      CI_ENV_FILE: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}.env
-      CI_RAW_LOG: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}.raw.log
-      CI_DIAGNOSTICS: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}-diagnostics
       COMPOSE_DISABLE_ENV_FILE: '1'
 
     steps:
@@ -31,6 +28,11 @@ jobs:
 
       - name: Generate isolated test environment
         timeout-minutes: 1
+        # The runner context is available in step env, not job env.
+        env:
+          CI_ENV_FILE: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}.env
+          CI_RAW_LOG: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}.raw.log
+          CI_DIAGNOSTICS: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}-diagnostics
         run: |
           umask 077
           python3 - <<'PY'
@@ -65,6 +67,9 @@ jobs:
           )
           Path(os.environ['CI_RAW_LOG']).touch(mode=0o600)
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              # Carry step-scoped paths to diagnostics and always() cleanup.
+              for key in ('CI_ENV_FILE', 'CI_RAW_LOG', 'CI_DIAGNOSTICS'):
+                  output.write(f"{key}={os.environ[key]}\n")
               # Shell env has priority over Compose --env-file. Replace every
               # interpolated value with the same newly generated test value.
               for key, value in values.items():

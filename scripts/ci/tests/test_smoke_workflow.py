@@ -21,16 +21,28 @@ def python_block(step_name):
     return source.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
 
 
+def test_runner_context_is_not_used_in_job_environment():
+    # GitHub rejected run 33741918971 before allocating any job: runner is
+    # available in step env, not jobs.<job_id>.env. YAML parsing alone misses it.
+    for job in WORKFLOW["jobs"].values():
+        assert not any(re.search(r"\brunner\s*\.", str(value))
+                       for value in job.get("env", {}).values())
+
+
 def test_generated_environment_overrides_stale_shell_values(tmp_path, monkeypatch, capsys):
     env_file = tmp_path / "test.env"
     github_env = tmp_path / "github-env"
     monkeypatch.setenv("CI_ENV_FILE", str(env_file))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
     monkeypatch.setenv("CI_RAW_LOG", str(tmp_path / "raw.log"))
+    monkeypatch.setenv("CI_DIAGNOSTICS", str(tmp_path / "diagnostics"))
     monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "a" * 40 + "\n")
     exec(compile(python_block("Generate isolated test environment"), "workflow", "exec"), {})
     generated = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
     exported = dict(line.split("=", 1) for line in github_env.read_text().splitlines())
+    for key in ("CI_ENV_FILE", "CI_RAW_LOG", "CI_DIAGNOSTICS"):
+        assert "runner.temp" in STEPS["Generate isolated test environment"]["env"][key]
+        assert exported[key] == os.environ[key], f"Later steps cannot access {key}"
     for key in ("POSTGRES_PASSWORD", "APP_SECRET_KEY", "BOOTSTRAP_TOKEN", "TOKEN_ENCRYPTION_KEY", "PU_RELEASE_REVISION", "CI_SMOKE_PASSWORD"):
         assert exported.get(key) == generated[key], f"Inherited {key} can override the test env file"
     assert re.fullmatch(r"[A-Za-z0-9_-]+", generated["POSTGRES_PASSWORD"])
