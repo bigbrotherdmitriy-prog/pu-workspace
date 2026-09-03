@@ -28,6 +28,15 @@ def _supported(document: Document) -> bool:
     )
 
 
+def reprocess_unavailable_reason(document: Document) -> str | None:
+    """Return a stable UI/API reason when the configured adapter cannot reload the original."""
+    if not _supported(document):
+        return "format_not_supported"
+    if document.source not in {"google_drive", "google_drive_copy"} or not document.external_id:
+        return "original_not_available"
+    return None
+
+
 def reprocess_documents(project_id: int, document_ids: list[int] | None = None) -> dict:
     """Re-OCR originals through the configured StorageAdapter; never mutate them."""
     with SessionLocal() as db:
@@ -41,11 +50,9 @@ def reprocess_documents(project_id: int, document_ids: list[int] | None = None) 
         extracted: list[DriveFile] = []
         by_external_id: dict[str, tuple[Document, object]] = {}
         for document in documents:
-            if not _supported(document):
-                skipped.append({"id": document.id, "name": document.name, "reason": "format_not_supported"})
-                continue
-            if not document.external_id or document.source not in {"google_drive", "google_drive_copy"}:
-                skipped.append({"id": document.id, "name": document.name, "reason": "original_not_available"})
+            unavailable_reason = reprocess_unavailable_reason(document)
+            if unavailable_reason:
+                skipped.append({"id": document.id, "name": document.name, "reason": unavailable_reason})
                 continue
             try:
                 drive = drive or DriveClient(get_drive_service(project_id=project_id, db=db))

@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 export type DocumentListItem = {
   id: number; name: string; source: string; status: string; current_version: number;
   extraction_method?: string; extraction_quality?: string; ocr_pages?: number; ocr_updated_at?: string;
+  ocr_reprocess_available?: boolean; ocr_reprocess_unavailable_reason?: string;
 };
 export type DocumentCard = DocumentListItem & {
   mime_type?: string; source_url?: string; summary?: string;
@@ -71,6 +72,10 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
 
   const ocrBusy = ocrBatch && ["queued", "running"].includes(ocrBatch.status);
   const ocrResult = ocrBatch?.status === "succeeded" ? ocrBatch.result : null;
+  const eligibleDocuments = documents.filter((item) => item.ocr_reprocess_available !== false);
+  const unavailableOcrMessage = selected?.ocr_reprocess_unavailable_reason === "format_not_supported"
+    ? "Повторное OCR доступно только для PDF и изображений."
+    : "Повторное OCR недоступно: исходный файл не сохранён. Загрузите файл ещё раз, чтобы распознать его заново.";
 
   async function compareVersions() {
     if (!selected || !previousVersion || !currentVersion) return;
@@ -86,7 +91,7 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
     <div className="documents-layout">
       <div className="card">
         <div className="card-head"><div><h2>{knowledgeMode ? "Центр знаний" : "Реестр документов"}</h2><p>{knowledgeMode ? "Поиск по названиям, сводкам и извлечённому тексту" : `Найдено: ${documents.length}`}</p></div>
-          <button disabled={Boolean(ocrBusy)} onClick={() => void startOcr()} title="Повторно распознать PDF и изображения, не изменяя оригиналы"><RefreshCw className={ocrBusy ? "spin" : ""} />{ocrBusy ? (ocrBatch?.status === "queued" ? "В очереди" : "Распознаю…") : "Повторно распознать сканы"}</button>
+          <button disabled={Boolean(ocrBusy) || !eligibleDocuments.length} onClick={() => void startOcr(eligibleDocuments.map((item) => item.id))} title={eligibleDocuments.length ? "Повторно распознать доступные PDF и изображения, не изменяя оригиналы" : "Нет документов с доступным оригиналом для повторного OCR"}><RefreshCw className={ocrBusy ? "spin" : ""} />{ocrBusy ? (ocrBatch?.status === "queued" ? "В очереди" : "Распознаю…") : "Повторно распознать доступные сканы"}</button>
         </div>
         {ocrResult && <div className="ocr-batch-result" role="status"><strong>OCR завершён</strong><span>Распознано: {ocrResult.processed.length} из {ocrResult.total}</span><span>Пропущено: {ocrResult.skipped.length}</span><span>Новых предложений: задач {ocrResult.tasks}, рисков {ocrResult.risks}, решений {ocrResult.decisions}</span></div>}
         {ocrError && <p className="version-error">{ocrError}</p>}
@@ -104,7 +109,12 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
           </div>
           <div className="document-links"><span>Задачи <strong>{selected.links.tasks}</strong></span><span>Риски <strong>{selected.links.risks}</strong></span><span>Решения <strong>{selected.links.decisions}</strong></span><span>Черновики <strong>{selected.links.drafts}</strong></span></div>
           <h3>Краткая сводка</h3><p className="document-summary">{selected.summary || "Сводка появится после анализа содержимого."}</p>
-          <div className="document-ocr-actions"><button disabled={Boolean(ocrBusy)} onClick={() => void startOcr([selected.id])}><FileScan />Повторно распознать этот документ</button>{selected.extraction_method && <span>Метод: {selected.extraction_method} · качество: {selected.extraction_quality || "не определено"} · OCR-страниц: {selected.ocr_pages || 0}</span>}</div>
+          <div className="document-ocr-actions">
+            {selected.ocr_reprocess_available === false
+              ? <span role="note">{unavailableOcrMessage}</span>
+              : <button disabled={Boolean(ocrBusy)} onClick={() => void startOcr([selected.id])}><FileScan />Повторно распознать этот документ</button>}
+            {selected.extraction_method && <span>Метод: {selected.extraction_method} · качество: {selected.extraction_quality || "не определено"} · OCR-страниц: {selected.ocr_pages || 0}</span>}
+          </div>
           <p className="versions">Версий: {selected.versions.length || 1}</p>
           {selected.versions.length > 1 && <section className="version-comparison">
             <h3>Что изменилось между версиями</h3>

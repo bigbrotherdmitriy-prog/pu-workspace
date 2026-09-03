@@ -15,12 +15,18 @@ from app.models.job import BackgroundJob
 from app.jobs.queue import enqueue
 from app.core.auth import require_project_role, require_user
 from app.integrations.source_urls import source_object_url
+from app.ocr_batch import reprocess_unavailable_reason
 
 
 router = APIRouter(
     prefix="/projects",
     tags=["documents"],
 )
+
+
+def _ocr_capability(item: Document) -> dict:
+    reason = reprocess_unavailable_reason(item)
+    return {"ocr_reprocess_available": reason is None, "ocr_reprocess_unavailable_reason": reason}
 
 
 class DocumentCreate(BaseModel):
@@ -142,6 +148,7 @@ def list_documents(
                 "extraction_quality": item.extraction_quality,
                 "ocr_pages": item.ocr_pages,
                 "ocr_updated_at": item.ocr_updated_at,
+                **_ocr_capability(item),
             }
             for item in documents
         ]
@@ -169,6 +176,7 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
         "extraction_quality": item.extraction_quality,
         "ocr_pages": item.ocr_pages,
         "ocr_updated_at": item.ocr_updated_at,
+        **_ocr_capability(item),
         "versions": [{"version": x.version_number, "created_at": x.created_at} for x in versions],
         "links": {"tasks": len(tasks), "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts)},
     }
@@ -184,11 +192,15 @@ def create_ocr_batch(
         raise HTTPException(404, "Project not found")
     document_ids = sorted(set(payload.document_ids or [])) or None
     if document_ids:
-        found = set(db.scalars(select(Document.id).where(
+        found_documents = list(db.scalars(select(Document).where(
             Document.project_id == project_id, Document.id.in_(document_ids),
         )))
+        found = {item.id for item in found_documents}
         if found != set(document_ids):
             raise HTTPException(404, "One or more documents were not found in this project")
+        unavailable = [item.name for item in found_documents if reprocess_unavailable_reason(item)]
+        if unavailable:
+            raise HTTPException(409, "Original file is not available for OCR reprocessing")
     active = db.scalar(select(BackgroundJob).where(
         BackgroundJob.kind == "documents.ocr",
         BackgroundJob.status.in_(("queued", "running")),
