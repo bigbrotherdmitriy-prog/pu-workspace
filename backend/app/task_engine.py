@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 
@@ -33,11 +34,47 @@ SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
 
 @dataclass(slots=True)
 class TaskCandidate:
+    """Candidate score is a heuristic review signal, not a calibrated probability."""
+
     title: str
     excerpt: str
     due_date: date | None
     priority: str
     confidence: float
+    review_reasons: tuple[str, ...] = ()
+
+
+def _text_quality_review_reasons(text: str) -> tuple[str, ...]:
+    """Flag explicit corruption only; do not spell-correct, classify jargon or drop claims.
+
+    This is NOT OCR confidence. In particular, numbers, uppercase identifiers,
+    separate Latin words and single mixed-script tokens are not evidence of damage.
+    """
+    reasons: list[str] = []
+    if "\ufffd" in text:
+        reasons.append("В тексте есть символы замены: часть исходных знаков не распознана.")
+    if any(unicodedata.category(char) in {"Cc", "Cs", "Co"} and not char.isspace() for char in text):
+        reasons.append("В тексте есть служебные или нестандартные символы вместо читаемых знаков.")
+    # Repeated UTF-8-as-cp1251/latin1 byte pairs, not any occurrence of Р/С.
+    if re.search(r"(?:[РС][\u0080-\u052f\u2000-\u2122]){3,}|(?:[ÃÂÐÑ][\u0080-\u00bf]){3,}", text):
+        reasons.append("Есть характерная последовательность повреждённой кодировки.")
+    if re.search(r"\b[а-яё](?:\s+[а-яё]){5,}\b", text):
+        reasons.append("Есть длинная последовательность текста, разбитого на отдельные буквы.")
+    if re.search(r"([а-яёa-z])\1{5,}", text):
+        reasons.append("Есть необычный повтор одной буквы; сверьте фрагмент с документом.")
+    if re.search(r"[?#~|^*]{4,}", text):
+        reasons.append("Есть скопление нечитаемых символов; смысл фрагмента требует проверки.")
+    # Require two word-like fragments with *interior* substitutions. Do not penalize
+    # M8x20, 12Х18Н10Т, AB12-РС34, ИД, API, 1С or separate language segments.
+    substitutions = sum(
+        1 for token in re.findall(r"[^\W_]+", text)
+        if len(token) >= 5
+        and re.fullmatch(r"[а-яё]+[aceopxy0-9][а-яё]+", token)
+        and len(re.findall(r"[а-яё]", token)) >= 3
+    )
+    if substitutions >= 2:
+        reasons.append("В нескольких словах есть вероятные подмены букв цифрами или латиницей.")
+    return tuple(reasons)
 
 
 def extract_task_candidates(text: str | None, limit: int = 5) -> list[TaskCandidate]:
@@ -68,8 +105,13 @@ def extract_task_candidates(text: str | None, limit: int = 5) -> list[TaskCandid
                 except ValueError:
                     pass
         urgent = bool(re.search(r"\b(срочно|критич|немедленно|не позднее)\b", sentence, re.I))
+        review_reasons = _text_quality_review_reasons(sentence)
+        # Compatibility scores for clean candidates; a valid date cannot override
+        # damaged evidence. 0.45 is a conservative review ceiling, not 45% accuracy.
         confidence = 0.90 if due else 0.82
-        result.append(TaskCandidate(sentence[:240], sentence, due, "high" if urgent else "normal", confidence))
+        if review_reasons:
+            confidence = min(confidence, 0.45)
+        result.append(TaskCandidate(sentence[:240], sentence, due, "high" if urgent else "normal", confidence, review_reasons))
         if len(result) >= limit:
             break
     return result
@@ -111,7 +153,12 @@ def create_tasks_from_files(db: Session, project_id: int, session_id: int | None
                 created_by_user_id=assignee.id,
                 organizer_session_id=session_id,
                 title=candidate.title,
-                description=f"Автоматически выделено из документа «{file.name}».",
+                description=(
+                    f"Автоматически выделено из документа «{file.name}». "
+                    "Оценка эвристическая, не вероятность правильного распознавания. "
+                    "Требуется ручная проверка по исходной цитате."
+                    + (" Причины: " + " ".join(candidate.review_reasons) if candidate.review_reasons else "")
+                ),
                 status="assigned",
                 priority=candidate.priority,
                 due_date=candidate.due_date,
