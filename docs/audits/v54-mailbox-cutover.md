@@ -108,7 +108,7 @@ unique; это oracle для cutover, не ORM fixture production schema. Ник
 
 Unit tests проверяют 14 функций/границ; counts выше не суммируются с CLI.
 SQL transaction semantics подготовлены, но без реального PostgreSQL не доказаны.
-Schema head a54f001c0a01 проверяется перед inventory.
+Schema head a54f001c0a02 проверяется перед inventory.
 
 ## Cutover sequence
 

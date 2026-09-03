@@ -13,7 +13,7 @@ def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
     # PyYAML 1.1 may coerce `on`; textual trigger checks are intentional too.
     parsed = yaml.safe_load(text)
     assert parsed["permissions"] == {"contents": "read"}
-    assert "branches: ['codex/v54-final-runtime']" in text
+    assert "branches: ['codex/v54-final-integration']" in text
     assert "workflow_dispatch:" in text and "pull_request:" not in text
     assert "persist-credentials: false" in text
     assert "postgres:16-alpine" in text and "ports:" not in text
@@ -32,7 +32,7 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert "capture_output=True" in source
     assert "print(result.stdout" not in source and "print(result.stderr" not in source
     assert "DROP DATABASE {}" in source and "pg_terminate_backend" in source
-    assert 'HEAD = "a54f001c0a01"' in source
+    assert 'HEAD = "a54f001c0a02"' in source
 
 
 def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_path):
