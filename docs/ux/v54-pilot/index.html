@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; connect-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>PU Workspace — CONFIRM • UX-макет</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="state.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Перейти к письму</a>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><b>[PU]</b><span>Workspace<small>Контроль решений</small></span></div>
+    <p class="nav-label">СИНТЕТИЧЕСКИЙ ПИЛОТ</p>
+    <a class="active" href="#main" aria-current="page">Входящее → задача</a>
+    <a href="#result">Результат и история</a>
+    <a href="#lab">Проверить ошибки</a>
+    <div class="aside-note">CONFIRM<br>Никакой реальной отправки.<br>AUTO выключен.</div>
+  </aside>
+  <div class="workspace">
+    <div class="demo">Демонстрационный макет, данные вымышлены</div>
+    <header>
+      <div><p class="eyebrow">AI SECRETARY / ПИЛОТ</p><h1>От письма к проверенному действию</h1></div>
+      <label>Просмотр проекта<select id="project"><option value="4">Альфа • новый проект</option><option value="old">Persistent Project • прежний</option></select></label>
+    </header>
+    <main id="main" tabindex="-1">
+      <p class="intro">Сначала проверьте основание, затем подтвердите контекст и срок. Только после этого разрешите конкретную версию задачи.</p>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <div id="other" class="card" hidden><h2>Persistent Project</h2><p>В этом demo-просмотре письма нет. Оно не перенесено сюда автоматически.</p><button id="return">Вернуться к письму проекта «Альфа»</button></div>
+      <div id="flow">
+        <ol class="steps" aria-label="Этапы проверки">
+          <li id="step-context">1 · Контекст</li><li id="step-claim">2 · Срок</li><li id="step-task">3 · Разрешение</li><li id="step-result">4 · Результат</li>
+        </ol>
+        <div class="columns">
+          <div>
+            <article class="card mail">
+              <span class="badge">Входящее • 1 вложение</span>
+              <h2>Исправленный акт по проекту «Альфа»</h2>
+              <p><strong>ООО «Пример»</strong> · contractor@example.invalid<br><span class="muted">3 сентября 2026, 12:00 МСК · вымышленный отправитель</span></p>
+              <div class="origin">Источник: synthetic / account-demo / mailbox-demo<br>Письмо M6 → источник S12; вложение S13<br>Origin: Альфа · это не подтверждение контекста</div>
+              <p>Вложение: <strong>Акт-демо.pdf</strong> · версия источника V15/r1</p>
+            </article>
+            <section class="card" aria-labelledby="evidence-heading">
+              <div class="card-head"><h2 id="evidence-heading">На чём основан вывод</h2><span id="source-status" class="badge"></span></div>
+              <p class="muted">Evidence E16/r1 → S13 / V15/r1<br>Наблюдение версии, не «последний файл»</p>
+              <div id="fragment"></div>
+              <p id="fact"></p>
+              <p><strong>Вывод AI:</strong> предложить внутреннюю задачу по подготовке исправленного акта. Это предложение, не установленное обязательство.</p>
+              <p class="muted">Confidence: 0,92 · synthetic fixture, не гарантия и не разрешение. Extractor: fixture/1; реальная AI-модель не запускалась.</p>
+              <p id="evidence-state"></p><button id="evidence">Проверить доказательство</button>
+              <details><summary>Граница текущего контракта</summary><p>Фрагмент и его locator — вымышленная UX-fixture. Source facade A пока возвращает deny для fragment; разрешённый reader и reason codes — IR-02. Этот макет не снимает запрет.</p></details>
+            </section>
+          </div>
+          <div>
+            <section class="card" aria-labelledby="context-heading">
+              <span class="eyebrow">РЕШЕНИЕ 1</span><h2 id="context-heading">К какому проекту относится письмо?</h2>
+              <dl><dt>Предложенный проект</dt><dd>Альфа <span class="muted">· project 4</span></dd><dt>Предложенный договор</dt><dd>ГК-01 <span class="muted">· contract 5 / Альфа</span></dd></dl>
+              <p id="context-state"></p>
+              <button id="context" class="primary">Подтвердить проект и договор</button>
+              <p class="hint">Только эти связи. Не подтверждает срок и не создаёт задачу. Другой проект/договор: требуется новый набор candidates и CAS, IR-03.</p>
+            </section>
+            <section class="card" aria-labelledby="claim-heading">
+              <span class="eyebrow">РЕШЕНИЕ 2</span><h2 id="claim-heading">Проверить извлечённый срок</h2>
+              <div class="date">10 сентября 2026</div><p>Дата без времени · Europe/Moscow<br>DeadlineClaim C17/r1 · основание E16/r1</p>
+              <p id="claim-state"></p><button id="claim">Срок верный — подтвердить</button>
+              <p class="hint">Отдельная проверка даты. Если срок неверный — не подтверждайте; correction/override требует новой claim revision и provenance, IR-04.</p>
+            </section>
+            <section class="card" aria-labelledby="task-heading">
+              <span class="eyebrow">РЕШЕНИЕ 3</span><h2 id="task-heading">Разрешить внутреннюю задачу</h2>
+              <label>Название<input id="title" maxlength="160" value="Предоставить исправленный акт"></label>
+              <label>Исполнитель<select id="assignee"><option>Иван • инженер проекта</option><option>Ольга • руководитель проекта</option></select></label>
+              <p>Альфа / ГК-01 · до 10.09.2026 · дата без времени</p>
+              <p id="revision"></p><p id="task-gate"></p><button id="open-approval" class="primary">Проверить и разрешить…</button>
+              <p class="hint">Будет создана только внутренняя задача и её история. Не отправит письмо, не создаст оплату или обязательство.</p>
+            </section>
+          </div>
+        </div>
+        <section id="result" class="card" aria-labelledby="result-heading">
+          <div class="card-head"><div><span class="eyebrow">РЕЗУЛЬТАТ БИЗНЕС-ДЕЙСТВИЯ</span><h2 id="result-heading"></h2></div><span class="badge">Без выдуманных процентов</span></div>
+          <p id="result-detail"></p><p id="job" class="muted"></p>
+          <div id="receipts"></div>
+          <button id="cancel">Запросить отмену задачи…</button>
+          <p class="hint">Отмена — новое внутреннее действие со своим разрешением. История не удаляется. Отправленное письмо таким действием не отозвать; в пилоте отправки нет.</p>
+          <details id="history-details"><summary>Цепочка решений и результатов (demo)</summary><ol id="history"></ol></details>
+        </section>
+      </div>
+      <section id="lab" class="lab" aria-labelledby="lab-heading">
+        <h2 id="lab-heading">Пульт сценариев макета</h2><p>Только локальная симуляция. Эти кнопки не являются операторским API или частью production-интерфейса.</p>
+        <label>Состояние источника<select id="source"><option value="fresh">Актуален</option><option value="stale">Устарел</option><option value="unavailable">Недоступен</option><option value="revoked">Доступ отозван</option><option value="unknown">Не удалось проверить</option></select></label>
+        <div class="buttons">
+          <button data-event="hold">Удержать ответ контекста</button><button data-event="release">Доставить задержанный ответ</button>
+          <button data-event="conflict">409 / новая версия</button><button data-event="revoke">Отозвать approval</button><button data-event="expire">Истечь approval</button>
+          <button data-event="start">Начать выполнение (demo)</button><button data-event="complete">APPLIED + Task + receipt (demo)</button>
+          <button data-event="no_effect">Ошибка без эффекта (demo)</button><button data-event="unknown">Job completed, результат неизвестен</button>
+          <button data-event="cancel_complete">Завершить отмену (demo)</button>
+          <button id="reload">Перезагрузить макет</button><button id="reset">Начать demo заново</button>
+        </div>
+        <p class="hint">Reload хранит только вымышленное состояние этой вкладки. Реальный UI обязан перечитать разрешённое состояние сервера и не повторять mutation. IR-06.</p>
+      </section>
+    </main>
+  </div>
+</div>
+<dialog id="approval" aria-labelledby="dialog-heading">
+  <h2 id="dialog-heading">Подтверждение конкретной версии</h2><div id="approval-body"></div>
+  <p id="dialog-error" role="alert"></p>
+  <div class="buttons"><button id="dismiss">Вернуться без разрешения</button><button id="approve" class="primary">Разрешить эту версию</button></div>
+</dialog>
+</body>
+</html>
