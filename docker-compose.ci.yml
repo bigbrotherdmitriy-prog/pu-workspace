@@ -1,0 +1,68 @@
+# Standalone API/DB smoke environment. Always invoke with:
+# docker compose --env-file <temporary-ci-env> -p puw-ci-<run_id>-<run_attempt> -f docker-compose.ci.yml ...
+# Generate fresh secrets for every run; POSTGRES_PASSWORD must be URL-safe
+# (for example, hexadecimal) because it is also embedded in DATABASE_URL.
+# The caller must clear inherited values of the five CI variables before loading
+# the env file: shell variables take precedence over --env-file in Compose.
+# Never publish `compose config` output containing resolved secrets; use config -q.
+# Apply migrations separately before starting backend (expected head: f360a1b2c3d4).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: puw_ci
+      POSTGRES_USER: puw_ci
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a fresh URL-safe CI database password}
+    volumes:
+      - ci_pgdata:/var/lib/postgresql/data
+    networks:
+      - ci
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "puw_ci", "-d", "puw_ci"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://puw_ci:${POSTGRES_PASSWORD:?Set a fresh URL-safe CI database password}@db:5432/puw_ci
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?Set a fresh CI app secret of at least 32 characters}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?Set a fresh CI bootstrap token of at least 24 characters}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?Set a fresh CI Fernet key}
+      PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?Set the tested full commit SHA}
+      PU_BACKGROUND_EXECUTION: in_process
+      GMAIL_AUTO_SYNC_ENABLED: "false"
+      AI_SECRETARY_AUTOMATION_ENABLED: "false"
+    command:
+      - sh
+      - -c
+      - python -m scripts.preflight && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    networks:
+      - ci
+    healthcheck:
+      # Python is in the existing image; curl/wget are not required.
+      # Smoke additionally checks /api/readiness and its JSON `ready` value.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json, urllib.request; r = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); assert r.status == 200 and json.load(r).get('status') == 'healthy'"
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+
+volumes:
+  ci_pgdata: {}
+
+networks:
+  ci:
+    internal: true

@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 from app.api.ai_secretary import _completion_candidate_score, router
 
 
@@ -35,8 +38,10 @@ def test_gmail_distinguishes_sent_mail_and_does_not_send_incoming_alert():
     assert "if not is_outgoing and not bulk_reason:" in source
 
 
-def test_schema_revision_tracks_latest_migration():
-    schema = (ROOT / "app/schema.py").read_text(encoding="utf-8")
-    migration = (ROOT / "migrations/versions/c83d0a24b512_merge_job_and_ocr_heads.py").read_text(encoding="utf-8")
-    assert 'CURRENT_SCHEMA_REVISION = "c83d0a24b512"' in schema
-    assert 'down_revision = ("b71d2e4f9a10", "b72c9f13a401")' in migration
+def test_job_and_ocr_merge_remains_in_current_migration_history():
+    config = Config(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "migrations"))
+    scripts = ScriptDirectory.from_config(config)
+    merge = scripts.get_revision("c83d0a24b512")
+    assert merge.down_revision == ("b71d2e4f9a10", "b72c9f13a401")
+    assert merge.revision in {revision.revision for revision in scripts.walk_revisions()}

@@ -1,0 +1,261 @@
+name: Docker Compose smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI_COMPOSE_PROJECT: puw-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_ENV_FILE: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}.env
+      CI_RAW_LOG: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}.raw.log
+      CI_DIAGNOSTICS: ${{ runner.temp }}/puw-ci-${{ github.run_id }}-${{ github.run_attempt }}-diagnostics
+      COMPOSE_DISABLE_ENV_FILE: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Generate isolated test environment
+        timeout-minutes: 1
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import base64
+          import os
+          import secrets
+          import subprocess
+          from pathlib import Path
+
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          values = {
+              'POSTGRES_PASSWORD': secrets.token_urlsafe(32),
+              'APP_SECRET_KEY': secrets.token_urlsafe(48),
+              'BOOTSTRAP_TOKEN': secrets.token_urlsafe(32),
+              # Fernet requires URL-safe base64 encoding of exactly 32 random bytes.
+              'TOKEN_ENCRYPTION_KEY': base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
+              'CI_SMOKE_PASSWORD': secrets.token_urlsafe(32),
+          }
+          for value in values.values():
+              print(f'::add-mask::{value}')
+          values.update({
+              'POSTGRES_DB': 'puw_ci',
+              'POSTGRES_USER': 'puw_ci',
+              'DATABASE_URL': f"postgresql+psycopg://puw_ci:{values['POSTGRES_PASSWORD']}@db:5432/puw_ci",
+              'PU_RELEASE_REVISION': revision,
+              'PU_BACKGROUND_EXECUTION': 'in_process',
+              'GMAIL_AUTO_SYNC_ENABLED': 'false',
+              'AI_SECRETARY_AUTOMATION_ENABLED': 'false',
+          })
+          Path(os.environ['CI_ENV_FILE']).write_text(
+              ''.join(f'{key}={value}\n' for key, value in values.items()), encoding='utf-8',
+          )
+          Path(os.environ['CI_RAW_LOG']).touch(mode=0o600)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              # Shell env has priority over Compose --env-file. Replace every
+              # interpolated value with the same newly generated test value.
+              for key, value in values.items():
+                  output.write(f"{key}={value}\n")
+          PY
+
+      - name: Check integration dependencies and Compose configuration
+        timeout-minutes: 1
+        run: |
+          test -f docker-compose.ci.yml || { echo 'Missing integration dependency: docker-compose.ci.yml'; exit 1; }
+          test -f scripts/ci/smoke_api.py || { echo 'Missing integration dependency: scripts/ci/smoke_api.py'; exit 1; }
+          # Never print the interpolated configuration or its error output.
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" config --quiet >> "$CI_RAW_LOG" 2>&1
+
+      - name: Build backend
+        timeout-minutes: 12
+        run: |
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" build backend >> "$CI_RAW_LOG" 2>&1
+
+      - name: Start database and wait for healthcheck
+        timeout-minutes: 3
+        run: |
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" up -d --wait --wait-timeout 120 db >> "$CI_RAW_LOG" 2>&1
+
+      - name: Apply Alembic migrations in a one-off container
+        timeout-minutes: 3
+        run: |
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" run --rm --no-deps backend alembic -c alembic.ini upgrade head >> "$CI_RAW_LOG" 2>&1
+
+      - name: Start backend
+        timeout-minutes: 2
+        run: |
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" up -d --no-deps backend >> "$CI_RAW_LOG" 2>&1
+
+      - name: Wait for API readiness and expected schema
+        timeout-minutes: 3
+        run: |
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" exec -T backend python - >> "$CI_RAW_LOG" 2>&1 <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          deadline = time.monotonic() + 120
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen('http://backend:8000/api/readiness', timeout=5) as response:
+                      report = json.load(response)
+                  schema = report.get('checks', {}).get('schema', {})
+                  if report.get('ready') is True and schema.get('ok') is True and schema.get('message') == 'f360a1b2c3d4':
+                      print('CI_READINESS_OK')
+                      break
+              except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+                  pass
+              time.sleep(2)
+          else:
+              raise SystemExit('CI_READINESS_TIMEOUT')
+          PY
+
+      - name: Run authenticated API smoke inside backend
+        timeout-minutes: 3
+        run: |
+          docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" exec -T \
+            -e CI_SMOKE_PASSWORD \
+            -e CI_SMOKE_BASE_URL=http://backend:8000 \
+            backend python - < scripts/ci/smoke_api.py >> "$CI_RAW_LOG" 2>&1
+
+      - name: Collect sanitized diagnostics before cleanup
+        if: failure()
+        timeout-minutes: 2
+        run: |
+          python3 - <<'PY'
+          import collections
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          output = Path(os.environ['CI_DIAGNOSTICS'])
+          output.mkdir(mode=0o700, exist_ok=True)
+          compose = [
+              'docker', 'compose', '--project-name', os.environ['CI_COMPOSE_PROJECT'],
+              '--file', 'docker-compose.ci.yml', '--env-file', os.environ['CI_ENV_FILE'],
+          ]
+
+          def collect(arguments):
+              try:
+                  result = subprocess.run(compose + arguments, capture_output=True, text=True, timeout=30)
+                  return result.returncode, result.stdout
+              except (OSError, subprocess.TimeoutExpired):
+                  return -1, ''
+
+          # Allowlist structured fields. Names, command lines, URLs and raw errors
+          # never reach the artifact, even if they contain unregistered secrets.
+          ps_code, ps_raw = collect(['ps', '--all', '--format', 'json'])
+          containers = []
+          try:
+              parsed = json.loads(ps_raw)
+              rows = parsed if isinstance(parsed, list) else [parsed]
+          except ValueError:
+              rows = []
+              for line in ps_raw.splitlines():
+                  try:
+                      rows.append(json.loads(line))
+                  except ValueError:
+                      pass
+          for row in rows:
+              if not isinstance(row, dict) or row.get('Service') not in {'db', 'backend'}:
+                  continue
+              containers.append({
+                  'service': row['Service'],
+                  'state': row.get('State') if row.get('State') in {'created', 'running', 'restarting', 'paused', 'exited', 'dead', 'removing'} else 'unknown',
+                  'health': row.get('Health') if row.get('Health') in {'healthy', 'unhealthy', 'starting', ''} else 'unknown',
+                  'exit_code': row.get('ExitCode') if type(row.get('ExitCode')) is int else None,
+              })
+          logs_code, logs_raw = collect(['logs', '--no-color', '--tail', '300', 'db', 'backend'])
+          raw_path = Path(os.environ['CI_RAW_LOG'])
+          # Cap memory usage for failed builds. Raw output remains runner-local.
+          if raw_path.exists():
+              with raw_path.open('rb') as source:
+                  source.seek(max(0, raw_path.stat().st_size - 2_000_000))
+                  logs_raw += '\n' + source.read().decode('utf-8', errors='replace')
+          signals = collections.Counter()
+          allowed_signals = (
+              'CI_READINESS_OK', 'CI_READINESS_TIMEOUT', 'Traceback',
+              'AssertionError', 'OperationalError', 'ProgrammingError',
+              'IntegrityError', 'ModuleNotFoundError', 'ConnectionRefusedError',
+              'TimeoutError', 'Application startup complete',
+              'Application startup failed', 'Running upgrade',
+              'database system is ready to accept connections',
+              'CSRF validation failed', 'Authentication required',
+          )
+          safe_lines = []
+          smoke_steps = {
+              'configuration', 'startup', 'health', 'release', 'readiness',
+              'anonymous', 'bootstrap', 'authenticated', 'organization-create',
+              'project-create', 'project-read', 'project-list', 'logout',
+              'after-logout', 'internal',
+          }
+          for number, line in enumerate(logs_raw.splitlines(), 1):
+              events = []
+              for signal in allowed_signals:
+                  if signal in line:
+                      signals[signal] += 1
+                      events.append(signal)
+              match = re.search(r'HTTP/1\.[01]" ([1-5][0-9]{2})\b', line)
+              if match:
+                  signals[f'http_status_{match.group(1)}'] += 1
+                  events.append(f'http_status={match.group(1)}')
+              smoke = re.fullmatch(r'(PASS|FAIL) step=([a-z-]+) http=(n/a|[1-5][0-9]{2})(?: reason=.*)?', line)
+              if smoke and smoke.group(2) in smoke_steps:
+                  events.append(f'{smoke.group(1)} step={smoke.group(2)} http={smoke.group(3)}')
+              if line == 'PASS smoke-api':
+                  events.append('PASS smoke-api')
+              if events:
+                  safe_lines.append(f'line={number} ' + '; '.join(events))
+          # Preserve event order without copying arbitrary log strings, URLs,
+          # exception messages, cookies, document text or command arguments.
+          (output / 'compose.sanitized.log').write_text(
+              'Allowlisted log events only; unrecognized text omitted.\n'
+              + '\n'.join(safe_lines) + '\n', encoding='utf-8',
+          )
+          (output / 'diagnostics.json').write_text(json.dumps({
+              'compose_ps_exit_code': ps_code,
+              'compose_logs_exit_code': logs_code,
+              'containers': containers,
+              'log_signals': dict(signals),
+              'raw_logs_included': False,
+              'note': 'Allowlisted fields, signal counts and ordered log events are retained; raw text is omitted.',
+          }, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Upload sanitized diagnostics
+        if: failure()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CI_DIAGNOSTICS }}/diagnostics.json
+            ${{ env.CI_DIAGNOSTICS }}/compose.sanitized.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Clean up isolated Compose project
+        if: always()
+        timeout-minutes: 2
+        run: |
+          # Remove only this run's temporary files, including on a failed down.
+          trap 'rm -f -- "$CI_ENV_FILE" "$CI_RAW_LOG"' EXIT
+          if [[ -f "$CI_ENV_FILE" && -f docker-compose.ci.yml ]]; then
+            timeout 90s docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" down --volumes --remove-orphans --timeout 20 >> "$CI_RAW_LOG" 2>&1
+          fi
