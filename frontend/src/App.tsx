@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./api/client";
+import { api, ApiError } from "./api/client";
 import { Login } from "./auth/Login";
 import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
 import { useStoragePicker } from "./modules/integrations/useStoragePicker";
@@ -343,6 +343,15 @@ const targetFolders = [
   "09_ЗАКРЫТИЕ ПРОЕКТА",
   "99_АРХИВ",
 ];
+
+function snapshotActionError(error: unknown) {
+  if (error instanceof ApiError && error.status === 409) {
+    return error.message.includes("queued, running or retrying")
+      ? "Задание уже находится в очереди или выполняется. Дождитесь завершения и обновите состояние."
+      : "Операция недоступна в текущем состоянии. Обновите данные проекта и проверьте подключение папки.";
+  }
+  return error instanceof Error ? error.message : "Не удалось выполнить операцию";
+}
 
 export function App() {
   const { projectId, projectIdRef, rememberProject, initialProjectId } = useProjectSelection();
@@ -728,7 +737,7 @@ export function App() {
       setNotice(`Повтор снимка №${snapshotId} поставлен в очередь`);
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setError(snapshotActionError(e));
     }
   }
   async function retryOrganizerSession(sessionId: number) {
@@ -1054,13 +1063,15 @@ export function App() {
         { method: "POST" },
       );
       if (!request.current()) return;
-      if (result.already_analyzed) {
+      if (result.already_queued) {
         setFolders((items) =>
           items.map((item) =>
-            item.id === folder.id ? { ...item, analyzed: true } : item,
+            item.id === folder.id ? { ...item, analyzed: result.status === "ready", analysis_status: result.status } : item,
           ),
         );
-        setNotice(`${folder.name} уже поставлена на безопасную стандартизацию`);
+        setNotice(result.status === "ready"
+          ? `${folder.name}: обработка завершена`
+          : `${folder.name}: задание уже существует (${result.status})`);
       } else {
         setFolders((items) =>
           items.map((item) =>
@@ -1070,7 +1081,7 @@ export function App() {
           ),
         );
         setNotice(
-          `Создание безопасной копии, анализ и стандартизация «${folder.name}» запущены. Страницу можно закрыть.`,
+          `Создание безопасной копии, анализ и стандартизация «${folder.name}» поставлены в очередь. Страницу можно закрыть.`,
         );
       }
     } catch (e) {
@@ -1095,7 +1106,7 @@ export function App() {
       setNotice("Готовится таблица «Было → Станет» для рабочей папки. Обновите раздел через несколько секунд.");
       await load();
     } catch (e) {
-      if (request.current()) setError((e as Error).message);
+      if (request.current()) setError(snapshotActionError(e));
     } finally {
       if (request.current()) setBusyFolder("");
     }

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../../App";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 
 vi.mock("../../api/client", async original => ({ ...await original<typeof import("../../api/client")>(), api: vi.fn() }));
 const mockApi = vi.mocked(api);
@@ -26,6 +26,39 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it.each(["ready", "retrying"])("uses actual standardize status %s, not a fictitious new launch", async status => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.includes("/source-folders/discover")) return { project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "root", breadcrumbs: [], folders: [{ id: "opaque-C", name: "Папка", registered: true,
+        is_primary: true, snapshot_status: "ready", snapshot_id: 31 }] };
+    if (path.endsWith("/standardize")) return { snapshot_id: 31, session_id: 42, status, already_queued: true };
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Создать копию и стандартизировать" }));
+  await screen.findByText(status === "ready" ? "Папка: обработка завершена" : "Папка: задание уже существует (retrying)");
+  expect(screen.queryByText(/стандартизация «Папка» запущены/)).not.toBeInTheDocument();
+  expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/standardize"))).toHaveLength(1);
+});
+
+it("shows a non-looping active-job conflict when preparing source analysis", async () => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.includes("/source-folders/discover")) return { project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "root", breadcrumbs: [], folders: [{ id: "opaque-C", name: "Папка", registered: true,
+        snapshot_status: "ready", snapshot_id: 31, analysis_result: { mode: "safe_copy" } }] };
+    if (path.endsWith("/analyze")) throw new ApiError("Snapshot already has queued, running or retrying work; wait for completion", 409, "");
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Подготовить стандарт рабочей папки" }));
+  await screen.findByText(/Задание уже находится в очереди/);
+  expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/analyze"))).toHaveLength(1);
+});
+
 it("renders missing explicit project without visually selecting Persistent Project", async () => {
   projectRows = projectRows.slice(0, 1);
   render(<App />);
@@ -33,6 +66,38 @@ it("renders missing explicit project without visually selecting Persistent Proje
   expect(screen.getByRole("combobox")).toHaveValue("2");
   expect(sessionStorage.getItem("pu_active_project_id")).toBe("2");
   expect(mockApi.mock.calls.some(([path]) => path === "/dashboard/project?project_id=1")).toBe(false);
+});
+
+it("does not interpret already_queued analysis as completed", async () => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.includes("/source-folders/discover")) return { project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "root", breadcrumbs: [], folders: [{ id: "opaque-C", name: "Папка", registered: true,
+        snapshot_status: "ready", snapshot_id: 31, analysis_result: { mode: "safe_copy" } }] };
+    if (path.endsWith("/analyze")) return { snapshot_id: 31, status: "analyzing", already_queued: true };
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Подготовить стандарт рабочей папки" }));
+  await screen.findByText(/Готовится таблица «Было → Станет»/);
+  expect(screen.queryByText(/обработка завершена/)).not.toBeInTheDocument();
+  expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/analyze"))).toHaveLength(1);
+});
+
+it("handles retry-build 409 without enqueue success or automatic retry", async () => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.endsWith("/processing-queue")) return { ...empty, snapshots: [{ id: 31, status: "failed", analysis_status: "pending", retry_count: 0, analysis_retry_count: 0 }] };
+    if (path.endsWith("/retry-build")) throw new ApiError("Snapshot already has queued, running or retrying work; wait for completion", 409, "");
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Повторить" }));
+  await screen.findByText(/Задание уже находится в очереди/);
+  expect(screen.queryByText(/Повтор снимка №31 поставлен в очередь/)).not.toBeInTheDocument();
+  expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/retry-build"))).toHaveLength(1);
 });
 
 it("uses the real App picker and ignores confirmation after the user changes project", async () => {

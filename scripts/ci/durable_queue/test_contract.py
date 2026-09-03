@@ -5,6 +5,15 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def test_final_candidate_push_is_branch_scoped_and_read_only():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/durable-queue.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert triggers["push"]["branches"] == ["codex/parallel-validation-final"]
+    assert workflow["permissions"] == {"contents": "read"}
+    assert "pull_request" in triggers and "workflow_dispatch" in triggers
+    assert workflow["jobs"]["recovery"]["timeout-minutes"] <= 30
+
+
 def test_isolated_topology_and_no_credentials_or_ports():
     cfg = yaml.safe_load((ROOT / "docker-compose.queue-ci.yml").read_text())
     assert set(cfg["services"]) == {"db", "api1", "api2", "worker1", "worker2", "scheduler"}
@@ -23,6 +32,15 @@ def test_fixture_is_not_in_production_image():
     assert "queue_ci" not in production and "durable_queue" not in production
     for path in Path(__file__).parent.glob("*.py"):
         ast.parse(path.read_text())
+
+
+def test_workspace_checks_run_before_workers_and_are_postgres_only():
+    runner = (ROOT / "scripts/ci/durable_queue/run.py").read_text()
+    assert runner.index('/queue_ci/workspace_checks.py') < runner.index('compose("up", "-d", "worker1"')
+    probe = (ROOT / "scripts/ci/durable_queue/workspace_checks.py").read_text()
+    assert 'url.get_backend_name() == "postgresql"' in probe
+    assert 'url.host == "db" and url.database == "puw_queue_test"' in probe
+    assert 'External I/O forbidden' in probe
 
 
 def test_unconditional_cleanup_precedes_artifact():

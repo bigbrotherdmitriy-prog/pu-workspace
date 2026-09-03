@@ -22,7 +22,8 @@ def test_project_launch_is_a_separate_frontend_module():
     assert 'target: "source"' in wizard
     assert 'target === "contacts"' in app
     assert 'target === "source"' in app
-    assert 'openSources("root")' in app
+    assert 'if (target === "source") void openSources();' in app
+    assert 'openSources("root")' not in app  # Restore the saved folder, not account root.
     assert 'setMailView("companies")' in app
     assert "Создать или импортировать ГПР для договора" in wizard
     assert "Добавить бюджет и связать его с договором" in wizard

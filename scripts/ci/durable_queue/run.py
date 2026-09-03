@@ -104,6 +104,8 @@ def main():
             assert sql("SELECT version_num FROM alembic_version").strip() == b"f360a1b2c3d4"
             race = compose("run", "--rm", "--no-deps", "api1", "python", "/queue_ci/postgres_checks.py")
             EVENTS.append(json.loads(race))
+            workspace_result = compose("run", "--rm", "--no-deps", "api1", "python", "/queue_ci/workspace_checks.py")
+            EVENTS.append(json.loads(workspace_result))
             compose("up", "-d", "worker1", "worker2", "scheduler")
             # Readiness preflight needs worker/scheduler heartbeat before APIs start.
             wait(lambda: int(sql("SELECT count(*) FROM service_heartbeats").strip()) >= 3)
