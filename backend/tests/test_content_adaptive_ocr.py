@@ -66,6 +66,54 @@ def test_psm6_is_accepted_when_it_eliminates_breaks_without_losing_evidence():
         assert _psm_calls(run) == ["1", "6"]
 
 
+def test_structural_fallback_does_not_introduce_one_letter_change_to_readable_word():
+    primary = (
+        "Поставщик передает товар покупателю по договору. "
+        "Поку обязан при ий товар лично или через у го пред теля. "
+        "Передача товара производится после оплаты и проверки документов."
+    )
+    fallback = (
+        "Поставщик передает товар покупателю по договару. "
+        "Покупатель обязан принять оплаченный товар лично или чераз уполномоченного представителя. "
+        "Передача товара производится после оплаты и проверки документов."
+    )
+    expected = fallback.replace("договару", "договору").replace("чераз", "через")
+    with COMMON_PATCHES[0], COMMON_PATCHES[1], COMMON_PATCHES[2], COMMON_PATCHES[3], patch(
+        "app.organizer_engine.content.subprocess.run",
+        side_effect=[SimpleNamespace(returncode=0, stdout=primary), SimpleNamespace(returncode=0, stdout=fallback)],
+    ):
+        assert _tesseract(Path("synthetic.jpg"), 30) == expected
+
+
+def test_numbered_prose_merge_preserves_readable_word_and_primary_table():
+    primary = (
+        "Счет 951 от 22 января 2026. Условия поставки согласованы сторонами.\n"
+        "7. Поку обязан при ый товар лично или через у го пред теля. Передача товара выполняется "
+        "после проверки договора и предъявления документов покупателем поставщику.\n"
+        "Сумма     Товар     Количество\n"
+        "1 | Конвектор А | 2 | 147360\n"
+        "2 | Конвектор Б | 4 | 26573\n"
+    )
+    fallback = (
+        "Счет 951 от 22 января 2026. Условия поставки согласованы сторонами.\n"
+        "7. Покупатель обязан принять оплаченный товар лично или чераз уполномоченного представителя. "
+        "Передача товара выполняется после проверки договора и предъявления документов покупателем поставщику.\n"
+        "Сумма     Товар     Количество\n"
+        "1 | Конвектор Б | 2 | 147360\n"
+        "2 | Конвектор А | 4 | 26573\n"
+    )
+    with COMMON_PATCHES[0], COMMON_PATCHES[1], COMMON_PATCHES[2], COMMON_PATCHES[3], patch(
+        "app.organizer_engine.content.subprocess.run",
+        side_effect=[SimpleNamespace(returncode=0, stdout=primary), SimpleNamespace(returncode=0, stdout=fallback)],
+    ):
+        result = _tesseract(Path("synthetic-invoice.jpg"), 30)
+    assert "Покупатель обязан принять оплаченный товар лично или через уполномоченного" in result
+    assert "чераз" not in result
+    assert "1 | Конвектор А | 2 | 147360" in result
+    assert "2 | Конвектор Б | 4 | 26573" in result
+    assert "1 | Конвектор Б" not in result
+
+
 @pytest.mark.parametrize(
     "old,new",
     [("147360", "сумма-не-распознана"), ("22.01.2026", "дата-не-распознана"), ("7716888076", "инн-не-распознан")],

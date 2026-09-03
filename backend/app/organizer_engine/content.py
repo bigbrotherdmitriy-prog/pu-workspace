@@ -10,6 +10,7 @@ import time
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -174,6 +175,56 @@ def _looks_tabular(text: str) -> bool:
     return table_rows >= 2
 
 
+def _preserve_primary_near_matches(primary: str, fallback: str) -> str:
+    """Do not let a structural fallback introduce an undecidable one-letter edit.
+
+    The adaptive pass is meant to join visibly fragmented prose. If two aligned
+    alphabetic words differ by exactly one substitution, neither OCR result proves
+    which spelling is faithful. Keeping the primary token is conservative and
+    avoids silently changing already-readable evidence. Larger edits remain the
+    fallback's responsibility, so fragments can still become complete words.
+    """
+    word_re = re.compile(r"(?iu)[^\W\d_]+")
+    primary_matches = list(word_re.finditer(primary))
+    fallback_matches = list(word_re.finditer(fallback))
+    primary_words = [match.group().casefold() for match in primary_matches]
+    fallback_words = [match.group().casefold() for match in fallback_matches]
+    replacements: list[tuple[int, int, str]] = []
+    for tag, old_start, old_end, new_start, new_end in SequenceMatcher(
+        None, primary_words, fallback_words, autojunk=False
+    ).get_opcodes():
+        if tag != "replace":
+            continue
+        old_indices = range(old_start, old_end)
+        new_indices = range(new_start, new_end)
+        near_pairs = [
+            (old_index, new_index)
+            for old_index in old_indices
+            for new_index in new_indices
+            if len(primary_words[old_index]) >= 4
+            and len(primary_words[old_index]) == len(fallback_words[new_index])
+            and sum(
+                left != right
+                for left, right in zip(primary_words[old_index], fallback_words[new_index])
+            ) == 1
+            and primary_words[old_index] not in OCR_ORPHAN_ENDINGS
+        ]
+        # Preserve only unambiguous pairs inside the changed region. Fragment
+        # repair often changes several neighboring tokens, so a useful pair need
+        # not form a standalone SequenceMatcher opcode.
+        for old_index, new_index in near_pairs:
+            if sum(pair[0] == old_index for pair in near_pairs) != 1:
+                continue
+            if sum(pair[1] == new_index for pair in near_pairs) != 1:
+                continue
+            new_match = fallback_matches[new_index]
+            replacements.append((new_match.start(), new_match.end(), primary_matches[old_index].group()))
+    result = fallback
+    for start, end, replacement in reversed(replacements):
+        result = result[:start] + replacement + result[end:]
+    return result
+
+
 def _merge_safe_numbered_prose(primary: str, fallback: str) -> tuple[str, int]:
     """Replace only damaged numbered prose; never rewrite the surrounding table."""
     fallback_sections = {match.group("number"): match for match in NUMBERED_PROSE_RE.finditer(fallback)}
@@ -196,7 +247,10 @@ def _merge_safe_numbered_prose(primary: str, fallback: str) -> tuple[str, int]:
             and _non_fragment_corruption(new_body) == 0
             and new_words >= old_words * 0.75
         ):
-            replacements.append((match.start(), match.end(), candidate.group(0)))
+            replacements.append((
+                match.start(), match.end(),
+                _preserve_primary_near_matches(match.group(0), candidate.group(0)),
+            ))
     merged = primary
     for start, end, replacement in reversed(replacements):
         merged = merged[:start] + replacement + merged[end:]
@@ -254,7 +308,7 @@ def _tesseract(path: Path, timeout: float | None = None, *, allow_fallback: bool
     if replacements:
         return merged
     if _safe_whole_page_fallback(primary, fallback):
-        return fallback
+        return _preserve_primary_near_matches(primary, fallback)
     return primary
 
 
