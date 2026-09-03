@@ -30,6 +30,9 @@ PYTEST_FAILURE = re.compile(
     r"(?P<nodeid>(?:backend|scripts)/[A-Za-z0-9_./-]+\.py"
     r"(?:::[A-Za-z_][A-Za-z0-9_]*)+)"
 )
+PYTEST_LOCATION = re.compile(
+    r"(?m)^(?P<location>(?:backend|scripts)/[A-Za-z0-9_./-]+\.py:[1-9][0-9]*):"
+)
 
 
 def base_url(database: str) -> str:
@@ -65,6 +68,11 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
         ))[:20]
         if failed_nodeids:
             record["failed_nodeids"] = failed_nodeids
+        failure_locations = list(dict.fromkeys(
+            match.group("location") for match in PYTEST_LOCATION.finditer(result.stdout)
+        ))[:20]
+        if failure_locations:
+            record["failure_locations"] = failure_locations
     PHASES.append(record)
     if result.returncode:
         raise RuntimeError(name + "_failed")

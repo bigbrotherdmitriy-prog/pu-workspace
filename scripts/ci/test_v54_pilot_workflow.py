@@ -52,6 +52,8 @@ def test_failed_phase_records_only_safe_pytest_nodeids(monkeypatch):
     module.PHASES.clear()
     secret = "synthetic-document-secret"
     stdout = (
+        "backend/tests/test_v54_authority_postgres.py:104: in test_revoke_wins\n"
+        f"    unsafe detail: {secret}\n"
         "FAILED backend/tests/test_v54_authority_postgres.py::test_revoke_wins "
         f"- AssertionError: {secret}\n1 failed, 273 passed in 1.00s\n"
     )
@@ -68,6 +70,9 @@ def test_failed_phase_records_only_safe_pytest_nodeids(monkeypatch):
     encoded = str(module.PHASES)
     assert module.PHASES[0]["failed_nodeids"] == [
         "backend/tests/test_v54_authority_postgres.py::test_revoke_wins"
+    ]
+    assert module.PHASES[0]["failure_locations"] == [
+        "backend/tests/test_v54_authority_postgres.py:104"
     ]
     assert secret not in encoded
 
