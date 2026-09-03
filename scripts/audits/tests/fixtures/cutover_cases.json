@@ -1,0 +1,74 @@
+{
+  "fixture_version": 1,
+  "purpose": "reconciliation_oracle_only",
+  "cases": [
+    {
+      "case_id": "same_provider_id_two_mailboxes",
+      "connections": [
+        "mailbox-a",
+        "mailbox-b"
+      ],
+      "provider_message_id": "gmail-shared-001",
+      "expected": "two_distinct_messages"
+    },
+    {
+      "case_id": "unknown_legacy_mailbox",
+      "legacy_message_id": "legacy-001",
+      "candidates": [],
+      "expected": "unresolved"
+    },
+    {
+      "case_id": "one_contact_multiple_projects",
+      "contact_identity": "contact-synthetic-001",
+      "projects": [
+        "project-a",
+        "project-b"
+      ],
+      "expected": "one_identity_two_confirmed_scoped_relations"
+    },
+    {
+      "case_id": "rfc_and_thread_collision",
+      "observations": [
+        {
+          "connection": "mailbox-a",
+          "provider_thread_id": "thread-shared",
+          "rfc_message_id": "<shared@example.test>"
+        },
+        {
+          "connection": "mailbox-b",
+          "provider_thread_id": "thread-shared",
+          "rfc_message_id": "<shared@example.test>"
+        }
+      ],
+      "expected": "no_identity_merge_manual_correlation_only"
+    },
+    {
+      "case_id": "project_transfer_preserves_origin",
+      "before": {
+        "project": "project-a",
+        "connection": "mailbox-a"
+      },
+      "after": {
+        "project": "project-b",
+        "connection": "mailbox-a"
+      },
+      "expected": "origin_binding_unchanged_context_history_appended"
+    },
+    {
+      "case_id": "ambiguous_mailbox",
+      "legacy_message_id": "legacy-ambiguous-001",
+      "candidates": [
+        "mailbox-a",
+        "mailbox-b"
+      ],
+      "forbidden_evidence": [
+        "current_project",
+        "current_oauth",
+        "sender",
+        "body",
+        "active_project"
+      ],
+      "expected": "unresolved"
+    }
+  ]
+}
