@@ -30,6 +30,29 @@ MONTH_DATE_RE = re.compile(
 MONTHS = {name: index + 1 for index, name in enumerate(
     ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"))}
 SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
+# A small set of Russian endings, not a dictionary of misspelled words. Ordinary
+# short words (и, у, по, при, их, им, ей, её, etc.) deliberately do not participate.
+# Two distinct unquoted fragments are needed: one fragment can be a name, game
+# (го), technical notation or a typo. This is a review signal, never a repair.
+ORPHAN_ENDING_RE = re.compile(
+    r"(?<![\w/\-–—])(?:ый|ий|ая|яя|ое|ые|ую|юю|ых|ым|ть|ться|го)(?![\w/\-–—])"
+)
+
+
+def _has_repeated_orphan_endings(text: str) -> bool:
+    if len(re.findall(r"\b[а-яё]{3,}\b", text, re.IGNORECASE)) < 5:
+        return False
+    fragments = set()
+    for match in ORPHAN_ENDING_RE.finditer(text):
+        before = text[:match.start()].rstrip()
+        after = text[match.end():].lstrip()
+        # Quoted words/suffixes and dot/colon abbreviations are not OCR evidence.
+        if (before and before[-1] in "\"'«»„“”‘’") or (
+            after and after[0] in "\"'«»„“”‘’.:"
+        ):
+            continue
+        fragments.add(match.group())
+    return len(fragments) >= 2
 
 
 @dataclass(slots=True)
@@ -45,7 +68,7 @@ class TaskCandidate:
 
 
 def _text_quality_review_reasons(text: str) -> tuple[str, ...]:
-    """Flag explicit corruption only; do not spell-correct, classify jargon or drop claims.
+    """Flag corruption patterns; do not spell-correct, classify jargon or drop claims.
 
     This is NOT OCR confidence. In particular, numbers, uppercase identifiers,
     separate Latin words and single mixed-script tokens are not evidence of damage.
@@ -74,6 +97,11 @@ def _text_quality_review_reasons(text: str) -> tuple[str, ...]:
     )
     if substitutions >= 2:
         reasons.append("В нескольких словах есть вероятные подмены букв цифрами или латиницей.")
+    if _has_repeated_orphan_endings(text):
+        reasons.append(
+            "В нескольких местах есть отдельно стоящие окончания слов; "
+            "возможны разрывы распознанного текста. Сверьте цитату с документом."
+        )
     return tuple(reasons)
 
 
