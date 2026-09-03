@@ -22,6 +22,7 @@ from app.core.v54_interfaces import AuditAppend, PilotGate, Resolution, require_
 from app.core.v54_refs import ObjectRef, TaggedId, VersionPin
 from app.core.v54_transactions import append_audit
 from app.models.audit_log import AuditLog
+from app.models.organization_contract import Organization
 from app.models.v54_pilot import (
     ConnectionIdentity, MailConnection, SourceReference, SourceVersion, Evidence, EvidenceAssessment,
     DeadlineClaim, ContextRelation, PilotAction, ActionRevision, ActionApproval, ActionReceipt,
@@ -44,6 +45,15 @@ def db():
         yield session
         session.rollback()
     engine.dispose()
+
+
+def test_synthetic_seed_reuses_migration_bootstrap_organization(db):
+    db.add(Organization(id=1, name="PU Workspace"))
+    db.flush()
+
+    seed(db)
+
+    assert db.get(Organization, 1).name == "PU Workspace"
 
 
 @pytest.mark.parametrize("kind,value", [

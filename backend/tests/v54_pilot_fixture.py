@@ -48,7 +48,12 @@ def envelopes():
 
 def seed(db):
     """Caller owns this transaction. No commit, network, provider or execution."""
-    db.add_all([Organization(id=1, name="Synthetic tenant"), Organization(id=2, name="Other synthetic tenant"),
+    # The historical organization migration creates id=1 on an otherwise empty
+    # database. Reuse that bootstrap row so the synthetic fixture exercises the
+    # real migration path without rewriting or duplicating baseline data.
+    if db.get(Organization, 1) is None:
+        db.add(Organization(id=1, name="Synthetic tenant"))
+    db.add_all([Organization(id=2, name="Other synthetic tenant"),
                 User(id=2, name="Requester", email="requester@example.test", is_admin=False),
                 User(id=3, name="Reviewer", email="reviewer@example.test", is_admin=False)])
     db.flush()

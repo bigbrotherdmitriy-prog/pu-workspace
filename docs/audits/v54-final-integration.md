@@ -166,3 +166,27 @@ pytest с `-rs`: этот report flag выводит только skipped и и�
 traceback, assertion text, stdout, stderr, DSN и данные по-прежнему не
 публикуются. Локальная проверка `scripts/ci`: 87 passed. До следующего runtime
 решение остаётся **CONDITIONAL**.
+
+## Четвёртый GitHub runtime — 33796098612
+
+Safe artifact для `78c90e3efd2faade6812177108efc04cc53c1f30` локализовал
+единственный сбой:
+
+- node ID: `backend/tests/test_v54_pilot_foundation.py::test_postgresql_upgrade_downgrade_only_on_explicit_empty_test_db`;
+- locations: `backend/tests/test_v54_pilot_foundation.py:452` и
+  `backend/tests/v54_pilot_fixture.py:54`;
+- artifact SHA-256:
+  `755ec1e0bc54cfdf6b2793a486109cab43c26624d0a6289ef367b7a6c591aaf3`;
+- cleanup: PASS, raw output не опубликован.
+
+Сбой происходил при первом `seed()`, до проверки downgrade. Историческая
+миграция `a17c4d820e31` создаёт bootstrap-организацию с `id=1`, а синтетический
+fixture пытался вставить тот же первичный ключ. Regression сначала воспроизвёл
+`UNIQUE organizations.id`. Fixture теперь повторно использует существующую
+bootstrap-организацию, не изменяя её данные; на чистом metadata-сценарии он
+по-прежнему создаёт синтетическую организацию. Production-код и применённые
+миграции не изменялись.
+
+После исправления: foundation `90 passed, 1 skipped`, полный backend
+`754 passed, 9 skipped`, `scripts/ci` — `87 passed`, `git diff --check` — PASS.
+PostgreSQL runtime требует повторного GitHub run; статус пока **CONDITIONAL**.
