@@ -37,6 +37,12 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert 'HEAD = "a54f001c0a02"' in source
 
 
+def test_postgres_phase_requests_safe_failure_summary():
+    source = (ROOT / "scripts/ci/v54_pilot_workflow.py").read_text(encoding="utf8")
+    postgres_phase = source.split('run_phase("postgres_abc_integration"', 1)[1].split("env=env", 1)[0]
+    assert '"-rfsE"' in postgres_phase
+
+
 def test_failed_phase_records_only_safe_pytest_nodeids(monkeypatch):
     path = ROOT / "scripts/ci/v54_pilot_workflow.py"
     spec = importlib.util.spec_from_file_location("v54_pilot_workflow_failure_test", path)

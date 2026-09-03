@@ -146,3 +146,23 @@ deploy не затрагивались; публикация ветки опис
 не более 20 node ID только из `backend/` или `scripts/`, без параметров теста,
 assertion text, stdout, stderr, DSN, документов и секретов. Повторный runtime
 обязателен; статус остаётся **CONDITIONAL**.
+
+## Второй GitHub runtime — 33792231596
+
+Повторный run для `f77e40f712c0b80c100e8b1d613d603527dfdf46` подтвердил:
+
+- migration: PASS, `a54f001c0a02`;
+- backend full: PASS, 753 passed / 9 skipped;
+- `postgres_abc_integration`: FAIL после 273 passed;
+- cleanup: PASS;
+- raw output не опубликован;
+- artifact SHA-256:
+  `b7ff1db0d9a229fa158db8031607c9b57cbf270f2da6a3d6086044bd14769b9e`.
+
+Поле `failed_nodeids` отсутствовало, потому что PostgreSQL-фаза запускала
+pytest с `-rs`: этот report flag выводит только skipped и исключает безопасные
+строки `FAILED`/`ERROR`, которые читает allowlist-парсер. Добавлен regression-
+тест и минимальная замена на `-rfsE`. Она раскрывает только node ID теста;
+traceback, assertion text, stdout, stderr, DSN и данные по-прежнему не
+публикуются. Локальная проверка `scripts/ci`: 87 passed. До следующего runtime
+решение остаётся **CONDITIONAL**.
