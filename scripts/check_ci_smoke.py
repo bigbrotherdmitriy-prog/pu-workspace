@@ -32,16 +32,17 @@ def run(base, env, seed=False):
         with client.open(Request(base + path, data=body, headers=headers), timeout=30) as response:
             return json.load(response)
 
+    last_failure = 'not ready'
     for attempt in range(60):
         try:
             ready = request('/api/readiness')
             if ready.get('ready'):
                 break
-        except (HTTPError, URLError, TimeoutError):
-            pass
+        except (HTTPError, URLError, TimeoutError) as error:
+            last_failure = type(error).__name__ + (f' status={error.code}' if isinstance(error, HTTPError) else '')
         time.sleep(2)
     else:
-        raise RuntimeError('Readiness did not become healthy')
+        raise RuntimeError(f'Readiness did not become healthy: {last_failure}')
     assert request('/health')['status'] == 'healthy'
     assert request('/api/status')['release'] == env['PU_RELEASE_REVISION'], 'Wrong deployed commit'
     # Check that application data cannot be read anonymously.
