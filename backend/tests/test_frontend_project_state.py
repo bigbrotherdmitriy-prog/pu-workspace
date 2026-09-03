@@ -120,13 +120,16 @@ def test_ai_secretary_automation_exposes_prepared_task_and_draft_for_review():
     assert "Связать со строкой бюджета" in source
 
 
-def test_contextual_ai_help_is_available_on_hover_and_keyboard_focus_without_external_call():
+def test_contextual_ai_help_remembers_context_but_opens_only_on_explicit_activation():
     source = APP_SOURCE.read_text(encoding="utf-8")
     helper = CONTEXTUAL_AI_SOURCE.read_text(encoding="utf-8")
     assert "<ContextualAssistant section={active}" in source
-    assert 'document.addEventListener("mouseover", show)' in helper
-    assert 'document.addEventListener("focusin", show)' in helper
-    assert 'document.addEventListener("mouseout", hide)' in helper
-    assert 'className="ai-hover-bubble"' in helper
+    assert 'document.addEventListener("mouseover",' in helper
+    assert 'document.addEventListener("focusin",' in helper
+    assert 'document.addEventListener("mousemove",' in helper
+    assert 'className="ai-hover-bubble"' not in helper
+    assert 'role="tooltip"' not in helper
+    assert 'onClick={ask}' in helper
+    assert 'type="button"' in helper
     assert 'className="ai-mascot"' in helper
     assert "api(" not in helper

@@ -27,6 +27,20 @@ try {
     await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     await page.goto(`${origin}/tests/fixtures/tasks-layout.html`);
     await page.locator(".task-body strong").waitFor();
+    await page.locator(".task-body strong").hover();
+    await page.waitForTimeout(800); // Previous unsolicited bubble appeared after 550 ms.
+    assert.equal(await page.getByRole("tooltip").count(), 0, `${width}: unsolicited tooltip`);
+    assert.equal(await page.getByLabel("Число запросов помощнику").textContent(), "0");
+    await page.getByRole("button", { name: "История", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    const mascot = page.getByRole("button", { name: "Спросить AI Secretary об этом элементе", exact: true });
+    assert.equal(await mascot.evaluate((el) => el === document.activeElement), true, `${width}: mascot tab focus`);
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector('[aria-label="Число запросов помощнику"]').textContent === "1");
+    assert.match(await page.getByLabel("Запрос помощнику").textContent(), /элементом «История»/);
+    await page.keyboard.press("Space");
+    await page.waitForFunction(() => document.querySelector('[aria-label="Число запросов помощнику"]').textContent === "2");
+    console.log(`PASS ${width}px assistant: no auto bubble; Tab, Enter, Space; context preserved`);
     for (const expanded of [false, true]) {
       if (expanded) {
         await page.getByRole("button", { name: "Завершить", exact: true }).click();
