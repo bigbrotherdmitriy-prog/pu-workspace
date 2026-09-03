@@ -6,6 +6,7 @@ export type TaskRow = {
   source_excerpt: string; confidence: number; needs_review: boolean; message_id?: number;
   external_action_status: string; google_task_id?: string; google_calendar_event_id?: string;
   result_note?: string; completion_document_id?: number; completion_document_name?: string;
+  description?: string | null;
 };
 
 export type TaskHistoryRow = {
@@ -47,7 +48,14 @@ export function TasksModule(props: Props) {
     <div className="card-head"><div><h2>Реестр задач</h2><p>Автоматически выделенные поручения с проверяемым источником</p></div><div className="task-filters">{[["open", "Открытые"], ["overdue", "Просроченные"], ["review", "На проверку"], ["all", "Все"]].map(([id, label]) => <button className={props.filter === id ? "selected" : ""} onClick={() => props.onFilterChange(id)} key={id}>{label}</button>)}</div></div>
     <div className="task-list">{visibleTasks.map((task) => <article key={task.id}>
       <div className={`task-priority ${task.priority}`} />
-      <div className="task-body"><strong>{task.title}</strong><p>{task.source_file_name} · {task.assignee_name} · уверенность {Math.round(task.confidence * 100)}%</p><small>{task.source_excerpt}</small></div>
+      <div className="task-body">
+        <strong>{task.title}</strong>
+        <p>{task.source_file_name} · {task.assignee_name} · эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
+        <small>Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
+        {task.needs_review && <p className="task-review-warning">Требуется ручная проверка по документу-источнику.</p>}
+        {task.description && <p className="task-description">{task.description}</p>}
+        <small className="task-source-excerpt">{task.source_excerpt}</small>
+      </div>
       <div className="task-meta"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{task.google_task_id ? "Google Tasks ✓" : task.external_action_status === "proposed" ? "Предложение" : "Локальная"}{task.google_calendar_event_id ? " · Calendar ✓" : ""}</span></div>
       <div className="task-actions">
         <label className="task-assignee"><span>Исполнитель</span><select aria-label={`Исполнитель задачи ${task.title}`} value={task.assignee_user_id} onChange={(event) => props.onAssign(task, Number(event.target.value))}>{props.members.map((member) => <option value={member.user_id} key={member.user_id}>{member.name} · {member.role}</option>)}</select></label>

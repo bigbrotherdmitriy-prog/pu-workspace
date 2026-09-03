@@ -19,10 +19,29 @@ describe("TasksModule layout and existing actions", () => {
   it("preserves full Russian content and groups controls separately from the body", () => {
     const { container } = render(<TasksModule {...props()} />);
     expect(screen.getByText(task.title)).toBeInTheDocument();
-    expect(container.querySelector(".task-body p")).toHaveTextContent(`${longPath} · ${task.assignee_name} · уверенность 42%`);
+    expect(container.querySelector(".task-body p")).toHaveTextContent(`${longPath} · ${task.assignee_name} · эвристическая оценка 42/100`);
     expect(screen.getByText(task.source_excerpt)).toBeInTheDocument();
     expect(container.querySelector(".task-action-buttons")?.querySelectorAll("button")).toHaveLength(4);
     expect(container.querySelector(".task-body select")).toBeNull();
+  });
+
+  it("shows backend review reasons as plain text without treating the score as probability", () => {
+    const description = "Причины: есть символы замены. <script>synthetic</script>";
+    const callbacks = props({ tasks: [{ ...task, description, confidence: 0.45 }] });
+    const { container } = render(<TasksModule {...callbacks} />);
+    expect(screen.getByText(description)).toBeInTheDocument();
+    expect(screen.getByText("Требуется ручная проверка по документу-источнику.")).toBeInTheDocument();
+    expect(screen.getByText(/не является вероятностью/)).toBeInTheDocument();
+    expect(container.querySelector(".task-description script")).toBeNull();
+    expect(callbacks.onApproveExternal).not.toHaveBeenCalled();
+  });
+
+  it.each([null, undefined])("supports historical rows without description (%s)", (description) => {
+    const { container } = render(<TasksModule {...props({ tasks: [{ ...task, description, confidence: 0.82, needs_review: false }] })} />);
+    expect(container.querySelector(".task-description")).toBeNull();
+    expect(container.querySelector(".task-review-warning")).toBeNull();
+    expect(screen.getByText(/эвристическая оценка 82\/100/)).toBeInTheDocument();
+    expect(screen.getByText(/Отсутствие предупреждений не гарантирует/)).toBeInTheDocument();
   });
 
   it("retains assignment, external approval, start, completion request and history callbacks", () => {

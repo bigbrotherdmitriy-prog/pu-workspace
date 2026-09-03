@@ -57,6 +57,7 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
         )
         result.append({
             "id": task.id, "title": task.title, "status": task.status, "priority": task.priority,
+            "description": task.description,
             "due_date": task.due_date, "assignee_user_id": task.assignee_user_id,
             "assignee_name": assignee.name, "assignee_email": assignee.email,
             "source_file_name": task.source_file_name, "source_excerpt": task.source_excerpt,

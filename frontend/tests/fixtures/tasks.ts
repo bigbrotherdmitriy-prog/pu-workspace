@@ -7,6 +7,7 @@ export const task: TaskRow = {
   assignee_name: "Александра Константиновна ОтветственнаяЗаИсполнительнуюДокументацию",
   source_file_name: longPath, source_excerpt: "Подготовить документы и проверить замечания. " + longPath,
   confidence: 0.42, needs_review: true, external_action_status: "proposed",
+  description: "Требуется ручная проверка. Причины: в синтетическом фрагменте есть символы замены; сверьте текст с оригиналом. " + longPath,
 };
 export const members = [
   { user_id: 1, name: task.assignee_name, role: "Руководитель проектного подразделения" },

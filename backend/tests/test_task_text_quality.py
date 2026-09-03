@@ -3,6 +3,7 @@ from datetime import date
 import hashlib
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core.integration_types import StorageObject
@@ -13,6 +14,7 @@ from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.organizer_engine.content import extract_text_result
 from app.task_engine import create_tasks_from_files, extract_task_candidates
+from app.api.tasks import list_tasks
 
 
 DAMAGED = [
@@ -146,6 +148,17 @@ def test_persisted_review_retains_evidence_and_resync_does_not_touch_existing_ta
     assert obligation.confidence == task.confidence
     assert obligation.status == "needs_confirmation"
 
+    # Additive list API field exposes reasons without dropping the original evidence.
+    response = list_tasks(project.id, db_session, user)
+    assert response["count"] == 1
+    assert response["tasks"][0]["description"] == task.description
+    assert response["tasks"][0]["source_excerpt"] == source
+    assert response["tasks"][0]["needs_review"] is True
+    outsider = user_factory()
+    with pytest.raises(HTTPException) as forbidden:
+        list_tasks(project.id, db_session, outsider)
+    assert forbidden.value.status_code == 403
+
     # Emulate a pre-existing, manually reviewed record: rescanning must not migrate it.
     task.confidence = 0.82
     task.description = "Ранее проверено человеком"
@@ -154,4 +167,5 @@ def test_persisted_review_retains_evidence_and_resync_does_not_touch_existing_ta
     assert create_tasks_from_files(db_session, project.id, None, [file]) == []
     db_session.refresh(task)
     assert (task.confidence, task.description, task.needs_review) == (0.82, "Ранее проверено человеком", False)
+    assert list_tasks(project.id, db_session, user)["tasks"][0]["description"] == "Ранее проверено человеком"
     assert len(db_session.scalars(select(Task)).all()) == 1

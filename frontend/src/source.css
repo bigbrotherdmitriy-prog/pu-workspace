@@ -79,6 +79,9 @@
 .task-body strong { display: block; }
 .task-body p { margin: 4px 0; color: #748091; font-size: 12px; }
 .task-body small { display: block; color: #4f5c6f; white-space: normal; }
+.task-body .task-review-warning { color: #8a5700; font-weight: 700; }
+.task-body .task-description { color: #4f5c6f; }
+.task-source-excerpt { margin-top: 8px; }
 .task-meta { display: flex; flex-wrap: wrap; gap: 5px 16px; color: #748091; font-size: 12px; overflow-wrap: anywhere; }
 .task-meta .overdue { color: #c63737; font-weight: 700; }
 .task-actions { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
