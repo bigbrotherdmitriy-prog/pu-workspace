@@ -32,6 +32,11 @@ from app.models.project_contact import ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.contract_document_link import ContractDocumentLink
 from app.models.job import BackgroundJob, ServiceHeartbeat
+from app.models.v54_pilot import (  # additive, inactive pilot foundation
+    ConnectionIdentity, MailConnection, SourceReference, SourceVersion, SourceCurrent,
+    Evidence, EvidenceAssessment, DeadlineClaim, ContextRelation, ActionPolicy,
+    PilotAction, ActionRevision, ActionApproval, ActionReceipt, PendingDispatch, AuditExtension,
+)
 
 __all__ = [
     "Project",

@@ -13,6 +13,7 @@ class Task(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    record_version: Mapped[int] = mapped_column(server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     assignee_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
