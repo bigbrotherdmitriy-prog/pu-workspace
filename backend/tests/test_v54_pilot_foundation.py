@@ -440,7 +440,8 @@ def test_postgresql_upgrade_downgrade_only_on_explicit_empty_test_db(monkeypatch
     from sqlalchemy import inspect
     parsed = make_url(url)
     assert parsed.get_backend_name() == "postgresql"
-    assert parsed.host in {"localhost","127.0.0.1","::1"}
+    assert parsed.host in {"localhost","127.0.0.1","::1"} or (
+        os.getenv("GITHUB_ACTIONS") == "true" and parsed.host == "postgres")
     assert parsed.database and parsed.database.startswith("puw_v54_test_")
     engine = create_engine(url)
     assert not inspect(engine).get_table_names(), "Refuse nonempty database"

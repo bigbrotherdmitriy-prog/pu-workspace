@@ -23,7 +23,8 @@ def test_two_postgresql_transactions_one_source_cas_winner():
         pytest.skip("CONDITIONAL: explicit isolated PostgreSQL URL not supplied")
     parsed = make_url(url)
     assert parsed.get_backend_name() == "postgresql"
-    assert parsed.host in {"localhost", "127.0.0.1", "::1"}
+    assert parsed.host in {"localhost", "127.0.0.1", "::1"} or (
+        os.getenv("GITHUB_ACTIONS") == "true" and parsed.host == "postgres")
     assert parsed.database and parsed.database.startswith("puw_v54_test_")
     assert not parsed.query, "Connection options must not redirect the test database"
     # All tables and data confined to a NEW random schema. Never drop public/db.

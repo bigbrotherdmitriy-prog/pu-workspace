@@ -60,7 +60,8 @@ def main():
     from app.jobs.queue import recover_expired
     from app.models.job import BackgroundJob
     from app.models.task import Task
-    from app.models.v54_pilot import ActionReceipt
+    from app.models.audit_log import AuditLog
+    from app.models.v54_pilot import ActionReceipt, AuditExtension, ContextRelation
     from v54_pilot_fixture import NOW, uid
     ctx = mp.get_context("spawn")
     children = []
@@ -110,11 +111,19 @@ def main():
             second.join(10)
             assert second.exitcode == 0
             with sessions() as db:
-                assert db.scalar(select(func.count()).select_from(Task)) == 1
-                assert db.scalar(select(func.count()).select_from(ActionReceipt)) == 1
+                task_count = db.scalar(select(func.count()).select_from(Task))
+                receipt_count = db.scalar(select(func.count()).select_from(ActionReceipt))
+                projection_count = db.scalar(select(func.count()).select_from(ContextRelation)
+                    .where(ContextRelation.receipt_id.is_not(None)))
+                success_audit_count = db.scalar(select(func.count()).select_from(AuditExtension)
+                    .join(AuditLog, AuditLog.id == AuditExtension.audit_log_id)
+                    .where(AuditLog.action == "v54.ACTION_SUCCEEDED"))
+                assert task_count == receipt_count == projection_count == success_audit_count == 1
                 assert db.get(BackgroundJob, job_id).status == "completed"
             print(json.dumps({"probe": "process_reclaim", "job_id": job_id, "receipt_id": completed["receipt_id"],
-                   "status": "PASS", "expiry": "accelerated", "external_effects": "not_tested"}))
+                   "status": "PASS", "expiry": "accelerated", "external_effects": "not_tested",
+                   "tasks": task_count, "receipts": receipt_count, "projections": projection_count,
+                   "success_audits": success_audit_count}))
         finally:
             for child in children:
                 if child.is_alive():

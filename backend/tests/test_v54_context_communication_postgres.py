@@ -32,7 +32,8 @@ def pg_engine():
         pytest.skip("PostgreSQL concurrency NOT RUN: no explicit isolated database")
     url = make_url(raw)
     assert url.get_backend_name() == "postgresql", "PostgreSQL required"
-    assert url.host in {"localhost", "127.0.0.1", "::1"}, "Local isolated database required"
+    assert (url.host in {"localhost", "127.0.0.1", "::1"} or
+            (os.getenv("GITHUB_ACTIONS") == "true" and url.host == "postgres")), "Isolated database required"
     assert url.database and url.database.startswith("puw_v54_test_"), "Test database name required"
     # No URL, password or DSN is printed. No production env or default URL.
     base = create_engine(url, connect_args={"connect_timeout": 5})

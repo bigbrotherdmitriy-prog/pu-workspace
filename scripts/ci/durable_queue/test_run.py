@@ -3,8 +3,51 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import io
+import tarfile
+import os
 
 import pytest
+
+
+def test_stdin_context_is_recognizable_with_fractional_mtime(tmp_path, monkeypatch):
+    # Buildx peeks 2*512 bytes and calls tar.Reader.Next() unless compression
+    # magic is present. A PAX metadata record + its payload fills that window.
+    spec = importlib.util.spec_from_file_location("queue_context_review", Path(__file__).with_name("run.py"))
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    monkeypatch.setattr(runtime, "ROOT", tmp_path)
+    (tmp_path / "backend").mkdir()
+    dockerfile = tmp_path / "backend/Dockerfile"
+    dockerfile.write_bytes(b"FROM scratch\n")
+    os.utime(dockerfile, (1700000000.125, 1700000000.125))
+    captured = []
+
+    def command(args, **kwargs):
+        if args[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args, 0, b"backend/Dockerfile\0", b"")
+        if args[:2] == ["docker", "build"]:
+            captured.append(kwargs["input"])
+            return subprocess.CompletedProcess(args, 1, b"", b"controlled stop before Docker")
+        return subprocess.CompletedProcess(args, 0, b"a" * 40 if args[:2] == ["git", "rev-parse"] else b"", b"")
+
+    monkeypatch.setattr(runtime.subprocess, "run", command)
+    with pytest.raises(RuntimeError):
+        runtime.main()
+    data = captured[0]
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
+        assert archive.getnames() == ["Dockerfile"]
+        assert archive.extractfile("Dockerfile").read() == b"FROM scratch\n"
+    header = data[:1024]
+    if header.startswith((b"\x1f\x8b\x08", b"BZh", b"\xfd7zXZ\x00")):
+        recognized = True
+    else:
+        try:
+            with tarfile.open(fileobj=io.BytesIO(header), mode="r:") as archive:
+                recognized = archive.next() is not None
+        except tarfile.ReadError:
+            recognized = False
+    assert recognized, "Buildx stdin sniff cannot reach a regular header after PAX within 1024 bytes"
 
 
 @pytest.mark.parametrize("stderr,category", [

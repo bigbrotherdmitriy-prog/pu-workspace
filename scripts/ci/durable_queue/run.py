@@ -69,7 +69,10 @@ def main():
         # Only tracked source files; never send .git, local .env or other worktrees.
         paths = command(["git", "ls-files", "-z", "--", prefix]).decode().split("\0")
         content = io.BytesIO()
-        with tarfile.open(fileobj=content, mode="w") as archive:
+        # Buildx sniffs only 1024 stdin bytes. A leading PAX mtime record
+        # consumes that window before the first file header. Compression magic
+        # makes the stream unambiguously a context, not an inline Dockerfile.
+        with tarfile.open(fileobj=content, mode="w:gz") as archive:
             for relative in filter(None, paths):
                 path = Path(relative)
                 assert path.name != ".env"

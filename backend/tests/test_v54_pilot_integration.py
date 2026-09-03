@@ -40,7 +40,8 @@ def integrated(tmp_path):
         from uuid import uuid4
         parsed = make_url(pg_url)
         assert parsed.get_backend_name() == "postgresql"
-        assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"}
+        assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"} or (
+            os.getenv("GITHUB_ACTIONS") == "true" and parsed.host == "postgres")
         assert (parsed.database or "").startswith("puw_v54_test_") and not parsed.query
         schema = "v54_integration_" + uuid4().hex
         admin = create_engine(pg_url, hide_parameters=True, connect_args={"connect_timeout": 5})
