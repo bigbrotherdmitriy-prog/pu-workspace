@@ -13,6 +13,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.models.drive_connection import DriveConnection
 from app.models.google_token import GoogleOAuthToken
+from app.models.job import BackgroundJob
 from app.models.workspace import SourceFolder, VirtualNode, WorkspaceSnapshot
 from app.organizer_engine.drive import DriveClient
 from app.organizer_engine.repository import OrganizerRepository
@@ -130,6 +131,24 @@ def _binding(connection, external_id):
             "folder_id": external_id}
 
 
+def _locked_snapshot(db, snapshot_id):
+    return db.scalar(select(WorkspaceSnapshot).where(WorkspaceSnapshot.id == snapshot_id).with_for_update())
+
+
+def _active_snapshot_job(db, snapshot_id, project_id):
+    return db.scalar(select(BackgroundJob).where(
+        BackgroundJob.kind.in_(("workspace.snapshot", "workspace.analysis", "workspace.safe_copy")),
+        BackgroundJob.status.in_(("queued", "running", "retrying")),
+        BackgroundJob.payload["snapshot_id"].as_integer() == snapshot_id,
+        BackgroundJob.payload["project_id"].as_integer() == project_id,
+    ).order_by(BackgroundJob.id).limit(1))
+
+
+def _require_idle_snapshot(db, snapshot_id, project_id):
+    if _active_snapshot_job(db, snapshot_id, project_id) is not None:
+        raise HTTPException(409, "Snapshot already has queued, running or retrying work; wait for completion")
+
+
 def _validate_snapshot_target(db, snapshot, project_id, external_id=None):
     if snapshot is None or snapshot.project_id != project_id:
         raise HTTPException(409, "Snapshot does not belong to the requested project")
@@ -139,7 +158,9 @@ def _validate_snapshot_target(db, snapshot, project_id, external_id=None):
     pinned = (snapshot.analysis_result or {}).get("storage_binding")
     if pinned:
         connection = _selected_connection(project_id, db)
-        if pinned != _binding(connection, source.external_id):
+        canonical = lambda value: "google_drive" if value == "google_workspace" else value
+        if (pinned != _binding(connection, source.external_id)
+                or canonical(source.provider) != canonical(connection.provider)):
             raise HTTPException(409, "Snapshot storage connection changed; reconnect the original connection")
     return source
 
@@ -180,7 +201,7 @@ def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, 
         proposal = repo.proposal_for_session(session_id)
         succeeded = session["status"] in {"proposed", "applied"}
         snapshot.analysis_status = "ready" if succeeded else "failed"
-        snapshot.analysis_error = None if succeeded else (session["error_message"] or "Safe-copy organization failed")
+        snapshot.analysis_error = None if succeeded else "Safe-copy organization failed. Verify the selected connection and retry."
         snapshot.analysis_result = {
             "storage_binding": (snapshot.analysis_result or {}).get("storage_binding"),
             "mode": "safe_copy",
@@ -202,10 +223,20 @@ def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_i
     """Idempotently queue copy creation, content analysis and high-confidence renaming."""
     db = SessionLocal()
     try:
-        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+        snapshot = _locked_snapshot(db, snapshot_id)
         if snapshot is None:
             return None
         _validate_snapshot_target(db, snapshot, project_id, source_folder_id)
+        queued = db.scalar(select(BackgroundJob).where(
+            BackgroundJob.idempotency_key == f"workspace.safe_copy:{snapshot_id}"))
+        if queued is not None:
+            payload = queued.payload or {}
+            session_id = payload.get("session_id")
+            session = OrganizerRepository(db).get_session(session_id) if session_id is not None else None
+            if (payload.get("project_id") != project_id or payload.get("source_folder_id") != source_folder_id
+                    or session is None or session["project_id"] != project_id or session["source_folder_id"] != source_folder_id):
+                raise HTTPException(409, "Existing safe-copy job does not match the snapshot target")
+            return int(session_id)
         existing = snapshot.analysis_result or {}
         if existing.get("organizer_session_id"):
             session_id = int(existing["organizer_session_id"])
@@ -384,6 +415,8 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
         if source is None:
             raise ValueError("Snapshot source folder is missing")
         _validate_snapshot_target(db, snapshot, project_id, source.external_id)
+        if snapshot.analysis_status == "ready":
+            return
         repo = OrganizerRepository(db)
         nodes = db.scalars(select(VirtualNode).where(VirtualNode.snapshot_id == snapshot_id).order_by(VirtualNode.id)).all()
         files = [DriveFile(
@@ -432,6 +465,11 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
 def _enqueue_snapshot(snapshot_id: int, project_id: int, external_id: str, *, force: bool = False) -> int:
     from app.jobs.queue import enqueue
     with SessionLocal() as db:
+        snapshot = _locked_snapshot(db, snapshot_id)
+        _validate_snapshot_target(db, snapshot, project_id, external_id)
+        active = _active_snapshot_job(db, snapshot_id, project_id)
+        if active is not None:
+            return active.id
         job = enqueue(db, "workspace.snapshot", {
             "snapshot_id": snapshot_id, "project_id": project_id, "external_id": external_id,
         }, idempotency_key=None if force else f"workspace.snapshot:{snapshot_id}")
@@ -441,6 +479,11 @@ def _enqueue_snapshot(snapshot_id: int, project_id: int, external_id: str, *, fo
 def _enqueue_analysis(snapshot_id: int, project_id: int, *, force: bool = False) -> int:
     from app.jobs.queue import enqueue
     with SessionLocal() as db:
+        snapshot = _locked_snapshot(db, snapshot_id)
+        _validate_snapshot_target(db, snapshot, project_id)
+        active = _active_snapshot_job(db, snapshot_id, project_id)
+        if active is not None:
+            return active.id
         job = enqueue(db, "workspace.analysis", {
             "snapshot_id": snapshot_id, "project_id": project_id,
         }, idempotency_key=None if force else f"workspace.analysis:{snapshot_id}")
@@ -712,7 +755,7 @@ def processing_queue(project_id: int, db: Session = Depends(get_db), user: User 
 @router.post("/{project_id}/snapshots/{snapshot_id}/retry-build")
 def retry_snapshot_build(project_id: int, snapshot_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "manager")
-    snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+    snapshot = _locked_snapshot(db, snapshot_id)
     if snapshot is None or snapshot.project_id != project_id:
         raise HTTPException(404, "Snapshot not found")
     if snapshot.status != "failed" or snapshot.retry_count >= 2:
@@ -721,11 +764,14 @@ def retry_snapshot_build(project_id: int, snapshot_id: int, db: Session = Depend
     if source is None:
         raise HTTPException(409, "Snapshot source folder is missing")
     _validate_snapshot_target(db, snapshot, project_id, source.external_id)
+    _require_idle_snapshot(db, snapshot_id, project_id)
     snapshot.status = "building"
     snapshot.error_message = None
     snapshot.retry_count += 1
-    db.commit()
-    _enqueue_snapshot(snapshot.id, project_id, source.external_id, force=True)
+    from app.jobs.queue import enqueue
+    enqueue(db, "workspace.snapshot", {
+        "snapshot_id": snapshot.id, "project_id": project_id, "external_id": source.external_id,
+    }, idempotency_key=f"workspace.snapshot:{snapshot.id}:manual:{snapshot.retry_count}")
     return {"snapshot_id": snapshot.id, "status": snapshot.status, "retry_count": snapshot.retry_count}
 
 
@@ -774,12 +820,14 @@ def analyze_workspace_snapshot(
 ):
     """Analyze a metadata snapshot read-only; no Drive copy or mutation is performed."""
     require_project_role(db, user, project_id, "manager")
-    snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+    snapshot = _locked_snapshot(db, snapshot_id)
     if snapshot is None or snapshot.project_id != project_id or snapshot.status != "ready":
         raise HTTPException(409, "A ready snapshot is required")
     source = db.get(SourceFolder, snapshot.source_folder_id)
     if source is None:
         raise HTTPException(409, "Snapshot source folder is missing")
+
+    _validate_snapshot_target(db, snapshot, project_id, source.external_id)
 
     repo = OrganizerRepository(db)
     existing_proposal = db.execute(text("""
@@ -799,6 +847,7 @@ def analyze_workspace_snapshot(
         }
     if snapshot.analysis_status == "analyzing":
         return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": True}
+    _require_idle_snapshot(db, snapshot_id, project_id)
     if snapshot.analysis_status == "dead_letter" or (
         snapshot.analysis_retry_count >= 2 and snapshot.analysis_status == "failed"
     ):
@@ -808,8 +857,9 @@ def analyze_workspace_snapshot(
     snapshot.analysis_status = "analyzing"
     snapshot.analysis_result = {"storage_binding": (snapshot.analysis_result or {}).get("storage_binding")}
     snapshot.analysis_error = None
-    db.commit()
-    _enqueue_analysis(snapshot_id, project_id, force=True)
+    from app.jobs.queue import enqueue
+    enqueue(db, "workspace.analysis", {"snapshot_id": snapshot_id, "project_id": project_id},
+            idempotency_key=f"workspace.analysis:{snapshot_id}:manual:{snapshot.analysis_retry_count}")
     return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": False}
 
 

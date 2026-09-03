@@ -226,6 +226,8 @@ def test_safe_copy_enqueue_failure_does_not_commit_orphan_session(bound, monkeyp
 def test_explicit_analysis_preserves_storage_binding(bound):
     result = choose(bound).json()
     with bound.db() as db:
+        # The previous snapshot job has finished before a new manual analysis.
+        db.get(BackgroundJob, result['job_id']).status = 'completed'
         snap = db.get(WorkspaceSnapshot, result['id']); snap.status = 'ready'; db.commit()
         binding = snap.analysis_result['storage_binding']
     response = bound.client.post(f'/projects/{bound.new}/snapshots/{result["id"]}/analyze')
@@ -286,6 +288,10 @@ def test_safe_error_and_explicit_retry_keep_target(bound):
         snap = db.get(WorkspaceSnapshot, result['id'])
         assert snap.status == 'failed'
         assert 'do-not-publish' not in snap.error_message
+        # Explicit retry is permitted after terminal queue failure, not while
+        # an automatic retry for this snapshot is still pending.
+        db.get(BackgroundJob, result['job_id']).status = 'failed'
+        db.commit()
     assert choose(bound).json()['id'] == result['id']
     assert bound.client.post(f'/projects/{bound.old}/snapshots/{result["id"]}/retry-build').status_code == 404
     assert bound.client.post(f'/projects/{bound.new}/snapshots/{result["id"]}/retry-build', headers={'X-User': 'other'}).status_code == 403
