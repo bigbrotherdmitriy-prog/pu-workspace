@@ -213,3 +213,18 @@ Process-fault probe до изменения сообщал только allowlis
 stderr не публикуются. Regression сначала упал из-за отсутствующего checkpoint;
 после изменения `scripts/ci` — 88 passed, отдельный safe-failure contract —
 PASS. Статус до следующего runtime остаётся **CONDITIONAL**.
+
+## Шестой GitHub runtime — 33799138740
+
+Run для `09789f4f14f7910008996fb779b73534b5fc3336` снова прошёл migration,
+backend, PostgreSQL A/B/C, corpus и durable regression, после чего process-fault
+probe завершился `AssertionError`. Artifact SHA-256:
+`ecce575b164dca57d88ef716677cf85c4d97bb27d22faf60b9fad54f8771620a`.
+
+Checkpoint ошибочно показывал `cleanup`: безусловный вызов `checkpoint` в
+`finally` перезаписывал стадию исходного сбоя даже при успешной очистке. Новый
+regression сначала воспроизвёл потерю checkpoint. Cleanup вынесен в helper,
+который ставит `cleanup` только при собственной ошибке и сохраняет исходную
+стадию во всех остальных случаях. После исправления `scripts/ci` — 89 passed,
+safe-failure contract — PASS. Runtime остаётся **CONDITIONAL** до следующего
+run с достоверным checkpoint.

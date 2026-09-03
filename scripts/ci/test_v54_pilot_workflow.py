@@ -102,6 +102,21 @@ def test_process_probe_records_only_allowlisted_failure_checkpoint(monkeypatch):
     assert secret not in str(module.PHASES)
 
 
+def test_successful_probe_cleanup_preserves_prior_checkpoint():
+    path = ROOT / "scripts/ci/v54_pilot_runtime.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_runtime_cleanup_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    module.checkpoint("first_claim")
+    child = SimpleNamespace(is_alive=lambda: False, join=lambda _timeout: None)
+    fixture = SimpleNamespace(close=lambda: None)
+
+    module.cleanup_probe([child], fixture)
+
+    assert module.CHECKPOINT == "first_claim"
+
+
 def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_path):
     path = ROOT / "scripts/ci/v54_pilot_workflow.py"
     spec = importlib.util.spec_from_file_location("v54_pilot_workflow_cleanup_test", path)

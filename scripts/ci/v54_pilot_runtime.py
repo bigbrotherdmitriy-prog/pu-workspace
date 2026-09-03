@@ -22,6 +22,18 @@ def checkpoint(value):
     CHECKPOINT = value
 
 
+def cleanup_probe(children, fixture):
+    try:
+        for child in children:
+            if child.is_alive():
+                child.terminate()
+            child.join(10)
+        fixture.close()
+    except Exception:
+        checkpoint("cleanup")
+        raise
+
+
 def contender(url, schema, policy, output, stop, pause_after_claim):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -143,12 +155,7 @@ def main():
                    "tasks": task_count, "receipts": receipt_count, "projections": projection_count,
                    "success_audits": success_audit_count}))
         finally:
-            checkpoint("cleanup")
-            for child in children:
-                if child.is_alive():
-                    child.terminate()
-                child.join(10)
-            fixture.close()
+            cleanup_probe(children, fixture)
     print(json.dumps({"cleanup": "test_schema_dropped"}))
 
 
