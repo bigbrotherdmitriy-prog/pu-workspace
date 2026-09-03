@@ -14,15 +14,24 @@ from app.models.job import BackgroundJob, ServiceHeartbeat
 READY_STATUSES = ("queued", "retrying")
 TERMINAL_STATUSES = ("failed", "dead_letter", "completed", "cancelled")
 _execution_owner = ContextVar("job_execution_owner", default=None)
+_execution_claim = ContextVar("job_execution_claim", default=None)
 
 
 @contextmanager
-def execution_owner(job_id: int, worker_id: str):
+def execution_owner(job_id: int, worker_id: str, *, attempt=None, locked_at=None):
     token = _execution_owner.set((job_id, worker_id))
+    claim_token = _execution_claim.set((job_id, worker_id, attempt, locked_at)
+        if attempt is not None and locked_at is not None else None)
     try:
         yield
     finally:
+        _execution_claim.reset(claim_token)
         _execution_owner.reset(token)
+
+
+def current_execution_claim():
+    """Claim-time fence snapshot, never reconstructed from a later DB owner."""
+    return _execution_claim.get()
 
 
 def _live_owner(job_id: int, owner_id: str):

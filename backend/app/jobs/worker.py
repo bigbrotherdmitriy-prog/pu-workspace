@@ -50,7 +50,7 @@ def main() -> None:
         try:
             with SessionLocal() as db:
                 set_progress(db, job.id, worker_id, 10)
-            with execution_owner(job.id, worker_id):
+            with execution_owner(job.id, worker_id, attempt=job.attempts, locked_at=job.locked_at):
                 result = run(job.kind, dict(job.payload or {}))
         except Exception as exc:
             log.error("Job %s (%s) failed; error_type=%s", job.id, job.kind, exc.__class__.__name__)

@@ -59,9 +59,11 @@ def boundary(method):
 class ContextCommunication:
     def __init__(self, *, resolver: Resolver, gate: PilotGate,
                  authorize_audit: Callable[[Session, RequestScope, ObjectRef], bool],
+                 authorize_mailbox=None,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.resolver, self.gate = resolver, gate
         self.authorize_audit, self.clock = authorize_audit, clock
+        self.authorize_mailbox = authorize_mailbox
 
     def _entry(self, db, scope):
         if not db.in_transaction():
@@ -214,6 +216,36 @@ class ContextCommunication:
             relations=tuple(relations), receipt=receipt), authorize=self.authorize_audit)
 
     @boundary
+    def bootstrap_mail_connection(self, db, *, scope, identity: VersionPin, namespace: str) -> VersionPin:
+        """Explicit owner-authorized synthetic namespace; no Source/mailbox cycle.
+
+        Callback is server-injected and must authorize the exact namespace under
+        the authority lock. Missing callback denies. Existing revoked/blocked
+        mailboxes are never reactivated by bootstrap.
+        """
+        if (identity.ref.type != "connection_identity" or identity.version_kind != "record_version"
+                or self.authorize_mailbox is None
+                or self.authorize_mailbox(db, scope, identity.ref, namespace) is not True):
+            raise ContextError("resource_unavailable")
+        self._allow(db, scope, identity)
+        row = self._row(db, ConnectionIdentity, identity.ref.id.value)
+        if (not row or row.provider != "synthetic" or row.state != "verified"
+                or row.organization_id != int(scope.tenant.value) or row.record_version != identity.value):
+            raise ContextError("resource_unavailable")
+        mail = db.scalar(select(MailConnection).where(MailConnection.identity_id == row.id,
+            MailConnection.namespace == namespace).with_for_update().execution_options(populate_existing=True))
+        if mail:
+            result = self._pin(self._ref(scope, "mail_connection", mail.id), mail.record_version)
+            self._mail(db, scope, result)
+            return result
+        mail = MailConnection(organization_id=row.organization_id, identity_id=row.id,
+                              namespace=namespace, state="active")
+        db.add(mail)
+        db.flush()
+        self._audit(db, scope, self._ref(scope, "mail_connection", mail.id), "SOURCE_OBSERVED")
+        return self._pin(self._ref(scope, "mail_connection", mail.id), mail.record_version)
+
+    @boundary
     def extend_mail_connection(self, db, *, scope, source: VersionPin) -> VersionPin:
         """Namespace comes from an authorized existing source, not an account DTO."""
         source_row = self._source(db, scope, source, lock=False)
@@ -301,11 +333,15 @@ class ContextCommunication:
             raise ContextError("relation_version_conflict")
 
     def _assertion(self, db, scope, msg, target, evidence, *, kind, previous=None, relation_id=None):
+        # A primary relation's scope is its project, matching Trust live_pins.
+        # Mailbox identity remains on Message/Source, not a second meaning of scope.
+        project_id = (int(target.ref.id.value) if target.ref.type == "project"
+                      else db.get(Contract, int(target.ref.id.value)).project_id)
         row = ContextRelation(id=relation_id or str(uuid4()), organization_id=msg.organization_id,
             message_id=msg.id, lineage_id=previous.lineage_id if previous else str(uuid4()),
             revision=previous.revision + 1 if previous else 1,
             relation_type="communication." + target.ref.type, target_ref=target.ref.model_dump(mode="json"),
-            scope_ref=self._ref(scope, "mail_connection", msg.mail_connection_id).model_dump(mode="json"),
+            scope_ref=self._ref(scope, "project", project_id).model_dump(mode="json"),
             expected_target=target.model_dump(mode="json"), expected_context_version=msg.context_version,
             evidence_pins=[p.model_dump(mode="json") for p in evidence],
             provenance={"kind": kind, "initiated_by": scope.actor.model_dump(mode="json"),

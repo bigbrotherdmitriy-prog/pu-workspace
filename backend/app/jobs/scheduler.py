@@ -33,7 +33,8 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
                 continue
             job = enqueue(db, kind, {}, idempotency_key=_bucket(kind, interval, now))
             created += int(job.status == "queued" and job.attempts == 0)
-    return created
+    from app.pilot_dispatch import recover_installed
+    return created + recover_installed()
 
 
 def main() -> None:
