@@ -129,3 +129,91 @@ timeout() { shift; "$@"; }
         "--env-file", env_file.as_posix(), "down", "--volumes", "--remove-orphans", "--timeout", "20",
     ]
     assert not env_file.exists() and not raw_log.exists()
+
+
+def test_fault_mode_is_opt_in_and_does_not_hide_failure():
+    mode = WORKFLOW['jobs']['smoke']['env']['CI_FAULT_MODE']
+    assert "github.event_name == 'push'" in mode
+    assert "github.ref == 'refs/heads/codex/ci-smoke-integration'" in mode
+    assert "contains(github.event.head_commit.message, '[ci-smoke-fault]')" in mode
+    assert STEPS['Inject bootstrap conflict on initialized test database']['if'] == "env.CI_FAULT_MODE == 'true'"
+    assert all(not step.get('continue-on-error') for step in STEPS.values())
+    for name in ('Verify exact injected failure', 'Verify test resources are absent after cleanup', 'Upload cleanup verification'):
+        assert 'always()' in STEPS[name]['if']
+    names = list(STEPS)
+    assert names.index('Run authenticated API smoke inside backend') < names.index('Inject bootstrap conflict on initialized test database')
+    assert names.index('Clean up isolated Compose project') < names.index('Verify test resources are absent after cleanup')
+    assert STEPS['Upload sanitized diagnostics']['with']['if-no-files-found'] == 'error'
+
+
+@pytest.mark.parametrize('probe_exit', [0, 1, 17])
+def test_fault_probe_preserves_actual_exit_code(tmp_path, probe_exit):
+    script = tmp_path / 'scripts' / 'ci' / 'smoke_api.py'
+    script.parent.mkdir(parents=True)
+    script.write_text('# synthetic stdin\n')
+    output, raw = tmp_path / 'outputs', tmp_path / 'raw.log'
+    environment = dict(os.environ, CI_COMPOSE_PROJECT='puw-ci-123-4',
+                       CI_ENV_FILE=(tmp_path / 'env').as_posix(), CI_RAW_LOG=raw.as_posix(),
+                       GITHUB_OUTPUT=output.as_posix(), CI_PROBE_EXIT=str(probe_exit))
+    prelude = 'docker() { return "$CI_PROBE_EXIT"; }\n'
+    result = subprocess.run([bash_executable(), '--noprofile', '--norc', '-e', '-c',
+                             prelude + STEPS['Inject bootstrap conflict on initialized test database']['run']],
+                            cwd=tmp_path, env=environment, text=True, capture_output=True)
+    assert result.returncode == probe_exit, result.stderr
+    assert output.read_text().strip() == f'exit_code={probe_exit}'
+
+
+@pytest.mark.parametrize('outcome,code,lines,expected', [
+    ('failure', '1', ['FAIL step=bootstrap http=409 reason=expected HTTP 200'], True),
+    ('success', '0', [], False),
+    ('failure', '1', ['FAIL step=bootstrap http=403 reason=expected HTTP 200'], False),
+    ('failure', '17', ['FAIL step=bootstrap http=409 reason=expected HTTP 200'], False),
+    ('failure', '1', ['FAIL step=bootstrap http=409 reason=expected HTTP 200'] * 2, False),
+    ('failure', '', [], False),
+])
+def test_fault_assertion_accepts_only_expected_bootstrap_conflict(tmp_path, monkeypatch, outcome, code, lines, expected):
+    raw = tmp_path / 'raw.log'
+    raw.write_text('PASS smoke-api\n' + '\n'.join(lines))
+    output = tmp_path / 'diagnostics'
+    for key, value in {'CI_RAW_LOG': str(raw), 'CI_DIAGNOSTICS': str(output),
+                       'CI_FAULT_OUTCOME': outcome, 'CI_FAULT_EXIT': code}.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(SystemExit) as exc:
+        exec(compile(python_block('Verify exact injected failure'), 'workflow', 'exec'), {})
+    assert exc.value.code == (0 if expected else 1)
+    assert json.loads((output / 'fault-assertion.json').read_text())['expected_bootstrap_conflict_confirmed'] is expected
+
+
+@pytest.mark.parametrize('fault', [None, 'leftover', 'daemon_error', 'timeout', 'tempfile'])
+def test_cleanup_verification_checks_all_project_labels_and_never_deletes(tmp_path, monkeypatch, fault):
+    output = tmp_path / 'diagnostics'
+    env_file, raw = tmp_path / 'test.env', tmp_path / 'raw.log'
+    if fault == 'tempfile':
+        env_file.write_text('SYNTHETIC-SECRET')
+    for key, value in {'CI_COMPOSE_PROJECT': 'puw-ci-123-4', 'CI_DIAGNOSTICS': str(output),
+                       'CI_ENV_FILE': str(env_file), 'CI_RAW_LOG': str(raw)}.items():
+        monkeypatch.setenv(key, value)
+    calls = []
+    def docker(args, **kwargs):
+        calls.append(args)
+        assert kwargs['timeout'] == 20
+        if 'volume' in args:
+            if fault == 'daemon_error':
+                return subprocess.CompletedProcess(args, 1, '', 'SYNTHETIC-SECRET')
+            if fault == 'timeout':
+                raise subprocess.TimeoutExpired(args, 20)
+            if fault == 'leftover':
+                return subprocess.CompletedProcess(args, 0, 'SYNTHETIC-RESOURCE\n', '')
+        return subprocess.CompletedProcess(args, 0, '', '')
+    monkeypatch.setattr(subprocess, 'run', docker)
+    with pytest.raises(SystemExit) as exc:
+        exec(compile(python_block('Verify test resources are absent after cleanup'), 'workflow', 'exec'), {})
+    assert exc.value.code == (0 if fault is None else 1)
+    assert calls == [
+        ['docker', 'ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=puw-ci-123-4'],
+        ['docker', 'network', 'ls', '--quiet', '--filter', 'label=com.docker.compose.project=puw-ci-123-4'],
+        ['docker', 'volume', 'ls', '--quiet', '--filter', 'label=com.docker.compose.project=puw-ci-123-4'],
+    ]
+    report = (output / 'cleanup-verification.json').read_text()
+    assert 'SYNTHETIC' not in report
+    assert json.loads(report)['cleanup_confirmed'] is (fault is None)

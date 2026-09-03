@@ -200,3 +200,53 @@ python -m pytest scripts/ci/tests/test_smoke_workflow.py -q
 ошибки контрактов, общий deadline, отсутствие повторных POST и безопасную
 диагностику. Отдельный subprocess запускает скрипт через stdin вне репозитория.
 Это не заменяет Docker + PostgreSQL + реальный HTTP smoke после интеграции.
+
+## Намеренный сбой и проверка cleanup
+
+Аварийный прогон включается только для события `push` в ветку
+`codex/ci-smoke-integration`, если сообщение проверяемого HEAD-коммита
+содержит точную метку `[ci-smoke-fault]`. Обычные push/PR без этой комбинации
+сохраняют успешный сценарий. Дополнительный сервер и изменение main не нужны.
+Ручной workflow_dispatch не используется: этот workflow пока отсутствует
+в default branch репозитория.
+
+Последовательность аварийного прогона:
+
+1. Создать новый Compose project `puw-ci-<run_id>-<attempt>` и чистую БД.
+2. Выполнить обычный полный API smoke успешно.
+3. Повторить тот же скрипт на инициализированной тестовой БД.
+   Ожидается HTTP 409 на bootstrap и exit code 1.
+4. Отдельный шаг с `always()` подтверждает одновременно: outcome failure,
+   exit 1 и единственную ожидаемую строку ошибки bootstrap. Непредвиденный
+   успех, HTTP 403, таймаут и любая другая ошибка не считаются успешной проверкой.
+5. Сохранить безопасную диагностику до cleanup.
+6. Выполнить штатный `down --volumes --remove-orphans` через `always()`.
+7. Независимо от статуса предыдущих шагов проверить отсутствие контейнеров,
+   сетей и volumes по `com.docker.compose.project=<точное имя>` и удаление
+   временных env/raw-log файлов. Ошибка/таймаут Docker дают непроверенный
+   счётчик `null` и провал, а не ноль ресурсов.
+8. Загрузить подтверждение cleanup отдельным artifact.
+
+Job намеренно остаётся **красным** из-за реального exit 1 в шаге инъекции;
+`continue-on-error` не используется. Это не зелёный CI и не разрешение на
+merge. Для принятия аварийного испытания должны одновременно выполняться:
+
+- первый API smoke — success;
+- единственная ожидаемая ошибка — шаг инъекции bootstrap conflict;
+- `Verify exact injected failure` — success;
+- сбор и загрузка диагностики — success;
+- cleanup, проверка отсутствия ресурсов и загрузка её результата — success.
+
+Артефакты:
+
+- `docker-smoke-<run_id>-<attempt>`: `diagnostics.json`,
+  `compose.sanitized.log`, `fault-assertion.json` (для fault-прогона);
+- `docker-smoke-cleanup-<run_id>-<attempt>`:
+  `cleanup-verification.json`, также для обычных успешных прогонов.
+
+В fault assertion требуется `expected_bootstrap_conflict_confirmed=true`.
+В cleanup report требуются три нулевых счётчика,
+`temporary_files_removed=true` и `cleanup_confirmed=true`.
+Отсутствие artifact или иной сбой оставляет испытание незакрытым.
+После проверки следующий обычный коммит без метки вернёт стандартный
+успешный сценарий; публиковать его следует только с разрешения пользователя.

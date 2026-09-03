@@ -19,6 +19,8 @@ jobs:
         shell: bash
     env:
       CI_COMPOSE_PROJECT: puw-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      # Explicit one-run drill on the test branch only; the failed step stays red.
+      CI_FAULT_MODE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/codex/ci-smoke-integration' && contains(github.event.head_commit.message, '[ci-smoke-fault]') }}
       COMPOSE_DISABLE_ENV_FILE: '1'
 
     steps:
@@ -27,6 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Generate isolated test environment
+        id: environment
         timeout-minutes: 1
         # The runner context is available in step env, not job env.
         env:
@@ -130,12 +133,61 @@ jobs:
           PY
 
       - name: Run authenticated API smoke inside backend
+        id: api_smoke
         timeout-minutes: 3
         run: |
           docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" exec -T \
             -e CI_SMOKE_PASSWORD \
             -e CI_SMOKE_BASE_URL=http://backend:8000 \
             backend python - < scripts/ci/smoke_api.py >> "$CI_RAW_LOG" 2>&1
+
+      - name: Inject bootstrap conflict on initialized test database
+        id: fault_probe
+        if: env.CI_FAULT_MODE == 'true'
+        timeout-minutes: 3
+        run: |
+          # Keep the actual failure as this step's exit code. No continue-on-error.
+          if docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" exec -T \
+            -e CI_SMOKE_PASSWORD \
+            -e CI_SMOKE_BASE_URL=http://backend:8000 \
+            backend python - < scripts/ci/smoke_api.py >> "$CI_RAW_LOG" 2>&1; then
+            fault_rc=0
+          else
+            fault_rc=$?
+          fi
+          echo "exit_code=$fault_rc" >> "$GITHUB_OUTPUT"
+          exit "$fault_rc"
+
+      - name: Verify exact injected failure
+        if: always() && env.CI_FAULT_MODE == 'true' && steps.api_smoke.outcome == 'success'
+        timeout-minutes: 1
+        env:
+          CI_FAULT_OUTCOME: ${{ steps.fault_probe.outcome }}
+          CI_FAULT_EXIT: ${{ steps.fault_probe.outputs.exit_code }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          raw = Path(os.environ['CI_RAW_LOG']).read_text(encoding='utf-8', errors='replace')
+          expected_line = 'FAIL step=bootstrap http=409 reason=expected HTTP 200'
+          failures = [line for line in raw.splitlines() if line.startswith('FAIL step=')]
+          confirmed = (
+              os.environ.get('CI_FAULT_OUTCOME') == 'failure'
+              and os.environ.get('CI_FAULT_EXIT') == '1'
+              and failures == [expected_line]
+          )
+          output = Path(os.environ['CI_DIAGNOSTICS'])
+          output.mkdir(mode=0o700, exist_ok=True)
+          (output / 'fault-assertion.json').write_text(json.dumps({
+              'expected_bootstrap_conflict_confirmed': confirmed,
+              'expected_http_status': 409,
+              'expected_exit_code': 1,
+          }, indent=2) + '\n', encoding='utf-8')
+          print('CI_FAULT_CONFIRMED' if confirmed else 'CI_FAULT_NOT_CONFIRMED')
+          raise SystemExit(0 if confirmed else 1)
+          PY
 
       - name: Collect sanitized diagnostics before cleanup
         if: failure()
@@ -252,7 +304,8 @@ jobs:
           path: |
             ${{ env.CI_DIAGNOSTICS }}/diagnostics.json
             ${{ env.CI_DIAGNOSTICS }}/compose.sanitized.log
-          if-no-files-found: warn
+            ${{ env.CI_DIAGNOSTICS }}/fault-assertion.json
+          if-no-files-found: error
           retention-days: 7
 
       - name: Clean up isolated Compose project
@@ -264,3 +317,55 @@ jobs:
           if [[ -f "$CI_ENV_FILE" && -f docker-compose.ci.yml ]]; then
             timeout 90s docker compose --project-name "$CI_COMPOSE_PROJECT" --file docker-compose.ci.yml --env-file "$CI_ENV_FILE" down --volumes --remove-orphans --timeout 20 >> "$CI_RAW_LOG" 2>&1
           fi
+
+      - name: Verify test resources are absent after cleanup
+        if: always() && steps.environment.outcome == 'success'
+        timeout-minutes: 2
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          project = os.environ['CI_COMPOSE_PROJECT']
+          if not re.fullmatch(r'puw-ci-[0-9]+-[0-9]+', project):
+              raise SystemExit('CI_CLEANUP_INVALID_PROJECT')
+          label = f'label=com.docker.compose.project={project}'
+          counts = {}
+          for kind, arguments in (
+              ('containers', ['ps', '--all', '--quiet']),
+              ('networks', ['network', 'ls', '--quiet']),
+              ('volumes', ['volume', 'ls', '--quiet']),
+          ):
+              try:
+                  result = subprocess.run(['docker'] + arguments + ['--filter', label],
+                                          capture_output=True, text=True, timeout=20)
+                  counts[kind] = len(result.stdout.split()) if result.returncode == 0 else None
+              except (OSError, subprocess.TimeoutExpired):
+                  counts[kind] = None
+          removed = all(count == 0 for count in counts.values())
+          temporary_files_removed = all(not Path(os.environ[key]).exists()
+                                        for key in ('CI_ENV_FILE', 'CI_RAW_LOG'))
+          confirmed = removed and temporary_files_removed
+          output = Path(os.environ['CI_DIAGNOSTICS'])
+          output.mkdir(mode=0o700, exist_ok=True)
+          (output / 'cleanup-verification.json').write_text(json.dumps({
+              'project': project, 'remaining_resource_counts': counts,
+              'temporary_files_removed': temporary_files_removed,
+              'cleanup_confirmed': confirmed,
+          }, indent=2) + '\n', encoding='utf-8')
+          print('CI_CLEANUP_CONFIRMED' if confirmed else 'CI_CLEANUP_NOT_CONFIRMED')
+          raise SystemExit(0 if confirmed else 1)
+          PY
+
+      - name: Upload cleanup verification
+        if: always() && steps.environment.outcome == 'success'
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CI_DIAGNOSTICS }}/cleanup-verification.json
+          if-no-files-found: error
+          retention-days: 7
