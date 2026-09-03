@@ -1,5 +1,14 @@
 import { useRef, useState } from "react";
 
+export function requestedProjectId(projects: { id: number }[], requested: number): number {
+  if (requested > 0) {
+    if (!projects.some(project => project.id === requested)) {
+      throw new Error(`Проект №${requested} отсутствует в ответе сервера. Повторите загрузку или выберите проект явно.`);
+    }
+    return requested;
+  }
+  return projects[0]?.id || 0;
+}
 
 export function restoredProjectId(): number {
   const callbackProjectId = Number(new URLSearchParams(window.location.search).get("project_id"));
