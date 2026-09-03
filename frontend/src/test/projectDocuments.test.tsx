@@ -34,7 +34,7 @@ beforeEach(() => {
     for (const [segment, key] of Object.entries(emptyLists)) {
       if (path.split(/[/?]/).includes(segment)) return { [key]: [] };
     }
-    if (path.startsWith("/integrations/")) return { adapters: [] };
+    if (path.startsWith("/integrations/")) return { adapters: [{ key: "local", provider: "local", capability: "storage", name: "Локальная рабочая папка", description: "Загрузка", available: true, connected: true, action: "local_upload" }] };
     return null;
   });
 });
@@ -51,6 +51,16 @@ function switchToB() {
 }
 
 describe("project document isolation", () => {
+  it("opens the upload dialog directly from Integrations without redirecting to a hint", async () => {
+    render(<App />);
+    await screen.findByRole("option", { name: "QA A" });
+    fireEvent.click(screen.getByTitle("Интеграции"));
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить папку" }));
+    expect(screen.getByRole("dialog", { name: "Загрузка документов" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Интеграции", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText(/Нажмите «Загрузить рабочую папку»/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить и проанализировать (0)" })).toBeDisabled();
+  });
   it("clears the previous detail immediately and restores only the chosen project's document", async () => {
     await openDocuments();
     await screen.findByText(documentA.summary);

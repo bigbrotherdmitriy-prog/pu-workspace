@@ -2533,6 +2533,7 @@ export function App() {
       </main>
       <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} onUpload={() => setMobileUploadOpen(true)} />
       <MobileDocumentUpload
+        key={projectId}
         open={mobileUploadOpen}
         projectId={projectId}
         onClose={() => setMobileUploadOpen(false)}
@@ -2865,7 +2866,7 @@ export function App() {
           onSyncGmail={() => void syncGmail()}
           onSelectFolder={() => void openSources("root")}
           onConnectGoogle={() => void connectGoogle()}
-          onLocalUpload={() => { setActive("Рабочий центр"); setNotice("Нажмите «Загрузить рабочую папку» в рабочем центре"); }}
+          onLocalUpload={() => { setNotice(""); setMobileUploadOpen(true); }}
           onOpenAIPolicy={() => setActive("Настройки")}
           onOpenGmailResults={openGmailResults}
           onReload={() => void loadIntegrations()}
