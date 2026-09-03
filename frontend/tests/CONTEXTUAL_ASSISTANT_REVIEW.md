@@ -35,6 +35,16 @@ semantics and the click handler, not browser-generated keyboard click events.
 Integration should verify Tab -> mascot -> Enter/Space and unchanged text
 visibility after hovering a long task card.
 
+## Keyboard-context follow-up
+
+Integration browser QA found that focusing a control can scroll its card under
+a stationary pointer, producing `mouseover` and replacing the focused context.
+The follow-up retains focus context until mouse coordinates actually change in
+`mousemove`; intentional pointer movement then resumes pointer selection.
+Two component regressions cover stationary-pointer scroll events and intentional
+movement. The updated suite passes 47 tests across 11 files; check also passes.
+Native browser confirmation belongs to the integration QA.
+
 No backend, task records, API, task module, shared CSS or generated `react_dist`
 files were changed. Build and production deployment belong to the integration
 step.

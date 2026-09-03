@@ -48,6 +48,33 @@ describe("ContextualAssistant", () => {
     expect(onAsk).toHaveBeenCalledWith(expect.stringContaining("элементом «Срок задачи»"));
   });
 
+  it("keeps focused context when scrolling causes mouseover under a stationary pointer", () => {
+    const onAsk = vi.fn();
+    render(<><article data-ai-help="Длинная задача">Текст задачи</article><button aria-label="История задачи">История</button><ContextualAssistant section="Задачи" onAsk={onAsk} /></>);
+    const card = screen.getByRole("article");
+    fireEvent.mouseOver(card, { clientX: 300, clientY: 400 });
+    fireEvent.focusIn(screen.getByRole("button", { name: "История задачи" }));
+    fireEvent.mouseOver(card, { clientX: 300, clientY: 400 });
+    fireEvent.mouseMove(card, { clientX: 300, clientY: 400 });
+    fireEvent.focusIn(assistant());
+    fireEvent.mouseOver(card, { clientX: 300, clientY: 400 });
+    fireEvent.click(assistant());
+    expect(onAsk).toHaveBeenCalledWith(expect.stringContaining("элементом «История задачи»"));
+  });
+
+  it("switches back to pointer context after intentional movement", () => {
+    const onAsk = vi.fn();
+    render(<><article data-ai-help="Длинная задача">Текст задачи</article><button aria-label="История задачи">История</button><ContextualAssistant section="Задачи" onAsk={onAsk} /></>);
+    const card = screen.getByRole("article");
+    fireEvent.mouseOver(card, { clientX: 300, clientY: 400 });
+    fireEvent.focusIn(screen.getByRole("button", { name: "История задачи" }));
+    fireEvent.mouseOver(card, { clientX: 320, clientY: 410 });
+    fireEvent.mouseMove(card, { clientX: 320, clientY: 410 });
+    fireEvent.focusIn(assistant());
+    fireEvent.click(assistant());
+    expect(onAsk).toHaveBeenCalledWith(expect.stringContaining("элементом «Длинная задача»"));
+  });
+
   it("clears stale context after navigation and does not use the whole page as a fallback", () => {
     const onAsk = vi.fn();
     const { rerender } = render(<><article data-ai-help="Старая задача">Старый текст</article><ContextualAssistant section="Задачи" onAsk={onAsk} /></>);
@@ -65,6 +92,7 @@ describe("ContextualAssistant", () => {
     const { unmount } = render(<ContextualAssistant section="Задачи" onAsk={vi.fn()} />);
     unmount();
     expect(remove).toHaveBeenCalledWith("mouseover", expect.any(Function));
+    expect(remove).toHaveBeenCalledWith("mousemove", expect.any(Function));
     expect(remove).toHaveBeenCalledWith("focusin", expect.any(Function));
     remove.mockRestore();
   });
