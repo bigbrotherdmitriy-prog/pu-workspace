@@ -1,12 +1,95 @@
 import io
+import subprocess
 import unittest
 import zipfile
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.organizer_engine.content import extract_text, extract_text_result
+from app.organizer_engine.content import _tesseract, extract_text, extract_text_result
 
 
 class ContentExtractionTests(unittest.TestCase):
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.OCR_ADAPTIVE_FALLBACK", True)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_fragmented_auto_layout_uses_single_block_fallback(self, run, _which):
+        broken = (
+            "Поставщик передает товар покупателю по договору. "
+            "Поку обязан принять оплаченный ый товар лично или через у го пред теля. "
+            "Передача товара производится после оплаты и проверки документов."
+        )
+        repaired = (
+            "Поставщик передает товар покупателю по договору. "
+            "Покупатель обязан принять оплаченный товар лично или через уполномоченного представителя. "
+            "Передача товара производится после оплаты и проверки документов."
+        )
+        run.side_effect = [SimpleNamespace(returncode=0, stdout=broken), SimpleNamespace(returncode=0, stdout=repaired)]
+
+        self.assertEqual(_tesseract(Path("scan.jpg"), 30), repaired)
+        self.assertEqual([call.args[0][call.args[0].index("--psm") + 1] for call in run.call_args_list], ["1", "6"])
+
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.OCR_ADAPTIVE_FALLBACK", True)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_intact_ocr_does_not_pay_for_fallback(self, run, _which):
+        intact = "Покупатель обязан принять оплаченный товар лично через представителя после проверки документов договора поставки."
+        run.return_value = SimpleNamespace(returncode=0, stdout=intact)
+
+        self.assertEqual(_tesseract(Path("scan.jpg"), 30), intact)
+        self.assertEqual(run.call_count, 1)
+
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.OCR_ADAPTIVE_FALLBACK", True)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_fallback_cannot_drop_invoice_numbers(self, run, _which):
+        broken = (
+            "Счет 951 от 22 января 2026. Поку обязан при ый товар через у го пред теля. "
+            "Сумма 147360 НДС 26573 ИНН 7716888076 КПП 771501001 и условия поставки товара. "
+            "Передача выполняется после проверки договора, оплаты счета и предъявления документов."
+        )
+        loses_numbers = "Покупатель обязан принять оплаченный товар через уполномоченного представителя."
+        run.side_effect = [SimpleNamespace(returncode=0, stdout=broken), SimpleNamespace(returncode=0, stdout=loses_numbers)]
+
+        self.assertEqual(_tesseract(Path("invoice.jpg"), 30), broken)
+        self.assertEqual(run.call_count, 2)
+
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_fallback_timeout_keeps_primary_result(self, run, _which):
+        broken = (
+            "Поставщик передает товар покупателю по договору. "
+            "Поку обязан принять оплаченный ый товар лично или через у го пред теля. "
+            "Передача товара производится после оплаты и проверки документов."
+        )
+        run.side_effect = [SimpleNamespace(returncode=0, stdout=broken), subprocess.TimeoutExpired("tesseract", 1)]
+
+        self.assertEqual(_tesseract(Path("scan.jpg"), 30), broken)
+
+    @patch("app.organizer_engine.content.OCR_PSM", 1)
+    @patch("app.organizer_engine.content.OCR_FALLBACK_PSM", 6)
+    @patch("app.organizer_engine.content.OCR_ADAPTIVE_FALLBACK", False)
+    @patch("app.organizer_engine.content.shutil.which", return_value="/usr/bin/tesseract")
+    @patch("app.organizer_engine.content.subprocess.run")
+    def test_administrator_can_disable_adaptive_fallback(self, run, _which):
+        broken = (
+            "Поставщик передает товар покупателю по договору. "
+            "Поку обязан принять оплаченный ый товар лично или через у го пред теля. "
+            "Передача товара производится после оплаты и проверки документов."
+        )
+        run.return_value = SimpleNamespace(returncode=0, stdout=broken)
+
+        self.assertEqual(_tesseract(Path("scan.jpg"), 30), broken)
+        self.assertEqual(run.call_count, 1)
+
     def test_extracts_docx_xml_text(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:

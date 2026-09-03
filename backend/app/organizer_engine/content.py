@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import unicodedata
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,11 @@ OCR_MAX_PAGES = max(1, min(50, int(os.getenv("OCR_MAX_PAGES", "20"))))
 OCR_TIMEOUT_SECONDS = max(10, min(300, int(os.getenv("OCR_TIMEOUT_SECONDS", "120"))))
 OCR_DPI = max(200, min(400, int(os.getenv("OCR_DPI", "300"))))
 OCR_PSM = max(1, min(13, int(os.getenv("OCR_PSM", "1"))))
+OCR_FALLBACK_PSM = max(1, min(13, int(os.getenv("OCR_FALLBACK_PSM", "6"))))
+OCR_ADAPTIVE_FALLBACK = os.getenv("OCR_ADAPTIVE_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
+OCR_FALLBACK_MAX_PAGES = max(0, min(5, int(os.getenv("OCR_FALLBACK_MAX_PAGES", "2"))))
+
+OCR_ORPHAN_ENDINGS = frozenset({"ый", "ий", "ая", "яя", "ое", "ые", "ую", "юю", "ых", "ым", "ть", "ться", "го"})
 
 
 @dataclass(slots=True)
@@ -120,22 +126,83 @@ def _ocr_enabled() -> bool:
     return os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _tesseract(path: Path, timeout: float | None = None) -> str:
-    if not shutil.which("tesseract"):
-        return ""
+def _run_tesseract(path: Path, psm: int, timeout: float) -> str:
     result = subprocess.run(
         [
             "tesseract", str(path), "stdout",
             "-l", os.getenv("OCR_LANGUAGES", "rus+eng"),
-            "--psm", str(OCR_PSM),
+            "--psm", str(psm),
             "-c", "preserve_interword_spaces=1",
         ],
         capture_output=True,
         text=True,
-        timeout=max(1, timeout or OCR_TIMEOUT_SECONDS),
+        timeout=max(1, timeout),
         check=False,
     )
     return result.stdout if result.returncode == 0 else ""
+
+
+def _ocr_fragment_penalty(text: str) -> tuple[int, int]:
+    """Return review-only fragmentation evidence and Cyrillic prose volume."""
+    words = re.findall(r"(?iu)(?<![\w/-])[а-яё]+(?![\w/-])", text)
+    endings = {word.casefold() for word in words if word.casefold() in OCR_ORPHAN_ENDINGS}
+    return len(endings), sum(len(word) >= 3 for word in words)
+
+
+def _numeric_token_preservation(primary: str, candidate: str) -> float:
+    from difflib import SequenceMatcher
+
+    # OCR may change ``147 360,00`` into ``14736000`` without losing the value.
+    # Compare the ordered digit stream so formatting alone does not reject a
+    # better pass, while dropped or reordered table values still count.
+    expected = "".join(re.findall(r"\d", primary))
+    if not expected:
+        return 1.0
+    found = "".join(re.findall(r"\d", candidate))
+    return SequenceMatcher(None, expected, found, autojunk=False).ratio()
+
+
+def _non_fragment_corruption(text: str) -> int:
+    controls = sum(unicodedata.category(char) in {"Cc", "Cs", "Co"} and not char.isspace() for char in text)
+    mixed = sum(
+        bool(re.search(r"[а-яё]", token, re.IGNORECASE)) and bool(re.search(r"[a-z]", token, re.IGNORECASE))
+        for token in re.findall(r"[^\W_]+", text)
+    )
+    return text.count("\ufffd") + controls + mixed
+
+
+def _tesseract(path: Path, timeout: float | None = None, *, allow_fallback: bool = True) -> str:
+    if not shutil.which("tesseract"):
+        return ""
+    budget = max(1, timeout or OCR_TIMEOUT_SECONDS)
+    started = time.monotonic()
+    primary = _run_tesseract(path, OCR_PSM, budget)
+    primary_penalty, primary_words = _ocr_fragment_penalty(primary)
+    remaining = budget - (time.monotonic() - started)
+    if (
+        not allow_fallback or not OCR_ADAPTIVE_FALLBACK or OCR_FALLBACK_PSM == OCR_PSM
+        or primary_penalty < 2 or primary_words < 20 or remaining <= 1
+    ):
+        return primary
+
+    try:
+        fallback = _run_tesseract(path, OCR_FALLBACK_PSM, remaining)
+    except (OSError, subprocess.SubprocessError):
+        return primary
+    fallback_penalty, fallback_words = _ocr_fragment_penalty(fallback)
+    primary_volume = max(1, sum(character.isalnum() for character in primary))
+    fallback_volume = sum(character.isalnum() for character in fallback)
+    volume_ratio = fallback_volume / primary_volume
+    # Never trade layout data or identifiers for a superficially cleaner result.
+    if (
+        fallback_penalty < primary_penalty
+        and 0.75 <= volume_ratio <= 1.35
+        and _numeric_token_preservation(primary, fallback) >= 0.9
+        and _non_fragment_corruption(fallback) <= _non_fragment_corruption(primary)
+        and fallback_words >= primary_words * 0.75
+    ):
+        return fallback
+    return primary
 
 
 def _ocr_text(data: bytes, suffix: str, mime_type: str) -> str:
@@ -166,7 +233,10 @@ def _ocr_text(data: bytes, suffix: str, mime_type: str) -> str:
             timeout=OCR_TIMEOUT_SECONDS,
             check=False,
         )
-        return " ".join(_tesseract(page) for page in sorted(temp_dir.glob("page-*.jpg")))
+        return " ".join(
+            _tesseract(page, allow_fallback=index < OCR_FALLBACK_MAX_PAGES)
+            for index, page in enumerate(sorted(temp_dir.glob("page-*.jpg")))
+        )
 
 
 def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, str]:
@@ -179,7 +249,7 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, str]:
         source = temp_dir / "source.pdf"
         source.write_bytes(data)
         result: dict[int, str] = {}
-        for page_number in sorted(page_numbers):
+        for index, page_number in enumerate(sorted(page_numbers)):
             remaining = deadline - time.monotonic()
             if remaining <= 1:
                 break
@@ -195,7 +265,9 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, str]:
             if rendered.returncode == 0 and image.exists():
                 remaining = deadline - time.monotonic()
                 if remaining > 1:
-                    result[page_number] = _tesseract(image, remaining)
+                    result[page_number] = _tesseract(
+                        image, remaining, allow_fallback=index < OCR_FALLBACK_MAX_PAGES
+                    )
         return result
 
 
