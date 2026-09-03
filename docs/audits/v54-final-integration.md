@@ -124,4 +124,25 @@ gh workflow run v54-pilot-runtime.yml --ref codex/v54-final-integration
 Push ветки также соответствует branch trigger workflow. Перед выдачей PASS нужно
 проверить safe artifact и отдельно выполнить durable queue workflow.
 
-Production, основная dirty worktree, merge, push, PR и deploy не затрагивались.
+На момент локальной интеграции production, основная dirty worktree, merge, PR и
+deploy не затрагивались; публикация ветки описана ниже.
+
+## Первый GitHub runtime — 33787031282
+
+После публикации `006543310eeefb7a205103a0eb029f8cdb61fe65` выполнен
+изолированный GitHub Actions run `33787031282`.
+
+- migration: PASS, `a54f001c0a02`;
+- backend full: PASS, 753 passed / 9 skipped;
+- `postgres_abc_integration`: FAIL после 273 passed;
+- cleanup: PASS;
+- raw output не опубликован;
+- artifact SHA-256:
+  `fa1c1a652b472554288fbda16bd7fd2e48c0672ec3cb2d2a5c7bae40bb81ddb8`.
+
+Протокол v1 безопасно указывает фазу, но не сохраняет pytest node ID, поэтому
+точный упавший сценарий из artifact определить невозможно. Добавлена
+регрессионная проверка и allowlisted диагностика: при ошибке протокол сохраняет
+не более 20 node ID только из `backend/` или `scripts/`, без параметров теста,
+assertion text, stdout, stderr, DSN, документов и секретов. Повторный runtime
+обязателен; статус остаётся **CONDITIONAL**.

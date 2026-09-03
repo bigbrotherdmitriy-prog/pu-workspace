@@ -25,6 +25,11 @@ HEAD = "a54f001c0a02"
 DATABASES = ("puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime")
 PHASES: list[dict] = []
 CREATED: list[str] = []
+PYTEST_FAILURE = re.compile(
+    r"(?m)^(?:FAILED|ERROR) "
+    r"(?P<nodeid>(?:backend|scripts)/[A-Za-z0-9_./-]+\.py"
+    r"(?:::[A-Za-z_][A-Za-z0-9_]*)+)"
+)
 
 
 def base_url(database: str) -> str:
@@ -54,6 +59,12 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
     if summary:
         record["passed"] = int(summary.group("passed"))
         record["skipped"] = int(summary.group("skipped") or 0)
+    if result.returncode:
+        failed_nodeids = list(dict.fromkeys(
+            match.group("nodeid") for match in PYTEST_FAILURE.finditer(result.stdout)
+        ))[:20]
+        if failed_nodeids:
+            record["failed_nodeids"] = failed_nodeids
     PHASES.append(record)
     if result.returncode:
         raise RuntimeError(name + "_failed")

@@ -1,6 +1,8 @@
 from pathlib import Path
 import importlib.util
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
 
@@ -33,6 +35,35 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert "print(result.stdout" not in source and "print(result.stderr" not in source
     assert "DROP DATABASE {}" in source and "pg_terminate_backend" in source
     assert 'HEAD = "a54f001c0a02"' in source
+
+
+def test_failed_phase_records_only_safe_pytest_nodeids(monkeypatch):
+    path = ROOT / "scripts/ci/v54_pilot_workflow.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_workflow_failure_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    module.PHASES.clear()
+    secret = "synthetic-document-secret"
+    stdout = (
+        "FAILED backend/tests/test_v54_authority_postgres.py::test_revoke_wins "
+        f"- AssertionError: {secret}\n1 failed, 273 passed in 1.00s\n"
+    )
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=1, stdout=stdout, stderr=f"provider response: {secret}"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="postgres_abc_integration_failed"):
+        module.run_phase("postgres_abc_integration", ["pytest"])
+
+    encoded = str(module.PHASES)
+    assert module.PHASES[0]["failed_nodeids"] == [
+        "backend/tests/test_v54_authority_postgres.py::test_revoke_wins"
+    ]
+    assert secret not in encoded
 
 
 def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_path):
