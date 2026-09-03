@@ -72,8 +72,9 @@ class YandexDiskStorageAdapter:
     @staticmethod
     def _to_object(meta: dict[str, Any], fallback_parent: str = "") -> StorageObject:
         path = meta.get("path") or meta.get("resource_id") or ""
-        parent = str(PurePosixPath(path.removeprefix("disk:"))).rsplit("/", 1)[0] or "/"
-        parent_locator = fallback_parent or f"disk:{parent}"
+        namespace = "app:" if path.startswith("app:/") else "disk:"
+        parent = str(PurePosixPath(path.removeprefix(namespace))).rsplit("/", 1)[0] or "/"
+        parent_locator = fallback_parent or f"{namespace}{parent}"
         return StorageObject(
             id=path,
             name=meta.get("name") or PurePosixPath(path).name,
