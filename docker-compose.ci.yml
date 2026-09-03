@@ -45,8 +45,6 @@ services:
         condition: service_healthy
   backend:
     <<: *app
-    ports:
-      - "127.0.0.1:${PU_TEST_PORT:-3010}:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -55,6 +53,16 @@ services:
       interval: 5s
       timeout: 6s
       retries: 36
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - "127.0.0.1:${PU_TEST_PORT:-3010}:8080"
+    volumes:
+      - ./infra/ci/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [default, edge]
+    depends_on:
+      backend:
+        condition: service_healthy
   worker:
     <<: *app
     command: [python, -m, app.jobs.worker]
@@ -75,3 +83,4 @@ volumes:
 networks:
   default:
     internal: true
+  edge:
