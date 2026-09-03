@@ -16,15 +16,23 @@ PSM 6 recognized the clause continuously. On the complete page the candidate:
 - retained 95.2% similarity of the ordered digit stream;
 - added no replacement, control, or mixed-script corruption signals.
 
-This is evidence for this scan, not a general OCR accuracy claim.
+This is evidence for this scan, not a general OCR accuracy claim. The stricter
+policy below was subsequently verified with repository-only synthetic fixtures;
+the customer PDF was not added to tests or committed.
 
 ## Implementation
 
-PSM 1 remains the primary configured mode. A bounded PSM 6 retry is eligible only
-when the primary result contains multiple distinct isolated endings and enough
-prose. The retry is accepted only when fragmentation falls, text volume remains
-within 75-135%, at least 90% ordered digit-stream similarity is retained, no new
-non-fragment corruption appears, and prose volume remains comparable.
+PSM 1 remains the primary configured mode. A bounded PSM 6 retry is eligible when
+the primary result contains repeated isolated endings and enough prose, or when
+the primary output is empty/very short. Primary failures and timeouts produce an
+empty page result without discarding pages already recognized in the batch.
+
+Whole-page replacement is forbidden for detected tabular layouts. On such pages,
+only a damaged numbered prose clause may be replaced, and only when that clause
+has no remaining fragmentation/corruption, keeps its numeric tokens exactly, and
+retains comparable text volume. The surrounding header, table, amounts and bank
+details always remain from PSM 1. A non-tabular page may be replaced as a whole
+only under the same strict corruption, volume and exact numeric-token checks.
 
 Fallback is limited to the first two OCR-eligible pages per document and shares
 the existing deadline. A timeout keeps the primary output. Administrators can
@@ -33,10 +41,10 @@ disable it with `OCR_ADAPTIVE_FALLBACK=false` or adjust
 
 ## Limits
 
-- PSM 6 can still mix columns; conservative acceptance criteria reduce but do not
-  eliminate that risk.
-- Ordered digits detect many losses/reorderings but do not prove every amount is
-  attached to the correct row.
+- Numbered-clause merging does not repair unnumbered damaged prose on a page that
+  also contains a table; it keeps the safer primary text instead.
+- Numeric-token equality does not prove semantic correctness, so generated
+  proposals still require review against the original.
 - Existing extracted text and task records are not rewritten automatically.
 - Production acceptance requires deployment followed by explicit re-recognition
   of this document; generated proposals must remain unconfirmed until reviewed.

@@ -190,10 +190,10 @@ def _merge_safe_numbered_prose(primary: str, fallback: str) -> tuple[str, int]:
         if (
             old_penalty >= 2
             and old_words >= 12
-            and new_penalty < old_penalty
+            and new_penalty == 0
             and 0.75 <= new_volume / old_volume <= 1.6
             and _numeric_tokens(old_body) == _numeric_tokens(new_body)
-            and _non_fragment_corruption(new_body) <= _non_fragment_corruption(old_body)
+            and _non_fragment_corruption(new_body) == 0
             and new_words >= old_words * 0.75
         ):
             replacements.append((match.start(), match.end(), candidate.group(0)))
@@ -211,10 +211,10 @@ def _safe_whole_page_fallback(primary: str, fallback: str) -> bool:
     return (
         not _looks_tabular(primary)
         and not _looks_tabular(fallback)
-        and fallback_penalty < primary_penalty
+        and fallback_penalty == 0
         and 0.75 <= fallback_volume / primary_volume <= 1.35
         and _numeric_tokens(primary) == _numeric_tokens(fallback)
-        and _non_fragment_corruption(fallback) <= _non_fragment_corruption(primary)
+        and _non_fragment_corruption(fallback) == 0
         and fallback_words >= primary_words * 0.75
     )
 
