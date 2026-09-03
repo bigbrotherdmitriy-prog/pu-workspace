@@ -1,0 +1,5 @@
+From: lada@example.test
+To: intake@example.test
+Subject: Акты
+
+Просим прислать акты. Проект и договор уточним позднее.
