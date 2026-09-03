@@ -377,6 +377,10 @@ def test_postgres_probe_requires_explicit_database_and_safe_failure():
         env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 1 and "AssertionError" in result.stdout
     assert not result.stderr and "Traceback" not in result.stdout
+    failure = json.loads(result.stdout)
+    assert failure == {
+        "status": "FAIL", "error_type": "AssertionError", "checkpoint": "require_database"
+    }
 
 
 def test_runtime_schema_expectations_follow_foundation():

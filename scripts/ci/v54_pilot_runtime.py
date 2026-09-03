@@ -14,6 +14,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT / "backend/tests")]
+CHECKPOINT = "require_database"
+
+
+def checkpoint(value):
+    global CHECKPOINT
+    CHECKPOINT = value
 
 
 def contender(url, schema, policy, output, stop, pause_after_claim):
@@ -53,6 +59,7 @@ def contender(url, schema, policy, output, stop, pause_after_claim):
 
 
 def main():
+    checkpoint("require_database")
     assert os.getenv("PUW_V54_INTEGRATION_DATABASE_URL"), "Explicit isolated PostgreSQL URL required"
     from sqlalchemy import select, func
     from datetime import timedelta
@@ -66,36 +73,44 @@ def main():
     ctx = mp.get_context("spawn")
     children = []
     with tempfile.TemporaryDirectory(prefix="puw-v54-pg-") as directory:
+        checkpoint("fixture_setup")
         fixture = integrated.__wrapped__(Path(directory))
         state = next(fixture)
         sessions, component, runtime, _ = state
         engine = sessions.kw["bind"]
         assert engine.dialect.name == "postgresql"
         try:
+            checkpoint("prepare")
             envelope = prepare(state)
+            checkpoint("enqueue")
             job_id = runtime.enqueue_action(envelope.action_ref.id.value, uid(999))
             output, stop = ctx.Queue(), ctx.Event()
             args = (os.environ["PUW_V54_INTEGRATION_DATABASE_URL"], engine.v54_test_schema, component.policy, output, stop)
             first = ctx.Process(target=contender, args=(*args, True))
             children.append(first)
             first.start()
+            checkpoint("first_claim")
             claimed = output.get(timeout=25)
             assert claimed["state"] == "claimed"
             rival = ctx.Process(target=contender, args=(*args, False))
             children.append(rival)
             rival.start()
+            checkpoint("rival_no_claim")
             assert output.get(timeout=25)["state"] == "no_claim"
             rival.join(10)
             assert rival.exitcode == 0
             # Kill only the test process created immediately above; not Docker or prod.
             first.terminate()
             first.join(10)
+            checkpoint("first_terminated")
             assert not first.is_alive()
             with sessions.begin() as db:
                 # Accelerated lease expiry, explicitly NOT a wall-clock expiry proof.
                 db.get(BackgroundJob, job_id).lease_expires_at = NOW - timedelta(seconds=1)
             with sessions() as db:
+                checkpoint("lease_recovery")
                 assert recover_expired(db) == 1
+            checkpoint("stale_owner_rejected")
             try:
                 runtime.execute(claimed["payload"], claimed["owner"])
             except ValueError:
@@ -105,12 +120,15 @@ def main():
             second = ctx.Process(target=contender, args=(*args, False))
             children.append(second)
             second.start()
+            checkpoint("second_claim")
             assert output.get(timeout=25)["state"] == "claimed"
+            checkpoint("second_completion")
             completed = output.get(timeout=25)
             assert completed["state"] == "completed"
             second.join(10)
             assert second.exitcode == 0
             with sessions() as db:
+                checkpoint("invariants")
                 task_count = db.scalar(select(func.count()).select_from(Task))
                 receipt_count = db.scalar(select(func.count()).select_from(ActionReceipt))
                 projection_count = db.scalar(select(func.count()).select_from(ContextRelation)
@@ -125,6 +143,7 @@ def main():
                    "tasks": task_count, "receipts": receipt_count, "projections": projection_count,
                    "success_audits": success_audit_count}))
         finally:
+            checkpoint("cleanup")
             for child in children:
                 if child.is_alive():
                     child.terminate()
@@ -137,5 +156,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(json.dumps({"status": "FAIL", "error_type": type(exc).__name__}))
+        print(json.dumps({"status": "FAIL", "error_type": type(exc).__name__,
+                          "checkpoint": CHECKPOINT}))
         raise SystemExit(1) from None

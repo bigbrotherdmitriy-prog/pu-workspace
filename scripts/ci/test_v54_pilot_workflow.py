@@ -77,6 +77,31 @@ def test_failed_phase_records_only_safe_pytest_nodeids(monkeypatch):
     assert secret not in encoded
 
 
+def test_process_probe_records_only_allowlisted_failure_checkpoint(monkeypatch):
+    path = ROOT / "scripts/ci/v54_pilot_workflow.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_workflow_probe_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    module.PHASES.clear()
+    secret = "synthetic-document-secret"
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=1,
+            stdout='{"status":"FAIL","error_type":"AssertionError","checkpoint":"lease_recovery"}\n',
+            stderr=secret,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="postgres_process_fault_failed"):
+        module.run_phase("postgres_process_fault", ["python"])
+
+    assert module.PHASES[0]["failure_checkpoint"] == "lease_recovery"
+    assert module.PHASES[0]["child_error_type"] == "AssertionError"
+    assert secret not in str(module.PHASES)
+
+
 def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_path):
     path = ROOT / "scripts/ci/v54_pilot_workflow.py"
     spec = importlib.util.spec_from_file_location("v54_pilot_workflow_cleanup_test", path)

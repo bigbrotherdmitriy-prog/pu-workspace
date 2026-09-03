@@ -190,3 +190,26 @@ bootstrap-организацию, не изменяя её данные; на ч
 После исправления: foundation `90 passed, 1 skipped`, полный backend
 `754 passed, 9 skipped`, `scripts/ci` — `87 passed`, `git diff --check` — PASS.
 PostgreSQL runtime требует повторного GitHub run; статус пока **CONDITIONAL**.
+
+## Пятый GitHub runtime — 33798041223
+
+Runtime для `96928ad8db72d1434a4a76d89d861a9ddd8a6772` подтвердил исправление
+bootstrap-конфликта и прошёл все тестовые фазы до process-fault probe:
+
+- migration: PASS, `a54f001c0a02`;
+- backend: PASS, 754 passed / 9 skipped;
+- PostgreSQL A/B/C/integration: PASS, 275 passed;
+- corpus: PASS;
+- durable gzip regression: PASS, 10 passed;
+- `postgres_process_fault`: FAIL за 4.45 секунды;
+- cleanup: PASS, raw output не опубликован;
+- artifact SHA-256:
+  `e2f811e858d8d84b79723866a9f7d606f0845d4aceeea30bb0fc07792cf641ee`.
+
+Process-fault probe до изменения сообщал только allowlisted тип
+`AssertionError`, поэтому точный fault checkpoint определить невозможно.
+Добавлен закрытый список безопасных checkpoint-кодов и их перенос в protocol
+только из валидного JSON failure record. Exception text, payload, DSN, stdout и
+stderr не публикуются. Regression сначала упал из-за отсутствующего checkpoint;
+после изменения `scripts/ci` — 88 passed, отдельный safe-failure contract —
+PASS. Статус до следующего runtime остаётся **CONDITIONAL**.

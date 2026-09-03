@@ -33,6 +33,11 @@ PYTEST_FAILURE = re.compile(
 PYTEST_LOCATION = re.compile(
     r"(?m)^(?P<location>(?:backend|scripts)/[A-Za-z0-9_./-]+\.py:[1-9][0-9]*):"
 )
+PROBE_CHECKPOINTS = {
+    "require_database", "fixture_setup", "prepare", "enqueue", "first_claim",
+    "rival_no_claim", "first_terminated", "lease_recovery", "stale_owner_rejected",
+    "second_claim", "second_completion", "invariants", "cleanup",
+}
 
 
 def base_url(database: str) -> str:
@@ -73,6 +78,20 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
         ))[:20]
         if failure_locations:
             record["failure_locations"] = failure_locations
+        if name == "postgres_process_fault":
+            for line in result.stdout.splitlines():
+                try:
+                    probe = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                checkpoint = probe.get("checkpoint") if isinstance(probe, dict) else None
+                error_type = probe.get("error_type") if isinstance(probe, dict) else None
+                if (probe.get("status") == "FAIL" and checkpoint in PROBE_CHECKPOINTS
+                        and isinstance(error_type, str)
+                        and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", error_type)):
+                    record["failure_checkpoint"] = checkpoint
+                    record["child_error_type"] = error_type
+                    break
     PHASES.append(record)
     if result.returncode:
         raise RuntimeError(name + "_failed")
