@@ -12,6 +12,14 @@ SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
 RISK_RE = re.compile(r"\b(риск\w*|угроз\w*|вероятн\w*|может привести|возможн\w* задерж\w*|просроч\w*|дефицит\w*|нехватк\w*|отклонен\w*)", re.I)
 DECISION_RE = re.compile(r"\b(требуется решение|необходимо решить|нужно решить|на согласование|следует выбрать|утвердить|согласовать вариант)\b", re.I)
 HIGH_RE = re.compile(r"\b(критич\w*|существен\w*|срыв\w*|авар\w*|штраф\w*|просроч\w*)", re.I)
+MITIGATION_REFERENCE_RE = re.compile(
+    r"\b(?:снижен(?:ие|ия|ию)|минимизаци[яию]|предотвращен(?:ие|ия|ию))\s+рис(?:ка|ков)\b",
+    re.I,
+)
+FAILED_MITIGATION_RE = re.compile(
+    r"\b(?:недостаточ\w*|неэффектив\w*|не\s+(?:достиг\w*|выполн\w*|реализ\w*|сработ\w*|помог\w*))",
+    re.I,
+)
 
 
 def extract_governance_candidates(text: str) -> tuple[list[dict], list[dict]]:
@@ -21,7 +29,11 @@ def extract_governance_candidates(text: str) -> tuple[list[dict], list[dict]]:
         sentence = " ".join(raw.split()).strip(" -–—\t")
         if not 20 <= len(sentence) <= 1200:
             continue
-        if RISK_RE.search(sentence):
+        # A reference to reducing risk is not a new risk by itself. Keep the
+        # original evidence, and still detect independent threats or failed measures.
+        risk_signal_text = MITIGATION_REFERENCE_RE.sub("", sentence)
+        failed_measure = risk_signal_text != sentence and FAILED_MITIGATION_RE.search(sentence)
+        if RISK_RE.search(risk_signal_text) or failed_measure:
             risks.append({
                 "text": sentence,
                 "kind": "deviation" if re.search(r"\b(просроч\w*|отклонен\w*)", sentence, re.I) else "risk",

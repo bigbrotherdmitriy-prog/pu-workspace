@@ -31,6 +31,7 @@ import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./mo
 import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
+import { OverdueMetric } from "./modules/dashboard/OverdueMetric";
 import {
   Activity,
   AlertTriangle,
@@ -2182,7 +2183,14 @@ export function App() {
                 </div>
               </section>
               <div className="metrics dashboard-metrics">
-                {metrics.map(([label, value, tone]) => (
+                {metrics.map(([label, value, tone]) => label === "Просрочено" ? (
+                  <OverdueMetric
+                    key={String(label)}
+                    tasks={summary?.overdue_tasks || 0}
+                    obligations={summary?.overdue_obligations || 0}
+                    onOpenTasks={() => openMetric("Просрочено")}
+                  />
+                ) : (
                   <button
                     type="button"
                     className={String(tone)}
@@ -2214,7 +2222,7 @@ export function App() {
                           {summary.attention} пунктов требуют проверки
                         </strong>
                         <p>
-                          Просрочено задач: {summary.overdue_tasks}; открытых
+                          Просрочено задач: {summary.overdue_tasks}; обязательств: {summary.overdue_obligations}; открытых
                           рисков: {summary.open_risks}; решений:{" "}
                           {summary.pending_decisions}.
                         </p>
