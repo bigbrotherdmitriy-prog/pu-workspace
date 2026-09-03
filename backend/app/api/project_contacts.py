@@ -113,11 +113,12 @@ def discover_contact_from_message(db: Session, project_id: int, sender: str, con
         db.add(AuditLog(action="project_contact_discovered", entity_type="project_contact", entity_id=row.id,
                         details=f"project={project.id}; source=gmail; requires_confirmation=true"))
     elif not row.confirmed:
-        row.project_id = project.id
-        row.name = row.name or display_name
-        row.company = row.company or company
-        row.company_activity = activity or row.company_activity
-        row.active = True
+        # One email currently has one organization-wide row. Discovery must not
+        # move it between projects or undo an operator's deactivation.
+        if row.project_id == project.id and row.active:
+            row.name = row.name or display_name
+            row.company = row.company or company
+            row.company_activity = activity or row.company_activity
     return row
 
 
@@ -177,8 +178,10 @@ def update_contact(contact_id: int, data: ContactUpdate,
         contract = db.get(Contract, data.contract_id)
         if contract is None or contract.project_id != target_project_id:
             raise HTTPException(422, "Договор не принадлежит выбранному проекту")
+    if row.project_id != target_project_id:
+        row.contract_id = None
     row.project_id = target_project_id
-    if data.contract_id is not None: row.contract_id = data.contract_id
+    if "contract_id" in data.model_fields_set: row.contract_id = data.contract_id
     if data.name is not None: row.name = data.name.strip()
     if data.company is not None: row.company = data.company.strip() or None
     if data.company_activity is not None: row.company_activity = data.company_activity.strip() or None

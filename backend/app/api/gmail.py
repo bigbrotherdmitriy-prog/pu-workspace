@@ -25,6 +25,7 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
+from app.models.project import Project
 from app.core.integration_types import StorageObject
 from app.document_engine import index_documents
 from app.governance_engine import create_governance_items
@@ -140,6 +141,10 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
 
 
 def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:
+    require_project_role(db, user, project_id, "editor")
+    sync_project = db.get(Project, project_id)
+    if sync_project is None:
+        raise HTTPException(404, "Project not found")
     service = google_workspace_for_project(project_id, db).service("gmail", "v1")
     page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
@@ -160,14 +165,18 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             )
             existing = db.scalar(select(Message).where(
                 Message.source_external_id == ref["id"],
+                Message.source_type.in_(("email", "email_outgoing")),
             ))
             if existing:
+                require_project_role(db, user, existing.project_id, "editor")
+                if existing.organization_id != sync_project.organization_id:
+                    raise HTTPException(409, "Message identity requires mailbox-scoped reconciliation")
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
                 if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
-                if existing.source_sender and not bulk_reason:
+                if existing.source_sender and not bulk_reason and existing.context_confirmed:
                     discover_contact_from_message(db, existing.project_id, existing.source_sender, existing.content, user)
                 # Older messages may have been synchronized before email fallback
                 # drafts existed. Backfill a reviewable draft without sending it
@@ -190,17 +199,24 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             if not content.strip():
                 skipped += 1
                 continue
+            target_project_id, routing_confidence, semantic_evidence = project_candidate(
+                db, project_id, f"{subject}\n{content}", user,
+            )
             contact = contact_for_sender(db, project_id, correspondent, user)
-            if contact is not None:
+            routing_evidence = None
+            routing_contract_id = None
+            if contact is not None and (routing_confidence == 0.40 or
+                                       (routing_confidence >= 0.90 and target_project_id != contact.project_id)):
+                routing_confidence = 0.40
+                routing_evidence = (f"Конфликт email и содержания; кандидаты проектов: {contact.project_id},{target_project_id}; "
+                                    f"{semantic_evidence}; требуется подтверждение")[:1000]
+            elif contact is not None:
                 target_project_id = contact.project_id
+                routing_confidence = 0.99
                 routing_evidence = f"Проект определён по email клиента: {contact.email}"
                 routing_contract_id = contact.contract_id
             else:
-                target_project_id, _, _ = project_candidate(
-                    db, project_id, f"{subject}\n{correspondent}\n{content}", user,
-                )
-                routing_evidence = None
-                routing_contract_id = None
+                routing_evidence = semantic_evidence
             result = ingest_message(IncomingMessage(
                 project_id=target_project_id, source_type=source_type, source_external_id=item["id"],
                 source_name=(f"Исходящее: {recipient} — {subject}" if is_outgoing else f"{sender} — {subject}"),
@@ -208,11 +224,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 source_sender=correspondent, source_thread_id=item.get("threadId"), content=content,
                 attachments=attachments,
                 routing_contract_id=routing_contract_id, routing_evidence=routing_evidence,
+                routing_confidence=routing_confidence,
                 automation_suppressed=bool(bulk_reason),
                 automation_suppression_reason=bulk_reason,
             ), db, user)
             processed += 1 if result["status"] else 0
-            if not bulk_reason:
+            if not bulk_reason and result.get("context_confirmed"):
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
             if not is_outgoing and not bulk_reason:
                 notify_telegram(_gmail_telegram_notice(sender, subject, result))

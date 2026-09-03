@@ -50,6 +50,7 @@ class IncomingMessage(BaseModel):
     attachments: list[dict] = Field(default_factory=list)
     routing_contract_id: int | None = None
     routing_evidence: str | None = Field(default=None, max_length=1000)
+    routing_confidence: float | None = Field(default=None, ge=0, le=1)
     automation_suppressed: bool = False
     automation_suppression_reason: str | None = Field(default=None, max_length=1000)
 
@@ -93,11 +94,16 @@ def daily_briefing(project_id: int, db: Session = Depends(get_db), user: User = 
     return build_daily_briefing(db, project_id)
 
 
+def _explicit_mail_reference(value: str | None, content: str) -> bool:
+    value = (value or "").strip()
+    return bool(value and re.search(r"(?<![\w@.-])" + re.escape(value) + r"(?![\w@.-])", content, re.IGNORECASE))
+
+
 def _contract_candidate(db: Session, project_id: int, content: str) -> tuple[Contract | None, float, str]:
     rows = list(db.scalars(select(Contract).where(Contract.project_id == project_id, Contract.status.in_(("draft", "active")))))
-    matched = [row for row in rows if row.number.casefold() in content.casefold() or (row.counterparty and row.counterparty.casefold() in content.casefold())]
+    matched = [row for row in rows if _explicit_mail_reference(row.number, content)]
     if len(matched) == 1:
-        return matched[0], 0.95, f"Найден номер договора или контрагент: {matched[0].number}"
+        return matched[0], 0.95, f"Найден номер договора: {matched[0].number}"
     if len(matched) > 1:
         return None, 0.45, "Найдено несколько возможных договоров; требуется подтверждение"
     return None, 0.70, "Проект выбран пользователем; договор в тексте не определён"
@@ -109,7 +115,7 @@ def project_candidate(db: Session, fallback_project_id: int, content: str, user:
     if fallback is None:
         raise HTTPException(404, "Project not found")
     text_value = content.casefold()
-    project_query = select(Project).where(Project.organization_id == fallback.organization_id)
+    project_query = select(Project).where(Project.organization_id == fallback.organization_id, Project.archived_at.is_(None))
     if user is not None and not user.is_admin:
         project_query = project_query.join(ProjectMember, ProjectMember.project_id == Project.id).where(
             ProjectMember.user_id == user.id,
@@ -119,7 +125,7 @@ def project_candidate(db: Session, fallback_project_id: int, content: str, user:
     matches: dict[int, list[str]] = {}
     for project in projects:
         name = project.name.strip().casefold()
-        if len(name) >= 4 and name in text_value:
+        if len(name) >= 4 and _explicit_mail_reference(name, text_value):
             matches.setdefault(project.id, []).append(f"название проекта «{project.name}»")
     for contract in db.scalars(
         select(Contract).join(Project, Project.id == Contract.project_id).where(
@@ -128,17 +134,15 @@ def project_candidate(db: Session, fallback_project_id: int, content: str, user:
         )
     ):
         evidence = []
-        if contract.number and contract.number.casefold() in text_value:
+        if _explicit_mail_reference(contract.number, text_value):
             evidence.append(f"договор {contract.number}")
-        if contract.counterparty and len(contract.counterparty.strip()) >= 4 and contract.counterparty.casefold() in text_value:
-            evidence.append(f"контрагент {contract.counterparty}")
         if evidence:
             matches.setdefault(contract.project_id, []).extend(evidence)
     if len(matches) == 1:
         project_id, evidence = next(iter(matches.items()))
         return project_id, 0.95, "Проект определён по содержанию: " + ", ".join(evidence[:3])
     if len(matches) > 1:
-        return fallback_project_id, 0.40, "Найдено несколько возможных проектов; требуется подтверждение"
+        return fallback_project_id, 0.40, f"Кандидаты проектов: {','.join(map(str, sorted(matches)))}; требуется подтверждение"
     return fallback_project_id, 0.55, "Проект по содержанию не определён; требуется подтверждение"
 
 
@@ -149,6 +153,8 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
     risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
     completion_rows = db.execute(select(TaskCompletionSuggestion, Task).join(Task, Task.id == TaskCompletionSuggestion.task_id).where(
         TaskCompletionSuggestion.message_id == row.id,
+        TaskCompletionSuggestion.project_id == row.project_id,
+        Task.project_id == row.project_id,
     ).order_by(TaskCompletionSuggestion.confidence.desc(), TaskCompletionSuggestion.id)).all()
     attachments = json.loads(row.attachments_json or "[]")
     attachment_ids = [item["document_external_id"] for item in attachments if item.get("document_external_id")]
@@ -278,6 +284,9 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
     external_id = payload.source_external_id or f"manual:{uuid4()}"
     existing = db.scalar(select(Message).where(Message.source_type == payload.source_type, Message.source_external_id == external_id))
     if existing:
+        require_project_role(db, user, existing.project_id, "editor")
+        if existing.organization_id != project.organization_id:
+            raise HTTPException(409, "Message identity requires mailbox-scoped reconciliation")
         return _message_payload(db, existing)
     if payload.routing_contract_id is not None:
         contract = db.get(Contract, payload.routing_contract_id)
@@ -288,6 +297,11 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         contract, confidence, evidence = _contract_candidate(db, payload.project_id, payload.content)
         if payload.routing_evidence:
             confidence, evidence = max(confidence, 0.99), payload.routing_evidence
+    if payload.routing_confidence is not None:
+        confidence = payload.routing_confidence
+        evidence = payload.routing_evidence or "Требуется подтверждение проекта"
+        if confidence < 0.90:
+            contract = None
     row = Message(
         organization_id=project.organization_id, project_id=project.id, contract_id=contract.id if contract else None,
         created_by_user_id=user.id, source_type=payload.source_type, source_external_id=external_id,
@@ -305,7 +319,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         tasks, drafts, risks, completion_suggestions = [], [], [], []
     elif row.source_type == "email_outgoing":
         tasks, drafts, risks = [], [], []
-        completion_suggestions = _create_completion_suggestions(db, row)
+        completion_suggestions = _create_completion_suggestions(db, row) if row.context_confirmed else []
     else:
         tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
         drafts = create_response_drafts(
@@ -339,10 +353,15 @@ def review_completion_suggestion(message_id: int, suggestion_id: int, payload: C
     if suggestion is None or suggestion.message_id != message_id:
         raise HTTPException(404, "Предложение о выполнении задачи не найдено")
     require_project_role(db, user, suggestion.project_id, "editor")
-    if suggestion.status != "proposed":
-        return {"id": suggestion.id, "status": suggestion.status, "already_reviewed": True}
     task = db.get(Task, suggestion.task_id)
     message = db.get(Message, message_id)
+    if (task is None or message is None or task.project_id != suggestion.project_id
+            or message.project_id != suggestion.project_id or not message.context_confirmed):
+        raise HTTPException(409, "Контекст письма или задачи изменился; требуется повторная проверка")
+    require_project_role(db, user, message.project_id, "editor")
+    require_project_role(db, user, task.project_id, "editor")
+    if suggestion.status != "proposed":
+        return {"id": suggestion.id, "status": suggestion.status, "already_reviewed": True}
     suggestion.status = payload.status
     suggestion.reviewed_by_user_id = user.id
     suggestion.reviewed_at = datetime.now(timezone.utc)
