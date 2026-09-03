@@ -1,4 +1,53 @@
-# Первый GitHub Actions запуск интегрированного smoke CI
+# GitHub Actions: первый запуск и успешная проверка исправления
+
+## Текущий результат после исправления
+
+Проверен SHA `1ac10e2f37cd948c0e8fc1532f58d560ca015409`, отправленный в
+`codex/ci-smoke-integration` после отдельного явного разрешения пользователя.
+
+- [Docker Compose smoke — SUCCESS, run 33742467119](https://github.com/bigbrotherdmitriy-prog/pu-workspace/actions/runs/33742467119).
+- [PU Workspace CI — SUCCESS, run 33742467112](https://github.com/bigbrotherdmitriy-prog/pu-workspace/actions/runs/33742467112).
+
+GitHub-hosted runner: Ubuntu 24.04, image version `20260823.283.1`.
+Smoke job `100607293891`: 2026-09-03 10:06:00–10:06:57 UTC, 57 секунд.
+Тестовый Compose project: `puw-ci-33742467119-1`.
+
+| Этап Docker smoke | Результат | Время по GitHub steps |
+|---|---|---|
+| Generate isolated test environment | SUCCESS | <1 s |
+| Compose configuration | SUCCESS | <1 s |
+| Build backend | SUCCESS | 32 s |
+| PostgreSQL start + healthcheck | SUCCESS | 10 s |
+| Alembic upgrade head | SUCCESS | 2 s |
+| Backend start | SUCCESS | <1 s |
+| Readiness + schema f360a1b2c3d4 | SUCCESS | 4 s |
+| Authenticated API smoke | SUCCESS | 1 s |
+| Compose down --volumes --remove-orphans | SUCCESS | <1 s |
+| Failure diagnostics / artifact | Штатно пропущены | Запуск успешный |
+
+Успех API-скрипта подтверждает health, release SHA, readiness, bootstrap,
+cookie/CSRF, создание/чтение организации и проекта, logout и последующий 401.
+В обычном CI: **382 backend-теста**, **17 frontend-тестов (6 файлов)**,
+typecheck и build прошли; frontend build — 2.29 s.
+
+Ограничения доказательств:
+
+- `down` вернул успех; отдельного запроса проверки отсутствия ресурсов по
+  labels после удаления в текущем workflow нет.
+- Реальные failure diagnostics, доставка очищенного artifact и cleanup
+  после намеренной ошибки ещё не испытаны.
+- Сырые Compose/build logs успешного прогона направляются во временный
+  файл и удаляются. Точные версии Docker/Compose/PostgreSQL и image digest
+  этим workflow отдельно не сохраняются; не подменяем их версиями локальной машины.
+- Durable-очередь, crash/recovery, workers, scheduler и внешние интеграции
+  не входят в двухсервисный in_process smoke.
+
+**Успешный Docker smoke и оба текущих CI: PASS. Полный протокол с аварийным
+сценарием остаётся CONDITIONAL.** Production и локальные Docker/WSL не
+изменялись. Merge и production-deploy не выполнялись. Этот раздел отчёта
+добавлен локально после запуска; дополнительных push без разрешения нет.
+
+## История первого запуска
 
 Дата: 2026-09-03.
 Ветка: `codex/ci-smoke-integration`.
