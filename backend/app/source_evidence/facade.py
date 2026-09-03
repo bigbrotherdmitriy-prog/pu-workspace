@@ -264,7 +264,7 @@ class SourceEvidenceFacade:
                     times.append(utc(assessment.checked_at) + self.policy.freshness_ttl)
                 verified = (assessment.verification == "verified"
                             and assessment.reviewed_by is not None
-                            and (assessment.reviewed_by, "review") in self.policy.grants
+                            and self.policy.permits(db, scope, assessment.reviewed_by, "review", now, lock=lock)
                             and utc(assessment.reviewed_at) is not None
                             and utc(assessment.reviewed_at) <= now
                             and db.get(User, assessment.reviewed_by) is not None)
@@ -275,7 +275,8 @@ class SourceEvidenceFacade:
                 "freshness": "fresh" if fresh else "stale", "availability": "available" if available else "unavailable",
                 "verification": "verified" if verified else "unverified", "policy_known": True,
                 "retention_known": True, "residency_allowed": True, "valid_until": expires,
-                "authority_epoch": self.policy.authority_epoch, "binding_epoch": identity.binding_epoch,
+                "authority_epoch": self.policy.resolved_authority_epoch(db, scope, operation, now, lock=lock),
+                "binding_epoch": identity.binding_epoch,
             })
         except SourceEvidenceError:
             return result.model_copy(update={"acl": "deny"})

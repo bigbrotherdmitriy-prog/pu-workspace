@@ -18,11 +18,13 @@ from app.core.v54_refs import ObjectRef, VersionPin
 from app.integrations.connection_identity import IdentityFacade
 from app.models.organization_contract import Organization, Contract
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.task import Task, TaskHistory
 from app.models.management import Obligation
 from app.models.job import BackgroundJob
 from app.models.v54_pilot import ActionPolicy, ActionReceipt, PendingDispatch, PilotAction, ContextRelation
+from app.models.v54_authority import AuthorityState
 from app.jobs.queue import claim
 from v54_pilot_fixture import NOW, DOC_FIXTURE, envelopes, ref, pin, uid
 from test_v54_source_evidence_pilot import policy, scope
@@ -67,6 +69,7 @@ def integrated(tmp_path):
 
 
 def seed_composition(engine):
+    from app.core.v54_authority import AuthorityResolver, PILOT_SCOPE
     from app.pilot_composition import SyntheticComposition
     from app.pilot_dispatch import SyntheticDispatch
     Base.metadata.create_all(engine)
@@ -78,13 +81,29 @@ def seed_composition(engine):
         "claim.extract", "action.freeze", "action.dispatch", "action.execute", "task.assign"))
     grants.update((3, op) for op in ("claim.review", "action.approve", "action.revoke", "task.assign"))
     grants.add((2, "task.assignee"))
-    pol = replace(pol, grants=frozenset(grants))
+    grants.add((2, "authority.manage"))
+    authority = AuthorityResolver(clock=lambda: NOW)
+    pol = replace(pol, grants=frozenset(grants), authority=authority)
     with sessions.begin() as db:
         db.add(Organization(id=1, name="Synthetic only"))
         db.add_all([User(id=2, name="Requester", email="requester@example.test"),
                     User(id=3, name="Reviewer", email="reviewer@example.test")])
         db.flush()
         db.add(Project(id=4, name="Synthetic intake", organization_id=1))
+        db.flush()
+        db.add_all([
+            ProjectMember(project_id=4, user_id=2, role="owner"),
+            ProjectMember(project_id=4, user_id=3, role="manager"),
+        ])
+        db.add_all([
+            AuthorityState(
+                organization_id=1, project_id=4, principal_kind="user", principal_id=str(actor),
+                scope=PILOT_SCOPE, membership_role="owner" if actor == 2 else "manager",
+                permissions=sorted(op for granted_actor, op in grants if granted_actor == actor),
+                state="active", authority_epoch=1, record_version=1,
+                valid_until=NOW + timedelta(hours=1), updated_at=NOW,
+            ) for actor in (2, 3)
+        ])
         db.flush()
         db.add(Contract(id=5, project_id=4, number="TEST", title="Synthetic contract"))
         rules = next(r for r in json.loads(DOC_FIXTURE.read_text(encoding="utf8"))["records"] if r["ref"]["type"] == "policy")

@@ -44,7 +44,7 @@ class SyntheticResolver:
             return self.source.resolve(db, scope=scope, pin=pin, operation=operation, lock=lock)
         kind, key = pin.ref.type, pin.ref.id.value
         verified = "unverified"
-        epoch = self.policy.authority_epoch
+        epoch = self.policy.resolved_authority_epoch(db, scope, operation, self.clock(), lock=lock)
         if kind == "project":
             row = load(db, Project, Project.id == int(key), lock=lock)
             if not row or row.id != self.policy.project_id or row.organization_id != self.policy.tenant_id or row.archived_at:
@@ -129,7 +129,9 @@ class SyntheticResolver:
         return Resolution(pin=pin, actor=scope.actor, project=scope.project, operation=operation,
             acl="allow", version="current", freshness="fresh", availability="available", verification=verified,
             policy_known=True, retention_known=self.policy.retention_known, residency_allowed=self.policy.residency_allowed,
-            valid_until=expires, authority_epoch=self.policy.authority_epoch, binding_epoch=epoch)
+            valid_until=expires,
+            authority_epoch=self.policy.resolved_authority_epoch(db, scope, operation, self.clock(), lock=lock),
+            binding_epoch=epoch)
 
 
 class _OrderedContext(ContextCommunication):
@@ -151,15 +153,18 @@ class SyntheticComposition:
     def authorize(self, db, scope, operation, subject, *, lock):
         require_same_tenant(scope.tenant, subject)
         self.policy.require(db, scope, operation, self.clock(), lock=True)
-        if operation == "task.assign" and (subject.type != "user"
-                or (int(subject.id.value), "task.assignee") not in self.policy.grants
-                or db.get(User, int(subject.id.value)) is None):
-            deny()
+        if self.policy.authority is not None:
+            return self.policy.authority.authorize_subject(db, scope, operation, subject, lock=True)
+        if operation == "task.assign":
+            if (subject.type != "user" or (int(subject.id.value), "task.assignee") not in self.policy.grants
+                    or db.get(User, int(subject.id.value)) is None):
+                deny()
         return True
 
     def gate(self, db, scope):
         return PilotGate(synthetic_scope_authorized=self.enabled is True and self.policy.synthetic_only,
-            roles_known=self.policy.acl == "allow", retention_known=self.policy.retention_known,
+            roles_known=self.policy.acl == "allow" and self.policy.authority is not None,
+            retention_known=self.policy.retention_known,
             valid_until=self.policy.valid_until)
 
     def context(self, db, scope):

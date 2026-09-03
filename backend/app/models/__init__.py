@@ -37,6 +37,7 @@ from app.models.v54_pilot import (  # additive, inactive pilot foundation
     Evidence, EvidenceAssessment, DeadlineClaim, ContextRelation, ActionPolicy,
     PilotAction, ActionRevision, ActionApproval, ActionReceipt, PendingDispatch, AuditExtension,
 )
+from app.models.v54_authority import AuthorityState
 
 __all__ = [
     "Project",
@@ -86,4 +87,5 @@ __all__ = [
     "ContractDocumentLink",
     "BackgroundJob",
     "ServiceHeartbeat",
+    "AuthorityState",
 ]

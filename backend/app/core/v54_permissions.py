@@ -1,5 +1,6 @@
 """Explicit, injected SYNTHETIC grants only. No production policy defaults."""
 from dataclasses import dataclass
+from typing import Any
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from uuid import UUID
@@ -103,6 +104,10 @@ class SyntheticPolicy:
     retention_known: bool
     residency_allowed: bool
     synthetic_only: bool
+    # Optional only for the inactive integrated pilot.  The remaining fields are
+    # source/retention fixture facts; grants/authority_epoch then cease to be the
+    # authority source.
+    authority: Any = None
 
     def require(self, db, scope, operation, now, *, lock=False):
         if not db.in_transaction():
@@ -112,9 +117,10 @@ class SyntheticPolicy:
                 or self.retention_known is not True or self.residency_allowed is not True
                 or self.valid_until is None or self.valid_until.tzinfo is None or self.valid_until <= now
                 or self.freshness_ttl is None or self.freshness_ttl <= timedelta(0)
-                or type(self.authority_epoch) is not int or self.authority_epoch <= 0
+                or (self.authority is None and
+                    (type(self.authority_epoch) is not int or self.authority_epoch <= 0))
                 or int(scope.tenant.value) != self.tenant_id or int(scope.project.id.value) != self.project_id
-                or (int(scope.actor.id.value), operation) not in self.grants):
+                or (self.authority is None and (int(scope.actor.id.value), operation) not in self.grants)):
             deny()
         check_pin(scope, self.pin, "policy")
         # Do not allow arbitrary caller strings to leak through correlation_id in audit.
@@ -124,7 +130,26 @@ class SyntheticPolicy:
                        Project.organization_id == self.tenant_id, lock=lock)
         if not project or project.archived_at is not None or not db.get(User, int(scope.actor.id.value)):
             deny()
-        return min(self.valid_until, now + self.freshness_ttl)
+        deadline = min(self.valid_until, now + self.freshness_ttl)
+        if self.authority is not None:
+            snapshot = self.authority.require(db, scope, operation, now, lock=lock)
+            deadline = min(deadline, snapshot.valid_until)
+        return deadline
+
+    def resolved_authority_epoch(self, db, scope, operation, now, *, lock=False):
+        if self.authority is None:
+            return self.authority_epoch
+        return self.authority.require(db, scope, operation, now, lock=lock).authority_epoch
+
+    def permits(self, db, scope, actor_id, operation, now, *, lock=False):
+        if self.authority is None:
+            return (actor_id, operation) in self.grants
+        actor = scope.model_copy(update={"actor": ObjectRef(
+            namespace="pu", type="user", tenant_id=scope.tenant,
+            id={"kind": "int", "value": str(actor_id)},
+        )})
+        self.authority.require(db, actor, operation, now, lock=lock)
+        return True
 
     def account(self, account, namespace=None):
         if account not in self.accounts or (namespace is not None and namespace not in self.namespaces):

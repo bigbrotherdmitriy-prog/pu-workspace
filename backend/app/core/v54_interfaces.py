@@ -188,7 +188,8 @@ class AuditAppend(StrictDTO):
     event: Literal["SOURCE_OBSERVED", "EVIDENCE_REVIEWED", "CONTEXT_CONFIRMED", "CLAIM_REVIEWED",
                    "ACTION_FROZEN", "APPROVAL_GRANTED", "APPROVAL_REVOKED", "DISPATCH_REQUESTED",
                    "DISPATCH_AUTHORIZED", "ACTION_SUCCEEDED", "BLOCKED", "UNKNOWN", "RETENTION_APPLIED",
-                   "CLAIM_EXTRACTED", "CLAIM_CONFIRMED", "CLAIM_REJECTED", "CONTEXT_PROPOSED"]
+                   "CLAIM_EXTRACTED", "CLAIM_CONFIRMED", "CLAIM_REJECTED", "CONTEXT_PROPOSED",
+                   "AUTHORITY_CHANGED"]
     action: VersionPin | None = None
     approval: ObjectRef | None = None
     receipt: ObjectRef | None = None
