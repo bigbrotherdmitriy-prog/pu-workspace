@@ -19,7 +19,7 @@ from typing import BinaryIO, Callable, Collection, ContextManager, Literal, Prot
 from sqlalchemy import select
 
 from app.core.auth import ROLE_LEVEL
-from app.mailbox_identity.runtime import runtime_for_message
+from app.mailbox_identity.runtime import require_mailbox_authority, runtime_for_message
 from app.models.ai_secretary import Message
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -84,6 +84,7 @@ class GmailAttachmentBinding:
     credential_generation: int
     binding_epoch: int
     mailbox_flags_record_version: int
+    mailbox_authority_version: int
     source_reference_id: str
     source_version_id: str
     mailbox_binding_id: str
@@ -95,6 +96,7 @@ class GmailAttachmentBinding:
         positive = (
             self.organization_id, self.owner_user_id, self.project_id, self.message_id,
             self.credential_generation, self.binding_epoch, self.mailbox_flags_record_version,
+            self.mailbox_authority_version,
         )
         opaque = (self.identity_id, self.mail_connection_id, self.source_reference_id,
                   self.source_version_id, self.mailbox_binding_id)
@@ -251,6 +253,15 @@ def validate_gmail_attachment_binding(db, binding: GmailAttachmentBinding, *, ma
             or runtime.binding_id != binding.mailbox_binding_id
             or not runtime.flags.primary_read or not runtime.flags.actions
             or runtime.flags.record_version != binding.mailbox_flags_record_version):
+        raise GmailAttachmentDenied("attachment_authority_denied")
+    try:
+        authority = require_mailbox_authority(
+            db, runtime=runtime, actor=owner, permission="action",
+            expected_version=binding.mailbox_authority_version,
+        )
+    except ValueError:
+        raise GmailAttachmentDenied("attachment_authority_denied") from None
+    if authority.authority_version != binding.mailbox_authority_version:
         raise GmailAttachmentDenied("attachment_authority_denied")
     source = db.get(SourceReference, binding.source_reference_id)
     version = db.get(SourceVersion, binding.source_version_id)

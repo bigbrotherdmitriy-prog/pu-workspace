@@ -19,7 +19,12 @@ from app.api.ai_secretary import IncomingMessage, ingest_message, project_candid
 from app.api.project_contacts import contact_for_sender, discover_contact_from_message
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.google_workspace import google_workspace_for_mailbox
-from app.mailbox_identity.runtime import observe_gmail_message, runtime_for_message, runtime_for_project_connection
+from app.mailbox_identity.runtime import (
+    observe_gmail_message,
+    require_mailbox_authority,
+    runtime_for_message,
+    runtime_for_project_connection,
+)
 from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
@@ -311,6 +316,12 @@ def import_gmail_attachment(
     if mailbox is None:
         # Historical/project-token fallback is never sufficient for staging.
         raise HTTPException(409, "Mailbox origin is unavailable")
+    try:
+        mailbox_authority = require_mailbox_authority(
+            db, runtime=mailbox, actor=user, permission="action",
+        )
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
     project = db.get(Project, source.project_id)
     if project is None or project.organization_id != source.organization_id:
         raise HTTPException(409, "Attachment scope is unavailable")
@@ -325,6 +336,7 @@ def import_gmail_attachment(
         credential_generation=mailbox.generation,
         binding_epoch=mailbox.binding_epoch,
         mailbox_flags_record_version=mailbox.flags.record_version,
+        mailbox_authority_version=mailbox_authority.authority_version,
         source_reference_id=mailbox.source_reference_id,
         source_version_id=mailbox.source_version_id,
         mailbox_binding_id=mailbox.binding_id,

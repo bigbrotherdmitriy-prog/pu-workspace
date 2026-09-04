@@ -4,8 +4,9 @@
 
 Gmail attachment import is cut over from synchronous API decoding/extraction to
 the existing durable `BackgroundJob` and the encrypted staging lifecycle seam.
-The change is default-deny until the a05 materialization owner installs the
-port. It adds no queue, materialization model, migration, provider credential,
+The change is default-deny until server composition installs the concrete
+`A05GmailAttachmentLifecycle` from `app.staging.gmail_a05`. It adds no queue,
+materialization model, migration, provider credential,
 OAuth scope, frontend behavior, OCR implementation or AUTO path.
 
 The API now returns an opaque `staging_id` and the existing job identity. The
@@ -28,7 +29,8 @@ Before the provider body read and again at every worker authorization callback,
 - exact organization, requesting owner and current editor-or-higher project access;
 - current message project and tenant;
 - exact connection identity/account, `MailConnection`, credential generation,
-  binding epoch and current mailbox origin binding;
+  binding epoch, current mailbox origin binding and exact mailbox authority
+  version;
 - exact message `SourceReference` and current immutable `SourceVersion` resolved
   by the mailbox cutover runtime;
 - current `primary_read` and `actions` rollout flags plus their record version;
