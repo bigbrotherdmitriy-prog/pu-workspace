@@ -1,7 +1,7 @@
 # PU Workspace v5.4 — process-fault gaps S07/S08
 
-Дата: 2026-09-04  
-База: `f869319e226d0563d9c95eec408adcf716ed7e9f`  
+Дата: 2026-09-04
+База: `f869319e226d0563d9c95eec408adcf716ed7e9f`
 Ветка: `codex/v54-wave3-fault-gaps`
 
 ## Результат
