@@ -115,9 +115,11 @@ class Harness:
         self.reviewer = self.requester.model_copy(update={"actor": ObjectRef.model_validate(ref("user", 3))})
         self.mutation = SyntheticTaskMutation()
 
-    def claim(self, anchor=101, revision_number=1, due_date="2026-09-10", confirm=True):
+    def claim(self, anchor=101, revision_number=1, due_date="2026-09-10", confirm=True,
+              due_time=None, timezone="Europe/Moscow", evidence_id=16):
         value = DeadlineClaimInput(anchor=ref("deadline_claim", uid(anchor)), revision=revision_number,
-            message=ref("message", 6), due_date=due_date, timezone="Europe/Moscow", evidence=[pin("evidence", uid(16))])
+            message=ref("message", 6), due_date=due_date, due_time=due_time,
+            timezone=timezone, evidence=[pin("evidence", uid(evidence_id))])
         result = self.claims.extract(self.db, scope=self.requester, claim=value)
         if confirm:
             self.claims.review(self.db, scope=self.reviewer,

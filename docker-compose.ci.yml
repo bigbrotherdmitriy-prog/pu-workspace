@@ -5,7 +5,7 @@
 # The caller must clear inherited values of the five CI variables before loading
 # the env file: shell variables take precedence over --env-file in Compose.
 # Never publish `compose config` output containing resolved secrets; use config -q.
-# Apply migrations separately before starting backend (expected head: a54f001c0a08).
+# Apply migrations separately before starting backend (expected head: a54f001c0a09).
 services:
   db:
     image: postgres:16-alpine

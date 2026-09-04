@@ -1,5 +1,5 @@
 """Task-owned deadline assertions. Never creates Task, approval or queue job."""
-from datetime import date
+from datetime import date, time
 
 from sqlalchemy import select
 
@@ -47,6 +47,7 @@ class DeadlineClaims:
         existing = next((r for r in rows if r.revision == claim.revision), None)
         if existing:
             if (existing.due_date.isoformat() != claim.due_date or existing.timezone != claim.timezone
+                    or (existing.due_time.isoformat() if existing.due_time is not None else None) != claim.due_time
                     or existing.evidence_pins != pins):
                 raise TrustConflict("claim_revision_conflict")
             return revision(claim.anchor, claim.revision)  # Never resets human review.
@@ -55,6 +56,7 @@ class DeadlineClaims:
         row = DeadlineClaim(id=claim.anchor.id.value, organization_id=int(scope.tenant.value),
                             revision=claim.revision, message_id=int(claim.message.id.value),
                             due_date=date.fromisoformat(claim.due_date), timezone=claim.timezone,
+                            due_time=time.fromisoformat(claim.due_time) if claim.due_time is not None else None,
                             evidence_pins=pins, verification="unverified", record_version=1,
                             provenance={"kind": "task_claim_input", "actor_ref": scope.actor.model_dump(mode="json")})
         db.add(row)

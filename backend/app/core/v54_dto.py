@@ -4,12 +4,36 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import date
+from datetime import date, time
 from typing import Literal
 
 from pydantic import StrictBool, StrictInt, StrictStr, model_validator
 
 from app.core.v54_refs import ObjectRef, StrictDTO, VersionPin, require_same_tenant
+
+
+_FIXED_UTC_OFFSET = re.compile(r"UTC(?P<sign>[+-])(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2})")
+_CANONICAL_LOCAL_TIME = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]")
+
+
+def validate_deadline_precision(*, due_date: str, due_time: str | None, timezone: str) -> None:
+    """Validate the additive exact-time claim without weakening date-only claims."""
+    if date.fromisoformat(due_date).isoformat() != due_date:
+        raise ValueError("invalid deadline date")
+    fixed = _FIXED_UTC_OFFSET.fullmatch(timezone)
+    if timezone not in {"Europe/Moscow", "UTC"} and fixed is None:
+        raise ValueError("unsupported deadline timezone")
+    if fixed is not None:
+        hour, minute = int(fixed.group("hour")), int(fixed.group("minute"))
+        if hour > 14 or minute > 59 or (hour == 14 and minute != 0) or (hour == 0 and minute == 0):
+            raise ValueError("invalid deadline UTC offset")
+    if due_time is not None:
+        if _CANONICAL_LOCAL_TIME.fullmatch(due_time) is None:
+            raise ValueError("deadline time must be canonical HH:MM:SS")
+        if time.fromisoformat(due_time).isoformat() != due_time:
+            raise ValueError("invalid deadline time")
+        if timezone == "Europe/Moscow":
+            raise ValueError("exact deadline time requires an explicit UTC offset")
 
 
 def canonical_json(value) -> str:
@@ -146,14 +170,20 @@ class DeadlineClaimInput(StrictDTO):
     revision: StrictInt
     message: ObjectRef
     due_date: StrictStr
-    timezone: Literal["Europe/Moscow", "UTC"]
+    timezone: StrictStr
     evidence: tuple[VersionPin, ...]
+    # Null preserves the original date-only contract. Non-null is exact local
+    # wall-clock time; timezone must carry UTC or an explicit UTC offset.
+    due_time: StrictStr | None = None
     # Human review is a separate command; extraction cannot set verification.
     @model_validator(mode="after")
     def validate_claim(self):
         require_same_tenant(self.anchor.tenant_id, self.message, *(p.ref for p in self.evidence))
+        validate_deadline_precision(
+            due_date=self.due_date, due_time=self.due_time, timezone=self.timezone,
+        )
         if (self.anchor.type != "deadline_claim" or self.message.type != "message" or self.revision <= 0
                 or not self.evidence or any(p.ref.type != "evidence" or p.version_kind != "revision" for p in self.evidence)
-                or date.fromisoformat(self.due_date).isoformat() != self.due_date):
+                ):
             raise ValueError("invalid deadline claim")
         return self

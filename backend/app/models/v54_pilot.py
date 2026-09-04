@@ -4,11 +4,11 @@ New UUIDs are local pilot identities; existing domain integer keys are unchanged
 Foreign keys prevent cross-tenant source/version bindings. Polymorphic refs and
 legacy domain/project ownership additionally require the server Resolver contract.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time
 from uuid import uuid4
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint,
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Time,
     Index, JSON, PrimaryKeyConstraint, String, UniqueConstraint, Uuid, event, inspect, select, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -200,6 +200,7 @@ class DeadlineClaim(Scoped, Base):
     revision: Mapped[int] = mapped_column(primary_key=True)
     message_id: Mapped[int] = mapped_column(ForeignKey("messages.id", ondelete="RESTRICT"))
     due_date: Mapped[date] = mapped_column(Date)
+    due_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     timezone: Mapped[str] = mapped_column(String(100))
     evidence_pins: Mapped[list] = mapped_column(JSON)
     provenance: Mapped[dict] = mapped_column(JSON)
@@ -514,7 +515,7 @@ for _model in (ConnectionIdentity, MailConnection, SourceReference, SourceVersio
 
 def _validate_insert(mapper, connection, target):
     """Server structural checks. ACL and live-version checks remain resolver-owned."""
-    from app.core.v54_dto import ActionEnvelope, canonical_hash
+    from app.core.v54_dto import ActionEnvelope, canonical_hash, validate_deadline_precision
     from app.core.v54_refs import ObjectRef, TaggedId, VersionPin, require_same_tenant
 
     tenant = TaggedId(kind="int", value=str(target.organization_id))
@@ -545,6 +546,12 @@ def _validate_insert(mapper, connection, target):
         pins = [VersionPin.model_validate(p) for p in target.evidence_pins]
         if not pins or any(p.ref.type != "evidence" or p.version_kind != "revision" for p in pins):
             raise ValueError("evidence_pins_required")
+    if isinstance(target, DeadlineClaim):
+        validate_deadline_precision(
+            due_date=target.due_date.isoformat(),
+            due_time=target.due_time.isoformat() if target.due_time is not None else None,
+            timezone=target.timezone,
+        )
     if isinstance(target, ContextRelation):
         expected_type = {"communication.project": "project", "communication.contract": "contract",
                          "communication.task": "task", "communication.draft": "response_draft"}[target.relation_type]

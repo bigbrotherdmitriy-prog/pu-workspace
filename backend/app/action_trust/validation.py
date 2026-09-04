@@ -66,6 +66,10 @@ def live_pins(db, *, guards, scope, envelope, action, operation):
             or claim.evidence_pins != [p.model_dump(mode="json") for p in e.evidence]):
         raise TrustConflict("claim_unverified_or_changed")
     if isinstance(e.payload, CreateTaskPayload):
+        # The current Task mutation contract is date-only. Never silently
+        # truncate an exact DeadlineClaim time while sealing an action.
+        if claim.due_time is not None:
+            raise TrustConflict("claim_precision_unsupported")
         if e.payload.due_date != claim.due_date.isoformat() or e.payload.timezone != claim.timezone:
             raise TrustConflict("claim_payload_mismatch")
         guards.allow(db, scope, "task.assign", e.payload.assignee_ref)

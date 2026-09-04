@@ -21,7 +21,7 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
-HEAD = "a54f001c0a08"
+HEAD = "a54f001c0a09"
 DATABASES = ("puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime")
 PHASES: list[dict] = []
 CREATED: list[str] = []
@@ -146,9 +146,8 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "runtime": runtime,
         "corpus": {
             "structural": "PASS" if any(p["name"] == "corpus" and p["exit"] == 0 for p in PHASES) else "FAIL",
-            "executed_cases": ["C01", "P02", "P06", "S02", "S06", "S07", "S08", "S09"],
+            "executed_cases": ["C01", "C07", "P02", "P06", "S02", "S06", "S07", "S08", "S09"],
             "expected_gaps": {
-                "C07": "time-of-day claim unsupported",
                 "S10": "external UNKNOWN remains fake-contract only",
                 "P04": "finance outside pilot",
             },

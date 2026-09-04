@@ -222,7 +222,7 @@ def test_a08_is_single_head_and_renders_safety_constraints(monkeypatch):
     output = StringIO()
     config = Config(str(BACKEND / "alembic.ini"), output_buffer=output)
     config.set_main_option("script_location", str(BACKEND / "migrations"))
-    assert ScriptDirectory.from_config(config).get_heads() == ["a54f001c0a08"]
+    assert ScriptDirectory.from_config(config).get_heads() == [CURRENT_SCHEMA_REVISION]
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",

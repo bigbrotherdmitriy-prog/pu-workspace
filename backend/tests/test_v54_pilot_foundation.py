@@ -193,7 +193,11 @@ def test_claim_extraction_cannot_set_review_or_omit_evidence():
     values = dict(anchor=ref("deadline_claim", uid(17)), revision=1, message=ref("message", 6),
                   due_date="2026-09-10", timezone="Europe/Moscow", evidence=[pin("evidence", uid(16))])
     DeadlineClaimInput(**values)
-    for change in [{"verification":"confirmed"}, {"evidence":[]}, {"due_date":"next Friday"}]:
+    DeadlineClaimInput(**{**values, "due_time": "18:30:00", "timezone": "UTC+03:00"})
+    for change in [{"verification":"confirmed"}, {"evidence":[]}, {"due_date":"next Friday"},
+                   {"due_time":"18:30"}, {"due_time":"18:30:00", "timezone":"UTC+03"},
+                   {"due_time":"18:30:00", "timezone":"UTC+14:30"},
+                   {"due_time":"18:30:00", "timezone":"Europe/Moscow"}]:
         with pytest.raises(ValueError):
             DeadlineClaimInput(**{**values, **change})
 
@@ -429,7 +433,7 @@ def test_downgrade_refuses_to_erase_pilot_history(db):
 
 def test_single_head_and_postgresql_offline_migration(monkeypatch):
     heads = ScriptDirectory.from_config(migration_config()).get_heads()
-    assert heads == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a08"]
+    assert heads == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a09"]
     # Explicit synthetic URL, offline only: never inherit DATABASE_URL.
     monkeypatch.setenv("DATABASE_URL","postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline")
     buf = StringIO()
