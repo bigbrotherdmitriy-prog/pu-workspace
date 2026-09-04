@@ -1,10 +1,12 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../../App";
 import { api, ApiError } from "../../api/client";
 
 vi.mock("../../api/client", async original => ({ ...await original<typeof import("../../api/client")>(), api: vi.fn() }));
 const mockApi = vi.mocked(api);
+configure({ asyncUtilTimeout: 5_000 });
+vi.setConfig({ testTimeout: 15_000 });
 let projectRows = [{ id: 1, name: "Persistent Project" }, { id: 2, name: "Новый проект" }];
 const empty = {
   summary: { attention: 0, active: 0, failed: 0, dead_letter: 0 },

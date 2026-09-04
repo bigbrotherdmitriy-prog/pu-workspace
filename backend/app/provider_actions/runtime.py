@@ -69,27 +69,42 @@ class ProviderActionRuntime:
         self.sessions, self.adapter, self.authority, self.clock = sessions, adapter, authority, clock
 
     def freeze(self, envelope: ActionEnvelope, *, actor_id: str, correlation_id: str):
+        with self.sessions.begin() as db:
+            return self.freeze_in_session(
+                db, envelope, actor_id=actor_id, correlation_id=correlation_id,
+                clock=self.clock,
+            )
+
+    @classmethod
+    def freeze_in_session(cls, db, envelope: ActionEnvelope, *, actor_id: str,
+                          correlation_id: str,
+                          clock=lambda: datetime.now(timezone.utc)):
+        """Freeze through the shared ledger inside a caller-owned transaction.
+
+        Product proposal endpoints use this entry point so drafting a protected
+        application record and sealing its action remain one atomic operation.
+        It deliberately does not approve, enqueue, dispatch, or touch a provider.
+        """
         if not isinstance(envelope, ActionEnvelope):
             raise ProviderActionError("invalid_envelope")
-        with self.sessions.begin() as db:
-            existing = db.get(ProviderAction, (envelope.action_id, envelope.revision))
-            if existing is not None:
-                if self._envelope(existing) != envelope:
-                    raise ProviderActionError("command_conflict")
-                return envelope
-            self._require_relation(db, envelope)
-            values = asdict(envelope)
-            values["evidence_pins"] = list(envelope.evidence_pins)
-            row = ProviderAction(
-                **values,
-                envelope_hash=envelope.envelope_hash, state="FROZEN", created_by=actor_id,
-                created_at=self.clock(),
-            )
-            db.add(row)
-            self._audit(db, "action_frozen", envelope.action_id, envelope.revision,
-                        actor_id, correlation_id, envelope_hash=envelope.envelope_hash)
-            db.flush()
+        existing = db.get(ProviderAction, (envelope.action_id, envelope.revision))
+        if existing is not None:
+            if cls._envelope(existing) != envelope:
+                raise ProviderActionError("command_conflict")
             return envelope
+        cls._require_relation(db, envelope)
+        values = asdict(envelope)
+        values["evidence_pins"] = list(envelope.evidence_pins)
+        row = ProviderAction(
+            **values,
+            envelope_hash=envelope.envelope_hash, state="FROZEN", created_by=actor_id,
+            created_at=clock(),
+        )
+        db.add(row)
+        cls._audit(db, "action_frozen", envelope.action_id, envelope.revision,
+                   actor_id, correlation_id, envelope_hash=envelope.envelope_hash)
+        db.flush()
+        return envelope
 
     def approve(self, action_id: str, revision: int, *, approval_id: str, actor_id: str,
                 expires_at: datetime, correlation_id: str):
@@ -348,20 +363,28 @@ class ProviderActionRuntime:
             outbox.job_id = job_id
         return row, approval, outbox
 
-    def _require_relation(self, db, envelope):
+    @staticmethod
+    def _require_relation(db, envelope):
         if not envelope.relation_kind:
             return
-        original = db.scalar(select(ProviderAction).where(
+        originals = list(db.scalars(select(ProviderAction).where(
             ProviderAction.action_id == envelope.relation_action_id,
-            ProviderAction.organization_id == envelope.organization_id))
-        latest = self._latest(db, original.action_id, original.revision) if original else None
+            ProviderAction.organization_id == envelope.organization_id)))
+        # a06 has no relation_action_revision column. Refuse an ambiguous
+        # relation instead of silently selecting one of several revisions.
+        original = originals[0] if len(originals) == 1 else None
+        latest = ProviderActionRuntime._latest(
+            db, original.action_id, original.revision,
+        ) if original else None
         required = {
             "ROLLBACK": ("REVERSIBLE", "synthetic.effect.rollback"),
             "COMPENSATION": ("COMPENSATABLE", "synthetic.effect.compensate"),
             "CORRECTIVE": ("IRREVERSIBLE", "synthetic.effect.corrective"),
         }[envelope.relation_kind]
         if (not original or not latest or latest.outcome != "APPLIED"
+                or original.state != "APPLIED"
                 or original.project_id != envelope.project_id or original.mailbox_key != envelope.mailbox_key
+                or original.evidence_pins != list(envelope.evidence_pins)
                 or original.reversibility != required[0] or envelope.action_kind != required[1]
                 or (envelope.relation_kind == "CORRECTIVE" and original.action_kind != "synthetic.effect.send")):
             raise ProviderActionError("relation_invalid")

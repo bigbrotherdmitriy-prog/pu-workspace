@@ -36,6 +36,10 @@ from app.task_engine import create_tasks_from_files
 from app.integrations.external_resources import external_id_for
 from app.integrations.actions import configured_action_adapter
 from app.daily_briefing import build_daily_briefing
+from app.provider_actions.email_compensation import (
+    describe_email_compensation,
+    unavailable_email_compensation,
+)
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
 
@@ -148,8 +152,16 @@ def project_candidate(db: Session, fallback_project_id: int, content: str, user:
     return fallback_project_id, 0.55, "Проект по содержанию не определён; требуется подтверждение"
 
 
-def _message_payload(db: Session, row: Message, action_provider: str | None = None) -> dict:
+def _message_payload(db: Session, row: Message, action_provider: str | None = None,
+                     actor: User | None = None) -> dict:
     action_provider = action_provider or configured_action_adapter(row.project_id, db).provider
+    actor_role = db.scalar(select(ProjectMember.role).where(
+        ProjectMember.project_id == row.project_id,
+        ProjectMember.user_id == actor.id,
+    )) if actor is not None and not actor.is_admin else None
+    can_prepare_external_action = bool(
+        actor is not None and (actor.is_admin or actor_role in {"manager", "owner"})
+    )
     tasks = list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
     drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
     risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
@@ -219,7 +231,14 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         "status": row.status, "created_at": row.created_at,
         "tasks": task_payloads,
         "drafts": [{"id": draft.id, "subject": draft.subject, "body": draft.body,
-                    "status": draft.status, "confidence": draft.confidence} for draft in drafts],
+                    "status": draft.status, "confidence": draft.confidence,
+                    "is_corrective_follow_up": draft.source_file_name == "corrective-follow-up",
+                    "email_compensation": (
+                        describe_email_compensation(db, draft)
+                        if draft.status == "sent" and can_prepare_external_action
+                        else unavailable_email_compensation()
+                        if draft.status == "sent" else None
+                    )} for draft in drafts],
         "risks": [{"id": risk.id, "title": risk.title, "criticality": risk.criticality,
                    "status": risk.status, "confidence": risk.confidence,
                    "source_excerpt": risk.source_excerpt} for risk in risks],
@@ -281,7 +300,7 @@ def inbox(project_id: int, db: Session = Depends(get_db), user: User = Depends(r
         Message.project_id.in_(accessible_project_ids),
         (Message.project_id == project_id) | (Message.context_confirmed.is_(False)),
     ).order_by(Message.created_at.desc(), Message.id.desc()).limit(200)))
-    return {"messages": [_message_payload(db, row) for row in rows], "count": len(rows)}
+    return {"messages": [_message_payload(db, row, actor=user) for row in rows], "count": len(rows)}
 
 
 @router.patch("/inbox/{message_id}/status")
@@ -294,7 +313,7 @@ def update_message_status(message_id: int, payload: MessageStatusUpdate, db: Ses
     db.add(AuditLog(action="message_status_updated", entity_type="message", entity_id=row.id,
                     details=f"status={payload.status}"))
     db.commit(); db.refresh(row)
-    return _message_payload(db, row)
+    return _message_payload(db, row, actor=user)
 
 
 def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox_origin=None) -> dict:
@@ -313,7 +332,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox
         require_project_role(db, user, existing.project_id, "editor")
         if existing.organization_id != project.organization_id:
             raise HTTPException(409, "Message identity requires mailbox-scoped reconciliation")
-        return _message_payload(db, existing)
+        return _message_payload(db, existing, actor=user)
     if payload.routing_contract_id is not None:
         contract = db.get(Contract, payload.routing_contract_id)
         if contract is None or contract.project_id != payload.project_id:
@@ -378,7 +397,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox
     db.add(AuditLog(action="message_processed", entity_type="message", entity_id=row.id,
                     details=f"source={row.source_type}; tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}; context={confidence:.0%}"))
     db.commit(); db.refresh(row)
-    return _message_payload(db, row)
+    return _message_payload(db, row, actor=user)
 
 
 @router.post("/inbox/{message_id}/completion-suggestions/{suggestion_id}")
@@ -455,7 +474,7 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
     db.add(AuditLog(action="message_context_confirmed", entity_type="message", entity_id=row.id,
                     details=f"project={row.project_id}; contract={row.contract_id or 'none'}"))
     db.commit(); db.refresh(row)
-    return _message_payload(db, row)
+    return _message_payload(db, row, actor=user)
 
 
 @router.post("/inbox/confirm-context-bulk")

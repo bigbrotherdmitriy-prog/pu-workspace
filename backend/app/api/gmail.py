@@ -384,6 +384,8 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     if draft is None:
         raise HTTPException(404, "Response draft not found")
     require_project_role(db, user, draft.project_id, "manager")
+    if draft.source_file_name == "corrective-follow-up":
+        raise HTTPException(409, "Corrective follow-up requires separate CONFIRM provider action")
     source = db.get(Message, draft.message_id) if draft.message_id else None
     try:
         mailbox = runtime_for_message(db, source, actor=user, action=True) if source is not None else None

@@ -18,6 +18,7 @@ import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/c
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
+import { EmailCompensationCard, type EmailCompensationOffer } from "./modules/inbox/EmailCompensationCard";
 import { EvidencePanel, type EvidenceRef } from "./modules/evidence/EvidencePanel";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
@@ -253,6 +254,8 @@ type InboxDraft = {
   body: string;
   status: string;
   confidence: number;
+  is_corrective_follow_up?: boolean;
+  email_compensation?: EmailCompensationOffer | null;
 };
 type InboxRisk = {
   id: number;
@@ -1487,6 +1490,19 @@ export function App() {
           ? "Это письмо уже было отправлено ранее"
           : "Ответ отправлен через Gmail и записан в аудит",
       );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function proposeEmailCompensation(draft: InboxDraft, offer: EmailCompensationOffer) {
+    if (!offer.source_etag) return;
+    try {
+      await api(`/response-drafts/${draft.id}/email-compensation/proposals`, {
+        method: "POST",
+        body: JSON.stringify({ expected_source_etag: offer.source_etag }),
+      });
+      setNotice("Корректирующий ответ подготовлен как черновик. Отправка требует отдельного подтверждения.");
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -3280,7 +3296,13 @@ export function App() {
                               ? "Отклонён"
                               : "Черновик — не отправлен"}
                         </span>
-                        {draft.status === "draft" && (
+                        {draft.status === "sent" && (
+                          <EmailCompensationCard
+                            offer={draft.email_compensation || undefined}
+                            onPropose={(offer) => proposeEmailCompensation(draft, offer)}
+                          />
+                        )}
+                        {draft.status === "draft" && !draft.is_corrective_follow_up && (
                           <div className="draft-actions">
                             <button
                               onClick={() =>
