@@ -9,6 +9,7 @@ import app.models  # noqa: F401
 from app.daily_briefing import build_daily_briefing
 from app.database import Base
 from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleBaseline, ScheduleItem
+from app.models.governance import Decision
 from app.models.organization_contract import Contract
 from app.models.ai_secretary import Message
 from app.models.management import Obligation
@@ -237,3 +238,61 @@ def test_daily_briefing_excludes_stale_draft_linked_to_filtered_message():
 
         assert result["summary"]["drafts_waiting_approval"] == 0
         assert not any(row["kind"] == "draft" for row in result["attention"])
+
+
+def test_daily_briefing_only_counts_actionable_communication_drafts():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            ResponseDraft(
+                project_id=17, reviewer_user_id=1, subject="Ответ по документу", body="Черновик",
+                status="draft", source_file_id="drive-file-1", source_file_name="Договор.pdf",
+                source_excerpt="Фрагмент договора", source_excerpt_hash="d" * 64, confidence=0.8,
+            ),
+            ResponseDraft(
+                project_id=17, reviewer_user_id=1, subject="Ежемесячное письмо", body="Черновик",
+                status="draft", source_file_id="automation:1:2026-09-01", source_file_name="Регламент",
+                source_excerpt="Подготовить письмо", source_excerpt_hash="e" * 64, confidence=1.0,
+            ),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 17, today=date(2026, 8, 30))
+
+        assert result["summary"]["drafts_waiting_approval"] == 1
+        drafts = [row for row in result["attention"] if row["kind"] == "draft"]
+        assert [row["title"] for row in drafts] == ["Ежемесячное письмо"]
+
+
+def test_daily_briefing_hides_legacy_forwarding_noise_and_deduplicates_decisions():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            Decision(
+                project_id=18, initiator_user_id=1, question="Направляю КС на согласование.",
+                status="needs_confirmation", source_type="email", source_id="message:1",
+                source_name="Re: КС", source_excerpt="Направляю КС на согласование.",
+                source_hash="f" * 64, confidence=0.8,
+            ),
+            Decision(
+                project_id=18, initiator_user_id=1, question="Нужно утвердить график платежей.",
+                status="needs_confirmation", source_type="document_analysis", source_id="file:1",
+                source_name="План.xlsx", source_excerpt="Нужно утвердить график платежей.",
+                source_hash="1" * 64, confidence=0.8,
+            ),
+            Decision(
+                project_id=18, initiator_user_id=1, question="Нужно утвердить график платежей.",
+                status="needs_confirmation", source_type="document_analysis", source_id="file:2",
+                source_name="Копия плана.xlsx", source_excerpt="Нужно утвердить график платежей.",
+                source_hash="2" * 64, confidence=0.8,
+            ),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 18, today=date(2026, 8, 30))
+
+        assert result["summary"]["pending_decisions"] == 1
+        decisions = [row for row in result["attention"] if row["kind"] == "decision"]
+        assert [row["title"] for row in decisions] == ["Нужно утвердить график платежей."]

@@ -13,6 +13,7 @@ from app.models.response_draft import ResponseDraft
 from app.models.task import Task, TaskDueDateHistory
 from app.models.organization_contract import Contract
 from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleBaseline, ScheduleItem
+from app.governance_engine import DECISION_RE
 from app.task_engine import extract_explicit_due_date
 
 
@@ -108,10 +109,11 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Подтвердить риск и назначить действие",
         })
 
-    pending_decisions = _unique(
-        [row for row in decisions if row.status in {"needs_confirmation", "confirmed", "decided"}],
-        "source_name", "source_excerpt", "question",
-    )
+    pending_decisions = _unique([
+        row for row in decisions
+        if row.status in {"needs_confirmation", "confirmed", "decided"}
+        and DECISION_RE.search(row.question or "")
+    ], "question")
     for row in pending_decisions:
         attention.append({
             "kind": "decision", "entity_id": row.id, "priority": "high",
@@ -123,7 +125,13 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
     waiting_drafts = _unique(
         [
             row for row in drafts
-            if row.status == "draft" and row.message_id not in filtered_message_ids
+            if row.status == "draft"
+            and row.message_id not in filtered_message_ids
+            and (
+                row.message_id is not None
+                or row.source_file_id.startswith("automation:")
+                or row.source_file_id.startswith("contact:")
+            )
         ],
         "source_file_name", "source_excerpt", "subject",
     )
