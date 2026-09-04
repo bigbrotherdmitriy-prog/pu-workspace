@@ -5,6 +5,7 @@ on:
     branches:
       - 'codex/v54-final-integration'
       - 'codex/v54-wave2-integration'
+      - 'codex/v54-wave3-integration'
   workflow_dispatch:
 
 permissions:

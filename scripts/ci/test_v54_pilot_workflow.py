@@ -25,6 +25,7 @@ def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
     triggers = parsed.get("on", parsed.get(True))
     assert triggers["push"]["branches"] == [
         "codex/v54-final-integration", "codex/v54-wave2-integration",
+        "codex/v54-wave3-integration",
     ]
     assert "workflow_dispatch:" in text and "pull_request:" not in text
     assert "persist-credentials: false" in text

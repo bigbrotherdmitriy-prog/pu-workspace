@@ -8,7 +8,10 @@ ROOT = Path(__file__).resolve().parents[3]
 def test_final_candidate_push_is_branch_scoped_and_read_only():
     workflow = yaml.safe_load((ROOT / ".github/workflows/durable-queue.yml").read_text())
     triggers = workflow.get("on", workflow.get(True))
-    assert triggers["push"]["branches"] == ["codex/parallel-validation-final"]
+    assert triggers["push"]["branches"] == [
+        "codex/parallel-validation-final",
+        "codex/v54-wave3-integration",
+    ]
     assert workflow["permissions"] == {"contents": "read"}
     assert "pull_request" in triggers and "workflow_dispatch" in triggers
     assert workflow["jobs"]["recovery"]["timeout-minutes"] <= 30
@@ -49,4 +52,13 @@ def test_unconditional_cleanup_precedes_artifact():
     assert steps[-2]["if"] == "always()"
     assert "cleanup.py" in steps[-2]["run"]
     assert steps[-1]["if"] == "always()"
-    assert steps[-1]["with"]["path"] == "queue-artifacts/*.json"
+    assert steps[-1]["with"]["path"].splitlines() == [
+        "queue-artifacts/protocol.json",
+        "queue-artifacts/fallback-cleanup.json",
+    ]
+
+
+def test_runtime_protocol_never_records_command_arguments():
+    runner = (ROOT / "scripts/ci/durable_queue/run.py").read_text()
+    assert '"command": args' not in runner
+    assert '"operation": safe_operation(args)' in runner

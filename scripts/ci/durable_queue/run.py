@@ -20,6 +20,28 @@ ROOT = Path(__file__).resolve().parents[3]
 EVENTS = []
 
 
+def safe_operation(args):
+    """Return an allowlisted coarse operation without paths or arguments."""
+    if not args:
+        return "unknown"
+    executable = Path(str(args[0])).name.lower()
+    if executable in {"git", "git.exe"}:
+        return "git_metadata"
+    if executable not in {"docker", "docker.exe"}:
+        return "subprocess"
+    if len(args) > 1 and args[1] == "compose":
+        allowed = {
+            "config", "cp", "down", "exec", "kill", "logs", "restart",
+            "run", "stop", "up",
+        }
+        action = next((str(item) for item in args[2:] if item in allowed), "other")
+        return "compose_" + action
+    action = str(args[1]) if len(args) > 1 and args[1] in {
+        "build", "network", "ps", "volume",
+    } else "other"
+    return "docker_" + action
+
+
 def safe_failure(stdout, stderr):
     """Emit only allowlisted classifications, never provider/document/log text.
 
@@ -55,7 +77,8 @@ def main():
     def command(args, *, timeout=120, data=None, expected=0):
         start = time.monotonic()
         r = subprocess.run(args, input=data, capture_output=True, env=env, cwd=ROOT, timeout=timeout)
-        EVENTS.append({"command": args, "exit": r.returncode, "seconds": round(time.monotonic()-start, 2)})
+        EVENTS.append({"operation": safe_operation(args), "exit": r.returncode,
+                       "seconds": round(time.monotonic()-start, 2)})
         if r.returncode != expected:
             EVENTS[-1]["failure"] = safe_failure(r.stdout, r.stderr)
             raise RuntimeError("command failed; raw output withheld")

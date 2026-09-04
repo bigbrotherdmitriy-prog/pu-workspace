@@ -10,6 +10,23 @@ import os
 import pytest
 
 
+def test_command_diagnostics_use_only_coarse_allowlisted_operations():
+    spec = importlib.util.spec_from_file_location("queue_operation_review", Path(__file__).with_name("run.py"))
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+
+    assert runtime.safe_operation(["git", "rev-parse", "HEAD"]) == "git_metadata"
+    assert runtime.safe_operation([
+        "docker", "compose", "--project-name", "synthetic", "--env-file",
+        "sensitive-path", "exec", "api1", "python", "-c", "sensitive-code",
+    ]) == "compose_exec"
+    assert runtime.safe_operation(["docker", "build", "--secret", "sensitive"]) == "docker_build"
+    assert "sensitive" not in json.dumps([
+        runtime.safe_operation(["docker", "build", "--secret", "sensitive"]),
+        runtime.safe_operation(["unknown-tool", "sensitive"]),
+    ])
+
+
 def test_stdin_context_is_recognizable_with_fractional_mtime(tmp_path, monkeypatch):
     # Buildx peeks 2*512 bytes and calls tar.Reader.Next() unless compression
     # magic is present. A PAX metadata record + its payload fills that window.
