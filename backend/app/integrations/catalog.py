@@ -10,10 +10,18 @@ from app.integrations.telegram import TelegramChannelAdapter
 
 
 GOOGLE_CAPABILITIES = (
-    ("storage", "Google Drive", "Документы и рабочие папки", "https://www.googleapis.com/auth/drive"),
-    ("task", "Google Tasks", "Подтверждённые задачи", "https://www.googleapis.com/auth/tasks"),
-    ("calendar", "Google Calendar", "Сроки и события проекта", "https://www.googleapis.com/auth/calendar.events"),
-    ("channel", "Gmail", "Входящие письма и подтверждаемая отправка", "https://www.googleapis.com/auth/gmail.readonly"),
+    ("storage", "Google Drive", "Документы и рабочие папки", frozenset({"https://www.googleapis.com/auth/drive"})),
+    ("task", "Google Tasks", "Подтверждённые задачи", frozenset({"https://www.googleapis.com/auth/tasks"})),
+    ("calendar", "Google Calendar", "Сроки и события проекта", frozenset({"https://www.googleapis.com/auth/calendar.events"})),
+    (
+        "channel",
+        "Gmail",
+        "Входящие письма и подтверждаемая отправка",
+        frozenset({
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+        }),
+    ),
 )
 
 
@@ -46,17 +54,17 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
             name=name,
             description=description,
             available=google.configured(),
-            connected=google_health.ready and scope in google_scopes,
+            connected=google_health.ready and required_scopes.issubset(google_scopes),
             action=(
-                "sync" if capability == "channel"
-                else "select_source" if capability == "storage" and google_health.ready and scope in google_scopes
+                "sync" if capability == "channel" and google_health.ready and required_scopes.issubset(google_scopes)
+                else "select_source" if capability == "storage" and google_health.ready and required_scopes.issubset(google_scopes)
                 else "oauth"
             ),
-            detail="scope granted" if google_health.ready and scope in google_scopes else (
+            detail="scope granted" if google_health.ready and required_scopes.issubset(google_scopes) else (
                 "authorization required" if google.configured() else "provider is not configured"
             ),
         )
-        for capability, name, description, scope in GOOGLE_CAPABILITIES
+        for capability, name, description, required_scopes in GOOGLE_CAPABILITIES
     ]
 
     telegram = TelegramChannelAdapter().health()
