@@ -15,9 +15,22 @@
   --pu-v4-green-dark: #0b7c52;
   --pu-v4-green-soft: #e5f6ee;
   --pu-v4-shadow: 0 1px 2px rgba(13, 31, 22, .035), 0 10px 32px rgba(13, 31, 22, .055);
+  /* Neutralize the legacy dark token layer for screens not yet componentized. */
+  --pu-v2-bg: #eef2ef;
+  --pu-v2-panel: #ffffff;
+  --pu-v2-panel-raised: #ffffff;
+  --pu-v2-panel-soft: #f7f9f8;
+  --pu-v2-line: #dce4df;
+  --pu-v2-line-strong: #c9d6cf;
+  --pu-v2-text: #16201b;
+  --pu-v2-text-soft: #4f5d55;
+  --pu-v2-muted: #738078;
+  --pu-v2-green: #16a66f;
+  --pu-v2-green-strong: #0b7c52;
+  --pu-v2-green-soft: #e5f6ee;
 }
 
-html, body { background: var(--pu-v4-canvas); }
+html, body, #root { color: var(--pu-v4-text); background: var(--pu-v4-canvas); }
 body {
   color: var(--pu-v4-text);
   background:
