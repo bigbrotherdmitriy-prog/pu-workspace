@@ -38,21 +38,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Scan pnpm lockfile with OSV Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@06b2ab4348248b456ee06c9e953637f55e03504f # v2.5.0
         with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Audit frontend dependencies with bounded retries
-        run: >-
-          python scripts/run_frontend_audit.py
-          --output frontend-audit.json
-          --attempts 3
-          --timeout 60
+          scan-args: |-
+            --format=json
+            --output=frontend-audit.json
+            --lockfile=./frontend/pnpm-lock.yaml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: frontend-dependency-audit
           path: frontend-audit.json
+          if-no-files-found: error
           retention-days: 7
