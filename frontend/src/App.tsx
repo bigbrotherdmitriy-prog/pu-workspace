@@ -13,6 +13,7 @@ import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
+import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
 import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
@@ -978,9 +979,7 @@ export function App() {
     } catch (e) { setError((e as Error).message); }
   }
   async function deleteContract(item: ContractRow) {
-    const confirmation = window.prompt(
-      `Удалить договор «${item.number}»? Исходные документы не удаляются. Введите точный номер договора:`,
-    );
+    const confirmation = requestContractDeletionConfirmation(item.number);
     if (confirmation === null) return;
     try {
       setError("");
@@ -989,7 +988,11 @@ export function App() {
       });
       setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      const message = (e as Error).message;
+      setError(message);
+      window.alert(message);
+    }
   }
   async function openContractControl(contractId: number) {
     try {
