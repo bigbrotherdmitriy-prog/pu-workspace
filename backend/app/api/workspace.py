@@ -3,20 +3,23 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from googleapiclient.discovery import build
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.integrations.google_workspace import credentials_for_project
+from app.integrations.storage import project_storage_connection, storage_for_project, validate_storage_locator
 from app.core.auth import require_project_role, require_user
 from app.database import SessionLocal, get_db
 from app.models.project import Project
 from app.models.user import User
+from app.models.drive_connection import DriveConnection
+from app.models.google_token import GoogleOAuthToken
+from app.models.job import BackgroundJob
 from app.models.workspace import SourceFolder, VirtualNode, WorkspaceSnapshot
 from app.organizer_engine.drive import DriveClient
 from app.organizer_engine.repository import OrganizerRepository
 from app.organizer_engine.planner import build_proposal
 from app.organizer_engine.types import DriveFile
+from app.organizer_engine.content import extract_text
 from app.document_engine import index_documents
 from app.task_engine import create_tasks_from_files
 from app.response_engine import create_response_drafts
@@ -24,8 +27,6 @@ from app.governance_engine import create_governance_items
 
 
 router = APIRouter(prefix="/projects", tags=["virtual-workspace"])
-_analysis_in_progress: set[int] = set()
-_analysis_results: dict[int, dict] = {}
 
 
 class ManagedWorkspaceCreate(BaseModel):
@@ -80,10 +81,115 @@ def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
     return [{"id": "root", "name": "Мой диск"}, *trail]
 
 
+def _storage_breadcrumb(adapter, folder_id: str) -> list[dict[str, str]]:
+    root = ("app:/" if folder_id.startswith("app:/") else "disk:/") if adapter.provider == "yandex_disk" else "root"
+    if folder_id in {root, "root", "/"}:
+        return [{"id": root, "name": "Яндекс Диск" if adapter.provider == "yandex_disk" else "Мой диск"}]
+    trail: list[dict[str, str]] = []
+    current = folder_id
+    visited: set[str] = set()
+    for _ in range(100):
+        if not current or current == root:
+            break
+        if current in visited:
+            raise HTTPException(409, "Storage folder ancestry contains a cycle")
+        visited.add(current)
+        item = adapter.get_object(current)
+        trail.append({"id": item.id, "name": item.name})
+        current = item.parent_id
+    else:
+        raise HTTPException(422, "Storage folder ancestry exceeds 100 levels")
+    trail.reverse()
+    return [{"id": root, "name": "Яндекс Диск" if adapter.provider == "yandex_disk" else "Мой диск"}, *trail]
+
+
+def _selected_connection(project_id, db, provider=None, connection_id=None, *, allow_google_oauth=False):
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    connection = project_storage_connection(project_id, db)
+    if connection is None and allow_google_oauth:
+        # Google OAuth historically stores only a project-scoped token. Browsing
+        # must remain read-only; persist a connection only on explicit confirmation.
+        token = db.scalar(select(GoogleOAuthToken).where(GoogleOAuthToken.project_id == project_id))
+        if token is not None and token.access_token:
+            connection = DriveConnection(project_id=project_id, provider="google_drive",
+                                         connection_id=f"google-token:{token.id}", account_email="",
+                                         root_folder_id="root", status="connected")
+    if connection is None or connection.status == "disconnected":
+        raise HTTPException(409, "Configure storage for this project before selecting a folder")
+    canonical = lambda value: "google_drive" if value == "google_workspace" else value
+    if provider is not None and canonical(provider) != canonical(connection.provider):
+        raise HTTPException(409, "Storage provider changed; reopen folder selection")
+    if connection_id is not None and connection_id != connection.connection_id:
+        raise HTTPException(409, "Storage connection changed; reopen folder selection")
+    return connection
+
+
+def _binding(connection, external_id):
+    return {"project_id": connection.project_id, "provider": connection.provider,
+            "connection_id": connection.connection_id, "connection_row_id": connection.id,
+            "folder_id": external_id}
+
+
+def _locked_snapshot(db, snapshot_id):
+    return db.scalar(select(WorkspaceSnapshot).where(WorkspaceSnapshot.id == snapshot_id).with_for_update())
+
+
+def _active_snapshot_job(db, snapshot_id, project_id):
+    return db.scalar(select(BackgroundJob).where(
+        BackgroundJob.kind.in_(("workspace.snapshot", "workspace.analysis", "workspace.safe_copy")),
+        BackgroundJob.status.in_(("queued", "running", "retrying")),
+        BackgroundJob.payload["snapshot_id"].as_integer() == snapshot_id,
+        BackgroundJob.payload["project_id"].as_integer() == project_id,
+    ).order_by(BackgroundJob.id).limit(1))
+
+
+def _require_idle_snapshot(db, snapshot_id, project_id):
+    if _active_snapshot_job(db, snapshot_id, project_id) is not None:
+        raise HTTPException(409, "Snapshot already has queued, running or retrying work; wait for completion")
+
+
+def _validate_snapshot_target(db, snapshot, project_id, external_id=None):
+    if snapshot is None or snapshot.project_id != project_id:
+        raise HTTPException(409, "Snapshot does not belong to the requested project")
+    source = db.get(SourceFolder, snapshot.source_folder_id)
+    if source is None or source.project_id != project_id or (external_id is not None and source.external_id != external_id):
+        raise HTTPException(409, "Snapshot source does not match the requested project and folder")
+    pinned = (snapshot.analysis_result or {}).get("storage_binding")
+    if pinned:
+        connection = _selected_connection(project_id, db)
+        canonical = lambda value: "google_drive" if value == "google_workspace" else value
+        if (pinned != _binding(connection, source.external_id)
+                or canonical(source.provider) != canonical(connection.provider)):
+            raise HTTPException(409, "Snapshot storage connection changed; reconnect the original connection")
+    return source
+
+
+def _populate_content(adapter, items: list[DriveFile]) -> tuple[int, int]:
+    if hasattr(adapter, "populate_content"):
+        return adapter.populate_content(items)
+    extracted = failed = 0
+    for item in items:
+        if item.is_folder:
+            continue
+        try:
+            raw, mime = adapter.read_bytes(item.id, 4 * 1024 * 1024)
+            item.content_text = extract_text(raw, mime, item.name)
+            extracted += int(bool(item.content_text))
+        except Exception:
+            failed += 1
+    return extracted, failed
+
+
 def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, source_folder_id: str, raise_errors: bool = False) -> None:
     """Organize one explicitly selected folder copy and mirror its result on the snapshot."""
     from app.organizer import _scan_worker
 
+    with SessionLocal() as check_db:
+        _validate_snapshot_target(check_db, check_db.get(WorkspaceSnapshot, snapshot_id), project_id, source_folder_id)
+        session = OrganizerRepository(check_db).get_session(session_id)
+        if session is None or session["project_id"] != project_id or session["source_folder_id"] != source_folder_id:
+            raise HTTPException(409, "Organizer session does not match the snapshot target")
     _scan_worker(session_id, project_id, source_folder_id, auto_apply=True, raise_errors=raise_errors)
     db = SessionLocal()
     try:
@@ -95,8 +201,9 @@ def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, 
         proposal = repo.proposal_for_session(session_id)
         succeeded = session["status"] in {"proposed", "applied"}
         snapshot.analysis_status = "ready" if succeeded else "failed"
-        snapshot.analysis_error = None if succeeded else (session["error_message"] or "Safe-copy organization failed")
+        snapshot.analysis_error = None if succeeded else "Safe-copy organization failed. Verify the selected connection and retry."
         snapshot.analysis_result = {
+            "storage_binding": (snapshot.analysis_result or {}).get("storage_binding"),
             "mode": "safe_copy",
             "organizer_session_id": session_id,
             "proposal_id": proposal["id"] if proposal else None,
@@ -116,31 +223,42 @@ def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_i
     """Idempotently queue copy creation, content analysis and high-confidence renaming."""
     db = SessionLocal()
     try:
-        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+        snapshot = _locked_snapshot(db, snapshot_id)
         if snapshot is None:
             return None
+        _validate_snapshot_target(db, snapshot, project_id, source_folder_id)
+        queued = db.scalar(select(BackgroundJob).where(
+            BackgroundJob.idempotency_key == f"workspace.safe_copy:{snapshot_id}"))
+        if queued is not None:
+            payload = queued.payload or {}
+            session_id = payload.get("session_id")
+            session = OrganizerRepository(db).get_session(session_id) if session_id is not None else None
+            if (payload.get("project_id") != project_id or payload.get("source_folder_id") != source_folder_id
+                    or session is None or session["project_id"] != project_id or session["source_folder_id"] != source_folder_id):
+                raise HTTPException(409, "Existing safe-copy job does not match the snapshot target")
+            return int(session_id)
         existing = snapshot.analysis_result or {}
         if existing.get("organizer_session_id"):
-            return int(existing["organizer_session_id"])
-        repo = OrganizerRepository(db)
-        session_id = repo.create_session(project_id, source_folder_id, source_name)
-        snapshot.analysis_status = "analyzing"
-        snapshot.analysis_error = None
-        snapshot.analysis_result = {
-            "mode": "safe_copy",
-            "organizer_session_id": session_id,
-            "status": "queued",
-            "originals_modified": False,
-        }
-        db.commit()
-    finally:
-        db.close()
-    from app.jobs.queue import enqueue
-    with SessionLocal() as job_db:
-        enqueue(job_db, "workspace.safe_copy", {
+            session_id = int(existing["organizer_session_id"])
+        else:
+            repo = OrganizerRepository(db)
+            session_id = repo.create_session(project_id, source_folder_id, source_name)
+            snapshot.analysis_status = "analyzing"
+            snapshot.analysis_error = None
+            snapshot.analysis_result = {
+                "storage_binding": existing.get("storage_binding"),
+                "mode": "safe_copy",
+                "organizer_session_id": session_id,
+                "status": "queued",
+                "originals_modified": False,
+            }
+        from app.jobs.queue import enqueue
+        enqueue(db, "workspace.safe_copy", {
             "snapshot_id": snapshot_id, "session_id": session_id,
             "project_id": project_id, "source_folder_id": source_folder_id,
         }, idempotency_key=f"workspace.safe_copy:{snapshot_id}")
+    finally:
+        db.close()
     return session_id
 
 
@@ -148,37 +266,43 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
     db = SessionLocal()
     start_pipeline = False
     source_name = ""
+    target_valid = False
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
-        if snapshot is None or snapshot.status == "ready":
-            return
-        drive = DriveClient(build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False))
-        source_meta = drive.get_file_meta(external_id)
-        source_name = source_meta.name
-        items = drive.walk_tree(external_id)
-        db.add(VirtualNode(
-            snapshot_id=snapshot.id, external_id=source_meta.id,
-            parent_external_id=source_meta.parent_id or None, name=source_meta.name,
-            mime_type=source_meta.mime_type, node_type="folder", size_bytes=source_meta.size,
-            checksum=source_meta.md5_checksum, source_modified_at=_parse_time(source_meta.modified_time),
-        ))
-        db.add_all(VirtualNode(
-            snapshot_id=snapshot.id, external_id=item.id,
-            parent_external_id=item.parent_id or None, name=item.name, mime_type=item.mime_type,
-            node_type="folder" if item.is_folder else "file", size_bytes=item.size,
-            checksum=item.md5_checksum, source_modified_at=_parse_time(item.modified_time),
-        ) for item in items)
-        snapshot.item_count = len(items) + 1
-        snapshot.status = "ready"
-        snapshot.completed_at = datetime.now(timezone.utc)
-        db.commit()
+        # Reject a forged target before changing even the failure state of another project.
+        if snapshot is None or snapshot.project_id != project_id:
+            raise HTTPException(409, "Snapshot does not belong to the requested project")
+        target_valid = True
+        source = _validate_snapshot_target(db, snapshot, project_id, external_id)
+        source_name = source.name
+        if snapshot.status != "ready":
+            drive = storage_for_project(project_id, db)
+            source_meta = drive.get_object(external_id)
+            source_name = source_meta.name
+            items = drive.walk_tree(external_id)
+            db.add(VirtualNode(
+                snapshot_id=snapshot.id, external_id=source_meta.id,
+                parent_external_id=source_meta.parent_id or None, name=source_meta.name,
+                mime_type=source_meta.mime_type, node_type="folder", size_bytes=source_meta.size,
+                checksum=source_meta.md5_checksum, source_modified_at=_parse_time(source_meta.modified_time),
+            ))
+            db.add_all(VirtualNode(
+                snapshot_id=snapshot.id, external_id=item.id,
+                parent_external_id=item.parent_id or None, name=item.name, mime_type=item.mime_type,
+                node_type="folder" if item.is_folder else "file", size_bytes=item.size,
+                checksum=item.md5_checksum, source_modified_at=_parse_time(item.modified_time),
+            ) for item in items)
+            snapshot.item_count = len(items) + 1
+            snapshot.status = "ready"
+            snapshot.completed_at = datetime.now(timezone.utc)
+            db.commit()
         start_pipeline = True
     except Exception as exc:
         db.rollback()
         failed = db.get(WorkspaceSnapshot, snapshot_id)
-        if failed is not None:
+        if failed is not None and target_valid:
             failed.status = "dead_letter" if failed.retry_count >= 2 else "failed"
-            failed.error_message = str(exc)[:2000]
+            failed.error_message = "Storage snapshot failed. Verify the selected project, connection and folder, then retry."
             db.commit()
         if raise_errors:
             raise
@@ -221,9 +345,7 @@ def recover_incomplete_analyses() -> int:
     finally:
         db.close()
     for snapshot_id, project_id in rows:
-        if snapshot_id not in _analysis_in_progress:
-            _analysis_in_progress.add(snapshot_id)
-            _enqueue_analysis(snapshot_id, project_id)
+        _enqueue_analysis(snapshot_id, project_id)
     return len(rows)
 
 
@@ -239,9 +361,9 @@ def create_managed_workspace(
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(404, "Project not found")
-    drive = DriveClient(build(
-        "drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False,
-    ))
+    drive = storage_for_project(project_id, db)
+    if not isinstance(drive, DriveClient):
+        raise HTTPException(422, "Managed workspace templates are currently available for Google Drive only")
     source = db.scalar(select(SourceFolder).where(
         SourceFolder.project_id == project_id,
         SourceFolder.provider == "google_drive_managed",
@@ -292,6 +414,9 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
         source = db.get(SourceFolder, snapshot.source_folder_id)
         if source is None:
             raise ValueError("Snapshot source folder is missing")
+        _validate_snapshot_target(db, snapshot, project_id, source.external_id)
+        if snapshot.analysis_status == "ready":
+            return
         repo = OrganizerRepository(db)
         nodes = db.scalars(select(VirtualNode).where(VirtualNode.snapshot_id == snapshot_id).order_by(VirtualNode.id)).all()
         files = [DriveFile(
@@ -299,12 +424,12 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
             parent_id=node.parent_external_id or "", md5_checksum=node.checksum,
             size=node.size_bytes, modified_time=node.source_modified_at.isoformat() if node.source_modified_at else None,
         ) for node in nodes]
-        drive = DriveClient(build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False))
-        extracted, extraction_failed = drive.populate_content(files)
+        drive = storage_for_project(project_id, db)
+        extracted, extraction_failed = _populate_content(drive, files)
         project = db.get(Project, project_id)
         session_id = repo.create_session(project_id, source.external_id, source.name)
         repo.update_session(session_id, copy_folder_id=f"virtual:{snapshot_id}", copy_folder_name=f"Виртуальный снимок #{snapshot_id}", source_item_count=len(files), copy_item_count=0, status="analyzing", progress=70)
-        indexed = index_documents(db, project_id, files, "google_drive_snapshot")
+        indexed = index_documents(db, project_id, files, f"{drive.provider}_snapshot")
         items = build_proposal(files, project_name=project.name if project else None, confirmed_rules=repo.confirmed_rules())
         tasks = create_tasks_from_files(db, project_id, session_id, files)
         google_synced = calendar_synced = 0
@@ -313,34 +438,38 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
         proposal_id = repo.create_proposal(project_id, session_id, source.name, source.external_id, f"virtual:{snapshot_id}")
         repo.save_items(proposal_id, items)
         repo.update_session(session_id, status="proposed", progress=100)
-        _analysis_results[snapshot_id] = {
+        analysis_result = {
+            "storage_binding": (snapshot.analysis_result or {}).get("storage_binding"),
             "status": "ready", "documents": len(indexed), "text_extracted": extracted,
             "extraction_failed": extraction_failed, "tasks": len(tasks),
             "google_tasks_synced": google_synced, "calendar_synced": calendar_synced,
             "drafts": len(drafts), "risks": len(risks), "decisions": len(decisions),
         }
         snapshot.analysis_status = "ready"
-        snapshot.analysis_result = _analysis_results[snapshot_id]
+        snapshot.analysis_result = analysis_result
         snapshot.analysis_error = None
         db.commit()
     except Exception as exc:
-        _analysis_results[snapshot_id] = {"status": "failed", "error": str(exc)[:500]}
         db.rollback()
         failed = db.get(WorkspaceSnapshot, snapshot_id)
-        if failed is not None:
+        if failed is not None and failed.project_id == project_id:
             failed.analysis_status = "dead_letter" if failed.analysis_retry_count >= 2 else "failed"
-            failed.analysis_error = str(exc)[:2000]
+            failed.analysis_error = "Storage analysis failed. Verify the selected project and connection, then retry."
             db.commit()
         if raise_errors:
             raise
     finally:
-        _analysis_in_progress.discard(snapshot_id)
         db.close()
 
 
 def _enqueue_snapshot(snapshot_id: int, project_id: int, external_id: str, *, force: bool = False) -> int:
     from app.jobs.queue import enqueue
     with SessionLocal() as db:
+        snapshot = _locked_snapshot(db, snapshot_id)
+        _validate_snapshot_target(db, snapshot, project_id, external_id)
+        active = _active_snapshot_job(db, snapshot_id, project_id)
+        if active is not None:
+            return active.id
         job = enqueue(db, "workspace.snapshot", {
             "snapshot_id": snapshot_id, "project_id": project_id, "external_id": external_id,
         }, idempotency_key=None if force else f"workspace.snapshot:{snapshot_id}")
@@ -350,6 +479,11 @@ def _enqueue_snapshot(snapshot_id: int, project_id: int, external_id: str, *, fo
 def _enqueue_analysis(snapshot_id: int, project_id: int, *, force: bool = False) -> int:
     from app.jobs.queue import enqueue
     with SessionLocal() as db:
+        snapshot = _locked_snapshot(db, snapshot_id)
+        _validate_snapshot_target(db, snapshot, project_id)
+        active = _active_snapshot_job(db, snapshot_id, project_id)
+        if active is not None:
+            return active.id
         job = enqueue(db, "workspace.analysis", {
             "snapshot_id": snapshot_id, "project_id": project_id,
         }, idempotency_key=None if force else f"workspace.analysis:{snapshot_id}")
@@ -359,20 +493,22 @@ def _enqueue_analysis(snapshot_id: int, project_id: int, *, force: bool = False)
 @router.get("/{project_id}/source-folders/discover")
 def discover_source_folders(
     project_id: int,
-    folder_id: str = Query("root"),
+    folder_id: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
+    provider: str | None = None,
+    connection_id: str | None = None,
 ):
-    """Browse Drive folders at any depth for independent snapshot queues."""
+    """Browse the selected provider at any depth for independent snapshot queues."""
     require_project_role(db, user, project_id, "viewer")
-    service = build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False)
-    result = service.files().list(
-        q=f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-        fields="files(id,name,modifiedTime,createdTime)", pageSize=1000, orderBy="name",
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-    ).execute()
-    sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)))
+    connection = _selected_connection(project_id, db, provider, connection_id, allow_google_oauth=True)
+    folder_id = connection.root_folder_id if folder_id is None else folder_id
+    if connection.provider == "yandex_disk" and folder_id == "root":
+        folder_id = "disk:/"  # Explicit legacy navigation request, never confirmation.
+    validate_storage_locator(connection.provider, folder_id)
+    adapter = storage_for_project(project_id, db)
+    provider_folders = [item for item in adapter.list_children(folder_id) if item.is_folder]
+    sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id, SourceFolder.provider == adapter.provider)))
     source_by_external = {row.external_id: row for row in sources}
     latest_by_source: dict[int, WorkspaceSnapshot] = {}
     for snapshot in db.scalars(select(WorkspaceSnapshot).where(WorkspaceSnapshot.project_id == project_id).order_by(WorkspaceSnapshot.id.desc())):
@@ -386,10 +522,10 @@ def discover_source_folders(
         if value and value.removeprefix("virtual:").isdigit()
     }
     folders = []
-    for item in result.get("files", []):
-        source = source_by_external.get(item["id"])
+    for item in provider_folders:
+        source = source_by_external.get(item.id)
         snapshot = latest_by_source.get(source.id) if source else None
-        folders.append({**item, "registered": source is not None,
+        folders.append({"id": item.id, "name": item.name, "modifiedTime": item.modified_time, "provider": adapter.provider, "registered": source is not None,
             "is_primary": bool(source.is_primary) if source else False,
             "snapshot_id": snapshot.id if snapshot else None,
             "snapshot_status": snapshot.status if snapshot else None,
@@ -399,13 +535,17 @@ def discover_source_folders(
             "analysis_result": snapshot.analysis_result if snapshot else None,
             "analysis_error": snapshot.analysis_error if snapshot else None})
     return {
+        "project_id": project_id,
+        "connection_id": connection.connection_id,
+        "connection_row_id": connection.id,
         "folder_id": folder_id,
-        "breadcrumbs": _drive_folder_breadcrumb(service, folder_id),
+        "provider": adapter.provider,
+        "breadcrumbs": _storage_breadcrumb(adapter, folder_id),
         "folders": folders,
     }
 
 
-@router.post("/{project_id}/source-folders/{external_id}/primary")
+@router.post("/{project_id}/source-folders/{external_id:path}/primary")
 def set_primary_source_folder(
     project_id: int,
     external_id: str,
@@ -422,33 +562,64 @@ def set_primary_source_folder(
     return {"id": source.id, "external_id": source.external_id, "name": source.name, "is_primary": True}
 
 
-@router.post("/{project_id}/source-folders/{external_id}/snapshot-queue")
+@router.post("/{project_id}/source-folders/{external_id:path}/snapshot-queue")
 def queue_workspace_snapshot(
     project_id: int,
     external_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
+    provider: str | None = None,
+    connection_id: str | None = None,
 ):
     require_project_role(db, user, project_id, "manager")
-    drive = DriveClient(build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False))
-    source_meta = drive.get_file_meta(external_id)
-    if not source_meta.is_folder:
-        raise HTTPException(422, "Source object is not a folder")
+    # Serialize confirmations for a project on PostgreSQL, including source creation.
+    db.scalar(select(Project).where(Project.id == project_id).with_for_update())
+    connection = _selected_connection(project_id, db, provider, connection_id, allow_google_oauth=True)
+    validate_storage_locator(connection.provider, external_id)
     source = db.scalar(select(SourceFolder).where(SourceFolder.project_id == project_id, SourceFolder.external_id == external_id))
-    if source is None:
-        has_source = db.scalar(select(SourceFolder.id).where(SourceFolder.project_id == project_id).limit(1)) is not None
-        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name, is_primary=not has_source)
-        db.add(source); db.flush()
+    selected_provider = "google_drive" if connection.provider == "google_workspace" else connection.provider
+    if source is not None and source.provider != selected_provider:
+        raise HTTPException(409, "Folder locator is already registered for a different provider")
     active = db.scalar(select(WorkspaceSnapshot).where(
         WorkspaceSnapshot.source_folder_id == source.id,
-        WorkspaceSnapshot.status == "building",
-    ).order_by(WorkspaceSnapshot.id.desc()))
+    ).order_by(WorkspaceSnapshot.id.desc())) if source else None
+    from app.jobs.queue import enqueue
+    from app.models.job import BackgroundJob
+    def response(snapshot, job_id, repeated):
+        return {"id": snapshot.id, "status": snapshot.status, "source_folder": source.name,
+                "already_queued": repeated, "job_id": job_id, **_binding(connection, external_id)}
     if active:
-        return {"id": active.id, "status": active.status, "source_folder": source.name, "already_queued": True}
-    snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building")
-    db.add(snapshot); db.commit(); db.refresh(snapshot)
-    _enqueue_snapshot(snapshot.id, project_id, external_id)
-    return {"id": snapshot.id, "status": snapshot.status, "source_folder": source.name, "already_queued": False}
+        _validate_snapshot_target(db, active, project_id, external_id)
+        job = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == f"workspace.snapshot:{active.id}"))
+        if job is None and active.status == "building":
+            job = enqueue(db, "workspace.snapshot", {
+                "snapshot_id": active.id, "project_id": project_id, "external_id": external_id,
+            }, idempotency_key=f"workspace.snapshot:{active.id}")
+        connection.root_folder_id = external_id
+        connection.root_display_name = source.name
+        db.commit()
+        return response(active, job.id if job else None, True)
+    drive = storage_for_project(project_id, db)
+    source_meta = drive.get_object(external_id)
+    if not source_meta.is_folder:
+        raise HTTPException(422, "Source object is not a folder")
+    if source is None:
+        has_source = db.scalar(select(SourceFolder.id).where(SourceFolder.project_id == project_id).limit(1)) is not None
+        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name, provider=drive.provider, is_primary=not has_source)
+        db.add(source)
+    if connection.id is None:
+        db.add(connection)
+    db.flush()
+    connection.root_folder_id = external_id
+    connection.root_display_name = source_meta.name
+    snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building",
+                                 analysis_result={"storage_binding": _binding(connection, external_id)})
+    db.add(snapshot); db.flush()
+    # enqueue commits the binding, snapshot and job together using its public contract.
+    job = enqueue(db, "workspace.snapshot", {
+        "snapshot_id": snapshot.id, "project_id": project_id, "external_id": external_id,
+    }, idempotency_key=f"workspace.snapshot:{snapshot.id}")
+    return response(snapshot, job.id, False)
 
 
 @router.post("/{project_id}/source-folders/snapshot-queue-all")
@@ -457,29 +628,28 @@ def queue_all_workspace_snapshots(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Queue missing top-level Drive folders for sequential metadata-only snapshots."""
+    """Queue missing top-level provider folders for sequential metadata-only snapshots."""
     require_project_role(db, user, project_id, "manager")
     if db.get(Project, project_id) is None:
         raise HTTPException(404, "Project not found")
-    service = build("drive", "v3", credentials=credentials_for_project(project_id, db), cache_discovery=False)
-    result = service.files().list(
-        q="'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-        fields="files(id,name)", pageSize=1000, orderBy="name",
-    ).execute()
+    adapter = storage_for_project(project_id, db)
+    connection = project_storage_connection(project_id, db)
+    root = connection.root_folder_id if connection else "root"
+    items = [item for item in adapter.list_children(root) if item.is_folder]
     sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id)))
     source_by_external = {row.external_id: row for row in sources}
     queued: list[tuple[int, str, str]] = []
     skipped = 0
-    for item in result.get("files", []):
-        source = source_by_external.get(item["id"])
+    for item in items:
+        source = source_by_external.get(item.id)
         if source is None:
             source = SourceFolder(
-                project_id=project_id, external_id=item["id"], name=item["name"],
+                project_id=project_id, external_id=item.id, name=item.name, provider=adapter.provider,
                 is_primary=not source_by_external,
             )
             db.add(source)
             db.flush()
-            source_by_external[item["id"]] = source
+            source_by_external[item.id] = source
         latest = db.scalar(select(WorkspaceSnapshot).where(
             WorkspaceSnapshot.source_folder_id == source.id,
         ).order_by(WorkspaceSnapshot.id.desc()))
@@ -489,7 +659,7 @@ def queue_all_workspace_snapshots(
         snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building")
         db.add(snapshot)
         db.flush()
-        queued.append((snapshot.id, item["id"], item["name"]))
+        queued.append((snapshot.id, item.id, item.name))
     db.commit()
     for snapshot_id, external_id, _ in queued:
         _enqueue_snapshot(snapshot_id, project_id, external_id)
@@ -500,84 +670,15 @@ def queue_all_workspace_snapshots(
     }
 
 
-@router.post("/{project_id}/source-folders/{external_id}/snapshots")
+@router.post("/{project_id}/source-folders/{external_id:path}/snapshots")
 def create_workspace_snapshot(
     project_id: int,
     external_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Capture Drive metadata only; source files are neither moved nor copied."""
-    require_project_role(db, user, project_id, "editor")
-    if db.get(Project, project_id) is None:
-        raise HTTPException(404, "Project not found")
-
-    credentials = credentials_for_project(project_id, db)
-    drive = DriveClient(build("drive", "v3", credentials=credentials, cache_discovery=False))
-    source_meta = drive.get_file_meta(external_id)
-    if not source_meta.is_folder:
-        raise HTTPException(422, "Source object is not a folder")
-
-    source = db.scalar(
-        select(SourceFolder).where(
-            SourceFolder.project_id == project_id,
-            SourceFolder.external_id == external_id,
-        )
-    )
-    if source is None:
-        has_source = db.scalar(select(SourceFolder.id).where(SourceFolder.project_id == project_id).limit(1)) is not None
-        source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name, is_primary=not has_source)
-        db.add(source)
-        db.flush()
-    else:
-        source.name = source_meta.name
-
-    snapshot = WorkspaceSnapshot(project_id=project_id, source_folder_id=source.id, status="building")
-    db.add(snapshot)
-    db.commit()
-    db.refresh(snapshot)
-    try:
-        items = drive.walk_tree(external_id)
-        root = VirtualNode(
-            snapshot_id=snapshot.id,
-            external_id=source_meta.id,
-            parent_external_id=source_meta.parent_id or None,
-            name=source_meta.name,
-            mime_type=source_meta.mime_type,
-            node_type="folder",
-            size_bytes=source_meta.size,
-            checksum=source_meta.md5_checksum,
-            source_modified_at=_parse_time(source_meta.modified_time),
-        )
-        db.add(root)
-        db.add_all(
-            VirtualNode(
-                snapshot_id=snapshot.id,
-                external_id=item.id,
-                parent_external_id=item.parent_id or None,
-                name=item.name,
-                mime_type=item.mime_type,
-                node_type="folder" if item.is_folder else "file",
-                size_bytes=item.size,
-                checksum=item.md5_checksum,
-                source_modified_at=_parse_time(item.modified_time),
-            )
-            for item in items
-        )
-        snapshot.item_count = len(items) + 1
-        snapshot.status = "ready"
-        snapshot.completed_at = datetime.now(timezone.utc)
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        failed = db.get(WorkspaceSnapshot, snapshot.id)
-        if failed is not None:
-            failed.status = "failed"
-            failed.error_message = str(exc)[:2000]
-            db.commit()
-        raise HTTPException(502, "Could not build workspace snapshot") from exc
-
-    return {"id": snapshot.id, "status": snapshot.status, "item_count": snapshot.item_count, "source_folder": source.name}
+    """Compatibility route: snapshot construction is always durable."""
+    return queue_workspace_snapshot(project_id, external_id, db, user)
 
 
 @router.get("/{project_id}/snapshots")
@@ -597,6 +698,9 @@ def list_workspace_snapshots(
         "snapshots": [
             {
                 "id": snapshot.id,
+                "project_id": snapshot.project_id,
+                "provider": source.provider,
+                "storage_binding": (snapshot.analysis_result or {}).get("storage_binding"),
                 "status": snapshot.status,
                 "item_count": snapshot.item_count,
                 "source_folder": source.name,
@@ -651,7 +755,7 @@ def processing_queue(project_id: int, db: Session = Depends(get_db), user: User 
 @router.post("/{project_id}/snapshots/{snapshot_id}/retry-build")
 def retry_snapshot_build(project_id: int, snapshot_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "manager")
-    snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+    snapshot = _locked_snapshot(db, snapshot_id)
     if snapshot is None or snapshot.project_id != project_id:
         raise HTTPException(404, "Snapshot not found")
     if snapshot.status != "failed" or snapshot.retry_count >= 2:
@@ -659,11 +763,15 @@ def retry_snapshot_build(project_id: int, snapshot_id: int, db: Session = Depend
     source = db.get(SourceFolder, snapshot.source_folder_id)
     if source is None:
         raise HTTPException(409, "Snapshot source folder is missing")
+    _validate_snapshot_target(db, snapshot, project_id, source.external_id)
+    _require_idle_snapshot(db, snapshot_id, project_id)
     snapshot.status = "building"
     snapshot.error_message = None
     snapshot.retry_count += 1
-    db.commit()
-    _enqueue_snapshot(snapshot.id, project_id, source.external_id, force=True)
+    from app.jobs.queue import enqueue
+    enqueue(db, "workspace.snapshot", {
+        "snapshot_id": snapshot.id, "project_id": project_id, "external_id": source.external_id,
+    }, idempotency_key=f"workspace.snapshot:{snapshot.id}:manual:{snapshot.retry_count}")
     return {"snapshot_id": snapshot.id, "status": snapshot.status, "retry_count": snapshot.retry_count}
 
 
@@ -712,12 +820,14 @@ def analyze_workspace_snapshot(
 ):
     """Analyze a metadata snapshot read-only; no Drive copy or mutation is performed."""
     require_project_role(db, user, project_id, "manager")
-    snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+    snapshot = _locked_snapshot(db, snapshot_id)
     if snapshot is None or snapshot.project_id != project_id or snapshot.status != "ready":
         raise HTTPException(409, "A ready snapshot is required")
     source = db.get(SourceFolder, snapshot.source_folder_id)
     if source is None:
         raise HTTPException(409, "Snapshot source folder is missing")
+
+    _validate_snapshot_target(db, snapshot, project_id, source.external_id)
 
     repo = OrganizerRepository(db)
     existing_proposal = db.execute(text("""
@@ -735,21 +845,21 @@ def analyze_workspace_snapshot(
             "physical_copies_created": 0,
             "already_analyzed": True,
         }
-    if snapshot_id in _analysis_in_progress:
+    if snapshot.analysis_status == "analyzing":
         return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": True}
+    _require_idle_snapshot(db, snapshot_id, project_id)
     if snapshot.analysis_status == "dead_letter" or (
         snapshot.analysis_retry_count >= 2 and snapshot.analysis_status == "failed"
     ):
         raise HTTPException(409, "Analysis exhausted three attempts and is in the dead-letter queue")
     if snapshot.analysis_status == "failed":
         snapshot.analysis_retry_count += 1
-    _analysis_results.pop(snapshot_id, None)
-    _analysis_in_progress.add(snapshot_id)
     snapshot.analysis_status = "analyzing"
-    snapshot.analysis_result = None
+    snapshot.analysis_result = {"storage_binding": (snapshot.analysis_result or {}).get("storage_binding")}
     snapshot.analysis_error = None
-    db.commit()
-    _enqueue_analysis(snapshot_id, project_id, force=True)
+    from app.jobs.queue import enqueue
+    enqueue(db, "workspace.analysis", {"snapshot_id": snapshot_id, "project_id": project_id},
+            idempotency_key=f"workspace.analysis:{snapshot_id}:manual:{snapshot.analysis_retry_count}")
     return {"snapshot_id": snapshot_id, "status": "analyzing", "already_queued": False}
 
 

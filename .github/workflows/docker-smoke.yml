@@ -1,24 +1,33 @@
 name: Docker smoke
+
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
   pull_request:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: docker-smoke-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   docker-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
     env:
       COMPOSE_PROJECT_NAME: puw-ci-${{ github.run_id }}-${{ github.run_attempt }}
       COMPOSE_FILE: docker-compose.ci.yml
       COMPOSE_ENV_FILES: .env.ci
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -30,9 +39,35 @@ jobs:
         run: docker compose up --build -d --wait --wait-timeout 180
       - name: Verify migration head and runtime flow
         run: |
-          docker compose exec -T backend alembic heads
+          docker compose exec -T backend alembic heads | grep -Fx 'e74a1c5d09b2 (head)'
           docker compose exec -T backend alembic current
+          docker compose exec -T backend python - <<'PY'
+          import json
+          import urllib.request
+
+          with urllib.request.urlopen('http://backend:8000/api/readiness', timeout=10) as response:
+              readiness = json.load(response)
+          schema = readiness.get('checks', {}).get('schema', {})
+          assert schema.get('ok') is True
+          assert schema.get('message') == 'e74a1c5d09b2'
+          PY
           python scripts/check_ci_smoke.py --seed
+      - name: Verify v5.4 runtime composition
+        run: |
+          docker compose exec -T backend python - <<'PY'
+          import importlib
+
+          for module in (
+              "app.action_trust.facade",
+              "app.autonomy_policy",
+              "app.mailbox_identity.runtime",
+              "app.provider_actions.runtime",
+              "app.source_evidence.product",
+              "app.staging.local_upload",
+          ):
+              importlib.import_module(module)
+          print("V54_RUNTIME_COMPOSITION_OK")
+          PY
       - name: Browser login and navigation
         run: |
           pip install playwright==1.55.0

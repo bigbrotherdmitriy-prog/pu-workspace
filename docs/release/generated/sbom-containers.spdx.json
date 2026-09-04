@@ -1,0 +1,216 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "comment": "License fields marked NOASSERTION must be resolved and reviewed before sale.",
+  "creationInfo": {
+    "created": "1970-01-01T00:00:00Z",
+    "creators": [
+      "Tool: scripts/legal_release_kit.py"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://pu-workspace.invalid/spdx/47662b76ff52fb374672d4f39942cec056361e59d2955b93fe5e384dbaf92933-containers",
+  "name": "PU Workspace container declaration",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-1",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:deb/debian/antiword",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "antiword",
+      "versionInfo": "resolved-at-image-build"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-2",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=container image is not digest-pinned; exact layer inventory and license texts are not reproducible; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:docker/app-backend:latest",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "app-backend:latest",
+      "versionInfo": "tag-not-digest-pinned"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-3",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:deb/debian/poppler-utils",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "poppler-utils",
+      "versionInfo": "resolved-at-image-build"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-4",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=container image is not digest-pinned; exact layer inventory and license texts are not reproducible; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:docker/postgres:16-alpine",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "postgres:16-alpine",
+      "versionInfo": "tag-not-digest-pinned"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-5",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=container image is not digest-pinned; exact layer inventory and license texts are not reproducible; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:docker/python:3.12-slim",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "python:3.12-slim",
+      "versionInfo": "tag-not-digest-pinned"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-6",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:deb/debian/tesseract-ocr",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "tesseract-ocr",
+      "versionInfo": "resolved-at-image-build"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-7",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:deb/debian/tesseract-ocr-eng",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "tesseract-ocr-eng",
+      "versionInfo": "resolved-at-image-build"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-8",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:deb/debian/tesseract-ocr-osd",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "tesseract-ocr-osd",
+      "versionInfo": "resolved-at-image-build"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-9",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:deb/debian/tesseract-ocr-rus",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "tesseract-ocr-rus",
+      "versionInfo": "resolved-at-image-build"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-1",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-2",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-3",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-4",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-5",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-6",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-7",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-8",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-9",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

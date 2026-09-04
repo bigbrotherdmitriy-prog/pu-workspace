@@ -16,6 +16,7 @@ TASKS = "https://www.googleapis.com/auth/tasks"
 CALENDAR = "https://www.googleapis.com/auth/calendar.events"
 GMAIL_READ = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND = "https://www.googleapis.com/auth/gmail.send"
+OPENID = "openid"
 
 
 def _project(db_session) -> Project:
@@ -46,8 +47,9 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
     monkeypatch.setattr(
         google_drive_api,
         "google_config",
-        lambda: ({"web": {}}, "https://workspace.example.test/projects/google/callback"),
+        lambda: ({"web": {"client_id": "synthetic-client"}}, "https://workspace.example.test/projects/google/callback"),
     )
+    monkeypatch.setattr(google_drive_api, "verified_google_subject", lambda *_args: "synthetic-subject")
 
     existing = GoogleOAuthToken(
         project_id=project.id,
@@ -64,10 +66,11 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
             token="new-access",
             refresh_token=None,
             token_uri="https://oauth2.googleapis.com/token",
-            scopes=[DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND],
+            id_token="synthetic-id-token",
+            scopes=[OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND],
         ),
         fetch_token=lambda **_kwargs: {
-            "scope": " ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
+            "scope": " ".join((OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
         },
     )
     monkeypatch.setattr(
@@ -90,7 +93,7 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
     assert "stable-refresh" not in stored.refresh_token
     assert decrypt_token(stored.access_token) == "new-access"
     assert decrypt_token(stored.refresh_token) == "stable-refresh"
-    assert set(stored.scopes.split()) == {DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND}
+    assert set(stored.scopes.split()) == {OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND}
 
 
 def test_capability_gating_requires_every_scope_for_each_google_surface(

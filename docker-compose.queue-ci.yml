@@ -1,0 +1,61 @@
+# Standalone synthetic recovery topology. Explicit --env-file and project required.
+x-runtime: &runtime
+  image: ${QUEUE_CI_IMAGE:?required}
+  working_dir: /app
+  environment: &environment
+    DATABASE_URL: postgresql+psycopg://puw_ci:${POSTGRES_PASSWORD:?required}@db:5432/puw_queue_test
+    APP_SECRET_KEY: ${APP_SECRET_KEY:?required}
+    BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?required}
+    TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?required}
+    PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?required}
+    PU_BACKGROUND_EXECUTION: durable
+    GMAIL_AUTO_SYNC_ENABLED: "false"
+    AI_SECRETARY_AUTOMATION_ENABLED: "false"
+    PU_JOB_LEASE_SECONDS: "60"
+    PU_JOB_POLL_SECONDS: "0.2"
+    PU_SCHEDULER_TICK_SECONDS: "5"
+  networks: [ci]
+  mem_limit: 768m
+  cpus: 1.0
+  stop_grace_period: 10s
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: puw_queue_test
+      POSTGRES_USER: puw_ci
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    networks: [ci]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, pg_isready, -U, puw_ci, -d, puw_queue_test]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  api1:
+    <<: *runtime
+    command: [sh, -c, "python -m scripts.preflight && exec uvicorn fixture:app --host 0.0.0.0 --port 8000"]
+  api2:
+    <<: *runtime
+    command: [sh, -c, "python -m scripts.preflight && exec uvicorn fixture:app --host 0.0.0.0 --port 8000"]
+  worker1:
+    <<: *runtime
+    command: [python, /queue_ci/fixture.py, worker]
+    environment:
+      <<: *environment
+      PU_WORKER_ID: worker1
+  worker2:
+    <<: *runtime
+    command: [python, /queue_ci/fixture.py, worker]
+    environment:
+      <<: *environment
+      PU_WORKER_ID: worker2
+  scheduler:
+    <<: *runtime
+    command: [python, -m, app.jobs.scheduler]
+networks:
+  ci:
+    internal: true
+volumes:
+  pgdata: {}

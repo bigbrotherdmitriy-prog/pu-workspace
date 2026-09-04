@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -40,6 +40,10 @@ class DriveConnection(Base):
         String(255),
         nullable=False,
     )
+
+    connection_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    root_display_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sync_settings: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     status: Mapped[str] = mapped_column(
         String(50),

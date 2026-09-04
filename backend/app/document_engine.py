@@ -26,7 +26,11 @@ def index_documents(db: Session, project_id: int, files: list[StorageObject], so
             continue
         content = file.content_text or ""
         content_hash = hashlib.sha256(content.encode()).hexdigest() if content else (file.md5_checksum or None)
-        document = db.scalar(select(Document).where(Document.project_id == project_id, Document.external_id == file.id))
+        document = db.scalar(select(Document).where(
+            Document.project_id == project_id,
+            Document.source == source,
+            Document.external_id == file.id,
+        ))
         if document is None:
             document = Document(project_id=project_id, external_id=file.id, name=file.name, mime_type=file.mime_type, parent_external_id=file.parent_id, source=source, status="analyzed" if content else "discovered", content_hash=content_hash, source_modified_at=_parse_time(file.modified_time), summary=content[:700] or None, current_version=1)
             db.add(document)

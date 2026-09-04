@@ -1,0 +1,5 @@
+From: lada@example.test
+To: intake@example.test
+Subject: Альфа-Макет TEST-A-42
+
+Передайте акты по проекту «Альфа-Макет», договор TEST-A-42, завтра до конца дня.

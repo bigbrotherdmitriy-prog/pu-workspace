@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import time
+import signal
+from threading import Event
 from datetime import datetime, timezone
 
 from app.automations.ai_secretary import enabled as ai_enabled, interval_seconds as ai_interval
@@ -31,10 +33,22 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
                 continue
             job = enqueue(db, kind, {}, idempotency_key=_bucket(kind, interval, now))
             created += int(job.status == "queued" and job.attempts == 0)
-    return created
+    from app.pilot_dispatch import recover_installed
+    from app.local_upload_staging import recover_local_upload_retention
+    from app.staging.gmail import recover_gmail_attachment_jobs
+    return (
+        created + recover_installed() + recover_gmail_attachment_jobs()
+        + recover_local_upload_retention()
+    )
 
 
 def main() -> None:
+    shutdown = Event()
+    def stop(signum, _frame):
+        log.info("Scheduler received signal %s", signum)
+        shutdown.set()
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     log.info("Scheduler started")
     # One-time cutover recovery: convert unfinished legacy in-process work to
     # durable idempotent jobs after a deployment or crash.
@@ -43,12 +57,13 @@ def main() -> None:
     recover_incomplete_scans()
     recover_incomplete_snapshots()
     recover_incomplete_analyses()
-    while True:
+    while not shutdown.is_set():
         try:
             schedule_once()
         except Exception:
             log.exception("Scheduler pass failed")
-        time.sleep(max(5, int(os.getenv("PU_SCHEDULER_TICK_SECONDS", "15"))))
+        shutdown.wait(max(5, int(os.getenv("PU_SCHEDULER_TICK_SECONDS", "15"))))
+    log.info("Scheduler stopped")
 
 
 if __name__ == "__main__":

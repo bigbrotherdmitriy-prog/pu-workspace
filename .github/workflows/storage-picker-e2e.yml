@@ -1,0 +1,64 @@
+name: Storage picker synthetic browser E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/storage-picker-browser-e2e', 'codex/parallel-validation-final']
+    paths: ['frontend/**', '.github/workflows/storage-picker-e2e.yml']
+  pull_request:
+    paths: ['frontend/**', '.github/workflows/storage-picker-e2e.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.19.0'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Check this workflow
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint" ../.github/workflows/storage-picker-e2e.yml
+      - name: Install locked frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install isolated Chromium headless runtime
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+      - name: Type checks and full component regression suite
+        run: |
+          pnpm run check
+          pnpm run check:e2e
+          pnpm run test
+      - name: Production build with no env files or tracked output
+        run: pnpm run build --config e2e/vite.config.mjs
+      - name: Real Chromium with synthetic HTTP only
+        timeout-minutes: 7
+        run: pnpm run test:e2e
+      - name: Publish synthetic browser evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-picker-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/node_modules/.cache/storage-picker-e2e/results/
+            frontend/node_modules/.cache/storage-picker-e2e/report/
+          if-no-files-found: warn
+          retention-days: 7

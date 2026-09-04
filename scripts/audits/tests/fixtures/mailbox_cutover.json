@@ -1,0 +1,158 @@
+{
+  "fixture_version": 1,
+  "messages": [
+    {
+      "id": "m-001",
+      "organization_id": "org-a",
+      "project_id": "project-a",
+      "source_type": "email",
+      "source_external_id": "gmail-shared",
+      "mail_connection_id": "mail-a",
+      "provider_message_id": "gmail-shared",
+      "source_reference_id": "source-001",
+      "source_thread_id": "thread-shared",
+      "context_confirmed": true
+    },
+    {
+      "id": "m-002",
+      "organization_id": "org-a",
+      "project_id": "project-b",
+      "source_type": "email",
+      "source_external_id": "gmail-shared",
+      "mail_connection_id": "mail-b",
+      "provider_message_id": "gmail-shared",
+      "source_reference_id": "source-002",
+      "source_thread_id": "thread-shared",
+      "context_confirmed": false
+    },
+    {
+      "id": "m-003",
+      "organization_id": "org-a",
+      "project_id": "project-a",
+      "source_type": "email",
+      "source_external_id": "gmail-legacy-unknown",
+      "mail_connection_id": null,
+      "provider_message_id": null,
+      "source_reference_id": null,
+      "source_thread_id": "thread-shared",
+      "context_confirmed": true
+    },
+    {
+      "id": "m-004",
+      "organization_id": "org-a",
+      "project_id": "project-b",
+      "source_type": "email",
+      "source_external_id": "gmail-moved",
+      "mail_connection_id": "mail-a",
+      "provider_message_id": "gmail-moved",
+      "source_reference_id": "source-004",
+      "source_thread_id": "thread-moved",
+      "context_confirmed": true
+    },
+    {
+      "id": "m-005",
+      "organization_id": "org-a",
+      "project_id": "project-a",
+      "source_type": "email",
+      "source_external_id": "gmail-ambiguous-mailbox",
+      "mail_connection_id": null,
+      "provider_message_id": null,
+      "source_reference_id": null,
+      "source_thread_id": null,
+      "context_confirmed": false
+    },
+    {
+      "id": "m-006",
+      "organization_id": "org-a",
+      "project_id": "project-a",
+      "source_type": "email_outgoing",
+      "source_external_id": "gmail-shared",
+      "mail_connection_id": "mail-a",
+      "provider_message_id": "gmail-shared",
+      "source_reference_id": "source-006",
+      "source_thread_id": "thread-outgoing",
+      "context_confirmed": true
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-001",
+      "project_id": "project-b",
+      "message_id": "m-004"
+    }
+  ],
+  "drafts": [
+    {
+      "id": "draft-001",
+      "project_id": "project-a",
+      "message_id": "m-004"
+    }
+  ],
+  "completion_suggestions": [
+    {
+      "id": "suggestion-001",
+      "project_id": "project-a",
+      "message_id": "m-006"
+    }
+  ],
+  "context_relations": [
+    {
+      "id": "relation-001",
+      "message_id": "m-004",
+      "lineage_id": "lineage-move",
+      "revision": 1,
+      "relation_type": "communication.project",
+      "state": "superseded",
+      "confirmed_by": "actor-001",
+      "target_project_id": "project-a"
+    },
+    {
+      "id": "relation-002",
+      "message_id": "m-004",
+      "lineage_id": "lineage-move",
+      "revision": 2,
+      "relation_type": "communication.project",
+      "state": "confirmed",
+      "confirmed_by": "actor-001",
+      "target_project_id": "project-b"
+    },
+    {
+      "id": "relation-003",
+      "message_id": "m-001",
+      "lineage_id": "lineage-stable",
+      "revision": 1,
+      "relation_type": "communication.project",
+      "state": "confirmed",
+      "confirmed_by": "actor-001",
+      "target_project_id": "project-a"
+    }
+  ],
+  "audit_events": [
+    {
+      "id": "audit-001",
+      "action": "message_context_confirmed",
+      "entity_type": "message",
+      "entity_id": "m-003"
+    },
+    {
+      "id": "audit-002",
+      "action": "message_context_confirmed",
+      "entity_type": "message",
+      "entity_id": "m-003"
+    }
+  ],
+  "contacts": [
+    {
+      "id": "contact-link-001",
+      "organization_id": "org-a",
+      "project_id": "project-a",
+      "identity_key": "contact-synthetic-001"
+    },
+    {
+      "id": "contact-link-002",
+      "organization_id": "org-a",
+      "project_id": "project-b",
+      "identity_key": "contact-synthetic-001"
+    }
+  ]
+}

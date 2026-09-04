@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.integrations.ai import configured_ai_provider
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.telegram import TelegramChannelAdapter
+from app.models.integration_credential import IntegrationCredential
 
 
 GOOGLE_CAPABILITIES = (
@@ -66,6 +69,25 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
         )
         for capability, name, description, required_scopes in GOOGLE_CAPABILITIES
     ]
+
+    yandex_configured = bool(os.getenv("YANDEX_CLIENT_ID") and os.getenv("YANDEX_CLIENT_SECRET") and os.getenv("YANDEX_REDIRECT_URI"))
+    yandex_connected = db.scalar(select(IntegrationCredential.id).where(
+        IntegrationCredential.project_id == project_id,
+        IntegrationCredential.provider == "yandex_disk",
+        IntegrationCredential.capability == "storage",
+        IntegrationCredential.access_token.is_not(None),
+    )) is not None
+    result.append(IntegrationStatus(
+        key="yandex_disk:storage",
+        provider="yandex_disk",
+        capability="storage",
+        name="Яндекс Диск",
+        description="Документы и рабочие папки Яндекс 360",
+        available=yandex_configured,
+        connected=yandex_connected,
+        action="select_source" if yandex_connected else "oauth",
+        detail="connected" if yandex_connected else ("authorization required" if yandex_configured else "provider is not configured"),
+    ))
 
     telegram = TelegramChannelAdapter().health()
     ai_provider = configured_ai_provider()

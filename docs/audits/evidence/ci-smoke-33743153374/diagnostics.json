@@ -1,0 +1,29 @@
+{
+  "compose_ps_exit_code": 0,
+  "compose_logs_exit_code": 0,
+  "containers": [
+    {
+      "service": "backend",
+      "state": "running",
+      "health": "starting",
+      "exit_code": 0
+    },
+    {
+      "service": "db",
+      "state": "running",
+      "health": "healthy",
+      "exit_code": 0
+    }
+  ],
+  "log_signals": {
+    "database system is ready to accept connections": 2,
+    "Application startup complete": 1,
+    "http_status_200": 14,
+    "http_status_401": 3,
+    "http_status_409": 1,
+    "Running upgrade": 44,
+    "CI_READINESS_OK": 1
+  },
+  "raw_logs_included": false,
+  "note": "Allowlisted fields, signal counts and ordered log events are retained; raw text is omitted."
+}

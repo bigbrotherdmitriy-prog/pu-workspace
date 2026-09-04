@@ -1,0 +1,2209 @@
+{
+  "schema_version": "v54.integration.1",
+  "synthetic_only": true,
+  "notice": "Documentation example; not product API or runtime proof. All source content below is fabricated. No enabled AUTO or external send.",
+  "fixture_content": {
+    "message": "По договору TEST-A-2026 проекта Альфа просим предоставить исправленный акт. Срок во вложении.",
+    "attachment": "Проект Альфа, договор TEST-A-2026. Предоставить исправленный акт до 10.09.2026 (Europe/Moscow)."
+  },
+  "records": [
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "organization",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "1"
+        }
+      },
+      "record_version": 1
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "2"
+        }
+      },
+      "record_version": 1,
+      "project_ref": {
+        "namespace": "pu",
+        "type": "project",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "4"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "record_version": 1,
+      "project_ref": {
+        "namespace": "pu",
+        "type": "project",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "4"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "project",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "4"
+        }
+      },
+      "record_version": 1
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "contract",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "5"
+        }
+      },
+      "record_version": 1,
+      "project_ref": {
+        "namespace": "pu",
+        "type": "project",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "4"
+        }
+      },
+      "synthetic_number": "TEST-A-2026"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "connection_identity",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000010"
+        }
+      },
+      "record_version": 1,
+      "provider": "fixture",
+      "provider_account_key": "synthetic-account",
+      "state": "verified",
+      "credential_generation": 1,
+      "binding_epoch": 1
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "mail_connection",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000011"
+        }
+      },
+      "record_version": 1,
+      "identity_ref": {
+        "namespace": "pu",
+        "type": "connection_identity",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000010"
+        }
+      },
+      "namespace": "synthetic-mailbox",
+      "state": "active"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000012"
+        }
+      },
+      "record_version": 1,
+      "identity_ref": {
+        "namespace": "pu",
+        "type": "connection_identity",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000010"
+        }
+      },
+      "namespace": "synthetic-mailbox",
+      "external_id": "synthetic-mail-1",
+      "object_kind": "message",
+      "current_version_ref": {
+        "namespace": "pu",
+        "type": "source_version",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000014"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000013"
+        }
+      },
+      "record_version": 1,
+      "identity_ref": {
+        "namespace": "pu",
+        "type": "connection_identity",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000010"
+        }
+      },
+      "namespace": "synthetic-mailbox",
+      "external_id": "synthetic-attachment-1",
+      "object_kind": "attachment",
+      "parent_ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000012"
+        }
+      },
+      "current_version_ref": {
+        "namespace": "pu",
+        "type": "source_version",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000015"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "source_version",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000014"
+        }
+      },
+      "revision": 1,
+      "source_ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000012"
+        }
+      },
+      "provider_revision": "fixture-mail-v1",
+      "consistency": "revision_bound"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "source_version",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000015"
+        }
+      },
+      "revision": 1,
+      "source_ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000013"
+        }
+      },
+      "provider_revision": "fixture-attachment-v1",
+      "consistency": "revision_bound"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "message",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "6"
+        }
+      },
+      "record_version": 1,
+      "context_version": 1,
+      "mail_ref": {
+        "namespace": "pu",
+        "type": "mail_connection",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000011"
+        }
+      },
+      "source_ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000012"
+        }
+      },
+      "attachment_refs": [
+        {
+          "namespace": "pu",
+          "type": "source",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000013"
+          }
+        }
+      ],
+      "provider_message_id": "synthetic-mail-1"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "evidence",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000016"
+        }
+      },
+      "revision": 1,
+      "source_ref": {
+        "namespace": "pu",
+        "type": "source",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000013"
+        }
+      },
+      "source_version": {
+        "ref": {
+          "namespace": "pu",
+          "type": "source_version",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000015"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "locator": {
+        "kind": "whole_object",
+        "reason_code": "synthetic_text_attachment"
+      },
+      "extractor": {
+        "name": "fixture",
+        "version": "1"
+      },
+      "assessment": {
+        "record_version": 2,
+        "verification": "verified",
+        "freshness": "fresh",
+        "availability": "available",
+        "reviewer_ref": {
+          "namespace": "pu",
+          "type": "user",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "3"
+          }
+        },
+        "last_checked_at": "2026-09-03T09:02:00Z"
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "deadline_claim",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000017"
+        }
+      },
+      "revision": 1,
+      "value": {
+        "due_date": "2026-09-10",
+        "timezone": "Europe/Moscow"
+      },
+      "evidence": [
+        {
+          "ref": {
+            "namespace": "pu",
+            "type": "evidence",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000016"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        }
+      ],
+      "verification": "confirmed",
+      "reviewer_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "anchor_ref": {
+        "namespace": "pu",
+        "type": "deadline_claim",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000017"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "context_relation",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000018"
+        }
+      },
+      "revision": 1,
+      "record_version": 2,
+      "lineage_id": "00000000-0000-4000-8000-000000000101",
+      "source_ref": {
+        "namespace": "pu",
+        "type": "message",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "6"
+        }
+      },
+      "target_ref": {
+        "namespace": "pu",
+        "type": "project",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "4"
+        }
+      },
+      "relation_type": "communication.project",
+      "state": "confirmed",
+      "applicability": "current",
+      "evidence": [
+        {
+          "ref": {
+            "namespace": "pu",
+            "type": "evidence",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000016"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "context_relation",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000019"
+        }
+      },
+      "revision": 1,
+      "record_version": 2,
+      "lineage_id": "00000000-0000-4000-8000-000000000102",
+      "source_ref": {
+        "namespace": "pu",
+        "type": "message",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "6"
+        }
+      },
+      "target_ref": {
+        "namespace": "pu",
+        "type": "contract",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "5"
+        }
+      },
+      "relation_type": "communication.contract",
+      "state": "confirmed",
+      "applicability": "current",
+      "evidence": [
+        {
+          "ref": {
+            "namespace": "pu",
+            "type": "evidence",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000016"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "policy",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000022"
+        }
+      },
+      "revision": 1,
+      "mode": "CONFIRM",
+      "allowed_action_types": [
+        "task.internal.create",
+        "task.internal.cancel"
+      ],
+      "external_execute": false,
+      "auto_enabled": false,
+      "synthetic_only": true
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "task",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "7"
+        }
+      },
+      "record_version": 2,
+      "project_ref": {
+        "namespace": "pu",
+        "type": "project",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "4"
+        }
+      },
+      "contract_ref": {
+        "namespace": "pu",
+        "type": "contract",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "5"
+        }
+      },
+      "versions": [
+        {
+          "record_version": 1,
+          "status": "assigned"
+        },
+        {
+          "record_version": 2,
+          "status": "cancelled"
+        }
+      ]
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "response_draft",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "8"
+        }
+      },
+      "record_version": 1,
+      "state": "DRAFT",
+      "body": "Предлагаем подготовить исправленный акт к 10.09.2026. Требуется подтверждение.",
+      "sent": false
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "action",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000027"
+        }
+      },
+      "revision": 1,
+      "state": "DRAFT",
+      "stage": "DRAFT",
+      "action_type": "response.draft.prepare",
+      "autonomy": "ASSIST",
+      "draft_ref": {
+        "namespace": "pu",
+        "type": "response_draft",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "8"
+        }
+      },
+      "claim": {
+        "ref": {
+          "namespace": "pu",
+          "type": "deadline_claim",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000017"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "execute_allowed": false
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "background_job",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "9"
+        }
+      },
+      "record_version": 1,
+      "kind": "synthetic.action",
+      "payload": {
+        "action_ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "action_revision": 1,
+        "correlation_id": "synthetic-trace-1"
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "action",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000020"
+        }
+      },
+      "revision": 1,
+      "state": "PROPOSED",
+      "business_state": "SUCCEEDED",
+      "envelope": {
+        "schema_version": "v54.integration.1",
+        "canonicalization": "pu-action-c14n-v1",
+        "action_ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "revision": 1,
+        "action_type": "task.internal.create",
+        "action_type_version": 1,
+        "executor_version": "task-db-v1",
+        "stage": "PROPOSE",
+        "project_ref": {
+          "namespace": "pu",
+          "type": "project",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "4"
+          }
+        },
+        "requested_by": {
+          "namespace": "pu",
+          "type": "user",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "2"
+          }
+        },
+        "target": {
+          "ref": {
+            "namespace": "pu",
+            "type": "project",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "int",
+              "value": "4"
+            }
+          },
+          "version_kind": "record_version",
+          "value": 1
+        },
+        "source_versions": [
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "source_version",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000014"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          },
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "source_version",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000015"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          }
+        ],
+        "evidence": [
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "evidence",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000016"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          }
+        ],
+        "claim": {
+          "ref": {
+            "namespace": "pu",
+            "type": "deadline_claim",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000017"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        },
+        "relations": [
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "context_relation",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000018"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          },
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "context_relation",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000019"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          }
+        ],
+        "expected_context_version": 1,
+        "connection_ref": {
+          "namespace": "pu",
+          "type": "connection_identity",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000010"
+          }
+        },
+        "policy": {
+          "ref": {
+            "namespace": "pu",
+            "type": "policy",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000022"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        },
+        "risk": "LOW",
+        "autonomy": "CONFIRM",
+        "reversal": "COMPENSATABLE",
+        "effects": [
+          "internal_task.create",
+          "task_history.append"
+        ],
+        "payload": {
+          "title": "Предоставить исправленный акт",
+          "due_date": "2026-09-10",
+          "timezone": "Europe/Moscow",
+          "assignee_ref": {
+            "namespace": "pu",
+            "type": "user",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "int",
+              "value": "2"
+            }
+          },
+          "contract_ref": {
+            "namespace": "pu",
+            "type": "contract",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "int",
+              "value": "5"
+            }
+          },
+          "publish_external": false,
+          "create_obligation": false
+        },
+        "idempotency_key": "synthetic:message-6:claim-17:create:r1",
+        "compensates_action_ref": null,
+        "policy_sha256": "70c5b18c3d782a78e4a211b857e101f33cada6b081352b12c18597c312b46974"
+      },
+      "envelope_sha256": "5664f62e2d1527665e45fe6ed89c259b5ab08d52e8452ea0c0ac1e086669a50e",
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000023"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000023"
+        }
+      },
+      "revision": 1,
+      "action": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "envelope_sha256": "5664f62e2d1527665e45fe6ed89c259b5ab08d52e8452ea0c0ac1e086669a50e",
+      "decision": "GRANTED",
+      "approver_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "granted_at": "2026-09-03T09:03:00Z",
+      "expires_at": "2026-09-03T09:10:00Z"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "receipt",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000025"
+        }
+      },
+      "revision": 1,
+      "action": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000023"
+        }
+      },
+      "envelope_sha256": "5664f62e2d1527665e45fe6ed89c259b5ab08d52e8452ea0c0ac1e086669a50e",
+      "outcome": "APPLIED",
+      "target": {
+        "ref": {
+          "namespace": "pu",
+          "type": "task",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "7"
+          }
+        },
+        "version_kind": "record_version",
+        "value": 1
+      },
+      "committed_at": "2026-09-03T09:04:00Z",
+      "transaction_id": "synthetic-tx-1"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "action",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000021"
+        }
+      },
+      "revision": 1,
+      "state": "PROPOSED",
+      "business_state": "SUCCEEDED",
+      "envelope": {
+        "schema_version": "v54.integration.1",
+        "canonicalization": "pu-action-c14n-v1",
+        "action_ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000021"
+          }
+        },
+        "revision": 1,
+        "action_type": "task.internal.cancel",
+        "action_type_version": 1,
+        "executor_version": "task-db-v1",
+        "stage": "PROPOSE",
+        "project_ref": {
+          "namespace": "pu",
+          "type": "project",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "4"
+          }
+        },
+        "requested_by": {
+          "namespace": "pu",
+          "type": "user",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "2"
+          }
+        },
+        "target": {
+          "ref": {
+            "namespace": "pu",
+            "type": "task",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "int",
+              "value": "7"
+            }
+          },
+          "version_kind": "record_version",
+          "value": 1
+        },
+        "source_versions": [
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "source_version",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000014"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          },
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "source_version",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000015"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          }
+        ],
+        "evidence": [
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "evidence",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000016"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          }
+        ],
+        "claim": {
+          "ref": {
+            "namespace": "pu",
+            "type": "deadline_claim",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000017"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        },
+        "relations": [
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "context_relation",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000018"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          },
+          {
+            "ref": {
+              "namespace": "pu",
+              "type": "context_relation",
+              "tenant_id": {
+                "kind": "int",
+                "value": "1"
+              },
+              "id": {
+                "kind": "uuid",
+                "value": "00000000-0000-4000-8000-000000000019"
+              }
+            },
+            "version_kind": "revision",
+            "value": 1
+          }
+        ],
+        "expected_context_version": 1,
+        "connection_ref": {
+          "namespace": "pu",
+          "type": "connection_identity",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000010"
+          }
+        },
+        "policy": {
+          "ref": {
+            "namespace": "pu",
+            "type": "policy",
+            "tenant_id": {
+              "kind": "int",
+              "value": "1"
+            },
+            "id": {
+              "kind": "uuid",
+              "value": "00000000-0000-4000-8000-000000000022"
+            }
+          },
+          "version_kind": "revision",
+          "value": 1
+        },
+        "risk": "LOW",
+        "autonomy": "CONFIRM",
+        "reversal": "COMPENSATABLE",
+        "effects": [
+          "internal_task.cancel",
+          "task_history.append"
+        ],
+        "payload": {
+          "expected_status": "assigned",
+          "reason": "Synthetic cancellation"
+        },
+        "idempotency_key": "synthetic:message-6:claim-17:cancel:r1",
+        "compensates_action_ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "policy_sha256": "70c5b18c3d782a78e4a211b857e101f33cada6b081352b12c18597c312b46974"
+      },
+      "envelope_sha256": "36964c801e756df3e5bcfc9830cc5367aaee67f2ced6d190322f90a6fe6deed9",
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000024"
+        }
+      }
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000024"
+        }
+      },
+      "revision": 1,
+      "action": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000021"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "envelope_sha256": "36964c801e756df3e5bcfc9830cc5367aaee67f2ced6d190322f90a6fe6deed9",
+      "decision": "GRANTED",
+      "approver_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "granted_at": "2026-09-03T09:05:00Z",
+      "expires_at": "2026-09-03T09:10:00Z"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "receipt",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000026"
+        }
+      },
+      "revision": 1,
+      "action": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000021"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000024"
+        }
+      },
+      "envelope_sha256": "36964c801e756df3e5bcfc9830cc5367aaee67f2ced6d190322f90a6fe6deed9",
+      "outcome": "APPLIED",
+      "target": {
+        "ref": {
+          "namespace": "pu",
+          "type": "task",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "7"
+          }
+        },
+        "version_kind": "record_version",
+        "value": 2
+      },
+      "committed_at": "2026-09-03T09:06:00Z",
+      "transaction_id": "synthetic-tx-2"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001000"
+        }
+      },
+      "revision": 1,
+      "type": "CLAIM_EXTRACTED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "deadline_claim",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000017"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 1,
+      "state": "unverified",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "2"
+        }
+      },
+      "approval_ref": null,
+      "receipt_ref": null,
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:00:00Z",
+      "transaction_id": null
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001001"
+        }
+      },
+      "revision": 1,
+      "type": "CONTEXT_PROPOSED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "message",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "6"
+          }
+        },
+        "version_kind": "record_version",
+        "value": 1
+      },
+      "sequence": 1,
+      "state": "hypothesis",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "2"
+        }
+      },
+      "approval_ref": null,
+      "receipt_ref": null,
+      "relation_refs": [
+        {
+          "namespace": "pu",
+          "type": "context_relation",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000018"
+          }
+        },
+        {
+          "namespace": "pu",
+          "type": "context_relation",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000019"
+          }
+        }
+      ],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:01:00Z",
+      "transaction_id": null
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001002"
+        }
+      },
+      "revision": 1,
+      "type": "CLAIM_CONFIRMED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "deadline_claim",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000017"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 2,
+      "state": "confirmed",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": null,
+      "receipt_ref": null,
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:02:00Z",
+      "transaction_id": null
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001003"
+        }
+      },
+      "revision": 1,
+      "type": "CONTEXT_CONFIRMED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "message",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "int",
+            "value": "6"
+          }
+        },
+        "version_kind": "record_version",
+        "value": 1
+      },
+      "sequence": 2,
+      "state": "confirmed",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": null,
+      "receipt_ref": null,
+      "relation_refs": [
+        {
+          "namespace": "pu",
+          "type": "context_relation",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000018"
+          }
+        },
+        {
+          "namespace": "pu",
+          "type": "context_relation",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000019"
+          }
+        }
+      ],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:02:30Z",
+      "transaction_id": null
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001004"
+        }
+      },
+      "revision": 1,
+      "type": "APPROVAL_GRANTED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 1,
+      "state": "READY",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000023"
+        }
+      },
+      "receipt_ref": null,
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:03:00Z",
+      "transaction_id": null
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001005"
+        }
+      },
+      "revision": 1,
+      "type": "DISPATCH_AUTHORIZED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 2,
+      "state": "EXECUTING",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000023"
+        }
+      },
+      "receipt_ref": null,
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:04:00Z",
+      "transaction_id": "synthetic-tx-1"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001006"
+        }
+      },
+      "revision": 1,
+      "type": "ACTION_SUCCEEDED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000020"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 3,
+      "state": "SUCCEEDED",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000023"
+        }
+      },
+      "receipt_ref": {
+        "namespace": "pu",
+        "type": "receipt",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000025"
+        }
+      },
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:04:00Z",
+      "transaction_id": "synthetic-tx-1"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001007"
+        }
+      },
+      "revision": 1,
+      "type": "APPROVAL_GRANTED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000021"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 1,
+      "state": "READY",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000024"
+        }
+      },
+      "receipt_ref": null,
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:05:00Z",
+      "transaction_id": null
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001008"
+        }
+      },
+      "revision": 1,
+      "type": "DISPATCH_AUTHORIZED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000021"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 2,
+      "state": "EXECUTING",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000024"
+        }
+      },
+      "receipt_ref": null,
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:06:00Z",
+      "transaction_id": "synthetic-tx-2"
+    },
+    {
+      "ref": {
+        "namespace": "pu",
+        "type": "ledger_event",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000001009"
+        }
+      },
+      "revision": 1,
+      "type": "ACTION_SUCCEEDED",
+      "subject": {
+        "ref": {
+          "namespace": "pu",
+          "type": "action",
+          "tenant_id": {
+            "kind": "int",
+            "value": "1"
+          },
+          "id": {
+            "kind": "uuid",
+            "value": "00000000-0000-4000-8000-000000000021"
+          }
+        },
+        "version_kind": "revision",
+        "value": 1
+      },
+      "sequence": 3,
+      "state": "SUCCEEDED",
+      "actor_ref": {
+        "namespace": "pu",
+        "type": "user",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "int",
+          "value": "3"
+        }
+      },
+      "approval_ref": {
+        "namespace": "pu",
+        "type": "approval",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000024"
+        }
+      },
+      "receipt_ref": {
+        "namespace": "pu",
+        "type": "receipt",
+        "tenant_id": {
+          "kind": "int",
+          "value": "1"
+        },
+        "id": {
+          "kind": "uuid",
+          "value": "00000000-0000-4000-8000-000000000026"
+        }
+      },
+      "relation_refs": [],
+      "correlation_id": "synthetic-trace-1",
+      "occurred_at": "2026-09-03T09:06:00Z",
+      "transaction_id": "synthetic-tx-2"
+    }
+  ],
+  "policy_note": "Fixture assumes separately authorized requester/reviewer, revision-bound source and permitted synthetic processing. TTL/retention/roles are not approved production policy.",
+  "negative_contract_cases": [
+    {
+      "case": "freshness_only",
+      "assessment_record_version_after": 3,
+      "expected_envelope_change": false,
+      "live_recheck_required": true
+    },
+    {
+      "case": "unknown_external",
+      "automatic_mutation_retry_allowed": false,
+      "scope": "future fake-provider contract only"
+    }
+  ]
+}

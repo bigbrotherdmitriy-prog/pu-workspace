@@ -1,0 +1,969 @@
+{
+  "notice": "PROPOSED SYNTHETIC CONTRACT EXAMPLES - NOT IMPLEMENTED",
+  "canonicalization": "pu-action-c14n-v1",
+  "policies": [
+    {
+      "policy": {
+        "id": "policy-task-confirm",
+        "version": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "mode": "CONFIRM",
+        "action_type": "task.internal.create",
+        "risk_max": "LOW",
+        "human_approval_required": true,
+        "enabled": true
+      },
+      "policy_sha256": "46cca6afd292d924815f5509a46dcd3994c62db6c43cc6c542aabcc37631baa0"
+    },
+    {
+      "policy": {
+        "id": "policy-task-auto",
+        "version": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "mode": "AUTO",
+        "action_type": "task.internal.create",
+        "risk_max": "LOW",
+        "human_approval_required": false,
+        "enabled": true,
+        "enabled_by": "user:31",
+        "enabled_at": "2026-09-03T08:00:00Z",
+        "expires_at": "2026-09-03T12:00:00Z",
+        "max_actions_per_hour": 5,
+        "verified_evidence_required": true,
+        "external_effects_allowed": false
+      },
+      "policy_sha256": "541baeda9fe94db658c9b5c4db53f19c793881815e7f33d6e9bfd07087777819"
+    },
+    {
+      "policy": {
+        "id": "policy-task-cancel",
+        "version": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "mode": "CONFIRM",
+        "action_type": "task.internal.cancel",
+        "risk_max": "LOW",
+        "human_approval_required": true,
+        "enabled": true
+      },
+      "policy_sha256": "8daed31abdca44d9a2e46b237fe3e261c67dd405789d7b912da84e659d9984cf"
+    },
+    {
+      "policy": {
+        "id": "policy-message-send",
+        "version": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "mode": "CONFIRM",
+        "action_type": "message.external.send",
+        "risk_max": "HIGH",
+        "human_approval_required": true,
+        "enabled": true
+      },
+      "policy_sha256": "e5e8015a1b605a65eec05af07c6f7dc8649e082ca7db093acf94d05b61e61898"
+    }
+  ],
+  "sealed_actions": [
+    {
+      "envelope": {
+        "schema_version": "pu-action-v1",
+        "canonicalization": "pu-action-c14n-v1",
+        "revision": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "requested_by": "user:30",
+        "stage": "PROPOSE",
+        "action_type_version": 1,
+        "executor_version": "task-db-v1",
+        "risk": "LOW",
+        "autonomy": "CONFIRM",
+        "reversal": "COMPENSATABLE",
+        "source_references": [
+          {
+            "id": "source-synthetic-1",
+            "version": 1
+          }
+        ],
+        "evidence_references": [
+          {
+            "id": "evidence-synthetic-1",
+            "version": 1
+          }
+        ],
+        "context_relation_references": [
+          {
+            "id": "relation-synthetic-1",
+            "version": 1
+          }
+        ],
+        "action_id": "00000000-0000-4000-8000-000000000101",
+        "action_type": "task.internal.create",
+        "target": {
+          "type": "project",
+          "id": 20,
+          "version": 17
+        },
+        "payload": {
+          "title": "Review synthetic schedule",
+          "description": "Internal task only",
+          "publish_external": false,
+          "create_obligation": false,
+          "due_date": "2026-09-05",
+          "assignee_user_id": 32
+        },
+        "effects": [
+          "internal_task.create",
+          "task_history.append"
+        ],
+        "policy_binding": {
+          "id": "policy-task-confirm",
+          "version": 1,
+          "hash": "46cca6afd292d924815f5509a46dcd3994c62db6c43cc6c542aabcc37631baa0"
+        },
+        "idempotency_key": "intent:synthetic-request-1:create"
+      },
+      "envelope_sha256": "dd5643fd15a3ce43e9fbd97dd33243af21893494bf48b91964dcef6c135b9a59"
+    },
+    {
+      "envelope": {
+        "schema_version": "pu-action-v1",
+        "canonicalization": "pu-action-c14n-v1",
+        "revision": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "requested_by": "user:30",
+        "stage": "PROPOSE",
+        "action_type_version": 1,
+        "executor_version": "task-db-v1",
+        "risk": "LOW",
+        "autonomy": "AUTO",
+        "reversal": "COMPENSATABLE",
+        "source_references": [
+          {
+            "id": "source-synthetic-1",
+            "version": 1
+          }
+        ],
+        "evidence_references": [
+          {
+            "id": "evidence-synthetic-1",
+            "version": 1
+          }
+        ],
+        "context_relation_references": [
+          {
+            "id": "relation-synthetic-1",
+            "version": 1
+          }
+        ],
+        "action_id": "00000000-0000-4000-8000-000000000102",
+        "action_type": "task.internal.create",
+        "target": {
+          "type": "project",
+          "id": 20,
+          "version": 17
+        },
+        "payload": {
+          "title": "Review synthetic appendix",
+          "description": "Internal task only",
+          "publish_external": false,
+          "create_obligation": false,
+          "due_date": "2026-09-05",
+          "assignee_user_id": 32
+        },
+        "effects": [
+          "internal_task.create",
+          "task_history.append"
+        ],
+        "policy_binding": {
+          "id": "policy-task-auto",
+          "version": 1,
+          "hash": "541baeda9fe94db658c9b5c4db53f19c793881815e7f33d6e9bfd07087777819"
+        },
+        "idempotency_key": "intent:synthetic-request-2:create"
+      },
+      "envelope_sha256": "291fed520d283dd35fb489de2c46611cbd332c1daa61111b95775f4d9616e5c3"
+    },
+    {
+      "envelope": {
+        "schema_version": "pu-action-v1",
+        "canonicalization": "pu-action-c14n-v1",
+        "revision": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "requested_by": "user:30",
+        "stage": "PROPOSE",
+        "action_type_version": 1,
+        "executor_version": "task-db-v1",
+        "risk": "LOW",
+        "autonomy": "CONFIRM",
+        "reversal": "COMPENSATABLE",
+        "source_references": [
+          {
+            "id": "source-synthetic-1",
+            "version": 1
+          }
+        ],
+        "evidence_references": [
+          {
+            "id": "evidence-synthetic-1",
+            "version": 1
+          }
+        ],
+        "context_relation_references": [
+          {
+            "id": "relation-synthetic-1",
+            "version": 1
+          }
+        ],
+        "action_id": "00000000-0000-4000-8000-000000000103",
+        "action_type": "task.internal.cancel",
+        "target": {
+          "type": "task",
+          "id": 201,
+          "version": 1
+        },
+        "payload": {
+          "reason": "Synthetic duplicate work no longer needed",
+          "expected_status": "assigned"
+        },
+        "effects": [
+          "internal_task.cancel",
+          "task_history.append"
+        ],
+        "policy_binding": {
+          "id": "policy-task-cancel",
+          "version": 1,
+          "hash": "8daed31abdca44d9a2e46b237fe3e261c67dd405789d7b912da84e659d9984cf"
+        },
+        "compensates_action_id": "00000000-0000-4000-8000-000000000101",
+        "idempotency_key": "intent:task-201:cancel-1"
+      },
+      "envelope_sha256": "0ae4da9b4c6acfdd1a86513adab4e49af73ef35c037dc289eb4afea6b9a30cec"
+    },
+    {
+      "envelope": {
+        "schema_version": "pu-action-v1",
+        "canonicalization": "pu-action-c14n-v1",
+        "revision": 1,
+        "organization_id": 10,
+        "project_id": 20,
+        "requested_by": "user:30",
+        "stage": "PROPOSE",
+        "action_type_version": 1,
+        "executor_version": "message-send-v1",
+        "risk": "HIGH",
+        "autonomy": "CONFIRM",
+        "reversal": "IRREVERSIBLE",
+        "source_references": [
+          {
+            "id": "source-synthetic-1",
+            "version": 1
+          }
+        ],
+        "evidence_references": [
+          {
+            "id": "evidence-synthetic-1",
+            "version": 1
+          }
+        ],
+        "context_relation_references": [
+          {
+            "id": "relation-synthetic-1",
+            "version": 1
+          }
+        ],
+        "action_id": "00000000-0000-4000-8000-000000000104",
+        "action_type": "message.external.send",
+        "renderer_version": "sealed-mime-v1",
+        "target": {
+          "type": "response_draft",
+          "id": 401,
+          "version": 3
+        },
+        "payload": {
+          "sending_account_ref": "synthetic-account-1",
+          "to": [
+            "recipient@example.test"
+          ],
+          "cc": [],
+          "bcc": [],
+          "subject": "Synthetic review request",
+          "body_text": "Please review the synthetic schedule.",
+          "attachments": [],
+          "thread_ref": null,
+          "in_reply_to": null,
+          "references": [],
+          "message_id": "<synthetic-401@example.test>"
+        },
+        "effects": [
+          "external_message.send"
+        ],
+        "policy_binding": {
+          "id": "policy-message-send",
+          "version": 1,
+          "hash": "e5e8015a1b605a65eec05af07c6f7dc8649e082ca7db093acf94d05b61e61898"
+        },
+        "idempotency_key": "intent:draft-401:send-1"
+      },
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc"
+    }
+  ],
+  "policy_decisions": [
+    {
+      "decision_id": "decision-synthetic-1",
+      "action_id": "00000000-0000-4000-8000-000000000101",
+      "revision": 1,
+      "envelope_sha256": "dd5643fd15a3ce43e9fbd97dd33243af21893494bf48b91964dcef6c135b9a59",
+      "target": {
+        "type": "project",
+        "id": 20,
+        "version": 17
+      },
+      "policy_binding": {
+        "id": "policy-task-confirm",
+        "version": 1,
+        "hash": "46cca6afd292d924815f5509a46dcd3994c62db6c43cc6c542aabcc37631baa0"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "requested_by": "user:30",
+      "effective_mode": "CONFIRM",
+      "risk": "LOW",
+      "result": "REQUIRES_HUMAN",
+      "evaluated_at": "2026-09-03T09:00:00Z",
+      "valid_until": "2026-09-03T09:10:00Z",
+      "preconditions": {
+        "requester_authority_epoch": 8,
+        "approver_authority_epoch": 9,
+        "evidence_access_epoch": 4,
+        "policy_epoch": 12,
+        "quota_reservation_required": false,
+        "allowed_effects": [
+          "internal_task.create",
+          "task_history.append"
+        ]
+      },
+      "evaluated_by": "server_policy"
+    },
+    {
+      "decision_id": "decision-synthetic-2",
+      "action_id": "00000000-0000-4000-8000-000000000102",
+      "revision": 1,
+      "envelope_sha256": "291fed520d283dd35fb489de2c46611cbd332c1daa61111b95775f4d9616e5c3",
+      "target": {
+        "type": "project",
+        "id": 20,
+        "version": 17
+      },
+      "policy_binding": {
+        "id": "policy-task-auto",
+        "version": 1,
+        "hash": "541baeda9fe94db658c9b5c4db53f19c793881815e7f33d6e9bfd07087777819"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "requested_by": "user:30",
+      "effective_mode": "AUTO",
+      "risk": "LOW",
+      "result": "ALLOW_AUTO",
+      "evaluated_at": "2026-09-03T09:02:00Z",
+      "valid_until": "2026-09-03T09:12:00Z",
+      "preconditions": {
+        "requester_authority_epoch": 8,
+        "approver_authority_epoch": null,
+        "evidence_access_epoch": 4,
+        "policy_epoch": 12,
+        "quota_reservation_required": true,
+        "allowed_effects": [
+          "internal_task.create",
+          "task_history.append"
+        ]
+      },
+      "evaluated_by": "server_policy"
+    },
+    {
+      "decision_id": "decision-synthetic-3",
+      "action_id": "00000000-0000-4000-8000-000000000103",
+      "revision": 1,
+      "envelope_sha256": "0ae4da9b4c6acfdd1a86513adab4e49af73ef35c037dc289eb4afea6b9a30cec",
+      "target": {
+        "type": "task",
+        "id": 201,
+        "version": 1
+      },
+      "policy_binding": {
+        "id": "policy-task-cancel",
+        "version": 1,
+        "hash": "8daed31abdca44d9a2e46b237fe3e261c67dd405789d7b912da84e659d9984cf"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "requested_by": "user:30",
+      "effective_mode": "CONFIRM",
+      "risk": "LOW",
+      "result": "REQUIRES_HUMAN",
+      "evaluated_at": "2026-09-03T09:03:00Z",
+      "valid_until": "2026-09-03T09:13:00Z",
+      "preconditions": {
+        "requester_authority_epoch": 8,
+        "approver_authority_epoch": 9,
+        "evidence_access_epoch": 4,
+        "policy_epoch": 12,
+        "quota_reservation_required": false,
+        "allowed_effects": [
+          "internal_task.cancel",
+          "task_history.append"
+        ]
+      },
+      "evaluated_by": "server_policy"
+    },
+    {
+      "decision_id": "decision-synthetic-4",
+      "action_id": "00000000-0000-4000-8000-000000000104",
+      "revision": 1,
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc",
+      "target": {
+        "type": "response_draft",
+        "id": 401,
+        "version": 3
+      },
+      "policy_binding": {
+        "id": "policy-message-send",
+        "version": 1,
+        "hash": "e5e8015a1b605a65eec05af07c6f7dc8649e082ca7db093acf94d05b61e61898"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "requested_by": "user:30",
+      "effective_mode": "CONFIRM",
+      "risk": "HIGH",
+      "result": "REQUIRES_HUMAN",
+      "evaluated_at": "2026-09-03T09:04:00Z",
+      "valid_until": "2026-09-03T09:14:00Z",
+      "preconditions": {
+        "requester_authority_epoch": 8,
+        "approver_authority_epoch": 9,
+        "evidence_access_epoch": 4,
+        "policy_epoch": 12,
+        "quota_reservation_required": false,
+        "allowed_effects": [
+          "external_message.send"
+        ]
+      },
+      "evaluated_by": "server_policy"
+    }
+  ],
+  "approval_events": [
+    {
+      "event_id": "approval-synthetic-1",
+      "decision": "GRANTED",
+      "action_id": "00000000-0000-4000-8000-000000000101",
+      "revision": 1,
+      "envelope_sha256": "dd5643fd15a3ce43e9fbd97dd33243af21893494bf48b91964dcef6c135b9a59",
+      "target": {
+        "type": "project",
+        "id": 20,
+        "version": 17
+      },
+      "policy_binding": {
+        "id": "policy-task-confirm",
+        "version": 1,
+        "hash": "46cca6afd292d924815f5509a46dcd3994c62db6c43cc6c542aabcc37631baa0"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "policy_decision_id": "decision-synthetic-1",
+      "approver": "user:31",
+      "approver_role_snapshot": "project_manager",
+      "approver_authority_epoch": 9,
+      "scope": {
+        "organization_id": 10,
+        "project_id": 20
+      },
+      "granted_at": "2026-09-03T09:01:00Z",
+      "expires_at": "2026-09-03T09:10:00Z",
+      "command_key": "approve:synthetic-1"
+    },
+    {
+      "event_id": "approval-synthetic-3",
+      "decision": "GRANTED",
+      "action_id": "00000000-0000-4000-8000-000000000103",
+      "revision": 1,
+      "envelope_sha256": "0ae4da9b4c6acfdd1a86513adab4e49af73ef35c037dc289eb4afea6b9a30cec",
+      "target": {
+        "type": "task",
+        "id": 201,
+        "version": 1
+      },
+      "policy_binding": {
+        "id": "policy-task-cancel",
+        "version": 1,
+        "hash": "8daed31abdca44d9a2e46b237fe3e261c67dd405789d7b912da84e659d9984cf"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "policy_decision_id": "decision-synthetic-3",
+      "approver": "user:31",
+      "approver_role_snapshot": "project_manager",
+      "approver_authority_epoch": 9,
+      "scope": {
+        "organization_id": 10,
+        "project_id": 20
+      },
+      "granted_at": "2026-09-03T09:03:30Z",
+      "expires_at": "2026-09-03T09:13:00Z",
+      "command_key": "approve:synthetic-3"
+    },
+    {
+      "event_id": "approval-synthetic-4",
+      "decision": "GRANTED",
+      "action_id": "00000000-0000-4000-8000-000000000104",
+      "revision": 1,
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc",
+      "target": {
+        "type": "response_draft",
+        "id": 401,
+        "version": 3
+      },
+      "policy_binding": {
+        "id": "policy-message-send",
+        "version": 1,
+        "hash": "e5e8015a1b605a65eec05af07c6f7dc8649e082ca7db093acf94d05b61e61898"
+      },
+      "source_references": [
+        {
+          "id": "source-synthetic-1",
+          "version": 1
+        }
+      ],
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "context_relation_references": [
+        {
+          "id": "relation-synthetic-1",
+          "version": 1
+        }
+      ],
+      "policy_decision_id": "decision-synthetic-4",
+      "approver": "user:31",
+      "approver_role_snapshot": "project_manager",
+      "approver_authority_epoch": 9,
+      "scope": {
+        "organization_id": 10,
+        "project_id": 20
+      },
+      "granted_at": "2026-09-03T09:04:30Z",
+      "expires_at": "2026-09-03T09:14:00Z",
+      "command_key": "approve:synthetic-4"
+    }
+  ],
+  "ledger_events": [
+    {
+      "event_id": "ledger-1-1",
+      "action_id": "00000000-0000-4000-8000-000000000101",
+      "revision": 1,
+      "envelope_sha256": "dd5643fd15a3ce43e9fbd97dd33243af21893494bf48b91964dcef6c135b9a59",
+      "sequence": 1,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "DISPATCH_AUTHORIZED",
+      "occurred_at": "2026-09-03T09:02:00Z",
+      "policy_decision_ref": "decision-synthetic-1",
+      "approval_ref": "approval-synthetic-1",
+      "correlation_id": "trace-synthetic-1",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-1",
+      "job_ref": "job-synthetic-1",
+      "business_state": "EXECUTING",
+      "authority_epoch": 8
+    },
+    {
+      "event_id": "ledger-1-2",
+      "action_id": "00000000-0000-4000-8000-000000000101",
+      "revision": 1,
+      "envelope_sha256": "dd5643fd15a3ce43e9fbd97dd33243af21893494bf48b91964dcef6c135b9a59",
+      "sequence": 2,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "ACTION_SUCCEEDED",
+      "occurred_at": "2026-09-03T09:02:00Z",
+      "policy_decision_ref": "decision-synthetic-1",
+      "approval_ref": "approval-synthetic-1",
+      "correlation_id": "trace-synthetic-1",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-1",
+      "business_state": "SUCCEEDED",
+      "domain_after_ref": {
+        "type": "task",
+        "id": 201,
+        "version": 1
+      },
+      "receipt_ref": "receipt-internal-1"
+    },
+    {
+      "event_id": "ledger-2-1",
+      "action_id": "00000000-0000-4000-8000-000000000102",
+      "revision": 1,
+      "envelope_sha256": "291fed520d283dd35fb489de2c46611cbd332c1daa61111b95775f4d9616e5c3",
+      "sequence": 1,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "server_policy",
+      "type": "DISPATCH_AUTHORIZED",
+      "occurred_at": "2026-09-03T09:03:00Z",
+      "policy_decision_ref": "decision-synthetic-2",
+      "approval_ref": null,
+      "correlation_id": "trace-synthetic-2",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-2",
+      "job_ref": "job-synthetic-2",
+      "business_state": "EXECUTING",
+      "grant_kind": "SERVER_POLICY",
+      "policy_enabled_by": "user:31",
+      "quota_reservation_ref": "quota-synthetic-1"
+    },
+    {
+      "event_id": "ledger-2-2",
+      "action_id": "00000000-0000-4000-8000-000000000102",
+      "revision": 1,
+      "envelope_sha256": "291fed520d283dd35fb489de2c46611cbd332c1daa61111b95775f4d9616e5c3",
+      "sequence": 2,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "server_policy",
+      "type": "ACTION_SUCCEEDED",
+      "occurred_at": "2026-09-03T09:03:00Z",
+      "policy_decision_ref": "decision-synthetic-2",
+      "approval_ref": null,
+      "correlation_id": "trace-synthetic-2",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-2",
+      "business_state": "SUCCEEDED",
+      "domain_after_ref": {
+        "type": "task",
+        "id": 202,
+        "version": 1
+      },
+      "receipt_ref": "receipt-internal-2"
+    },
+    {
+      "event_id": "ledger-3-1",
+      "action_id": "00000000-0000-4000-8000-000000000103",
+      "revision": 1,
+      "envelope_sha256": "0ae4da9b4c6acfdd1a86513adab4e49af73ef35c037dc289eb4afea6b9a30cec",
+      "sequence": 1,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "DISPATCH_AUTHORIZED",
+      "occurred_at": "2026-09-03T09:04:00Z",
+      "policy_decision_ref": "decision-synthetic-3",
+      "approval_ref": "approval-synthetic-3",
+      "correlation_id": "trace-synthetic-3",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-3",
+      "business_state": "EXECUTING",
+      "compensates_action_id": "00000000-0000-4000-8000-000000000101"
+    },
+    {
+      "event_id": "ledger-3-2",
+      "action_id": "00000000-0000-4000-8000-000000000103",
+      "revision": 1,
+      "envelope_sha256": "0ae4da9b4c6acfdd1a86513adab4e49af73ef35c037dc289eb4afea6b9a30cec",
+      "sequence": 2,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "ACTION_SUCCEEDED",
+      "occurred_at": "2026-09-03T09:04:00Z",
+      "policy_decision_ref": "decision-synthetic-3",
+      "approval_ref": "approval-synthetic-3",
+      "correlation_id": "trace-synthetic-3",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-3",
+      "business_state": "SUCCEEDED",
+      "domain_before_ref": {
+        "type": "task",
+        "id": 201,
+        "version": 1
+      },
+      "domain_after_ref": {
+        "type": "task",
+        "id": 201,
+        "version": 2
+      },
+      "compensates_action_id": "00000000-0000-4000-8000-000000000101",
+      "receipt_ref": "receipt-cancel-1"
+    },
+    {
+      "event_id": "ledger-4-1",
+      "action_id": "00000000-0000-4000-8000-000000000104",
+      "revision": 1,
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc",
+      "sequence": 1,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "DISPATCH_AUTHORIZED",
+      "occurred_at": "2026-09-03T09:05:00Z",
+      "policy_decision_ref": "decision-synthetic-4",
+      "approval_ref": "approval-synthetic-4",
+      "correlation_id": "trace-synthetic-4",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-4",
+      "business_state": "EXECUTING",
+      "provider_account_ref": "synthetic-account-1"
+    },
+    {
+      "event_id": "ledger-4-2",
+      "action_id": "00000000-0000-4000-8000-000000000104",
+      "revision": 1,
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc",
+      "sequence": 2,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "OUTCOME_UNKNOWN",
+      "occurred_at": "2026-09-03T09:06:00Z",
+      "policy_decision_ref": "decision-synthetic-4",
+      "approval_ref": "approval-synthetic-4",
+      "correlation_id": "trace-synthetic-4",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-4",
+      "business_state": "UNKNOWN",
+      "safe_error_code": "RECEIPT_COMMIT_UNCONFIRMED",
+      "automatic_mutation_retry_allowed": false
+    },
+    {
+      "event_id": "ledger-4-3",
+      "action_id": "00000000-0000-4000-8000-000000000104",
+      "revision": 1,
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc",
+      "sequence": 3,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "RECONCILIATION_OBSERVATION",
+      "occurred_at": "2026-09-03T09:07:00Z",
+      "policy_decision_ref": "decision-synthetic-4",
+      "approval_ref": "approval-synthetic-4",
+      "correlation_id": "trace-synthetic-4",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-4",
+      "business_state": "UNKNOWN",
+      "observation": "EMPTY_NON_AUTHORITATIVE_SEARCH",
+      "automatic_mutation_retry_allowed": false
+    },
+    {
+      "event_id": "ledger-4-4",
+      "action_id": "00000000-0000-4000-8000-000000000104",
+      "revision": 1,
+      "envelope_sha256": "c94b358a846851883f69975739daeeb7c63eeaa80fe6ca204201ab612b6150dc",
+      "sequence": 4,
+      "organization_id": 10,
+      "project_id": 20,
+      "actor": "user:30",
+      "type": "ACTION_SUCCEEDED",
+      "occurred_at": "2026-09-03T09:08:00Z",
+      "policy_decision_ref": "decision-synthetic-4",
+      "approval_ref": "approval-synthetic-4",
+      "correlation_id": "trace-synthetic-4",
+      "evidence_references": [
+        {
+          "id": "evidence-synthetic-1",
+          "version": 1
+        }
+      ],
+      "attempt_id": "attempt-4",
+      "business_state": "SUCCEEDED",
+      "proof": "AUTHORITATIVE_PROVIDER_RECEIPT",
+      "receipt_ref": "receipt-external-1",
+      "provider_account_ref": "synthetic-account-1",
+      "external_id_ref": "external-id-synthetic-1"
+    }
+  ],
+  "changed_payload_case": {
+    "original_action_id": "00000000-0000-4000-8000-000000000101",
+    "original_revision": 1,
+    "changed_revision": 2,
+    "change": {
+      "field": "payload.assignee_user_id",
+      "old": 32,
+      "new": 33
+    },
+    "old_approval_ref": "approval-synthetic-1",
+    "expected": "OLD_APPROVAL_NOT_APPLICABLE_NEW_FREEZE_AND_APPROVAL_REQUIRED",
+    "execute_allowed": false
+  },
+  "corrective_email_case": {
+    "stage": "DRAFT",
+    "action_type": "message.external.corrective_send",
+    "corrects_action_id": "00000000-0000-4000-8000-000000000104",
+    "autonomy": "CONFIRM",
+    "reversal": "IRREVERSIBLE",
+    "human_approval_required": true,
+    "original_email_recalled": false,
+    "execute_allowed": false
+  },
+  "case_notes": [
+    "All IDs and addresses are synthetic. No runnable commands or credentials. Policy records are illustrative, not enabled product configuration.",
+    "Cases assume authenticated user:30 and approver user:31 possess current scoped permissions; snapshots do not grant authority.",
+    "Evidence/context/source records are owned by other streams; refs do not implement those models.",
+    "AUTO has a policy decision, not a forged human approval. Example quota 5/hour requires owner approval before implementation.",
+    "Internal create/cancel receipts and domain changes must commit atomically. Ledger entries here show resulting records, not separately committed calls.",
+    "Cancel case assumes target task 201 remains assigned and version 1, without external or financial effects. Project version 17 has not changed.",
+    "External receipt is hypothetical reconciliation evidence, not proof that current Gmail adapter implements lookup. Empty search leaves UNKNOWN.",
+    "Late authoritative receipt documents the effect even if job failed or a grant later expired; a new send still requires a fresh execution gate.",
+    "Envelopes describe the proposed facade, not current HTTP request models. Task assignee_user_id and date-only due_date preserve existing domain semantics; no new time-of-day scheduling is implied."
+  ]
+}

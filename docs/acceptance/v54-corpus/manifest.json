@@ -1,0 +1,356 @@
+{
+  "format_version": 1,
+  "title": "PU Workspace v5.4 independent synthetic acceptance corpus",
+  "base_sha": "34dcc8306acd6d1bacf85e9ce799330fba907ed9",
+  "provenance": {
+    "requirements": {
+      "filename": "PU_Workspace_TZ_v5_4_FEDERATED_EVIDENCE_AUTONOMY.docx",
+      "sha256": "af7bfde75715345e4f32b9d7ca057812cdba7b8d8e0b6a1b105dfe20fc0d5df3",
+      "mode": "OOXML text read; document not copied into corpus"
+    },
+    "read_only_contract_commits": {
+      "source_evidence": "7674e973401301d4d31e8561ce7875427a600869",
+      "context": "7edea2b5e6b362b856dfb752ee4a09ae598e12d2",
+      "trust": "f384ae533d6ac48229d2bf00aa2659b8b3895ca6"
+    }
+  },
+  "semantics": {
+    "ids": "Corpus aliases only, map independently per case; not a replacement shared DTO or foundation fixture.",
+    "offsets": "Unicode code points; zero-based start inclusive/end exclusive on strict UTF-8 LF text; no normalization.",
+    "observations": "Each immutable observation has revision 1. r2 is a new observation ID, not revision 2 of old observation.",
+    "confidence": "null means not measured, never a numeric probability.",
+    "business_counts": "Counts are scoped to one isolated case after expected.business.phase. Events may assert intermediate zero effects.",
+    "source_visibility": "Oracle is not SUT input. oracle_only excerpts and forbidden content must be withheld. only control harness executes structured events.",
+    "pass": "Validator only structural. Product PASS requires all business/policy/history assertions; safe refusal of unsupported feature is BLOCKED, not full PASS.",
+    "audit": "required_observations are semantic requirements, not new shared enum values; map to approved shared append_audit contracts."
+  },
+  "case_files": [
+    "cases/content.json",
+    "cases/policy.json",
+    "cases/sequence.json"
+  ],
+  "declared_counts": {
+    "content": 12,
+    "policy": 6,
+    "sequence": 10,
+    "total": 28
+  },
+  "assets": [
+    {
+      "asset_id": "clear_mail",
+      "kind": "message",
+      "logical_source": "mail-clear",
+      "observation_id": "obs-clear_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/clear_mail.txt",
+      "sha256": "9c3bf7c0bd991df6d1e1f42231a12c6fc511ceb7c9bc9ff56eca1c9e855a06f5"
+    },
+    {
+      "asset_id": "clear_attachment",
+      "kind": "attachment",
+      "logical_source": "attachment-clear",
+      "observation_id": "obs-clear_attachment",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/clear_attachment.md",
+      "sha256": "f457e6daf83e638b6b7105a0ae615437fd028ec6a7e7f009b5f8991b945c0ba4"
+    },
+    {
+      "asset_id": "ambiguous_mail",
+      "kind": "message",
+      "logical_source": "mail-ambiguous",
+      "observation_id": "obs-ambiguous_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/ambiguous_mail.txt",
+      "sha256": "f4bcd87d927b649f7e061e489acee0f719b0ace06b0fa7cfb83bab898546f8a3"
+    },
+    {
+      "asset_id": "same_number_mail",
+      "kind": "message",
+      "logical_source": "mail-same-number",
+      "observation_id": "obs-same_number_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/same_number_mail.txt",
+      "sha256": "5cd3d4ca6f2487e32729abb83b79d10f51bb09642d831bdc500a0c671752dd23"
+    },
+    {
+      "asset_id": "exact_number_mail",
+      "kind": "message",
+      "logical_source": "mail-exact-number",
+      "observation_id": "obs-exact_number_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/exact_number_mail.txt",
+      "sha256": "8ac582194355cba35ec127f34c266fdcff5226913ac6502918a9f226d1df5e41"
+    },
+    {
+      "asset_id": "contact_only_mail",
+      "kind": "message",
+      "logical_source": "mail-contact-only",
+      "observation_id": "obs-contact_only_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/contact_only_mail.txt",
+      "sha256": "d7d322432d858e32d19d79a91dea2be7495b005d5a758955bbf288652f326ebb"
+    },
+    {
+      "asset_id": "timed_mail",
+      "kind": "message",
+      "logical_source": "mail-timed",
+      "observation_id": "obs-timed_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/timed_mail.txt",
+      "sha256": "214da4aa62bf5ea84d687864f27e8db7a4b16308d8006e15d6c677c85f98ff53"
+    },
+    {
+      "asset_id": "relative_mail",
+      "kind": "message",
+      "logical_source": "mail-relative",
+      "observation_id": "obs-relative_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/relative_mail.txt",
+      "sha256": "2edd070bc964cb0b6151db42e684e8307435a9669fbb96b28d32f4b2e68b88c7"
+    },
+    {
+      "asset_id": "conflict_date_mail",
+      "kind": "message",
+      "logical_source": "mail-conflict-date",
+      "observation_id": "obs-conflict_date_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/conflict_date_mail.txt",
+      "sha256": "25298e5c9a1561bfef92a62b49c06ac4430179e7add74f8f737673257d17eeb9"
+    },
+    {
+      "asset_id": "no_date_mail",
+      "kind": "message",
+      "logical_source": "mail-no-date",
+      "observation_id": "obs-no_date_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/no_date_mail.txt",
+      "sha256": "0f45ef9c869223dd45f270b7366d2452282b69d5dbe6bae1f5980d4dfe235e32"
+    },
+    {
+      "asset_id": "conflict_attachment",
+      "kind": "attachment",
+      "logical_source": "attachment-conflict",
+      "observation_id": "obs-conflict_attachment",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/conflict_attachment.md",
+      "sha256": "d2ca12a23113a4bb1daa7e5f288cf6faf6357bf3cd3ccd5a1092e1627958b054"
+    },
+    {
+      "asset_id": "injection_mail",
+      "kind": "message",
+      "logical_source": "mail-injection",
+      "observation_id": "obs-injection_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/injection_mail.txt",
+      "sha256": "54571ef51cd0d1e22502d7e2f82b33cff6f68a51803b66df4ebd55ba496affac"
+    },
+    {
+      "asset_id": "revised_attachment",
+      "kind": "attachment",
+      "logical_source": "attachment-clear",
+      "observation_id": "obs-revised_attachment",
+      "observation_revision": 1,
+      "provider_revision": "r2",
+      "path": "sources/revised_attachment.md",
+      "sha256": "fd6dfdb53c31254b0a06c877ef06bd8b049f33afd6444070ed4be1e002828171"
+    },
+    {
+      "asset_id": "payment_mail",
+      "kind": "message",
+      "logical_source": "mail-payment",
+      "observation_id": "obs-payment_mail",
+      "observation_revision": 1,
+      "provider_revision": "r1",
+      "path": "sources/payment_mail.txt",
+      "sha256": "b01424b6bb4b380e5d98de8c1bee2ff376da5946df47840793d88ef845a3861c"
+    }
+  ],
+  "entities": {
+    "tenants": {
+      "tenant_a": "Тестовая артель Фонарь",
+      "tenant_b": "Тестовое бюро Кварц"
+    },
+    "actors": {
+      "operator": {
+        "email": "boris@example.test",
+        "name": "Борис Макетов",
+        "tenant": "tenant_a"
+      },
+      "requester": {
+        "email": "anna@example.test",
+        "name": "Анна Примерова",
+        "tenant": "tenant_a"
+      },
+      "foreign": {
+        "email": "other@example.test",
+        "name": "Вера Образцова",
+        "tenant": "tenant_b"
+      }
+    },
+    "projects": {
+      "alpha": {
+        "name": "Альфа-Макет",
+        "tenant": "tenant_a"
+      },
+      "beta": {
+        "name": "Бета-Макет",
+        "tenant": "tenant_a"
+      },
+      "foreign": {
+        "name": "Чужой-Макет",
+        "tenant": "tenant_b"
+      }
+    },
+    "contracts": {
+      "a42": {
+        "number": "TEST-A-42",
+        "project": "alpha"
+      },
+      "b43": {
+        "number": "TEST-B-43",
+        "project": "beta"
+      },
+      "a12": {
+        "number": "12",
+        "project": "alpha"
+      },
+      "b12": {
+        "number": "12",
+        "project": "beta"
+      },
+      "a3124": {
+        "number": "3124",
+        "project": "alpha"
+      }
+    },
+    "contacts": {
+      "lada": {
+        "email": "lada@example.test",
+        "name": "Лада Макетова",
+        "projects": [
+          "alpha",
+          "beta"
+        ]
+      }
+    },
+    "connections": {
+      "mail_a": {
+        "account": "account-a",
+        "mailbox": "intake@example.test",
+        "tenant": "tenant_a"
+      },
+      "mail_b": {
+        "account": "account-b",
+        "mailbox": "secondary@example.test",
+        "tenant": "tenant_a"
+      },
+      "mail_foreign": {
+        "account": "account-foreign",
+        "mailbox": "foreign@example.test",
+        "tenant": "tenant_b"
+      }
+    }
+  },
+  "requirement_catalog": {
+    "TZ-31": "v5.4 §31 Context/Evidence/Autonomy and Trust additions: provenance, independent approvals, versions, dedup, correction, compensation.",
+    "TZ-35": "v5.4 §35: no fabricated dates, evidence and human review for ambiguity.",
+    "USER-CORPUS": "Explicit user acceptance corpus constraints and coverage list.",
+    "FOUNDATION-TRANSACTIONS": "Foundation integration ownership-transactions/acceptance: caller transaction, pending T1, atomic business T2, queue completion after T2."
+  },
+  "interface_requests": {
+    "IR-01": {
+      "owner": "A/B/integrator",
+      "topic": "Extraction and evidence locator",
+      "decision": "A/B/C currently accept prepared pins/DTO, not raw-text extraction. A whole_object/no-fragment facade does not prove excerpt/operator source UX. Provide authorised locator/fragment mapping; preserve raw quote only where policy permits."
+    },
+    "IR-02": {
+      "owner": "integrator",
+      "topic": "Legacy Message identity",
+      "decision": "Plan mailbox-scoped uniqueness and migration for unknown legacy mailbox; required project cannot represent unassigned origin. No salted IDs, fake shared project or identity guessing."
+    },
+    "IR-03": {
+      "owner": "Task/Trust + product owner",
+      "topic": "Date versus instant",
+      "decision": "Agree timestamp/timezone precision or explicitly exclude timed deadlines; do not silently truncate 18:30 to a date."
+    },
+    "IR-04": {
+      "owner": "authority/integrator",
+      "topic": "Durable authority and revoke races",
+      "decision": "Supply authoritative tenant/mailbox/project/source ACL, evidence revoke epochs and lock ordering at mutation guard. Synthetic policy maps are not a durable authority proof."
+    },
+    "IR-05": {
+      "owner": "Task/Trust/jobs integrator",
+      "topic": "Real transaction/fault harness",
+      "decision": "Supply approved real Task helper, pending intent reconciler, queue key mapping and process/PG fault barriers. Use existing queue; no new ledger or queue."
+    },
+    "IR-06": {
+      "owner": "Source/Evidence + policy owner",
+      "topic": "No copy/no fragment",
+      "decision": "Define permissible metadata versus materialization. Harness must withhold oracle content and inspect approved storage/log sinks. No new retention rights inferred."
+    },
+    "IR-07": {
+      "owner": "product owner + future external integration",
+      "topic": "UNKNOWN external outcome",
+      "decision": "Only fake-state oracle now; future provider reconciliation and UNKNOWN recovery contract required before external execution."
+    },
+    "IR-08": {
+      "owner": "product owner + finance integration",
+      "topic": "User-confirmed payment",
+      "decision": "Payment event and DDS linkage need separate contract; no mandatory bank statement, no payment inference from invoice. No finance execution in pilot."
+    },
+    "IR-09": {
+      "owner": "product owner",
+      "topic": "AUTO/external actions",
+      "decision": "Keep disabled in pilot; any future allow-list and approval policy requires explicit scope decision."
+    }
+  },
+  "coverage": {
+    "unique_context": "C01",
+    "two_projects": "C02",
+    "same_contract_number": "C03",
+    "number_boundaries": "C04",
+    "multi_project_contact": "C05",
+    "contact_content_conflict": "C06",
+    "explicit_deadline": "C01",
+    "timestamp_precision": "C07",
+    "relative_without_anchor": "C08",
+    "conflicting_deadlines": "C09",
+    "absent_deadline": "C10",
+    "attachment_conflict": "C11",
+    "prompt_injection": "C12",
+    "source_unavailable": "P01",
+    "evidence_revoked": "P02",
+    "no_copy_no_fragment": "P03",
+    "user_payment_confirmation": "P04",
+    "acl_isolation": "P05",
+    "auto_disabled": "P06",
+    "source_changed": "S01",
+    "cross_mailbox_external_id": "S02",
+    "redelivery": "S03",
+    "late_analysis_manual_correction": "S04",
+    "approved_payload_changed": "S05",
+    "receipt_replay": "S06",
+    "crash_intent_before_enqueue": "S07",
+    "crash_business_before_job_complete": "S08",
+    "separate_cancel": "S09",
+    "unknown_external_outcome": "S10"
+  },
+  "verification": {
+    "structural": "validator_required",
+    "application": "planned",
+    "postgres_fault_test": "required_for_marked_cases",
+    "owner_decisions": "open_as_listed"
+  }
+}

@@ -53,10 +53,14 @@ def test_authorized_project_without_snapshot_can_select_and_bind_drive_folder():
 
     assert "!latestSnapshot && googleState?.authorized" in source
     assert "Выбрать рабочую папку" in source
-    assert "const targetProjectId = projectIdRef.current;" in source
-    assert "await load(targetProjectId);" in source
-    assert "Создаётся безопасная копия, выполняются анализ и стандартизация имён" in source
-    assert "Подключить и стандартизировать" in source
+    picker = (APP_SOURCE.parent / "modules/integrations/useStoragePicker.ts").read_text(encoding="utf-8")
+    assert "await picker.confirm(folder);" in source
+    assert "const target = projectIdRef.current;" in picker
+    assert "/projects/${pinned.project_id}/source-folders/${encodeURIComponent(folder.id)}/snapshot-queue" in picker
+    assert "if (!request.current()) return false;" in picker
+    assert "await load(targetProjectId);" not in source
+    assert "Выбрать эту папку" in source
+    assert "snapshotActionError(e)" in source
 
 
 def test_legacy_ui_keeps_selected_project_after_refresh_and_oauth():

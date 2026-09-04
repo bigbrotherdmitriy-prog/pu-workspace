@@ -949,13 +949,19 @@ def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = De
         raise HTTPException(404, "Запись ДДС не найдена")
     require_project_role(db, user, item.project_id, "manager")
     paid_status = "received" if item.direction == "inflow" else "paid"
+    actual_amount = payload.actual_amount or item.planned_amount
+    actual_date = payload.actual_date or date.today()
     if item.status in {"paid", "received"}:
+        if item.actual_amount != actual_amount or item.actual_date != actual_date:
+            raise HTTPException(
+                409,
+                "Платёж уже подтверждён с другой суммой или датой; создайте корректирующее событие",
+            )
         return {"id": item.id, "status": item.status, "already_confirmed": True}
     if item.status not in {"proposed", "approved"}:
         raise HTTPException(409, "Эту запись нельзя подтвердить как оплаченную")
-    actual_amount = payload.actual_amount or item.planned_amount
     item.actual_amount = actual_amount
-    item.actual_date = payload.actual_date or date.today()
+    item.actual_date = actual_date
     item.status = paid_status
     _refresh_budget_from_cash_flow(db, item.budget_line_id)
     _audit(db, "cash_flow_payment_confirmed", "cash_flow", item.id, user.id,

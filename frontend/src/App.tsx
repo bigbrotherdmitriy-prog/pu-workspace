@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./api/client";
+import { api, ApiError } from "./api/client";
 import { Login } from "./auth/Login";
-import { useProjectSelection } from "./context/useProjectSelection";
+import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
+import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
@@ -22,6 +23,8 @@ import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
 import { MailClientModule } from "./modules/mail/MailClientModule";
+import { EmailCompensationCard, type EmailCompensationOffer } from "./modules/inbox/EmailCompensationCard";
+import { EvidencePanel, type EvidenceRef } from "./modules/evidence/EvidencePanel";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
@@ -214,6 +217,7 @@ type AnalysisResult = {
 };
 type Snapshot = {
   id: number;
+  provider?: string;
   status: string;
   item_count: number;
   source_folder: string;
@@ -229,6 +233,7 @@ type Snapshot = {
 type DriveFolder = {
   id: string;
   name: string;
+  provider?: string;
   modifiedTime?: string;
   registered: boolean;
   is_primary: boolean;
@@ -240,7 +245,6 @@ type DriveFolder = {
   snapshot_status?: string;
   item_count?: number;
 };
-type DriveBreadcrumb = { id: string; name: string };
 type InboxTask = {
   id: number;
   title: string;
@@ -256,6 +260,8 @@ type InboxDraft = {
   body: string;
   status: string;
   confidence: number;
+  is_corrective_follow_up?: boolean;
+  email_compensation?: EmailCompensationOffer | null;
 };
 type InboxRisk = {
   id: number;
@@ -294,6 +300,7 @@ type InboxMessage = {
     evidence: string;
     status: string;
   }[];
+  evidence_refs?: EvidenceRef[];
 };
 type AutomationRule = {
   id: number;
@@ -343,6 +350,15 @@ const targetFolders = [
   "09_ЗАКРЫТИЕ ПРОЕКТА",
   "99_АРХИВ",
 ];
+
+function snapshotActionError(error: unknown) {
+  if (error instanceof ApiError && error.status === 409) {
+    return error.message.includes("queued, running or retrying")
+      ? "Задание уже находится в очереди или выполняется. Дождитесь завершения и обновите состояние."
+      : "Операция недоступна в текущем состоянии. Обновите данные проекта и проверьте подключение папки.";
+  }
+  return error instanceof Error ? error.message : "Не удалось выполнить операцию";
+}
 
 export function App() {
   const { projectId, projectIdRef, rememberProject: persistProjectSelection, initialProjectId } = useProjectSelection();
@@ -415,7 +431,6 @@ export function App() {
     [summary, setSummary] = useState<Summary | null>(null),
     [documents, setDocuments] = useState<DocumentCard[]>([]),
     [snapshots, setSnapshots] = useState<Snapshot[]>([]),
-    [folders, setFolders] = useState<DriveFolder[]>([]),
     [proposals, setProposals] = useState<Proposal[]>([]),
     [auditLogs, setAuditLogs] = useState<AuditRow[]>([]),
     [members, setMembers] = useState<MemberRow[]>([]),
@@ -424,8 +439,6 @@ export function App() {
     [processingQueue, setProcessingQueue] = useState<ProcessingQueue | null>(null),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
-    [showSources, setShowSources] = useState(false),
-    [busyFolder, setBusyFolder] = useState(""),
     [busyProposal, setBusyProposal] = useState(0),
     [busyAll, setBusyAll] = useState(false),
     [gmailSyncing, setGmailSyncing] = useState(false),
@@ -443,10 +456,12 @@ export function App() {
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const [copyCleanupResults, setCopyCleanupResults] = useState<Record<number, { count: number; message: string }>>({});
-  const [sourceFolderId, setSourceFolderId] = useState("root");
-  const [sourceBreadcrumbs, setSourceBreadcrumbs] = useState<DriveBreadcrumb[]>([
-    { id: "root", name: "Мой диск" },
-  ]);
+  const picker = useStoragePicker<DriveFolder>(projectId, projectIdRef);
+  const { folders, setFolders, busyFolder, setBusyFolder } = picker;
+  const showSources = picker.isOpen;
+  const sourceFolderId = picker.folderId;
+  const sourceProvider = picker.context?.provider;
+  const sourceBreadcrumbs = picker.breadcrumbs;
   const {
     finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
@@ -470,6 +485,7 @@ export function App() {
   }
 
   async function activateProject(id: number) {
+    picker.close();
     rememberProject(id);
     setActive("Рабочий центр");
     await load(id);
@@ -477,14 +493,14 @@ export function App() {
 
   async function load(preferredProjectId?: number) {
     const loadSequence = ++loadSequenceRef.current;
+    const selectionAtStart = projectIdRef.current;
+    const requested = preferredProjectId ?? selectionAtStart;
     try {
       setError("");
       const p = await api("/projects/");
+      if (loadSequence !== loadSequenceRef.current || projectIdRef.current !== selectionAtStart) return;
       setProjects(p.projects);
-      const requestedProjectId = preferredProjectId ?? projectIdRef.current;
-      const id = p.projects.some((item: Project) => item.id === requestedProjectId)
-        ? requestedProjectId
-        : p.projects[0]?.id || 0;
+      const id = requestedProjectId(p.projects, requested);
       if (id) {
         if (loadSequence !== loadSequenceRef.current) return;
         rememberProject(id);
@@ -580,7 +596,7 @@ export function App() {
         setDailyBriefing(briefingData);
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (loadSequence === loadSequenceRef.current && projectIdRef.current === selectionAtStart) setError((e as Error).message);
     }
   }
   async function loadIntegrations() {
@@ -667,12 +683,26 @@ export function App() {
     }
   }
   async function connectGoogle() {
+    picker.close();
     try {
       const result = await api(`/projects/${projectId}/google/auth`);
       window.location.href = result.authorization_url;
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  async function connectStorageProvider(provider: string) {
+    picker.close();
+    if (provider !== "yandex_disk") return connectGoogle();
+    try {
+      const result = await api(`/projects/${projectId}/yandex/auth`);
+      window.location.href = result.authorization_url;
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function openProviderSources(provider: string) {
+    await picker.open(provider);
   }
   async function syncGmail(options: { silent?: boolean } = {}) {
     if (gmailSyncing || !projectId) return;
@@ -727,7 +757,7 @@ export function App() {
       setNotice(`Повтор снимка №${snapshotId} поставлен в очередь`);
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setError(snapshotActionError(e));
     }
   }
   async function retryOrganizerSession(sessionId: number) {
@@ -1009,62 +1039,23 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  async function openSources(folderId = "root") {
-    try {
-      setError("");
-      const targetProjectId = projectIdRef.current;
-      const d = await api(
-        `/projects/${targetProjectId}/source-folders/discover?folder_id=${encodeURIComponent(folderId)}`,
-      );
-      setFolders(d.folders);
-      setSourceFolderId(d.folder_id || folderId);
-      setSourceBreadcrumbs(
-        d.breadcrumbs || [{ id: "root", name: "Мой диск" }],
-      );
-      setShowSources(true);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  async function openSources(folderId?: string) {
+    if (folderId === undefined) await picker.open();
+    else await picker.navigate(folderId);
   }
   async function queueFolder(folder: DriveFolder) {
-    try {
-      const targetProjectId = projectIdRef.current;
-      setBusyFolder(folder.id);
-      setError("");
-      const queued = await api(
-        `/projects/${targetProjectId}/source-folders/${folder.id}/snapshot-queue`,
-        { method: "POST" },
-      );
-      setFolders((items) =>
-        items.map((item) =>
-          item.id === folder.id
-            ? {
-                ...item,
-                registered: true,
-                snapshot_id: queued.id,
-                snapshot_status: queued.status,
-                item_count: 0,
-              }
-            : item,
-        ),
-      );
-      setNotice(
-        `Папка «${folder.name}» подключена. Создаётся безопасная копия, выполняются анализ и стандартизация имён. Оригиналы не изменяются.`,
-      );
-      await load(targetProjectId);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusyFolder("");
-    }
+    await picker.confirm(folder);
   }
   async function makePrimary(folder: DriveFolder) {
+    const request = picker.capture();
+    if (!request) return;
     try {
       setBusyFolder(folder.id);
       setError("");
-      await api(`/projects/${projectId}/source-folders/${folder.id}/primary`, {
+      await api(`/projects/${request.context.project_id}/source-folders/${encodeURIComponent(folder.id)}/primary`, {
         method: "POST",
       });
+      if (!request.current()) return;
       setFolders((items) =>
         items.map((item) => ({ ...item, is_primary: item.id === folder.id })),
       );
@@ -1076,28 +1067,33 @@ export function App() {
       );
       setNotice(`${folder.name} назначена основной рабочей папкой`);
     } catch (e) {
-      setError((e as Error).message);
+      if (request.current()) setError((e as Error).message);
     } finally {
-      setBusyFolder("");
+      if (request.current()) setBusyFolder("");
     }
   }
   async function analyzeFolder(folder: DriveFolder) {
     if (!folder.snapshot_id) return;
+    const request = picker.capture();
+    if (!request) return;
     try {
       setBusyFolder(folder.id);
       setError("");
       setNotice("");
       const result = await api(
-        `/projects/${projectId}/snapshots/${folder.snapshot_id}/standardize`,
+        `/projects/${request.context.project_id}/snapshots/${folder.snapshot_id}/standardize`,
         { method: "POST" },
       );
-      if (result.already_analyzed) {
+      if (!request.current()) return;
+      if (result.already_queued) {
         setFolders((items) =>
           items.map((item) =>
-            item.id === folder.id ? { ...item, analyzed: true } : item,
+            item.id === folder.id ? { ...item, analyzed: result.status === "ready", analysis_status: result.status } : item,
           ),
         );
-        setNotice(`${folder.name} уже поставлена на безопасную стандартизацию`);
+        setNotice(result.status === "ready"
+          ? `${folder.name}: обработка завершена`
+          : `${folder.name}: задание уже существует (${result.status})`);
       } else {
         setFolders((items) =>
           items.map((item) =>
@@ -1107,50 +1103,56 @@ export function App() {
           ),
         );
         setNotice(
-          `Создание безопасной копии, анализ и стандартизация «${folder.name}» запущены. Страницу можно закрыть.`,
+          `Создание безопасной копии, анализ и стандартизация «${folder.name}» поставлены в очередь. Страницу можно закрыть.`,
         );
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (request.current()) setError((e as Error).message);
     } finally {
-      setBusyFolder("");
+      if (request.current()) setBusyFolder("");
     }
   }
   async function prepareSourceChanges(folder: DriveFolder) {
     if (!folder.snapshot_id) return;
+    const request = picker.capture();
+    if (!request) return;
     try {
       setBusyFolder(folder.id);
       setError("");
-      await api(`/projects/${projectId}/snapshots/${folder.snapshot_id}/analyze`, {
+      await api(`/projects/${request.context.project_id}/snapshots/${folder.snapshot_id}/analyze`, {
         method: "POST",
       });
-      setShowSources(false);
+      if (!request.current()) return;
+      picker.close();
       setActive("Предложения");
       setNotice("Готовится таблица «Было → Станет» для рабочей папки. Обновите раздел через несколько секунд.");
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (request.current()) setError(snapshotActionError(e));
     } finally {
-      setBusyFolder("");
+      if (request.current()) setBusyFolder("");
     }
   }
   async function queueAllFolders() {
+    const request = picker.capture();
+    if (!request) return;
     try {
       setBusyAll(true);
       setError("");
       const result = await api(
-        `/projects/${projectId}/source-folders/snapshot-queue-all`,
+        `/projects/${request.context.project_id}/source-folders/snapshot-queue-all`,
         { method: "POST" },
       );
+      if (!request.current()) return;
       setNotice(
         result.queued
           ? `В очередь добавлено папок: ${result.queued}. Они будут обработаны последовательно.`
           : "Все доступные папки уже подключены или находятся в очереди.",
       );
-      await openSources();
+      await picker.navigate();
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (request.current()) setError((e as Error).message);
     } finally {
       setBusyAll(false);
     }
@@ -1510,6 +1512,19 @@ export function App() {
       setError((e as Error).message);
     }
   }
+  async function proposeEmailCompensation(draft: InboxDraft, offer: EmailCompensationOffer) {
+    if (!offer.source_etag) return;
+    try {
+      await api(`/response-drafts/${draft.id}/email-compensation/proposals`, {
+        method: "POST",
+        body: JSON.stringify({ expected_source_etag: offer.source_etag }),
+      });
+      setNotice("Корректирующий ответ подготовлен как черновик. Отправка требует отдельного подтверждения.");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function editProposalAction(item: ProposalAction, decision: string) {
     try {
       await api(`/organizer/actions/${item.id}`, {
@@ -1779,6 +1794,7 @@ export function App() {
     const timer = window.setInterval(async () => {
       try {
         const queue = await api(`/projects/${projectId}/processing-queue`);
+        if (projectIdRef.current !== projectId) return;
         setProcessingQueue(queue);
         if (!queue.summary.active) await load();
       } catch {
@@ -1791,11 +1807,11 @@ export function App() {
     if (
       !ready ||
       !showSources ||
-      !folders.some(
+      picker.loading || busyFolder || picker.needsReopen || (!folders.some(
         (item) =>
           item.snapshot_status === "building" ||
           item.analysis_status === "analyzing",
-      )
+      ) && picker.selection?.status !== "building" && picker.selection?.analysis_status !== "analyzing")
     )
       return;
     const timer = window.setInterval(() => {
@@ -1808,6 +1824,7 @@ export function App() {
     projectId,
     showSources,
     sourceFolderId,
+    picker.loading, busyFolder, picker.needsReopen, picker.selection?.status, picker.selection?.analysis_status,
     folders.some(
       (item) =>
         item.snapshot_status === "building" ||
@@ -2149,10 +2166,14 @@ export function App() {
                 value={projectId}
                 onChange={(e) => {
                   const id = Number(e.target.value);
+                  picker.close();
                   rememberProject(id);
                   void load(id);
                 }}
               >
+                {projectId > 0 && !projects.some((project) => project.id === projectId) && (
+                  <option value={projectId}>Проект №{projectId} — ожидается загрузка</option>
+                )}
                 {projects.map((p) => <option value={p.id} key={p.id}>{p.name}</option>)}
               </select>
             </label>
@@ -2198,7 +2219,7 @@ export function App() {
               openSection={(section, target) => {
                 if (target === "contacts") setMailView("companies");
                 setActive(section);
-                if (target === "source") void openSources("root");
+                if (target === "source") void openSources();
               }}
             />
           )}
@@ -2387,17 +2408,17 @@ export function App() {
                         : latestSnapshot.status}
                     </span>
                     <div className="source-actions">
-                      <button onClick={() => void openSources("root")}>
+                      <button onClick={() => void openSources()}>
                         Все источники
                       </button>
-                      <a
+                      {latestSnapshot.provider !== "yandex_disk" && <a
                         className="source-link"
                         href={`https://drive.google.com/drive/folders/${latestSnapshot.source_external_id}`}
                         target="_blank"
                         rel="noreferrer"
                       >
                         Открыть в Google Drive
-                      </a>
+                      </a>}
                     </div>
                   </section>
                 )}
@@ -2415,7 +2436,7 @@ export function App() {
                       </p>
                     </div>
                     <div className="source-actions">
-                      <button onClick={() => void openSources("root")}>
+                      <button onClick={() => void openSources()}>
                         Выбрать рабочую папку
                       </button>
                     </div>
@@ -2427,30 +2448,45 @@ export function App() {
                       <div>
                         <h2>Папки для последовательного разбора</h2>
                         <p>
-                          Каждая папка получает отдельный виртуальный снимок;
+                          {sourceProvider === "yandex_disk" ? "Яндекс Диск" : sourceProvider ? "Google Drive" : "Хранилище проекта"}. Каждая папка получает отдельный виртуальный снимок;
                           файлы не перемещаются.
                         </p>
                       </div>
                       <div className="source-head-actions">
-                        {sourceFolderId === "root" && (
+                        {["root", "disk:/"].includes(sourceFolderId) && (
                           <button
                             className="queue-all"
-                            disabled={busyAll}
+                            disabled={busyAll || picker.loading || !!busyFolder || !picker.context}
                             onClick={queueAllFolders}
                           >
                             {busyAll ? "Добавление…" : "Подготовить все папки"}
                           </button>
                         )}
-                        <button onClick={() => setShowSources(false)}>
+                        <button onClick={picker.close}>
                           Закрыть
                         </button>
                       </div>
                     </div>
+                    {picker.loading && <p role="status">Загружаю папки…</p>}
+                    {picker.error && <div role="alert"><p>{picker.error}</p><button onClick={() => void picker.reopen()}>Переоткрыть выбор</button></div>}
+                    {picker.context?.connection_id === null && <p>Это подключение пока не имеет идентификатора аккаунта. Проверка смены аккаунта ограничена; при переподключении переоткройте выбор.</p>}
+                    {picker.selection?.project_id === projectId && <p role="status">
+                      Выбрана: {picker.selection.source_folder} · снимок №{picker.selection.id}
+                      {picker.selection.job_id != null && ` · задание №${picker.selection.job_id}`}
+                      {` · статус снимка: ${picker.selection.status}`}
+                      {picker.selection.analysis_status && ` · анализ: ${picker.selection.analysis_status}`}
+                      {picker.selection.analysis_error && ` · ${picker.selection.analysis_error}`}
+                    </p>}
+                    {picker.context && sourceBreadcrumbs.length > 0 && <button
+                      disabled={picker.loading || !!busyFolder || picker.needsReopen}
+                      onClick={() => void queueFolder({ id: sourceFolderId, name: sourceBreadcrumbs.at(-1)!.name,
+                        provider: sourceProvider, registered: false, is_primary: false, analyzed: false })}
+                    >Выбрать текущую папку</button>}
                     <div className="source-breadcrumbs">
                       {sourceBreadcrumbs.map((crumb, index) => (
                         <button
                           key={crumb.id}
-                          disabled={index === sourceBreadcrumbs.length - 1}
+                          disabled={!!busyFolder || index === sourceBreadcrumbs.length - 1}
                           onClick={() => void openSources(crumb.id)}
                         >
                           {crumb.name}
@@ -2461,13 +2497,11 @@ export function App() {
                       {folders.map((folder) => {
                         const session = processingQueue?.sessions.find((item) => item.id === folder.analysis_result?.organizer_session_id);
                         const isQueued = session?.status === "queued";
-                        const queuedSessions = (processingQueue?.sessions || []).filter((item) => item.status === "queued").sort((left, right) => left.id - right.id);
-                        const localQueuePosition = isQueued ? queuedSessions.findIndex((item) => item.id === session?.id) + 1 : 0;
-                        const queuePosition = session?.queue_position || localQueuePosition;
-                        const activeProgress = isQueued ? 0 : folder.snapshot_status === "building" ? 5 : Math.max(0, Math.min(100, session?.progress || (folder.analysis_status === "ready" ? 100 : 10)));
+                        const queuePosition = session?.queue_position;
+                        const activeProgress = session?.progress == null ? null : Math.max(0, Math.min(100, session.progress));
                         const totalItems = session?.copy_item_count || session?.source_item_count || folder.item_count || 0;
-                        const processedItems = Math.min(totalItems, session?.processed_item_count || (activeProgress >= 92 ? totalItems : 0));
-                        const remainingItems = Math.max(0, totalItems - processedItems);
+                        const processedItems = session?.processed_item_count ?? null;
+                        const remainingItems = processedItems === null || !totalItems ? null : Math.max(0, totalItems - processedItems);
                         const isProcessing = folder.snapshot_status === "building" || folder.analysis_status === "analyzing";
                         return (
                         <article key={folder.id}>
@@ -2496,16 +2530,16 @@ export function App() {
                                           ? "Ошибка снимка — можно повторить"
                                           : folder.modifiedTime
                                             ? `Изменена ${new Date(folder.modifiedTime).toLocaleDateString("ru-RU")}`
-                                            : "Google Drive"}
+                                            : sourceProvider === "yandex_disk" ? "Яндекс Диск" : "Google Drive"}
                             </p>
-                            {isProcessing && <div className="source-progress" aria-label={`Прогресс анализа ${activeProgress}%`}>
-                              <div className="source-progress-head"><strong>{isQueued ? "В очереди" : `${activeProgress}%`}</strong><span>{isQueued && queuePosition ? `позиция ${queuePosition} · ` : ""}{processedItems.toLocaleString("ru-RU")} обработано · {remainingItems.toLocaleString("ru-RU")} осталось</span></div>
-                              <div className="source-progress-track"><i style={{ width: `${activeProgress}%` }} /></div>
-                              <small>{isQueued ? "Ожидает свободного обработчика" : activeProgress < 15 ? "Сканирование структуры папки" : activeProgress < 55 ? "Создание безопасной копии" : activeProgress < 92 ? "Чтение и анализ файлов" : "Формирование документов, задач и предложений"}</small>
+                            {isProcessing && <div className="source-progress" aria-label={activeProgress === null ? "Обработка: процент не предоставлен сервером" : `Прогресс анализа ${activeProgress}%`}>
+                              <div className="source-progress-head"><strong>{isQueued ? "В очереди" : activeProgress === null ? "Обработка…" : `${activeProgress}%`}</strong><span>{isQueued && queuePosition ? `позиция ${queuePosition} · ` : ""}{processedItems === null ? "Количество обработанных объектов пока неизвестно" : `${processedItems.toLocaleString("ru-RU")} обработано`}{remainingItems !== null && ` · ${remainingItems.toLocaleString("ru-RU")} осталось`}</span></div>
+                              {activeProgress !== null && <div className="source-progress-track"><i style={{ width: `${activeProgress}%` }} /></div>}
+                              <small>{isQueued ? "Ожидает свободного обработчика" : session?.status || "Создаётся снимок папки"}</small>
                             </div>}
                           </div>
                           <div className="source-row-actions">
-                            <button onClick={() => void openSources(folder.id)}>
+                            <button disabled={!!busyFolder} onClick={() => void openSources(folder.id)}>
                               Открыть
                             </button>
                             {folder.registered && !folder.is_primary && (
@@ -2519,10 +2553,10 @@ export function App() {
                             {folder.snapshot_status === "ready" ? (
                               <>
                                 <button
-                                  disabled={busyFolder === folder.id}
+                                  disabled={!!busyFolder || picker.loading || picker.needsReopen}
                                   onClick={() => queueFolder(folder)}
                                 >
-                                  {busyFolder === folder.id ? "Обновляю…" : "Найти новые файлы"}
+                                  {busyFolder === folder.id ? "Подтверждаю…" : "Выбрать эту папку"}
                                 </button>
                                 <button
                                   className="analyze"
@@ -2549,15 +2583,14 @@ export function App() {
                             ) : (
                               <button
                                 disabled={
-                                  folder.snapshot_status === "building" ||
-                                  busyFolder === folder.id
+                                  folder.snapshot_status === "building" || !!busyFolder || picker.loading || picker.needsReopen
                                 }
                                 onClick={() => queueFolder(folder)}
                               >
                                 {folder.snapshot_status === "building"
                                   ? "В очереди"
                                   : folder.snapshot_status === "failed"
-                                    ? "Повторить"
+                                    ? "Показать результат привязки"
                                     : folder.registered
                                       ? "Обновить копию и анализ"
                                       : "Подключить и стандартизировать"}
@@ -2965,8 +2998,8 @@ export function App() {
           gmailSyncing={gmailSyncing}
           gmailSyncStatus={gmailSyncStatus}
           onSyncGmail={() => void syncGmail()}
-          onSelectFolder={() => void openSources("root")}
-          onConnectGoogle={() => void connectGoogle()}
+          onSelectFolder={(provider) => void openProviderSources(provider)}
+          onConnectProvider={(provider) => void connectStorageProvider(provider)}
           onLocalUpload={() => { setNotice(""); setMobileUploadOpen(true); }}
           onOpenAIPolicy={() => setActive("Настройки")}
           onOpenGmailResults={openGmailResults}
@@ -3308,6 +3341,7 @@ export function App() {
                       </div>
                     )}
                     <pre className="inbox-summary">{message.summary}</pre>
+                    <EvidencePanel active={expanded} evidenceRefs={message.evidence_refs || []} />
                     {message.risks.length > 0 && (
                       <div className="inbox-risks">
                         <h3>Риски и контроль</h3>
@@ -3412,7 +3446,13 @@ export function App() {
                               ? "Отклонён"
                               : "Черновик — не отправлен"}
                         </span>
-                        {draft.status === "draft" && (
+                        {draft.status === "sent" && (
+                          <EmailCompensationCard
+                            offer={draft.email_compensation || undefined}
+                            onPropose={(offer) => proposeEmailCompensation(draft, offer)}
+                          />
+                        )}
+                        {draft.status === "draft" && !draft.is_corrective_follow_up && (
                           <div className="draft-actions">
                             <button
                               onClick={() =>

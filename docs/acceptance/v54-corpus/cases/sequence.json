@@ -1,0 +1,1166 @@
+{
+  "format_version": 1,
+  "category": "sequence",
+  "cases": [
+    {
+      "case_id": "S01",
+      "category": "sequence",
+      "requirement": "Оригинал изменён после extraction: старый evidence pin не становится новой версией.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S01",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment","revised_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [
+          {"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"},
+          {"asset_id":"revised_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}
+        ]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [
+        {"asset_id":"clear_mail","observation_id":"obs-clear_mail"},
+        {"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"},
+        {"asset_id":"revised_attachment","observation_id":"obs-revised_attachment"}
+      ],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-revised_attachment-95",
+          "asset_id": "revised_attachment",
+          "observation_id": "obs-revised_attachment",
+          "start": 95,
+          "end": 165,
+          "quote": "Требуется передать комплект актов до 19 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources","available_assets":["clear_mail","clear_attachment"],"withhold_assets":["revised_attachment"]},
+        {"step":2,"event":"analyse_without_mutation"},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":4,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":5,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":6,"event":"human_approve_exact_action"},
+        {
+          "step": 7,
+          "event": "control_publish_new_source_observation",
+          "previous": "obs-clear_attachment",
+          "next": "obs-revised_attachment",
+          "logical_source": "attachment-clear"
+        },
+        {"step":8,"event":"attempt_execute_old_action"},
+        {"step":9,"event":"reanalyse_current_sources"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17","2030-04-19"],
+          "normalized_date": null,
+          "timestamp": null,
+          "review_state": "old_claim_stale; new_claim_unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"performed_for_exact_payload"},
+        "allowed_changes": ["Новая immutable SourceVersion observation и новый неподтверждённый claim; старые evidence/approval сохранены исторически."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {"phase":"after_old_execute_attempt","new_tasks":0,"new_receipts":0,"external_effects":0,"confirmed_context":true},
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Хэши двух созданных файлов различаются; старый action не исполняется на новой версии без повторного review/approval.",
+          "После повторного анализа письмо всё ещё указывает 17-е, новое вложение 19-е: конфликт сохранён, 19-е автоматически не выбрано.",
+          "Старая observation остаётся revision=1 и новым содержимым не перезаписывается."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": ["IR-01"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"not_required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S02",
+      "category": "sequence",
+      "requirement": "Одинаковый external_id в разных mailbox/account — не одно сообщение.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "integration_blocked",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S02",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "deliveries": [{"connection":"mail_a","external_id":"synthetic-shared-external-id"},{"connection":"mail_b","external_id":"synthetic-shared-external-id"}],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"deliver_first_mailbox"},
+        {"step":2,"event":"deliver_second_mailbox_same_external_id"},
+        {"step":3,"event":"inspect_both_origin_identities"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"required","claim":"required_before_deadline_use","action":"required_before_execution"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {"phase":"target_architecture","distinct_messages":2,"new_tasks":0,"new_receipts":0,"external_effects":0,"confirmed_context":false},
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Полная целевая приёмка: два Message origin, каждый привязан к своему ConnectionIdentity, без утечки связей между ними.",
+          "На точной базе global uq_message_source мешает этому: безопасный явный отказ второго ingress считается BLOCKED, а не PASS поддержки двух ящиков.",
+          "Нельзя salted/prefixed legacy source ID, общий фиктивный проект или перенос credentials registry ради зелёного теста."
+        ]
+      },
+      "uncertainties": ["Миграция mailbox-scoped uniqueness и legacy identity mapping принадлежит интегратору. Existing required project также сохраняется."],
+      "interface_requests": ["IR-02"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"not_required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S03",
+      "category": "sequence",
+      "requirement": "Повтор доставки в том же mailbox не создаёт дублей Message, intent и Task.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S03",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"redeliver_same_message","same_connection":true,"same_external_id":true,"same_source_hash":true},
+        {"step":3,"event":"analyse_without_mutation"},
+        {"step":4,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":5,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":6,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":7,"event":"human_approve_exact_action"},
+        {"step":8,"event":"execute_internal_task"},
+        {"step":9,"event":"redeliver_and_reanalyse_again"},
+        {"step":10,"event":"project_same_receipt_twice"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"performed_for_exact_payload"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {
+          "phase": "after_replays",
+          "distinct_messages": 1,
+          "distinct_intents": 1,
+          "new_tasks": 1,
+          "new_receipts": 1,
+          "task_projections": 1,
+          "external_effects": 0,
+          "confirmed_context": true
+        },
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Один Message origin на ConnectionIdentity/external_id; повтор не теряет ручное решение.",
+          "Одна Task/receipt/projection и один семантический intent, включая конкурентный ingress вариант.",
+          "Дополнительные replay audit observations допустимы, но не выдаются за повторный бизнес-commit."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": ["IR-05"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S04",
+      "category": "sequence",
+      "requirement": "Ручная коррекция защищена от позднего анализа; обе primary relations меняются атомарно.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S04",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"start_analysis_snapshot","context_version":1},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42","expected_context_version":1,"result_context_version":2},
+        {
+          "step": 4,
+          "event": "concurrent_correction_barrier",
+          "winner": {
+            "expected_context_version": 2,
+            "expected_project_record_version": "confirmed_relation_version",
+            "expected_contract_record_version": "confirmed_relation_version",
+            "project": "beta",
+            "contract": null,
+            "origin": "explicit_human_scoped_correction"
+          },
+          "loser": {"expected_context_version":2,"project":"alpha","contract":"a42"}
+        },
+        {"step":5,"event":"commit_winner","result_context_version":3},
+        {"step":6,"event":"attempt_commit_stale_loser"},
+        {"step":7,"event":"finish_old_analysis_snapshot","context_version":1},
+        {"step":8,"event":"attempt_cross_project_contract","project":"beta","contract":"a42","expected_context_version":3},
+        {
+          "step": 9,
+          "event": "human_confirm_new_contract",
+          "project": "beta",
+          "contract": "b43",
+          "expected_context_version": 3,
+          "result_context_version": 4,
+          "origin": "explicit_human_scoped_assertion"
+        }
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["beta"],
+          "contract_candidates": ["b43"],
+          "relation_state": "confirmed_by_human",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Явное scoped человеческое исправление; исходные alpha/a42 assertions сохранены superseded."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified_and_not_rebound_automatically",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"required","claim":"required_before_deadline_use","action":"required_before_execution"},
+        "allowed_changes": ["Append history: alpha/a42 superseded; beta без старого contract затем beta/b43. Ни одного частичного обновления пары."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {
+          "phase": "after_correction_sequence",
+          "new_tasks": 0,
+          "new_receipts": 0,
+          "external_effects": 0,
+          "confirmed_context": true,
+          "project": "beta",
+          "contract": "b43",
+          "context_version": 4
+        },
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Только winner CAS меняет context_version 2→3; stale loser и late analysis не перезаписывают human relation.",
+          "При project beta старый contract a42 инвалидирован; cross-project contract отвергнут без частичного изменения.",
+          "Финал beta/b43 version4; mailbox origin mail_a неизменен; correction не стала глобальным правилом контакта/домена.",
+          "Context confirmation не подтверждает срок исходного alpha письма для beta и не разрешает action."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": [],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S05",
+      "category": "sequence",
+      "requirement": "Изменение payload после approval аннулирует право исполнить изменённое действие.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S05",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"analyse_without_mutation"},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":4,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":5,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":6,"event":"human_approve_exact_action"},
+        {"step":7,"event":"control_change_action_payload","field":"title","before":"Передать комплект актов","after":"Подготовить другой комплект"},
+        {"step":8,"event":"attempt_execute_with_old_approval"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"performed_for_exact_payload"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {"phase":"after_tampered_execute","new_tasks":0,"new_receipts":0,"external_effects":0,"confirmed_context":true},
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Изменённый canonical payload не совпадает с одобренным hash; execute отказан.",
+          "Исторический seal/approval не переписан; новый payload требует нового freeze и нового action approval.",
+          "Нельзя обойти проверку тем, что project/claim остались прежними."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": [],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"not_required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S06",
+      "category": "sequence",
+      "requirement": "Повтор execute успешного receipt не создаёт вторую Task.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S06",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"analyse_without_mutation"},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":4,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":5,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":6,"event":"human_approve_exact_action"},
+        {"step":7,"event":"execute_internal_task"},
+        {"step":8,"event":"execute_same_intent_again"},
+        {"step":9,"event":"project_receipt"},
+        {"step":10,"event":"project_receipt_again"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"performed_for_exact_payload"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {"phase":"after_replay","new_tasks":1,"new_receipts":1,"task_projections":1,"external_effects":0,"confirmed_context":true},
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Повтор возвращает тот же receipt/Task, не вызывает TaskMutation второй раз.",
+          "Повтор projection не создаёт вторую communication.task relation.",
+          "Чтение receipt тоже проходит tenant/project ACL; идемпотентность не предоставляет чужой receipt."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": ["IR-05"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S07",
+      "category": "sequence",
+      "requirement": "Crash после commit pending intent до enqueue восстанавливается без потери работы.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S07",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"analyse_without_mutation"},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":4,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":5,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":6,"event":"human_approve_exact_action"},
+        {"step":7,"event":"commit_pending_intent_T1","stable_idempotency_alias":"intent-S07"},
+        {"step":8,"event":"fault_kill_dispatch_process","boundary":"after_pending_commit_before_enqueue"},
+        {"step":9,"event":"restart_dispatch_reconciler"},
+        {"step":10,"event":"recover_and_enqueue_same_intent"},
+        {"step":11,"event":"worker_execute"},
+        {"step":12,"event":"reconcile_again"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"performed_for_exact_payload"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {"phase":"after_recovery","distinct_intents":1,"new_tasks":1,"new_receipts":1,"external_effects":0,"confirmed_context":true,"pending_unrecoverable":0},
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "После настоящего process kill committed intent остаётся в PostgreSQL; restart находит его без памяти старого процесса.",
+          "Enqueue/reconcile используют один стабильный ключ в корректном tenant scope; не возникает второй Task.",
+          "До бизнес-commit нет receipt успеха; после recovery ровно один подтверждённый эффект."
+        ]
+      },
+      "uncertainties": ["Интегратор предоставляет pending reconciler и mapping global queue idempotency/tenant command key; корпус не создаёт очередь."],
+      "interface_requests": ["IR-05"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S08",
+      "category": "sequence",
+      "requirement": "Crash после бизнес-commit до job completion не повторяет бизнес-эффект.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S08",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"analyse_without_mutation"},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":4,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":5,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":6,"event":"human_approve_exact_action"},
+        {"step":7,"event":"enqueue_pending_intent"},
+        {"step":8,"event":"worker_commit_T2","atomic_members":["Task","task_history","receipt","audit"]},
+        {"step":9,"event":"fault_kill_worker","boundary":"after_business_commit_before_job_completion"},
+        {"step":10,"event":"expire_lease_and_reclaim_from_second_worker"},
+        {"step":11,"event":"execute_same_intent_again"},
+        {"step":12,"event":"complete_job"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"performed_for_exact_payload"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {"phase":"after_reclaimed_completion","new_tasks":1,"new_receipts":1,"task_history_create_entries":1,"external_effects":0,"confirmed_context":true},
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "После kill PostgreSQL содержит атомарно Task/history/receipt/audit, а queue completion ещё не записан.",
+          "Второй worker после lease reclaim читает receipt, не выполняет create повторно; итог одна Task и один бизнес-audit успеха.",
+          "Job completion согласован с существующим receipt; дополнительные технические retry observations не дублируют бизнес-историю."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": ["IR-05"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S09",
+      "category": "sequence",
+      "requirement": "Отмена созданной Task — отдельное действие с новым approval и собственной историей.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "pilot",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S09",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"register_sources"},
+        {"step":2,"event":"analyse_without_mutation"},
+        {"step":3,"event":"human_confirm_context","project":"alpha","contract":"a42"},
+        {"step":4,"event":"human_review_claim","date":"2030-04-17"},
+        {"step":5,"event":"freeze_internal_task_and_non_executable_reply_draft"},
+        {"step":6,"event":"human_approve_exact_action"},
+        {"step":7,"event":"execute_internal_task"},
+        {"step":8,"event":"freeze_cancel_task","target":"task_from_create_receipt"},
+        {"step":9,"event":"attempt_cancel_without_cancel_approval"},
+        {"step":10,"event":"human_approve_cancel_action"},
+        {"step":11,"event":"execute_cancel_task"},
+        {"step":12,"event":"replay_cancel_receipt"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"performed_explicitly","claim":"performed_separately","action":"one_create_approval_and_one_distinct_cancel_approval"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {
+          "phase": "after_cancel",
+          "new_tasks": 1,
+          "new_receipts": 2,
+          "external_effects": 0,
+          "confirmed_context": true,
+          "task_status": "cancelled",
+          "create_history_retained": true
+        },
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Create approval не разрешает cancel; первый неподтверждённый cancel не меняет Task.",
+          "Отдельный cancel receipt меняет статус, но не удаляет Task/create receipt/history.",
+          "Повтор cancel возвращает существующий результат; ни второй cancellation mutation, ни undo audit."
+        ]
+      },
+      "uncertainties": ["Не задана численная вероятность confidence или порог качества; corpus задаёт допустимый результат, не измеренную уверенность."],
+      "interface_requests": ["IR-05"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"not_required","owner_decision":"not_required"}
+    },
+    {
+      "case_id": "S10",
+      "category": "sequence",
+      "requirement": "Неизвестный результат внешнего действия не допускает слепого retry.",
+      "requirement_refs": ["TZ-31","USER-CORPUS","FOUNDATION-TRANSACTIONS"],
+      "execution_scope": "future_fake_only",
+      "inputs": {
+        "tenant": "tenant_a",
+        "actor": "operator",
+        "connection": "mail_a",
+        "external_id": "synthetic-S10",
+        "active_project": "beta",
+        "clock": "2030-04-01T12:00:00+03:00",
+        "source_assets": ["clear_mail","clear_attachment"],
+        "harness_delivery": "fake_provider_only; no_network",
+        "legacy_intake_project": "alpha",
+        "synthetic_origin": true,
+        "message_asset": "clear_mail",
+        "attachments": [{"asset_id":"clear_attachment","parent_message_asset":"clear_mail","display_name":"specification.md","logical_attachment":"attachment-clear"}]
+      },
+      "preconditions": [
+        "Изолированный новый namespace этого case_id; каталог manifest не является production ID.",
+        "Вызовы выполняются в caller transaction; источники — недоверенные данные."
+      ],
+      "permissions": {
+        "tenant_access": true,
+        "mailbox_access": true,
+        "project_access": ["alpha","beta"],
+        "source_read": true,
+        "evidence_read": true,
+        "may_confirm_context": true,
+        "may_review_claim": true,
+        "may_approve_action": true,
+        "autonomy": "CONFIRM",
+        "external_actions": false
+      },
+      "sources": [{"asset_id":"clear_mail","observation_id":"obs-clear_mail"},{"asset_id":"clear_attachment","observation_id":"obs-clear_attachment"}],
+      "evidence": [
+        {
+          "evidence_alias": "ev-clear_mail-159",
+          "asset_id": "clear_mail",
+          "observation_id": "obs-clear_mail",
+          "start": 159,
+          "end": 271,
+          "quote": "По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "context_and_deadline",
+          "visibility": "sut_permitted"
+        },
+        {
+          "evidence_alias": "ev-clear_attachment-81",
+          "asset_id": "clear_attachment",
+          "observation_id": "obs-clear_attachment",
+          "start": 81,
+          "end": 151,
+          "quote": "Требуется передать комплект актов до 17 апреля 2030 года включительно.",
+          "role": "deadline",
+          "visibility": "sut_permitted"
+        }
+      ],
+      "events": [
+        {"step":1,"event":"fake_prepare_external_action_without_product_execution"},
+        {"step":2,"event":"fake_provider_apply_effect_then_drop_response"},
+        {"step":3,"event":"observe_unknown_outcome"},
+        {"step":4,"event":"attempt_blind_retry"},
+        {"step":5,"event":"human_or_provider_reconciliation"}
+      ],
+      "expected": {
+        "hypotheses": {
+          "project_candidates": ["alpha"],
+          "contract_candidates": ["a42"],
+          "relation_state": "hypothesis",
+          "confidence": null,
+          "confidence_basis": "not_measured",
+          "selection_rule": "Содержание и доступные evidence pins; active project и домен не являются основанием."
+        },
+        "claims": {
+          "kind": "deadline",
+          "candidate_dates": ["2030-04-17"],
+          "normalized_date": "2030-04-17",
+          "timestamp": null,
+          "review_state": "unverified",
+          "evidence_required": true
+        },
+        "manual_confirmation": {"context":"required","claim":"required_before_deadline_use","action":"not_executable_in_pilot; reconciliation_not_new_approval_to_retry"},
+        "allowed_changes": ["Версионированные hypotheses и неподтверждённый claim при доступном evidence; предложение внутренней задачи и черновика, без исполнения."],
+        "forbidden_changes": [
+          "Автоподтверждение context/claim/action.",
+          "Отправка письма или иное внешнее действие.",
+          "Запись body, attachment или excerpt в job payload, technical log или audit.",
+          "Назначение по одному домену или active project."
+        ],
+        "business": {
+          "phase": "fake_oracle_only",
+          "new_tasks": 0,
+          "new_receipts": 0,
+          "external_effects": 0,
+          "fake_provider_effects": 1,
+          "fake_blind_retries": 0,
+          "confirmed_context": false
+        },
+        "audit": {
+          "required_observations": ["correlation/case mapped to object IDs","actor and tenant","source/evidence version references","operation outcome"],
+          "forbidden_fields": ["body","attachment_bytes","base64","tokens","password","excerpt"]
+        },
+        "pass_conditions": [
+          "Fake model сохраняет unknown outcome, а не success/failure с разрешённым retry; слепой повтор не вызывает provider второй раз.",
+          "Реальных сетевых вызовов и продуктового внешнего action/receipt нет.",
+          "Дальнейшее действие возможно лишь после доказуемой reconciliation/отдельного решения, не по факту нового approval. Без внешнего контракта это не PASS пилотной поддержки external execution."
+        ]
+      },
+      "uncertainties": ["Протокол внешней reconciliation и допустимые terminal outcomes не входит в create/cancel Task pilot."],
+      "interface_requests": ["IR-07"],
+      "verification": {"structural":"validator_required","application":"planned","postgres_fault_test":"not_required","owner_decision":"required"}
+    }
+  ]
+}
