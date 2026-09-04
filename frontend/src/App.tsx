@@ -312,27 +312,23 @@ type AutomationRule = {
   runs: { id: number; scheduled_for: string; task_id?: number; response_draft_id?: number; status: string }[];
 };
 type NotificationRow = NotificationItem;
-const items = [
-  [CalendarDays, "Сегодня"],
-  [LayoutDashboard, "Рабочий центр"],
-  [Route, "Запуск проекта"],
-  [FolderKanban, "Проекты"],
-  [FileText, "Договоры"],
-  [FileText, "Документы"],
-  [Search, "Центр знаний"],
-  [BarChart3, "Аналитика"],
-  [GitPullRequest, "Предложения"],
-  [ListTodo, "Задачи"],
-  [ClipboardCheck, "Обязательства"],
-  [AlertTriangle, "Риски и решения"],
-  [Users, "Совещания"],
-  [Bell, "Уведомления"],
-  [Mail, "Письма"],
-  [Bot, "AI Secretary"],
-  [Wallet, "Исполнение и финансы"],
-  [CalendarDays, "Интеграции"],
-  [ShieldCheck, "Журнал"],
-  [Settings, "Настройки"],
+const navigationGroups = [
+  { label: "Работа", items: [
+    [LayoutDashboard, "Рабочий центр"], [CalendarDays, "Сегодня"],
+    [Mail, "Письма"], [ListTodo, "Задачи"], [Bot, "AI Secretary"],
+  ] },
+  { label: "Проект", items: [
+    [FolderKanban, "Проекты"], [Route, "Запуск проекта"],
+    [FileText, "Договоры"], [FileText, "Документы"], [Search, "Центр знаний"],
+  ] },
+  { label: "Контроль", items: [
+    [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
+    [Wallet, "Исполнение и финансы"], [BarChart3, "Аналитика"],
+    [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
+  ] },
+  { label: "Система", items: [
+    [CalendarDays, "Интеграции"], [ShieldCheck, "Журнал"], [Settings, "Настройки"],
+  ] },
 ] as const;
 const targetFolders = [
   "00_НЕРАЗОБРАННОЕ",
@@ -2045,26 +2041,27 @@ export function App() {
       >
         <div className="sidebar-head">
           <div className="brand-mark">PU</div>
-          {!collapsed && <strong>PU Workspace</strong>}
+          {!collapsed && <div className="sidebar-brand-copy"><strong>PU Workspace</strong><small>Project intelligence</small></div>}
           <button className="icon" onClick={() => setCollapsed(!collapsed)}>
             <ChevronLeft />
           </button>
         </div>
         <nav>
-          {items.map(([Icon, label]) => (
-            <button
-              onClick={() => {
-                setActive(label);
-                setMobile(false);
-              }}
-              className={label === active ? "active" : ""}
-              key={label}
-              title={label}
-            >
-              <Icon />
-              <span>{label}</span>
-            </button>
-          ))}
+          {navigationGroups.map((group) => <div className="nav-group" key={group.label}>
+            {!collapsed && <span className="nav-group-label">{group.label}</span>}
+            {group.items.map(([Icon, label]) => (
+              <button
+                onClick={() => { setActive(label); setMobile(false); }}
+                className={label === active ? "active" : ""}
+                key={label}
+                title={label}
+              >
+                <Icon />
+                <span>{label}</span>
+                {label === "Письма" && inboxCounts.attention > 0 && <b>{inboxCounts.attention}</b>}
+              </button>
+            ))}
+          </div>)}
         </nav>
         <div className="profile">
           <div className="avatar">D</div>
@@ -2093,7 +2090,8 @@ export function App() {
           >
             <Menu />
           </button>
-          <div>
+          <div className="page-heading">
+            <span className="page-kicker">{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
             <h1>{active}</h1>
             <p>
               {active === "Рабочий центр"
@@ -2137,21 +2135,21 @@ export function App() {
               />
               <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
             </div>
-            <select
-              aria-label="Текущий проект"
-              value={projectId}
-              onChange={(e) => {
-                const id = Number(e.target.value);
-                rememberProject(id);
-                void load(id);
-              }}
-            >
-              {projects.map((p) => (
-                <option value={p.id} key={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <label className="project-switcher">
+              <FolderKanban />
+              <span>Проект</span>
+              <select
+                aria-label="Текущий проект"
+                value={projectId}
+                onChange={(e) => {
+                  const id = Number(e.target.value);
+                  rememberProject(id);
+                  void load(id);
+                }}
+              >
+                {projects.map((p) => <option value={p.id} key={p.id}>{p.name}</option>)}
+              </select>
+            </label>
             <button className="icon" onClick={() => load()}>
               <RefreshCw />
             </button>

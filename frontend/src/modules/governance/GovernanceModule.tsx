@@ -31,17 +31,37 @@ export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecis
     (item) => !["executed", "dismissed"].includes(item.status),
   ).length;
 
-  return <section className="governance-grid">
-    <div className="card">
+  const openRisks = risks.filter((item) => !["resolved", "dismissed"].includes(item.status)).length;
+  const criticalRisks = risks.filter(
+    (item) => !["resolved", "dismissed"].includes(item.status)
+      && (item.criticality === "critical" || item.criticality === "high"),
+  ).length;
+  const statusLabel = (status: string) => ({
+    needs_confirmation: "Нужно подтвердить",
+    confirmed: "Подтверждено",
+    resolved: "Закрыто",
+    dismissed: "Отклонено",
+    decided: "Решение принято",
+    executed: "Исполнено",
+  }[status] || "На проверке");
+
+  return <section className="governance-workspace">
+    <div className="governance-overview">
+      <div><span>Открытые риски</span><strong>{openRisks}</strong><small>требуют контроля</small></div>
+      <div><span>Высокий приоритет</span><strong>{criticalRisks}</strong><small>проверить в первую очередь</small></div>
+      <div><span>Решения</span><strong>{pendingDecisions}</strong><small>ожидают фиксации</small></div>
+    </div>
+    <div className="governance-grid">
+    <div className="card governance-column risks-column">
       <div className="card-head">
-        <div><h2>Риски</h2><p>Обнаружено: {risks.length}</p></div>
+        <div><span className="eyebrow">КОНТРОЛЬ</span><h2>Риски проекта</h2><p>{risks.length} обнаружено · {openRisks} открыто</p></div>
       </div>
       <div className="governance-list">
         {risks.map((risk) => <article key={risk.id}>
           <div>
             <strong>{risk.title}</strong>
             <p>{risk.source_name} · уверенность {Math.round(risk.confidence * 100)}%</p>
-            <span className={`governance-status ${risk.criticality}`}>{risk.status}</span>
+            <span className={`governance-status ${risk.criticality}`}>{statusLabel(risk.status)}</span>
           </div>
           <div className="task-actions">
             {risk.status === "needs_confirmation" && (
@@ -54,16 +74,16 @@ export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecis
         </article>)}
       </div>
     </div>
-    <div className="card">
+    <div className="card governance-column decisions-column">
       <div className="card-head">
-        <div><h2>Решения</h2><p>Ожидают фиксации: {pendingDecisions}</p></div>
+        <div><span className="eyebrow">РЕШЕНИЯ</span><h2>Ждут вашего выбора</h2><p>{pendingDecisions} необходимо зафиксировать</p></div>
       </div>
       <div className="governance-list">
         {decisions.map((decision) => <article key={decision.id}>
           <div>
             <strong>{decision.question}</strong>
             <p>{decision.source_name} · уверенность {Math.round(decision.confidence * 100)}%</p>
-            <span className="governance-status">{decision.status}</span>
+            <span className="governance-status">{statusLabel(decision.status)}</span>
           </div>
           <div className="task-actions">
             {!['decided', 'executed', 'dismissed'].includes(decision.status) && (
@@ -75,6 +95,6 @@ export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecis
           </div>
         </article>)}
       </div>
-    </div>
+    </div></div>
   </section>;
 }
