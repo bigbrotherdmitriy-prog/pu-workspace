@@ -3,7 +3,7 @@ import inspect
 from types import SimpleNamespace
 
 from app.api.ai_secretary import project_candidate
-from app.api.gmail import GmailSyncRequest, _apply_bulk_filter, _attachments, _automated_sender_reason, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
+from app.api.gmail import GmailSyncRequest, _apply_automated_filter, _apply_bulk_filter, _attachments, _automated_sender_reason, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
 from app.api.google_drive import SCOPES
 
 
@@ -137,6 +137,25 @@ def test_bulk_backfill_does_not_override_human_workflow_status():
 
     assert _apply_bulk_filter(message, "массовая рассылка") is False
     assert message.status == "in_progress"
+
+
+def test_nonactionable_machine_message_is_removed_from_attention_on_resync():
+    message = SimpleNamespace(status="needs_context_confirmation", summary="Анализируется")
+
+    assert _apply_automated_filter(
+        message, "адрес отправителя не принимает ответы", has_actions=False,
+    ) is True
+    assert message.status == "filtered"
+    assert "Служебное письмо без действий" in message.summary
+
+
+def test_actionable_machine_message_remains_for_human_review():
+    message = SimpleNamespace(status="needs_context_confirmation", summary="Найдена задача")
+
+    assert _apply_automated_filter(
+        message, "адрес отправителя не принимает ответы", has_actions=True,
+    ) is False
+    assert message.status == "needs_context_confirmation"
 
 
 def test_oauth_callback_returns_to_new_interface():

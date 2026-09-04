@@ -391,6 +391,7 @@ export function App() {
     [mailView, setMailView] = useState<"inbox" | "companies">("inbox"),
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
     [inboxFilter, setInboxFilter] = useState("attention"),
+    [inboxVisibleLimit, setInboxVisibleLimit] = useState(10),
     [selectedInboxIds, setSelectedInboxIds] = useState<number[]>([]),
     [bulkInboxProjectId, setBulkInboxProjectId] = useState(initialProjectId),
     [bulkInboxContractId, setBulkInboxContractId] = useState(0),
@@ -3053,7 +3054,10 @@ export function App() {
                   ["drafts", "Есть черновики", inboxCounts.drafts],
                   ["filtered", "Отфильтровано", inboxCounts.filtered],
                 ].map(([value, label, count]) => (
-                  <button className={inboxFilter === value ? "selected" : ""} onClick={() => setInboxFilter(String(value))} key={value}>
+                  <button className={inboxFilter === value ? "selected" : ""} onClick={() => {
+                    setInboxFilter(String(value));
+                    setInboxVisibleLimit(10);
+                  }} key={value}>
                     {label} <b>{count}</b>
                   </button>
                 ))}
@@ -3095,7 +3099,7 @@ export function App() {
                   <small>Переносятся письма и связанные предложения задач, рисков и ответов. Письма в Gmail не изменяются.</small>
                 </div>
               )}
-              {visibleInbox
+              {visibleInbox.slice(0, inboxVisibleLimit)
                 .map((message) => {
                   const expanded = expandedInboxId === message.id;
                   return (
@@ -3367,6 +3371,18 @@ export function App() {
                   </article>
                   );
                 })}
+              {visibleInbox.length > 10 && (
+                <div className="inbox-show-more">
+                  <span>Показано {Math.min(inboxVisibleLimit, visibleInbox.length)} из {visibleInbox.length}</span>
+                  <button className="secondary" onClick={() => setInboxVisibleLimit((current) =>
+                    current >= visibleInbox.length ? 10 : Math.min(current + 10, visibleInbox.length)
+                  )}>
+                    {inboxVisibleLimit >= visibleInbox.length
+                      ? "Свернуть список"
+                      : `Показать ещё ${Math.min(10, visibleInbox.length - inboxVisibleLimit)}`}
+                  </button>
+                </div>
+              )}
               {!visibleInbox.length && (
                 <div className="card empty">
                   <Bot />

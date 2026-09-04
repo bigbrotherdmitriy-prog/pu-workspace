@@ -23,7 +23,10 @@ from app.database import get_db
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.governance import Risk
 from app.models.response_draft import ResponseDraft
+from app.models.task import Task
+from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.user import User
 from app.core.integration_types import StorageObject
 from app.document_engine import index_documents
@@ -194,6 +197,15 @@ def _apply_bulk_filter(message: Message, reason: str | None) -> bool:
     return True
 
 
+def _apply_automated_filter(message: Message, reason: str | None, *, has_actions: bool) -> bool:
+    """Keep actionable machine mail, but remove non-actionable noise from attention."""
+    if not reason or has_actions or message.status not in {"needs_review", "needs_context_confirmation", "ready"}:
+        return False
+    message.status = "filtered"
+    message.summary = f"Служебное письмо без действий: {reason}."
+    return True
+
+
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -226,6 +238,17 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             ))
             if existing:
                 _apply_bulk_filter(existing, bulk_reason)
+                has_actions = bool(
+                    db.scalar(select(Task.id).where(Task.message_id == existing.id))
+                    or db.scalar(select(Risk.id).where(
+                        Risk.project_id == existing.project_id,
+                        Risk.source_id == f"message:{existing.id}",
+                    ))
+                    or db.scalar(select(TaskCompletionSuggestion.id).where(
+                        TaskCompletionSuggestion.message_id == existing.id,
+                    ))
+                )
+                _apply_automated_filter(existing, automated_sender_reason, has_actions=has_actions)
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
@@ -275,9 +298,10 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 automation_suppressed=bool(bulk_reason),
                 automation_suppression_reason=bulk_reason,
                 response_suppressed=bool(automated_sender_reason),
+                response_suppression_reason=automated_sender_reason,
             ), db, user)
             processed += 1 if result["status"] else 0
-            if not bulk_reason:
+            if not bulk_reason and result["status"] != "filtered":
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
             thread_key = item.get("threadId") or item["id"]
             if not is_outgoing and not bulk_reason and thread_key not in notified_threads:

@@ -545,6 +545,7 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .inbox-filters button { padding: 8px 11px; border: 1px solid #d2ddd7; border-radius: 999px; background: #fff; color: #56655e; cursor: pointer; }
 .inbox-filters button.selected { border-color: #0b9068; background: #dff4ec; color: #087a59; }
 .inbox-filters b { margin-left: 5px; }
+.inbox-show-more { display: flex; align-items: center; justify-content: center; gap: 12px; color: #68786f; }
 .mail-view-tabs { display: flex; gap: 8px; margin: 0 0 16px; }
 .mail-view-tabs button { border: 1px solid #c9d7d0; background: #fff; color: #53635b; border-radius: 12px; padding: 10px 15px; cursor: pointer; }
 .mail-view-tabs button.selected { background: #123129; border-color: #123129; color: #fff; }

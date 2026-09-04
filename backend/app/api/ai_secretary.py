@@ -53,6 +53,7 @@ class IncomingMessage(BaseModel):
     automation_suppressed: bool = False
     automation_suppression_reason: str | None = Field(default=None, max_length=1000)
     response_suppressed: bool = False
+    response_suppression_reason: str | None = Field(default=None, max_length=1000)
 
 
 class ContextConfirmation(BaseModel):
@@ -320,9 +321,19 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         task.external_action_status = "proposed"
     for draft in drafts:
         draft.message_id = row.id
+    nonactionable_machine_message = (
+        payload.response_suppressed
+        and not tasks
+        and not risks
+        and not completion_suggestions
+    )
+    if nonactionable_machine_message:
+        row.status = "filtered"
     row.summary = (
         f"Автоматические действия не создавались: {payload.automation_suppression_reason or 'массовое или рекламное письмо'}."
         if payload.automation_suppressed else
+        f"Служебное письмо без действий: {payload.response_suppression_reason or 'адрес отправителя не принимает ответы'}."
+        if nonactionable_machine_message else
         f"Исходящее письмо проверено. Возможных выполненных задач: {len(completion_suggestions)}. Требуется подтверждение пользователя."
         if row.source_type == "email_outgoing" else
         brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0)
