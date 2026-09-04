@@ -18,6 +18,7 @@ import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/c
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
+import { EvidencePanel, type EvidenceRef } from "./modules/evidence/EvidencePanel";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
@@ -290,6 +291,7 @@ type InboxMessage = {
     evidence: string;
     status: string;
   }[];
+  evidence_refs?: EvidenceRef[];
 };
 type AutomationRule = {
   id: number;
@@ -3173,6 +3175,7 @@ export function App() {
                       </div>
                     )}
                     <pre className="inbox-summary">{message.summary}</pre>
+                    <EvidencePanel active={expanded} evidenceRefs={message.evidence_refs || []} />
                     {message.risks.length > 0 && (
                       <div className="inbox-risks">
                         <h3>Риски и контроль</h3>

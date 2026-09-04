@@ -242,7 +242,7 @@ def test_local_chain_gates_fail_before_resolver_and_store(db, mutation):
     resolver, store = ResolverDouble(), StoreDouble()
     with pytest.raises(SourceEvidenceError, match="^resource_unavailable$"):
         read(db, evidence, resolver=resolver, store=store)
-    assert resolver.calls == (1 if mutation == "binding_changed" else 0)
+    assert resolver.calls == (1 if mutation in {"binding_changed", "current_changed"} else 0)
     assert store.calls == []
 
 

@@ -25,6 +25,8 @@ from app.models.task import TaskHistory
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.governance import Risk
 from app.models.user import User
+from app.models.v54_pilot import DeadlineClaim
+from app.core.v54_refs import VersionPin
 from app.models.automation_rule import AutomationRule, AutomationRun
 from app.automation_engine import next_monthly_date, prepare_rule_run
 from app.core.integration_types import StorageObject
@@ -188,6 +190,24 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
                 *([{"provider": action_provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
         })
+    evidence_refs = []
+    seen_evidence = set()
+    for pins in db.scalars(select(DeadlineClaim.evidence_pins).where(
+        DeadlineClaim.organization_id == row.organization_id,
+        DeadlineClaim.message_id == row.id,
+    ).order_by(DeadlineClaim.revision.desc())):
+        if not isinstance(pins, list):
+            continue
+        for value in pins:
+            try:
+                pin = VersionPin.model_validate(value)
+            except Exception:
+                continue
+            if (pin.ref.type != "evidence" or pin.ref.tenant_id.value != str(row.organization_id)
+                    or pin.ref.id.value in seen_evidence):
+                continue
+            seen_evidence.add(pin.ref.id.value)
+            evidence_refs.append({"id": pin.ref.id.value, "revision": pin.value})
     return {
         "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
         "source_type": row.source_type, "source_external_id": row.source_external_id,
@@ -207,6 +227,7 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
                                     "task_status": task.status, "confidence": suggestion.confidence,
                                     "evidence": suggestion.evidence, "status": suggestion.status}
                                    for suggestion, task in completion_rows],
+        "evidence_refs": evidence_refs,
     }
 
 

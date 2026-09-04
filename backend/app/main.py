@@ -26,6 +26,7 @@ from app.api.analytics import router as analytics_router
 from app.api.integrations import router as integrations_router
 from app.api.project_contacts import router as project_contacts_router
 from app.api.jobs import router as jobs_router
+from app.api.evidence import router as evidence_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -139,6 +140,7 @@ app.include_router(analytics_router)
 app.include_router(integrations_router)
 app.include_router(project_contacts_router)
 app.include_router(jobs_router)
+app.include_router(evidence_router)
 app.include_router(google_drive_router)
 app.include_router(yandex_disk_router)
 app.include_router(tasks_router)

@@ -11,6 +11,7 @@ function readableInput() {
     version_state: "current",
     freshness: "fresh",
     availability: "available",
+    valid_until: "2026-09-03T09:03:00Z",
     evidence: { id: "evidence-16", revision: 1, source_id: "source-13", source_version_id: "version-15" },
     source: {
       id: "source-13",
@@ -180,7 +181,10 @@ describe("strict server evidence DTO", () => {
     [{ kind: "section_clause", section_path: ["Договор"], clause_label: "2.1", anchor: "clause-2-1" }, "section_clause", true],
     [{ kind: "sheet_cell", sheet_key: "sheet-1", sheet_name: "ДДС", range_a1: "B2:C3", value_kind: "displayed_value" }, "sheet_cell", true],
     [{ kind: "message", message_external_id: "message-1", part: "body", char_range: [5, 20] }, "message", true],
-    [{ kind: "attachment", message_external_id: "message-1", attachment_external_id: "attachment-1", attachment_source_reference_id: "source-attachment" }, "attachment", true],
+    [{ kind: "attachment", message_external_id: "message-1", attachment_external_id: "attachment-1", attachment_source_reference_id: {
+      namespace: "pu", type: "source", tenant_id: { kind: "int", value: "1" },
+      id: { kind: "uuid", value: "source-attachment" },
+    } }, "attachment", true],
     [{ kind: "record", record_key: "row-7", field_path: ["payment", "amount"] }, "record", true],
   ])("parses exact locator %s", (locator, kind, precise) => {
     const input = readableInput();

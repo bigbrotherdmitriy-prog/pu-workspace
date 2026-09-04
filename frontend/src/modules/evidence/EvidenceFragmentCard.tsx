@@ -42,6 +42,7 @@ export function EvidenceFragmentCard({ input }: EvidenceFragmentCardProps) {
         <Detail term="Evidence"><code>{model.pins.evidence}</code></Detail>
         <Detail term="Source"><code>{model.pins.source}</code></Detail>
         <Detail term="Source version"><code>{model.pins.sourceVersion}</code></Detail>
+        <Detail term="Доступ действительно до">{new Date(model.validUntil).toLocaleString("ru-RU")}</Detail>
       </dl>
     </section>
 

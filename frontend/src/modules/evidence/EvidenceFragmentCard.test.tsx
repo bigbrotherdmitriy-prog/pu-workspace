@@ -11,6 +11,7 @@ function readableInput() {
     version_state: "current",
     freshness: "fresh",
     availability: "available",
+    valid_until: "2026-09-03T09:03:00Z",
     evidence: { id: "evidence-16", revision: 1, source_id: "source-13", source_version_id: "version-15" },
     source: {
       id: "source-13",

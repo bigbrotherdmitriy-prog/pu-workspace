@@ -37,6 +37,7 @@ type ReadableViewModel = {
   statusLabel: string;
   reasonLabel: null;
   historical: boolean;
+  validUntil: string;
   source: { provider: string; account: string; namespace: string; originProject: string };
   pins: { evidence: string; source: string; sourceVersion: string };
   locator: EvidenceLocatorViewModel;
@@ -120,6 +121,19 @@ function tuple(value: unknown, length: number): number[] | null {
   return result.every((item): item is number => item !== null) ? result : null;
 }
 
+function sourceObjectRefId(value: unknown): string | null {
+  const ref = record(value);
+  const tenant = ref && record(ref.tenant_id);
+  const id = ref && record(ref.id);
+  if (!ref || !tenant || !id
+    || !exact(ref, ["namespace", "type", "tenant_id", "id"])
+    || !exact(tenant, ["kind", "value"]) || !exact(id, ["kind", "value"])
+    || ref.namespace !== "pu" || ref.type !== "source"
+    || (tenant.kind !== "int" && tenant.kind !== "uuid")
+    || id.kind !== "uuid") return null;
+  return text(id.value);
+}
+
 function parseLocator(value: unknown): EvidenceLocatorViewModel | null {
   const input = record(value);
   const kind = input && text(input.kind);
@@ -199,7 +213,7 @@ function parseLocator(value: unknown): EvidenceLocatorViewModel | null {
     if (!exact(input, ["kind", "message_external_id", "attachment_external_id", "attachment_source_reference_id"])) return null;
     const messageId = text(input.message_external_id);
     const attachmentId = text(input.attachment_external_id);
-    const sourceId = text(input.attachment_source_reference_id);
+    const sourceId = sourceObjectRefId(input.attachment_source_reference_id);
     return messageId && attachmentId && sourceId
       ? { kind, label: `Вложение ${attachmentId} · сообщение ${messageId} · source ${sourceId}`, preciseNavigation: true }
       : null;
@@ -234,13 +248,15 @@ export function toEvidenceFragmentViewModel(value: unknown): EvidenceFragmentVie
     return reason ? unavailable(REASON_LABELS[reason]) : unavailable();
   }
   if (root.state !== "readable" || !exact(root, [
-    "schema_version", "state", "status", "version_state", "freshness", "availability",
+    "schema_version", "state", "status", "version_state", "freshness", "availability", "valid_until",
     "evidence", "source", "source_version", "locator", "fragment", "extracted_fact",
     "ai_conclusion", "extractor", "confidence", "assessment",
   ])) return unavailable();
   if ((root.status !== "verified" && root.status !== "unverified")
     || (root.version_state !== "current" && root.version_state !== "historical")
     || root.freshness !== "fresh" || root.availability !== "available") return unavailable();
+  const validUntil = timestamp(root.valid_until);
+  if (!validUntil) return unavailable();
 
   const evidence = record(root.evidence);
   const source = record(root.source);
@@ -285,15 +301,15 @@ export function toEvidenceFragmentViewModel(value: unknown): EvidenceFragmentVie
   if (!provider || !account || !namespace || !originProject || !locator || !mediaType || !excerpt) return unavailable();
 
   const extractorName = text(extractor.name);
-  const extractorVersion = text(extractor.version);
-  const method = text(extractor.method);
+  const extractorVersion = nullableText(extractor.version);
+  const method = nullableText(extractor.method);
   const modelProvider = nullableText(extractor.model_provider);
   const modelId = nullableText(extractor.model_id);
   const modelVersion = nullableText(extractor.model_version);
   const promptVersion = nullableText(extractor.prompt_version);
   const allModelNull = [modelProvider, modelId, modelVersion].every((item) => item === null);
   const allModelPresent = [modelProvider, modelId, modelVersion].every((item) => typeof item === "string");
-  if (!extractorName || !extractorVersion || !method || modelProvider === undefined || modelId === undefined
+  if (!extractorName || extractorVersion === undefined || method === undefined || modelProvider === undefined || modelId === undefined
     || modelVersion === undefined || promptVersion === undefined || !allModelNull && !allModelPresent) return unavailable();
 
   const confidenceKind = confidence.kind === "heuristic" || confidence.kind === "model"
@@ -325,6 +341,7 @@ export function toEvidenceFragmentViewModel(value: unknown): EvidenceFragmentVie
     statusLabel: root.status === "verified" ? "Проверено" : "Не проверено",
     reasonLabel: null,
     historical: root.version_state === "historical",
+    validUntil,
     source: { provider, account, namespace, originProject },
     pins: {
       evidence: `${evidenceId}/r${evidenceRevision}`,
@@ -336,8 +353,8 @@ export function toEvidenceFragmentViewModel(value: unknown): EvidenceFragmentVie
     extractedFact,
     aiConclusion,
     extraction: {
-      extractor: `${extractorName}/${extractorVersion}`,
-      method,
+      extractor: extractorVersion ? `${extractorName}/${extractorVersion}` : extractorName,
+      method: method ?? "Не указан",
       model: modelProvider && modelId && modelVersion ? `${modelProvider} / ${modelId} / ${modelVersion}` : null,
       prompt: promptVersion,
       confidence: confidenceLabel(confidenceValue, confidenceKind),

@@ -297,9 +297,9 @@ class FragmentReadResult(StrictDTO):
     media_type: StrictStr
     verification: Literal["verified", "unverified"]
     effective_status: Literal["verified", "unverified"]
-    historical: Literal[False]
+    historical: StrictBool
     assessment_record_version: StrictInt
-    version_state: Literal["current"]
+    version_state: Literal["current", "historical"]
     freshness: Literal["fresh"]
     availability: Literal["available"]
     valid_until: AwareDatetime
@@ -463,7 +463,6 @@ def read_fragment(
                 or version.organization_id != tenant_id
                 or current.source_id != source.id
                 or current.organization_id != tenant_id
-                or current.version_id != version.id
                 or identity.id != source.identity_id
                 or identity.organization_id != tenant_id
                 or mailbox.identity_id != identity.id
@@ -507,6 +506,7 @@ def read_fragment(
                 or not isinstance(source.residency, dict) or not source.residency):
             deny()
 
+        version_state = "current" if current.version_id == version.id else "historical"
         resolution = resolver.resolve(db, scope=scope, pin=evidence_pin,
                                       operation="fragment", lock=False)
         if not isinstance(resolution, Resolution):
@@ -514,7 +514,8 @@ def read_fragment(
         require_resolution(
             resolution, scope=scope, pin=evidence_pin, operation="fragment", now=now
         )
-        if resolution.binding_epoch != identity.binding_epoch:
+        if (resolution.binding_epoch != identity.binding_epoch
+                or resolution.version != version_state):
             deny()
 
         extractor = ExtractorMetadata.model_validate(evidence.extractor)
@@ -594,9 +595,9 @@ def read_fragment(
                 if assessment.verification == "verified" and resolution.verification == "verified"
                 else "unverified"
             ),
-            historical=False,
+            historical=version_state == "historical",
             assessment_record_version=assessment.record_version,
-            version_state="current",
+            version_state=version_state,
             freshness="fresh",
             availability="available",
             valid_until=effective_valid_until,

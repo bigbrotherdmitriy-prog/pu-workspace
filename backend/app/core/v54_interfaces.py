@@ -39,7 +39,7 @@ class Resolution(StrictDTO):
     project: ObjectRef
     operation: Literal["metadata", "fragment", "review", "dispatch"]
     acl: Literal["allow", "deny", "unknown"] = "unknown"
-    version: Literal["current", "changed", "unknown"] = "unknown"
+    version: Literal["current", "historical", "changed", "unknown"] = "unknown"
     freshness: Literal["fresh", "stale", "unknown"] = "unknown"
     availability: Literal["available", "unavailable", "unknown"] = "unknown"
     verification: Literal["verified", "unverified"] = "unverified"
@@ -62,9 +62,12 @@ def require_resolution(result: Resolution, *, scope: RequestScope, pin: VersionP
                        operation: str, now: datetime) -> None:
     """No admin/unknown/legacy-null fallback; does not implement an ACL backend."""
     require_same_tenant(scope.tenant, pin.ref, result.pin.ref)
+    version_allowed = result.version == "current" or (
+        operation == "fragment" and result.version == "historical"
+    )
     if (now.tzinfo is None or result.pin != pin or result.actor != scope.actor
             or result.project != scope.project or result.operation != operation
-            or result.acl != "allow" or result.version != "current"
+            or result.acl != "allow" or not version_allowed
             or result.freshness != "fresh" or result.availability != "available"
             or not result.policy_known or not result.retention_known or not result.residency_allowed
             or result.valid_until is None or result.valid_until <= now
