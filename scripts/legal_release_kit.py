@@ -51,6 +51,7 @@ CLIENT_MARKERS = re.compile(
     r"Налог-Сервис|ДИСИАЙ|Булат|ГК-08|Б-УЗП|\bИНН\s*\d{10,12}\b",
     re.IGNORECASE,
 )
+LICENSE_EVIDENCE_PATH = "docs/release/generated/license-evidence.json"
 
 
 def run(root: Path, *args: str) -> bytes:
@@ -110,7 +111,13 @@ def parse_pnpm_lock(data: str) -> list[dict]:
             continue
         if not in_packages:
             continue
-        match = re.match(r"^  ['\"]?(.+?)@([^:'\"]+)['\"]?:\s*$", line)
+        # pnpm lockfiles contain other top-level mappings after ``packages``
+        # (notably ``snapshots``).  Snapshot keys may look exactly like package
+        # keys, but include peer-resolution suffixes and must not become SPDX
+        # packages.  Stop at the first following top-level key.
+        if line and not line.startswith((" ", "\t")):
+            break
+        match = re.match(r"^  ['\"]?([^\s].*?)@([^:'\"]+)['\"]?:\s*$", line)
         if not match:
             continue
         name, version = match.groups()
@@ -125,12 +132,20 @@ def spdx_document(name: str, namespace_suffix: str, components: list[dict]) -> d
     relationships = []
     for index, component in enumerate(sorted(components, key=lambda row: (row["name"].casefold(), row["version"]))):
         spdx_id = f"SPDXRef-Package-{index + 1}"
-        packages.append({
+        evidence = component.get("license_evidence") or {}
+        declared = component.get("license") or "NOASSERTION"
+        package = {
             "SPDXID": spdx_id, "name": component["name"], "versionInfo": component["version"],
             "downloadLocation": "NOASSERTION", "filesAnalyzed": False,
-            "licenseConcluded": "NOASSERTION", "licenseDeclared": component.get("license", "NOASSERTION"),
+            "licenseConcluded": "NOASSERTION", "licenseDeclared": declared,
             "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": component["purl"]}],
-        })
+        }
+        package["comment"] = (
+            f"licenseConcluded is NOASSERTION pending legal review; status={evidence.get('status', 'unresolved')}; "
+            f"reason={evidence.get('unresolved_reason') or 'package registry declaration recorded'}; "
+            f"evidence={evidence.get('evidence_url') or 'manifest only'}"
+        )
+        packages.append(package)
         relationships.append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": spdx_id})
     return {
         "spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "SPDXID": "SPDXRef-DOCUMENT",
@@ -146,13 +161,95 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def generate_sbom(root: Path, out: Path, ref: str) -> list[Path]:
+def load_license_evidence(root: Path, ref: str, override: Path | None = None) -> dict[str, dict]:
+    try:
+        data = override.read_bytes() if override else git_blob(root, ref, LICENSE_EVIDENCE_PATH)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return {}
+    document = json.loads(data.decode("utf-8"))
+    return {row["purl"]: row for row in document.get("components", []) if isinstance(row, dict) and row.get("purl")}
+
+
+def attach_license_evidence(components: list[dict], evidence: dict[str, dict]) -> None:
+    for component in components:
+        record = evidence.get(component["purl"])
+        if record and record.get("license_declared"):
+            component["license"] = record["license_declared"]
+        component["license_evidence"] = record or {
+            "status": "unresolved",
+            "unresolved_reason": "no exact-version license evidence record",
+            "evidence_url": None,
+        }
+
+
+def write_license_bundle(out: Path, layers: dict[str, list[dict]]) -> list[Path]:
+    rows = []
+    for layer, components in layers.items():
+        for component in components:
+            evidence = component.get("license_evidence") or {}
+            declared = component.get("license")
+            rows.append({
+                "layer": layer,
+                "name": component["name"],
+                "version": component["version"],
+                "purl": component["purl"],
+                "license_declared": declared,
+                "license_concluded": None,
+                "status": evidence.get("status", "unresolved"),
+                "unresolved_reason": evidence.get("unresolved_reason"),
+                "evidence_url": evidence.get("evidence_url"),
+                "metadata_sha256": evidence.get("metadata_sha256"),
+            })
+    rows.sort(key=lambda row: (row["layer"], row["purl"].casefold()))
+    strong = [row["purl"] for row in rows if re.search(r"(?:^|\W)(?:AGPL|SSPL|GPL)-", row.get("license_declared") or "")]
+    weak = [row["purl"] for row in rows if "LGPL-" in (row.get("license_declared") or "")]
+    unresolved = [row["purl"] for row in rows if not row.get("license_declared")]
+    value = {
+        "schema": "pu-workspace-third-party-license-matrix/v1",
+        "components": rows,
+        "summary": {
+            "total": len(rows),
+            "declared_license_evidenced": len(rows) - len(unresolved),
+            "license_concluded": 0,
+            "unresolved": len(unresolved),
+            "strong_copyleft_declared": strong,
+            "weak_copyleft_declared": weak,
+            "scope_note": "backend direct requirements + complete pnpm packages + manifest-level container declarations",
+        },
+    }
+    matrix = out / "third-party-license-matrix.json"
+    write_json(matrix, value)
+    notices = out / "THIRD_PARTY_NOTICES.md"
+    lines = [
+        "# Third-party license evidence bundle",
+        "",
+        "This file records exact component versions and package-declared license metadata. It is not a legal conclusion.",
+        "`licenseConcluded` remains `NOASSERTION` until the right holder and counsel approve the release.",
+        "",
+        f"- Components: {len(rows)}",
+        f"- Declared license evidenced: {len(rows) - len(unresolved)}",
+        f"- Unresolved declarations: {len(unresolved)}",
+        f"- Strong copyleft declared (GPL/AGPL/SSPL): {len(strong)}",
+        f"- Weak copyleft declared (LGPL): {len(weak)}",
+        "",
+        "Machine-readable per-component evidence, URLs, hashes and unresolved reasons are in `third-party-license-matrix.json`.",
+        "Package-specific LICENSE/NOTICE texts and container-layer licenses remain a release gate where the matrix says unresolved.",
+        "",
+    ]
+    notices.write_text("\n".join(lines), encoding="utf-8")
+    return [matrix, notices]
+
+
+def generate_sbom(root: Path, out: Path, ref: str, evidence_override: Path | None = None) -> list[Path]:
     requirements_blob = git_blob(root, ref, "backend/requirements.txt")
     lock_blob = git_blob(root, ref, "frontend/pnpm-lock.yaml")
     compose_blob = git_blob(root, ref, "docker-compose.yml")
     dockerfile_blob = git_blob(root, ref, "backend/Dockerfile")
     backend = parse_requirements(requirements_blob.decode("utf-8"))
     frontend = parse_pnpm_lock(lock_blob.decode("utf-8"))
+    license_evidence = load_license_evidence(root, ref, evidence_override)
+    attach_license_evidence(backend, license_evidence)
+    attach_license_evidence(frontend, license_evidence)
     compose = compose_blob.decode("utf-8")
     dockerfile = dockerfile_blob.decode("utf-8")
     images = sorted(set(re.findall(r"^\s*(?:image:|FROM)\s+([^\s]+)", compose + "\n" + dockerfile, re.MULTILINE)))
@@ -161,11 +258,12 @@ def generate_sbom(root: Path, out: Path, ref: str) -> list[Path]:
     for block in system_packages:
         for package in block.replace("\\", " ").split():
             container_components.append({"name": package, "version": "resolved-at-image-build", "purl": f"pkg:deb/debian/{package}"})
+    attach_license_evidence(container_components, license_evidence)
     paths = [out / "sbom-backend.spdx.json", out / "sbom-frontend.spdx.json", out / "sbom-containers.spdx.json"]
     write_json(paths[0], spdx_document("PU Workspace backend", f"{sha256(requirements_blob)}-backend", backend))
     write_json(paths[1], spdx_document("PU Workspace frontend", f"{sha256(lock_blob)}-frontend", frontend))
     write_json(paths[2], spdx_document("PU Workspace container declaration", f"{sha256(compose_blob + dockerfile_blob)}-containers", container_components))
-    return paths
+    return paths + write_license_bundle(out, {"backend-direct": backend, "frontend-lock": frontend, "container-manifest": container_components})
 
 
 def build_bundle(root: Path, out: Path, ref: str) -> tuple[Path, dict]:
@@ -243,11 +341,12 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--out", type=Path, default=Path("dist/legal-release"))
+    parser.add_argument("--license-evidence", type=Path)
     args = parser.parse_args()
     root, out = args.root.resolve(), args.out.resolve()
     bundle = None
     if args.command in {"sbom", "all"}:
-        generate_sbom(root, out, args.ref)
+        generate_sbom(root, out, args.ref, args.license_evidence.resolve() if args.license_evidence else None)
     if args.command in {"bundle", "all"}:
         bundle, _ = build_bundle(root, out, args.ref)
     if args.command in {"audit", "all"}:

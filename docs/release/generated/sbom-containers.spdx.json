@@ -8,11 +8,12 @@
     ]
   },
   "dataLicense": "CC0-1.0",
-  "documentNamespace": "https://pu-workspace.invalid/spdx/6e39adb1ca55e5f670835dc2a62766a4512e2041ed5ac2286950f434875bc8b9-containers",
+  "documentNamespace": "https://pu-workspace.invalid/spdx/47662b76ff52fb374672d4f39942cec056361e59d2955b93fe5e384dbaf92933-containers",
   "name": "PU Workspace container declaration",
   "packages": [
     {
       "SPDXID": "SPDXRef-Package-1",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -29,6 +30,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-2",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=container image is not digest-pinned; exact layer inventory and license texts are not reproducible; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -45,6 +47,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-3",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -61,6 +64,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-4",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=container image is not digest-pinned; exact layer inventory and license texts are not reproducible; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -77,6 +81,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-5",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=container image is not digest-pinned; exact layer inventory and license texts are not reproducible; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -93,6 +98,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-6",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -109,6 +115,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-7",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -125,6 +132,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-8",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -141,6 +149,7 @@
     },
     {
       "SPDXID": "SPDXRef-Package-9",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=apt package version is resolved at image build and is not pinned; evidence=manifest only",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {

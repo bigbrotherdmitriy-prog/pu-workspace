@@ -8,11 +8,12 @@
     ]
   },
   "dataLicense": "CC0-1.0",
-  "documentNamespace": "https://pu-workspace.invalid/spdx/992cc942fbe30a3a3a8a3ac9490caa4b0b4b71377b8a1cb943f7fa08628af9ce-backend",
+  "documentNamespace": "https://pu-workspace.invalid/spdx/8409d1f7417fa926c79099349267e47f55fb3cd9904b8f409147b6dd7dc83242-backend",
   "name": "PU Workspace backend",
   "packages": [
     {
       "SPDXID": "SPDXRef-Package-1",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/alembic/1.16.5/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -23,12 +24,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "MIT",
       "name": "alembic",
       "versionInfo": "1.16.5"
     },
     {
       "SPDXID": "SPDXRef-Package-2",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/cryptography/45.0.6/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -39,12 +41,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0 OR BSD-3-Clause",
       "name": "cryptography",
       "versionInfo": "45.0.6"
     },
     {
       "SPDXID": "SPDXRef-Package-3",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/fastapi/0.116.1/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -55,12 +58,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "MIT",
       "name": "fastapi",
       "versionInfo": "0.116.1"
     },
     {
       "SPDXID": "SPDXRef-Package-4",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/google-api-python-client/2.179.0/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -71,12 +75,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
       "name": "google-api-python-client",
       "versionInfo": "2.179.0"
     },
     {
       "SPDXID": "SPDXRef-Package-5",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/google-auth/2.40.3/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -87,12 +92,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
       "name": "google-auth",
       "versionInfo": "2.40.3"
     },
     {
       "SPDXID": "SPDXRef-Package-6",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/google-auth-oauthlib/1.2.2/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -103,12 +109,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
       "name": "google-auth-oauthlib",
       "versionInfo": "1.2.2"
     },
     {
       "SPDXID": "SPDXRef-Package-7",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/httpx/0.28.1/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -119,12 +126,30 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
       "name": "httpx",
       "versionInfo": "0.28.1"
     },
     {
       "SPDXID": "SPDXRef-Package-8",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/Pillow/11.3.0/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/pillow@11.3.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT-CMU",
+      "name": "Pillow",
+      "versionInfo": "11.3.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-9",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/psycopg/3.2.9/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -135,12 +160,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "LGPL-3.0-only",
       "name": "psycopg",
       "versionInfo": "3.2.9"
     },
     {
-      "SPDXID": "SPDXRef-Package-9",
+      "SPDXID": "SPDXRef-Package-10",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/pypdf/6.0.0/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -151,12 +177,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
       "name": "pypdf",
       "versionInfo": "6.0.0"
     },
     {
-      "SPDXID": "SPDXRef-Package-10",
+      "SPDXID": "SPDXRef-Package-11",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/pytest/8.4.1/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -167,12 +194,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "MIT",
       "name": "pytest",
       "versionInfo": "8.4.1"
     },
     {
-      "SPDXID": "SPDXRef-Package-11",
+      "SPDXID": "SPDXRef-Package-12",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/SQLAlchemy/2.0.43/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -183,12 +211,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "MIT",
       "name": "SQLAlchemy",
       "versionInfo": "2.0.43"
     },
     {
-      "SPDXID": "SPDXRef-Package-12",
+      "SPDXID": "SPDXRef-Package-13",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/uvicorn/0.35.0/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -199,12 +228,13 @@
       ],
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
       "name": "uvicorn",
       "versionInfo": "0.35.0"
     },
     {
-      "SPDXID": "SPDXRef-Package-13",
+      "SPDXID": "SPDXRef-Package-14",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=PyPI metadata has no usable license expression/classifier; evidence=https://pypi.org/pypi/xlrd/2.0.2/json",
       "downloadLocation": "NOASSERTION",
       "externalRefs": [
         {
@@ -283,6 +313,11 @@
     },
     {
       "relatedSpdxElement": "SPDXRef-Package-13",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-14",
       "relationshipType": "DESCRIBES",
       "spdxElementId": "SPDXRef-DOCUMENT"
     }

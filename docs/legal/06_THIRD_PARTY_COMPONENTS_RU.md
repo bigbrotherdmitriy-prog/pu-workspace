@@ -1,44 +1,54 @@
 # Сторонние компоненты и лицензии
 
-Статус: первичный реестр по manifest-файлам. SPDX генерируется командой `python scripts/legal_release_kit.py sbom --ref <SHA> --out <DIR>`. Поля `NOASSERTION`, транзитивные зависимости, container digests и обязательные лицензионные тексты являются release gate, а не молчаливым допущением.
+Статус на 2026-09-04: **технический реестр обновлён; внешняя коммерческая выдача заблокирована до решений владельца и юриста**.
 
-## Backend
+Этот документ не утверждает лицензию за правообладателя и не подменяет юридическое заключение. Точный машинный состав формируется командой:
 
-| Компонент | Версия релиза | Типовая лицензия — проверить | Назначение |
+```text
+python scripts/legal_release_kit.py sbom --ref <FULL_SHA> --out <EMPTY_DIR> --license-evidence docs/release/generated/license-evidence.json
+```
+
+## Доказательства текущего кандидата
+
+| Слой | Точный охват | Результат | Остаточный риск |
 |---|---:|---|---|
-| FastAPI | 0.116.1 | MIT | API |
-| Uvicorn | 0.35.0 | BSD-3-Clause | ASGI server |
-| SQLAlchemy | 2.0.43 | MIT | ORM |
-| psycopg | 3.2.9 | LGPL-3.0-or-later | PostgreSQL driver |
-| google-api-python-client | 2.179.0 | Apache-2.0 | Google adapters |
-| google-auth / oauthlib | 2.40.3 / 1.2.2 | Apache-2.0 | OAuth |
-| Alembic | 1.16.5 | MIT | migrations |
-| cryptography | 45.0.6 | Apache-2.0 OR BSD-3-Clause | encryption |
-| httpx | 0.28.1 | BSD-3-Clause | HTTP client |
-| pypdf | 6.0.0 | BSD-3-Clause | PDF text |
-| xlrd | 2.0.2 | BSD-3-Clause | spreadsheets |
+| Backend | 14 прямых требований | 13 SPDX-деклараций подтверждены metadata PyPI; `xlrd==2.0.2` оставлен unresolved, потому что источник говорит только `BSD` | Нет lock-файла транзитивных Python-зависимостей; точный воспроизводимый граф не доказан |
+| Frontend | 216 записей секции `packages:` pnpm lock | 216/216 SPDX-деклараций подтверждены metadata npm | `licenseConcluded` требует юридической проверки; package-specific texts ещё не приложены |
+| Containers | 3 image declarations и 6 apt declarations | Все 9 перечислены адресно | Images не закреплены digest; apt-версии определяются при build, поэтому точный layer SBOM не доказан |
+| Assets | 5 уникальных PWA-файлов и их build-копии | Хеши, первые git-коммиты и происхождение описаны в `docs/release/generated/ASSET_PROVENANCE.md` | Правообладатель должен подтвердить авторство/права на PU-графику |
 
-## Frontend
+Авторитетные приложения для этой проверки:
 
-| Компонент | Диапазон версии | Типовая лицензия — проверить | Назначение |
-|---|---:|---|---|
-| React / React DOM | ^19.2.1 | MIT | UI |
-| lucide-react | ^0.453.0 | ISC | icons |
-| Vite / plugin-react | ^7.1.7 / ^5.0.4 | MIT | build |
-| TypeScript | ^5.9.3 | Apache-2.0 | compiler |
-| Vitest | ^3.2.4 | MIT | tests |
+- `docs/release/generated/sbom-backend.spdx.json`;
+- `docs/release/generated/sbom-frontend.spdx.json`;
+- `docs/release/generated/sbom-containers.spdx.json`;
+- `docs/release/generated/license-evidence.json`;
+- `docs/release/generated/third-party-license-matrix.json`;
+- `docs/release/generated/THIRD_PARTY_NOTICES.md`;
+- `docs/release/generated/ASSET_PROVENANCE.md`;
+- `docs/audits/v54-wave3-sbom-legal.md`.
 
-## Инфраструктура и внешние сервисы
+Каждый оставшийся `NOASSERTION` имеет адресное объяснение в package `comment` соответствующего SPDX и в `third-party-license-matrix.json`. Значение не заменялось предположением.
 
-PostgreSQL 16 (PostgreSQL License), Docker/Compose — устанавливаются покупателем. Google Workspace, Telegram и AI-провайдеры не входят в лицензию PU Workspace; использование регулируется их условиями и аккаунтами покупателя.
+## Copyleft-классификация
 
-## Release gate
+- В 229 подтверждённых package declarations **не заявлены GPL, AGPL или SSPL**.
+- `psycopg==3.2.9` заявляет `LGPL-3.0-only`; это weak-copyleft и требует проверки способа распространения, dynamic linking и исполнения notice/source-offer обязанностей юристом.
+- Отсутствие GPL/AGPL/SSPL во всей поставке **не доказано**, пока не получены digest-based container SBOM, точный Python transitive lock и package-specific license texts.
+- `poppler-utils` и `antiword` нельзя выпускать на основании названия пакета: версия и фактическая лицензия должны быть сняты с собранного образа.
 
-- [ ] `pip-licenses`/CycloneDX сформировали backend SBOM.
-- [ ] package lock присутствует и frontend SBOM сформирован.
-- [ ] Отсутствуют GPL/AGPL/SSPL-компоненты без отдельного решения.
-- [ ] NOTICE и обязательные тексты лицензий включены в поставку.
-- [ ] Проверены шрифты, изображения, иконки и демоматериалы.
-- [ ] Зафиксированы версии контейнерных образов и их лицензии.
+## Чек-лист выдачи
 
-Технический аудит не обнаружил vendored font-файлов или `@font-face`; интерфейс ссылается на системные шрифты, а иконки — на `lucide-react`. Собственные PU-логотипы/изображения требуют подтверждения автора и прав в досье 01. Root `NOTICE` предупреждает о сторонних правах, но не заменяет полные тексты лицензий. До закрытия всех `NOASSERTION` поставка может использоваться для внутреннего пилота, но продажа релиза блокируется.
+- [x] **Готово:** исправлен парсер pnpm lock; `snapshots:` и вложенные peer-поля не становятся ложными пакетами.
+- [x] **Готово:** зафиксированы 216 frontend-компонентов с точными версиями из lock-файла.
+- [x] **Готово:** зафиксированы 14 прямых backend requirements и 9 container manifest declarations.
+- [x] **Готово:** у каждой неподтверждённой декларации есть причина и источник/отсутствие источника.
+- [x] **Готово:** выполнена отдельная проверка GPL/AGPL/SSPL по подтверждённым declarations.
+- [x] **Готово:** проверены repository assets, отсутствие vendored fonts и внешних media-файлов.
+- [ ] **Требуется документ:** создать и закоммитить Python 3.12 transitive lock с hashes; пересобрать backend SPDX по lock.
+- [ ] **Требуется документ:** закрепить container images digest и снять SBOM фактически собранных слоёв с версиями apt packages.
+- [ ] **Требуется документ:** приложить package-specific LICENSE/COPYING/NOTICE texts для всего фактического графа.
+- [ ] **Требуется решение владельца:** заполнить правообладателя и год в корневом `LICENSE`, выбрать модель лицензирования 02 или 03.
+- [ ] **Требуется юрист:** утвердить `licenseConcluded`, LGPL-обязанности, container copyleft и итоговый NOTICE.
+
+До закрытия пяти последних пунктов комплект пригоден для внутренней проверки и due diligence, но не должен обозначаться как полностью готовый к коммерческой передаче.
