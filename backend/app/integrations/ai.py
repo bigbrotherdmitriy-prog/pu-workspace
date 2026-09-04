@@ -18,7 +18,13 @@ class GeminiAIAdapter:
 
     def health(self) -> AdapterHealth:
         ready = gemini_configured()
-        return AdapterHealth(ready=ready, detail="configured" if ready else "api key is not configured")
+        return AdapterHealth(
+            ready=ready,
+            detail=(
+                f"configured for {self.model}; connectivity is verified on each analysis request"
+                if ready else "api key is not configured"
+            ),
+        )
 
     def analyze_document(self, text: str, filename: str) -> dict[str, Any]:
         return analyze_document_with_gemini(text, filename)

@@ -61,6 +61,25 @@ def gemini_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
 
 
+def _generation_config(model: str, schema: dict[str, Any], legacy_temperature: float) -> dict[str, Any]:
+    """Build a model-compatible structured-output configuration.
+
+    Gemini 3.x rejects/deprecates sampling overrides and should use the new
+    thinking-level control.  LOW is intentional for interactive document and
+    message analysis: it bounds latency while the JSON schema and system
+    instruction provide the required determinism.
+    """
+    config: dict[str, Any] = {
+        "responseMimeType": "application/json",
+        "responseSchema": schema,
+    }
+    if model.casefold().startswith("gemini-3"):
+        config["thinkingConfig"] = {"thinkingLevel": "low"}
+    else:
+        config["temperature"] = legacy_temperature
+    return config
+
+
 def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
     import httpx
 
@@ -78,11 +97,7 @@ def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "responseMimeType": "application/json",
-            "responseSchema": ANALYSIS_SCHEMA,
-        },
+        "generationConfig": _generation_config(model, ANALYSIS_SCHEMA, 0.1),
     }
     with httpx.Client(timeout=90.0) as client:
         response = request_with_retry(
@@ -118,11 +133,7 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-            "responseSchema": MESSAGE_REPLY_SCHEMA,
-        },
+        "generationConfig": _generation_config(model, MESSAGE_REPLY_SCHEMA, 0.2),
     }
     with httpx.Client(timeout=90.0) as client:
         response = request_with_retry(

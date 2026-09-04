@@ -1,4 +1,21 @@
-from app.gemini_analysis import format_gemini_analysis, format_message_replies
+from app.gemini_analysis import ANALYSIS_SCHEMA, _generation_config, format_gemini_analysis, format_message_replies
+
+
+def test_gemini_3_generation_config_uses_low_thinking_without_sampling_overrides():
+    config = _generation_config("gemini-3.8-flash", ANALYSIS_SCHEMA, 0.1)
+
+    assert config["thinkingConfig"] == {"thinkingLevel": "low"}
+    assert "temperature" not in config
+    assert "topP" not in config
+    assert "topK" not in config
+    assert config["responseSchema"] is ANALYSIS_SCHEMA
+
+
+def test_legacy_gemini_generation_config_keeps_supported_temperature():
+    config = _generation_config("gemini-2.5-flash", ANALYSIS_SCHEMA, 0.1)
+
+    assert config["temperature"] == 0.1
+    assert "thinkingConfig" not in config
 
 
 def test_gemini_analysis_is_formatted_as_actionable_sections():
