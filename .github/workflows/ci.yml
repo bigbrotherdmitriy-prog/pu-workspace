@@ -26,8 +26,8 @@ jobs:
       DATABASE_URL: postgresql://pu_test:pu_test_password@127.0.0.1:5432/pu_workspace_test
       PU_TEST_POSTGRES: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -43,10 +43,10 @@ jobs:
         run: |
           set -o pipefail
           pytest tests -q 2>&1 | tee ../pytest.log
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: pnpm
@@ -71,7 +71,7 @@ jobs:
           pnpm run build 2>&1 | tee ../frontend-build.log
       - name: Upload verification logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: verification-logs-${{ github.sha }}
           path: |
