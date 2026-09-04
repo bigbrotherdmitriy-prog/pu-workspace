@@ -42,6 +42,41 @@ class ChannelAdapter(IntegrationAdapter, Protocol):
     def send(self, destination: str, text: str) -> str: ...
 
 
+@dataclass(frozen=True, slots=True)
+class MailFolder:
+    id: str
+    name: str
+    kind: str = "label"
+
+
+@dataclass(frozen=True, slots=True)
+class MailSendCommand:
+    to: Sequence[str]
+    cc: Sequence[str]
+    bcc: Sequence[str]
+    subject: str
+    body: str
+    thread_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MailSendReceipt:
+    external_message_id: str
+    external_thread_id: str | None = None
+
+
+class MailNotAppliedError(RuntimeError):
+    """The adapter can prove that no provider-side effect happened."""
+
+
+@runtime_checkable
+class MailboxAdapter(IntegrationAdapter, Protocol):
+    """Provider-neutral mailbox operations used by the mail client API."""
+
+    def list_folders(self) -> list[MailFolder]: ...
+    def send_message(self, command: MailSendCommand) -> MailSendReceipt: ...
+
+
 @runtime_checkable
 class AIProviderAdapter(IntegrationAdapter, Protocol):
     def analyze_document(self, text: str, filename: str) -> dict[str, Any]: ...

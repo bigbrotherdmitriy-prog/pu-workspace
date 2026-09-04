@@ -321,6 +321,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         task.external_action_status = "proposed"
     for draft in drafts:
         draft.message_id = row.id
+        draft.contract_id = row.contract_id
     nonactionable_machine_message = (
         payload.response_suppressed
         and not tasks
@@ -397,6 +398,7 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
             task.project_id = target_project_id
         for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
             draft.project_id = target_project_id
+            draft.contract_id = None
         for risk in db.scalars(select(Risk).where(Risk.project_id == old_project_id, Risk.source_id == f"message:{row.id}")):
             risk.project_id = target_project_id
     if payload.contract_id is not None:
@@ -404,6 +406,8 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
         if contract is None:
             raise HTTPException(422, "Contract does not belong to this project")
         row.contract_id = contract.id
+        for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
+            draft.contract_id = contract.id
         row.context_evidence = f"Проект и договор подтверждены пользователем: {target_project.name}; {contract.number}"
     else:
         row.context_evidence = f"Проект подтверждён пользователем: {target_project.name}"
@@ -452,12 +456,15 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
                 task.project_id = target_project_id
             for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
                 draft.project_id = target_project_id
+                draft.contract_id = None
             for risk in db.scalars(select(Risk).where(
                 Risk.project_id == old_project_id,
                 Risk.source_id == f"message:{row.id}",
             )):
                 risk.project_id = target_project_id
         row.contract_id = contract.id if contract else None
+        for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
+            draft.contract_id = contract.id if contract else None
         row.context_confirmed = True
         row.context_confidence = 1.0
         row.status = "ready"

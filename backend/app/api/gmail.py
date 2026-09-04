@@ -5,8 +5,6 @@ import html
 import json
 import os
 import re
-from datetime import datetime, timezone
-from email.message import EmailMessage
 from email.utils import parseaddr
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -299,6 +297,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 Message.source_external_id == ref["id"],
             ))
             if existing:
+                existing.mail_headers_json = json.dumps({
+                    key: headers[key]
+                    for key in ("subject", "to", "cc", "date", "message-id", "in-reply-to", "references")
+                    if headers.get(key)
+                }, ensure_ascii=False)
+                existing.mail_labels_json = json.dumps(item.get("labelIds") or [])
                 _apply_bulk_filter(existing, bulk_reason)
                 _apply_automated_filter(
                     existing,
@@ -357,6 +361,13 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 response_suppressed=bool(automated_sender_reason),
                 response_suppression_reason=automated_sender_reason,
             ), db, user)
+            stored = db.get(Message, result["id"])
+            stored.mail_headers_json = json.dumps({
+                key: headers[key]
+                for key in ("subject", "to", "cc", "date", "message-id", "in-reply-to", "references")
+                if headers.get(key)
+            }, ensure_ascii=False)
+            stored.mail_labels_json = json.dumps(item.get("labelIds") or [])
             processed += 1 if result["status"] else 0
             if not bulk_reason and result["status"] != "filtered":
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
@@ -432,35 +443,19 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     draft = db.get(ResponseDraft, draft_id)
     if draft is None:
         raise HTTPException(404, "Response draft not found")
-    require_project_role(db, user, draft.project_id, "manager")
-    if draft.sent_external_id:
-        return {"id": draft.id, "status": "sent", "gmail_message_id": draft.sent_external_id, "already_sent": True}
-    if draft.status != "approved":
-        raise HTTPException(409, "Сначала подтвердите и при необходимости отредактируйте проект ответа")
-    source = db.get(Message, draft.message_id) if draft.message_id else None
-    recipient = draft.recipient_to or (
-        parseaddr(source.source_sender)[1]
-        if source is not None and source.source_type == "email" and source.source_sender else ""
+    if draft.status != "approved" or draft.approved_revision != draft.revision:
+        raise HTTPException(409, "Сначала подтвердите текущую редакцию проекта ответа")
+    from app.api.mail import MailDraftSend, send_mail_draft
+
+    result = send_mail_draft(
+        draft_id,
+        MailDraftSend(revision=draft.revision, idempotency_key=f"legacy-{draft.id}-{draft.revision}"),
+        db,
+        user,
     )
-    if not recipient:
-        raise HTTPException(422, "Не удалось определить адрес получателя")
-    message = EmailMessage()
-    message["To"] = recipient
-    message["Subject"] = (
-        draft.subject if draft.recipient_to or draft.subject.lower().startswith("re:")
-        else f"Re: {draft.subject}"
-    )
-    message.set_content(draft.body)
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    service = google_workspace_for_project(draft.project_id, db).service("gmail", "v1")
-    body = {"raw": raw}
-    if source is not None and source.source_thread_id:
-        body["threadId"] = source.source_thread_id
-    sent = service.users().messages().send(userId="me", body=body).execute()
-    draft.sent_external_id = sent["id"]
-    draft.sent_at = datetime.now(timezone.utc)
-    draft.status = "sent"
-    db.add(AuditLog(action="gmail_reply_sent", entity_type="response_draft", entity_id=draft.id,
-                    details=f"message={source.id if source else 'proactive'}; gmail_message={sent['id']}"))
-    db.commit()
-    return {"id": draft.id, "status": draft.status, "gmail_message_id": draft.sent_external_id, "already_sent": False}
+    return {
+        "id": result["id"],
+        "status": result["status"],
+        "gmail_message_id": (result.get("receipt") or {}).get("external_message_id"),
+        "already_sent": result["idempotent_replay"],
+    }

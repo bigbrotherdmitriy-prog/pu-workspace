@@ -25,6 +25,7 @@ from app.api.ai_policy import router as ai_policy_router
 from app.api.analytics import router as analytics_router
 from app.api.integrations import router as integrations_router
 from app.api.project_contacts import router as project_contacts_router
+from app.api.mail import router as mail_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -107,6 +108,7 @@ app.include_router(ai_policy_router)
 app.include_router(analytics_router)
 app.include_router(integrations_router)
 app.include_router(project_contacts_router)
+app.include_router(mail_router)
 app.include_router(google_drive_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)
