@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from sqlalchemy import select
@@ -9,9 +10,33 @@ from app.models.ai_secretary import Message
 from app.models.governance import Decision, Risk
 from app.models.management import Obligation
 from app.models.response_draft import ResponseDraft
-from app.models.task import Task
+from app.models.task import Task, TaskDueDateHistory
 from app.models.organization_contract import Contract
 from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleBaseline, ScheduleItem
+from app.task_engine import extract_explicit_due_date
+
+
+def _normalized(value: object) -> str:
+    return re.sub(r"[\W_]+", "", str(value or "").casefold())
+
+
+def _unique(rows: list, *attributes: str) -> list:
+    """Collapse repeated derived entities without changing or deleting records."""
+    result = []
+    seen: set[tuple[str, ...]] = set()
+    for row in rows:
+        key = tuple(_normalized(getattr(row, attribute, None)) for attribute in attributes)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(row)
+    return result
+
+
+def _derived_due_date_is_supported(row: Task, user_corrected_ids: set[int]) -> bool:
+    if not row.needs_review or row.id in user_corrected_ids or row.source_type == "automation_rule":
+        return True
+    return extract_explicit_due_date(row.source_excerpt or "") == row.due_date
 
 
 def build_daily_briefing(db: Session, project_id: int, *, today: date | None = None) -> dict:
@@ -28,10 +53,24 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
     schedule_items = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id)).all())
     budget_lines = list(db.scalars(select(BudgetLine).where(BudgetLine.project_id == project_id)).all())
     cash_flow = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id)).all())
+    task_ids = [row.id for row in tasks]
+    user_corrected_due_task_ids = set(db.scalars(
+        select(TaskDueDateHistory.task_id).where(TaskDueDateHistory.task_id.in_(task_ids))
+    ).all()) if task_ids else set()
 
     attention: list[dict] = []
     open_tasks = [row for row in tasks if row.status in {"assigned", "in_progress"}]
-    overdue_tasks = [row for row in open_tasks if row.due_date and row.due_date < current]
+    invalid_derived_due_task_ids = {
+        row.id for row in open_tasks
+        if row.due_date and not _derived_due_date_is_supported(row, user_corrected_due_task_ids)
+    }
+    overdue_tasks = _unique(
+        [
+            row for row in open_tasks
+            if row.due_date and row.due_date < current and row.id not in invalid_derived_due_task_ids
+        ],
+        "source_file_name", "source_excerpt", "due_date",
+    )
     for row in overdue_tasks:
         attention.append({
             "kind": "overdue_task", "entity_id": row.id, "priority": "critical",
@@ -39,8 +78,17 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Подтвердить исполнителя и новый срок либо завершить задачу",
         })
 
-    open_obligations = [row for row in obligations if row.status in {"needs_confirmation", "confirmed", "in_progress"}]
-    overdue_obligations = [row for row in open_obligations if row.due_date and row.due_date < current]
+    represented_task_ids = {row.id for row in overdue_tasks}
+    open_obligations = [
+        row for row in obligations
+        if row.status in {"needs_confirmation", "confirmed", "in_progress"}
+        and row.task_id not in represented_task_ids
+        and row.task_id not in invalid_derived_due_task_ids
+    ]
+    overdue_obligations = _unique(
+        [row for row in open_obligations if row.due_date and row.due_date < current],
+        "source_name", "source_excerpt", "due_date",
+    )
     for row in overdue_obligations:
         attention.append({
             "kind": "overdue_obligation", "entity_id": row.id, "priority": "critical",
@@ -48,7 +96,10 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Проверить исполнение обязательства и зафиксировать результат",
         })
 
-    open_risks = [row for row in risks if row.status in {"needs_confirmation", "confirmed", "mitigating"}]
+    open_risks = _unique(
+        [row for row in risks if row.status in {"needs_confirmation", "confirmed", "mitigating"}],
+        "source_name", "source_excerpt", "title",
+    )
     for row in open_risks:
         attention.append({
             "kind": "risk", "entity_id": row.id,
@@ -57,7 +108,10 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Подтвердить риск и назначить действие",
         })
 
-    pending_decisions = [row for row in decisions if row.status in {"needs_confirmation", "confirmed", "decided"}]
+    pending_decisions = _unique(
+        [row for row in decisions if row.status in {"needs_confirmation", "confirmed", "decided"}],
+        "source_name", "source_excerpt", "question",
+    )
     for row in pending_decisions:
         attention.append({
             "kind": "decision", "entity_id": row.id, "priority": "high",
@@ -65,7 +119,10 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Зафиксировать решение или отклонить предложение",
         })
 
-    waiting_drafts = [row for row in drafts if row.status == "draft"]
+    waiting_drafts = _unique(
+        [row for row in drafts if row.status == "draft"],
+        "source_file_name", "source_excerpt", "subject",
+    )
     for row in waiting_drafts:
         attention.append({
             "kind": "draft", "entity_id": row.id, "priority": "normal",
@@ -73,7 +130,10 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Проверить, отредактировать и подтвердить черновик",
         })
 
-    unconfirmed_messages = [row for row in messages if not row.context_confirmed]
+    unconfirmed_messages = [
+        row for row in messages
+        if not row.context_confirmed and row.status != "filtered"
+    ]
     for row in unconfirmed_messages:
         attention.append({
             "kind": "context", "entity_id": row.id, "priority": "high",

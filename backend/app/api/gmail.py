@@ -185,6 +185,15 @@ def _automated_sender_reason(headers: dict[str, str]) -> str | None:
     return None
 
 
+def _apply_bulk_filter(message: Message, reason: str | None) -> bool:
+    """Backfill safe filtering without overriding a human workflow decision."""
+    if not reason or message.status not in {"needs_review", "needs_context_confirmation", "ready"}:
+        return False
+    message.status = "filtered"
+    message.summary = f"Автоматические действия не создавались: {reason}."
+    return True
+
+
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -216,6 +225,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 Message.source_external_id == ref["id"],
             ))
             if existing:
+                _apply_bulk_filter(existing, bulk_reason)
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")

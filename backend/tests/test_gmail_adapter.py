@@ -1,9 +1,9 @@
 import base64
-
 import inspect
+from types import SimpleNamespace
 
 from app.api.ai_secretary import project_candidate
-from app.api.gmail import GmailSyncRequest, _attachments, _automated_sender_reason, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
+from app.api.gmail import GmailSyncRequest, _apply_bulk_filter, _attachments, _automated_sender_reason, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
 from app.api.google_drive import SCOPES
 
 
@@ -122,6 +122,21 @@ def test_filtered_messages_do_not_backfill_drafts_or_notify_telegram():
     source = inspect.getsource(sync_gmail_project)
     assert 'not bulk_reason and not automated_sender_reason and existing.status != "filtered"' in source
     assert "not is_outgoing and not bulk_reason" in source
+
+
+def test_existing_bulk_message_is_safely_reclassified_on_resync():
+    message = SimpleNamespace(status="needs_context_confirmation", summary="Анализируется")
+
+    assert _apply_bulk_filter(message, "Gmail отнёс письмо к категории «Промоакции»") is True
+    assert message.status == "filtered"
+    assert "Автоматические действия не создавались" in message.summary
+
+
+def test_bulk_backfill_does_not_override_human_workflow_status():
+    message = SimpleNamespace(status="in_progress", summary="Проверяется пользователем")
+
+    assert _apply_bulk_filter(message, "массовая рассылка") is False
+    assert message.status == "in_progress"
 
 
 def test_oauth_callback_returns_to_new_interface():

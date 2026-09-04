@@ -504,6 +504,7 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .daily-briefing-list article button { padding: 8px 11px; border: 1px solid #bfcfc7; border-radius: 8px; background: #fff; color: #31564a; cursor: pointer; }
 .daily-briefing-icon { color: #9a6a24; }
 .daily-briefing-icon svg { width: 20px; height: 20px; }
+.daily-briefing-more { justify-self: center; padding: 9px 16px; border: 1px solid #bfcfc7; border-radius: 9px; background: #fff; color: #31564a; cursor: pointer; }
 .daily-briefing-empty { display: flex; gap: 9px; align-items: center; justify-content: center; padding: 18px; color: #16866f; }
 .daily-briefing-safety { color: #748078; }
 .automation-control { display: grid; gap: 16px; margin: 16px 0; }

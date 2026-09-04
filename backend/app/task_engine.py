@@ -21,9 +21,17 @@ OBLIGATION_RE = re.compile(
     r"выполнить|устранить|оплатить|поставить)\b",
     re.IGNORECASE,
 )
-DATE_RE = re.compile(r"\b(?:до\s+|не позднее\s+)?(\d{1,2})[./](\d{1,2})[./](20\d{2})\b", re.IGNORECASE)
+DATE_RE = re.compile(
+    r"\b(?:не\s+позднее|до|к)\s+(\d{1,2})[./](\d{1,2})[./](20\d{2})\b",
+    re.IGNORECASE,
+)
+DEADLINE_DATE_RE = re.compile(
+    r"\bсрок(?:\s+(?:исполнения|выполнения|предоставления|поставки|оплаты))?\s*"
+    r"(?:[:=\-–—]|установлен(?:\s+на)?)?\s*(\d{1,2})[./](\d{1,2})[./](20\d{2})\b",
+    re.IGNORECASE,
+)
 MONTH_DATE_RE = re.compile(
-    r"\b(?:до\s+|не позднее\s+)?(\d{1,2})\s+"
+    r"\b(?:не\s+позднее|до|к)\s+(\d{1,2})\s+"
     r"(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
     r"(?:\s+(20\d{2}))?\b", re.IGNORECASE,
 )
@@ -105,6 +113,33 @@ def _text_quality_review_reasons(text: str) -> tuple[str, ...]:
     return tuple(reasons)
 
 
+def extract_explicit_due_date(sentence: str) -> date | None:
+    """Extract only an explicit execution deadline, not a document reference date.
+
+    Dates introduced by ``от`` or embedded in СНиП/ГОСТ references identify a
+    source document.  Treating every date in an obligation sentence as a due
+    date produced false, already-overdue tasks.  Absolute dates therefore need
+    a local deadline marker such as ``до``, ``не позднее``, ``к`` or ``срок``.
+    """
+    match = DATE_RE.search(sentence) or DEADLINE_DATE_RE.search(sentence)
+    if match:
+        try:
+            return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            return None
+    word_match = MONTH_DATE_RE.search(sentence)
+    if word_match:
+        try:
+            return date(
+                int(word_match.group(3) or date.today().year),
+                MONTHS[word_match.group(2).lower()],
+                int(word_match.group(1)),
+            )
+        except ValueError:
+            return None
+    return None
+
+
 def extract_task_candidates(text: str | None, limit: int = 5) -> list[TaskCandidate]:
     if not text:
         return []
@@ -118,20 +153,7 @@ def extract_task_candidates(text: str | None, limit: int = 5) -> list[TaskCandid
         if digest in seen:
             continue
         seen.add(digest)
-        match = DATE_RE.search(sentence)
-        due = None
-        if match:
-            try:
-                due = date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
-            except ValueError:
-                pass
-        if due is None:
-            word_match = MONTH_DATE_RE.search(sentence)
-            if word_match:
-                try:
-                    due = date(int(word_match.group(3) or date.today().year), MONTHS[word_match.group(2).lower()], int(word_match.group(1)))
-                except ValueError:
-                    pass
+        due = extract_explicit_due_date(sentence)
         urgent = bool(re.search(r"\b(срочно|критич|немедленно|не позднее)\b", sentence, re.I))
         review_reasons = _text_quality_review_reasons(sentence)
         # Compatibility scores for clean candidates; a valid date cannot override

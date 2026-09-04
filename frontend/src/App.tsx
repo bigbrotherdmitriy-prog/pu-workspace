@@ -17,6 +17,7 @@ import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/c
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
+import { messageNeedsAttention } from "./modules/inbox/messageAttention";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
@@ -389,7 +390,7 @@ export function App() {
     [projectContacts, setProjectContacts] = useState<ProjectContact[]>([]),
     [mailView, setMailView] = useState<"inbox" | "companies">("inbox"),
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
-    [inboxFilter, setInboxFilter] = useState("all"),
+    [inboxFilter, setInboxFilter] = useState("attention"),
     [selectedInboxIds, setSelectedInboxIds] = useState<number[]>([]),
     [bulkInboxProjectId, setBulkInboxProjectId] = useState(initialProjectId),
     [bulkInboxContractId, setBulkInboxContractId] = useState(0),
@@ -1987,17 +1988,19 @@ export function App() {
   );
   const inboxCounts = {
     all: inbox.length,
-    attention: inbox.filter((item) => !item.context_confirmed || item.status !== "completed").length,
+    attention: inbox.filter(messageNeedsAttention).length,
     tasks: inbox.filter((item) => item.tasks.length > 0).length,
     drafts: inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length,
+    filtered: inbox.filter((item) => item.status === "filtered").length,
   };
   const visibleInbox = inbox.filter((item) => {
     const matchesQuery = !query || `${item.source_name} ${item.source_sender || ""} ${item.summary}`
       .toLocaleLowerCase("ru-RU").includes(query.toLocaleLowerCase("ru-RU"));
     if (!matchesQuery) return false;
-    if (inboxFilter === "attention") return !item.context_confirmed || item.status !== "completed";
+    if (inboxFilter === "attention") return messageNeedsAttention(item);
     if (inboxFilter === "tasks") return item.tasks.length > 0;
     if (inboxFilter === "drafts") return item.drafts.some((draft) => draft.status !== "sent");
+    if (inboxFilter === "filtered") return item.status === "filtered";
     return true;
   });
   const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
@@ -2153,7 +2156,7 @@ export function App() {
               projectName={projects.find((item) => item.id === projectId)?.name || ""}
               briefing={dailyBriefing}
               summary={summary}
-              inboxAttention={inbox.filter((item) => !item.context_confirmed || item.status !== "completed").length}
+              inboxAttention={inbox.filter(messageNeedsAttention).length}
               onOpen={setActive}
             />
           )}
@@ -2936,7 +2939,7 @@ export function App() {
         <InboxModule
           collapsed={collapsed}
           mode={active === "Письма" ? "mail" : "secretary"}
-          attentionCount={inbox.filter((item) => !item.context_confirmed || item.tasks.some((task) => task.external_action_status === "proposed")).length}
+          attentionCount={inbox.filter(messageNeedsAttention).length}
           syncing={gmailSyncing}
           onSync={() => void syncGmail()}
         >
@@ -3048,26 +3051,27 @@ export function App() {
                   ["attention", "Требуют внимания", inboxCounts.attention],
                   ["tasks", "Есть задачи", inboxCounts.tasks],
                   ["drafts", "Есть черновики", inboxCounts.drafts],
+                  ["filtered", "Отфильтровано", inboxCounts.filtered],
                 ].map(([value, label, count]) => (
                   <button className={inboxFilter === value ? "selected" : ""} onClick={() => setInboxFilter(String(value))} key={value}>
                     {label} <b>{count}</b>
                   </button>
                 ))}
               </div>
-              {visibleInbox.some((item) => !item.context_confirmed) && (
+              {visibleInbox.some((item) => !item.context_confirmed && item.status !== "filtered") && (
                 <div className="inbox-bulk card">
                   <label>
                     <input
                       type="checkbox"
-                      checked={visibleInbox.filter((item) => !item.context_confirmed).every((item) => selectedInboxIds.includes(item.id))}
+                      checked={visibleInbox.filter((item) => !item.context_confirmed && item.status !== "filtered").every((item) => selectedInboxIds.includes(item.id))}
                       onChange={(e) => {
-                        const ids = visibleInbox.filter((item) => !item.context_confirmed).map((item) => item.id);
+                        const ids = visibleInbox.filter((item) => !item.context_confirmed && item.status !== "filtered").map((item) => item.id);
                         setSelectedInboxIds((current) => e.target.checked
                           ? Array.from(new Set([...current, ...ids]))
                           : current.filter((id) => !ids.includes(id)));
                       }}
                     />
-                    Выбрать все нераспределённые ({visibleInbox.filter((item) => !item.context_confirmed).length})
+                    Выбрать все нераспределённые ({visibleInbox.filter((item) => !item.context_confirmed && item.status !== "filtered").length})
                   </label>
                   <select value={bulkInboxProjectId || projectId} onChange={(e) => {
                     setBulkInboxProjectId(Number(e.target.value));
@@ -3097,7 +3101,7 @@ export function App() {
                   return (
                   <article className={`card inbox-card ${expanded ? "expanded" : "collapsed"}`} key={message.id}>
                     <div className="inbox-head">
-                      {!message.context_confirmed && (
+                      {!message.context_confirmed && message.status !== "filtered" && (
                         <input
                           className="inbox-select"
                           type="checkbox"
@@ -3110,7 +3114,9 @@ export function App() {
                       )}
                       <div>
                         <span className={`draft-status ${message.status}`}>
-                          {message.status === "completed"
+                          {message.status === "filtered"
+                            ? "Отфильтровано"
+                            : message.status === "completed"
                             ? "Обработано"
                             : message.status === "in_progress"
                               ? "В работе"
@@ -3141,7 +3147,7 @@ export function App() {
                       <button className="inbox-toggle" onClick={() => setExpandedInboxId(expanded ? null : message.id)}>
                         {expanded ? "Свернуть" : "Открыть"}
                       </button>
-                      {message.status !== "completed" ? (
+                      {message.status === "filtered" ? null : message.status !== "completed" ? (
                         <button className="inbox-workflow" onClick={() => updateInboxStatus(message, message.status === "in_progress" ? "completed" : "in_progress")}>
                           {message.status === "in_progress" ? "Завершить" : "В работу"}
                         </button>
