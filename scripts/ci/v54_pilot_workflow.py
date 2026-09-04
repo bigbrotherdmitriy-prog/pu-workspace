@@ -37,6 +37,10 @@ PROBE_CHECKPOINTS = {
     "require_database", "fixture_setup", "prepare", "enqueue", "first_claim",
     "rival_no_claim", "first_terminated", "lease_recovery", "stale_owner_rejected",
     "second_claim", "second_completion", "invariants", "cleanup",
+    "s07_fixture_setup", "s07_t1_committed", "s07_producer_terminated",
+    "s07_recover_enqueue", "s07_second_worker", "t2_rollback_fixture_setup",
+    "t2_flushed_before_commit", "t2_uncommitted_worker_terminated",
+    "s08_fixture_setup", "s08_t2_committed", "s08_worker_terminated",
 }
 
 
@@ -141,13 +145,11 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "runtime": runtime,
         "corpus": {
             "structural": "PASS" if any(p["name"] == "corpus" and p["exit"] == 0 for p in PHASES) else "FAIL",
-            "executed_cases": ["P02", "P06", "S06", "S09"],
+            "executed_cases": ["P02", "P06", "S06", "S07", "S08", "S09"],
             "expected_gaps": {
                 "C01": "content extraction and corpus due-date input are not wired to the synthetic fixture",
                 "C07": "time-of-day claim unsupported",
                 "S02": "legacy global message identity cutover unresolved",
-                "S07": "process kill between T1 and enqueue not exercised",
-                "S08": "process kill inside T2 before commit not exercised; transactional rollback is exercised",
                 "S10": "external UNKNOWN remains fake-contract only",
                 "P04": "finance outside pilot",
             },

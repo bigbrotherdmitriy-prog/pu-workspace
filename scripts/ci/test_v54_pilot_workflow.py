@@ -49,6 +49,9 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert '"PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations")' in source
     assert '"backend/tests/test_v54_provider_action_migration.py"' in source
     assert '"backend/tests/test_v54_product_acceptance.py"' in source
+    assert '"executed_cases": ["P02", "P06", "S06", "S07", "S08", "S09"]' in source
+    gaps = source.split('"expected_gaps": {', 1)[1].split("}", 1)[0]
+    assert '"S07"' not in gaps and '"S08"' not in gaps
 
 
 def test_postgres_phase_requests_safe_failure_summary():
@@ -162,6 +165,41 @@ def test_process_probe_strips_unpicklable_authority_before_spawn():
 
     assert safe_policy.authority is None
     pickle.dumps(safe_policy)
+
+
+def test_process_probe_has_exact_s07_and_s08_kill_boundaries():
+    source = (ROOT / "scripts/ci/v54_pilot_runtime.py").read_text(encoding="utf8")
+    assert "def intent_producer(" in source
+    assert '"state": "t1_committed"' in source
+    assert '"probe": "s07_intent_recovery"' in source
+    assert "def t2_contender(" in source
+    assert 'boundary == "before_commit"' in source
+    assert '"state": "business_committed"' in source
+    assert '"probe": "t2_precommit_rollback"' in source
+    assert '"probe": "s08_receipt_replay"' in source
+    assert "terminate_at_boundary(producer)" in source
+    assert source.count("terminate_at_boundary(worker)") == 2
+
+
+def test_process_termination_helper_targets_only_started_child():
+    path = ROOT / "scripts/ci/v54_pilot_runtime.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_runtime_termination_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    calls = []
+    child = SimpleNamespace(
+        pid=123,
+        terminate=lambda: calls.append("terminate"),
+        join=lambda timeout: calls.append(("join", timeout)),
+        is_alive=lambda: False,
+    )
+    module.terminate_at_boundary(child)
+    assert calls == ["terminate", ("join", 10)]
+
+    with pytest.raises(AssertionError, match="fault_process_not_started"):
+        module.terminate_at_boundary(SimpleNamespace(pid=None))
 
 
 def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_path):
