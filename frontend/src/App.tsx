@@ -2221,8 +2221,8 @@ export function App() {
                   <i /><i /><i />
                 </div>
                 <div className="dashboard-hero-copy">
-                  <span className="dashboard-kicker">ЦЕНТР УПРАВЛЕНИЯ · {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</span>
-                  <h2>{projects.find((item) => item.id === projectId)?.name || "Текущий проект"}</h2>
+                  <span className="dashboard-kicker">{projects.find((item) => item.id === projectId)?.name || "ТЕКУЩИЙ ПРОЕКТ"}</span>
+                  <h2>Главное по проекту — в одном месте</h2>
                   <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
                   <div className="dashboard-hero-actions">
                     <button onClick={() => setActive("Сегодня")}><Route /> План на сегодня</button>
