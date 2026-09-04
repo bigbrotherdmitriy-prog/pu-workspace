@@ -98,7 +98,7 @@ def test_postgres_migration_upgrade_and_single_head(monkeypatch):
     try:
         command.upgrade(cfg, "head")
         with engine.connect() as db:
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a02"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a04"
             assert "v54_authority_states" in inspect(db).get_table_names()
         command.downgrade(cfg, "a54f001c0a01")
         command.upgrade(cfg, "head")

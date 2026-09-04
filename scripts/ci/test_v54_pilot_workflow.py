@@ -41,7 +41,7 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert "capture_output=True" in source
     assert "print(result.stdout" not in source and "print(result.stderr" not in source
     assert "DROP DATABASE {}" in source and "pg_terminate_backend" in source
-    assert 'HEAD = "a54f001c0a02"' in source
+    assert 'HEAD = "a54f001c0a04"' in source
 
 
 def test_postgres_phase_requests_safe_failure_summary():
