@@ -21,6 +21,7 @@ export type FinanceOverview = {
     version: number;
     status: string;
     note?: string;
+    source_format?: string;
   }[];
   schedule: {
     id: number;
@@ -88,6 +89,18 @@ export type FinanceOverview = {
     amount: number;
     status: string;
   }[];
+};
+
+export type MppPreview = {
+  filename: string;
+  sha256: string;
+  task_count: number;
+  relation_count: number;
+  milestone_count: number;
+  summary_count: number;
+  critical_count: number;
+  planned_start?: string;
+  planned_finish?: string;
 };
 
 export type FinanceDocumentCandidate = {

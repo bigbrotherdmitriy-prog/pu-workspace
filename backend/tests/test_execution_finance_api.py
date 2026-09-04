@@ -42,6 +42,8 @@ def test_mvp4_routes_are_registered():
     assert "/execution/procurement" in paths
     assert "/execution/acts" in paths
     assert "/execution/{kind}/{item_id}/status" in paths
+    assert "/execution/mpp/preview" in paths
+    assert "/execution/mpp/import" in paths
 
 
 def test_mvp4_request_contracts_preserve_plan_and_fact():

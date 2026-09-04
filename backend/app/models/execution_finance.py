@@ -18,6 +18,8 @@ class ScheduleBaseline(Base):
     version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_format: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

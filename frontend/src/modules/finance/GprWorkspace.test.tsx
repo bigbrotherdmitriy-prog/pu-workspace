@@ -19,7 +19,7 @@ const finance = {
 describe("GprWorkspace", () => {
   it("shows the task grid and saves edits to the selected task", async () => {
     const onUpdateTask = vi.fn().mockResolvedValue(undefined);
-    render(<GprWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onUpdateTask={onUpdateTask} onBulkUpdate={vi.fn().mockResolvedValue(undefined)} onCloneBaseline={vi.fn().mockResolvedValue(11)} />);
+    render(<GprWorkspace projectId={1} finance={finance} selectedContractId={4} onPrepare={vi.fn()} onUpdateTask={onUpdateTask} onBulkUpdate={vi.fn().mockResolvedValue(undefined)} onCloneBaseline={vi.fn().mockResolvedValue(11)} onImported={vi.fn()} />);
 
     expect(screen.getByText("Монтаж")).toBeInTheDocument();
     expect(screen.getByText("Критический путь")).toBeInTheDocument();

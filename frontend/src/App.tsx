@@ -2618,12 +2618,14 @@ export function App() {
               onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
             />
             <GprWorkspace
+              projectId={projectId}
               finance={finance}
               selectedContractId={selectedFinanceContractId}
               onPrepare={prepareFinanceItem}
               onUpdateTask={updateScheduleTask}
               onBulkUpdate={bulkUpdateSchedule}
               onCloneBaseline={cloneScheduleBaseline}
+              onImported={loadFinance}
             />
             <FinanceOperations
               finance={finance}

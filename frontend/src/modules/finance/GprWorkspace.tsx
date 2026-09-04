@@ -1,15 +1,18 @@
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftToLine, ArrowRightToLine, CalendarClock, ChevronDown, ChevronRight, Copy, Diamond, Download, LocateFixed, Plus, Save } from "lucide-react";
-import type { FinanceOverview } from "./types";
+import { ArrowLeftToLine, ArrowRightToLine, CalendarClock, ChevronDown, ChevronRight, Copy, Diamond, Download, LocateFixed, Plus, Save, Upload } from "lucide-react";
+import { api } from "../../api/client";
+import type { FinanceOverview, MppPreview } from "./types";
 
 type Task = FinanceOverview["schedule"][number];
 type Props = {
+  projectId: number;
   finance: FinanceOverview | null;
   selectedContractId: number;
   onPrepare: (kind: string, baselineId?: number) => void;
   onUpdateTask: (id: number, patch: Record<string, unknown>) => Promise<void>;
   onBulkUpdate: (baselineId: number, ids: number[], patch: Record<string, unknown>) => Promise<void>;
   onCloneBaseline: (baselineId: number) => Promise<number | void>;
+  onImported: () => Promise<void> | void;
 };
 type Zoom = "day" | "week" | "month" | "quarter";
 
@@ -17,6 +20,11 @@ const dateLabel = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-d
 const headerDay = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", timeZone: "UTC" });
 const headerMonth = new Intl.DateTimeFormat("ru-RU", { month: "short", year: "numeric", timeZone: "UTC" });
 const dayMs = 86_400_000;
+const fileBase64 = async (file: File) => {
+  const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+  return btoa(binary);
+};
 
 function asDate(value?: string) {
   return value ? new Date(`${value}T00:00:00Z`) : null;
@@ -111,7 +119,7 @@ function networkAnalysis(tasks: Task[]) {
   return { critical: new Set(tasks.filter((task) => slack.get(task.id) === 0).map((task) => task.id)), slack };
 }
 
-export function GprWorkspace({ finance, selectedContractId, onPrepare, onUpdateTask, onBulkUpdate, onCloneBaseline }: Props) {
+export function GprWorkspace({ projectId, finance, selectedContractId, onPrepare, onUpdateTask, onBulkUpdate, onCloneBaseline, onImported }: Props) {
   const baselines = (finance?.baselines || []).filter((baseline) => !selectedContractId || baseline.contract_id === selectedContractId);
   const [baselineId, setBaselineId] = useState(0);
   const [selectedId, setSelectedId] = useState(0);
@@ -121,6 +129,11 @@ export function GprWorkspace({ finance, selectedContractId, onPrepare, onUpdateT
   const [referenceId, setReferenceId] = useState(0);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(() => new Set());
   const [dragPreview, setDragPreview] = useState<{ id: number; start: string; finish: string } | null>(null);
+  const [mppFile, setMppFile] = useState<File | null>(null);
+  const [mppPreview, setMppPreview] = useState<MppPreview | null>(null);
+  const [mppBusy, setMppBusy] = useState(false);
+  const [mppError, setMppError] = useState("");
+  const mppInput = useRef<HTMLInputElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const currentBaselineId = baselines.some((item) => item.id === baselineId) ? baselineId : baselines[0]?.id || 0;
   const tasks = useMemo(() => (finance?.schedule || []).filter((task) => task.baseline_id === currentBaselineId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id), [finance, currentBaselineId]);
@@ -222,6 +235,38 @@ export function GprWorkspace({ finance, selectedContractId, onPrepare, onUpdateT
     chartRef.current?.scrollTo({ left: Math.max(0, left - chartRef.current.clientWidth / 2), behavior: "smooth" });
   }
 
+  async function chooseMpp(file?: File) {
+    if (!file) return;
+    setMppFile(file); setMppPreview(null); setMppError(""); setMppBusy(true);
+    try {
+      const content_base64 = await fileBase64(file);
+      setMppPreview(await api<MppPreview>("/execution/mpp/preview", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, contract_id: selectedContractId || null, filename: file.name, content_base64 }),
+      }));
+    } catch (error) {
+      setMppError(error instanceof Error ? error.message : "Не удалось прочитать MPP-файл");
+    } finally { setMppBusy(false); }
+  }
+
+  async function importMpp() {
+    if (!mppFile) return;
+    setMppError(""); setMppBusy(true);
+    try {
+      const content_base64 = await fileBase64(mppFile);
+      const result = await api<{ baseline_id: number; created: number; duplicate: boolean }>("/execution/mpp/import", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, contract_id: selectedContractId || null, filename: mppFile.name, content_base64 }),
+      });
+      await onImported();
+      setBaselineId(result.baseline_id); setSelectedId(0); setMppFile(null); setMppPreview(null);
+      if (result.duplicate) setMppError("Этот файл уже импортирован — открыта существующая версия ГПР.");
+      if (mppInput.current) mppInput.current.value = "";
+    } catch (error) {
+      setMppError(error instanceof Error ? error.message : "Не удалось импортировать MPP-файл");
+    } finally { setMppBusy(false); }
+  }
+
   function exportSchedule() {
     const headings = ["ID", "WBS", "Название", "Длительность", "Начало", "Окончание", "Предшественники", "План %", "Факт %", "Резерв, дн.", "Отклонение от baseline, дн."];
     const rows = tasks.map((task, index) => [task.id, index + 1, taskPath(task, byId), task.duration_days || 0, task.planned_start || "", task.planned_finish || "", task.predecessor_ids || "", task.planned_progress || 0, task.actual_progress || 0, network.slack.get(task.id) || 0, finishVariance.get(task.id) ?? ""]);
@@ -274,7 +319,9 @@ export function GprWorkspace({ finance, selectedContractId, onPrepare, onUpdateT
   }));
 
   return <section className="card gpr-workspace">
-    <div className="gpr-head"><div><span className="eyebrow">КАЛЕНДАРНО-СЕТЕВОЕ ПЛАНИРОВАНИЕ</span><h2>График работ</h2><p>Иерархия задач, зависимости, план/факт и диаграмма Ганта в одном рабочем поле.</p></div><div className="gpr-controls"><select aria-label="Версия ГПР" value={currentBaselineId} onChange={(event) => { setBaselineId(Number(event.target.value)); setSelectedId(0); }}>{baselines.map((item) => <option value={item.id} key={item.id}>v{item.version} · {item.name} · {item.status}</option>)}</select><button type="button" onClick={() => onPrepare(currentBaselineId ? "schedule" : "baseline", currentBaselineId)}><Plus />{currentBaselineId ? "Задача" : "Версия ГПР"}</button></div></div>
+    <div className="gpr-head"><div><span className="eyebrow">КАЛЕНДАРНО-СЕТЕВОЕ ПЛАНИРОВАНИЕ</span><h2>График работ</h2><p>Иерархия задач, зависимости, план/факт и диаграмма Ганта в одном рабочем поле.</p></div><div className="gpr-controls"><select aria-label="Версия ГПР" value={currentBaselineId} onChange={(event) => { setBaselineId(Number(event.target.value)); setSelectedId(0); }}>{baselines.map((item) => <option value={item.id} key={item.id}>v{item.version} · {item.name} · {item.status}</option>)}</select><input ref={mppInput} hidden type="file" accept=".mpp" onChange={(event) => void chooseMpp(event.target.files?.[0])} /><button type="button" className="secondary" disabled={mppBusy} onClick={() => mppInput.current?.click()}><Upload />{mppBusy ? "Читаю…" : "Импорт .mpp"}</button><button type="button" onClick={() => onPrepare(currentBaselineId ? "schedule" : "baseline", currentBaselineId)}><Plus />{currentBaselineId ? "Задача" : "Версия ГПР"}</button></div></div>
+    {mppError && <div className={`gpr-import-message ${mppPreview ? "" : "error"}`}>{mppError}</div>}
+    {mppPreview && <div className="gpr-import-preview"><div><strong>{mppPreview.filename}</strong><span>{mppPreview.task_count} задач · {mppPreview.relation_count} связей · {mppPreview.summary_count} сводных · {mppPreview.milestone_count} вех · {mppPreview.critical_count} критических</span><small>{mppPreview.planned_start || "без даты"} — {mppPreview.planned_finish || "без даты"}. Исходный файл не изменяется.</small></div><div><button className="secondary" type="button" onClick={() => { setMppFile(null); setMppPreview(null); setMppError(""); if (mppInput.current) mppInput.current.value = ""; }}>Отмена</button><button type="button" disabled={mppBusy} onClick={() => void importMpp()}>{mppBusy ? "Импорт…" : "Создать ГПР"}</button></div></div>}
     <div className="gpr-toolbar"><button disabled={!editable || !selected} onClick={() => void indent()} title="Сделать подзадачей"><ArrowRightToLine /> Отступ</button><button disabled={!editable || !selected?.parent_id} onClick={() => void indent(true)} title="Поднять уровень"><ArrowLeftToLine /> Выступ</button><button disabled={!editable || !selected} onClick={() => selected && void onUpdateTask(selected.id, { is_milestone: !selected.is_milestone })}><Diamond /> Веха</button><button type="button" onClick={() => void cloneBaseline()} title="Создать редактируемую копию версии"><Copy /> Новая версия</button><label><input type="checkbox" checked={showCritical} onChange={(event) => setShowCritical(event.target.checked)} /> Критический путь</label><label>Сравнить <select aria-label="Baseline для сравнения" value={referenceBaselineId} onChange={(event) => setReferenceId(Number(event.target.value))}><option value={0}>без baseline</option>{referenceCandidates.map((item) => <option value={item.id} key={item.id}>v{item.version} · {item.name}</option>)}</select></label><span></span><button type="button" onClick={scrollToToday}><LocateFixed /> Сегодня</button><button type="button" onClick={exportSchedule}><Download /> CSV</button><label>Масштаб <select value={zoom} onChange={(event) => setZoom(event.target.value as Zoom)}><option value="day">День</option><option value="week">Неделя</option><option value="month">Месяц</option><option value="quarter">Квартал</option></select></label></div>
     {checkedIds.size > 0 && <div className="gpr-bulk"><strong>Выбрано: {checkedIds.size}</strong><button disabled={!editable} onClick={() => void applyBulk("shift")}>Сдвинуть даты</button><button disabled={!editable} onClick={() => void applyBulk("plan")}>План, %</button><button onClick={() => void applyBulk("fact")}>Факт, %</button><button className="secondary" onClick={() => setCheckedIds(new Set())}>Снять выбор</button></div>}
     <div className="gpr-split">

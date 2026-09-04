@@ -41,7 +41,10 @@ def test_header_project_switch_updates_persistent_context_before_loading():
     source = APP_SOURCE.read_text(encoding="utf-8")
 
     assert "const id = Number(e.target.value);" in source
-    assert "rememberProject(id);\n                void load(id);" in source
+    selection = source.index("const id = Number(e.target.value);")
+    remember = source.index("rememberProject(id);", selection)
+    load = source.index("void load(id);", remember)
+    assert selection < remember < load
     assert 'onChange={(e) => setProjectId(Number(e.target.value))}' not in source
 
 

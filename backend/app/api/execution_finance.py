@@ -1,5 +1,8 @@
+import base64
+import binascii
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import hashlib
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +19,7 @@ from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntr
 from app.models.organization_contract import Contract
 from app.models.user import User
 from app.structured_import import parse_structured_rows
+from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
@@ -71,6 +75,48 @@ class ScheduleBulkUpdate(BaseModel):
     actual_progress: float | None = Field(default=None, ge=0, le=100)
     status: str | None = Field(default=None, pattern="^(planned|in_progress|completed|blocked|cancelled)$")
     delta_days: int | None = Field(default=None, ge=-36500, le=36500)
+
+
+class MppImportRequest(BaseModel):
+    project_id: int
+    contract_id: int | None = None
+    filename: str = Field(min_length=5, max_length=500)
+    content_base64: str
+
+
+MAX_MPP_BYTES = 25 * 1024 * 1024
+
+
+def _decode_mpp(payload: MppImportRequest) -> tuple[bytes, str]:
+    if not payload.filename.casefold().endswith(".mpp"):
+        raise HTTPException(422, "Выберите файл Microsoft Project с расширением .mpp")
+    try:
+        data = base64.b64decode(payload.content_base64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(422, "Некорректное содержимое MPP-файла") from exc
+    if not data:
+        raise HTTPException(422, "MPP-файл пуст")
+    if len(data) > MAX_MPP_BYTES:
+        raise HTTPException(413, "MPP-файл больше 25 МБ")
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def _mpp_tasks(data: bytes):
+    try:
+        return read_mpp_bytes(data)
+    except MppImportUnavailable as exc:
+        raise HTTPException(503, "Импорт MPP временно недоступен: на сервере требуется MPXJ и Java 17") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _mpp_lag_suffix(value: object) -> str:
+    """Translate MPXJ duration text into the schedule editor's day syntax."""
+    match = re.fullmatch(r"\s*([+-]?\d+(?:\.\d+)?)d\s*", str(value or ""), re.IGNORECASE)
+    if not match:
+        return ""
+    days = round(float(match.group(1)))
+    return f"{days:+d}d" if days else ""
 
 
 class BudgetCreate(BaseModel):
@@ -388,7 +434,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
                     "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
-        "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note} for x in baselines],
+        "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note,
+                       "source_format": x.source_format} for x in baselines],
         "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "sort_order": x.sort_order,
                       "parent_id": x.parent_id, "duration_days": x.duration_days, "is_milestone": x.is_milestone,
                       "predecessor_ids": x.predecessor_ids, "constraint_type": x.constraint_type, "constraint_date": x.constraint_date,
@@ -570,6 +617,77 @@ def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user
                             created_by_user_id=user.id, name=payload.name.strip(), version=version, note=payload.note)
     db.add(item); db.flush(); _audit(db, "baseline_created", "schedule_baseline", item.id, user.id, f"version={version}"); db.commit(); db.refresh(item)
     return {"id": item.id, "version": item.version, "status": item.status}
+
+
+@router.post("/mpp/preview")
+def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "viewer")
+    _check_contract(db, payload.project_id, payload.contract_id)
+    data, digest = _decode_mpp(payload)
+    tasks = _mpp_tasks(data)
+    dated = [row for row in tasks if row.planned_start or row.planned_finish]
+    return {
+        "filename": payload.filename, "sha256": digest, "task_count": len(tasks),
+        "relation_count": sum(len(row.predecessors) for row in tasks),
+        "milestone_count": sum(row.is_milestone for row in tasks),
+        "summary_count": sum(row.is_summary for row in tasks),
+        "critical_count": sum(row.is_critical for row in tasks),
+        "planned_start": min((row.planned_start for row in dated if row.planned_start), default=None),
+        "planned_finish": max((row.planned_finish for row in dated if row.planned_finish), default=None),
+    }
+
+
+@router.post("/mpp/import")
+def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    _check_contract(db, payload.project_id, payload.contract_id)
+    data, digest = _decode_mpp(payload)
+    existing = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.project_id == payload.project_id,
+        ScheduleBaseline.contract_id == payload.contract_id,
+        ScheduleBaseline.source_sha256 == digest,
+    ))
+    if existing:
+        count = db.scalar(select(func.count(ScheduleItem.id)).where(ScheduleItem.baseline_id == existing.id)) or 0
+        return {"baseline_id": existing.id, "version": existing.version, "created": count, "duplicate": True}
+
+    tasks = _mpp_tasks(data)
+    version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == payload.project_id)) or 0) + 1
+    baseline = ScheduleBaseline(
+        project_id=payload.project_id, contract_id=payload.contract_id, created_by_user_id=user.id,
+        name=payload.filename, version=version, status="draft",
+        note="Импортировано из Microsoft Project; требуется проверка и утверждение",
+        source_format="mpp", source_sha256=digest,
+    )
+    db.add(baseline)
+    db.flush()
+    imported: dict[str, ScheduleItem] = {}
+    imported_rows = []
+    for order, row in enumerate(tasks):
+        duration = max(0, (row.planned_finish - row.planned_start).days + 1) if row.planned_start and row.planned_finish else 0
+        item = ScheduleItem(
+            project_id=payload.project_id, baseline_id=baseline.id, title=row.title[:500], sort_order=order,
+            duration_days=duration, is_milestone=row.is_milestone, planned_start=row.planned_start,
+            planned_finish=row.planned_finish, planned_progress=row.progress, actual_progress=row.progress,
+            status="completed" if row.progress >= 100 else "in_progress" if row.progress > 0 else "planned",
+            source_name=payload.filename, source_excerpt=f"MPP task UID {row.external_uid}",
+        )
+        db.add(item); imported[row.external_uid] = item; imported_rows.append((row, item))
+    db.flush()
+    for row, item in imported_rows:
+        parent = imported.get(row.parent_external_uid or "")
+        item.parent_id = parent.id if parent else None
+        links = []
+        for relation in row.predecessors:
+            predecessor = imported.get(str(relation.get("external_uid") or ""))
+            if predecessor:
+                link_type = str(relation.get("type") or "FS")
+                links.append(f"{predecessor.id}{link_type}{_mpp_lag_suffix(relation.get('lag'))}")
+        item.predecessor_ids = ",".join(links) or None
+    _audit(db, "mpp_schedule_imported", "schedule_baseline", baseline.id, user.id,
+           f"tasks={len(tasks)}; sha256={digest[:12]}")
+    db.commit()
+    return {"baseline_id": baseline.id, "version": baseline.version, "created": len(tasks), "duplicate": False}
 
 
 @router.post("/baselines/{baseline_id}/clone")
