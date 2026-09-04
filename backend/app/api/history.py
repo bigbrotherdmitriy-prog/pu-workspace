@@ -1,3 +1,5 @@
+from difflib import SequenceMatcher, unified_diff
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -7,6 +9,8 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
+from app.models.user import User
+from app.core.auth import require_admin, require_project_role, require_user
 
 
 router = APIRouter(
@@ -17,6 +21,40 @@ router = APIRouter(
 
 class SnapshotRequest(BaseModel):
     content: str
+
+
+def compare_version_content(previous: str, current: str) -> dict:
+    previous_lines = previous.splitlines()
+    current_lines = current.splitlines()
+    matcher = SequenceMatcher(None, previous_lines, current_lines)
+    added = removed = changed = 0
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "insert":
+            added += new_end - new_start
+        elif tag == "delete":
+            removed += old_end - old_start
+        elif tag == "replace":
+            old_count = old_end - old_start
+            new_count = new_end - new_start
+            changed += min(old_count, new_count)
+            removed += max(0, old_count - new_count)
+            added += max(0, new_count - old_count)
+    preview = list(unified_diff(
+        previous_lines,
+        current_lines,
+        fromfile="previous",
+        tofile="current",
+        lineterm="",
+        n=2,
+    ))
+    return {
+        "added_lines": added,
+        "removed_lines": removed,
+        "changed_lines": changed,
+        "unchanged": previous == current,
+        "preview": preview[:120],
+        "preview_truncated": len(preview) > 120,
+    }
 
 
 def document_to_dict(document):
@@ -33,19 +71,22 @@ def document_to_dict(document):
     return result
 
 
+def accessible_document(db: Session, user: User, document_id: int, minimum: str):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(404, "Document not found")
+    require_project_role(db, user, document.project_id, minimum)
+    return document
+
+
 @router.post("/documents/{document_id}/snapshot")
 def create_snapshot(
     document_id: int,
     payload: SnapshotRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
+    document = accessible_document(db, user, document_id, "editor")
 
     current_max = db.scalar(
         select(
@@ -94,14 +135,9 @@ def create_snapshot(
 def get_versions(
     document_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
+    accessible_document(db, user, document_id, "viewer")
 
     versions = db.scalars(
         select(DocumentVersion)
@@ -132,7 +168,9 @@ def get_version(
     document_id: int,
     version_number: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    accessible_document(db, user, document_id, "viewer")
     version = db.scalar(
         select(DocumentVersion).where(
             DocumentVersion.document_id == document_id,
@@ -155,6 +193,31 @@ def get_version(
     }
 
 
+@router.get("/documents/{document_id}/compare")
+def compare_versions(
+    document_id: int,
+    previous: int,
+    current: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    accessible_document(db, user, document_id, "viewer")
+    rows = list(db.scalars(select(DocumentVersion).where(
+        DocumentVersion.document_id == document_id,
+        DocumentVersion.version_number.in_({previous, current}),
+    )))
+    versions = {row.version_number: row for row in rows}
+    missing = [number for number in (previous, current) if number not in versions]
+    if missing:
+        raise HTTPException(404, f"Version not found: {', '.join(map(str, missing))}")
+    return {
+        "document_id": document_id,
+        "previous_version": previous,
+        "current_version": current,
+        **compare_version_content(versions[previous].content, versions[current].content),
+    }
+
+
 @router.post(
     "/documents/{document_id}/restore/{version_number}"
 )
@@ -162,14 +225,9 @@ def restore_version(
     document_id: int,
     version_number: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
+    document = accessible_document(db, user, document_id, "manager")
 
     version = db.scalar(
         select(DocumentVersion).where(
@@ -206,6 +264,7 @@ def restore_version(
 def audit(
     limit: int = 100,
     db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
 ):
     limit = max(1, min(limit, 500))
 

@@ -4,8 +4,33 @@ from app.models.project_member import ProjectMember
 from app.models.drive_connection import DriveConnection
 from app.models.document import Document
 from app.models.google_token import GoogleOAuthToken
+from app.models.ai_cache import AIAnalysisCache
 from app.models.document_version import DocumentVersion
 from app.models.audit_log import AuditLog
+from app.models.organizer import (
+    OrganizerAction,
+    OrganizerOperation,
+    OrganizerProposal,
+    OrganizerRule,
+    OrganizerSession,
+)
+from app.models.auth_session import AuthSession
+from app.models.task import Task, TaskDueDateHistory, TaskHistory
+from app.models.response_draft import ResponseDraft
+from app.models.automation_rule import AutomationRule, AutomationRun
+from app.models.telegram_chat import TelegramChatLink
+from app.models.governance import Decision, Risk
+from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
+from app.models.organization_contract import Contract, Organization
+from app.models.ai_secretary import Message
+from app.models.ai_policy import ProjectAIPolicy
+from app.models.management import Meeting, Notification, Obligation
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
+from app.models.external_resource import ExternalResourceLink
+from app.models.project_contact import ProjectContact
+from app.models.task_completion_suggestion import TaskCompletionSuggestion
+from app.models.contract_document_link import ContractDocumentLink
+from app.models.job import BackgroundJob, ServiceHeartbeat
 
 __all__ = [
     "Project",
@@ -16,4 +41,42 @@ __all__ = [
     "GoogleOAuthToken",
     "DocumentVersion",
     "AuditLog",
+    "OrganizerSession",
+    "OrganizerProposal",
+    "OrganizerAction",
+    "OrganizerOperation",
+    "OrganizerRule",
+    "AuthSession",
+    "Task",
+    "TaskDueDateHistory",
+    "TaskHistory",
+    "ResponseDraft",
+    "AutomationRule",
+    "AutomationRun",
+    "TelegramChatLink",
+    "Risk",
+    "Decision",
+    "SourceFolder",
+    "WorkspaceSnapshot",
+    "VirtualNode",
+    "ExtractionResult",
+    "Organization",
+    "Contract",
+    "Message",
+    "ProjectAIPolicy",
+    "Obligation",
+    "Meeting",
+    "Notification",
+    "ScheduleBaseline",
+    "ScheduleItem",
+    "BudgetLine",
+    "CashFlowEntry",
+    "ProcurementItem",
+    "AcceptanceAct",
+    "ExternalResourceLink",
+    "ProjectContact",
+    "TaskCompletionSuggestion",
+    "ContractDocumentLink",
+    "BackgroundJob",
+    "ServiceHeartbeat",
 ]

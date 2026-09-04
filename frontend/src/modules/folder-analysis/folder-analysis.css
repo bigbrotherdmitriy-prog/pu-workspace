@@ -1,0 +1,8 @@
+.folder-analysis { display: grid; gap: 16px; }
+.folder-analysis-metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 16px; }
+.folder-analysis-metrics article { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 20px; border: .5px solid var(--pu-border); border-radius: var(--pu-radius-card); background: #fff; }
+.folder-analysis-metrics article.warn { border-color: #e6c98e; background: #fffaf0; }
+.folder-analysis-metrics svg { width: 18px; color: var(--pu-green-700); }
+.folder-analysis-metrics span { color: var(--pu-muted); font-size: 12px; }
+.folder-analysis-metrics strong { font-size: 22px; }
+.folder-analysis-next { padding: 14px 16px; border-left: 3px solid var(--pu-green-700); background: var(--pu-canvas); color: #38564a; }

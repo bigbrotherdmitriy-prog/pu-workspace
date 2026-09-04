@@ -1,0 +1,8 @@
+.search { position: relative; }
+.project-search-results { position: absolute; z-index: 80; top: calc(100% + 8px); left: 0; width: min(560px,82vw); max-height: min(620px,70vh); overflow: auto; padding: 8px; border: .5px solid var(--pu-border); border-radius: var(--pu-radius-shell); background: #fff; box-shadow: var(--pu-shadow-popover); }
+.project-search-results > button { width: 100%; display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; padding: 10px; border: 0; border-radius: var(--pu-radius-card); background: transparent; color: inherit; text-align: left; }
+.project-search-results > button:hover { background: var(--pu-canvas); }
+.project-search-results svg { width: 17px; color: var(--pu-green-700); }
+.project-search-results span { min-width: 0; }
+.project-search-results strong, .project-search-results small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-search-results small { margin-top: 3px; color: var(--pu-muted); }

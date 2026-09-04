@@ -1,0 +1,12 @@
+services:
+  sales-bot:
+    build: .
+    container_name: pu-workspace-sales-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - sales_bot_data:/app/data
+
+volumes:
+  sales_bot_data:
+

@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.drive_connection import DriveConnection
 from app.models.project import Project
+from app.models.user import User
+from app.core.auth import require_project_role, require_user
 
 
 router = APIRouter(
@@ -24,7 +26,9 @@ def connect_drive(
     project_id: int,
     payload: DriveConnectRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "manager")
     project = db.get(Project, project_id)
 
     if project is None:
@@ -70,7 +74,9 @@ def connect_drive(
 def get_drive(
     project_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ):
+    require_project_role(db, user, project_id, "viewer")
     connection = db.scalar(
         select(DriveConnection).where(
             DriveConnection.project_id == project_id

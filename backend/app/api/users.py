@@ -1,22 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
+from app.core.auth import hash_password, require_admin
 
 
 router = APIRouter(
     prefix="/users",
     tags=["users"],
+    dependencies=[Depends(require_admin)],
 )
 
 
 class UserCreate(BaseModel):
     name: str
     email: str
+    password: str = Field(min_length=12, max_length=256)
 
 
 @router.get("/")
@@ -46,7 +49,8 @@ def create_user(
 ):
     user = User(
         name=payload.name,
-        email=payload.email,
+        email=payload.email.strip().lower(),
+        password_hash=hash_password(payload.password),
     )
 
     db.add(user)

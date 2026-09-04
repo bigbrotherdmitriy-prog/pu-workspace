@@ -22,3 +22,5 @@ NAME_SEPARATOR = " — "
 MAX_FILES_PER_SCAN = int(os.getenv("MAX_FILES_PER_SCAN", "2000"))
 SAFE_COPY_SUFFIX = os.getenv("SAFE_COPY_SUFFIX", " (безопасная копия {ts})")
 MIN_AUTO_CONFIDENCE = float(os.getenv("ORGANIZER_MIN_AUTO_CONFIDENCE", "0.65"))
+AUTO_APPLY_ENABLED = os.getenv("ORGANIZER_AUTO_APPLY", "false").lower() in {"1", "true", "yes"}
+AUTO_APPLY_CONFIDENCE = float(os.getenv("ORGANIZER_AUTO_APPLY_CONFIDENCE", "0.90"))

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PU Workspace — безопасный органайзер</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="authGate" class="auth-gate">
+    <section class="panel auth-card">
+      <span class="eyebrow dark">PU WORKSPACE</span><h2>Вход</h2>
+      <div id="readiness" class="readiness">Проверка готовности…</div>
+      <input id="authEmail" type="email" placeholder="Email">
+      <input id="authPassword" type="password" placeholder="Пароль (минимум 12 символов)">
+      <button id="login">Войти</button>
+      <details><summary>Первый запуск</summary><input id="authName" placeholder="Имя администратора"><input id="bootstrapToken" type="password" placeholder="BOOTSTRAP_TOKEN"><button id="bootstrap" class="secondary">Создать администратора</button></details>
+      <p id="authError" class="special"></p>
+    </section>
+  </div>
+  <header>
+    <div><span class="eyebrow">PU WORKSPACE</span><h1>Безопасный органайзер</h1></div>
+    <div><span class="badge">Оригиналы не изменяются</span> <button id="logout" class="header-button">Выйти</button></div>
+  </header>
+  <main>
+    <section class="panel wide command-center" id="dashboardPanel" hidden>
+      <div class="section-head"><div><span class="eyebrow dark">РАБОЧИЙ ЦЕНТР</span><h2>Что требует внимания</h2><p class="muted" id="dashboardHint"></p></div><button id="refreshDashboard" class="secondary">Обновить всё</button></div>
+      <div class="metric-grid">
+        <button class="metric urgent" data-jump="issuesPanel"><strong id="metricAttention">0</strong><span>требуют внимания</span></button>
+        <button class="metric" data-jump="tasksPanel"><strong id="metricTasks">0</strong><span>открытых задач</span></button>
+        <button class="metric" data-jump="tasksPanel"><strong id="metricOverdue">0</strong><span>просрочено</span></button>
+        <button class="metric" data-jump="issuesPanel"><strong id="metricRisks">0</strong><span>рисков</span></button>
+        <button class="metric" data-jump="issuesPanel"><strong id="metricDecisions">0</strong><span>ждут решения</span></button>
+        <button class="metric" data-jump="draftsPanel"><strong id="metricDrafts">0</strong><span>черновиков ответов</span></button>
+      </div>
+    </section>
+    <section class="panel setup">
+      <h2>1. Проект и Google Drive</h2>
+      <div class="row">
+        <label>Проект<select id="project"></select></label>
+        <button id="refreshProjects" class="secondary">Обновить</button>
+      </div>
+      <div class="row">
+        <input id="newProject" placeholder="Название нового проекта">
+        <button id="createProject">Создать проект</button>
+      </div>
+      <div class="row">
+        <button id="connectDrive" class="secondary">Подключить Google Drive</button>
+        <span id="driveStatus" class="muted">Статус не проверен</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>2. Выберите исходную папку</h2>
+      <p class="muted">Система сначала создаст отдельную копию рядом с исходной папкой.</p>
+      <div class="row"><input id="folderId" value="root" aria-label="ID папки"><button id="loadFolder" class="secondary">Открыть</button></div>
+      <div id="files" class="file-list empty">Подключите Drive и откройте папку.</div>
+      <button id="scan" disabled>Создать копию и проанализировать</button>
+      <div class="upload-divider"><span>или с компьютера</span></div>
+      <input id="localFolder" type="file" webkitdirectory directory multiple hidden>
+      <button id="chooseLocalFolder" class="secondary">Загрузить рабочую папку</button>
+      <p class="muted" id="localUploadStatus">Оригиналы на компьютере не изменяются. Поддерживаются DOCX, PDF, XLSX, TXT и CSV.</p>
+    </section>
+
+    <section class="panel" id="progressPanel" hidden>
+      <h2>3. Анализ</h2>
+      <div class="progress"><span id="progressBar"></span></div>
+      <p id="progressText">Ожидание…</p>
+      <button id="retryScan" class="secondary" hidden>Повторить незавершённый анализ</button>
+    </section>
+
+    <section class="panel wide" id="proposalPanel" hidden>
+      <div class="section-head"><div><h2>4. Предлагаемые изменения</h2><p class="muted" id="proposalMeta"></p></div><span id="proposalStatus" class="badge"></span></div>
+      <div class="notice">Особые случаи и низкая уверенность требуют явной ручной проверки.</div>
+      <div class="table-wrap"><table><thead><tr><th>Решение</th><th>Было</th><th>Станет</th><th>Уверенность</th><th>Основание</th></tr></thead><tbody id="actions"></tbody></table></div>
+      <div class="actions"><button id="approve">Подтвердить изменения</button><button id="reject" class="secondary">Ничего не менять</button><button id="apply" hidden>Применить к копии</button><button id="rollback" class="danger" hidden>Откатить</button></div>
+    </section>
+
+    <section class="panel wide" id="tasksPanel" hidden>
+      <div class="section-head"><div><h2>5. Автоматически назначенные задачи</h2><p class="muted" id="tasksMeta"></p></div><div><button id="syncGoogleTasks" class="secondary">Google Tasks и Calendar</button> <button id="refreshTasks" class="secondary">Обновить</button></div></div>
+      <div class="notice">Задачи извлекаются из текста документов и назначаются владельцу проекта. Перед исполнением проверьте формулировку и срок по источнику.</div>
+      <div class="table-wrap"><table><thead><tr><th>Задача</th><th>Ответственный</th><th>Статус и результат</th><th>Срок</th><th>Источник</th><th>Синхронизация</th></tr></thead><tbody id="tasks"></tbody></table></div>
+    </section>
+
+    <section class="panel wide" id="draftsPanel" hidden>
+      <div class="section-head"><div><h2>6. Черновики автоматических ответов</h2><p class="muted" id="draftsMeta"></p></div><button id="refreshDrafts" class="secondary">Обновить</button></div>
+      <div class="notice">Это только проекты ответов. Система никогда не отправляет их адресатам без проверки и явного подтверждения пользователя.</div>
+      <div id="drafts"></div>
+    </section>
+
+    <section class="panel wide" id="issuesPanel" hidden>
+      <div class="section-head"><div><h2>7. Единый реестр открытых вопросов</h2><p class="muted" id="issuesMeta"></p></div><button id="refreshIssues" class="secondary">Обновить</button></div>
+      <div class="notice">Риски и решения определяются по содержанию документов и сообщений. Найденные системой записи требуют подтверждения человеком.</div>
+      <div class="table-wrap"><table><thead><tr><th>Тип</th><th>Вопрос</th><th>Статус</th><th>Важность</th><th>Источник</th></tr></thead><tbody id="issues"></tbody></table></div>
+    </section>
+
+    <section class="panel wide" id="documentsPanel" hidden>
+      <div class="section-head"><div><h2>8. Карточки документов</h2><p class="muted" id="documentsMeta"></p></div></div>
+      <div id="documentCards" class="document-grid"></div>
+      <div id="documentDetail" class="notice" hidden></div>
+    </section>
+
+    <div id="message" role="status"></div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

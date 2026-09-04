@@ -3,10 +3,25 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+import io
+import os
+from typing import Any, Callable
+
+from googleapiclient.http import MediaIoBaseDownload
+
+from app.integrations.contracts import AdapterHealth
 
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
+from .content import extract_text
 from .types import DriveFile, FOLDER_MIME
+
+
+MAX_CONTENT_BYTES = int(os.getenv("ORGANIZER_MAX_CONTENT_BYTES", str(4 * 1024 * 1024)))
+GOOGLE_EXPORTS = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
 
 
 class UnsafeDriveMutation(RuntimeError):
@@ -33,8 +48,13 @@ class DriveClient:
     the file is outside the safe-copy tree.
     """
 
+    provider = "google_drive"
+
     def __init__(self, service: Any):
         self.service = service
+
+    def health(self) -> AdapterHealth:
+        return AdapterHealth(ready=self.service is not None, detail="service configured")
 
     @staticmethod
     def _to_file(meta: dict, fallback_parent: str = "") -> DriveFile:
@@ -46,7 +66,12 @@ class DriveClient:
             md5_checksum=meta.get("md5Checksum"),
             size=int(meta["size"]) if meta.get("size") else None,
             modified_time=meta.get("modifiedTime"),
+            object_type="folder" if meta["mimeType"] == FOLDER_MIME else "file",
+            provider="google_drive",
         )
+
+    def get_object(self, object_id: str) -> DriveFile:
+        return self.get_file_meta(object_id)
 
     def get_file_meta(self, file_id: str) -> DriveFile:
         meta = self.service.files().get(
@@ -71,6 +96,65 @@ class DriveClient:
             page_token = resp.get("nextPageToken")
             if not page_token:
                 return out
+
+    def populate_content(
+        self,
+        items: list[DriveFile],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> tuple[int, int]:
+        extracted = 0
+        failed = 0
+        total = len(items)
+        for processed, item in enumerate(items, start=1):
+            if item.is_folder or (item.size is not None and item.size > MAX_CONTENT_BYTES):
+                if on_progress:
+                    on_progress(processed, total)
+                continue
+            try:
+                export_mime = GOOGLE_EXPORTS.get(item.mime_type)
+                request = (
+                    self.service.files().export_media(fileId=item.id, mimeType=export_mime)
+                    if export_mime
+                    else self.service.files().get_media(fileId=item.id)
+                )
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request, chunksize=1024 * 1024)
+                done = False
+                while not done and buffer.tell() <= MAX_CONTENT_BYTES:
+                    _, done = downloader.next_chunk()
+                if buffer.tell() > MAX_CONTENT_BYTES:
+                    if on_progress:
+                        on_progress(processed, total)
+                    continue
+                item.content_text = extract_text(buffer.getvalue(), export_mime or item.mime_type, item.name)
+                if item.content_text:
+                    extracted += 1
+            except Exception:
+                failed += 1
+            if on_progress:
+                on_progress(processed, total)
+        return extracted, failed
+
+    def read_bytes(self, object_id: str, max_bytes: int = MAX_CONTENT_BYTES) -> tuple[bytes, str]:
+        """Read one object through the storage-adapter boundary without mutating it."""
+        item = self.get_file_meta(object_id)
+        if item.is_folder:
+            raise ValueError("Storage object is a folder")
+        if item.size is not None and item.size > max_bytes:
+            raise ValueError(f"Storage object exceeds {max_bytes} bytes")
+        export_mime = GOOGLE_EXPORTS.get(item.mime_type)
+        request = (
+            self.service.files().export_media(fileId=item.id, mimeType=export_mime)
+            if export_mime else self.service.files().get_media(fileId=item.id)
+        )
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request, chunksize=1024 * 1024)
+        done = False
+        while not done and buffer.tell() <= max_bytes:
+            _, done = downloader.next_chunk()
+        if buffer.tell() > max_bytes:
+            raise ValueError(f"Storage object exceeds {max_bytes} bytes")
+        return buffer.getvalue(), export_mime or item.mime_type
 
     def walk_tree(self, root_folder_id: str, limit: int = MAX_FILES_PER_SCAN) -> list[DriveFile]:
         out: list[DriveFile] = []
@@ -141,6 +225,17 @@ class DriveClient:
             addParents=new_parent_id,
             removeParents=old_parent_id,
             fields="id,parents",
+        ).execute()
+
+    def trash_safe_copy(self, copy_root_id: str) -> None:
+        """Move an explicitly identified PU safe-copy root to Drive trash."""
+        meta = self.get_file_meta(copy_root_id)
+        if not meta.is_folder:
+            raise UnsafeDriveMutation("Safe copy root must be a folder")
+        self.service.files().update(
+            fileId=copy_root_id,
+            body={"trashed": True},
+            fields="id,trashed",
         ).execute()
 
     def copy_folder_tree(self, source_folder_id: str, new_parent_id: str, source_name: str, source_items: list[DriveFile] | None = None) -> CopyResult:

@@ -2,22 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core.integration_types import StorageObject
+
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
-@dataclass(slots=True)
-class DriveFile:
-    id: str
-    name: str
-    mime_type: str
-    parent_id: str
-    md5_checksum: str | None = None
-    size: int | None = None
-    modified_time: str | None = None
-
-    @property
-    def is_folder(self) -> bool:
-        return self.mime_type == FOLDER_MIME
+# Backwards-compatible import for adapters and third-party callers. Domain code
+# uses StorageObject; removing this alias would needlessly break the live Google adapter.
+DriveFile = StorageObject
 
 
 @dataclass(slots=True)
@@ -39,3 +31,5 @@ class ProposalItem:
     special_case: str | None = None
     confidence: float = 1.0
     reasoning: str = ""
+    source_modified_at: str | None = None
+    source_checksum: str | None = None

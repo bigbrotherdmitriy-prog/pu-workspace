@@ -4,29 +4,102 @@ services:
     container_name: pu-workspace-db
     restart: unless-stopped
     environment:
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
-      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY}
       POSTGRES_DB: pu_workspace
       POSTGRES_USER: pu_user
-      POSTGRES_PASSWORD: pu_change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pu_change_me}
     volumes:
     - pu_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pu_user -d pu_workspace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   backend:
     build: ./backend
     container_name: pu-workspace-backend
     restart: unless-stopped
     depends_on:
-    - db
+      db:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://pu_user:pu_change_me@db:5432/pu_workspace
+      DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:-pu_change_me}@db:5432/pu_workspace
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN}
+      AUTH_SESSION_HOURS: ${AUTH_SESSION_HOURS:-24}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
-      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY}
-      MAX_FILES_PER_SCAN: '1000000'
+      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY:-app.api.google_drive:drive_service_for_project}
+      MAX_FILES_PER_SCAN: ${MAX_FILES_PER_SCAN:-2000}
+      ORGANIZER_WORKERS: ${ORGANIZER_WORKERS:-2}
+      ORGANIZER_AUTO_APPLY: ${ORGANIZER_AUTO_APPLY:-false}
+      ORGANIZER_AUTO_APPLY_CONFIDENCE: ${ORGANIZER_AUTO_APPLY_CONFIDENCE:-0.90}
+      ORGANIZER_MAX_CONTENT_BYTES: ${ORGANIZER_MAX_CONTENT_BYTES:-4194304}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_ADMIN_USER_ID: ${TELEGRAM_ADMIN_USER_ID:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_FORCE_IPV6: ${TELEGRAM_FORCE_IPV6:-false}
+      TELEGRAM_RELAY_URL: ${TELEGRAM_RELAY_URL:-}
+      TELEGRAM_RELAY_SECRET: ${TELEGRAM_RELAY_SECRET:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      GEMINI_API_BASE: ${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}
+      GMAIL_AUTO_SYNC_ENABLED: ${GMAIL_AUTO_SYNC_ENABLED:-true}
+      GMAIL_AUTO_SYNC_INTERVAL_SECONDS: ${GMAIL_AUTO_SYNC_INTERVAL_SECONDS:-300}
+      PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:-development}
+      PU_ANDROID_CERT_SHA256: ${PU_ANDROID_CERT_SHA256:-}
+      PU_BACKGROUND_EXECUTION: durable
+      AI_SECRETARY_AUTOMATION_ENABLED: ${AI_SECRETARY_AUTOMATION_ENABLED:-true}
+      AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS: ${AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS:-300}
+    command: ["sh", "-c", "alembic -c alembic.ini upgrade head && python -m scripts.preflight && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${API_WORKERS:-2}"]
     ports:
     - 3000:8000
+  worker:
+    image: app-backend:latest
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:-pu_change_me}@db:5432/pu_workspace
+      PU_JOB_LEASE_SECONDS: ${PU_JOB_LEASE_SECONDS:-1800}
+      PU_JOB_POLL_SECONDS: ${PU_JOB_POLL_SECONDS:-1}
+      PU_DRIVE_SERVICE_FACTORY: ${PU_DRIVE_SERVICE_FACTORY:-app.api.google_drive:drive_service_for_project}
+    command: ["python", "-m", "app.jobs.worker"]
+    deploy:
+      replicas: 2
+  scheduler:
+    image: app-backend:latest
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:-pu_change_me}@db:5432/pu_workspace
+      GMAIL_AUTO_SYNC_ENABLED: ${GMAIL_AUTO_SYNC_ENABLED:-true}
+      GMAIL_AUTO_SYNC_INTERVAL_SECONDS: ${GMAIL_AUTO_SYNC_INTERVAL_SECONDS:-300}
+      AI_SECRETARY_AUTOMATION_ENABLED: ${AI_SECRETARY_AUTOMATION_ENABLED:-true}
+      AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS: ${AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS:-300}
+    command: ["python", "-m", "app.jobs.scheduler"]
+  telegram-relay:
+    image: app-backend:latest
+    container_name: pu-workspace-telegram-relay
+    working_dir: /app
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_RELAY_SECRET: ${TELEGRAM_RELAY_SECRET:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-true}
+      TELEGRAM_FORCE_IPV6: ${TELEGRAM_FORCE_IPV6:-false}
+      TELEGRAM_BACKEND_WEBHOOK_URL: ${TELEGRAM_BACKEND_WEBHOOK_URL:-http://127.0.0.1:3000/telegram/webhook}
+    command: ["uvicorn", "app.telegram_relay:app", "--host", "172.19.0.1", "--port", "18080"]
 volumes:
   pu_pgdata: null

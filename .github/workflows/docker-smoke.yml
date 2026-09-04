@@ -1,0 +1,71 @@
+name: Docker smoke
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: puw-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: docker-compose.ci.yml
+      COMPOSE_ENV_FILES: .env.ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate isolated test configuration
+        run: python scripts/prepare_test_environment.py
+      - name: Validate Compose without printing credentials
+        run: docker compose config --quiet
+      - name: Build and start isolated stack
+        run: docker compose up --build -d --wait --wait-timeout 180
+      - name: Verify migration head and runtime flow
+        run: |
+          docker compose exec -T backend alembic heads
+          docker compose exec -T backend alembic current
+          python scripts/check_ci_smoke.py --seed
+      - name: Browser login and navigation
+        run: |
+          pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium
+          python scripts/check_ci_browser.py
+      - name: Restart API, workers and scheduler; verify persistent data
+        run: |
+          docker compose restart backend worker scheduler
+          python scripts/check_ci_smoke.py
+      - name: Restore backup into a second isolated database and compare data
+        run: |
+          set -euo pipefail
+          docker compose exec -T db pg_dump -U pu_test -d pu_test -Fc -f /tmp/ci.dump
+          docker compose exec -T db createdb -U pu_test pu_restore
+          docker compose exec -T db pg_restore -U pu_test -d pu_restore --exit-on-error /tmp/ci.dump
+          for table in users projects documents; do
+            source_count=$(docker compose exec -T db psql -U pu_test -d pu_test -Atc "SELECT count(*) FROM $table")
+            restored_count=$(docker compose exec -T db psql -U pu_test -d pu_restore -Atc "SELECT count(*) FROM $table")
+            test "$source_count" = "$restored_count"
+            test "$source_count" -gt 0
+          done
+      - name: Collect sanitized logs
+        if: always()
+        run: |
+          mkdir -p ci-reports
+          docker compose logs --no-color 2>&1 | python scripts/redact_ci_logs.py > ci-reports/compose.log
+          docker compose ps --all > ci-reports/containers.txt
+      - name: Remove this run's disposable stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans --timeout 20
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-reports/
+          retention-days: 7

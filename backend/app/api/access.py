@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
+from app.core.auth import ROLE_LEVEL, require_project_role, require_user
 
 
 router = APIRouter(
@@ -26,7 +27,13 @@ def add_project_member(
     project_id: int,
     payload: MemberCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
+    require_project_role(db, current_user, project_id, "manager")
+    if payload.role not in ROLE_LEVEL:
+        raise HTTPException(422, "Unknown project role")
+    if payload.role == "owner" and not current_user.is_admin:
+        require_project_role(db, current_user, project_id, "owner")
     project = db.get(Project, project_id)
 
     if project is None:
@@ -75,7 +82,9 @@ def add_project_member(
 def list_project_members(
     project_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
+    require_project_role(db, current_user, project_id, "viewer")
     project = db.get(Project, project_id)
 
     if project is None:
