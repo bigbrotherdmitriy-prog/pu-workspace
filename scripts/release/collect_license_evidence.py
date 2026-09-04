@@ -142,7 +142,9 @@ def load_release_module(root: Path):
 
 def collect(root: Path, ref: str, as_of: str, timeout: float) -> dict[str, Any]:
     module = load_release_module(root)
-    backend = module.parse_requirements(module.git_blob(root, ref, "backend/requirements.txt").decode())
+    requirements_blob = module.git_blob(root, ref, "backend/requirements.txt")
+    locked_backend = module.load_validated_python_lock(root, ref, requirements_blob)
+    backend = locked_backend if locked_backend is not None else module.parse_requirements(requirements_blob.decode())
     frontend = module.parse_pnpm_lock(module.git_blob(root, ref, "frontend/pnpm-lock.yaml").decode())
     records: list[dict[str, Any]] = []
     for component in backend:
@@ -210,7 +212,7 @@ def collect(root: Path, ref: str, as_of: str, timeout: float) -> dict[str, Any]:
         "schema": "pu-workspace-license-evidence/v1",
         "release_ref": ref,
         "evidence_as_of": as_of,
-        "method": "exact-version public PyPI/npm registry metadata plus manifest-only container declarations; no license inferred from package name",
+        "method": "exact-version public PyPI/npm registry metadata; backend uses Linux hash lock when present, otherwise direct requirements; container declarations remain manifest-only; no license inferred from package name",
         "legal_effect": "package-declared metadata evidence only; licenseConcluded remains NOASSERTION pending counsel",
         "components": records,
     }

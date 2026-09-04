@@ -15,4 +15,4 @@
 
 Архив формируется только из commit SHA: backend/frontend runtime source, миграции, безопасные шаблоны, документация, `LICENSE`, `NOTICE`, SBOM и release manifest. Исключаются тесты с клиентоподобными фикстурами, `.env`, ключи, токены, production/deploy-доступы, backups, логи, пользовательские файлы, sales-материалы, `.git` и `node_modules`.
 
-Точный состав определяется исключительно `RELEASE_MANIFEST.json`; разночтения со списками в договоре устраняются до подписания Акта.
+Точный состав определяется исключительно `RELEASE_MANIFEST.json`; разночтения со списками в договоре устраняются до подписания Акта. Manifest считается принятым только вместе с успешным `VERIFICATION_RESULT.json`, созданным по процедуре [REPRODUCIBLE_PACKAGING_RU.md](REPRODUCIBLE_PACKAGING_RU.md). Python и контейнерные зависимости подтверждаются отдельными provenance/evidence, а не тегом образа или текущим состоянием package registry.
