@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, JSON, String, UniqueConstraint, Uuid, event, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, JSON, String, UniqueConstraint, Uuid, event, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -41,7 +41,7 @@ class MailboxOriginDecision(Base):
         ForeignKeyConstraint(["organization_id", "identity_id"], ["v54_connection_identities.organization_id", "v54_connection_identities.id"], ondelete="RESTRICT", name="fk_v54_mailbox_decision_identity"),
         ForeignKeyConstraint(["organization_id", "mail_connection_id"], ["v54_mail_connections.organization_id", "v54_mail_connections.id"], ondelete="RESTRICT", name="fk_v54_mailbox_decision_mail"),
         ForeignKeyConstraint(["organization_id", "source_reference_id", "source_version_id"], ["v54_source_versions.organization_id", "v54_source_versions.source_id", "v54_source_versions.id"], ondelete="RESTRICT", name="fk_v54_mailbox_decision_observation"),
-        CheckConstraint("expected_message_version > 0 AND expected_current_version > 0 AND binding_epoch > 0 AND credential_generation > 0 AND authority_version > 0", name="ck_v54_mailbox_decision_versions"),
+        CheckConstraint("expected_message_version > 0 AND expected_current_version > 0 AND identity_record_version > 0 AND mail_connection_record_version > 0 AND binding_epoch > 0 AND credential_generation > 0 AND source_reference_record_version > 0 AND source_version_revision = 1 AND authority_version > 0", name="ck_v54_mailbox_decision_versions"),
         CheckConstraint("outcome IN ('CONFIRM','REJECT','LEAVE_UNRESOLVED')", name="ck_v54_mailbox_decision_outcome"),
     )
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_id)
@@ -52,11 +52,15 @@ class MailboxOriginDecision(Base):
     expected_message_version: Mapped[int] = mapped_column()
     expected_current_version: Mapped[int] = mapped_column()
     identity_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    identity_record_version: Mapped[int] = mapped_column()
     mail_connection_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    mail_connection_record_version: Mapped[int] = mapped_column()
     binding_epoch: Mapped[int] = mapped_column()
     credential_generation: Mapped[int] = mapped_column()
     source_reference_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    source_reference_record_version: Mapped[int] = mapped_column()
     source_version_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    source_version_revision: Mapped[int] = mapped_column()
     evidence_refs: Mapped[list] = mapped_column(JSON)
     reason_code: Mapped[str] = mapped_column(String(50))
     correlation_id: Mapped[str] = mapped_column(String(100))
@@ -77,7 +81,6 @@ class MailboxOriginBinding(Base):
         CheckConstraint("revision > 0 AND binding_epoch > 0 AND credential_generation > 0", name="ck_v54_mailbox_binding_versions"),
         CheckConstraint("state IN ('unresolved','confirmed','rejected','superseded')", name="ck_v54_mailbox_binding_state"),
         CheckConstraint("(mail_connection_id IS NULL AND provider_message_id IS NULL AND source_reference_id IS NULL) OR (mail_connection_id IS NOT NULL AND provider_message_id IS NOT NULL AND source_reference_id IS NOT NULL)", name="ck_v54_mailbox_binding_origin"),
-        Index("uq_v54_mailbox_binding_live", "organization_id", "message_id", unique=True, postgresql_where=text("state = 'confirmed'"), sqlite_where=text("state = 'confirmed'")),
     )
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_id)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))

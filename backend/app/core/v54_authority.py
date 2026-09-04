@@ -20,7 +20,8 @@ PILOT_OPERATIONS = frozenset({
     "action.receipt.read", "task.assign", "task.assignee", "authority.manage",
     "mailbox.reconcile", "mailbox.read", "mailbox.action",
 })
-HUMAN_ONLY = frozenset({"claim.review", "context.confirm", "action.approve", "action.revoke", "authority.manage", "mailbox.reconcile"})
+HUMAN_ONLY = frozenset({"claim.review", "context.confirm", "action.approve", "action.revoke",
+                        "authority.manage", "mailbox.reconcile", "mailbox.action"})
 
 
 class AuthorityDenied(ValueError):

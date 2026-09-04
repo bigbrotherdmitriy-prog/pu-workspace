@@ -322,6 +322,12 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox
         source_reference_id=mailbox_origin.source_reference_id if mailbox_origin else None,
     )
     db.add(row); db.flush()
+    if mailbox_origin:
+        from app.mailbox_identity.service import MailboxIdentityService
+        MailboxIdentityService().record_provider_observed_origin(
+            db, message=row, runtime=mailbox_origin.runtime,
+            source=mailbox_origin.source, source_version=mailbox_origin.source_version,
+            actor=user)
     synthetic = StorageObject(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)
     if payload.automation_suppressed:
         tasks, drafts, risks, completion_suggestions = [], [], [], []

@@ -59,14 +59,17 @@ def upgrade():
         sa.Column("decision_key", sa.String(200), nullable=False), sa.Column("payload_hash", sa.String(64), nullable=False),
         sa.Column("message_id", sa.Integer(), nullable=False), sa.Column("expected_message_version", sa.Integer(), nullable=False),
         sa.Column("expected_current_version", sa.Integer(), nullable=False), sa.Column("identity_id", sa.Uuid(as_uuid=False), nullable=False),
-        sa.Column("mail_connection_id", sa.Uuid(as_uuid=False), nullable=False), sa.Column("binding_epoch", sa.Integer(), nullable=False),
+        sa.Column("identity_record_version", sa.Integer(), nullable=False),
+        sa.Column("mail_connection_id", sa.Uuid(as_uuid=False), nullable=False),
+        sa.Column("mail_connection_record_version", sa.Integer(), nullable=False), sa.Column("binding_epoch", sa.Integer(), nullable=False),
         sa.Column("credential_generation", sa.Integer(), nullable=False), sa.Column("source_reference_id", sa.Uuid(as_uuid=False), nullable=False),
-        sa.Column("source_version_id", sa.Uuid(as_uuid=False), nullable=False),
+        sa.Column("source_reference_record_version", sa.Integer(), nullable=False),
+        sa.Column("source_version_id", sa.Uuid(as_uuid=False), nullable=False), sa.Column("source_version_revision", sa.Integer(), nullable=False),
         sa.Column("evidence_refs", sa.JSON(), nullable=False), sa.Column("reason_code", sa.String(50), nullable=False),
         sa.Column("correlation_id", sa.String(100), nullable=False), sa.Column("decided_by_user_id", sa.Integer(), nullable=False),
         sa.Column("authority_version", sa.Integer(), nullable=False), sa.Column("outcome", sa.String(20), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("expected_message_version > 0 AND expected_current_version > 0 AND binding_epoch > 0 AND credential_generation > 0 AND authority_version > 0", name="ck_v54_mailbox_decision_versions"),
+        sa.CheckConstraint("expected_message_version > 0 AND expected_current_version > 0 AND identity_record_version > 0 AND mail_connection_record_version > 0 AND binding_epoch > 0 AND credential_generation > 0 AND source_reference_record_version > 0 AND source_version_revision = 1 AND authority_version > 0", name="ck_v54_mailbox_decision_versions"),
         sa.CheckConstraint("outcome IN ('CONFIRM','REJECT','LEAVE_UNRESOLVED')", name="ck_v54_mailbox_decision_outcome"),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["organization_id","message_id"], ["messages.organization_id","messages.id"], name="fk_v54_mailbox_decision_message", ondelete="RESTRICT"),
@@ -102,6 +105,21 @@ def upgrade():
         sa.ForeignKeyConstraint(["organization_id","message_id"], ["messages.organization_id","messages.id"], name="fk_v54_mailbox_current_message", ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["organization_id","binding_id"], ["v54_mailbox_origin_bindings.organization_id","v54_mailbox_origin_bindings.id"], name="fk_v54_mailbox_current_binding", ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("message_id"))
+    op.execute(sa.text("""
+        CREATE FUNCTION v54_deny_append_only_mutation() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          RAISE EXCEPTION 'append_only_record' USING ERRCODE = '55000';
+        END;
+        $$
+    """))
+    for table in ("v54_mailbox_credential_generations", "v54_mailbox_origin_decisions",
+                  "v54_mailbox_origin_bindings"):
+        op.execute(sa.text(f"""
+            CREATE TRIGGER trg_{table}_append_only
+            BEFORE UPDATE OR DELETE ON {table}
+            FOR EACH ROW EXECUTE FUNCTION v54_deny_append_only_mutation()
+        """))
 
 
 def downgrade():
@@ -112,5 +130,6 @@ def downgrade():
         if connection.scalar(sa.text(f"SELECT EXISTS (SELECT 1 FROM {table} LIMIT 1)")):
             raise RuntimeError("Mailbox identity data exists; explicit archival is required")
     for table in tables: op.drop_table(table)
+    op.execute(sa.text("DROP FUNCTION v54_deny_append_only_mutation()"))
     op.drop_constraint("ck_v54_message_origin_version", "messages", type_="check")
     op.drop_column("messages", "origin_version")

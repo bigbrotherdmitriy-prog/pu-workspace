@@ -147,8 +147,14 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
     sync_project = db.get(Project, project_id)
     if sync_project is None:
         raise HTTPException(404, "Project not found")
-    mailbox_runtime = runtime_for_project_connection(db, project_id)
-    service = google_workspace_for_project(project_id, db).service("gmail", "v1")
+    try:
+        mailbox_runtime = runtime_for_project_connection(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox identity is unavailable") from exc
+    if mailbox_runtime and mailbox_runtime.mailbox_cohort and not mailbox_runtime.flags.pilot_write:
+        raise HTTPException(409, "Mailbox cohort requires an explicit current-generation write flag")
+    service = (google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
+               if mailbox_runtime else google_workspace_for_project(project_id, db)).service("gmail", "v1")
     page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
@@ -178,6 +184,16 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 require_project_role(db, user, existing.project_id, "editor")
                 if existing.organization_id != sync_project.organization_id:
                     raise HTTPException(409, "Message identity requires mailbox-scoped reconciliation")
+                if mailbox_write:
+                    source_ref, observation = observe_gmail_message(
+                        db, runtime=mailbox_runtime, project_id=existing.project_id,
+                        provider_message_id=item["id"], provider_thread_id=item.get("threadId"),
+                        observation_key=str(item.get("historyId") or item["id"]),
+                    )
+                    from app.mailbox_identity.service import MailboxIdentityService
+                    MailboxIdentityService().record_provider_observed_origin(
+                        db, message=existing, runtime=mailbox_runtime, source=source_ref,
+                        source_version=observation, actor=user)
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
@@ -229,11 +245,15 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 source_ref, _observation = observe_gmail_message(
                     db, runtime=mailbox_runtime, project_id=target_project_id,
                     provider_message_id=item["id"],
+                    provider_thread_id=item.get("threadId"),
                     observation_key=str(item.get("historyId") or item["id"]),
                 )
                 ingress_origin = type("IngressOrigin", (), {
                     "mail_connection_id": mailbox_runtime.mail_connection_id,
                     "source_reference_id": source_ref.id,
+                    "runtime": mailbox_runtime,
+                    "source": source_ref,
+                    "source_version": _observation,
                 })()
             result = ingest_message(IncomingMessage(
                 project_id=target_project_id, source_type=source_type, source_external_id=item["id"],
@@ -276,7 +296,12 @@ def import_gmail_attachment(message_id: int, attachment_index: int, db: Session 
         raise HTTPException(422, "Attachment cannot be downloaded")
     if int(metadata.get("size") or 0) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
-    external_id = metadata.get("document_external_id") or f"gmail:{source.source_external_id}:{attachment_id}"
+    try:
+        mailbox = runtime_for_message(db, source, actor=user, action=True)
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
+    external_id = (f"gmail:{mailbox.provider_message_id}:{attachment_id}" if mailbox else
+                   metadata.get("document_external_id") or f"gmail:{source.source_external_id}:{attachment_id}")
     existing_document = db.scalar(select(Document).where(
         Document.project_id == source.project_id,
         Document.external_id == external_id,
@@ -284,14 +309,11 @@ def import_gmail_attachment(message_id: int, attachment_index: int, db: Session 
     if existing_document:
         return {"document_id": existing_document.id, "name": existing_document.name, "tasks": 0, "drafts": 0,
                 "risks": 0, "decisions": 0, "already_indexed": True}
-    try:
-        mailbox = runtime_for_message(db, source, action=True)
-    except ValueError as exc:
-        raise HTTPException(409, "Mailbox origin is unavailable") from exc
     service = (google_workspace_for_mailbox(mailbox.google_token_id, db)
                if mailbox else google_workspace_for_project(source.project_id, db)).service("gmail", "v1")
     payload = service.users().messages().attachments().get(
-        userId="me", messageId=source.source_external_id, id=attachment_id,
+        userId="me", messageId=(mailbox.provider_message_id if mailbox else source.source_external_id),
+        id=attachment_id,
     ).execute()
     data = base64.urlsafe_b64decode(payload.get("data", "") + "=" * (-len(payload.get("data", "")) % 4))
     if len(data) > MAX_ATTACHMENT_BYTES:
@@ -310,7 +332,7 @@ def import_gmail_attachment(message_id: int, attachment_index: int, db: Session 
     drafts = create_response_drafts(db, source.project_id, source.contract_id, [item])
     risks, decisions = create_governance_items(db, source.project_id, [item], source_type="email_attachment")
     db.add(AuditLog(action="gmail_attachment_imported", entity_type="message", entity_id=source.id,
-                    details=f"name={name}; documents={len(documents)}; tasks={len(tasks)}; risks={len(risks)}"))
+                    details=f"documents={len(documents)}; tasks={len(tasks)}; risks={len(risks)}"))
     db.commit()
     return {"document_id": documents[0].id, "name": name, "tasks": len(tasks), "drafts": len(drafts),
             "risks": len(risks), "decisions": len(decisions), "already_indexed": False}
@@ -322,11 +344,15 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     if draft is None:
         raise HTTPException(404, "Response draft not found")
     require_project_role(db, user, draft.project_id, "manager")
+    source = db.get(Message, draft.message_id) if draft.message_id else None
+    try:
+        mailbox = runtime_for_message(db, source, actor=user, action=True) if source is not None else None
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
     if draft.sent_external_id:
         return {"id": draft.id, "status": "sent", "gmail_message_id": draft.sent_external_id, "already_sent": True}
     if draft.status != "approved":
         raise HTTPException(409, "Сначала подтвердите и при необходимости отредактируйте проект ответа")
-    source = db.get(Message, draft.message_id) if draft.message_id else None
     recipient = draft.recipient_to or (
         parseaddr(source.source_sender)[1]
         if source is not None and source.source_type == "email" and source.source_sender else ""
@@ -341,15 +367,12 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     )
     message.set_content(draft.body)
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    try:
-        mailbox = runtime_for_message(db, source, action=True) if source is not None else None
-    except ValueError as exc:
-        raise HTTPException(409, "Mailbox origin is unavailable") from exc
     service = (google_workspace_for_mailbox(mailbox.google_token_id, db)
                if mailbox else google_workspace_for_project(draft.project_id, db)).service("gmail", "v1")
     body = {"raw": raw}
-    if source is not None and source.source_thread_id:
-        body["threadId"] = source.source_thread_id
+    thread_id = mailbox.provider_thread_id if mailbox else source.source_thread_id if source is not None else None
+    if thread_id:
+        body["threadId"] = thread_id
     sent = service.users().messages().send(userId="me", body=body).execute()
     draft.sent_external_id = sent["id"]
     draft.sent_at = datetime.now(timezone.utc)

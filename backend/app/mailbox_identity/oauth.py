@@ -16,10 +16,12 @@ def verified_google_subject(raw_id_token: str, audience: str, *, request=None, n
         claims = id_token.verify_oauth2_token(raw_id_token, request or Request(), audience=audience)
         issuer = claims.get("iss")
         subject = claims.get("sub")
-        expiry = int(claims.get("exp", 0))
+        expiry = claims.get("exp")
         current = int((now or datetime.now(timezone.utc)).timestamp())
-        if issuer not in {"accounts.google.com", "https://accounts.google.com"} or not subject or expiry <= current:
+        if (issuer not in {"accounts.google.com", "https://accounts.google.com"}
+                or not isinstance(subject, str) or not subject or len(subject) > 255
+                or subject.strip() != subject or type(expiry) is not int or expiry <= current):
             raise ValueError
     except Exception as exc:
         raise OIDCVerificationError("identity_verification_failed") from exc
-    return str(subject)
+    return subject
