@@ -34,7 +34,8 @@ MIGRATION_REVISIONS = (
 )
 
 SECRET_BASENAMES = re.compile(
-    r"(?:^\.env(?:\..*)?$|secret|credential|id_rsa|id_ed25519|\.pem$|\.key$|\.p12$|\.pfx$)",
+    r"(?:^\.env(?:\..*)?$|^(?:.*[-_.])?(?:secret|secrets|credential|credentials)(?:[-_.].*)?$|"
+    r"^id_rsa(?:\..*)?$|^id_ed25519(?:\..*)?$|\.pem$|\.key$|\.p12$|\.pfx$)",
     re.IGNORECASE,
 )
 REAL_EMAIL_RE = re.compile(r"(?<![\w.+-])([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})(?![\w.-])")
@@ -54,6 +55,32 @@ SENSITIVE_DESCRIPTOR_KEYS = {
     "project_id", "plaintext", "plaintext_metadata", "metadata", "path",
     "filesystem_path", "absolute_path",
 }
+
+MAILBOX_ALLOWED_PATHS = frozenset({
+    "backend/app/api/ai_secretary.py",
+    "backend/app/api/gmail.py",
+    "backend/app/api/google_drive.py",
+    "backend/app/core/v54_authority.py",
+    "backend/app/core/v54_refs.py",
+    "backend/app/integrations/google_workspace.py",
+    "backend/app/mailbox_identity/__init__.py",
+    "backend/app/mailbox_identity/dto.py",
+    "backend/app/mailbox_identity/oauth.py",
+    "backend/app/mailbox_identity/runtime.py",
+    "backend/app/mailbox_identity/service.py",
+    "backend/app/models/__init__.py",
+    "backend/app/models/ai_secretary.py",
+    "backend/app/models/mailbox_identity.py",
+    "backend/app/schema.py",
+    "backend/migrations/versions/a54f001c0a03_v54_mailbox_identity_expand.py",
+    "backend/migrations/versions/a54f001c0a04_v54_mailbox_dedup_cutover.py",
+    "backend/tests/test_v54_mailbox_identity.py",
+    "backend/tests/test_v54_pilot_foundation.py",
+    "docs/architecture/v54/mailbox-cutover/README.md",
+    "docs/audits/v54-mailbox-cutover.md",
+    "docs/audits/v54-mailbox-identity-implementation.md",
+    "scripts/audits/v54_mailbox_inventory.py",
+})
 
 
 class GateFailure(RuntimeError):
@@ -80,10 +107,11 @@ class Candidate:
 
 
 def _git(repo: Path, args: Sequence[str], *, limit: int = MAX_GIT_OUTPUT_BYTES) -> bytes:
-    command = ["git", "-C", str(repo), *args]
+    command = ["git", *args]
     try:
         completed = subprocess.run(
             command,
+            cwd=repo,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -138,7 +166,7 @@ def _changed_files(repo: Path, base: str, candidate: str) -> tuple[str, ...]:
 
 def _file_bytes(repo: Path, sha: str, path: str) -> bytes | None:
     try:
-        return _git(repo, ["show", f"{sha}:{path}"], limit=MAX_FILE_BYTES)
+        return _git(repo, ["cat-file", "-p", f"{sha}:{path}"], limit=MAX_FILE_BYTES)
     except GateFailure as exc:
         if exc.code == "git_command_failed":
             return None
@@ -162,24 +190,7 @@ def _added_text(repo: Path, base: str, candidate: str, path: str) -> str:
 
 
 def _mailbox_allowed(path: str) -> bool:
-    name = PurePosixPath(path).name.lower()
-    if path == "backend/app/schema.py":
-        return True
-    if path.startswith("backend/app/models/"):
-        return name in {"__init__.py", "ai_secretary.py", "v54_pilot.py"} or "mail" in name or "identity" in name
-    if path.startswith("backend/app/api/"):
-        return name in {"gmail.py", "ai_secretary.py"} or "mailbox" in name
-    if path.startswith("backend/app/integrations/"):
-        return any(marker in name for marker in ("mail", "gmail", "identity"))
-    if path.startswith("backend/migrations/versions/"):
-        return any(revision in name for revision in ("a54f001c0a03", "a54f001c0a04"))
-    if path.startswith("backend/tests/"):
-        return any(marker in name for marker in ("v54_mail", "mailbox", "gmail"))
-    if path.startswith("docs/architecture/v54/"):
-        return "mailbox" in path.lower() or "mail-identity" in path.lower()
-    if path.startswith("docs/audits/"):
-        return "mailbox" in name or "mail-identity" in name
-    return False
+    return path in MAILBOX_ALLOWED_PATHS
 
 
 def _stream_allowed(stream: str, path: str) -> bool:
@@ -192,7 +203,7 @@ def _stream_allowed(stream: str, path: str) -> bool:
     if stream == "evidence":
         return path in {
             "backend/app/source_evidence/fragment_reader.py",
-            "backend/tests/test_v54_evidence_fragment_reader.py",
+            "backend/tests/test_v54_fragment_reader.py",
         }
     if stream == "ui":
         return path.startswith("frontend/src/modules/evidence/")
@@ -294,12 +305,44 @@ def _has_sensitive_descriptor(text: str) -> bool:
     return False
 
 
+def _is_test_path(path: str) -> bool:
+    lowered = path.lower()
+    name = PurePosixPath(lowered).name
+    return ("/tests/" in lowered or name.startswith("test_") or ".test." in name
+            or ".spec." in name or "/__tests__/" in lowered)
+
+
+def _is_product_source(path: str) -> bool:
+    if _is_test_path(path):
+        return False
+    return ((path.startswith("backend/app/") and path.endswith(".py"))
+            or (path.startswith("frontend/src/") and PurePosixPath(path).suffix.lower() in {".ts", ".tsx", ".js", ".jsx"}))
+
+
+def _activation_name(name: str) -> bool:
+    parts = name.lower().strip("_").split("_")
+    return ("enabled" in parts or "auto" in parts or "autonomy" in parts
+            or ("external" in parts and bool({"action", "actions"} & set(parts))))
+
+
 def _added_default_activation(text: str) -> bool:
+    assignment = re.compile(
+        r"(?im)^\s*(?:(?:const|let|var)\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+        r"\s*(?::[^=\n]+)?=\s*(?P<value>[^\n#]+)"
+    )
+    truthy = re.compile(
+        r"^(?:True|true|1|['\"](?:true|on|yes|auto)['\"])(?:\s*[,;)]|\s*$)|"
+        r"\b(?:default|server_default)\s*=\s*(?:True|true|1|['\"](?:true|on|yes|auto)['\"])",
+        re.IGNORECASE,
+    )
+    for match in assignment.finditer(text):
+        if _activation_name(match.group("name")) and truthy.search(match.group("value").strip()):
+            return True
     patterns = (
-        r"(?i)\b(?:auto|external_action|external_actions|enabled)[A-Za-z0-9_]*\b\s*[:=]\s*(?:True|true|1|['\"](?:true|on|yes|auto)['\"])",
         r"(?i)os\.getenv\([^,]+,\s*['\"](?:true|on|yes|1|auto)['\"]\)",
         r"(?i)\$\{[A-Za-z0-9_]+:-(?:true|on|yes|1|auto)\}",
         r"(?i)['\"]mode['\"]\s*:\s*['\"]AUTO['\"]",
+        r"(?i)['\"]enabled['\"]\s*:\s*(?:True|true|1|['\"](?:true|on|yes)['\"])",
     )
     return any(re.search(pattern, text) for pattern in patterns)
 
@@ -349,11 +392,84 @@ def _test_has_unsafe_fixture(text: str) -> bool:
     )
 
 
-def _test_hides_failure(text: str) -> bool:
-    return bool(re.search(
-        r"pytest\.mark\.(?:skip|skipif|xfail)|pytest\.(?:skip|xfail)\s*\(|unittest\.skip|\b(?:it|test|describe)\.skip\s*\(",
-        text,
-    ))
+def _call_name(node: ast.Call) -> str:
+    values: list[str] = []
+    current: ast.AST = node.func
+    while isinstance(current, ast.Attribute):
+        values.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        values.append(current.id)
+    return ".".join(reversed(values))
+
+
+def _test_skip_usage(text: str) -> tuple[bool, bool, bool]:
+    """Return unconditional, unsupported-conditional and allowed-conditional use."""
+    tree = _parse_python(text)
+    if tree is None:
+        hidden = bool(re.search(
+            r"\b(?:it|test|describe)\.skip\s*\(|\b(?:xit|xtest|xdescribe)\s*\(", text,
+        ))
+        return hidden, False, False
+
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    def ancestors(node: ast.AST) -> Iterable[ast.AST]:
+        while node in parents:
+            node = parents[node]
+            yield node
+
+    def source(node: ast.AST) -> str:
+        return (ast.get_source_segment(text, node) or ast.dump(node)).lower()
+
+    def explicit_condition(value: str) -> bool:
+        markers = (
+            "sys.platform", "os.name", "platform.system", "hasattr(os", "symlink", "hardlink",
+            "os.link", "oserror", "notimplementederror", "postgres", "psycopg",
+            "test_database_url", "database_url",
+        )
+        return any(marker in value for marker in markers)
+
+    unconditional = unsupported = allowed = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                value = source(decorator)
+                if "pytest.mark.xfail" in value or re.search(r"(?:pytest\.mark\.|unittest\.)skip(?:\s*\(|$)", value):
+                    unconditional = True
+                elif "pytest.mark.skipif" in value:
+                    if explicit_condition(value):
+                        allowed = True
+                    else:
+                        unsupported = True
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node)
+        if name in {"pytest.xfail", "unittest.skip"}:
+            unconditional = True
+            continue
+        if name != "pytest.skip":
+            continue
+        chain = tuple(ancestors(node))
+        platform_handler = any(
+            isinstance(parent, ast.ExceptHandler)
+            and explicit_condition(source(parent.type) if parent.type is not None else "")
+            for parent in chain
+        )
+        guarded = next((parent for parent in chain if isinstance(parent, ast.If)), None)
+        reason = source(node)
+        if platform_handler or (guarded is not None and explicit_condition(source(guarded.test))):
+            allowed = True
+        elif guarded is not None and explicit_condition(reason + " " + source(guarded)):
+            allowed = True
+        elif any(isinstance(parent, (ast.If, ast.ExceptHandler)) for parent in chain):
+            unsupported = True
+        else:
+            unconditional = True
+    return unconditional, unsupported, allowed
 
 
 def _extract_revision(text: str, field: str) -> str | None:
@@ -396,7 +512,9 @@ def _content_checks(repo: Path, base: str, candidates: dict[str, Candidate]) -> 
         "staging_descriptor": False,
         "ui_behavior": False,
         "unsafe_fixture": False,
-        "hidden_test_failure": False,
+        "unconditional_test_skip": False,
+        "unsupported_conditional_skip": False,
+        "conditional_runtime_skip": False,
     }
     for candidate in candidates.values():
         for path in candidate.files:
@@ -405,17 +523,22 @@ def _content_checks(repo: Path, base: str, candidates: dict[str, Candidate]) -> 
                 continue
             added = _added_text(repo, base, candidate.sha, path)
             result["duplicate_engine"] |= _adds_duplicate_engine(added)
-            result["default_activation"] |= _added_default_activation(added)
+            if _is_product_source(path):
+                result["default_activation"] |= _added_default_activation(added)
             if path.endswith(".py") and "/tests/" not in path and not path.startswith("scripts/"):
                 result["sensitive_job_payload"] |= _has_sensitive_job_payload(text)
                 result["runtime_state_read"] |= _reads_forbidden_runtime_state(added)
             if candidate.name == "staging" and path.startswith("backend/app/staging/"):
                 result["staging_descriptor"] |= _has_sensitive_descriptor(text)
-            if candidate.name == "ui" and path.startswith("frontend/src/modules/evidence/"):
+            if (candidate.name == "ui" and path.startswith("frontend/src/modules/evidence/")
+                    and not _is_test_path(path)):
                 result["ui_behavior"] |= _ui_has_forbidden_behavior(text)
             if "/test" in path.lower() or PurePosixPath(path).name.lower().startswith("test_") or ".test." in path.lower():
                 result["unsafe_fixture"] |= _test_has_unsafe_fixture(text)
-                result["hidden_test_failure"] |= _test_hides_failure(added)
+                unconditional, unsupported, conditional = _test_skip_usage(added)
+                result["unconditional_test_skip"] |= unconditional
+                result["unsupported_conditional_skip"] |= unsupported
+                result["conditional_runtime_skip"] |= conditional
     return result
 
 
@@ -475,7 +598,8 @@ def evaluate(repo: Path, *, base_sha: str, mailbox_sha: str, staging_sha: str,
                "evidence_facade_unchanged", "source_facade_modified", stream="evidence"),
         _check(not content["ui_behavior"], "ui_read_only", "ui_forbidden_behavior", stream="ui"),
         _check(not content["unsafe_fixture"], "synthetic_test_data", "unsafe_test_fixture"),
-        _check(not content["hidden_test_failure"], "no_hidden_test_failures", "skip_or_xfail_added"),
+        _check(not content["unconditional_test_skip"], "no_unconditional_test_skips", "unconditional_skip_or_xfail_added"),
+        _check(not content["unsupported_conditional_skip"], "conditional_test_skip_scope", "unsupported_conditional_skip"),
     ))
 
     for name, candidate in candidates.items():
@@ -485,7 +609,10 @@ def evaluate(repo: Path, *, base_sha: str, mailbox_sha: str, staging_sha: str,
         except GateFailure:
             ok = False
         checks.append(_check(ok, "git_diff_check", "git_diff_check_failed", stream=name))
-    return _protocol(base, checks)
+    protocol = _protocol(base, checks)
+    if content["conditional_runtime_skip"]:
+        protocol["limitations"].append("conditional_platform_or_postgres_tests_may_skip")
+    return protocol
 
 
 def _protocol(base: str | None, checks: Sequence[Check], *, fatal_code: str | None = None) -> dict[str, object]:

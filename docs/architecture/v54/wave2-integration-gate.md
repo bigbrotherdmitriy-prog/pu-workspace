@@ -42,10 +42,39 @@ Git вызывается только списком аргументов с `sh
 
 | Поток | Разрешённая область |
 |---|---|
-| Mailbox | профильные models/API/integrations/tests/docs, `schema.py`, новые migrations `a54f001c0a03` и `a54f001c0a04` |
+| Mailbox | только зафиксированный ниже exact write-set, включая `schema.py` и migrations `a54f001c0a03`/`a54f001c0a04` |
 | Staging | `backend/app/staging/**` и профильные backend tests |
-| Evidence | только `source_evidence/fragment_reader.py` и его точный test |
+| Evidence | только `backend/app/source_evidence/fragment_reader.py` и `backend/tests/test_v54_fragment_reader.py` |
 | UI | только `frontend/src/modules/evidence/**` |
+
+Mailbox write-set не расширяется по совпадению слов `mail`, `gmail` или
+`identity` в имени. Разрешены ровно:
+
+```text
+backend/app/api/ai_secretary.py
+backend/app/api/gmail.py
+backend/app/api/google_drive.py
+backend/app/core/v54_authority.py
+backend/app/core/v54_refs.py
+backend/app/integrations/google_workspace.py
+backend/app/mailbox_identity/__init__.py
+backend/app/mailbox_identity/dto.py
+backend/app/mailbox_identity/oauth.py
+backend/app/mailbox_identity/runtime.py
+backend/app/mailbox_identity/service.py
+backend/app/models/__init__.py
+backend/app/models/ai_secretary.py
+backend/app/models/mailbox_identity.py
+backend/app/schema.py
+backend/migrations/versions/a54f001c0a03_v54_mailbox_identity_expand.py
+backend/migrations/versions/a54f001c0a04_v54_mailbox_dedup_cutover.py
+backend/tests/test_v54_mailbox_identity.py
+backend/tests/test_v54_pilot_foundation.py
+docs/architecture/v54/mailbox-cutover/README.md
+docs/audits/v54-mailbox-cutover.md
+docs/audits/v54-mailbox-identity-implementation.md
+scripts/audits/v54_mailbox_inventory.py
+```
 
 Mailbox сохраняет существующий base revision `a54f001c0a02` и обязан дать одну
 линейную цепочку:
@@ -74,8 +103,20 @@ a54f001c0a02 -> a54f001c0a03 -> a54f001c0a04
 - fetch/endpoints/localStorage/dangerous HTML/mutation controls в UI;
 - несинтетические email/OAuth/provider ID и встроенный PDF/base64 document
   material в новых tests;
-- новые `skip`/`xfail`;
+- безусловные `skip`/`xfail` и условные skip вне явно проверяемых
+  platform/PostgreSQL условий;
 - ошибки `git diff --check`.
+
+Activation detector применяется только к добавленным production source-файлам,
+а не к migrations, docs или tests; имена вроде `autoincrement` не считаются
+флагом. UI behavior scanner также проверяет production `.ts/.tsx`, отделяя их
+от negative assertions в `.test.*`/`.spec.*`.
+
+Условный `pytest.skip` разрешён только для явно обнаруживаемой недоступности
+platform capability (например symlink/hardlink) либо отдельного PostgreSQL test
+environment. Такой skip отмечается ограничением
+`conditional_platform_or_postgres_tests_may_skip`: структурный gate может пройти,
+но это не означает runtime PASS. Безусловные skip/xfail остаются отказом.
 
 Это консервативный gate: совпадение с запретным структурным шаблоном требует
 ручной проверки и исправления, а не обхода правила.
@@ -104,5 +145,7 @@ response bodies, найденные значения и содержимое п�
 - Валидация цепочки подтверждает revision/down_revision и ожидаемый
   `CURRENT_SCHEMA_REVISION`, но не выполняет `alembic upgrade`.
 - Скрипт не запускает кандидатов, PostgreSQL, workers, API или браузер.
+- Разрешённые platform/PostgreSQL conditional skips не доказывают выполнение
+  соответствующего runtime сценария.
 - После PASS интегратор всё равно запускает тесты каждого потока, миграции на
   чистом PostgreSQL, общий regression suite и browser E2E.
