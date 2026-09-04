@@ -1,8 +1,8 @@
-/* PU Workspace 2026.3 — calm enterprise workspace.
-   Designed for an eight-hour workday: light work surface, graphite navigation,
-   clear density and a single functional green accent. */
+/* PU Workspace 2026.3 — architectural enterprise workspace.
+   A warm technical canvas, compact graphite navigation and one functional
+   emerald accent keep dense project data legible through a full workday. */
 :root {
-  --pu-v4-canvas: #eef2ef;
+  --pu-v4-canvas: #f1f2ef;
   --pu-v4-surface: #ffffff;
   --pu-v4-surface-soft: #f7f9f8;
   --pu-v4-graphite: #101714;
@@ -14,7 +14,7 @@
   --pu-v4-green: #16a66f;
   --pu-v4-green-dark: #0b7c52;
   --pu-v4-green-soft: #e5f6ee;
-  --pu-v4-shadow: 0 1px 2px rgba(13, 31, 22, .035), 0 10px 32px rgba(13, 31, 22, .055);
+  --pu-v4-shadow: 0 1px 2px rgba(13, 31, 22, .025), 0 8px 24px rgba(13, 31, 22, .045);
   /* Neutralize the legacy dark token layer for screens not yet componentized. */
   --pu-v2-bg: #eef2ef;
   --pu-v2-panel: #ffffff;
@@ -49,7 +49,7 @@ body {
 }
 
 .shell {
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
   gap: 0;
   padding: 0;
   background: transparent;
@@ -57,16 +57,16 @@ body {
 .shell:has(aside.collapsed) { grid-template-columns: 72px minmax(0, 1fr); }
 .shell > aside {
   top: 0;
-  width: 252px;
+  width: 224px;
   height: 100dvh;
   margin: 0;
-  padding: 18px 14px 14px;
+  padding: 18px 12px 14px;
   border: 0;
   border-radius: 0;
   background:
     radial-gradient(330px 220px at 16% -6%, rgba(61, 226, 163, .13), transparent 72%),
     linear-gradient(180deg, #121b17, #0c120f);
-  box-shadow: 14px 0 42px rgba(8, 24, 16, .1);
+  box-shadow: 10px 0 32px rgba(8, 24, 16, .08);
 }
 .shell > aside.collapsed { width: 72px; }
 .sidebar-head { height: 62px; padding: 0 4px 17px; border-bottom: 1px solid rgba(255, 255, 255, .07); }
@@ -87,7 +87,7 @@ body {
 .nav-group { gap: 4px; }
 .nav-group-label { padding: 0 10px 8px; color: #63756c; font-size: 9px; letter-spacing: .16em; }
 .shell > aside nav button {
-  height: 43px;
+  height: 41px;
   padding-inline: 11px;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -127,7 +127,7 @@ body {
   box-shadow: none;
 }
 .shell > main > header {
-  height: 86px;
+  height: 76px;
   padding-inline: clamp(24px, 2.6vw, 46px);
   border-bottom: 1px solid rgba(36, 62, 49, .09);
   background: rgba(248, 250, 249, .86);
@@ -181,7 +181,11 @@ body {
 .content {
   width: 100%;
   max-width: 1680px;
-  padding: 34px clamp(24px, 3vw, 52px) 84px;
+  padding: 30px clamp(24px, 3vw, 48px) 84px;
+  background-image:
+    linear-gradient(rgba(22, 67, 46, .018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22, 67, 46, .018) 1px, transparent 1px);
+  background-size: 72px 72px;
 }
 .card, .metrics article, .analytics-metrics article, .today-metrics button,
 .today-priorities article, .today-quick button, .project-card, .integration-card,
@@ -193,7 +197,7 @@ body {
   box-shadow: var(--pu-v4-shadow);
   backdrop-filter: none;
 }
-.card { padding: 26px; border-radius: 16px; }
+.card { padding: 26px; border-radius: 10px; }
 .card:hover { border-color: #c9d8d0; box-shadow: 0 1px 2px rgba(13,31,22,.04), 0 16px 40px rgba(13,31,22,.07); }
 .card h1, .card h2, .card h3, .card strong,
 .card-head h2, .governance-list strong { color: var(--pu-v4-text); }
@@ -233,7 +237,7 @@ button { font-family: inherit; }
   margin-bottom: 18px;
   padding: clamp(36px, 4vw, 58px);
   border: 1px solid rgba(65, 213, 157, .22);
-  border-radius: 22px;
+  border-radius: 10px;
   background:
     radial-gradient(520px 320px at 88% 42%, rgba(61, 229, 165, .23), transparent 68%),
     linear-gradient(120deg, #13211b 0%, #0c1511 70%, #102c21 100%);
@@ -271,7 +275,7 @@ button { font-family: inherit; }
   min-height: 196px;
   padding: 26px;
   border: 1px solid rgba(164, 244, 213, .17);
-  border-radius: 17px;
+  border-radius: 8px;
   background: rgba(255,255,255,.07);
   box-shadow: inset 0 1px rgba(255,255,255,.06);
 }
@@ -280,19 +284,32 @@ button { font-family: inherit; }
 .dashboard-focus > span, .dashboard-focus > p { color: #a9bdb3; }
 .dashboard-focus > button { color: #f4fbf7; }
 
-.dashboard-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-.dashboard-metrics button {
-  min-height: 132px;
-  padding: 21px;
+.dashboard-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 20px;
+  overflow: hidden;
   border: 1px solid var(--pu-v4-line);
-  border-radius: 14px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--pu-v4-shadow);
+}
+.dashboard-metrics button {
+  min-height: 126px;
+  padding: 20px 22px;
+  border: 0;
+  border-right: 1px solid #e5e9e6;
+  border-radius: 0;
   color: var(--pu-v4-text);
   background: var(--pu-v4-surface);
-  box-shadow: var(--pu-v4-shadow);
+  box-shadow: none;
   backdrop-filter: none;
 }
-.dashboard-metrics button::before { inset: auto 20px 0; height: 3px; border-radius: 99px 99px 0 0; background: #b8c5be; }
-.dashboard-metrics button:hover { transform: translateY(-2px); border-color: #bdd4c8; box-shadow: 0 14px 32px rgba(14,38,25,.08); }
+.dashboard-metrics button:last-child { border-right: 0; }
+.dashboard-metrics button::before { inset: 0 auto 0 0; width: 3px; height: auto; border-radius: 0; background: transparent; }
+.dashboard-metrics button.warn::before { background: #e7aa39; }
+.dashboard-metrics button.danger::before { background: #e05b61; }
+.dashboard-metrics button:hover { transform: none; border-color: #e5e9e6; background: #f6faf8; box-shadow: none; }
 .dashboard-metrics button > span { color: var(--pu-v4-muted); font-size: 12px; }
 .dashboard-metrics button > strong { color: var(--pu-v4-text); font-size: 34px; }
 .dashboard-metrics button > small { color: var(--pu-v4-subtle); font-size: 10px; }
@@ -300,16 +317,21 @@ button { font-family: inherit; }
 .dashboard-command-grid { grid-template-columns: minmax(0, 1.4fr) minmax(330px, .6fr); gap: 18px; margin-bottom: 18px; }
 .dashboard-lower-grid { grid-template-columns: minmax(0, 1.6fr) minmax(330px, .55fr); gap: 18px; margin-bottom: 18px; }
 .dashboard-attention-card, .dashboard-actions-card { min-height: 330px; }
-.dashboard-control-links { gap: 10px; }
+.dashboard-attention-card { border-top: 3px solid var(--pu-v4-green); }
+.dashboard-actions-card { border-top: 3px solid #b9c6bf; }
+.dashboard-control-links { gap: 0; border-top: 1px solid #e4e9e6; }
 .dashboard-control-links button, .dashboard-actions-card .quick button {
-  border-color: #e1e7e3;
+  border: 0;
+  border-bottom: 1px solid #e4e9e6;
+  border-radius: 0;
   color: var(--pu-v4-text);
-  background: var(--pu-v4-surface-soft);
+  background: transparent;
 }
-.dashboard-control-links button:hover, .dashboard-actions-card .quick button:hover { border-color: #bbd8ca; background: #eef8f3; }
+.dashboard-control-links button:hover, .dashboard-actions-card .quick button:hover { border-color: #e4e9e6; background: #eef8f3; }
 .dashboard-control-links strong, .dashboard-actions-card .quick button strong { color: var(--pu-v4-text); }
 .dashboard-actions-card .quick button small { color: var(--pu-v4-muted); }
-.dashboard-actions-card .quick button > svg:first-child { color: var(--pu-v4-green-dark); background: var(--pu-v4-green-soft); }
+.dashboard-actions-card .quick { gap: 0; border-top: 1px solid #e4e9e6; }
+.dashboard-actions-card .quick button > svg:first-child { color: var(--pu-v4-green-dark); background: transparent; }
 .attention { border-color: #f2dfb5; color: #6e5218; background: #fff9eb; }
 .dashboard-inbox-list > button { padding: 15px 8px; color: #4e5d55; border-color: #e6ebe8; background: transparent; }
 .dashboard-inbox-list > button:hover { background: #f4f9f6; }
@@ -322,7 +344,8 @@ button { font-family: inherit; }
   background:
     radial-gradient(260px 220px at 100% 100%, rgba(55, 220, 157, .2), transparent 75%),
     linear-gradient(145deg, #16251e, #0f1915);
-  box-shadow: 0 16px 42px rgba(17, 47, 32, .13);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(17, 47, 32, .1);
 }
 .dashboard-ai-card h2 { color: #fff; font-size: 23px; }
 .dashboard-ai-card > p, .dashboard-ai-facts { color: #a8bdb3; }
@@ -346,19 +369,45 @@ button { font-family: inherit; }
 
 .governance-workspace { gap: 20px; }
 .governance-overview { gap: 12px; }
-.governance-overview > div { min-height: 124px; padding: 23px 25px; border-radius: 15px; }
+.governance-overview > div { min-height: 124px; padding: 23px 25px; border-radius: 9px; }
 .governance-overview span { color: var(--pu-v4-muted); font-size: 12px; }
 .governance-overview strong { color: var(--pu-v4-text); font-size: 39px; }
 .governance-overview small { color: var(--pu-v4-subtle); font-size: 10px; }
 .governance-grid { grid-template-columns: minmax(0, 1.35fr) minmax(420px, .9fr); gap: 20px; }
-.governance-column { border-radius: 16px; }
+.governance-column { border-radius: 10px; }
 .governance-list { gap: 8px; }
 .governance-list article {
   min-height: 116px;
   padding: 20px 14px;
   border: 1px solid transparent;
   border-bottom-color: #e5ebe7;
-  border-radius: 12px;
+  border-radius: 6px;
+}
+
+/* Architectural data surfaces: one visual language for documents, finance and planning. */
+.dds-workspace, .gpr-workspace, .document-register, .document-detail,
+.contract-create, .contract-scheme, .mail-layout, .mail-client-header {
+  border-radius: 10px;
+  box-shadow: var(--pu-v4-shadow);
+}
+.dds-table th, .gpr-grid th {
+  color: #56635c;
+  background: #f2f4f2;
+  letter-spacing: .035em;
+}
+.dds-table th, .dds-table td, .gpr-grid th, .gpr-grid td { border-color: #e1e6e3; }
+.gpr-timescale { background: #f2f4f2; }
+.gpr-timeline {
+  background-color: #fff;
+  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--gpr-grid, 84px) - 1px), #e7ebe8 calc(var(--gpr-grid, 84px) - 1px), #e7ebe8 var(--gpr-grid, 84px));
+}
+.contract-scheme-scroll {
+  border-radius: 8px;
+  background-color: #fafbf9;
+  background-image:
+    linear-gradient(rgba(21, 102, 67, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 102, 67, .045) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 .governance-list article:hover { border-color: #d8e8df; background: #f6faf8; }
 .governance-list strong { font-size: 15px; line-height: 1.5; }
@@ -369,9 +418,11 @@ button { font-family: inherit; }
 .governance-list .task-actions button:first-child { color: #fff; border-color: var(--pu-v4-green); background: var(--pu-v4-green); }
 
 @media (max-width: 1280px) {
-  .shell { grid-template-columns: 226px minmax(0, 1fr); }
-  .shell > aside { width: 226px; }
+  .shell { grid-template-columns: 210px minmax(0, 1fr); }
+  .shell > aside { width: 210px; }
   .dashboard-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashboard-metrics button:nth-child(3n) { border-right: 0; }
+  .dashboard-metrics button:nth-child(-n+3) { border-bottom: 1px solid #e5e9e6; }
   .dashboard-hero { grid-template-columns: minmax(0, 1fr) 240px; }
   .governance-grid { grid-template-columns: 1fr; }
   .finance-metrics { grid-template-columns: repeat(4, minmax(118px, 1fr)); }
