@@ -4,6 +4,8 @@ import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
+import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
+import { GprWorkspace } from "./modules/finance/GprWorkspace";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
@@ -447,12 +449,12 @@ export function App() {
   const {
     finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
-    financeExtra, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId,
+    financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
-    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
-    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
+    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
+    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment,
+    addFinanceItem, confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
 
@@ -2529,6 +2531,22 @@ export function App() {
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
               onReload={() => void loadFinance()}
             />
+            <DdsWorkspace
+              finance={finance}
+              selectedContractId={selectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
+              onConfirmMany={confirmFinanceMany}
+              onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
+            />
+            <GprWorkspace
+              finance={finance}
+              selectedContractId={selectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onUpdateTask={updateScheduleTask}
+              onBulkUpdate={bulkUpdateSchedule}
+              onCloneBaseline={cloneScheduleBaseline}
+            />
             <FinanceOperations
               finance={finance}
               preview={financeStructuredPreview}
@@ -2540,16 +2558,24 @@ export function App() {
               amount={financeAmount}
               date={financeDate}
               extra={financeExtra}
+              objectName={financeObject}
+              category={financeCategory}
+              note={financeNote}
               sourceDocumentId={financeSourceDocumentId}
               scheduleItemId={financeScheduleItemId}
               budgetLineId={financeBudgetLineId}
+              baselineId={financeBaselineId}
               setKind={setFinanceKind}
               setTitle={setFinanceTitle}
               setAmount={setFinanceAmount}
               setDate={setFinanceDate}
               setExtra={setFinanceExtra}
+              setObjectName={setFinanceObject}
+              setCategory={setFinanceCategory}
+              setNote={setFinanceNote}
               setScheduleItemId={setFinanceScheduleItemId}
               setBudgetLineId={setFinanceBudgetLineId}
+              setBaselineId={setFinanceBaselineId}
               onClosePreview={() => {
                 setFinanceStructuredPreview(null);
                 setFinanceStructuredRows([]);
@@ -2562,6 +2588,8 @@ export function App() {
               onConfirmPayment={(id, amount) =>
                 void confirmCashPayment(id, amount)
               }
+              includeScheduleRegister={false}
+              includeCashFlowRegister={false}
             />
           </div>
         </section>

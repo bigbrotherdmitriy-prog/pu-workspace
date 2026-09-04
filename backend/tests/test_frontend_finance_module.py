@@ -30,3 +30,34 @@ def test_finance_module_preserves_contract_first_and_human_review_flow():
     assert "Минимальная уверенность" in module
     assert "onUseCandidate" in module
     assert "google_workspace" not in module.casefold()
+
+
+def test_dds_workspace_mirrors_reference_workbook_views():
+    module = (ROOT / "frontend" / "src" / "modules" / "finance" / "DdsWorkspace.tsx").read_text(encoding="utf-8")
+
+    assert "ДДС по месяцам" in module
+    assert "Календарь (вид ГПР)" in module
+    assert "Детализация" in module
+    assert "Сводка" in module
+    assert "object_name" in module
+    assert "category" in module
+
+
+def test_structured_preview_shows_exact_source_coordinate():
+    module = (ROOT / "frontend" / "src" / "modules" / "finance" / "FinanceOperations.tsx").read_text(encoding="utf-8")
+    types = (ROOT / "frontend" / "src" / "modules" / "finance" / "types.ts").read_text(encoding="utf-8")
+
+    assert "row.source_coordinate" in module
+    assert "source_sheet?: string" in types
+    assert "source_coordinate: string" in types
+
+
+def test_gpr_workspace_exposes_project_style_planning_without_microsoft_branding():
+    module = (ROOT / "frontend" / "src" / "modules" / "finance" / "GprWorkspace.tsx").read_text(encoding="utf-8")
+
+    assert "График работ" in module
+    assert "Критический путь" in module
+    assert "Предш." in module
+    assert "Отступ" in module
+    assert "Веха" in module
+    assert "Microsoft Project" not in module

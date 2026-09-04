@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import re
 
@@ -27,18 +27,50 @@ class BaselineCreate(BaseModel):
     note: str | None = Field(default=None, max_length=5000)
 
 
+class BaselineClone(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=500)
+    note: str | None = Field(default=None, max_length=5000)
+
+
 class ScheduleItemCreate(BaseModel):
     baseline_id: int
     title: str = Field(min_length=2, max_length=500)
+    sort_order: int | None = Field(default=None, ge=0)
+    parent_id: int | None = None
+    duration_days: int = Field(default=1, ge=0, le=10000)
+    is_milestone: bool = False
+    predecessor_ids: str | None = Field(default=None, max_length=2000)
+    constraint_type: str | None = Field(default=None, pattern="^(asap|alap|mso|mfo|snet|snlt|fnet|fnlt)$")
+    constraint_date: date | None = None
     planned_start: date | None = None
     planned_finish: date | None = None
     planned_progress: float = Field(default=0, ge=0, le=100)
 
 
 class ScheduleProgress(BaseModel):
-    actual_progress: float = Field(ge=0, le=100)
+    title: str | None = Field(default=None, min_length=2, max_length=500)
+    sort_order: int | None = Field(default=None, ge=0)
+    parent_id: int | None = None
+    duration_days: int | None = Field(default=None, ge=0, le=10000)
+    is_milestone: bool | None = None
+    predecessor_ids: str | None = Field(default=None, max_length=2000)
+    constraint_type: str | None = Field(default=None, pattern="^(asap|alap|mso|mfo|snet|snlt|fnet|fnlt)$")
+    constraint_date: date | None = None
+    planned_start: date | None = None
+    planned_finish: date | None = None
+    planned_progress: float | None = Field(default=None, ge=0, le=100)
+    actual_progress: float | None = Field(default=None, ge=0, le=100)
     actual_start: date | None = None
     actual_finish: date | None = None
+
+
+class ScheduleBulkUpdate(BaseModel):
+    baseline_id: int
+    item_ids: list[int] = Field(min_length=1, max_length=500)
+    planned_progress: float | None = Field(default=None, ge=0, le=100)
+    actual_progress: float | None = Field(default=None, ge=0, le=100)
+    status: str | None = Field(default=None, pattern="^(planned|in_progress|completed|blocked|cancelled)$")
+    delta_days: int | None = Field(default=None, ge=-36500, le=36500)
 
 
 class BudgetCreate(BaseModel):
@@ -59,6 +91,9 @@ class CashFlowCreate(BaseModel):
     planned_date: date
     planned_amount: Decimal = Field(gt=0)
     counterparty: str | None = Field(default=None, max_length=500)
+    object_name: str | None = Field(default=None, max_length=300)
+    category: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=5000)
 
 
 class InvoiceProposalCreate(CashFlowCreate):
@@ -180,11 +215,154 @@ def _refresh_budget_from_cash_flow(db: Session, budget_line_id: int | None) -> N
     budget.committed_amount, budget.actual_amount = _linked_budget_totals(rows)
 
 
+def _schedule_predecessor_ids(value: str | None) -> list[int]:
+    if not value:
+        return []
+    result: list[int] = []
+    for token in re.split(r"[,;]+", value):
+        match = re.match(r"\s*(\d+)(?:\s*(?:FS|SS|FF|SF))?(?:\s*[+-]\s*\d+\s*[dд])?\s*$", token, re.IGNORECASE)
+        if not match:
+            raise HTTPException(422, f"Не распознана связь: {token.strip()}")
+        result.append(int(match.group(1)))
+    return result
+
+
+def _schedule_predecessors(value: str | None) -> list[tuple[int, str, int]]:
+    """Return predecessor id, link type and lag in calendar days."""
+    if not value:
+        return []
+    result: list[tuple[int, str, int]] = []
+    for token in re.split(r"[,;]+", value):
+        match = re.match(r"\s*(\d+)(?:\s*(FS|SS|FF|SF))?(?:\s*([+-])\s*(\d+)\s*[dд])?\s*$", token, re.IGNORECASE)
+        if not match:
+            raise HTTPException(422, f"Не распознана связь: {token.strip()}")
+        lag = int(match.group(4) or 0) * (-1 if match.group(3) == "-" else 1)
+        result.append((int(match.group(1)), (match.group(2) or "FS").upper(), lag))
+    return result
+
+
+def _remap_schedule_predecessors(value: str | None, item_id_map: dict[int, int]) -> str | None:
+    """Replace task ids while preserving relation types, lags and formatting."""
+    if not value:
+        return value
+    predecessor_ids = _schedule_predecessor_ids(value)
+    missing = sorted(set(predecessor_ids).difference(item_id_map))
+    if missing:
+        raise ValueError(f"Cannot remap schedule predecessor ids: {missing}")
+
+    def replace(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{match.group(2)}{item_id_map[int(match.group(3))]}"
+
+    return re.sub(r"(^|[,;])(\s*)(\d+)", replace, value)
+
+
+def _finish_from_start(start: date, duration_days: int) -> date:
+    return start + timedelta(days=max(0, duration_days - 1))
+
+
+def _start_from_finish(finish: date, duration_days: int) -> date:
+    return finish - timedelta(days=max(0, duration_days - 1))
+
+
+def _auto_schedule_baseline(db: Session, baseline_id: int) -> list[int]:
+    """Forward-schedule dependent tasks after a plan edit.
+
+    The current version deliberately uses calendar days. Project calendars and
+    resource leveling are separate planner capabilities and must not be silently
+    approximated here.
+    """
+    tasks = list(db.scalars(select(ScheduleItem).where(ScheduleItem.baseline_id == baseline_id)))
+    by_id = {task.id: task for task in tasks}
+    dependencies = {task.id: _schedule_predecessors(task.predecessor_ids) for task in tasks}
+    pending = set(by_id)
+    ordered: list[ScheduleItem] = []
+    while pending:
+        ready = sorted(
+            (task_id for task_id in pending if all(pred_id not in pending for pred_id, _, _ in dependencies[task_id])),
+            key=lambda task_id: (by_id[task_id].sort_order or 0, task_id),
+        )
+        if not ready:
+            raise HTTPException(422, "Зависимости образуют цикл")
+        for task_id in ready:
+            pending.remove(task_id)
+            ordered.append(by_id[task_id])
+
+    changed: list[int] = []
+    for task in ordered:
+        duration = 0 if task.is_milestone else max(1, task.duration_days or 1)
+        start_candidates: list[date] = []
+        finish_candidates: list[date] = []
+        for predecessor_id, link_type, lag in dependencies[task.id]:
+            predecessor = by_id[predecessor_id]
+            pred_start = predecessor.planned_start or predecessor.planned_finish
+            pred_finish = predecessor.planned_finish or predecessor.planned_start
+            if not pred_start or not pred_finish:
+                continue
+            if link_type == "FS":
+                start_candidates.append(pred_finish + timedelta(days=1 + lag))
+            elif link_type == "SS":
+                start_candidates.append(pred_start + timedelta(days=lag))
+            elif link_type == "FF":
+                finish_candidates.append(pred_finish + timedelta(days=lag))
+            else:  # SF
+                finish_candidates.append(pred_start + timedelta(days=lag))
+
+        start = max(start_candidates) if start_candidates else task.planned_start
+        finish = max(finish_candidates) if finish_candidates else None
+        if finish is not None:
+            start_from_finish = _start_from_finish(finish, duration)
+            start = max(start, start_from_finish) if start else start_from_finish
+
+        constraint = task.constraint_type or "asap"
+        constraint_date = task.constraint_date
+        if constraint_date and constraint in {"mso", "snet"}:
+            start = constraint_date if constraint == "mso" else max(start or constraint_date, constraint_date)
+        if constraint_date and constraint in {"mfo", "fnet"}:
+            constrained_start = _start_from_finish(constraint_date, duration)
+            start = constrained_start if constraint == "mfo" else max(start or constrained_start, constrained_start)
+        if start is None:
+            continue
+        calculated_finish = start if task.is_milestone else _finish_from_start(start, duration)
+        if task.planned_start != start or task.planned_finish != calculated_finish:
+            task.planned_start = start
+            task.planned_finish = calculated_finish
+            task.duration_days = duration
+            changed.append(task.id)
+    return changed
+
+
+def _validate_schedule_predecessors(db: Session, baseline_id: int, item_id: int | None, value: str | None) -> None:
+    predecessor_ids = _schedule_predecessor_ids(value)
+    if len(predecessor_ids) != len(set(predecessor_ids)):
+        raise HTTPException(422, "Предшественники не должны повторяться")
+    tasks = list(db.scalars(select(ScheduleItem).where(ScheduleItem.baseline_id == baseline_id)))
+    by_id = {task.id: task for task in tasks}
+    if any(predecessor_id not in by_id for predecessor_id in predecessor_ids):
+        raise HTTPException(422, "Все предшественники должны принадлежать этой версии ГПР")
+    if item_id is None:
+        return
+    if item_id in predecessor_ids:
+        raise HTTPException(422, "Задача не может зависеть от самой себя")
+    for predecessor_id in predecessor_ids:
+        stack = [predecessor_id]
+        visited: set[int] = set()
+        while stack:
+            current = stack.pop()
+            if current == item_id:
+                raise HTTPException(422, "Зависимости образуют цикл")
+            if current in visited:
+                continue
+            visited.add(current)
+            if current not in by_id:
+                raise HTTPException(422, "В существующих связях найден отсутствующий предшественник")
+            stack.extend(_schedule_predecessor_ids(by_id[current].predecessor_ids))
+
+
 @router.get("/overview")
 def overview(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     baselines = list(db.scalars(select(ScheduleBaseline).where(ScheduleBaseline.project_id == project_id).order_by(ScheduleBaseline.version.desc())))
-    schedule = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id).order_by(ScheduleItem.planned_finish, ScheduleItem.id)))
+    schedule = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id).order_by(ScheduleItem.baseline_id, ScheduleItem.sort_order, ScheduleItem.id)))
     budget = list(db.scalars(select(BudgetLine).where(BudgetLine.project_id == project_id).order_by(BudgetLine.id.desc())))
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
@@ -211,7 +389,10 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
                     "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note} for x in baselines],
-        "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "planned_start": x.planned_start,
+        "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "sort_order": x.sort_order,
+                      "parent_id": x.parent_id, "duration_days": x.duration_days, "is_milestone": x.is_milestone,
+                      "predecessor_ids": x.predecessor_ids, "constraint_type": x.constraint_type, "constraint_date": x.constraint_date,
+                      "planned_start": x.planned_start,
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status} for x in schedule],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "category": x.category, "description": x.description,
@@ -221,7 +402,9 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                        "budget_line_id": x.budget_line_id, "source_document_id": x.source_document_id,
                        "direction": x.direction, "title": x.title,
                        "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
-                       "actual_amount": x.actual_amount, "counterparty": x.counterparty, "status": x.status} for x in cash],
+                       "actual_amount": x.actual_amount, "counterparty": x.counterparty,
+                       "object_name": x.object_name, "category": x.category, "note": x.note,
+                       "status": x.status} for x in cash],
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
                          "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
                          "planned_amount": x.planned_amount, "actual_amount": x.actual_amount} for x in procurement],
@@ -304,7 +487,7 @@ def structured_preview(document_id: int, project_id: int, kind: str,
     if kind not in {"schedule", "budget", "cash-flow"}:
         raise HTTPException(422, "Поддерживаются ГПР, бюджет и ДДС")
     document, content = _document_content(db, project_id, document_id)
-    preview = parse_structured_rows(content, kind)
+    preview = parse_structured_rows(content, kind, source_name=document.name)
     return {"document_id": document.id, "name": document.name, "kind": kind, **preview,
             "requires_confirmation": True, "originals_changed": False}
 
@@ -315,7 +498,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
     document, content = _document_content(db, payload.project_id, document_id)
-    preview = parse_structured_rows(content, payload.kind)
+    preview = parse_structured_rows(content, payload.kind, source_name=document.name)
     if len(payload.source_rows) != len(set(payload.source_rows)):
         raise HTTPException(422, "Строки источника не должны повторяться")
     selected = {row["source_row"]: row for row in preview["rows"] if row["source_row"] in set(payload.source_rows)}
@@ -337,12 +520,14 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
     created = []
     for source_row in payload.source_rows:
         row = selected[source_row]
-        source_name = f"{document.name}, строка {source_row}"
+        source_name = f"{document.name}, {row['source_coordinate']}"
         if payload.kind == "schedule":
             item = ScheduleItem(
                 project_id=payload.project_id, baseline_id=baseline.id, title=row["title"],
+                sort_order=len(created),
                 planned_start=_import_date(row["planned_start"]),
                 planned_finish=_import_date(row["planned_finish"]),
+                duration_days=max(0, ((_import_date(row["planned_finish"]) - _import_date(row["planned_start"])).days + 1) if row["planned_start"] and row["planned_finish"] else 1),
                 planned_progress=min(100, max(0, row["progress"])),
                 source_name=source_name, source_excerpt=row["excerpt"], status="planned",
             )
@@ -360,6 +545,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                 source_document_id=document.id, direction=row["direction"] or payload.direction,
                 title=row["title"], planned_date=_import_date(row["planned_date"]),
                 planned_amount=Decimal(row["amount"]), counterparty=row["counterparty"],
+                object_name=row.get("object_name"), category=row.get("category"), note=row.get("note"),
                 status="proposed", source_name=source_name, source_excerpt=row["excerpt"],
             )
         db.add(item)
@@ -386,15 +572,173 @@ def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user
     return {"id": item.id, "version": item.version, "status": item.status}
 
 
+@router.post("/baselines/{baseline_id}/clone")
+def clone_baseline(baseline_id: int, payload: BaselineClone, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    source = db.get(ScheduleBaseline, baseline_id)
+    if source is None:
+        raise HTTPException(404, "Baseline not found")
+    require_project_role(db, user, source.project_id, "manager")
+    version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(
+        ScheduleBaseline.project_id == source.project_id,
+    )) or 0) + 1
+    name = payload.name.strip() if payload.name is not None else f"{source.name} — версия {version}"
+    if len(name) < 2:
+        raise HTTPException(422, "Название версии должно содержать не менее двух символов")
+    note = payload.note if "note" in payload.model_fields_set else source.note
+    clone = ScheduleBaseline(
+        project_id=source.project_id,
+        contract_id=source.contract_id,
+        created_by_user_id=user.id,
+        name=name,
+        version=version,
+        status="draft",
+        note=note,
+    )
+    db.add(clone)
+    db.flush()
+
+    source_items = list(db.scalars(select(ScheduleItem).where(
+        ScheduleItem.baseline_id == source.id,
+    ).order_by(ScheduleItem.sort_order, ScheduleItem.id)))
+    cloned_pairs: list[tuple[ScheduleItem, ScheduleItem]] = []
+    for source_item in source_items:
+        cloned_item = ScheduleItem(
+            project_id=source_item.project_id,
+            baseline_id=clone.id,
+            title=source_item.title,
+            sort_order=source_item.sort_order,
+            parent_id=None,
+            duration_days=source_item.duration_days,
+            is_milestone=source_item.is_milestone,
+            predecessor_ids=None,
+            constraint_type=source_item.constraint_type,
+            constraint_date=source_item.constraint_date,
+            planned_start=source_item.planned_start,
+            planned_finish=source_item.planned_finish,
+            actual_start=source_item.actual_start,
+            actual_finish=source_item.actual_finish,
+            planned_progress=source_item.planned_progress,
+            actual_progress=source_item.actual_progress,
+            status=source_item.status,
+            source_name=source_item.source_name,
+            source_excerpt=source_item.source_excerpt,
+        )
+        db.add(cloned_item)
+        cloned_pairs.append((source_item, cloned_item))
+    db.flush()
+
+    item_id_map = {source_item.id: cloned_item.id for source_item, cloned_item in cloned_pairs}
+    for source_item, cloned_item in cloned_pairs:
+        if source_item.parent_id is not None:
+            if source_item.parent_id not in item_id_map:
+                raise HTTPException(422, "Родительская задача исходной версии отсутствует")
+            cloned_item.parent_id = item_id_map[source_item.parent_id]
+        try:
+            cloned_item.predecessor_ids = _remap_schedule_predecessors(source_item.predecessor_ids, item_id_map)
+        except ValueError as exc:
+            raise HTTPException(422, "Предшественник исходной версии отсутствует") from exc
+
+    _audit(
+        db, "baseline_cloned", "schedule_baseline", clone.id, user.id,
+        f"source_baseline={source.id}; version={version}; items={len(cloned_pairs)}",
+    )
+    db.commit()
+    return {
+        "id": clone.id,
+        "source_baseline_id": source.id,
+        "version": clone.version,
+        "status": clone.status,
+        "cloned_item_ids": [cloned_item.id for _, cloned_item in cloned_pairs],
+        "item_id_map": item_id_map,
+    }
+
+
 @router.post("/schedule-items")
 def create_schedule_item(payload: ScheduleItemCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     baseline = db.get(ScheduleBaseline, payload.baseline_id)
     if baseline is None: raise HTTPException(404, "Baseline not found")
     require_project_role(db, user, baseline.project_id, "editor")
     if baseline.status == "approved": raise HTTPException(409, "Утверждённый baseline неизменяем; создайте новую версию")
-    item = ScheduleItem(project_id=baseline.project_id, **payload.model_dump())
-    db.add(item); db.flush(); _audit(db, "schedule_item_created", "schedule_item", item.id, user.id, "proposal"); db.commit(); db.refresh(item)
-    return {"id": item.id, "status": item.status}
+    data = payload.model_dump()
+    if data["parent_id"] is not None:
+        parent = db.get(ScheduleItem, data["parent_id"])
+        if parent is None or parent.baseline_id != baseline.id:
+            raise HTTPException(422, "Родительская задача должна принадлежать этой версии ГПР")
+    _validate_schedule_predecessors(db, baseline.id, None, data["predecessor_ids"])
+    if data["sort_order"] is None:
+        data["sort_order"] = (db.scalar(select(func.max(ScheduleItem.sort_order)).where(ScheduleItem.baseline_id == baseline.id)) or 0) + 1
+    if data["is_milestone"]:
+        data["duration_days"] = 0
+        data["planned_finish"] = data["planned_start"] or data["planned_finish"]
+    item = ScheduleItem(project_id=baseline.project_id, **data)
+    db.add(item); db.flush()
+    changed = _auto_schedule_baseline(db, baseline.id)
+    _audit(db, "schedule_item_created", "schedule_item", item.id, user.id, f"proposal; auto_scheduled={','.join(map(str, changed))}")
+    db.commit(); db.refresh(item)
+    return {"id": item.id, "status": item.status, "auto_scheduled_ids": changed}
+
+
+@router.patch("/schedule-items/bulk")
+def bulk_update_schedule(payload: ScheduleBulkUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    baseline = db.get(ScheduleBaseline, payload.baseline_id)
+    if baseline is None:
+        raise HTTPException(404, "Baseline not found")
+    require_project_role(db, user, baseline.project_id, "editor")
+    if len(payload.item_ids) != len(set(payload.item_ids)):
+        raise HTTPException(422, "Задачи для массового изменения не должны повторяться")
+
+    update_fields = payload.model_dump(
+        include={"planned_progress", "actual_progress", "status"},
+        exclude_unset=True,
+        exclude_none=True,
+    )
+    delta_days = payload.delta_days if "delta_days" in payload.model_fields_set else None
+    if delta_days is not None and update_fields:
+        raise HTTPException(422, "Сдвиг дат и изменение состояния выполняются отдельными операциями")
+    if delta_days == 0 or (delta_days is None and not update_fields):
+        raise HTTPException(422, "Не задано массовое изменение")
+    if baseline.status == "approved" and (delta_days is not None or "planned_progress" in update_fields):
+        raise HTTPException(409, "Утверждённый baseline неизменяем; создайте новую версию")
+
+    items = list(db.scalars(select(ScheduleItem).where(ScheduleItem.id.in_(payload.item_ids))))
+    by_id = {item.id: item for item in items}
+    missing_ids = sorted(set(payload.item_ids).difference(by_id))
+    if missing_ids:
+        raise HTTPException(404, f"Schedule items not found: {','.join(map(str, missing_ids))}")
+    if any(item.baseline_id != baseline.id or item.project_id != baseline.project_id for item in items):
+        raise HTTPException(422, "Все задачи должны принадлежать выбранной версии ГПР")
+
+    if delta_days is not None:
+        delta = timedelta(days=delta_days)
+        for item in items:
+            if item.planned_start is not None:
+                item.planned_start += delta
+            if item.planned_finish is not None:
+                item.planned_finish += delta
+            if item.constraint_date is not None:
+                item.constraint_date += delta
+        auto_scheduled_ids = _auto_schedule_baseline(db, baseline.id)
+    else:
+        for item in items:
+            for name, value in update_fields.items():
+                setattr(item, name, value)
+            if "actual_progress" in update_fields and "status" not in update_fields:
+                item.status = "completed" if item.actual_progress == 100 else "in_progress"
+        auto_scheduled_ids = []
+
+    updated_ids = sorted(payload.item_ids)
+    _audit(
+        db, "schedule_items_bulk_updated", "schedule_baseline", baseline.id, user.id,
+        (f"items={','.join(map(str, updated_ids))}; fields={','.join(sorted(update_fields))}; "
+         f"delta_days={delta_days}; auto_scheduled={','.join(map(str, auto_scheduled_ids))}"),
+    )
+    db.commit()
+    return {
+        "baseline_id": baseline.id,
+        "updated_ids": updated_ids,
+        "auto_scheduled_ids": auto_scheduled_ids,
+        "status": "updated",
+    }
 
 
 @router.patch("/schedule-items/{item_id}")
@@ -402,10 +746,36 @@ def update_schedule(item_id: int, payload: ScheduleProgress, db: Session = Depen
     item = db.get(ScheduleItem, item_id)
     if item is None: raise HTTPException(404, "Schedule item not found")
     require_project_role(db, user, item.project_id, "editor")
-    for name, value in payload.model_dump(exclude_unset=True).items(): setattr(item, name, value)
-    item.status = "completed" if item.actual_progress == 100 else "in_progress"
-    _audit(db, "schedule_actual_updated", "schedule_item", item.id, user.id, f"progress={item.actual_progress}"); db.commit()
-    return {"id": item.id, "status": item.status, "actual_progress": item.actual_progress}
+    data = payload.model_dump(exclude_unset=True)
+    plan_fields = {"title", "sort_order", "parent_id", "duration_days", "is_milestone", "predecessor_ids", "constraint_type", "constraint_date", "planned_start", "planned_finish", "planned_progress"}
+    baseline = db.get(ScheduleBaseline, item.baseline_id)
+    if baseline and baseline.status == "approved" and plan_fields.intersection(data):
+        raise HTTPException(409, "Утверждённый baseline неизменяем; создайте новую версию")
+    if "parent_id" in data and data["parent_id"] is not None:
+        parent = db.get(ScheduleItem, data["parent_id"])
+        if parent is None or parent.baseline_id != item.baseline_id or parent.id == item.id:
+            raise HTTPException(422, "Недопустимая родительская задача")
+        cursor = parent
+        seen: set[int] = set()
+        while cursor and cursor.id not in seen:
+            if cursor.id == item.id:
+                raise HTTPException(422, "Иерархия задач образует цикл")
+            seen.add(cursor.id)
+            cursor = db.get(ScheduleItem, cursor.parent_id) if cursor.parent_id else None
+    if "predecessor_ids" in data:
+        _validate_schedule_predecessors(db, item.baseline_id, item.id, data["predecessor_ids"])
+    if data.get("is_milestone"):
+        data["duration_days"] = 0
+        data["planned_finish"] = data.get("planned_start") or data.get("planned_finish") or item.planned_start or item.planned_finish
+    for name, value in data.items(): setattr(item, name, value)
+    if "actual_progress" in data:
+        item.status = "completed" if item.actual_progress == 100 else "in_progress"
+    schedule_fields = {"duration_days", "is_milestone", "predecessor_ids", "constraint_type", "constraint_date", "planned_start", "planned_finish"}
+    changed = _auto_schedule_baseline(db, item.baseline_id) if schedule_fields.intersection(data) else []
+    action = "schedule_actual_updated" if "actual_progress" in data else "schedule_plan_updated"
+    _audit(db, action, "schedule_item", item.id, user.id, f"fields={','.join(sorted(data))}; auto_scheduled={','.join(map(str, changed))}"); db.commit()
+    return {"id": item.id, "status": item.status, "actual_progress": item.actual_progress,
+            "auto_scheduled_ids": changed}
 
 
 @router.post("/budget")

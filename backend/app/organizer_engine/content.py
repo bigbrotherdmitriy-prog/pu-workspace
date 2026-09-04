@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 
 
 MAX_EXTRACTED_CHARS = 50_000
+XLSX_COORDINATE_MARKER = "__PU_SOURCE_COORD__"
 OCR_MIN_NATIVE_CHARS = 40
 OCR_MAX_PAGES = max(1, min(50, int(os.getenv("OCR_MAX_PAGES", "20"))))
 OCR_TIMEOUT_SECONDS = max(10, min(300, int(os.getenv("OCR_TIMEOUT_SECONDS", "120"))))
@@ -55,10 +56,31 @@ def _xlsx_text(data: bytes) -> str:
         if "xl/sharedStrings.xml" in archive.namelist():
             root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
             shared = [" ".join(node.itertext()).strip() for node in root]
+        sheet_names: dict[str, str] = {}
+        names = set(archive.namelist())
+        if "xl/workbook.xml" in names and "xl/_rels/workbook.xml.rels" in names:
+            workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            relationships = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+            targets = {
+                relation.attrib.get("Id", ""): relation.attrib.get("Target", "")
+                for relation in relationships
+            }
+            for sheet in (node for node in workbook.iter() if node.tag.endswith("}sheet")):
+                relationship_id = next(
+                    (value for key, value in sheet.attrib.items() if key.endswith("}id")), ""
+                )
+                target = targets.get(relationship_id, "")
+                if target:
+                    target = target.lstrip("/")
+                    path = target if target.startswith("xl/") else f"xl/{target}"
+                    sheet_names[path] = sheet.attrib.get("name", "")
         lines: list[str] = []
         for name in sorted(item for item in archive.namelist() if item.startswith("xl/worksheets/") and item.endswith(".xml")):
             root = ElementTree.fromstring(archive.read(name))
-            for row in (node for node in root.iter() if node.tag.endswith("}row")):
+            sheet_name = sheet_names.get(name) or name.rsplit("/", 1)[-1].removesuffix(".xml")
+            for sequential_row, row in enumerate(
+                (node for node in root.iter() if node.tag.endswith("}row")), start=1
+            ):
                 values: list[str] = []
                 for cell in (node for node in row if node.tag.endswith("}c")):
                     kind = cell.attrib.get("t")
@@ -71,6 +93,9 @@ def _xlsx_text(data: bytes) -> str:
                         value = raw
                     values.append(value.replace("\t", " ").replace("\n", " ").strip())
                 if any(values):
+                    source_row = row.attrib.get("r") or str(sequential_row)
+                    safe_sheet_name = sheet_name.replace("\t", " ").replace("\n", " ").strip()
+                    values.append(f"{XLSX_COORDINATE_MARKER}:{safe_sheet_name}:{source_row}")
                     lines.append("\t".join(values))
         return "\n".join(lines)
 

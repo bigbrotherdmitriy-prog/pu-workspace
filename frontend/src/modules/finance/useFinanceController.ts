@@ -28,9 +28,13 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [financeAmount, setFinanceAmount] = useState("");
   const [financeDate, setFinanceDate] = useState("");
   const [financeExtra, setFinanceExtra] = useState("");
+  const [financeObject, setFinanceObject] = useState("");
+  const [financeCategory, setFinanceCategory] = useState("");
+  const [financeNote, setFinanceNote] = useState("");
   const [financeSourceDocumentId, setFinanceSourceDocumentId] = useState(0);
   const [financeScheduleItemId, setFinanceScheduleItemId] = useState(0);
   const [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
+  const [financeBaselineId, setFinanceBaselineId] = useState(0);
 
   async function loadFinance() {
     if (!projectId) return;
@@ -51,13 +55,17 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     if (ready && projectId) void loadFinance();
   }, [ready, projectId, selectedFinanceContractId]);
 
-  function prepareFinanceItem(kind: string) {
+  function prepareFinanceItem(kind: string, baselineId = 0) {
     setFinanceKind(kind);
     setFinanceTitle("");
     setFinanceAmount("");
     setFinanceDate("");
     setFinanceExtra("");
+    setFinanceObject("");
+    setFinanceCategory("");
+    setFinanceNote("");
     setFinanceSourceDocumentId(0);
+    setFinanceBaselineId(baselineId);
     window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
 
@@ -137,7 +145,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       if (financeKind === "budget") body = { ...body, category: financeExtra.trim() || "Прочее", description: financeTitle.trim(), planned_amount: amount };
       if (financeKind === "cash-in" || financeKind === "cash-out") {
         path = "/execution/cash-flow";
-        body = { ...body, direction: financeKind === "cash-in" ? "inflow" : "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null };
+        body = { ...body, direction: financeKind === "cash-in" ? "inflow" : "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null, object_name: financeObject.trim() || "Общие", category: financeCategory.trim() || (financeKind === "cash-in" ? "Приход от заказчика" : "Прочее"), note: financeNote.trim() || financeTitle.trim() };
       }
       if (financeKind === "invoice") {
         if (!selectedFinanceContractId) throw new Error("Сначала выберите договор для счёта");
@@ -159,16 +167,20 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         body = { ...body, name: financeTitle.trim(), note: financeExtra.trim() || null };
       }
       if (financeKind === "schedule") {
-        const baseline = finance?.baselines.find((row) => row.status === "draft");
+        const baseline = finance?.baselines.find((row) => row.id === financeBaselineId && row.status === "draft")
+          || finance?.baselines.find((row) => row.status === "draft" && (!selectedFinanceContractId || row.contract_id === selectedFinanceContractId));
         if (!baseline) throw new Error("Сначала создайте черновик версии ГПР");
         path = "/execution/schedule-items";
-        body = { baseline_id: baseline.id, title: financeTitle.trim(), planned_finish: financeDate || null, planned_progress: amount };
+        body = { baseline_id: baseline.id, title: financeTitle.trim(), planned_start: financeDate || null, planned_finish: financeDate || null, duration_days: 1, planned_progress: amount };
       }
       await api(path, { method: "POST", body: JSON.stringify(body) });
       setFinanceTitle("");
       setFinanceAmount("");
       setFinanceDate("");
       setFinanceExtra("");
+      setFinanceObject("");
+      setFinanceCategory("");
+      setFinanceNote("");
       setNotice("Запись создана как предложение и ожидает подтверждения");
       await loadFinance();
     } catch (error) {
@@ -214,6 +226,47 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
+  async function confirmFinanceMany(kind: string, ids: number[], status: string) {
+    try {
+      await Promise.all(ids.map((id) => api(`/execution/${kind}/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) })));
+      setNotice(`Подтверждено записей: ${ids.length}. Изменения сохранены в аудите.`);
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
+  async function updateScheduleTask(id: number, patch: Record<string, unknown>) {
+    try {
+      await api(`/execution/schedule-items/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      setNotice("Задача ГПР обновлена, сроки и связи сохранены");
+      await loadFinance();
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
+
+  async function bulkUpdateSchedule(baselineId: number, itemIds: number[], patch: Record<string, unknown>) {
+    try {
+      const result = await api<{ updated_ids: number[]; auto_scheduled_ids: number[] }>("/execution/schedule-items/bulk", {
+        method: "PATCH",
+        body: JSON.stringify({ baseline_id: baselineId, item_ids: itemIds, ...patch }),
+      });
+      setNotice(`Обновлено задач: ${result.updated_ids.length}. Автопересчитано: ${result.auto_scheduled_ids.length}.`);
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
+  async function cloneScheduleBaseline(baselineId: number) {
+    try {
+      const result = await api<{ id: number; cloned_item_ids: number[] }>(`/execution/baselines/${baselineId}/clone`, { method: "POST", body: JSON.stringify({}) });
+      setNotice(`Создана новая версия ГПР. Скопировано задач: ${result.cloned_item_ids.length}.`);
+      await loadFinance();
+      return result.id;
+    } catch (error) {
+      setError((error as Error).message);
+      return undefined;
+    }
+  }
+
   async function recordFinanceActual(kind: string, id: number, status: string) {
     const raw = window.prompt("Фактическая сумма, ₽", "0");
     if (raw === null) return;
@@ -232,11 +285,11 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   return {
     finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
-    financeExtra, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId,
+    financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
-    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
-    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
+    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
+    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment, updateScheduleActual, recordFinanceActual,
+    addFinanceItem, confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }
