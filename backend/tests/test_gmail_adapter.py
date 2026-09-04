@@ -2,9 +2,15 @@ import base64
 import inspect
 from types import SimpleNamespace
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
 from app.api.ai_secretary import project_candidate
-from app.api.gmail import GmailSyncRequest, _apply_automated_filter, _apply_bulk_filter, _attachments, _automated_sender_reason, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
+from app.api.gmail import GmailSyncRequest, _apply_automated_filter, _apply_bulk_filter, _attachments, _automated_sender_reason, _backfill_automated_messages_for_user, _bulk_email_reason, _gmail_telegram_notice, _message_text, router, sync_gmail_project
 from app.api.google_drive import SCOPES
+from app.database import Base
+from app.models.ai_secretary import Message
+from app.models.task import Task
 
 
 def test_gmail_routes_and_scopes_are_explicit():
@@ -108,6 +114,8 @@ def test_business_offer_is_not_suppressed_from_words_alone():
 
 def test_machine_sender_suppresses_reply_draft_without_filtering_message():
     assert _automated_sender_reason({"from": 'REG.RU support <noreply@support.reg.ru>'})
+    assert _automated_sender_reason({"from": 'GitHub <notifications@github.com>'})
+    assert _automated_sender_reason({"from": 'System <robot@example.test>'})
     assert _automated_sender_reason({"from": "client@example.ru"}) is None
 
 
@@ -156,6 +164,57 @@ def test_actionable_machine_message_remains_for_human_review():
         message, "адрес отправителя не принимает ответы", has_actions=True,
     ) is False
     assert message.status == "needs_context_confirmation"
+
+
+def test_backfill_covers_old_gmail_pages_without_overriding_actions_or_human_confirmation():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        rows = [
+            Message(
+                organization_id=1, project_id=1, created_by_user_id=7,
+                source_type="email", source_external_id="old-machine",
+                source_name="System notice", source_url="https://mail.google.com/mail/u/0/#all/old-machine",
+                source_sender="Notifications <notifications@example.test>", content="Service update",
+                summary="Analysis", context_confidence=0.7, context_evidence="Not enough evidence",
+                context_confirmed=False, status="needs_context_confirmation",
+            ),
+            Message(
+                organization_id=1, project_id=1, created_by_user_id=7,
+                source_type="email", source_external_id="actionable-machine",
+                source_name="Build failed", source_url="https://mail.google.com/mail/u/0/#all/actionable-machine",
+                source_sender="Notifications <notifications@example.test>", content="Fix the failed build",
+                summary="Task found", context_confidence=0.7, context_evidence="Not enough evidence",
+                context_confirmed=False, status="needs_context_confirmation",
+            ),
+            Message(
+                organization_id=1, project_id=1, created_by_user_id=7,
+                source_type="email", source_external_id="confirmed-machine",
+                source_name="Confirmed notice", source_url="https://mail.google.com/mail/u/0/#all/confirmed-machine",
+                source_sender="No reply <noreply@example.test>", content="Confirmed by the operator",
+                summary="Confirmed", context_confidence=1.0,
+                context_evidence="Проект подтверждён пользователем: Проект",
+                context_confirmed=True, status="ready",
+            ),
+        ]
+        db.add_all(rows)
+        db.flush()
+        db.add(Task(
+            project_id=1, assignee_user_id=7, created_by_user_id=7,
+            message_id=rows[1].id, title="Fix build", status="assigned",
+            source_file_id="message:actionable-machine", source_file_name="Build failed",
+            source_excerpt="Fix the failed build", source_excerpt_hash="a" * 64,
+            confidence=0.8, needs_review=True,
+        ))
+        db.commit()
+
+        changed = _backfill_automated_messages_for_user(db, SimpleNamespace(id=7))
+        db.commit()
+
+        assert changed == 1
+        assert rows[0].status == "filtered"
+        assert rows[1].status == "needs_context_confirmation"
+        assert rows[2].status == "ready"
 
 
 def test_oauth_callback_returns_to_new_interface():

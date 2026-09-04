@@ -119,8 +119,12 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "evidence": row.source_excerpt, "next_step": "Зафиксировать решение или отклонить предложение",
         })
 
+    filtered_message_ids = {row.id for row in messages if row.status == "filtered"}
     waiting_drafts = _unique(
-        [row for row in drafts if row.status == "draft"],
+        [
+            row for row in drafts
+            if row.status == "draft" and row.message_id not in filtered_message_ids
+        ],
         "source_file_name", "source_excerpt", "subject",
     )
     for row in waiting_drafts:

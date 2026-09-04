@@ -175,16 +175,28 @@ def _automated_sender_reason(headers: dict[str, str]) -> str | None:
     The message remains visible and can still produce tasks or risks.  We only
     prevent nonsensical replies to machine-only addresses and mail systems.
     """
-    sender = parseaddr(headers.get("from", ""))[1].casefold()
-    local_part = sender.partition("@")[0]
+    sender_reason = _stored_automated_sender_reason(headers.get("from", ""))
     auto_submitted = headers.get("auto-submitted", "").casefold().strip()
     if auto_submitted and auto_submitted != "no":
         return "автоматическое служебное письмо"
     if headers.get("x-auto-response-suppress"):
         return "отправитель запретил автоматические ответы"
-    machine_addresses = ("noreply", "no-reply", "do-not-reply", "donotreply")
-    if any(marker in local_part for marker in machine_addresses):
+    return sender_reason
+
+
+def _stored_automated_sender_reason(sender_value: str) -> str | None:
+    """Classify only strong machine-address evidence available on old rows."""
+    sender = parseaddr(sender_value)[1].casefold()
+    local_part = sender.partition("@")[0].strip()
+    machine_fragments = ("noreply", "no-reply", "no_reply", "do-not-reply", "donotreply")
+    machine_local_parts = {
+        "notification", "notifications", "notify", "robot", "postmaster",
+        "mailer-daemon", "devnull",
+    }
+    if any(marker in local_part for marker in machine_fragments):
         return "адрес отправителя не принимает ответы"
+    if local_part in machine_local_parts:
+        return "служебный адрес автоматических уведомлений"
     return None
 
 
@@ -197,13 +209,63 @@ def _apply_bulk_filter(message: Message, reason: str | None) -> bool:
     return True
 
 
-def _apply_automated_filter(message: Message, reason: str | None, *, has_actions: bool) -> bool:
+def _apply_automated_filter(
+    message: Message, reason: str | None, *, has_actions: bool, human_reviewed: bool = False,
+) -> bool:
     """Keep actionable machine mail, but remove non-actionable noise from attention."""
-    if not reason or has_actions or message.status not in {"needs_review", "needs_context_confirmation", "ready"}:
+    if (
+        not reason or has_actions or human_reviewed
+        or message.status not in {"needs_review", "needs_context_confirmation", "ready"}
+    ):
         return False
     message.status = "filtered"
     message.summary = f"Служебное письмо без действий: {reason}."
     return True
+
+
+def _message_has_actions(db: Session, message: Message) -> bool:
+    return bool(
+        db.scalar(select(Task.id).where(Task.message_id == message.id))
+        or db.scalar(select(Risk.id).where(
+            Risk.project_id == message.project_id,
+            Risk.source_id == f"message:{message.id}",
+        ))
+        or db.scalar(select(TaskCompletionSuggestion.id).where(
+            TaskCompletionSuggestion.message_id == message.id,
+        ))
+    )
+
+
+def _message_was_reviewed_by_human(db: Session, message: Message) -> bool:
+    evidence = (message.context_evidence or "").casefold()
+    if "пользовател" in evidence or "массово подтвержд" in evidence:
+        return True
+    return db.scalar(select(AuditLog.id).where(
+        AuditLog.entity_type == "message",
+        AuditLog.entity_id == message.id,
+        AuditLog.action.in_({"message_context_confirmed", "message_status_updated"}),
+    )) is not None
+
+
+def _backfill_automated_messages_for_user(db: Session, user: User) -> int:
+    """Reclassify old Gmail pages safely; never touch another user's or reviewed rows."""
+    rows = db.scalars(select(Message).where(
+        Message.created_by_user_id == user.id,
+        Message.source_type == "email",
+        Message.source_url.like("https://mail.google.com/%"),
+        Message.status.in_({"needs_review", "needs_context_confirmation", "ready"}),
+    )).all()
+    changed = 0
+    for message in rows:
+        reason = _stored_automated_sender_reason(message.source_sender or "")
+        if _apply_automated_filter(
+            message,
+            reason,
+            has_actions=_message_has_actions(db, message),
+            human_reviewed=_message_was_reviewed_by_human(db, message),
+        ):
+            changed += 1
+    return changed
 
 
 @router.post("/projects/{project_id}/gmail/sync")
@@ -238,17 +300,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             ))
             if existing:
                 _apply_bulk_filter(existing, bulk_reason)
-                has_actions = bool(
-                    db.scalar(select(Task.id).where(Task.message_id == existing.id))
-                    or db.scalar(select(Risk.id).where(
-                        Risk.project_id == existing.project_id,
-                        Risk.source_id == f"message:{existing.id}",
-                    ))
-                    or db.scalar(select(TaskCompletionSuggestion.id).where(
-                        TaskCompletionSuggestion.message_id == existing.id,
-                    ))
+                _apply_automated_filter(
+                    existing,
+                    automated_sender_reason,
+                    has_actions=_message_has_actions(db, existing),
+                    human_reviewed=_message_was_reviewed_by_human(db, existing),
                 )
-                _apply_automated_filter(existing, automated_sender_reason, has_actions=has_actions)
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
@@ -311,10 +368,13 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             db.rollback()
             failed += 1
             errors.append({"message_id": ref.get("id"), "error": exc.__class__.__name__})
+    reclassified = _backfill_automated_messages_for_user(db, user)
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
-                    details=f"query={query}; processed={processed}; skipped={skipped}; failed={failed}"))
+                    details=(f"query={query}; processed={processed}; skipped={skipped}; "
+                             f"failed={failed}; reclassified={reclassified}")))
     db.commit()
-    return {"processed": processed, "skipped": skipped, "failed": failed, "errors": errors[:20]}
+    return {"processed": processed, "skipped": skipped, "failed": failed,
+            "reclassified": reclassified, "errors": errors[:20]}
 
 
 @router.post("/ai-secretary/inbox/{message_id}/attachments/{attachment_index}/import")

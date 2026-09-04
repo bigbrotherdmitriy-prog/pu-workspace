@@ -12,6 +12,7 @@ from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleBase
 from app.models.organization_contract import Contract
 from app.models.ai_secretary import Message
 from app.models.management import Obligation
+from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 
 
@@ -187,3 +188,32 @@ def test_daily_briefing_excludes_filtered_message_from_context_attention():
         assert result["summary"]["messages_waiting_context"] == 1
         contexts = [row for row in result["attention"] if row["kind"] == "context"]
         assert [row["title"] for row in contexts] == ["Письмо заказчика"]
+
+
+def test_daily_briefing_excludes_stale_draft_linked_to_filtered_message():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        message = Message(
+            organization_id=1, project_id=15, created_by_user_id=1,
+            source_type="email", source_external_id="machine-1",
+            source_name="Служебное письмо", content="Автоматическое уведомление",
+            summary="Отфильтровано", context_confidence=0.0,
+            context_evidence="Служебный отправитель", context_confirmed=False,
+            status="filtered",
+        )
+        db.add(message)
+        db.flush()
+        db.add(ResponseDraft(
+            project_id=15, reviewer_user_id=1, message_id=message.id,
+            subject="Re: уведомление", body="Черновик не должен требовать внимания",
+            status="draft", source_file_id=f"message:{message.id}",
+            source_file_name=message.source_name, source_excerpt=message.content,
+            source_excerpt_hash="c" * 64, confidence=0.5,
+        ))
+        db.commit()
+
+        result = build_daily_briefing(db, 15, today=date(2026, 8, 30))
+
+        assert result["summary"]["drafts_waiting_approval"] == 0
+        assert not any(row["kind"] == "draft" for row in result["attention"])

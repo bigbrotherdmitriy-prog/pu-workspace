@@ -685,7 +685,8 @@ export function App() {
         body: JSON.stringify({ query: "newer_than:7d", max_results: 25 }),
       });
       const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Ошибок: ${result.failed}.`;
+      const reclassified = Number(result.reclassified || 0);
+      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Перенесено в фильтр: ${reclassified}. Ошибок: ${result.failed}.`;
       setGmailSyncStatus(message);
       if (!options.silent || result.processed > 0) setNotice(`Gmail: ${message}`);
       if (result.processed > 0 || !options.silent) await load();
