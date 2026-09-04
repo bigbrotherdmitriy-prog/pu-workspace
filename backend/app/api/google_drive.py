@@ -173,7 +173,11 @@ def google_callback(
 
     try:
         token.access_token = encrypt_token(credentials.token)
-        token.refresh_token = encrypt_token(credentials.refresh_token)
+        # Google may omit refresh_token on a repeat consent. Keep the last
+        # encrypted refresh token instead of silently disconnecting the project
+        # as soon as the new access token expires.
+        if credentials.refresh_token:
+            token.refresh_token = encrypt_token(credentials.refresh_token)
     except TokenEncryptionError as exc:
         raise HTTPException(503, str(exc)) from exc
     token.token_uri = credentials.token_uri
