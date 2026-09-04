@@ -26,10 +26,15 @@ const emptyQueue = () => ({ summary: { active: 0, failed: 0, dead_letter: 0 }, s
 /** Explicitly allowlisted synthetic HTTP API. No catch-all 200 and no backend proxy. */
 export class StorageApi {
   provider: Provider = "google_drive";
-  requests: { method: string; path: string }[] = [];
+  requests: { method: string; path: string; body: string | null }[] = [];
   unexpected: string[] = [];
   errors: string[] = [];
   projectRows = [...projects];
+  inboxByProject = new Map<number, Record<string, unknown>[]>();
+  evidenceReplies = new Map<string, Reply>();
+  aiPolicies = new Map<number, Record<string, unknown>>();
+  attachmentImportReply: Reply = { body: { name: "synthetic.pdf", already_indexed: false, tasks: 1, risks: 0, drafts: 0 } };
+  localUploadReplies: Reply[] = [{ body: { processed: 1, tasks: 1, risks: 0, skipped: [] } }];
   roots = new Map<number, string>();
   snapshots: Record<string, unknown>[] = [];
   queue: { summary: { active: number; failed: number; dead_letter: number }; snapshots: unknown[]; sessions: unknown[] } = emptyQueue();
@@ -61,7 +66,7 @@ export class StorageApi {
         || ["/new/pu-icon.svg", "/new/manifest.webmanifest"].includes(url.pathname))) {
       await route.continue(); return;
     }
-    this.requests.push({ method, path: url.pathname + url.search });
+    this.requests.push({ method, path: url.pathname + url.search, body: request.postData() });
     if (url.origin !== origin) return this.block(route, `External ${method} ${url.origin}${url.pathname}`);
     const holdIndex = this.holds.findIndex(item => item.match(url));
     if (holdIndex >= 0) {
@@ -71,6 +76,41 @@ export class StorageApi {
     }
     const path = url.pathname;
     const projectId = Number(path.match(/^\/projects\/(\d+)/)?.[1] || url.searchParams.get("project_id") || 2);
+    const evidenceMatch = path.match(/^\/api\/v54\/evidence\/([^/]+)\/fragment$/);
+    if (method === "GET" && evidenceMatch) {
+      const evidenceId = decodeURIComponent(evidenceMatch[1]);
+      return this.fulfill(route, this.evidenceReplies.get(evidenceId) || {
+        status: 404,
+        body: { detail: "Synthetic evidence is unavailable" },
+      });
+    }
+    const attachmentMatch = path.match(/^\/ai-secretary\/inbox\/(\d+)\/attachments\/(\d+)\/import$/);
+    if (method === "POST" && attachmentMatch) {
+      const messageId = Number(attachmentMatch[1]);
+      const attachmentIndex = Number(attachmentMatch[2]);
+      const rows = this.inboxByProject.get(projectId) || [];
+      const message = rows.find(row => row.id === messageId);
+      const attachments = message?.attachments;
+      if (Array.isArray(attachments) && attachments[attachmentIndex] && typeof attachments[attachmentIndex] === "object") {
+        attachments[attachmentIndex] = { ...attachments[attachmentIndex], imported: true, document_id: 501 };
+      }
+      return this.fulfill(route, this.attachmentImportReply);
+    }
+    if (method === "POST" && path === "/local-upload/analyze") {
+      return this.fulfill(route, this.localUploadReplies.shift() || {
+        status: 503,
+        body: { detail: "Synthetic local upload reply was not configured" },
+      });
+    }
+    if (method === "PATCH" && /^\/projects\/\d+\/ai-policy$/.test(path)) {
+      const current = this.aiPolicies.get(projectId) || {
+        project_id: projectId, mode: "local_only", dlp_enabled: true, prompt_version: "v1",
+      };
+      const patch = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const saved = { ...current, mode: patch.mode, dlp_enabled: patch.dlp_enabled };
+      this.aiPolicies.set(projectId, saved);
+      return this.fulfill(route, { body: saved });
+    }
     if (method === "GET" && /^\/projects\/\d+\/source-folders\/discover$/.test(path)) {
       if (this.discoveryReply) return this.fulfill(route, this.discoveryReply(url));
       const selected = url.searchParams.get("provider");
@@ -92,11 +132,12 @@ export class StorageApi {
     if (method !== "GET") return this.block(route, `Unexpected write ${method} ${path}`);
     const single: Record<string, unknown> = {
       "/auth/me": { id: 900, name: "Synthetic Operator", email: "operator@example.invalid", is_admin: true },
+      "/organizations/current/requisites": { id: 901, name: "Synthetic Organization", requisites_status: "draft" },
       "/projects/": { projects: this.projectRows },
       "/api/readiness": { ready: true, google_drive_ready: true, telegram_ready: false, checks: {} },
       "/history/audit": { logs: [] },
       "/tasks": { tasks: [] }, "/governance/risks": { risks: [] }, "/governance/decisions": { decisions: [] },
-      "/response-drafts": { drafts: [] }, "/ai-secretary/inbox": { messages: [] }, "/organizer/proposals": { proposals: [] },
+      "/response-drafts": { drafts: [] }, "/ai-secretary/inbox": { messages: this.inboxByProject.get(projectId) || [] }, "/organizer/proposals": { proposals: [] },
       "/ai-secretary/automations": { rules: [] }, "/project-contacts": { contacts: [] },
       "/ai-secretary/daily-briefing": { project_id: projectId, date: "2026-09-03", summary: {
         attention: 0, overdue_tasks: 0, overdue_obligations: 0, open_risks: 0, pending_decisions: 0,
@@ -113,10 +154,14 @@ export class StorageApi {
       "/management/obligations": { obligations: [] }, "/management/meetings": { meetings: [] }, "/management/notifications": { notifications: [] },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },
-      "/integrations/project": { project_id: projectId, adapters: ["google_drive", "yandex_disk"].map(provider => ({
-        key: provider, provider, capability: "storage", name: provider === "google_drive" ? "Google Drive" : "Яндекс Диск",
-        description: "Синтетическое подключение", available: true, connected: true, action: "select_source",
-      })) },
+      "/integrations/project": { project_id: projectId, adapters: [
+        ...["google_drive", "yandex_disk"].map(provider => ({
+          key: provider, provider, capability: "storage", name: provider === "google_drive" ? "Google Drive" : "Яндекс Диск",
+          description: "Синтетическое подключение", available: true, connected: true, action: "select_source",
+        })),
+        { key: "local-upload", provider: "local", capability: "storage", name: "Локальная загрузка", description: "Синтетический локальный путь", available: true, connected: true, action: "local_upload" },
+        { key: "ai-policy", provider: "policy", capability: "ai", name: "Политика AI", description: "Синтетическая политика проекта", available: true, connected: true, action: "ai_policy" },
+      ] },
     };
     if (path in single) return this.fulfill(route, { body: single[path] });
     const scoped: Record<string, unknown> = {
@@ -124,7 +169,7 @@ export class StorageApi {
       "processing-queue": this.queue,
       "google/status": { authorized: true, gmail_authorized: false },
       documents: { documents: [] }, contracts: { contracts: [] }, members: { members: [] },
-      "ai-policy": { project_id: projectId, mode: "local_only", dlp_enabled: true, prompt_version: "v1" },
+      "ai-policy": this.aiPolicies.get(projectId) || { project_id: projectId, mode: "local_only", dlp_enabled: true, prompt_version: "v1" },
     };
     const suffix = path.replace(/^\/projects\/\d+\//, "");
     if (/^\/projects\/\d+\//.test(path) && suffix in scoped) return this.fulfill(route, { body: scoped[suffix] });
