@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/client";
 import { MailClientModule, readableMessageBody } from "./MailClientModule";
+import { editorHtml } from "./RichTextEditor";
 import type { MailCapabilities, MailDraft, MailMessage, MailThread } from "./types";
 
 const capabilities: MailCapabilities = {
@@ -34,7 +35,10 @@ const thread: MailThread = {
   last_message_at: message.received_at, unread_count: 1, needs_attention: true, messages: [message],
 };
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function mockClient(overrides: Record<string, unknown> = {}) {
   return {
@@ -56,6 +60,16 @@ function mockClient(overrides: Record<string, unknown> = {}) {
     sendDraft: vi.fn().mockResolvedValue({ ...approvedDraft, status: "sent", receipt: { provider: "gmail", sent_at: "2026-09-04T10:05:00Z" } }),
     confirmContext: vi.fn().mockResolvedValue(message),
     setMessageStatus: vi.fn().mockResolvedValue({ ...message, status: "in_progress" }),
+    settings: vi.fn().mockResolvedValue({
+      display_name: "Operator", signature_html: "", auto_signature_new: true, auto_signature_reply: true,
+      default_font: "Arial", default_font_size: "14px", default_text_color: "#18211d",
+    }),
+    updateSettings: vi.fn().mockImplementation(async (settings) => settings),
+    assist: vi.fn().mockResolvedValue({
+      subject: "Подтверждение срока", body: "Добрый день! Подтверждаем получение запроса.",
+      notes: "Проверьте срок.", provider: "gemini", model: "gemini-test", policy_mode: "external_allowed", requires_confirmation: true,
+    }),
+    moveMessage: vi.fn().mockResolvedValue(message),
     ...overrides,
   };
 }
@@ -152,7 +166,9 @@ describe("MailClientModule", () => {
     await screen.findByRole("heading", { name: "Срок поставки" });
     fireEvent.click(screen.getByRole("button", { name: /Re: Срок поставки/ }));
     const composer = screen.getByRole("dialog");
-    fireEvent.change(within(composer).getByLabelText("Текст"), { target: { value: "Исправленный ответ" } });
+    const editor = within(composer).getByLabelText("Текст письма");
+    editor.innerHTML = "<div>Исправленный ответ</div>";
+    fireEvent.input(editor);
     expect(within(composer).getByText(/подтвердите новую версию/i)).toBeInTheDocument();
     expect(within(composer).getByRole("button", { name: "Отправить" })).toBeDisabled();
     expect(within(composer).getByRole("button", { name: "Подтвердить текущую версию" })).toBeDisabled();
@@ -168,11 +184,13 @@ describe("MailClientModule", () => {
     fireEvent.change(within(composer).getByLabelText("Копия"), { target: { value: "copy@example.test" } });
     fireEvent.change(within(composer).getByLabelText("Скрытая копия"), { target: { value: "secret@example.test" } });
     fireEvent.change(within(composer).getByLabelText("Тема"), { target: { value: "Протокол" } });
-    fireEvent.change(within(composer).getByLabelText("Текст"), { target: { value: "Направляю протокол." } });
+    const editor = within(composer).getByLabelText("Текст письма");
+    editor.innerHTML = "<div>Направляю протокол.</div>";
+    fireEvent.input(editor);
     fireEvent.click(within(composer).getByRole("button", { name: "Сохранить черновик" }));
     await waitFor(() => expect(client.createDraft).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 7, to: ["one@example.test"], cc: ["copy@example.test"],
-      bcc: ["secret@example.test"], subject: "Протокол", body: "Направляю протокол.",
+      bcc: ["secret@example.test"], subject: "Протокол", body: "<div>Направляю протокол.</div>", body_format: "html",
     })));
     expect(props.onNotice).toHaveBeenCalledWith(expect.stringContaining("не отправлен"));
   });
@@ -194,10 +212,54 @@ describe("MailClientModule", () => {
     await screen.findByRole("heading", { name: "Срок поставки" });
     fireEvent.click(screen.getByRole("button", { name: /Re: Срок поставки/ }));
     const composer = screen.getByRole("dialog");
-    fireEvent.change(within(composer).getByLabelText("Текст"), { target: { value: "Изменено" } });
+    const editor = within(composer).getByLabelText("Текст письма");
+    editor.innerHTML = "<div>Изменено</div>";
+    fireEvent.input(editor);
     fireEvent.click(within(composer).getByRole("button", { name: "Сохранить черновик" }));
     await waitFor(() => expect(props.onError).toHaveBeenCalledWith(expect.stringContaining("другой вкладке")));
     expect(updateDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Outlook-style formatting, account signature settings and Gemini drafting", async () => {
+    const client = mockClient();
+    renderClient(client);
+    await screen.findByRole("heading", { name: "Срок поставки" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Настройки/ }));
+    const settings = screen.getByRole("dialog", { name: "Настройки и подпись" });
+    expect(within(settings).getByLabelText("Подпись")).toBeInTheDocument();
+    fireEvent.click(within(settings).getByRole("button", { name: /Сохранить настройки/ }));
+    await waitFor(() => expect(client.updateSettings).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: /Написать/ }));
+    const composer = screen.getByRole("dialog", { name: /Новый черновик/ });
+    expect(within(composer).getByRole("toolbar", { name: "Форматирование письма" })).toBeInTheDocument();
+    expect(within(composer).getByRole("button", { name: /Полужирный/ })).toBeInTheDocument();
+    expect(within(composer).getByRole("button", { name: /Подчёркивание/ })).toBeInTheDocument();
+    fireEvent.click(within(composer).getByRole("button", { name: "Помощь Gemini" }));
+    fireEvent.change(within(composer).getByPlaceholderText(/Опишите, кому/), { target: { value: "Подтвердить срок" } });
+    fireEvent.click(within(composer).getByRole("button", { name: "Написать письмо" }));
+    await waitFor(() => expect(client.assist).toHaveBeenCalledWith(expect.objectContaining({ action: "compose", instruction: "Подтвердить срок" })));
+    await waitFor(() => expect((within(composer).getByLabelText("Текст письма") as HTMLElement).innerHTML).toContain("Подтверждаем получение"));
+    expect(client.sendDraft).not.toHaveBeenCalled();
+  });
+
+  it("removes active content from rich editor HTML before it is rendered", () => {
+    const html = editorHtml('<div onclick="alert(1)">Текст<img src="https://tracker.test/pixel" onerror="alert(2)"><script>alert(3)</script><a href="javascript:alert(4)">ссылка</a></div>');
+    expect(html).toContain("Текст");
+    expect(html).toContain("ссылка");
+    expect(html).not.toMatch(/onclick|onerror|script|javascript:|tracker\.test/i);
+  });
+
+  it("moves a message to Gmail trash only after confirmation", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const client = mockClient();
+    renderClient(client);
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await waitFor(() => expect(client.moveMessage).toHaveBeenCalledWith(101, "trash"));
+    expect(confirm).toHaveBeenCalledOnce();
+    confirm.mockRestore();
   });
 
   it("blocks compose and send when the adapter lacks capabilities", async () => {

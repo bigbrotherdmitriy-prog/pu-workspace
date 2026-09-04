@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 import os
 
-from app.gemini_analysis import analyze_document_with_gemini, analyze_message_with_gemini, gemini_configured
+from app.gemini_analysis import (
+    analyze_document_with_gemini,
+    analyze_message_with_gemini,
+    compose_message_with_gemini,
+    gemini_configured,
+)
 from app.integrations.contracts import AdapterHealth
 
 
@@ -31,6 +36,9 @@ class GeminiAIAdapter:
 
     def analyze_message(self, text: str, context_name: str) -> dict[str, Any]:
         return analyze_message_with_gemini(text, context_name)
+
+    def compose_message(self, text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
+        return compose_message_with_gemini(text, context_name, action, tone)
 
 
 def configured_ai_provider() -> GeminiAIAdapter:

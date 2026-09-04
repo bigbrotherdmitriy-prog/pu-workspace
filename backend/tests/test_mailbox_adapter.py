@@ -24,11 +24,20 @@ class Labels:
 class Messages:
     def __init__(self):
         self.body = None
+        self.move = None
 
     def send(self, **kwargs):
         assert kwargs["userId"] == "me"
         self.body = kwargs["body"]
         return Execute({"id": "gm-1", "threadId": "thread-1"})
+
+    def modify(self, **kwargs):
+        self.move = ("modify", kwargs)
+        return Execute({"id": kwargs["id"]})
+
+    def trash(self, **kwargs):
+        self.move = ("trash", kwargs)
+        return Execute({"id": kwargs["id"]})
 
 
 class Users:
@@ -91,6 +100,27 @@ def test_gmail_adapter_builds_to_cc_bcc_and_thread_without_logging_content():
     assert parsed["Cc"] == "cc@example.test"
     assert parsed["Bcc"] == "bcc@example.test"
     assert parsed.get_content().strip() == "Synthetic body"
+
+
+def test_gmail_adapter_sends_safe_html_alternative_and_moves_messages():
+    workspace = Workspace()
+    adapter = GmailMailboxAdapter(workspace)
+    adapter.send_message(MailSendCommand(
+        to=("to@example.test",), cc=(), bcc=(), subject="Formatted",
+        body="Synthetic body", html_body="<div><strong>Synthetic body</strong></div>",
+    ))
+    request = workspace.gmail.users_api.messages_api.body
+    parsed = message_from_bytes(base64.urlsafe_b64decode(request["raw"]), policy=policy.default)
+    assert parsed.is_multipart()
+    assert parsed.get_body(preferencelist=("plain",)).get_content().strip() == "Synthetic body"
+    assert "<strong>Synthetic body</strong>" in parsed.get_body(preferencelist=("html",)).get_content()
+
+    receipt = adapter.move_message("gm-1", "spam")
+    assert receipt.destination == "spam"
+    assert workspace.gmail.users_api.messages_api.move == (
+        "modify",
+        {"userId": "me", "id": "gm-1", "body": {"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}},
+    )
 
 
 def test_gmail_adapter_classifies_service_setup_failure_as_not_applied():

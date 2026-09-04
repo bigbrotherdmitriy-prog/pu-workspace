@@ -1,4 +1,4 @@
-export type MailFolderKind = "inbox" | "attention" | "drafts" | "sent" | "archive" | "all";
+export type MailFolderKind = "inbox" | "attention" | "drafts" | "sent" | "archive" | "spam" | "trash" | "all";
 
 export type MailDeliveryStatus = "draft" | "approved" | "rejected" | "queued" | "sending" | "sent" | "failed" | "unknown";
 
@@ -26,6 +26,7 @@ export type MailDraft = {
   bcc: MailAddress[];
   subject: string;
   body: string;
+  body_format?: "plain" | "html";
   attachments: MailAttachment[];
   revision: number;
   approved_revision?: number | null;
@@ -106,5 +107,37 @@ export type DraftInput = {
   bcc: string[];
   subject: string;
   body: string;
+  body_format: "plain" | "html";
   attachments: Array<{ message_id: number; attachment_index: number }>;
+};
+
+export type MailSettings = {
+  display_name: string;
+  signature_html: string;
+  auto_signature_new: boolean;
+  auto_signature_reply: boolean;
+  default_font: "Arial" | "Calibri" | "Georgia" | "Tahoma" | "Times New Roman" | "Verdana";
+  default_font_size: "12px" | "14px" | "16px" | "18px";
+  default_text_color: string;
+  updated_at?: string | null;
+};
+
+export type MailAssistRequest = {
+  project_id: number;
+  reply_to_message_id: number | null;
+  action: "compose" | "reply" | "improve" | "shorten" | "formal" | "friendly";
+  tone: "business" | "neutral" | "friendly";
+  instruction: string;
+  subject: string;
+  body: string;
+};
+
+export type MailAssistResult = {
+  subject: string;
+  body: string;
+  notes: string;
+  provider: string;
+  model: string;
+  policy_mode: string;
+  requires_confirmation: boolean;
 };

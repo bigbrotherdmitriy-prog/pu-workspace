@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from email.utils import getaddresses, parseaddr
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,10 +14,14 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
+from app.ai_policy import ExternalAIBlocked, prepare_external_ai_text
+from app.integrations.ai import configured_ai_provider
 from app.integrations.contracts import MailNotAppliedError, MailSendCommand
 from app.integrations.mail import mailbox_adapter_for_project
+from app.mail_content import is_rich_mail_body, mail_html_to_text, sanitize_mail_html
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
+from app.models.mail_settings import MailUserSettings
 from app.models.organization_contract import Contract
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
@@ -30,6 +35,8 @@ MAIL_FOLDERS = (
     ("drafts", "Черновики"),
     ("attention", "Требуют внимания"),
     ("archive", "Архив"),
+    ("spam", "Спам"),
+    ("trash", "Удалённые"),
     ("all", "Вся почта"),
 )
 
@@ -49,6 +56,7 @@ class MailDraftCreate(BaseModel):
     bcc: list[str] = Field(default_factory=list, max_length=100)
     subject: str = Field(min_length=1, max_length=500)
     body: str = Field(min_length=1, max_length=20000)
+    body_format: Literal["plain", "html"] = "plain"
     attachments: list[MailAttachmentRef] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
@@ -66,6 +74,7 @@ class MailDraftPatch(BaseModel):
     bcc: list[str] | None = Field(default=None, max_length=100)
     subject: str | None = Field(default=None, min_length=1, max_length=500)
     body: str | None = Field(default=None, min_length=1, max_length=20000)
+    body_format: Literal["plain", "html"] | None = None
     attachments: list[MailAttachmentRef] | None = Field(default=None, max_length=20)
 
 
@@ -76,6 +85,30 @@ class MailDraftApproval(BaseModel):
 class MailDraftSend(BaseModel):
     revision: int = Field(gt=0)
     idempotency_key: str = Field(min_length=8, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+class MailSettingsPatch(BaseModel):
+    display_name: str = Field(default="", max_length=255)
+    signature_html: str = Field(default="", max_length=10000)
+    auto_signature_new: bool = True
+    auto_signature_reply: bool = True
+    default_font: Literal["Arial", "Calibri", "Georgia", "Tahoma", "Times New Roman", "Verdana"] = "Arial"
+    default_font_size: Literal["12px", "14px", "16px", "18px"] = "14px"
+    default_text_color: str = Field(default="#18211d", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class MailAssistRequest(BaseModel):
+    project_id: int = Field(gt=0)
+    reply_to_message_id: int | None = Field(default=None, gt=0)
+    action: Literal["compose", "reply", "improve", "shorten", "formal", "friendly"]
+    tone: Literal["business", "neutral", "friendly"] = "business"
+    instruction: str = Field(default="", max_length=4000)
+    subject: str = Field(default="", max_length=500)
+    body: str = Field(default="", max_length=20000)
+
+
+class MailMoveRequest(BaseModel):
+    destination: Literal["archive", "spam", "trash", "inbox"]
 
 
 def _json(value: str | None, fallback):
@@ -166,6 +199,7 @@ def _draft_payload(row: ResponseDraft, *, replay: bool = False) -> dict:
         "bcc": _address_list(row.recipient_bcc),
         "subject": row.subject,
         "body": row.body,
+        "body_format": "html" if is_rich_mail_body(row.body) else "plain",
         "attachments": _json(row.attachments_json, []),
         "revision": row.revision,
         "approved_revision": row.approved_revision,
@@ -180,6 +214,32 @@ def _draft_payload(row: ResponseDraft, *, replay: bool = False) -> dict:
     }
 
 
+def _mail_settings_payload(row: MailUserSettings | None, user: User) -> dict:
+    return {
+        "display_name": row.display_name if row else user.name,
+        "signature_html": row.signature_html if row else "",
+        "auto_signature_new": row.auto_signature_new if row else True,
+        "auto_signature_reply": row.auto_signature_reply if row else True,
+        "default_font": row.default_font if row else "Arial",
+        "default_font_size": row.default_font_size if row else "14px",
+        "default_text_color": row.default_text_color if row else "#18211d",
+        "updated_at": row.updated_at if row else None,
+    }
+
+
+def _clean_draft_body(value: str, body_format: str) -> str:
+    if body_format == "plain":
+        result = value.strip()
+    else:
+        result = sanitize_mail_html(value)
+        if result and not is_rich_mail_body(result):
+            result = f"<div>{result}</div>"
+    readable = mail_html_to_text(result) if body_format == "html" else result
+    if not readable.strip():
+        raise HTTPException(422, "Введите текст письма")
+    return result
+
+
 def _message_rows(db: Session, project_id: int, folder: str, query: str | None, cursor: int | None):
     statement = select(Message).where(
         Message.project_id == project_id,
@@ -192,7 +252,7 @@ def _message_rows(db: Session, project_id: int, folder: str, query: str | None, 
     result = []
     for row in rows:
         labels = set(_json(row.mail_labels_json, []))
-        if folder == "inbox" and (row.source_type != "email" or (labels and "INBOX" not in labels)):
+        if folder == "inbox" and (row.source_type != "email" or (labels and "INBOX" not in labels) or labels.intersection({"SPAM", "TRASH"})):
             continue
         if folder == "sent" and row.source_type != "email_outgoing":
             continue
@@ -200,7 +260,11 @@ def _message_rows(db: Session, project_id: int, folder: str, query: str | None, 
             continue
         if folder == "attention" and row.status not in {"needs_review", "needs_context_confirmation", "in_progress"}:
             continue
-        if folder == "archive" and (row.source_type != "email" or not labels or "INBOX" in labels):
+        if folder == "archive" and (row.source_type != "email" or not labels or "INBOX" in labels or labels.intersection({"SPAM", "TRASH"})):
+            continue
+        if folder == "spam" and (row.source_type != "email" or "SPAM" not in labels):
+            continue
+        if folder == "trash" and (row.source_type != "email" or "TRASH" not in labels):
             continue
         if needle and needle not in f"{row.source_name}\n{row.source_sender or ''}\n{row.content}".casefold():
             continue
@@ -234,6 +298,85 @@ def _require_contract(db: Session, project_id: int, contract_id: int | None):
         return
     if not db.scalar(select(Contract.id).where(Contract.id == contract_id, Contract.project_id == project_id)):
         raise HTTPException(422, "Contract does not belong to this project")
+
+
+@router.get("/settings")
+def get_mail_settings(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return _mail_settings_payload(db.get(MailUserSettings, user.id), user)
+
+
+@router.put("/settings")
+def update_mail_settings(payload: MailSettingsPatch, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = db.get(MailUserSettings, user.id)
+    if row is None:
+        row = MailUserSettings(user_id=user.id)
+        db.add(row)
+    row.display_name = payload.display_name.strip()
+    row.signature_html = sanitize_mail_html(payload.signature_html)
+    row.auto_signature_new = payload.auto_signature_new
+    row.auto_signature_reply = payload.auto_signature_reply
+    row.default_font = payload.default_font
+    row.default_font_size = payload.default_font_size
+    row.default_text_color = payload.default_text_color.lower()
+    db.add(AuditLog(
+        action="mail_settings_updated", entity_type="user", entity_id=user.id,
+        details="signature_configured=%s; auto_new=%s; auto_reply=%s" % (
+            bool(mail_html_to_text(row.signature_html)), row.auto_signature_new, row.auto_signature_reply,
+        ),
+    ))
+    db.commit()
+    db.refresh(row)
+    return _mail_settings_payload(row, user)
+
+
+@router.post("/assist")
+def assist_mail_draft(payload: MailAssistRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    source = db.get(Message, payload.reply_to_message_id) if payload.reply_to_message_id else None
+    if source is not None and (source.project_id != payload.project_id or source.source_type not in MAIL_SOURCE_TYPES):
+        raise HTTPException(422, "Reply source does not belong to this project")
+    if payload.reply_to_message_id and source is None:
+        raise HTTPException(404, "Reply source not found")
+    readable_body = mail_html_to_text(payload.body) if is_rich_mail_body(payload.body) else payload.body
+    source_text = source.content if source else ""
+    combined = (
+        f"Текущая тема: {payload.subject}\n"
+        f"Пожелание пользователя: {payload.instruction}\n"
+        f"Текущий текст черновика: {readable_body}\n"
+        f"Исходное письмо для ответа: {source_text}"
+    )
+    try:
+        ai_text, policy_mode = prepare_external_ai_text(db, payload.project_id, combined)
+    except ExternalAIBlocked as exc:
+        raise HTTPException(409, "external_ai_blocked_by_project_policy") from exc
+    provider = configured_ai_provider()
+    if not provider.health().ready:
+        raise HTTPException(503, "ai_provider_not_configured")
+    try:
+        result = provider.compose_message(
+            ai_text, source.source_name if source else "Новое деловое письмо", payload.action, payload.tone,
+        )
+    except Exception as exc:
+        raise HTTPException(502, "ai_provider_temporarily_unavailable") from exc
+    subject = str(result.get("subject") or payload.subject).strip()[:500]
+    body = str(result.get("body") or "").strip()[:20000]
+    if not body:
+        raise HTTPException(502, "ai_provider_returned_empty_draft")
+    db.add(AuditLog(
+        action="external_ai_mail_assist", entity_type="project", entity_id=payload.project_id,
+        details=(f"provider={provider.provider}; model={provider.model}; mode={policy_mode}; "
+                 f"operation={payload.action}; source={'reply' if source else 'compose'}"),
+    ))
+    db.commit()
+    return {
+        "subject": subject,
+        "body": body,
+        "notes": str(result.get("notes") or "Проверьте факты перед отправкой.")[:1000],
+        "provider": provider.provider,
+        "model": provider.model,
+        "policy_mode": policy_mode,
+        "requires_confirmation": True,
+    }
 
 
 @router.get("/projects/{project_id}/capabilities")
@@ -278,6 +421,8 @@ def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = De
         )))),
         "attention": len(_message_rows(db, project_id, "attention", None, None)),
         "archive": len(_message_rows(db, project_id, "archive", None, None)),
+        "spam": len(_message_rows(db, project_id, "spam", None, None)),
+        "trash": len(_message_rows(db, project_id, "trash", None, None)),
         "all": len(message_rows),
     }
     return {
@@ -361,6 +506,48 @@ def mail_message(message_id: int, db: Session = Depends(get_db), user: User = De
     return _message_payload(db, row)
 
 
+@router.post("/messages/{message_id}/move")
+def move_mail_message(message_id: int, payload: MailMoveRequest,
+                      db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = db.scalar(select(Message).where(Message.id == message_id).with_for_update())
+    if row is None or row.source_type != "email":
+        raise HTTPException(404, "Mail message not found")
+    require_project_role(db, user, row.project_id, "editor")
+    external_id = str(row.source_external_id or "").strip()
+    if not external_id:
+        raise HTTPException(409, "mail_provider_identity_missing")
+    adapter = mailbox_adapter_for_project(row.project_id, db)
+    try:
+        adapter.move_message(external_id, payload.destination)
+    except MailNotAppliedError as exc:
+        raise HTTPException(502, "mail_move_not_applied") from exc
+    except Exception as exc:
+        raise HTTPException(502, "mail_move_outcome_unknown_refresh_required") from exc
+    labels = set(_json(row.mail_labels_json, []))
+    if payload.destination == "archive":
+        labels.discard("INBOX")
+    elif payload.destination == "spam":
+        labels.discard("INBOX")
+        labels.discard("TRASH")
+        labels.add("SPAM")
+    elif payload.destination == "trash":
+        labels.discard("INBOX")
+        labels.discard("SPAM")
+        labels.add("TRASH")
+    else:
+        labels.discard("SPAM")
+        labels.discard("TRASH")
+        labels.add("INBOX")
+    row.mail_labels_json = json.dumps(sorted(labels))
+    db.add(AuditLog(
+        action="mail_message_moved", entity_type="message", entity_id=row.id,
+        details=f"project={row.project_id}; destination={payload.destination}; provider={adapter.provider}",
+    ))
+    db.commit()
+    db.refresh(row)
+    return _message_payload(db, row)
+
+
 @router.get("/projects/{project_id}/drafts")
 def mail_drafts(project_id: int, status: str | None = None,
                 db: Session = Depends(get_db), user: User = Depends(require_user)):
@@ -410,7 +597,7 @@ def create_mail_draft(payload: MailDraftCreate, db: Session = Depends(get_db), u
         reviewer_user_id=user.id,
         message_id=source.id if source else None,
         subject=subject,
-        body=payload.body.strip(),
+        body=_clean_draft_body(payload.body, payload.body_format),
         recipient_to=_store_to(to),
         recipient_cc=json.dumps(cc),
         recipient_bcc=json.dumps(bcc),
@@ -458,7 +645,7 @@ def update_mail_draft(draft_id: int, payload: MailDraftPatch, db: Session = Depe
         draft.subject = payload.subject.strip()
         changed = True
     if payload.body is not None:
-        draft.body = payload.body.strip()
+        draft.body = _clean_draft_body(payload.body, payload.body_format or "plain")
         changed = True
     if payload.attachments is not None:
         draft.attachments_json = json.dumps(_attachment_metadata(db, draft.project_id, payload.attachments), ensure_ascii=False)
@@ -526,12 +713,14 @@ def send_mail_draft(draft_id: int, payload: MailDraftSend, db: Session = Depends
     source = db.get(Message, draft.message_id) if draft.message_id else None
     if source is not None and source.project_id != draft.project_id:
         raise HTTPException(409, "mail_reply_origin_mismatch")
+    rich_body = is_rich_mail_body(draft.body)
     command = MailSendCommand(
         to=recipients,
         cc=_address_list(draft.recipient_cc),
         bcc=_address_list(draft.recipient_bcc),
         subject=draft.subject,
-        body=draft.body,
+        body=mail_html_to_text(draft.body) if rich_body else draft.body,
+        html_body=draft.body if rich_body else None,
         thread_id=source.source_thread_id if source else None,
     )
     draft.send_idempotency_key = key_hash

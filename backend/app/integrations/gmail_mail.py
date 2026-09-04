@@ -7,6 +7,7 @@ from app.integrations.contracts import (
     AdapterHealth,
     MailFolder,
     MailNotAppliedError,
+    MailMoveReceipt,
     MailSendCommand,
     MailSendReceipt,
 )
@@ -45,6 +46,8 @@ class GmailMailboxAdapter:
             message["Bcc"] = ", ".join(command.bcc)
         message["Subject"] = command.subject
         message.set_content(command.body)
+        if command.html_body:
+            message.add_alternative(command.html_body, subtype="html")
         body: dict[str, str] = {
             "raw": base64.urlsafe_b64encode(message.as_bytes()).decode("ascii"),
         }
@@ -64,3 +67,24 @@ class GmailMailboxAdapter:
             external_message_id=external_id,
             external_thread_id=str(sent.get("threadId") or "").strip() or command.thread_id,
         )
+
+    def move_message(self, external_message_id: str, destination: str) -> MailMoveReceipt:
+        service = self._service().users().messages()
+        try:
+            if destination == "trash":
+                request = service.trash(userId="me", id=external_message_id)
+            else:
+                labels = {
+                    "archive": {"addLabelIds": [], "removeLabelIds": ["INBOX"]},
+                    "spam": {"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]},
+                    "inbox": {"addLabelIds": ["INBOX"], "removeLabelIds": ["SPAM", "TRASH"]},
+                }.get(destination)
+                if labels is None:
+                    raise MailNotAppliedError("unsupported_mail_destination")
+                request = service.modify(userId="me", id=external_message_id, body=labels)
+        except MailNotAppliedError:
+            raise
+        except Exception:
+            raise MailNotAppliedError("provider_unavailable_before_move") from None
+        request.execute()
+        return MailMoveReceipt(external_message_id=external_message_id, destination=destination)
