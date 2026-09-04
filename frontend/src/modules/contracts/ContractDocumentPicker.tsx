@@ -87,7 +87,7 @@ export function ContractDocumentPicker(props: Props) {
         <div className="contract-source-tabs">{tabs.map(([source, title]) =>
           <button type="button" className={props.tab === source ? "selected" : "secondary"} onClick={() => props.onTabChange(source)} key={source}>{title}</button>,
         )}</div>
-        <label className="contract-document-search"><Search /><input autoFocus value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} aria-label="Поиск документа по названию" placeholder="Например: ГК-08-194 или Налог-Сервис" /></label>
+        <label className="contract-document-search"><Search /><input autoFocus value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} aria-label="Поиск документа по названию" placeholder="Например: ДЕМО-ДОКУМЕНТ-001.pdf" /></label>
         <nav className="contract-folder-breadcrumbs" aria-label="Путь к папке">
           <button type="button" onClick={() => setCurrentFolderId(null)}><Home /> Корень проекта</button>
           {breadcrumbs.map((folder) => <span key={folder.id}><ChevronRight /><button type="button" onClick={() => setCurrentFolderId(folder.external_id || null)}>{folder.name}</button></span>)}
