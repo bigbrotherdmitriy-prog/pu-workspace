@@ -183,8 +183,15 @@ def _store_ai_message_result(
     return drafts
 
 
-def _reanalyze_existing_document(db, inbox_message: Message) -> str:
+def _reanalyze_existing_document(
+    db, inbox_message: Message, *, refreshed_content: str | None = None,
+    refreshed_source_name: str | None = None,
+) -> str:
     """Refresh AI analysis for a deduplicated Telegram file without side effects."""
+    if refreshed_content is not None:
+        inbox_message.content = refreshed_content
+    if refreshed_source_name:
+        inbox_message.source_name = refreshed_source_name
     ai_provider = configured_ai_provider()
     if not ai_provider.health().ready:
         return "⚠️ Gemini API не настроен. Ранее сохранённая сводка:\n\n" + (inbox_message.summary or "Сводка отсутствует.")
@@ -346,18 +353,6 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
         content = text
         if document:
             source_id = f"telegram-file:{chat_id}:{document.get('file_unique_id') or document.get('file_id')}"
-            existing_message = db.scalar(select(Message).where(
-                Message.source_type == "telegram",
-                Message.source_external_id == source_id,
-                Message.project_id == link.project_id,
-            ))
-            if existing_message:
-                notify_telegram_chat(
-                    chat_id,
-                    "Файл уже сохранён. Повторно выполняю AI-анализ без создания дублей задач, рисков и документов.",
-                )
-                notify_telegram_chat(chat_id, _reanalyze_existing_document(db, existing_message))
-                return {"ok": True}
             already_processed = db.scalar(select(Document.id).where(
                 Document.project_id == link.project_id,
                 Document.external_id == source_id,
@@ -382,7 +377,20 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             return {"ok": True}
         existing_message = db.scalar(select(Message).where(Message.source_type == "telegram", Message.source_external_id == source_id))
         if existing_message:
-            notify_telegram_chat(chat_id, "Это сообщение уже сохранено во входящих AI Secretary.")
+            if document:
+                notify_telegram_chat(
+                    chat_id,
+                    "Файл уже сохранён. Текст повторно извлечён новым обработчиком; выполняю AI-анализ без создания дублей.",
+                )
+                notify_telegram_chat(
+                    chat_id,
+                    _reanalyze_existing_document(
+                        db, existing_message, refreshed_content=content,
+                        refreshed_source_name=source_name,
+                    ),
+                )
+            else:
+                notify_telegram_chat(chat_id, "Это сообщение уже сохранено во входящих AI Secretary.")
             return {"ok": True}
         project = db.get(Project, link.project_id)
         owner = _project_owner(db, link.project_id)
