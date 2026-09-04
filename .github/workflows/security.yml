@@ -44,7 +44,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: pnpm --dir frontend audit --audit-level high --json > frontend-audit.json
+      - name: Audit frontend dependencies with bounded retries
+        run: >-
+          python scripts/run_frontend_audit.py
+          --output frontend-audit.json
+          --attempts 3
+          --timeout 60
       - uses: actions/upload-artifact@v4
         if: always()
         with:
