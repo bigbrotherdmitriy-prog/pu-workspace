@@ -99,7 +99,7 @@ class SourceEvidenceFacade:
                             Evidence.organization_id == self.policy.tenant_id, lock=lock)
             assessment = load(db, EvidenceAssessment, EvidenceAssessment.evidence_id == evidence.id,
                               EvidenceAssessment.organization_id == self.policy.tenant_id, lock=lock)
-            if not assessment or evidence.policy_pins != self.policy.policy_pins() or evidence.representation_ref is not None:
+            if not assessment or evidence.policy_pins != self.policy.policy_pins():
                 deny()
             if requested.value != evidence.revision:
                 deny()
@@ -239,9 +239,8 @@ class SourceEvidenceFacade:
         if operation not in {"metadata", "fragment", "review", "dispatch"}:
             deny()
         result = Resolution(pin=pin, actor=scope.actor, project=scope.project, operation=operation)
-        # No fragment store/materialization exists; do not pretend fragment access.
-        if operation == "fragment":
-            return result.model_copy(update={"acl": "deny"})
+        # Fragment bytes remain inaccessible without the separately injected,
+        # request-bound materialization store and an explicit fragment grant.
         now = self.clock()
         try:
             source, identity, version, current, evidence, assessment = self._chain(db, scope, pin, operation, now, lock)

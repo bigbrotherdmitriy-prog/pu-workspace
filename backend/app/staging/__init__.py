@@ -11,6 +11,7 @@ from app.staging.contracts import (
     StagingStorage,
 )
 from app.staging.filesystem import FilesystemStagingStorage, new_fence, new_object_id
+from app.staging.lifecycle import LifecycleAuthority, MaterializationLifecycle
 
 __all__ = [
     "FilesystemStagingStorage",
@@ -24,4 +25,6 @@ __all__ = [
     "StagingStorage",
     "new_fence",
     "new_object_id",
+    "LifecycleAuthority",
+    "MaterializationLifecycle",
 ]

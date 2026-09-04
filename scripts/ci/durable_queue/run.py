@@ -127,7 +127,7 @@ def main():
             command(["docker", "build", "--build-arg", f"BASE_IMAGE={base}", "-f", "scripts/ci/durable_queue/Dockerfile", "-t", image, "-"], data=build_context("scripts"), timeout=120)
             compose("up", "-d", "--wait", "--wait-timeout", "90", "db")
             compose("run", "--rm", "--no-deps", "api1", "alembic", "-c", "alembic.ini", "upgrade", "head")
-            assert sql("SELECT version_num FROM alembic_version").strip() == b"a54f001c0a04"
+            assert sql("SELECT version_num FROM alembic_version").strip() == b"a54f001c0a05"
             race = compose("run", "--rm", "--no-deps", "api1", "python", "/queue_ci/postgres_checks.py")
             EVENTS.append(json.loads(race))
             workspace_result = compose("run", "--rm", "--no-deps", "api1", "python", "/queue_ci/workspace_checks.py")

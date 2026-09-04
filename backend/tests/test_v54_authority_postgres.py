@@ -14,6 +14,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 import app.models
+from app.schema import CURRENT_SCHEMA_REVISION
 from app.core.v54_authority import AuthorityDenied, AuthorityResolver
 from app.database import Base
 from test_v54_authority import seed_authority
@@ -98,7 +99,7 @@ def test_postgres_migration_upgrade_and_single_head(monkeypatch):
     try:
         command.upgrade(cfg, "head")
         with engine.connect() as db:
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a04"
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_SCHEMA_REVISION
             assert "v54_authority_states" in inspect(db).get_table_names()
         command.downgrade(cfg, "a54f001c0a01")
         command.upgrade(cfg, "head")

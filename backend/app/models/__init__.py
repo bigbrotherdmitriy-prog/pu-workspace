@@ -42,6 +42,7 @@ from app.models.mailbox_identity import (
     MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
 )
+from app.models.materialization import Materialization
 
 __all__ = [
     "Project",
@@ -94,4 +95,5 @@ __all__ = [
     "AuthorityState",
     "MailboxAuthorityState", "MailboxCredentialGeneration", "MailboxCutoverFlags",
     "MailboxOriginBinding", "MailboxOriginCurrent", "MailboxOriginDecision",
+    "Materialization",
 ]

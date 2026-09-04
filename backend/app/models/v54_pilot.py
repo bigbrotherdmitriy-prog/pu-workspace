@@ -142,6 +142,8 @@ class Evidence(Scoped, Base):
     __tablename__ = "v54_evidence"
     __table_args__ = (
         scoped_unique("uq_v54_evidence_scope"),
+        UniqueConstraint("organization_id", "id", "source_id", "source_version_id",
+                         name="uq_v54_evidence_binding"),
         ForeignKeyConstraint(["organization_id", "source_id", "source_version_id"],
                              ["v54_source_versions.organization_id", "v54_source_versions.source_id",
                               "v54_source_versions.id"], ondelete="RESTRICT", name="fk_v54_evidence_observation"),
@@ -410,6 +412,7 @@ def _immutable_fields(mapper, connection, target):
     mutable = {
         SourceReference: {"canonical_locator", "record_version", "freshness", "sync_state", "availability",
                           "last_seen_at", "last_checked_at", "next_check_at", "policy_pins", "residency"},
+        Evidence: {"representation_ref"},
         EvidenceAssessment: {"record_version", "verification", "freshness", "availability",
                              "checked_at", "valid_until", "reviewed_by", "reviewed_at"},
         DeadlineClaim: {"verification", "record_version", "reviewed_by", "reviewed_at"},
@@ -419,6 +422,10 @@ def _immutable_fields(mapper, connection, target):
                              "credential_generation", "verified_at"},
         MailConnection: {"state", "record_version"},
     }.get(type(target), set())
+    if isinstance(target, Evidence):
+        history = inspect(target).attrs.representation_ref.history
+        if history.has_changes() and (not history.deleted or history.deleted[0] is not None):
+            raise ValueError("immutable_pilot_assertion")
     if any(attr.history.has_changes() and attr.key not in mutable for attr in inspect(target).attrs):
         raise ValueError("immutable_pilot_assertion")
 

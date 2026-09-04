@@ -192,7 +192,9 @@ class AuditAppend(StrictDTO):
                    "ACTION_FROZEN", "APPROVAL_GRANTED", "APPROVAL_REVOKED", "DISPATCH_REQUESTED",
                    "DISPATCH_AUTHORIZED", "ACTION_SUCCEEDED", "BLOCKED", "UNKNOWN", "RETENTION_APPLIED",
                    "CLAIM_EXTRACTED", "CLAIM_CONFIRMED", "CLAIM_REJECTED", "CONTEXT_PROPOSED",
-                   "AUTHORITY_CHANGED"]
+                   "AUTHORITY_CHANGED", "MATERIALIZATION_ADMITTED", "MATERIALIZATION_WRITING",
+                   "MATERIALIZATION_SEALED", "MATERIALIZATION_DERIVED", "MATERIALIZATION_EXPIRED",
+                   "MATERIALIZATION_PURGED"]
     action: VersionPin | None = None
     approval: ObjectRef | None = None
     receipt: ObjectRef | None = None

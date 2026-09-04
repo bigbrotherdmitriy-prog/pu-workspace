@@ -1,1 +1,1 @@
-"""Synthetic-only Source/Evidence facade; no provider transport or content storage."""
+"""Source/Evidence contracts; no provider transport, queue or implicit storage."""
