@@ -46,11 +46,21 @@ def upgrade():
 
 
 def downgrade():
-    connection = op.get_bind()
-    if connection.scalar(sa.text(
+    retention_rows_exist = sa.text(
         "SELECT EXISTS (SELECT 1 FROM v54_audit_extensions "
         "WHERE service_principal IS NOT NULL LIMIT 1)"
-    )):
+    )
+    if context.is_offline_mode():
+        # Preserve the same fail-closed guard in generated recovery SQL.  A
+        # MockConnection cannot inspect data while Alembic renders --sql.
+        op.execute(sa.text(
+            "DO $guard$ BEGIN "
+            "IF EXISTS (SELECT 1 FROM v54_audit_extensions "
+            "WHERE service_principal IS NOT NULL LIMIT 1) THEN "
+            "RAISE EXCEPTION 'Service retention audit records require explicit archival'; "
+            "END IF; END $guard$"
+        ))
+    elif op.get_bind().scalar(retention_rows_exist):
         raise RuntimeError("Service retention audit records require explicit archival")
     op.drop_constraint(
         "ck_v54_audit_actor_origin", "v54_audit_extensions", type_="check",

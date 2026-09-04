@@ -239,6 +239,22 @@ def test_a08_is_single_head_and_renders_safety_constraints(monkeypatch):
     assert "ck_v54_audit_actor_origin" in rendered
 
 
+def test_a08_offline_downgrade_renders_fail_closed_retention_guard(monkeypatch):
+    output = StringIO()
+    config = Config(str(BACKEND / "alembic.ini"), output_buffer=output)
+    config.set_main_option("script_location", str(BACKEND / "migrations"))
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",
+    )
+
+    command.downgrade(config, "a54f001c0a08:a54f001c0a07", sql=True)
+
+    rendered = output.getvalue()
+    assert "Service retention audit records require explicit archival" in rendered
+    assert "DROP INDEX uq_documents_local_upload_identity" in rendered
+
+
 def test_postgresql_a08_constraints_are_present():
     value = os.getenv("PUW_V54_PROVIDER_MIGRATION_DATABASE_URL")
     if not value:
