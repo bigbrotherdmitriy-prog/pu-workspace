@@ -75,6 +75,24 @@ function forwardSubject(subject: string): string {
   return /^fwd:/i.test(subject) ? subject : `Fwd: ${subject}`;
 }
 
+export function readableMessageBody(content: string): string {
+  const source = content.trim();
+  if (!source || !/<[a-z][\s\S]*>/i.test(source) || typeof DOMParser === "undefined") return source;
+  const parsed = new DOMParser().parseFromString(source, "text/html");
+  parsed.querySelectorAll("script, style, noscript, iframe, object, embed, svg").forEach((node) => node.remove());
+  parsed.querySelectorAll("br").forEach((node) => node.replaceWith(parsed.createTextNode("\n")));
+  parsed.querySelectorAll("p, div, li, tr, h1, h2, h3, h4, h5, h6, blockquote").forEach((node) => {
+    node.append(parsed.createTextNode("\n"));
+  });
+  return (parsed.body.textContent || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function statusLabel(status: MailDraft["status"]): string {
   return {
     draft: "Черновик — не отправлен",
@@ -393,7 +411,7 @@ export function MailClientModule({
           const last = thread.messages[thread.messages.length - 1];
           return <button className={`mail-thread-row ${selectedThreadId === thread.id ? "selected" : ""}`} key={thread.id} onClick={() => setSelectedThreadId(thread.id)}>
             <span className="mail-avatar">{(last.sender.name || last.sender.email).slice(0, 1).toLocaleUpperCase("ru-RU")}</span>
-            <span className="mail-thread-copy"><strong>{last.sender.name || last.sender.email}</strong><b>{thread.subject}</b><small>{last.preview || last.summary || last.content}</small></span>
+            <span className="mail-thread-copy"><strong>{last.sender.name || last.sender.email}</strong><b>{thread.subject}</b><small>{last.preview || last.summary || readableMessageBody(last.content)}</small></span>
             <time>{new Date(thread.last_message_at).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}</time>
             {thread.unread_count > 0 && <span className="mail-unread">{thread.unread_count}</span>}
             {thread.needs_attention && <AlertTriangle className="mail-attention" aria-label="Требует внимания" />}
@@ -429,7 +447,7 @@ export function MailClientModule({
             {selectedThread.messages.map((message) => <article key={message.id} className={message.direction === "outgoing" ? "outgoing" : "incoming"}>
               <header><span className="mail-avatar">{(message.sender.name || message.sender.email).slice(0, 1).toUpperCase()}</span><div><strong>{message.sender.name || message.sender.email}</strong><small>Кому: {addressText(message.to) || "не указан"}{message.cc.length ? ` · Копия: ${addressText(message.cc)}` : ""}</small></div><time>{new Date(message.received_at).toLocaleString("ru-RU")}</time></header>
               {message.summary && <div className="mail-ai-summary"><Bot /><div><strong>AI-сводка</strong><p>{message.summary}</p><small>Вывод AI нужно сверять с исходным письмом.</small></div></div>}
-              <details open={selectedThread.messages.length === 1}><summary>Текст письма</summary><pre>{message.content}</pre></details>
+              <details open={selectedThread.messages.length === 1}><summary>Текст письма</summary><pre>{readableMessageBody(message.content)}</pre></details>
               {message.attachments.length > 0 && <div className="mail-attachments"><strong><Paperclip /> Вложения</strong>{message.attachments.map((attachment) => <span key={attachment.id || attachment.attachment_id || attachment.name}><FileText />{attachment.name}<small>{attachment.size ? `${Math.ceil(attachment.size / 1024)} КБ` : ""}</small></span>)}</div>}
               {message.drafts.map((draft) => <button className="mail-draft-card" key={draft.id} onClick={() => setComposer({
                 draft, mode: draft.mode, replyTo: message, projectId: draft.project_id,

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/client";
-import { MailClientModule } from "./MailClientModule";
+import { MailClientModule, readableMessageBody } from "./MailClientModule";
 import type { MailCapabilities, MailDraft, MailMessage, MailThread } from "./types";
 
 const capabilities: MailCapabilities = {
@@ -78,6 +78,13 @@ function renderClient(client = mockClient()) {
 }
 
 describe("MailClientModule", () => {
+  it("turns HTML email into readable safe text instead of showing source markup", () => {
+    const body = readableMessageBody("<html><style>.hidden{display:none}</style><p>Добрый день!<br>Срок — 10 сентября.</p><script>secret()</script></html>");
+    expect(body).toBe("Добрый день!\nСрок — 10 сентября.");
+    expect(body).not.toContain("<p>");
+    expect(body).not.toContain("secret");
+  });
+
   it("loads a real thread view with AI summary, context and inbound attachments", async () => {
     const { client } = renderClient();
     expect(await screen.findByRole("heading", { name: "Срок поставки" })).toBeInTheDocument();
