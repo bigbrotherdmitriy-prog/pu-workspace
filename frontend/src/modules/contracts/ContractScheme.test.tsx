@@ -99,4 +99,14 @@ describe("ContractScheme", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Удалить договор$/ }));
     expect(onDelete).toHaveBeenCalledTimes(2);
   });
+
+  it("archives a contract separately from physical deletion", () => {
+    const onArchive = vi.fn();
+    render(<ContractScheme projectId={15} contracts={[
+      { id: 6, number: "Д-6", title: "Связанный договор", status: "active" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDelete={vi.fn()} onArchive={onArchive} />);
+    fireEvent.click(screen.getByRole("button", { name: /Заказчик Д-6/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Архивировать договор" }));
+    expect(onArchive).toHaveBeenCalledWith(expect.objectContaining({ id: 6 }));
+  });
 });

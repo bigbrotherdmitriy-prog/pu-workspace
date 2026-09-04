@@ -1,8 +1,10 @@
 from decimal import Decimal
 
-from app.api.organizations_contracts import ContractCreate, ContractDelete, ContractLinkUpdate, _apply_contract_financial_terms, _contract_document_score, _contract_financial_terms, _contract_source_text, _payment_schedule_candidates, router
+from app.api.organizations_contracts import ContractCreate, ContractDelete, ContractLinkUpdate, _apply_contract_financial_terms, _contract_dependencies, _contract_document_score, _contract_financial_terms, _contract_source_text, _payment_schedule_candidates, router
+from app.models.contract_document_link import ContractDocumentLink
 from app.models.document import Document
-from app.models.organization_contract import Contract
+from app.models.organization_contract import Contract, Organization
+from app.models.project import Project
 
 
 def test_contract_routes_are_registered():
@@ -13,6 +15,7 @@ def test_contract_routes_are_registered():
     assert "/projects/{project_id}/contracts/{contract_id}/initialize-control" in paths
     assert "/projects/{project_id}/contracts/{contract_id}/analyze" in paths
     assert "/projects/{project_id}/contracts/{contract_id}/source-candidates" in paths
+    assert "/projects/{project_id}/contracts/{contract_id}/deletion-preview" in paths
     delete_route = next(route for route in router.routes if route.path == "/projects/{project_id}/contracts/{contract_id}" and "DELETE" in route.methods)
     assert delete_route
 
@@ -44,6 +47,30 @@ def test_contract_update_accepts_commercial_fields_and_delete_requires_confirmat
     assert update.amount == Decimal("1500000")
     assert update.signed_at.isoformat() == "2026-08-31"
     assert ContractDelete(confirmation="СП-02").confirmation == "СП-02"
+
+
+def test_contract_can_be_archived_without_deleting_its_links():
+    update = ContractLinkUpdate(status="archived")
+    assert update.status == "archived"
+
+
+def test_physical_contract_delete_is_blocked_by_document_and_tree_links(db_session):
+    organization = Organization(name="Synthetic owner")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="Synthetic project", organization_id=organization.id)
+    db_session.add(project); db_session.flush()
+    parent = Contract(project_id=project.id, number="ГК-1", title="Головной", status="active")
+    db_session.add(parent); db_session.flush()
+    child = Contract(project_id=project.id, number="СП-1", title="Дочерний", status="active", parent_contract_id=parent.id)
+    document = Document(project_id=project.id, name="Договор.pdf", source="synthetic", status="ready")
+    db_session.add_all([child, document]); db_session.flush()
+    db_session.add(ContractDocumentLink(project_id=project.id, contract_id=parent.id, document_id=document.id))
+    db_session.flush()
+
+    assert _contract_dependencies(db_session, project.id, parent.id) == {
+        "child_contracts": 1,
+        "documents": 1,
+    }
 
 
 def test_prime_reference_contract_has_an_explicit_non_financial_role():

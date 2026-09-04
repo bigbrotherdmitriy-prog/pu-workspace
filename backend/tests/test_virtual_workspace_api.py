@@ -34,11 +34,11 @@ def test_snapshot_analysis_is_explicitly_read_only_in_contract():
     assert "no Drive copy or mutation" in (route.endpoint.__doc__ or "")
 
 
-def test_connected_folder_automatically_starts_safe_copy_pipeline():
+def test_connected_folder_snapshot_does_not_automatically_create_safe_copy():
     source = inspect.getsource(_build_snapshot)
-    assert "_start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)" in source
-    pipeline = inspect.getsource(_run_safe_copy_pipeline)
-    assert "auto_apply=True" in pipeline
+    assert "_start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)" not in source
+    standardize = next(route.endpoint for route in router.routes if route.path.endswith("/snapshots/{snapshot_id}/standardize"))
+    assert "Create and organize a safe Drive copy" in (standardize.__doc__ or "")
 
 
 def test_safe_copy_recovery_is_not_started_by_legacy_virtual_analyzer():
