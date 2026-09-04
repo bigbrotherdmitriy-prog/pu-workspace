@@ -2,9 +2,9 @@
 
 Дата проверки: 2026-09-04
 
-Ветка: `codex/v54-provider-action-runtime`
+Ветка: `codex/v54-provider-a06`
 
-Базовый SHA: `b0dbf98d82f034637512c199ba107d44a8133735`
+Базовый SHA интеграции: `1ce1c6c` (`a54f001c0a05` уже в истории)
 
 ## Итог
 
@@ -65,19 +65,17 @@ Runtime нельзя создать с live adapter; для PostgreSQL разр�
 5. Отсутствие lookup receipt не доказывает отсутствие effect и сохраняет
    `UNKNOWN`; новый provider dispatch не выполняется.
 
-## Migration handoff
+## Migration result
 
-Alembic migration намеренно не добавлена: текущий head этой базы остаётся
-`a54f001c0a04`, а `a54f001c0a05` принадлежит параллельной ветке. После landing
-`a54f001c0a05` интегратор должен создать ровно одну последовательную migration:
+Добавлена ровно одна последовательная Alembic migration:
 
 ```text
 revision = "a54f001c0a06"
 down_revision = "a54f001c0a05"
 ```
 
-Migration должна материализовать модели из
-`backend/app/models/v54_provider_action.py` в следующем порядке:
+Migration материализует модели из `backend/app/models/v54_provider_action.py`
+в следующем порядке:
 
 1. `v54_provider_actions`;
 2. `v54_provider_action_approvals`;
@@ -85,51 +83,57 @@ Migration должна материализовать модели из
 4. `v54_provider_execution_attempts`;
 5. `v54_provider_outcome_observations`.
 
-При переносе нужны все model constraints/indexes, FK `job_id/first_job_id` к
-`background_jobs.id`, уникальные scoped command/idempotency bindings и уникальная
-observation sequence. Дополнительно PostgreSQL migration review должен добавить
-composite FK action/revision между дочерними таблицами и
-`v54_provider_actions`, а approval ID — между outbox и approvals: эти FK не
-включены в текущие SQLite-portable модели, чтобы не имитировать ещё не
-существующий schema head. Downgrade удаляет таблицы строго в обратном порядке и
-не должен переписывать provider/audit историю.
+Migration и ORM metadata содержат все model checks/uniques/indexes, FK
+`job_id/first_job_id` к `background_jobs.id`, scoped composite FK
+`(organization_id, action_id, revision)` от четырёх дочерних таблиц к action и
+composite approval binding от outbox. Это не позволяет подменить tenant/action
+или связать outbox с approval от другой ревизии. Downgrade удаляет пять таблиц
+строго в обратном порядке.
 
-Перед merge интегратор обязан выполнить offline PostgreSQL migration render,
-upgrade на чистой БД, upgrade с `a54f001c0a05`, downgrade/upgrade round-trip и
-проверку единственного Alembic head.
+`CURRENT_SCHEMA_REVISION`, Docker readiness, durable queue и v5.4 CI pins
+переведены на `a54f001c0a06`; исторические ссылки на parent `a05` сохранены.
+CI PostgreSQL test выполняет full upgrade на чистой тестовой БД, затем
+`a06 -> a05 -> a06`, проверяет состав таблиц/FK/index и единственный head.
 
 ## Проверки
 
-Targeted runtime suite:
+Targeted runtime и migration/offline PostgreSQL suite:
 
 ```text
-python -m pytest tests/test_v54_provider_action_runtime.py -q -p no:cacheprovider
-20 passed
+python -m pytest tests/test_v54_provider_action_runtime.py \
+  tests/test_v54_provider_action_migration.py -q -p no:cacheprovider
+21 passed, 1 conditional PostgreSQL skip
 ```
 
-Совместимость с существующими v54 acceptance/trust/pilot и queue тестами:
+Совместимость materialization/source/queue:
 
 ```text
-python -m pytest tests/test_v54_provider_acceptance_contract.py \
-  tests/test_v54_action_trust.py tests/test_v54_pilot_integration.py \
-  tests/test_durable_jobs.py tests/test_worker_topology.py \
-  tests/test_v54_provider_action_runtime.py -q -p no:cacheprovider
-133 passed
+python -m pytest tests/test_v54_materialization_lifecycle.py \
+  tests/test_v54_materialization_postgres.py \
+  tests/test_v54_source_evidence_pilot.py \
+  tests/test_v54_source_evidence_postgres.py \
+  tests/test_durable_jobs.py tests/test_worker_topology.py -q -p no:cacheprovider
+71 passed, 3 conditional PostgreSQL skips
 ```
 
-Первый полный прогон старым project venv: `982 passed, 11 skipped, 3 failed`.
-Все три failure находятся в `tests/test_content.py` и вызваны отсутствием пакета
-`pypdf` в этом venv (`ModuleNotFoundError`), а не изменённым кодом. Финальный
-повтор с доступным bundled `pypdf` фиксируется ниже после выполнения.
-
-Финальный полный прогон с отдельным writable `--basetemp` и bundled `pypdf`:
+Полный backend suite с отдельным ASCII `--basetemp`:
 
 ```text
-python -B -c "... pytest.main(['-q', '-p', 'no:cacheprovider', '--basetemp=...'])"
-986 passed, 11 skipped, 4 warnings
+python -m pytest tests -q -p no:cacheprovider --basetemp=<ascii-temp>
+1024 passed, 14 skipped, 6 warnings
 ```
 
-Четыре warning — существующий Alembic `path_separator` deprecation; failures нет.
+Scripts CI suite:
+
+```text
+python -m pytest scripts/ci -q -p no:cacheprovider --basetemp=<ascii-temp>
+110 passed
+```
+
+Шесть warning полного backend — существующий Alembic `path_separator`
+deprecation; failures нет. Live PostgreSQL тест не запускался локально: Docker
+CLI отсутствует. Он остаётся fail-closed conditional и включён в PostgreSQL CI с
+явной disposable БД `puw_v54_test_migrations`; offline PostgreSQL render прошёл.
 
 Process-fault тест принудительно завершает synthetic provider после записи
 effect, но до receipt persistence. Второй worker делает один lookup; итоговые
@@ -141,5 +145,4 @@ counters: `dispatch=1`, `lookup=1`, `effects=1`.
 - нет live provider/network/credential loader;
 - нет endpoint/UI cutover;
 - нет изменения Gmail/Google/Yandex execution code;
-- нет migration до появления `a54f001c0a05`;
 - нет push, merge или deploy.

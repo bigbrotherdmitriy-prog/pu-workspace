@@ -21,7 +21,7 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
-HEAD = "a54f001c0a05"
+HEAD = "a54f001c0a06"
 DATABASES = ("puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime")
 PHASES: list[dict] = []
 CREATED: list[str] = []
@@ -127,6 +127,7 @@ def test_env() -> dict:
         "PUW_V54_SOURCE_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_CONTEXT_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_INTEGRATION_DATABASE_URL": base_url("puw_v54_test_runtime"),
+        "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations"),
         "GMAIL_AUTO_SYNC_ENABLED": "false",
         "AI_SECRETARY_AUTOMATION_ENABLED": "false",
     })
@@ -182,13 +183,15 @@ def main() -> None:
                 raise RuntimeError("migration_head_mismatch")
         run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
                   env=dict(env, PUW_V54_TEST_DATABASE_URL="", PUW_V54_SOURCE_TEST_DATABASE_URL="",
-                           PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_INTEGRATION_DATABASE_URL=""), timeout=900)
+                           PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_INTEGRATION_DATABASE_URL="",
+                           PUW_V54_PROVIDER_MIGRATION_DATABASE_URL=""), timeout=900)
         targets = [
             "backend/tests/test_v54_pilot_foundation.py",
             "backend/tests/test_v54_source_evidence_pilot.py", "backend/tests/test_v54_source_evidence_postgres.py",
             "backend/tests/test_v54_context_communication.py", "backend/tests/test_v54_context_communication_postgres.py",
             "backend/tests/test_v54_task_claims.py", "backend/tests/test_v54_action_trust.py",
             "backend/tests/test_v54_action_trust_external_contract.py",
+            "backend/tests/test_v54_provider_action_migration.py",
             "backend/tests/test_v54_pilot_integration.py", "backend/tests/test_v54_corpus_confirm_subset.py",
         ]
         run_phase("postgres_abc_integration", [sys.executable, "-m", "pytest", *targets, "-q", "--tb=short", "-rfsE"], env=env, timeout=900)

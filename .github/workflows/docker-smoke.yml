@@ -122,7 +122,7 @@ jobs:
                   with urllib.request.urlopen('http://backend:8000/api/readiness', timeout=5) as response:
                       report = json.load(response)
                   schema = report.get('checks', {}).get('schema', {})
-                  if report.get('ready') is True and schema.get('ok') is True and schema.get('message') == 'a54f001c0a05':
+                  if report.get('ready') is True and schema.get('ok') is True and schema.get('message') == 'a54f001c0a06':
                       print('CI_READINESS_OK')
                       break
               except (urllib.error.URLError, TimeoutError, ValueError, OSError):

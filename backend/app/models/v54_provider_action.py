@@ -1,14 +1,12 @@
-"""Wave 3 provider action records.
-
-The models are intentionally registered without an Alembic revision in this
-branch. The sequential a54f001c0a06 migration must be emitted after the
-parallel a54f001c0a05 owner lands; see the audit handoff.
-"""
+"""Wave 3 provider action records."""
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, event, inspect
+from sqlalchemy import (
+    Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index,
+    Integer, JSON, String, UniqueConstraint, event, inspect,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -17,6 +15,7 @@ from app.database import Base
 class ProviderAction(Base):
     __tablename__ = "v54_provider_actions"
     __table_args__ = (
+        UniqueConstraint("organization_id", "action_id", "revision", name="uq_v54_provider_action_scope"),
         UniqueConstraint("organization_id", "mailbox_key", "command_key", name="uq_v54_provider_command"),
         UniqueConstraint("organization_id", "idempotency_key", name="uq_v54_provider_idempotency"),
         CheckConstraint("revision > 0 AND organization_id > 0 AND project_id > 0", name="ck_v54_provider_action_scope"),
@@ -57,6 +56,14 @@ class ProviderActionApproval(Base):
     __tablename__ = "v54_provider_action_approvals"
     __table_args__ = (
         UniqueConstraint("action_id", "revision", name="uq_v54_provider_action_approval"),
+        UniqueConstraint("id", "organization_id", "action_id", "revision",
+                         name="uq_v54_provider_approval_binding"),
+        ForeignKeyConstraint(
+            ["organization_id", "action_id", "revision"],
+            ["v54_provider_actions.organization_id", "v54_provider_actions.action_id",
+             "v54_provider_actions.revision"],
+            name="fk_v54_provider_approval_action", ondelete="RESTRICT",
+        ),
         CheckConstraint("state IN ('GRANTED','REVOKED','EXPIRED')", name="ck_v54_provider_approval_state"),
         CheckConstraint("length(payload_hash) = 64 AND length(mailbox_key) = 64 AND length(envelope_hash) = 64",
                         name="ck_v54_provider_approval_hashes"),
@@ -82,7 +89,21 @@ class ProviderActionApproval(Base):
 
 class ProviderDispatchOutbox(Base):
     __tablename__ = "v54_provider_dispatch_outbox"
-    __table_args__ = (Index("ix_v54_provider_outbox_pending", "pending", "organization_id"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "action_id", "revision"],
+            ["v54_provider_actions.organization_id", "v54_provider_actions.action_id",
+             "v54_provider_actions.revision"],
+            name="fk_v54_provider_outbox_action", ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["approval_id", "organization_id", "action_id", "revision"],
+            ["v54_provider_action_approvals.id", "v54_provider_action_approvals.organization_id",
+             "v54_provider_action_approvals.action_id", "v54_provider_action_approvals.revision"],
+            name="fk_v54_provider_outbox_approval", ondelete="RESTRICT",
+        ),
+        Index("ix_v54_provider_outbox_pending", "pending", "organization_id"),
+    )
     action_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, primary_key=True)
     organization_id: Mapped[int] = mapped_column(Integer)
@@ -97,6 +118,12 @@ class ProviderExecutionAttempt(Base):
     __tablename__ = "v54_provider_execution_attempts"
     __table_args__ = (
         UniqueConstraint("attempt_id", name="uq_v54_provider_attempt_id"),
+        ForeignKeyConstraint(
+            ["organization_id", "action_id", "revision"],
+            ["v54_provider_actions.organization_id", "v54_provider_actions.action_id",
+             "v54_provider_actions.revision"],
+            name="fk_v54_provider_attempt_action", ondelete="RESTRICT",
+        ),
         CheckConstraint("state IN ('DISPATCHING','APPLIED','NOT_APPLIED','UNKNOWN')", name="ck_v54_provider_attempt_state"),
     )
     action_id: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -116,6 +143,12 @@ class ProviderOutcomeObservation(Base):
     __tablename__ = "v54_provider_outcome_observations"
     __table_args__ = (
         UniqueConstraint("action_id", "revision", "sequence", name="uq_v54_provider_observation_sequence"),
+        ForeignKeyConstraint(
+            ["organization_id", "action_id", "revision"],
+            ["v54_provider_actions.organization_id", "v54_provider_actions.action_id",
+             "v54_provider_actions.revision"],
+            name="fk_v54_provider_observation_action", ondelete="RESTRICT",
+        ),
         CheckConstraint("outcome IN ('APPLIED','NOT_APPLIED','UNKNOWN')", name="ck_v54_provider_observation_outcome"),
         CheckConstraint("source IN ('DISPATCH','RECONCILE','LATE_RECEIPT','PROCESS_RECOVERY')",
                         name="ck_v54_provider_observation_source"),
