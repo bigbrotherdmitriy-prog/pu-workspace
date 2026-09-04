@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import BinaryIO, Literal
+from uuid import UUID
 
 from pydantic import StrictInt, StrictStr, model_validator
 from sqlalchemy import select
@@ -29,6 +30,12 @@ _MEDIA = frozenset({
     "text/plain", "text/plain; charset=utf-8", "text/markdown",
     "text/markdown; charset=utf-8", "application/json",
     "application/json; charset=utf-8",
+})
+_SOURCE_MEDIA = frozenset({
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/csv", "text/markdown", "text/plain",
 })
 
 
@@ -56,7 +63,7 @@ class MaterializationManifest(StrictDTO):
     evidence_pin: VersionPin
     source_ref: ObjectRef
     source_version_pin: VersionPin
-    kind: Literal["extracted_text", "quote"]
+    kind: Literal["extracted_text", "quote", "source_object"]
     media_type: StrictStr
 
     @model_validator(mode="after")
@@ -67,13 +74,23 @@ class MaterializationManifest(StrictDTO):
         if (self.evidence_pin.ref.type != "evidence" or self.evidence_pin.value != 1
                 or self.source_ref.type != "source"
                 or self.source_version_pin.ref.type != "source_version"
-                or self.source_version_pin.value != 1 or self.media_type not in _MEDIA):
+                or self.source_version_pin.value != 1
+                or self.media_type not in (_SOURCE_MEDIA if self.kind == "source_object" else _MEDIA)):
             raise ValueError("resource_unavailable")
         return self
 
 
 class PurgeTombstone(StrictDTO):
     schema_version: Literal["v54.materialization.tombstone.1"]
+    outcome: Literal["completed", "cancelled"] | None = None
+    result: dict | None = None
+
+
+class RetiredMaterializationManifest(StrictDTO):
+    schema_version: Literal["v54.materialization.retired.1"]
+    storage: StoredDescriptor
+    outcome: Literal["completed", "cancelled"]
+    result: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,7 +164,8 @@ class MaterializationLifecycle:
     def admit(self, db, *, scope: RequestScope, evidence: VersionPin,
               source_version: VersionPin, residency: str, retention_until: datetime,
               kek: KekRef, allow_copy: bool = False, allow_derive: bool = False,
-              parent: VersionPin | None = None) -> VersionPin:
+              parent: VersionPin | None = None, materialization_id: str | None = None,
+              object_id: str | None = None) -> VersionPin:
         now = self._require(db, scope, "write", audit_required=True)
         if (not isinstance(evidence, VersionPin) or evidence.ref.type != "evidence"
                 or evidence.version_kind != "revision" or evidence.value != 1
@@ -194,12 +212,18 @@ class MaterializationLifecycle:
                     or parent_row.source_version_id != proof.source_version_id):
                 deny()
             parent_id = parent_row.id
+        if materialization_id is not None:
+            if type(materialization_id) is not str or str(UUID(materialization_id)) != materialization_id:
+                deny()
+        if object_id is not None and (type(object_id) is not str or not _OPAQUE.fullmatch(object_id)):
+            deny()
         row = Materialization(
+            id=materialization_id,
             organization_id=self.authority.policy.tenant_id,
             project_id=self.authority.policy.project_id,
             owner_id=int(scope.actor.id.value), source_id=proof.source_id,
             source_version_id=proof.source_version_id, evidence_id=proof.id,
-            parent_id=parent_id, object_id=new_object_id(), state="ADMITTED",
+            parent_id=parent_id, object_id=object_id or new_object_id(), state="ADMITTED",
             kek_reference=kek.reference, kek_version=kek.version,
             residency=residency, retention_until=retention_until,
             copy_allowed=allow_copy, derive_allowed=allow_derive, admitted_at=now,
@@ -230,12 +254,14 @@ class MaterializationLifecycle:
 
     @_boundary
     def seal(self, db, *, scope: RequestScope, materialization: VersionPin, fence: str,
-             source: BinaryIO, max_bytes: int, kind: Literal["extracted_text", "quote"],
+             source: BinaryIO, max_bytes: int,
+             kind: Literal["extracted_text", "quote", "source_object"],
              media_type: str) -> VersionPin:
         now = self._require(db, scope, "write", audit_required=True)
         row = self._load(db, scope, materialization, state={"WRITING"})
         if (row.active_fence != fence or type(max_bytes) is not int or max_bytes <= 0
-                or kind not in {"extracted_text", "quote"} or media_type not in _MEDIA):
+                or kind not in {"extracted_text", "quote", "source_object"}
+                or media_type not in (_SOURCE_MEDIA if kind == "source_object" else _MEDIA)):
             deny()
         descriptor = self.storage.write(
             row.object_id, source, max_bytes=max_bytes,
@@ -316,7 +342,9 @@ class MaterializationLifecycle:
         return result
 
     def _storage_descriptor(self, row) -> StagingDescriptor:
-        manifest = MaterializationManifest.model_validate(row.manifest)
+        manifest = (RetiredMaterializationManifest.model_validate(row.manifest)
+                    if row.state == "EXPIRED"
+                    else MaterializationManifest.model_validate(row.manifest))
         value = manifest.storage
         if (value.object_id != row.object_id or value.format_version != row.format_version
                 or value.chunk_size != row.chunk_size or value.kek_reference != row.kek_reference
@@ -329,15 +357,51 @@ class MaterializationLifecycle:
         )
 
     @_boundary
-    def read(self, db, *, scope: RequestScope, materialization: VersionPin,
-             max_bytes: int, for_copy: bool = False) -> bytes:
+    def authorize_read(self, db, *, scope: RequestScope,
+                       materialization: VersionPin, max_bytes: int,
+                       for_copy: bool = False) -> StagingDescriptor:
+        """Return a descriptor only; the transaction owner commits before I/O."""
         now = self._require(db, scope, "write" if for_copy else "fragment")
         row = self._load(db, scope, materialization, state={"DERIVED"})
         if (utc(row.retention_until) <= now or type(max_bytes) is not int or max_bytes <= 0
                 or type(for_copy) is not bool
                 or for_copy and (not row.copy_allowed or not self.authority.copy_allowed)):
             deny()
-        return b"".join(self.storage.read_chunks(self._storage_descriptor(row), max_bytes=max_bytes))
+        return self._storage_descriptor(row)
+
+    @_boundary
+    def read(self, db, *, scope: RequestScope, materialization: VersionPin,
+             max_bytes: int, for_copy: bool = False) -> bytes:
+        descriptor = self.authorize_read(
+            db, scope=scope, materialization=materialization,
+            max_bytes=max_bytes, for_copy=for_copy,
+        )
+        return b"".join(self.storage.read_chunks(descriptor, max_bytes=max_bytes))
+
+    @_boundary
+    def retire(self, db, *, scope: RequestScope, materialization: VersionPin,
+               outcome: Literal["completed", "cancelled"],
+               result: dict | None = None) -> VersionPin:
+        """Authorize early cleanup after a durable terminal processing outcome."""
+        now = self._require(db, scope, "write", audit_required=True)
+        if not self.authority.retention_owner or outcome not in {"completed", "cancelled"}:
+            deny()
+        row = self._load(db, scope, materialization, state={"DERIVED"})
+        storage = MaterializationManifest.model_validate(row.manifest).storage
+        retired = RetiredMaterializationManifest(
+            schema_version="v54.materialization.retired.1", storage=storage,
+            outcome=outcome, result=result,
+        )
+        cas(db, Materialization, [Materialization.id == row.id,
+            Materialization.organization_id == row.organization_id,
+            Materialization.state == "DERIVED"], materialization.value,
+            state="EXPIRED", expired_at=now, active_fence=None,
+            manifest=retired.model_dump(mode="json"))
+        result_pin = VersionPin(ref=materialization.ref, version_kind="record_version",
+                                value=materialization.value + 1)
+        audit(db, self.authority.policy, scope, result_pin.ref,
+              "MATERIALIZATION_EXPIRED", now, result_pin)
+        return result_pin
 
     @_boundary
     def expire(self, db, *, scope: RequestScope, materialization: VersionPin) -> VersionPin:
@@ -370,11 +434,19 @@ class MaterializationLifecycle:
             deny()
         row = self._load(db, scope, materialization, state={"EXPIRED"})
         self.storage.delete(row.object_id)
+        retired = None
+        try:
+            retired = RetiredMaterializationManifest.model_validate(row.manifest)
+        except Exception:
+            pass
         cas(db, Materialization, [Materialization.id == row.id,
             Materialization.organization_id == row.organization_id,
             Materialization.state == "EXPIRED"], materialization.value,
             state="PURGED", manifest=PurgeTombstone(
-                schema_version="v54.materialization.tombstone.1").model_dump(mode="json"),
+                schema_version="v54.materialization.tombstone.1",
+                outcome=retired.outcome if retired else None,
+                result=retired.result if retired else None,
+            ).model_dump(mode="json", exclude_none=True),
             wrapped_dek=None, format_version=None, chunk_size=None, active_fence=None,
             purged_at=now)
         result = VersionPin(ref=materialization.ref, version_kind="record_version",

@@ -1,10 +1,11 @@
 # v5.4 local upload encrypted staging — synthetic audit
 
-Дата: 2026-09-04. Ветка: `codex/v54-local-upload-staging`.
-База: `f721634762944e8bf9020e99c50f504678291296`.
+Дата: 2026-09-04. Ветка: `codex/v54-local-upload-a05-wiring`.
+База: `7509767`.
 
-Вердикт: **local slice и synthetic contract готовы; production wiring
-fail-closed до интеграции a05 lifecycle**.
+Вердикт: **local slice содержательно подключён к a05 SourceVersion и
+MaterializationLifecycle; composition остаётся fail-closed без явно
+инъецированной authority**.
 
 ## Область изменения
 
@@ -17,20 +18,30 @@ Local upload больше не извлекает и не индексирует
 Alembic migrations, production Compose и deployment. Push, merge, PR и доступ к
 production не выполнялись.
 
-## Граница a05
+## Реальная граница a05
 
-`LocalUploadLifecycleAdapter` — обязательная fail-closed граница composition.
-Raw backend нельзя передать в `LocalUploadRuntime`. Adapter не импортирует
-незавершённую a05 schema и не реализует вторую persistence-модель. Будущий a05
-owner должен предоставить пять scoped durable операций:
+`LocalUploadLifecycleAdapter` остаётся fail-closed границей composition, а
+`A05LocalUploadLifecycle` является её concrete backend. Вторая persistence-
+модель и новая очередь не создавались. Backend пишет настоящие
+`SourceReference`, immutable `SourceVersion`, `Evidence` и
+`Materialization`, а переходы representation делегирует существующему
+`MaterializationLifecycle`.
 
-1. `reserve`: idempotent request reservation с owner/project, fingerprint,
-   opaque object/fence и retention;
-2. `publish`: CAS binding зашифрованного descriptor, checksum и exact size;
-3. `bind_job`: durable binding к существующему `BackgroundJob.id`;
-4. `load_for_processing`: загрузка только по opaque staging ID и текущему
-   claimed job ID с восстановлением server-side scope и manifest;
-5. `finalize`: durable terminal decision и explicit cleanup authorization.
+Связи точные и проверяются перед каждым чтением/terminal transition:
+
+- authenticated owner и project восстанавливаются server-side из
+  materialization и сверяются с injected authority;
+- `staging_id` является hyphenless UUID того же materialization/representation;
+- SourceVersion, Evidence, representation и storage object связаны FK и
+  manifest pins;
+- BackgroundJob находится по exact idempotency binding и обязан иметь payload
+  только `{"staging_id": ...}`;
+- worker claim сравнивается с job id, worker id, attempt, locked_at и живой
+  `lease_expires_at`.
+
+`authority_factory` — обязательная server-side composition dependency. HTTP
+body/job payload не может создать policy grant. Без неё runtime по-прежнему
+возвращает стабильный `503` до первого staging effect.
 
 Отсутствующий/частичный backend, несовместимый DTO или любое его исключение
 нормализуются в `local_upload_lifecycle_unavailable`. Текст исключения не
@@ -62,23 +73,25 @@ Processor result имеет exact allowlist целочисленных счёт�
 message, ни payload, ни имя/путь, ни содержимое, ни cryptographic material не
 логируются этим slice. Infrastructure error в API — content-free `503`.
 
-## Durability и cleanup
+## Durability, lease и cleanup
 
-`enqueue()` сохраняет published lifecycle row вместе с durable job в текущем
-public queue contract. Затем `bind_job` выполняется как отдельный durable
-transition. Узкое падение между этими шагами восстанавливается повтором того же
-request: queue idempotency возвращает прежний job, после чего binding
-повторяется. Ошибка commit приводит к rollback и stable availability error.
+Границы транзакций явные: admission/fence commit выполняется до ciphertext
+write; sealed/derived SourceVersion binding commit — до enqueue; job binding
+commit — до ответа; live lease/source authorization commit — до decrypt/read;
+business result commit — до finalize; terminal decision commit — до delete;
+purge tombstone commit — после idempotent delete.
 
-Worker сначала durable-коммитит terminal lifecycle decision, затем выполняет
-идемпотентное удаление ciphertext. Completed требует explicit
-`delete_ciphertext=true`; при failure ciphertext сохраняется, если lifecycle не
-разрешил удаление; cancellation очищается только по явному decision. Cleanup не
-делается до durable finalization.
+Completed и cancelled переходят `DERIVED → EXPIRED`, сохраняя content-free
+outcome/result и storage descriptor для restart recovery. После durable
+finalization ciphertext удаляется, затем lifecycle создаёт `PURGED` tombstone.
+Crash в любом из этих промежутков повторяет delete/purge без повторной обработки.
+Failed остаётся `DERIVED`, сохраняет ciphertext до retention и может быть
+повторно claimed; старый/истёкший claim не может читать или финализировать.
 
 ## Synthetic negative coverage
 
-`test_v54_local_upload_staging.py` проверяет:
+`test_v54_local_upload_staging.py` и
+`test_v54_local_upload_a05_wiring.py` проверяют:
 
 - filename/MIME normalization, owner/project scope и size/MIME admission;
 - authorization до decode/staging и whole-batch admission до первого write;
@@ -94,25 +107,29 @@ Worker сначала durable-коммитит terminal lifecycle decision, за
 - completed/cancelled/failed finalize policy;
 - commit-before-delete ordering и idempotent delete;
 - отсутствие Telegram/provider side effect в local business processor;
-- queued API response без file content/path/client idempotency value.
+- queued API response без file content/path/client idempotency value;
+- exact Source/SourceVersion/Evidence/representation/object/job binding;
+- full SQLite round trip, idempotent re-admission and safe audit surfaces;
+- completed/cancelled purge, failed retention и restart между finalize/delete;
+- expired lease rejection и recovery новым worker claim.
+
+`test_v54_local_upload_a05_postgres.py` условно проверяет на отдельной
+локальной test-БД конкурентные old/current lease attempts: только current
+worker получает authorization на materialization read.
 
 Проверки на Python 3.13.14:
 
-- focused local upload: `28 passed`;
-- staging/queue/local relevant suite: `114 passed, 2 skipped`;
-- полный backend: `988 passed, 11 skipped`, один baseline failure в неизменённом
-  `test_v54_source_evidence_pilot.py::test_transaction_is_required_and_correlation_cannot_leak_text`;
-- тот же одиночный тест на чистой base-worktree `f721634` воспроизводит failure:
-  Python 3.13 включает строку вызова теста с synthetic marker в
-  `traceback.format_exception`, то есть это не local-upload regression.
+- real-a05 SQLite integration: `5 passed`;
+- focused lifecycle/local/conditional PostgreSQL: `42 passed, 3 skipped`;
+- полный backend: `1033 passed, 14 skipped`.
 
 `git diff --check` выполняется перед commit. `.pytest-tmp` является только
 локальным test artifact и не входит в commit.
 
-## Явные блокеры следующего интегратора
+## Явная rollout граница
 
-Этот commit намеренно не включает a05 model/migration/composition. До включения
-feature должны быть интегрированы authoritative Source/Version/policy pins,
-tenant/organization scope, live revoke/offline-processing checks, retention
-owner и recovery/purge reconciliation. Разрешение на local staging само по себе
-не разрешает OCR, AI/provider action, derived artifacts или permanent copy.
+Новая migration, queue, production Compose и автоматическое production-enable
+не добавлялись. Production runtime должен явно передать policy-backed
+`authority_factory`, KEK resolver, residency и private shared storage. Разрешение
+на local staging само по себе не разрешает OCR, AI/provider action, derived
+artifacts или permanent copy.

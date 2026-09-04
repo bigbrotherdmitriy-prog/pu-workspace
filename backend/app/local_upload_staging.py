@@ -102,6 +102,18 @@ class MaterializedUpload:
 
 
 @dataclass(frozen=True, slots=True)
+class FinalizedUpload:
+    """Durable cleanup recovery returned after a worker restart."""
+
+    staging_id: str
+    scope: UploadScope
+    descriptor: StagingDescriptor | None
+    job_id: int
+    outcome: Literal["completed", "cancelled"]
+    result: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CleanupDecision:
     delete_ciphertext: bool
     retention_until: datetime | None = None
@@ -121,7 +133,7 @@ class LocalUploadLifecycle(Protocol):
     def reserve(
         self, session: Any, *, scope: UploadScope, request_key: str,
         object_id: str, fence: str, fingerprint: str, display_name: str,
-        mime_type: str, expires_at: datetime,
+        mime_type: str, checksum: str, size: int, expires_at: datetime,
     ) -> UploadReservation: ...
 
     def publish(
@@ -135,12 +147,19 @@ class LocalUploadLifecycle(Protocol):
 
     def load_for_processing(
         self, session: Any, *, staging_id: str, job_id: int,
-    ) -> MaterializedUpload: ...
+        claim: tuple[Any, ...],
+    ) -> MaterializedUpload | FinalizedUpload: ...
 
     def finalize(
         self, session: Any, *, scope: UploadScope, staging_id: str, job_id: int,
-        outcome: Literal["completed", "cancelled", "failed"],
+        claim: tuple[Any, ...], outcome: Literal["completed", "cancelled", "failed"],
+        result: Mapping[str, Any] | None = None,
     ) -> CleanupDecision: ...
+
+    def complete_cleanup(
+        self, session: Any, *, scope: UploadScope, staging_id: str, job_id: int,
+        claim: tuple[Any, ...],
+    ) -> None: ...
 
 
 class LocalUploadLifecycleAdapter:
@@ -178,8 +197,13 @@ class LocalUploadLifecycleAdapter:
     def bind_job(self, session: Any, **kwargs: Any) -> UploadReservation:
         return self._call("bind_job", UploadReservation, session, **kwargs)
 
-    def load_for_processing(self, session: Any, **kwargs: Any) -> MaterializedUpload:
-        return self._call("load_for_processing", MaterializedUpload, session, **kwargs)
+    def load_for_processing(
+        self, session: Any, **kwargs: Any,
+    ) -> MaterializedUpload | FinalizedUpload:
+        result = self._call("load_for_processing", object, session, **kwargs)
+        if not isinstance(result, (MaterializedUpload, FinalizedUpload)):
+            raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
+        return result
 
     def finalize(self, session: Any, **kwargs: Any) -> CleanupDecision:
         decision = self._call("finalize", CleanupDecision, session, **kwargs)
@@ -191,6 +215,17 @@ class LocalUploadLifecycleAdapter:
         ):
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         return decision
+
+    def complete_cleanup(self, session: Any, **kwargs: Any) -> None:
+        function = getattr(self.__backend, "complete_cleanup", None)
+        if not callable(function):
+            raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
+        try:
+            result = function(session, **kwargs)
+        except Exception:
+            raise LocalUploadUnavailable("local_upload_lifecycle_unavailable") from None
+        if result is not None:
+            raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
 
 
 @runtime_checkable
@@ -408,11 +443,17 @@ def stage_and_enqueue(
         session, scope=scope, request_key=scoped_key, object_id=new_object_id(),
         fence=new_fence(), fingerprint=fingerprint,
         display_name=candidate.display_name, mime_type=candidate.mime_type,
+        checksum=checksum, size=len(candidate.content),
         expires_at=datetime.now(timezone.utc) + runtime.retention,
     )
     reservation = _validate_reservation(reservation, fingerprint=fingerprint)
     if reservation.job_id is not None:
+        _commit(session, "local_upload_existing_binding_unavailable")
         return EnqueuedUpload(reservation.staging_id, reservation.job_id, "already_queued")
+
+    # Admission and its write fence must be durable before ciphertext I/O.
+    # A restart reuses the same object/fence and the storage write is recoverable.
+    _commit(session, "local_upload_admission_unavailable")
 
     descriptor = reservation.descriptor
     if descriptor is None:
@@ -431,6 +472,10 @@ def stage_and_enqueue(
         reservation = _validate_reservation(reservation, fingerprint=fingerprint)
         if reservation.descriptor != descriptor:
             raise LocalUploadConflict("descriptor_binding_conflict")
+
+    # The exact representation/source-version binding must exist before the
+    # queue can make this materialization visible to a worker.
+    _commit(session, "local_upload_publication_unavailable")
 
     payload = _job_payload(reservation.staging_id)
     if set(payload) != ALLOWED_JOB_KEYS:
@@ -553,12 +598,30 @@ def run_local_upload_job(payload: Mapping[str, Any]) -> dict[str, Any]:
     if job_id <= 0:
         raise LocalUploadUnavailable("invalid_job_claim")
     with runtime.session_factory() as session:
-        record = _validated_materialization(
-            runtime.lifecycle.load_for_processing(
-                session, staging_id=staging_id, job_id=job_id,
-            ),
-            staging_id=staging_id, job_id=job_id, runtime=runtime,
+        loaded = runtime.lifecycle.load_for_processing(
+            session, staging_id=staging_id, job_id=job_id, claim=claim,
         )
+        if isinstance(loaded, FinalizedUpload):
+            _commit(session, "local_upload_read_authorization_unavailable")
+            if loaded.descriptor is not None:
+                cleanup_finalized_upload(runtime, MaterializedUpload(
+                    staging_id=loaded.staging_id, scope=loaded.scope,
+                    display_name="recovery", mime_type="text/plain", checksum="0" * 64,
+                    size=0, descriptor=loaded.descriptor, job_id=loaded.job_id,
+                ), CleanupDecision(True))
+                runtime.lifecycle.complete_cleanup(
+                    session, scope=loaded.scope, staging_id=staging_id,
+                    job_id=job_id, claim=claim,
+                )
+                _commit(session, "local_upload_cleanup_ack_unavailable")
+            if loaded.outcome == "cancelled":
+                return {"cancelled": True, "staging_id": staging_id}
+            return {"staging_id": staging_id, **_validated_result(loaded.result or {})}
+        record = _validated_materialization(
+            loaded, staging_id=staging_id, job_id=job_id, runtime=runtime,
+        )
+        # Commit the live lease/source/version authorization before plaintext read.
+        _commit(session, "local_upload_read_authorization_unavailable")
         try:
             content = b"".join(runtime.storage.read_chunks(record.descriptor, max_bytes=runtime.max_file_bytes))
             actual = hashlib.sha256(content).hexdigest()
@@ -569,28 +632,47 @@ def run_local_upload_job(payload: Mapping[str, Any]) -> dict[str, Any]:
                 operation_key=f"local-upload:{staging_id}",
             ))
         except LocalUploadCancelled:
+            rollback = getattr(session, "rollback", None)
+            if callable(rollback):
+                rollback()
             decision = runtime.lifecycle.finalize(
                 session, scope=record.scope, staging_id=staging_id, job_id=job_id,
-                outcome="cancelled",
+                claim=claim, outcome="cancelled",
             )
             _commit(session, "local_upload_finalization_unavailable")
             cleanup_finalized_upload(runtime, record, decision)
+            runtime.lifecycle.complete_cleanup(
+                session, scope=record.scope, staging_id=staging_id,
+                job_id=job_id, claim=claim,
+            )
+            _commit(session, "local_upload_cleanup_ack_unavailable")
             return {"cancelled": True, "staging_id": staging_id}
         except Exception:
+            rollback = getattr(session, "rollback", None)
+            if callable(rollback):
+                rollback()
             decision = runtime.lifecycle.finalize(
                 session, scope=record.scope, staging_id=staging_id, job_id=job_id,
-                outcome="failed",
+                claim=claim, outcome="failed",
             )
             _commit(session, "local_upload_finalization_unavailable")
             cleanup_finalized_upload(runtime, record, decision)
             log.warning("Local upload job failed; error_type=processing_failure")
             raise
+        # Business rows converge on operation_key and commit before lifecycle
+        # finalization, so a crash can safely resume cleanup without reprocessing.
+        _commit(session, "local_upload_processing_commit_unavailable")
         decision = runtime.lifecycle.finalize(
             session, scope=record.scope, staging_id=staging_id, job_id=job_id,
-            outcome="completed",
+            claim=claim, outcome="completed", result=result,
         )
         if not decision.delete_ciphertext:
             raise LocalUploadStagingError("completed_cleanup_not_authorized")
         _commit(session, "local_upload_finalization_unavailable")
         cleanup_finalized_upload(runtime, record, decision)
+        runtime.lifecycle.complete_cleanup(
+            session, scope=record.scope, staging_id=staging_id,
+            job_id=job_id, claim=claim,
+        )
+        _commit(session, "local_upload_cleanup_ack_unavailable")
         return {"staging_id": staging_id, **result}

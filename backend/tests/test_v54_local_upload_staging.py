@@ -69,7 +69,7 @@ class SyntheticLifecycle:
 
     def reserve(
         self, session, *, scope, request_key, object_id, fence, fingerprint,
-        display_name, mime_type, expires_at,
+        display_name, mime_type, checksum, size, expires_at,
     ) -> UploadReservation:
         existing_id = self.requests.get(request_key)
         if existing_id is not None:
@@ -79,6 +79,7 @@ class SyntheticLifecycle:
             "staging_id": staging_id, "scope": scope, "request_key": request_key,
             "object_id": object_id, "fence": fence, "fingerprint": fingerprint,
             "display_name": display_name, "mime_type": mime_type,
+            "checksum": checksum, "size": size,
             "expires_at": expires_at, "state": "reserved",
         }
         self.rows[staging_id] = row
@@ -99,7 +100,7 @@ class SyntheticLifecycle:
         row.update(job_id=job_id, state="queued")
         return self._reservation(row)
 
-    def load_for_processing(self, session, *, staging_id, job_id):
+    def load_for_processing(self, session, *, staging_id, job_id, claim=None):
         row = self.rows[staging_id]
         if row.get("job_id") != job_id:
             raise LocalUploadConflict("materialization_binding_conflict")
@@ -110,12 +111,15 @@ class SyntheticLifecycle:
             descriptor=row["descriptor"], job_id=job_id,
         )
 
-    def finalize(self, session, *, scope, staging_id, job_id, outcome):
+    def finalize(self, session, *, scope, staging_id, job_id, outcome, claim=None, result=None):
         row = self.rows[staging_id]
         assert row["scope"] == scope and row["job_id"] == job_id
         row["state"] = outcome
         self.finalized.append((staging_id, outcome))
         return self.cleanup_by_outcome[outcome]
+
+    def complete_cleanup(self, session, **kwargs):
+        return None
 
 
 class SyntheticProcessor:
@@ -135,13 +139,15 @@ class SyntheticProcessor:
 
 
 class SyntheticSession:
-    def __init__(self, events=None, fail_commit=False) -> None:
+    def __init__(self, events=None, fail_commit: bool | int = False) -> None:
         self.events = events if events is not None else []
         self.fail_commit = fail_commit
 
     def commit(self):
         self.events.append("commit")
-        if self.fail_commit:
+        if (self.fail_commit is True
+                or type(self.fail_commit) is int
+                and self.fail_commit == self.events.count("commit")):
             raise RuntimeError("SECRET SQL filename=C:/private.txt key=raw")
 
     def rollback(self):
@@ -405,7 +411,7 @@ def test_job_binding_commit_failure_is_stable_and_rolls_back(tmp_path, monkeypat
     runtime = make_runtime(tmp_path, lifecycle)
     captured = []
     enqueue_once(monkeypatch, captured)
-    session = SyntheticSession(fail_commit=True)
+    session = SyntheticSession(fail_commit=3)
     with caplog.at_level(logging.WARNING):
         with pytest.raises(
             LocalUploadUnavailable, match="^local_upload_job_binding_unavailable$",
@@ -415,7 +421,7 @@ def test_job_binding_commit_failure_is_stable_and_rolls_back(tmp_path, monkeypat
                 candidate=UploadCandidate("private.txt", "text/plain", b"secret body"),
                 request_key="request-commit", index=0,
             )
-    assert session.events == ["commit", "rollback"]
+    assert session.events == ["commit", "commit", "commit", "rollback"]
     assert "private.txt" not in caplog.text
     assert "secret body" not in caplog.text
 
@@ -465,7 +471,7 @@ def test_finalization_is_committed_before_ciphertext_cleanup(tmp_path, monkeypat
     )
     install_claim(monkeypatch, queued.job_id)
     run_local_upload_job(job_payload(captured))
-    assert events == ["commit", "delete"]
+    assert events == ["commit", "commit", "commit", "delete", "commit"]
 
 
 def test_worker_rejects_descriptor_key_rebinding_before_decrypt(tmp_path, monkeypatch):
