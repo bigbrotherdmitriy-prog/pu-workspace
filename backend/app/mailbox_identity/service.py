@@ -8,7 +8,9 @@ from uuid import uuid4
 
 from sqlalchemy import select, update
 
-from app.mailbox_identity.runtime import provider_locator, require_mailbox_authority
+from app.mailbox_identity.runtime import (
+    provider_locator, require_mailbox_authority, rollout_flags_are_valid,
+)
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
 from app.models.mailbox_identity import (
@@ -22,7 +24,10 @@ from app.models.v54_pilot import (
     ConnectionIdentity, Evidence, EvidenceAssessment, MailConnection,
     SourceCurrent, SourceReference, SourceVersion,
 )
-from app.mailbox_identity.dto import ReconciliationCommand, ReconciliationResult
+from app.mailbox_identity.dto import (
+    MailboxRolloutResult, MailboxRolloutTransition,
+    ReconciliationCommand, ReconciliationResult,
+)
 
 
 class MailboxConflict(ValueError):
@@ -136,6 +141,111 @@ class MailboxIdentityService:
             MailboxCutoverFlags.credential_generation == generation,
         ))
         return row
+
+    def change_rollout_flags(self, db, command: MailboxRolloutTransition, *, actor: User,
+                             expected_record_version: int) -> MailboxRolloutResult:
+        """CAS one human-confirmed flag transition in the caller transaction."""
+        command = MailboxRolloutTransition.model_validate(command)
+        _trusted_actor(db, actor)
+        if type(expected_record_version) is not int or expected_record_version <= 0:
+            _fail("flags_version_conflict")
+
+        # Match the credential rotation lock order: generation, identity, then
+        # connection. This makes rotation and rollout mutually serializable.
+        mail_hint = db.scalar(select(MailConnection).where(
+            MailConnection.organization_id == command.organization_id,
+            MailConnection.id == command.mail_connection_id,
+        ))
+        generation = db.scalar(select(MailboxCredentialGeneration).where(
+            MailboxCredentialGeneration.organization_id == command.organization_id,
+            MailboxCredentialGeneration.connection_identity_id == (
+                mail_hint.identity_id if mail_hint else None
+            ),
+            MailboxCredentialGeneration.generation == command.credential_generation,
+            MailboxCredentialGeneration.binding_epoch == command.binding_epoch,
+            MailboxCredentialGeneration.state == "active",
+        ).with_for_update())
+        identity = db.scalar(select(ConnectionIdentity).where(
+            ConnectionIdentity.organization_id == command.organization_id,
+            ConnectionIdentity.id == (generation.connection_identity_id if generation else None),
+        ).with_for_update())
+        mail = db.scalar(select(MailConnection).where(
+            MailConnection.organization_id == command.organization_id,
+            MailConnection.id == command.mail_connection_id,
+        ).with_for_update())
+        if (not mail or mail.state != "active" or mail.namespace != "gmail"
+                or not identity or identity.organization_id != command.organization_id
+                or identity.state != "verified"
+                or identity.binding_epoch != command.binding_epoch
+                or identity.credential_generation != command.credential_generation
+                or not generation):
+            _fail()
+
+        flags = db.scalar(select(MailboxCutoverFlags).where(
+            MailboxCutoverFlags.organization_id == command.organization_id,
+            MailboxCutoverFlags.mail_connection_id == command.mail_connection_id,
+            MailboxCutoverFlags.credential_generation == command.credential_generation,
+        ).with_for_update())
+        if not flags or flags.record_version != expected_record_version:
+            _fail("flags_version_conflict")
+        try:
+            runtime = type("RolloutRuntime", (), {
+                "organization_id": command.organization_id,
+                "mail_connection_id": command.mail_connection_id,
+            })()
+            require_mailbox_authority(
+                db,
+                runtime=runtime,
+                actor=actor,
+                permission="rollout",
+                expected_version=command.authority_version,
+            )
+        except ValueError:
+            _fail()
+
+        if not rollout_flags_are_valid(flags) or getattr(flags, command.flag) is command.enabled:
+            _fail()
+        next_values = {
+            name: getattr(flags, name) for name in (
+                "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"
+            )
+        }
+        next_values[command.flag] = command.enabled
+        candidate = type("RolloutCandidate", (), next_values)()
+        if not rollout_flags_are_valid(candidate):
+            _fail()
+
+        next_version = expected_record_version + 1
+        result = db.execute(update(MailboxCutoverFlags).where(
+            MailboxCutoverFlags.id == flags.id,
+            MailboxCutoverFlags.organization_id == command.organization_id,
+            MailboxCutoverFlags.mail_connection_id == command.mail_connection_id,
+            MailboxCutoverFlags.credential_generation == command.credential_generation,
+            MailboxCutoverFlags.record_version == expected_record_version,
+        ).values(**{command.flag: command.enabled}, record_version=next_version)
+         .execution_options(synchronize_session="fetch"))
+        if result.rowcount != 1:
+            _fail("flags_version_conflict")
+        db.add(AuditLog(
+            action="mailbox_rollout_transition_confirmed",
+            entity_type="mailbox_cutover_flags",
+            entity_id=flags.id,
+            details=(f"flag={command.flag};enabled={str(command.enabled).lower()};"
+                     f"from_version={expected_record_version};to_version={next_version};"
+                     f"actor_user_id={actor.id}"),
+        ))
+        db.flush()
+        db.refresh(flags)
+        return MailboxRolloutResult(
+            flag=command.flag,
+            enabled=command.enabled,
+            record_version=flags.record_version,
+            shadow_write=flags.shadow_write,
+            shadow_read_compare=flags.shadow_read_compare,
+            pilot_write=flags.pilot_write,
+            primary_read=flags.primary_read,
+            actions=flags.actions,
+        )
 
     @staticmethod
     def _authority(db, command, organization_id, actor):

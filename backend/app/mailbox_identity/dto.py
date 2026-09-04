@@ -1,6 +1,8 @@
 from typing import Literal
 
-from pydantic import Field, StrictInt, StrictStr, model_validator
+from uuid import UUID
+
+from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from app.core.v54_refs import StrictDTO
 
@@ -57,3 +59,46 @@ class ReconciliationResult(StrictDTO):
     origin_version: StrictInt
     state: Literal["unresolved", "confirmed", "rejected"]
     idempotent_replay: bool = False
+
+
+class MailboxRolloutTransition(StrictDTO):
+    """One explicitly confirmed transition for one exact mailbox generation."""
+
+    organization_id: StrictInt
+    mail_connection_id: StrictStr = Field(min_length=36, max_length=36)
+    credential_generation: StrictInt
+    binding_epoch: StrictInt
+    authority_version: StrictInt
+    flag: Literal[
+        "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"
+    ]
+    enabled: StrictBool
+    approval: Literal["CONFIRM"]
+
+    @model_validator(mode="after")
+    def exact_positive_pins(self):
+        if any(type(value) is not int or value <= 0 for value in (
+            self.organization_id,
+            self.credential_generation,
+            self.binding_epoch,
+            self.authority_version,
+        )):
+            raise ValueError("invalid_rollout_transition")
+        try:
+            UUID(self.mail_connection_id)
+        except (TypeError, ValueError, AttributeError):
+            raise ValueError("invalid_rollout_transition") from None
+        return self
+
+
+class MailboxRolloutResult(StrictDTO):
+    flag: Literal[
+        "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"
+    ]
+    enabled: StrictBool
+    record_version: StrictInt
+    shadow_write: StrictBool
+    shadow_read_compare: StrictBool
+    pilot_write: StrictBool
+    primary_read: StrictBool
+    actions: StrictBool

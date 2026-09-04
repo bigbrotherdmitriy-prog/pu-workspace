@@ -28,6 +28,12 @@ from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceCurrent, So
 NOW = datetime.now(timezone.utc)
 
 
+def enable_rollout(flags, through):
+    order = ("shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions")
+    for name in order[:order.index(through) + 1]:
+        setattr(flags, name, True)
+
+
 def world(db_session, user_factory):
     db = db_session
     user = user_factory()
@@ -248,7 +254,7 @@ def test_revoked_generation_and_actions_false_deny(db_session, user_factory):
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
     with pytest.raises(ValueError): runtime_for_message(w.db, w.message, actor=w.user, action=True)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = True; flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     w.identity.state = "revoked"; w.db.flush()
     with pytest.raises(ValueError): runtime_for_message(w.db, w.message, actor=w.user, action=True)
 
@@ -265,7 +271,7 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
     from app.api import gmail
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = True; flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     other = Project(name="Moved context", organization_id=w.org.id); w.db.add(other); w.db.flush()
     w.message.project_id = other.id
     w.message.source_thread_id = "legacy-wrong-thread"
@@ -291,7 +297,7 @@ def test_attachment_uses_origin_mailbox_adapter(db_session, user_factory, monkey
     from app.api import gmail
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = True; flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     w.message.source_external_id = "legacy-wrong-message"
     w.message.attachments_json = '[{"name":"safe.txt","mime_type":"text/plain","size":4,"attachment_id":"attachment-synthetic","document_external_id":"document-synthetic"}]'
     calls = []
@@ -319,7 +325,7 @@ def test_attachment_uses_origin_mailbox_adapter(db_session, user_factory, monkey
 def test_reconcile_revokes_confirmed_runtime_without_rewriting_history(db_session, user_factory, outcome, state):
     w = world(db_session, user_factory); service = MailboxIdentityService()
     first = service.reconcile(w.db, command(w), actor=w.user)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     assert runtime_for_message(w.db, w.message, actor=w.user, action=True).provider_message_id == w.source.external_id
     result = service.reconcile(w.db, command(w, decision_key=f"decision-{state}", outcome=outcome), actor=w.user)
     assert result.state == state
@@ -346,7 +352,7 @@ def test_runtime_requires_current_binding_exact_generation_and_locator(db_sessio
     w.message.mail_connection_id = w.mail.id
     w.message.provider_message_id = w.source.external_id
     w.message.source_reference_id = w.source.id
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     with pytest.raises(ValueError, match="resource_unavailable"):
         runtime_for_message(w.db, w.message, actor=w.user, action=True)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
@@ -402,7 +408,7 @@ def test_provider_observed_ingress_creates_authoritative_current_binding(db_sess
 def test_gmail_pilot_ingress_wires_observation_binding_and_current(db_session, user_factory, monkeypatch):
     from app.api import ai_secretary, gmail
     w = world(db_session, user_factory)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.pilot_write = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "pilot_write")
     item = {"id": "new-provider-message", "threadId": "new-provider-thread", "historyId": "history-1",
         "labelIds": ["INBOX"], "payload": {"mimeType": "text/plain", "headers": [
             {"name": "Subject", "value": "Synthetic"},
@@ -442,7 +448,7 @@ def test_shared_subject_project_resolves_current_mailbox_generation(db_session, 
         subject=w.identity.account_key, now=NOW)
     current_flags = w.db.scalar(select(MailboxCutoverFlags).where(
         MailboxCutoverFlags.credential_generation == generation2))
-    current_flags.pilot_write = True; w.db.flush()
+    enable_rollout(current_flags, "pilot_write"); w.db.flush()
     runtime = runtime_for_project_connection(w.db, w.project.id)
     assert runtime.generation == generation2 and runtime.google_token_id == token2.id
 
@@ -450,7 +456,7 @@ def test_shared_subject_project_resolves_current_mailbox_generation(db_session, 
 def test_rotated_mailbox_cohort_never_falls_back_to_project_token(db_session, user_factory, monkeypatch):
     from app.api import gmail
     w = world(db_session, user_factory)
-    old_flags = w.db.scalar(select(MailboxCutoverFlags)); old_flags.pilot_write = True
+    old_flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(old_flags, "pilot_write")
     project2 = Project(name="Credential owner", organization_id=w.org.id); w.db.add(project2); w.db.flush()
     token2 = GoogleOAuthToken(project_id=project2.id, token_uri="https://oauth2.googleapis.com/token")
     w.db.add(token2); w.db.flush()
@@ -469,7 +475,7 @@ def test_rotated_mailbox_cohort_never_falls_back_to_project_token(db_session, us
 def test_runtime_requires_actor_mailbox_action_authority(db_session, user_factory):
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     authority = w.db.scalar(select(MailboxAuthorityState)); authority.permissions = ["reconcile"]
     with pytest.raises(ValueError, match="resource_unavailable"):
         runtime_for_message(w.db, w.message, actor=w.user, action=True)
@@ -478,7 +484,7 @@ def test_runtime_requires_actor_mailbox_action_authority(db_session, user_factor
 def test_runtime_rechecks_exact_evidence_assessment_pin(db_session, user_factory):
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
-    flags = w.db.scalar(select(MailboxCutoverFlags)); flags.primary_read = flags.actions = True
+    flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     assessment = w.db.get(EvidenceAssessment, w.evidence.id)
     assessment.record_version += 1; assessment.freshness = "stale"; w.db.flush()
     with pytest.raises(ValueError, match="resource_unavailable"):

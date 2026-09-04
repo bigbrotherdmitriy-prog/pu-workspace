@@ -41,6 +41,21 @@ def _aware(value):
     return value.replace(tzinfo=timezone.utc) if value and value.tzinfo is None else value
 
 
+def rollout_flags_are_valid(flags):
+    """Validate the only rollout lattice accepted by runtime and control paths."""
+    values = tuple(getattr(flags, name, None) for name in (
+        "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"
+    ))
+    if any(type(value) is not bool for value in values):
+        return False
+    shadow_write, shadow_read_compare, pilot_write, primary_read, actions = values
+    return not (
+        (pilot_write and not (shadow_write and shadow_read_compare))
+        or (primary_read and not pilot_write)
+        or (actions and not primary_read)
+    )
+
+
 def _runtime(db, generation, *, expected_mail_connection_id=None):
     if not generation or generation.state != "active" or not generation.google_token_id:
         return None
@@ -62,7 +77,7 @@ def _runtime(db, generation, *, expected_mail_connection_id=None):
         MailboxCutoverFlags.organization_id == generation.organization_id,
         MailboxCutoverFlags.mail_connection_id == mail.id,
         MailboxCutoverFlags.credential_generation == generation.generation))
-    if not flags:
+    if not flags or not rollout_flags_are_valid(flags):
         return None
     mailbox_cohort = bool(db.scalar(select(MailboxCutoverFlags.id).where(
         MailboxCutoverFlags.organization_id == generation.organization_id,
