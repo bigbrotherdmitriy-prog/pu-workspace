@@ -54,7 +54,7 @@ export function ContextualAssistant({ section, onAsk }: { section: string; onAsk
     onAsk(`Я нахожусь в разделе «${section}»${context ? ` и работаю с элементом «${context}»` : ""}. Объясни назначение и предложи безопасный следующий шаг. Ничего не изменяй без моего подтверждения.`);
   };
 
-  return <button type="button" data-ai-overlay className="ai-mascot" onClick={ask} aria-label="Спросить AI Secretary об этом элементе" title="AI Secretary — спросить подробнее">
+  return <button type="button" data-ai-overlay className="ai-mascot" onClick={ask} aria-label="Спросить AI Secretary об этом элементе">
     <span className="ai-mascot-antenna" />
     <span className="ai-mascot-face"><i /><i /></span>
     <span className="ai-mascot-body">PU</span>
