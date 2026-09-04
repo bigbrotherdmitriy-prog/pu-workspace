@@ -59,6 +59,7 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
     db_session.commit()
 
     fake_flow = SimpleNamespace(
+        oauth2session=SimpleNamespace(scope=list(google_drive_api.SCOPES)),
         credentials=SimpleNamespace(
             token="new-access",
             refresh_token=None,
