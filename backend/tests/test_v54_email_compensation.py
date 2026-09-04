@@ -8,10 +8,11 @@ from hashlib import sha256
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
+import app.provider_actions.email_compensation as email_compensation
 from app.api.responses import DraftUpdate, EmailCompensationProposal, router, update_draft
 from app.api.gmail import send_gmail
 from app.database import Base
@@ -222,13 +223,15 @@ def test_proposal_is_pii_free_outside_protected_draft(sent_email_runtime):
         )
         action_id = result["proposal"]["action_id"]
         action = db.get(ProviderAction, (action_id, 1))
-        audit = db.scalar(select(AuditLog).where(
-            AuditLog.action == "v54.provider.action_frozen",
-            AuditLog.details.contains(action_id),
-        ))
+        audits = list(db.scalars(select(AuditLog).where(
+            AuditLog.action.in_((
+                "v54.provider.action_frozen",
+                "v54.provider.email_correction_proposed",
+            )),
+        )))
         serialized = json.dumps({
             "action": {column.name: getattr(action, column.name) for column in action.__table__.columns},
-            "audit": audit.details,
+            "audits": [audit.details for audit in audits],
         }, default=str, sort_keys=True)
         for forbidden in (
             "recipient@example.test", "private-original-body-marker",
@@ -295,6 +298,78 @@ def test_existing_proposal_fails_closed_when_source_outcome_snapshot_advances(se
         assert result["status"] == "UNAVAILABLE"
         assert result["can_propose"] is False
         assert result["unavailable_reason"] == "source_stale"
+
+
+def test_proposal_rechecks_source_after_optimistic_read(sent_email_runtime, monkeypatch):
+    """A late receipt between GET and POST must not be silently repinned."""
+    sessions, source, user_id, draft_id, _provider = sent_email_runtime
+    original_describe = email_compensation.describe_email_compensation
+
+    with sessions.begin() as db:
+        draft = db.get(ResponseDraft, draft_id)
+        offered = original_describe(db, draft)
+
+        def advance_after_read(local_db, local_draft):
+            result = original_describe(local_db, local_draft)
+            first = local_db.scalar(select(ProviderOutcomeObservation).where(
+                ProviderOutcomeObservation.action_id == source.action_id,
+                ProviderOutcomeObservation.revision == source.revision,
+            ))
+            local_db.add(ProviderOutcomeObservation(
+                action_id=first.action_id,
+                revision=first.revision,
+                organization_id=first.organization_id,
+                sequence=2,
+                attempt_id="racing-observation",
+                job_id=first.job_id,
+                mailbox_key=first.mailbox_key,
+                command_key=first.command_key,
+                idempotency_key=first.idempotency_key,
+                payload_hash=first.payload_hash,
+                envelope_hash=first.envelope_hash,
+                outcome="APPLIED",
+                retry_safe=False,
+                source="LATE_RECEIPT",
+                late=True,
+                external_ref=None,
+                safe_code="racing_observation",
+                recorded_at=NOW + timedelta(seconds=1),
+            ))
+            local_db.flush()
+            return result
+
+        monkeypatch.setattr(
+            email_compensation, "describe_email_compensation", advance_after_read,
+        )
+        with pytest.raises(EmailCompensationError, match="source_stale"):
+            propose_email_compensation(
+                db, draft, expected_source_etag=offered["source_etag"],
+                actor_id=str(user_id), correlation_id="racing-client", clock=lambda: NOW,
+            )
+        assert db.scalar(select(ProviderAction).where(
+            ProviderAction.relation_kind == "CORRECTIVE",
+        )) is None
+
+
+def test_proposal_serializes_concurrent_creation_on_source_action(sent_email_runtime):
+    sessions, _source, user_id, draft_id, _provider = sent_email_runtime
+    with sessions.begin() as db:
+        draft = db.get(ResponseDraft, draft_id)
+        offered = describe_email_compensation(db, draft)
+        statements = []
+
+        @event.listens_for(db, "do_orm_execute")
+        def capture(statement):
+            statements.append(statement.statement)
+
+        propose_email_compensation(
+            db, draft, expected_source_etag=offered["source_etag"],
+            actor_id=str(user_id), correlation_id="concurrent-client", clock=lambda: NOW,
+        )
+        assert any(
+            getattr(statement, "_for_update_arg", None) is not None
+            for statement in statements
+        )
 
 
 def test_api_contract_is_read_propose_only_and_rejects_bad_etag():

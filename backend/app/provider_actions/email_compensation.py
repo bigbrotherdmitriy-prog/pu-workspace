@@ -79,15 +79,21 @@ def _source_etag(source: ProviderAction, observation: ProviderOutcomeObservation
     })
 
 
-def _source_for_draft(db, draft: ResponseDraft):
+def _source_for_draft(db, draft: ResponseDraft, *, lock: bool = False):
     project = db.get(Project, draft.project_id)
     if project is None or draft.status != "sent" or not draft.sent_at or not draft.sent_external_id:
         return None, None, SOURCE_UNAVAILABLE
-    rows = list(db.scalars(select(ProviderAction).where(
+    source_query = select(ProviderAction).where(
         ProviderAction.organization_id == project.organization_id,
         ProviderAction.project_id == draft.project_id,
         ProviderAction.command_key == source_send_command_key(draft.id),
-    )))
+    )
+    if lock:
+        # Serialize proposal creation on the immutable source action.  Without
+        # this lock two concurrent POSTs can both observe "no proposal" and
+        # create distinct corrective actions with random command keys.
+        source_query = source_query.with_for_update()
+    rows = list(db.scalars(source_query))
     if len(rows) != 1:
         return None, None, SOURCE_AMBIGUOUS if rows else SOURCE_UNAVAILABLE
     source = rows[0]
@@ -217,9 +223,17 @@ def propose_email_compensation(db, draft: ResponseDraft, *, expected_source_etag
     if current.get("proposal"):
         return current
 
-    source, observation, reason = _source_for_draft(db, draft)
+    source, observation, reason = _source_for_draft(db, draft, lock=True)
     if reason:
         raise EmailCompensationError(reason)
+    # The source outcome may advance after the optimistic GET/describe and
+    # before this transaction acquires the source lock.  Recheck the exact
+    # observation under that lock before deriving a new action.
+    if _source_etag(source, observation) != expected_source_etag:
+        raise EmailCompensationError(SOURCE_STALE)
+    proposal = _existing_proposal(db, source, observation)
+    if proposal is not None:
+        return describe_email_compensation(db, draft)
     nonce = uuid4().hex
     action_id = f"corrective-{uuid4().hex}"
     protected_draft = ResponseDraft(
