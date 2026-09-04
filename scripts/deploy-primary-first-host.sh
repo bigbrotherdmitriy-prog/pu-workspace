@@ -62,6 +62,7 @@ case "$CANDIDATE_IMAGE" in *[!A-Za-z0-9._/@:+-]*|'') fail "unsafe candidate imag
 [ -d "$RELEASE_DIR" ] && [ ! -L "$RELEASE_DIR" ] || fail "candidate release must be a real directory"
 [ "$(cat "$RELEASE_DIR/.pu-primary-release" 2>/dev/null || true)" = "$REVISION" ] \
   || fail "candidate release marker is missing or does not match its directory"
+[ ! -e "$RELEASE_DIR/.env" ] || fail "candidate release must not contain an environment file"
 [ -s "$COMPOSE_FILE" ] || fail "first-host primary Compose file is missing"
 [ -s "$RELEASE_DIR/backend/migrations/env.py" ] || fail "candidate migrations are missing"
 [ -s "$SOURCE_ENV" ] && [ ! -L "$SOURCE_ENV" ] || fail "dedicated primary secret file is missing or is a symlink"
@@ -168,8 +169,7 @@ echo "[1/6] running candidate backend tests without secrets"
 docker run --rm --network none \
   -e PYTHONPATH=/app \
   -e DATABASE_URL=sqlite+pysqlite:///:memory: \
-  -v "$RELEASE_DIR/backend:/workspace/backend:ro" \
-  -v /dev/null:/workspace/.env:ro \
+  -v "$RELEASE_DIR:/workspace:ro" \
   -w /workspace/backend \
   "$CANDIDATE_IMAGE" \
   python -m pytest tests -q -p no:cacheprovider

@@ -187,6 +187,7 @@ def test_primary_deploy_has_first_host_guardrails_and_no_public_request():
         "ROLLBACK FAILED",
         "mv -Tf",
         ".pu-primary-release",
+        "candidate release must not contain an environment file",
         "com.pu-workspace.primary.revision",
         "previous private runtime environment is missing",
         "check_primary_local_smoke.py",
@@ -200,9 +201,8 @@ def test_primary_deploy_has_first_host_guardrails_and_no_public_request():
     assert "puworkspace.ru" not in deploy
     assert "docker compose -p app" not in deploy
     assert "app_pu_pgdata" not in deploy
-    assert '-v "$RELEASE_DIR/backend:/workspace/backend:ro"' in deploy
-    assert '-v "$RELEASE_DIR:/workspace:ro"' not in deploy
-    assert "-v /dev/null:/workspace/.env:ro" in deploy
+    assert '-v "$RELEASE_DIR:/workspace:ro"' in deploy
+    assert "-v /dev/null:/workspace/.env:ro" not in deploy
 
 
 def test_primary_compose_is_standalone_loopback_only_and_has_no_relay():
