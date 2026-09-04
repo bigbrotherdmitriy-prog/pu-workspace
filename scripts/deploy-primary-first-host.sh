@@ -168,7 +168,7 @@ echo "[1/6] running candidate backend tests without secrets"
 docker run --rm --network none \
   -e PYTHONPATH=/app \
   -e DATABASE_URL=sqlite+pysqlite:///:memory: \
-  -v "$RELEASE_DIR:/workspace:ro" \
+  -v "$RELEASE_DIR/backend:/workspace/backend:ro" \
   -v /dev/null:/workspace/.env:ro \
   -w /workspace/backend \
   "$CANDIDATE_IMAGE" \
