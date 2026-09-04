@@ -1,7 +1,7 @@
 {
   "schema": "pu-workspace-release-packaging-status/v1",
-  "candidate_commit": "8ccc194bc834328e51a73225981f74d81775789a",
-  "candidate_tree": "c5b5a3c4fa7898c49ca54474de62b83308925575",
+  "candidate_commit": "bc46e9d6512cacc27c560652eb636a2e9bf0a9bf",
+  "candidate_tree": "c9366c5d86be6e860c40ae645789a8adea0c00d8",
   "dependency_inputs": {
     "hash_mode": "UTF-8 with LF normalization",
     "backend_requirements_canonical_lf_sha256": "8409d1f7417fa926c79099349267e47f55fb3cd9904b8f409147b6dd7dc83242",
@@ -22,8 +22,8 @@
     },
     {
       "id": "source-secret-pii-scan",
-      "status": "BLOCKED",
-      "detail": "client-like example remains in frontend/src/modules/contracts/ContractDocumentPicker.tsx"
+      "status": "PASS",
+      "detail": "independent archive verification found zero secret, PII or client-like markers"
     },
     {
       "id": "python-transitive-lock",
@@ -51,6 +51,13 @@
       "detail": "licenseConcluded and distribution obligations are unresolved"
     }
   ],
-  "overall_status": "BLOCKED",
+  "verified_archive": {
+    "name": "pu-workspace-bc46e9d6512c-commercial-source.tar.gz",
+    "sha256": "b3ffae3e7746f8f07d983b7bfb1de643ef50f2488f3b9a8f58ecbf678a01f159",
+    "file_count": 402,
+    "topology": "single-root regular-files-only",
+    "verification": "PASS"
+  },
+  "overall_status": "BLOCKED_ON_RUNTIME_EVIDENCE_OWNER_AND_COUNSEL",
   "legal_effect": "technical evidence only; not a legal conclusion"
 }

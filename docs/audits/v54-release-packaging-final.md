@@ -8,9 +8,14 @@
 
 ## Решение
 
-**PACKAGING TOOLING: PASS. COMMERCIAL ARCHIVE: BLOCKED. LEGAL READINESS: NOT CLAIMED.**
+**PACKAGING TOOLING: PASS. SOURCE ARCHIVE: PASS. LEGAL READINESS: NOT CLAIMED.**
 
-Добавлены воспроизводимый manifest v2, независимый fail-closed archive verifier, контракт Linux Python transitive lock с hashes, контракт container digest/layer/dpkg/SPDX evidence и package-specific metadata provenance. При проверке реального кандидата упаковщик корректно остановился на client-like примере в product source. Файл не изменялся из-за запрета менять Product Core.
+Добавлены воспроизводимый manifest v2, независимый fail-closed archive verifier, контракт Linux Python transitive lock с hashes, контракт container digest/layer/dpkg/SPDX evidence и package-specific metadata provenance. После отдельной обезличивающей правки UI-placeholder архив точного кандидата `bc46e9d...` успешно собран и независимо проверен.
+
+Проверенный архив: `pu-workspace-bc46e9d6512c-commercial-source.tar.gz`.
+SHA-256: `b3ffae3e7746f8f07d983b7bfb1de643ef50f2488f3b9a8f58ecbf678a01f159`.
+Проверка: 402 файла, single-root regular-files-only, 0 secret/PII/client findings,
+status PASS.
 
 ## Найденное до изменений
 
@@ -39,7 +44,7 @@
 - Candidate tree: `c5b5a3c4fa7898c49ca54474de62b83308925575`.
 - Registry matrix: 239 entries; declared evidence 229; unresolved 10.
 - Confirmed declarations: GPL 0, AGPL 0, SSPL 0; `psycopg` LGPL-3.0-only требует юриста.
-- Реальная команда bundle остановилась только на `frontend/src/modules/contracts/ContractDocumentPicker.tsx: client-like identifier` после исключения допустимых шаблонных DSN.
+- Первичный bundle был заблокирован `ContractDocumentPicker.tsx`; отдельный commit заменил пример на явно синтетический, после чего bundle и независимый verifier завершились PASS.
 - Release script tests: **38 passed**.
 - Python compilation: PASS.
 - SPDX regeneration against `8ccc194`: 239 total / 229 declared / 10 unresolved.
@@ -55,11 +60,10 @@ python scripts/legal_release_kit.py bundle --ref 8ccc194bc834328e51a73225981f74d
 git diff --check
 ```
 
-Последняя `bundle` команда ожидаемо вернула non-zero из-за product-source blocker; архив не создан.
+Финальные `bundle` и `verify_release_package.py` завершились с exit `0`.
 
 ## Остаточные блокеры
 
-- **Product owner/developer:** заменить client-like UI placeholder отдельным core-коммитом и повторить scan.
 - **Linux runtime:** создать accepted Python lock/provenance; перевести build на него; проверить `pip --require-hashes`.
 - **Container runtime:** собрать image, закрепить RepoDigest, снять layers, dpkg inventory и SPDX.
 - **License bundle:** собрать upstream LICENSE/COPYING/NOTICE texts именно из проверенных artifacts и сверить их hashes.
