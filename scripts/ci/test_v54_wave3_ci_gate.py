@@ -4,7 +4,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_HEAD = "a54f001c0a07"
+EXPECTED_HEAD = "a54f001c0a08"
 WAVE3_BRANCH = "codex/v54-wave3-integration"
 
 
@@ -26,7 +26,7 @@ def test_wave3_runs_postgres_runtime_and_durable_fault_gate():
     assert durable["permissions"] == {"contents": "read"}
 
 
-def test_every_wave3_runtime_pin_matches_a07():
+def test_every_wave3_runtime_pin_matches_a08():
     sources = {
         "orchestrator": ROOT / "scripts/ci/v54_pilot_workflow.py",
         "durable": ROOT / "scripts/ci/durable_queue/run.py",
@@ -35,7 +35,7 @@ def test_every_wave3_runtime_pin_matches_a07():
     for label, path in sources.items():
         text = path.read_text(encoding="utf8")
         assert EXPECTED_HEAD in text, label
-        assert "a54f001c0a08" not in text, label
+        assert "a54f001c0a07" not in text, label
 
 
 def test_wave3_artifacts_are_exact_allowlisted_json_files():
