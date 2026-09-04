@@ -509,8 +509,9 @@ body { font-size: 16px; }
 .sidebar-head { height: 66px; padding: 4px 6px 14px; border-bottom: 1px solid rgba(221, 241, 232, .13); }
 .brand-mark { width: 38px; height: 38px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: #28b982; box-shadow: none; }
 .brand-mark::after { display: none; }
-.sidebar-brand-copy strong { font-size: 15px; letter-spacing: -.015em; }
-.sidebar-brand-copy small { margin-top: 3px; color: #8fa49a; font-size: 9px; letter-spacing: .08em; }
+.sidebar-brand-copy { min-width: 0; }
+.sidebar-brand-copy strong { font-size: 15px; letter-spacing: -.015em; white-space: nowrap; }
+.sidebar-brand-copy small { margin-top: 3px; color: #8fa49a; font-size: 9px; letter-spacing: .08em; white-space: nowrap; }
 .shell > aside nav { counter-reset: pu-nav-section; gap: 13px; margin-top: 16px; }
 .nav-group { counter-increment: pu-nav-section; position: relative; gap: 2px; padding: 0 0 0 22px; border-left: 1px solid rgba(175, 207, 192, .16); }
 .nav-group::before {
@@ -599,7 +600,7 @@ input[type="number"], input[type="date"], input[type="datetime-local"],
   box-shadow: none;
 }
 .dashboard-hero::before { opacity: .18; background-size: 20px 20px; }
-.dashboard-signal { right: 12px; width: 240px; height: 240px; opacity: .35; }
+.dashboard-signal { display: none !important; }
 .dashboard-kicker { color: #c3ecdb; font-size: 12px; font-weight: 650; letter-spacing: 0; text-transform: none; }
 .dashboard-hero h2 { max-width: 850px; margin: 8px 0 7px; font-size: clamp(28px, 2.6vw, 42px); line-height: 1.08; letter-spacing: -.035em; }
 .dashboard-hero-copy > p { color: #c2d4cc; font-size: 14px; }
@@ -743,6 +744,9 @@ tbody tr:hover td { background: #eef6f2; }
   .dashboard-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .dashboard-metrics button:nth-child(-n+3) { border-bottom: 1px solid var(--pu-rule); }
   .finance-metrics { grid-template-columns: repeat(4,minmax(145px,1fr)); }
+  .header-team, .connection-status { display: none; }
+  .search { width: min(360px, 31vw); }
+  .project-switcher { min-width: 230px; max-width: 260px; }
 }
 
 @media (max-width: 960px) {
