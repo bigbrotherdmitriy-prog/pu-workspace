@@ -85,6 +85,13 @@ describe("MailClientModule", () => {
     expect(body).not.toContain("secret");
   });
 
+  it("removes legacy CSS that was previously stored as plain email text", () => {
+    const body = readableMessageBody("96 Timeweb Cloud html { -webkit-text-size-adjust: none; } p { margin: 0 !important; } @media screen and (max-width: 600px) { .container { width: 100% !important; } } Проверьте, что-то не так с картой");
+    expect(body).toBe("96 Timeweb Cloud\nПроверьте, что-то не так с картой");
+    expect(body).not.toContain("!important");
+    expect(body).not.toContain("@media");
+  });
+
   it("loads a real thread view with AI summary, context and inbound attachments", async () => {
     const { client } = renderClient();
     expect(await screen.findByRole("heading", { name: "Срок поставки" })).toBeInTheDocument();

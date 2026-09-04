@@ -32,6 +32,19 @@ def test_gmail_payload_prefers_plain_text():
     assert _message_text(payload) == "Просим направить акт до 30.08.2026"
 
 
+def test_gmail_html_fallback_omits_css_scripts_and_keeps_readable_lines():
+    markup = base64.urlsafe_b64encode(
+        ("<html><head><style>html{-webkit-text-size-adjust:none} p{margin:0!important}</style>"
+         "<script>secret()</script></head><body><p>Добрый день!</p>"
+         "<p>Проверьте, что-то не так с картой.<br>Нужен ответ.</p></body></html>").encode()
+    ).decode()
+    payload = {"mimeType": "text/html", "body": {"data": markup}}
+    text = _message_text(payload)
+    assert text == "Добрый день!\nПроверьте, что-то не так с картой.\nНужен ответ."
+    assert "webkit" not in text
+    assert "secret" not in text
+
+
 def test_gmail_attachment_metadata_is_extracted_without_file_transfer():
     payload = {"parts": [{"filename": "Акт.pdf", "mimeType": "application/pdf", "body": {"attachmentId": "secret", "size": 2048}}]}
     assert _attachments(payload, "message-1") == [{"name": "Акт.pdf", "mime_type": "application/pdf", "size": 2048,

@@ -23,7 +23,7 @@
 .mail-compose-button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 0; border-radius: 11px; background: #087a59; color: #fff; font-weight: 750; }
 .mail-compose-button svg { width: 18px; }
 .mail-folders > small { color: #7e5a18; line-height: 1.4; }
-.mail-folders nav { display: grid; gap: 4px; margin: 0; }
+.mail-folders nav { display: grid; flex: 0 0 auto; align-content: start; gap: 4px; margin: 0; }
 .mail-folders nav button { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 0 11px; border: 0; border-radius: 9px; background: transparent; color: #58675f; text-align: left; }
 .mail-folders nav button.active { background: #dff4ec; color: #087a59; font-weight: 750; }
 .mail-folders nav svg { width: 17px; }

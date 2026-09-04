@@ -76,7 +76,16 @@ function forwardSubject(subject: string): string {
 }
 
 export function readableMessageBody(content: string): string {
-  const source = content.trim();
+  let source = content.trim();
+  const legacyCssStart = source.search(/(?:^|\s)(?:html|body|table|td|p|\.[a-z_-][\w-]*)\s*\{/i);
+  if (legacyCssStart >= 0 && /(?:!important|-webkit-|@media|font-size\s*:|color\s*:|margin\s*:)/i.test(source)) {
+    const legacyCssEnd = source.lastIndexOf("}");
+    const prefix = source.slice(0, legacyCssStart).trim();
+    const readableTail = source.slice(legacyCssEnd + 1).trim();
+    if (legacyCssEnd > legacyCssStart && readableTail.length >= 12) {
+      source = [prefix, readableTail].filter(Boolean).join("\n");
+    }
+  }
   if (!source || !/<[a-z][\s\S]*>/i.test(source) || typeof DOMParser === "undefined") return source;
   const parsed = new DOMParser().parseFromString(source, "text/html");
   parsed.querySelectorAll("script, style, noscript, iframe, object, embed, svg").forEach((node) => node.remove());

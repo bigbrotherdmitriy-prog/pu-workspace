@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import base64
-import html
 import json
 import os
 import re
+from html.parser import HTMLParser
 from email.utils import parseaddr
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -48,6 +48,51 @@ def _decode(value: str | None) -> str:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode("utf-8", errors="replace")
 
 
+class _SafeMailHTMLText(HTMLParser):
+    _suppressed = {"head", "style", "script", "noscript", "iframe", "object", "embed", "svg"}
+    _blocks = {"p", "div", "li", "tr", "table", "section", "article", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.suppression_depth = 0
+
+    def handle_starttag(self, tag: str, attrs):
+        tag = tag.casefold()
+        if tag in self._suppressed:
+            self.suppression_depth += 1
+        elif self.suppression_depth == 0 and tag == "br":
+            self.parts.append("\n")
+        elif self.suppression_depth == 0 and tag == "li":
+            self.parts.append("\n• ")
+
+    def handle_endtag(self, tag: str):
+        tag = tag.casefold()
+        if tag in self._suppressed:
+            self.suppression_depth = max(0, self.suppression_depth - 1)
+        elif self.suppression_depth == 0 and tag in self._blocks:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str):
+        if self.suppression_depth == 0:
+            self.parts.append(data)
+
+    def text(self) -> str:
+        value = "".join(self.parts).replace("\xa0", " ")
+        value = re.sub(r"[ \t]+\n", "\n", value)
+        value = re.sub(r"\n[ \t]+", "\n", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        value = re.sub(r"[ \t]{2,}", " ", value)
+        return value.strip()
+
+
+def _html_message_text(markup: str) -> str:
+    parser = _SafeMailHTMLText()
+    parser.feed(markup)
+    parser.close()
+    return parser.text()
+
+
 def _message_text(payload: dict) -> str:
     candidates: list[tuple[str, str]] = []
 
@@ -64,7 +109,7 @@ def _message_text(payload: dict) -> str:
     if plain:
         return plain.strip()
     markup = next((text for mime, text in candidates if mime == "text/html"), "")
-    return html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))).strip()
+    return _html_message_text(markup)
 
 
 def _headers(payload: dict) -> dict[str, str]:
