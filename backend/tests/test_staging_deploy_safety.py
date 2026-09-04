@@ -1,5 +1,9 @@
+import base64
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import tarfile
 
 import pytest
 
@@ -125,7 +129,7 @@ def test_runtime_env_preserves_secrets_but_forces_isolation(tmp_path):
     source.write_text("\n".join([
         "POSTGRES_PASSWORD=" + "p" * 48,
         "APP_SECRET_KEY=" + "a" * 64,
-        "TOKEN_ENCRYPTION_KEY=" + "t" * 44 + "=",
+        "TOKEN_ENCRYPTION_KEY=" + base64.urlsafe_b64encode(b"t" * 32).decode(),
         "BOOTSTRAP_TOKEN=" + "b" * 40,
         "PU_SMOKE_PASSWORD=" + "s" * 32,
         "GOOGLE_CLIENT_ID=must-be-removed",
@@ -142,6 +146,39 @@ def test_runtime_env_preserves_secrets_but_forces_isolation(tmp_path):
     assert values["PU_TEST_IMAGE_REPOSITORY"] == "pu-workspace-staging"
     assert values["GOOGLE_CLIENT_ID"] == ""
     assert values["GMAIL_AUTO_SYNC_ENABLED"] == "false"
+
+
+def test_runtime_env_accepts_canonical_44_character_fernet_key(tmp_path):
+    key = base64.urlsafe_b64encode(b"k" * 32).decode()
+    assert len(key) == 44
+    source = tmp_path / ".env.staging"
+    source.write_text("\n".join([
+        "POSTGRES_PASSWORD=" + "p" * 48,
+        "APP_SECRET_KEY=" + "a" * 64,
+        "TOKEN_ENCRYPTION_KEY=" + key,
+        "BOOTSTRAP_TOKEN=" + "b" * 40,
+        "PU_SMOKE_PASSWORD=" + "s" * 32,
+    ]), encoding="utf-8")
+
+    values = script("render_staging_environment").read_env(source)
+
+    assert values["TOKEN_ENCRYPTION_KEY"] == key
+
+
+def test_runtime_env_rejects_64_character_non_fernet_key(tmp_path):
+    key = base64.urlsafe_b64encode(b"k" * 48).decode()
+    assert len(key) == 64
+    source = tmp_path / ".env.staging"
+    source.write_text("\n".join([
+        "POSTGRES_PASSWORD=" + "p" * 48,
+        "APP_SECRET_KEY=" + "a" * 64,
+        "TOKEN_ENCRYPTION_KEY=" + key,
+        "BOOTSTRAP_TOKEN=" + "b" * 40,
+        "PU_SMOKE_PASSWORD=" + "s" * 32,
+    ]), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="canonical Fernet key"):
+        script("render_staging_environment").read_env(source)
 
 
 def test_release_gate_uses_latest_push_run_for_each_required_workflow():
@@ -294,6 +331,113 @@ def test_staging_deploy_script_has_lock_backup_rollback_and_public_smoke():
         assert marker in deploy
     assert "/opt/pu-workspace|/opt/pu-workspace/*" in deploy
     assert "compose up -d --no-build --force-recreate --wait --wait-timeout 180 || true" not in deploy
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX staging path semantics")
+def test_first_staging_deploy_without_current_uses_seed_path(tmp_path):
+    root = tmp_path / "staging"
+    shared = root / "shared"
+    shared.mkdir(parents=True)
+    source_env = shared / ".env.staging"
+    source_env.write_text("PU_SMOKE_PASSWORD=synthetic-password\n", encoding="utf-8")
+    source_env.chmod(0o600)
+
+    project = "puw-staging"
+    port = "3010"
+    public_url = "https://staging.example.test"
+    marker = shared / ".pu-staging-host"
+    marker.write_text(
+        "\n".join([
+            "PU_WORKSPACE_DEDICATED_STAGING=1",
+            f"STAGING_PROJECT={project}",
+            f"STAGING_PORT={port}",
+            f"STAGING_PUBLIC_URL={public_url}",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+
+    release_source = tmp_path / "release-source"
+    scripts = release_source / "scripts"
+    scripts.mkdir(parents=True)
+    (release_source / "docker-compose.ci.yml").write_text("services: {}\n", encoding="utf-8")
+    (release_source / "Dockerfile.ci").write_text("FROM scratch\n", encoding="utf-8")
+    (scripts / "render_staging_environment.py").write_text(
+        "from pathlib import Path\n"
+        "import shutil, sys\n"
+        "source = sys.argv[sys.argv.index('--source') + 1]\n"
+        "output = sys.argv[sys.argv.index('--output') + 1]\n"
+        "Path(output).parent.mkdir(parents=True, exist_ok=True)\n"
+        "shutil.copyfile(source, output)\n",
+        encoding="utf-8",
+    )
+    (scripts / "validate_staging_compose.py").write_text(
+        "import sys\nsys.stdin.read()\n",
+        encoding="utf-8",
+    )
+    (scripts / "check_ci_smoke.py").write_text(
+        "import os, sys\n"
+        "with open(os.environ['STAGING_TEST_CALL_LOG'], 'a', encoding='utf-8') as stream:\n"
+        "    stream.write(' '.join(sys.argv[1:]) + '\\n')\n",
+        encoding="utf-8",
+    )
+    (scripts / "check_public_smoke.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+
+    revision = "a" * 40
+    archive = tmp_path / "release.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        for path in release_source.rglob("*"):
+            if path.is_file():
+                bundle.add(path, arcname=path.relative_to(release_source))
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  compose)\n"
+        "    for arg in \"$@\"; do\n"
+        "      [ \"$arg\" != version ] || exit 0\n"
+        "      if [ \"$arg\" = config ]; then printf '{}\\n'; exit 0; fi\n"
+        "      [ \"$arg\" != up ] || exit 0\n"
+        "    done\n"
+        "    ;;\n"
+        "  build) exit 0 ;;\n"
+        "  image) printf '%s\\n' \"${3##*:}\"; exit 0 ;;\n"
+        "  volume) exit 1 ;;\n"
+        "  run) cat >/dev/null; exit 0 ;;\n"
+        "esac\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o700)
+
+    call_log = tmp_path / "smoke-calls.log"
+    env = os.environ.copy()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["STAGING_TEST_CALL_LOG"] = str(call_log)
+    result = subprocess.run(
+        [
+            "sh",
+            str(ROOT / "scripts" / "deploy-staging.sh"),
+            str(root),
+            revision,
+            project,
+            port,
+            public_url,
+            str(archive),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "first staging deployment; no existing database to back up" in result.stdout
+    assert "current release escapes staging root" not in result.stdout + result.stderr
+    assert "--seed" in call_log.read_text(encoding="utf-8")
 
 
 def test_staging_preflight_validates_real_compose_without_external_secrets():
