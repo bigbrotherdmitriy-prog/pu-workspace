@@ -19,6 +19,7 @@ import { NotificationsModule, type NotificationItem } from "./modules/notificati
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
+import { MailClientModule } from "./modules/mail/MailClientModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
@@ -2963,6 +2964,23 @@ export function App() {
               onUpdateDraft={(draft, status) => void updateDraft(draft, status)}
               onSendDraft={(draft) => void sendGmailDraft(draft)}
             />}
+            {active === "Письма" && mailView === "inbox" && <MailClientModule
+              projectId={projectId}
+              currentUserEmail={currentUser?.email}
+              projects={projects}
+              contracts={contracts.map((contract) => ({
+                id: contract.id,
+                number: contract.number,
+                title: contract.title,
+                project_id: projectId,
+              }))}
+              syncing={gmailSyncing}
+              syncStatus={gmailSyncStatus}
+              onSync={() => syncGmail()}
+              onOpenContacts={() => setMailView("companies")}
+              onNotice={setNotice}
+              onError={setError}
+            />}
             {active === "AI Secretary" && (
               <DailyBriefingPanel briefing={dailyBriefing} onOpenSection={setActive} />
             )}
@@ -3042,7 +3060,7 @@ export function App() {
                 Проанализировать
               </button>
             </section>}
-            <section className="inbox-list" style={{ display: active === "Письма" && mailView !== "inbox" ? "none" : undefined }}>
+            <section className="inbox-list" style={{ display: active === "Письма" ? "none" : undefined }}>
               <div className="inbox-toolbar">
                 <div>
                   <strong>Входящие письма и сообщения</strong>
