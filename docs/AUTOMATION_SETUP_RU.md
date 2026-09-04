@@ -26,7 +26,7 @@ python scripts/check_ci_smoke.py --env-file .env.staging --seed
 
 Workflow `Deploy staging` разворачивает только отдельный Compose project из `docker-compose.ci.yml`. Он запускается после успешного `Docker smoke` для `main` или вручную, но остаётся пропущенным, пока переменная `STAGING_ENABLED` не равна `true`. Перед SSH он проверяет все пять release gates для точного commit SHA и убеждается, что SHA всё ещё является вершиной `main`. Concurrency lock в GitHub и `flock` на сервере не допускают двух одновременных переключений.
 
-Staging использует собственную PostgreSQL volume, собственные случайные ключи, отдельный loopback-порт и отдельный HTTPS-домен. Google, Gmail, Telegram, Gemini, Yandex и фоновые внешние автоматизации принудительно отключаются. Production compose, `/opt/pu-workspace`, порт 3000 и production-домены отвергаются до изменения контейнеров.
+Staging использует отдельный сервер, собственную PostgreSQL volume, собственные случайные ключи, отдельный loopback-порт и отдельный HTTPS-домен. Google, Gmail, Telegram, Gemini, Yandex и фоновые внешние автоматизации принудительно отключаются. Production host `37.252.23.204`, production compose, `/opt/pu-workspace`, порт 3000 и production-домены отвергаются до изменения контейнеров. Rendered Compose дополнительно проверяется перед сборкой: фиксированные имена контейнеров, host namespaces, privileged/capabilities/devices, посторонние mounts/networks/images и публикация не на loopback блокируют выпуск.
 
 Один раз на выделенном staging-сервере создайте закрытый файл. Генератор не перезаписывает существующий файл:
 
@@ -37,7 +37,7 @@ sudo -u puw_staging python3 /tmp/puw-staging-bootstrap/scripts/prepare_test_envi
   --output /opt/pu-workspace-staging/shared/.env.staging --port 3010
 ```
 
-Пользователь `puw_staging` должен иметь доступ только к Docker и `/opt/pu-workspace-staging`; SSH-ключ не должен использоваться production-деплоем. На reverse proxy добавьте отдельный host, например `staging.example.test`, направленный на `127.0.0.1:3010`, и выпустите для него TLS-сертификат. DNS этого host должен указывать на staging-сервер до первого запуска workflow.
+Используйте отдельный сервер, на котором нет production-контейнеров и production-секретов. Обычный доступ к системному Docker daemon практически равен root-доступу ко всему серверу, поэтому одной отдельной папки на production-машине недостаточно. Пользователь `puw_staging` должен иметь Docker-доступ и владеть только `/opt/pu-workspace-staging`; предпочтителен rootless Docker. SSH-ключ не должен использоваться production-деплоем. На reverse proxy добавьте отдельный host, например `staging.example.test`, направленный на `127.0.0.1:3010`, и выпустите для него TLS-сертификат. DNS этого host должен указывать на staging-сервер до первого запуска workflow.
 
 В GitHub создайте Environment с точным именем `staging`. На уровне репозитория добавьте управляющую переменную `STAGING_ENABLED`: сначала `false`, после DNS/серверной подготовки — `true`. Она намеренно является repository variable, чтобы GitHub мог решить, запускать ли job, до выдачи доступа к Environment.
 

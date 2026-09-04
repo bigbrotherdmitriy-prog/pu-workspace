@@ -6,10 +6,16 @@ import ipaddress
 import os
 from pathlib import PurePosixPath
 import re
+import socket
 from urllib.parse import urlparse
 
 
-PRODUCTION_HOSTS = {"pu-workspace.duckdns.org", "www.puworkspace.ru", "puworkspace.ru"}
+PRODUCTION_HOSTS = {
+    "37.252.23.204",
+    "pu-workspace.duckdns.org",
+    "www.puworkspace.ru",
+    "puworkspace.ru",
+}
 PRODUCTION_ROOT = PurePosixPath("/opt/pu-workspace")
 SAFE_NAME = re.compile(r"^[a-z][a-z0-9_-]{2,39}$")
 SAFE_USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
@@ -17,7 +23,7 @@ SAFE_HOST = re.compile(r"^[A-Za-z0-9.-]+$")
 SAFE_PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
 
 
-def validate(values: dict[str, str]) -> dict[str, str]:
+def validate(values: dict[str, str], resolver=None) -> dict[str, str]:
     required = (
         "STAGING_HOST",
         "STAGING_USER",
@@ -32,6 +38,8 @@ def validate(values: dict[str, str]) -> dict[str, str]:
         raise ValueError("missing staging settings: " + ", ".join(missing))
 
     host = values["STAGING_HOST"].strip()
+    if host != values["STAGING_HOST"]:
+        raise ValueError("STAGING_HOST must not contain surrounding whitespace")
     if not SAFE_HOST.fullmatch(host) or host.lower() in PRODUCTION_HOSTS:
         raise ValueError("STAGING_HOST must be a dedicated staging hostname or IP")
     try:
@@ -42,12 +50,23 @@ def validate(values: dict[str, str]) -> dict[str, str]:
     else:
         if host_ip.is_loopback or host_ip.is_unspecified or host_ip.is_multicast:
             raise ValueError("STAGING_HOST must be a reachable staging host")
+    if resolver is not None:
+        try:
+            addresses = {item[4][0] for item in resolver(host, None, type=socket.SOCK_STREAM)}
+        except OSError as exc:
+            raise ValueError("STAGING_HOST does not resolve") from exc
+        if not addresses or addresses & PRODUCTION_HOSTS:
+            raise ValueError("STAGING_HOST resolves to the production host")
 
     user = values["STAGING_USER"].strip()
+    if user != values["STAGING_USER"]:
+        raise ValueError("STAGING_USER must not contain surrounding whitespace")
     if not SAFE_USER.fullmatch(user):
         raise ValueError("STAGING_USER contains unsafe characters")
 
-    root_text = values["STAGING_ROOT"].strip().rstrip("/")
+    root_text = values["STAGING_ROOT"].strip()
+    if root_text != values["STAGING_ROOT"] or (root_text != "/" and root_text.endswith("/")):
+        raise ValueError("STAGING_ROOT must be canonical and have no trailing slash")
     if not SAFE_PATH.fullmatch(root_text):
         raise ValueError("STAGING_ROOT must be an absolute safe POSIX path")
     root = PurePosixPath(root_text)
@@ -57,6 +76,8 @@ def validate(values: dict[str, str]) -> dict[str, str]:
         raise ValueError("STAGING_ROOT must not be nested inside the production root")
 
     project = values["STAGING_PROJECT"].strip()
+    if project != values["STAGING_PROJECT"]:
+        raise ValueError("STAGING_PROJECT must not contain surrounding whitespace")
     if not SAFE_NAME.fullmatch(project) or project in {"app", "pu-workspace", "production"}:
         raise ValueError("STAGING_PROJECT must be a dedicated safe Compose project name")
 
@@ -105,7 +126,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.environment != "staging":
         parser.error("only the staging environment is accepted")
-    validate(dict(os.environ))
+    validate(dict(os.environ), resolver=socket.getaddrinfo)
     print("Staging settings are valid; values were not logged.")
     return 0
 

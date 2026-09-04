@@ -17,7 +17,12 @@ def evaluate(check_runs: list[dict], required: set[str]) -> tuple[str, list[str]
     latest: dict[str, dict] = {}
     for run in check_runs:
         name = str(run.get("name", ""))
-        if name in required and int(run.get("id", 0)) > int(latest.get(name, {}).get("id", 0)):
+        app_slug = str((run.get("app") or {}).get("slug", ""))
+        if (
+            name in required
+            and app_slug == "github-actions"
+            and int(run.get("id", 0)) > int(latest.get(name, {}).get("id", 0))
+        ):
             latest[name] = run
     failed = sorted(
         name for name, run in latest.items() if run.get("status") == "completed" and run.get("conclusion") in TERMINAL_FAILURES
