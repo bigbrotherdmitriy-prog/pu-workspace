@@ -1,5 +1,6 @@
 import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FileText, Mail, TimerReset } from "lucide-react";
 import type { DailyBriefing } from "../ai-secretary/DailyBriefingPanel";
+import { ProjectSiteLocationCard } from "../projects/ProjectSiteLocationCard";
 import "./today.css";
 
 export type TodaySummary = {
@@ -12,6 +13,7 @@ export type TodaySummary = {
 };
 
 type Props = {
+  projectId: number;
   projectName: string;
   briefing: DailyBriefing | null;
   summary: TodaySummary | null;
@@ -33,7 +35,7 @@ const sectionByKind = {
   payment_confirmation: "Исполнение и финансы",
 } as const;
 
-export function TodayModule({ projectName, briefing, summary, inboxAttention, onOpen }: Props) {
+export function TodayModule({ projectId, projectName, briefing, summary, inboxAttention, onOpen }: Props) {
   const priorities = briefing?.attention.slice(0, 3) || [];
   const totalAttention = briefing?.summary.attention ?? 0;
 
@@ -42,6 +44,8 @@ export function TodayModule({ projectName, briefing, summary, inboxAttention, on
       <div><span className="today-eyebrow">СЕГОДНЯ · {new Date().toLocaleDateString("ru-RU")}</span><h2>{projectName || "Текущий проект"}</h2><p>{briefing?.next_step || "Собираем актуальный контекст проекта"}</p></div>
       <div className={totalAttention ? "today-score attention" : "today-score clear"}><strong>{totalAttention}</strong><span>{totalAttention ? "требуют внимания" : "всё под контролем"}</span></div>
     </section>
+
+    <ProjectSiteLocationCard projectId={projectId} />
 
     <section className="today-metrics">
       <button onClick={() => onOpen("Задачи")}><TimerReset /><span>Просрочено задач<strong>{summary?.overdue_tasks || 0}</strong></span></button>

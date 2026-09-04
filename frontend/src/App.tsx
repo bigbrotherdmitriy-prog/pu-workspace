@@ -2160,6 +2160,7 @@ export function App() {
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
             <TodayModule
+              projectId={projectId}
               projectName={projects.find((item) => item.id === projectId)?.name || ""}
               briefing={dailyBriefing}
               summary={summary}

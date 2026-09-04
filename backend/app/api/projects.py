@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,29 @@ class ProjectResponse(BaseModel):
     name: str
     organization_id: int
     archived_at: datetime | None = None
+
+
+class ProjectSiteLocationUpdate(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    label: str | None = Field(default=None, max_length=500)
+    radius_m: int = Field(default=250, ge=25, le=5000)
+    accuracy_m: float | None = Field(default=None, ge=0, le=100_000)
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        value = value.strip() if value else None
+        return value or None
+
+
+class ProjectSiteLocationResponse(BaseModel):
+    configured: bool
+    latitude: float | None = None
+    longitude: float | None = None
+    label: str | None = None
+    radius_m: int | None = None
+    accuracy_m: float | None = None
 
 
 class SafeCopyCleanup(BaseModel):
@@ -128,6 +151,60 @@ def get_project(
         )
 
     return item
+
+
+def _site_location_response(project: Project) -> ProjectSiteLocationResponse:
+    configured = project.site_latitude is not None and project.site_longitude is not None
+    return ProjectSiteLocationResponse(
+        configured=configured,
+        latitude=project.site_latitude if configured else None,
+        longitude=project.site_longitude if configured else None,
+        label=project.site_label if configured else None,
+        radius_m=project.site_geofence_radius_m or 250,
+        accuracy_m=project.site_accuracy_m if configured else None,
+    )
+
+
+@router.get("/{project_id}/site-location", response_model=ProjectSiteLocationResponse)
+def get_project_site_location(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    return _site_location_response(project)
+
+
+@router.put("/{project_id}/site-location", response_model=ProjectSiteLocationResponse)
+def update_project_site_location(
+    project_id: int,
+    payload: ProjectSiteLocationUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+
+    project.site_latitude = payload.latitude
+    project.site_longitude = payload.longitude
+    project.site_label = payload.label
+    project.site_geofence_radius_m = payload.radius_m
+    project.site_accuracy_m = payload.accuracy_m
+    project.site_location_updated_at = datetime.now(timezone.utc)
+    db.add(AuditLog(
+        action="project_site_location_updated",
+        entity_type="project",
+        entity_id=project_id,
+        details=f"radius_m={payload.radius_m}; label_set={bool(payload.label)}",
+    ))
+    db.commit()
+    db.refresh(project)
+    return _site_location_response(project)
 
 
 @router.get("/{project_id}/launch-readiness")
