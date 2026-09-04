@@ -10,6 +10,7 @@ import time
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from xml.etree import ElementTree
@@ -59,9 +60,68 @@ def _zip_xml_text(data: bytes, prefixes: tuple[str, ...]) -> str:
     return " ".join(parts)
 
 
+def _xlsx_column_index(reference: str | None, fallback: int) -> int:
+    match = re.match(r"([A-Za-z]+)", reference or "")
+    if not match:
+        return fallback
+    value = 0
+    for character in match.group(1).upper():
+        value = value * 26 + ord(character) - ord("A") + 1
+    return max(0, value - 1)
+
+
+def _xlsx_date_style_indexes(archive: zipfile.ZipFile) -> set[int]:
+    if "xl/styles.xml" not in archive.namelist():
+        return set()
+    root = ElementTree.fromstring(archive.read("xl/styles.xml"))
+    custom_formats: dict[int, str] = {}
+    for node in root.iter():
+        if node.tag.endswith("}numFmt"):
+            try:
+                custom_formats[int(node.attrib.get("numFmtId", ""))] = node.attrib.get("formatCode", "")
+            except ValueError:
+                continue
+    date_format_ids = set(range(14, 23)) | set(range(27, 37)) | set(range(45, 48)) | set(range(50, 59))
+    for format_id, code in custom_formats.items():
+        normalized = re.sub(r'"[^"]*"|\\.|_.|\*.', "", code.casefold())
+        if re.search(r"(?:^|[^a-z])[dmyhs]+(?:[^a-z]|$)", normalized):
+            date_format_ids.add(format_id)
+    cell_xfs = next((node for node in root.iter() if node.tag.endswith("}cellXfs")), None)
+    if cell_xfs is None:
+        return set()
+    result: set[int] = set()
+    for index, node in enumerate(child for child in cell_xfs if child.tag.endswith("}xf")):
+        try:
+            if int(node.attrib.get("numFmtId", "0")) in date_format_ids:
+                result.add(index)
+        except ValueError:
+            continue
+    return result
+
+
+def _xlsx_date_value(raw: str, *, date_1904: bool) -> str:
+    try:
+        serial = float(raw)
+    except ValueError:
+        return raw
+    if not 0 <= serial <= 2_958_465:
+        return raw
+    epoch = datetime(1904, 1, 1) if date_1904 else datetime(1899, 12, 30)
+    value = epoch + timedelta(days=serial)
+    if abs(serial - round(serial)) < 1e-9:
+        return value.date().isoformat()
+    return value.isoformat(timespec="seconds", sep=" ")
+
+
 def _xlsx_text(data: bytes) -> str:
     """Preserve spreadsheet rows and columns for the structured import preview."""
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        date_1904 = False
+        if "xl/workbook.xml" in archive.namelist():
+            workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            properties = next((node for node in workbook.iter() if node.tag.endswith("}workbookPr")), None)
+            date_1904 = bool(properties is not None and properties.attrib.get("date1904", "0").casefold() in {"1", "true"})
+        date_styles = _xlsx_date_style_indexes(archive)
         shared: list[str] = []
         if "xl/sharedStrings.xml" in archive.namelist():
             root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
@@ -72,16 +132,25 @@ def _xlsx_text(data: bytes) -> str:
             for row in (node for node in root.iter() if node.tag.endswith("}row")):
                 values: list[str] = []
                 for cell in (node for node in row if node.tag.endswith("}c")):
+                    column = _xlsx_column_index(cell.attrib.get("r"), len(values))
+                    if column >= 200:
+                        continue
+                    if column >= len(values):
+                        values.extend([""] * (column - len(values) + 1))
                     kind = cell.attrib.get("t")
                     raw = next((node.text or "" for node in cell.iter() if node.tag.endswith("}v")), "")
                     if kind == "s" and raw.isdigit() and int(raw) < len(shared):
                         value = shared[int(raw)]
                     elif kind == "inlineStr":
                         value = " ".join(node.text or "" for node in cell.iter() if node.tag.endswith("}t"))
+                    elif kind in {None, "n"} and cell.attrib.get("s", "").isdigit() and int(cell.attrib["s"]) in date_styles:
+                        value = _xlsx_date_value(raw, date_1904=date_1904)
                     else:
                         value = raw
-                    values.append(value.replace("\t", " ").replace("\n", " ").strip())
+                    values[column] = value.replace("\t", " ").replace("\n", " ").strip()
                 if any(values):
+                    while values and not values[-1]:
+                        values.pop()
                     lines.append("\t".join(values))
         return "\n".join(lines)
 

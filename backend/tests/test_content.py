@@ -176,6 +176,36 @@ class ContentExtractionTests(unittest.TestCase):
             "Этап\tСумма\nМонтаж\t1250000",
         )
 
+    def test_extracts_xlsx_dates_and_preserves_empty_columns(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr(
+                "xl/styles.xml",
+                '<styleSheet xmlns="urn:x"><cellXfs count="2">'
+                '<xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>',
+            )
+            archive.writestr(
+                "xl/workbook.xml",
+                '<workbook xmlns="urn:x"><workbookPr date1904="0"/></workbook>',
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                '<worksheet xmlns="urn:x"><sheetData>'
+                '<row r="1"><c r="A1" t="inlineStr"><is><t>Этап</t></is></c>'
+                '<c r="C1" t="inlineStr"><is><t>Начало</t></is></c></row>'
+                '<row r="2"><c r="A2" t="inlineStr"><is><t>Монтаж</t></is></c>'
+                '<c r="C2" s="1"><v>46388</v></c></row>'
+                '</sheetData></worksheet>',
+            )
+        self.assertEqual(
+            extract_text(
+                buffer.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "ГПР.xlsx",
+            ),
+            "Этап\t\tНачало\nМонтаж\t\t2027-01-01",
+        )
+
     @patch("app.organizer_engine.content._ocr_text", return_value="Распознанный текст сканированного акта")
     def test_uses_local_ocr_for_image(self, ocr):
         self.assertEqual(
