@@ -1,0 +1,55 @@
+name: Staging preflight
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  staging-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate staging deployment shell
+        run: sh -n scripts/deploy-staging.sh
+      - name: Render disposable staging configuration
+        run: |
+          set -euo pipefail
+          install -d -m 700 .staging-preflight/shared .staging-preflight/runtime
+          python scripts/prepare_test_environment.py \
+            --output .staging-preflight/shared/.env.staging \
+            --port 3010
+          python scripts/render_staging_environment.py \
+            --source .staging-preflight/shared/.env.staging \
+            --output .staging-preflight/runtime/.env.staging \
+            --revision "$(git rev-parse HEAD)" \
+            --port 3010
+      - name: Validate the real rendered staging Compose model
+        env:
+          COMPOSE_PROJECT_NAME: puw-staging-preflight
+          COMPOSE_FILE: docker-compose.ci.yml
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          PU_TEST_IMAGE_REPOSITORY=pu-workspace-staging \
+            docker compose --env-file .staging-preflight/runtime/.env.staging config --format json \
+            | python scripts/validate_staging_compose.py \
+                --project "$COMPOSE_PROJECT_NAME" \
+                --revision "$revision" \
+                --port 3010 \
+                --release "$GITHUB_WORKSPACE"
+      - name: Remove disposable staging configuration
+        if: always()
+        run: rm -rf -- .staging-preflight

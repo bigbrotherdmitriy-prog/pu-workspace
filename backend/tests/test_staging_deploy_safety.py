@@ -58,6 +58,65 @@ def test_staging_hostname_must_not_resolve_to_production_server():
         script("validate_staging_settings").validate(valid_settings(), resolver=production_resolver)
 
 
+def test_staging_public_hostname_may_use_a_separate_proxy_address():
+    def split_resolver(host, *_args, **_kwargs):
+        if host == "staging-host.example.test":
+            address = "93.184.216.34"
+        elif host == "staging.example.test":
+            address = "1.1.1.1"
+        else:
+            address = "37.252.23.204"
+        return [(2, 1, 6, "", (address, 0))]
+
+    assert script("validate_staging_settings").validate(
+        valid_settings(), resolver=split_resolver,
+    ) == valid_settings()
+
+
+def test_staging_public_hostname_must_not_resolve_to_production_server():
+    def resolver(host, *_args, **_kwargs):
+        address = "93.184.216.34" if host == "staging-host.example.test" else "37.252.23.204"
+        return [(2, 1, 6, "", (address, 0))]
+
+    with pytest.raises(ValueError, match="production host"):
+        script("validate_staging_settings").validate(valid_settings(), resolver=resolver)
+
+
+def test_staging_dns_identity_accepts_one_dedicated_host():
+    def resolver(host, *_args, **_kwargs):
+        address = "37.252.23.204" if host in script("validate_staging_settings").PRODUCTION_HOSTS else "93.184.216.34"
+        return [(2, 1, 6, "", (address, 0))]
+
+    assert script("validate_staging_settings").validate(
+        valid_settings(), resolver=resolver,
+    ) == valid_settings()
+
+
+def test_staging_rejects_ipv4_mapped_production_address():
+    def resolver(*_args, **_kwargs):
+        return [(10, 1, 6, "", ("::ffff:37.252.23.204", 0, 0, 0))]
+
+    with pytest.raises(ValueError, match="production host"):
+        script("validate_staging_settings").validate(valid_settings(), resolver=resolver)
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("STAGING_USER", "root"),
+    ("STAGING_PORT", "+3010"),
+    ("STAGING_PORT", "03010"),
+    ("STAGING_SSH_PORT", "+22"),
+    ("STAGING_SSH_PORT", "022"),
+    ("STAGING_PUBLIC_URL", "https://staging.example.test:abc"),
+    ("STAGING_PUBLIC_URL", "https://staging.example.test:8443"),
+    ("STAGING_PUBLIC_URL", "https://staging.example.test/"),
+])
+def test_staging_settings_reject_privileged_user_and_noncanonical_ports(key, value):
+    values = valid_settings()
+    values[key] = value
+    with pytest.raises(ValueError):
+        script("validate_staging_settings").validate(values)
+
+
 def test_runtime_env_preserves_secrets_but_forces_isolation(tmp_path):
     source_dir = tmp_path / "shared"
     target_dir = tmp_path / "runtime"
@@ -85,16 +144,30 @@ def test_runtime_env_preserves_secrets_but_forces_isolation(tmp_path):
     assert values["GMAIL_AUTO_SYNC_ENABLED"] == "false"
 
 
-def test_release_gate_uses_latest_run_for_each_required_check():
+def test_release_gate_uses_latest_push_run_for_each_required_workflow():
     module = script("wait_for_github_checks")
     runs = [
-        {"id": 1, "name": "docker-smoke", "status": "completed", "conclusion": "failure", "app": {"slug": "github-actions"}},
-        {"id": 2, "name": "docker-smoke", "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}},
-        {"id": 3, "name": "test-and-build", "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}},
-        {"id": 99, "name": "test-and-build", "status": "completed", "conclusion": "failure", "app": {"slug": "untrusted-app"}},
+        {"id": 1, "path": ".github/workflows/docker-smoke.yml", "event": "push", "status": "completed", "conclusion": "failure"},
+        {"id": 2, "path": ".github/workflows/docker-smoke.yml", "event": "push", "status": "completed", "conclusion": "success"},
+        {"id": 3, "path": ".github/workflows/ci.yml", "event": "push", "status": "completed", "conclusion": "success"},
+        {"id": 99, "path": ".github/workflows/ci.yml", "event": "pull_request", "status": "completed", "conclusion": "failure"},
+        {"id": 100, "path": ".github/workflows/untrusted.yml", "event": "push", "status": "completed", "conclusion": "success"},
     ]
-    assert module.evaluate(runs, {"docker-smoke", "test-and-build"}) == ("success", [])
-    assert module.evaluate(runs, {"docker-smoke", "security"}) == ("pending", ["security"])
+    docker = ".github/workflows/docker-smoke.yml"
+    ci = ".github/workflows/ci.yml"
+    security = ".github/workflows/security.yml"
+    assert module.evaluate(runs, {docker, ci}) == ("success", [])
+    assert module.evaluate(runs, {docker, security}) == ("pending", [security])
+
+
+def test_release_gate_cannot_be_spoofed_by_a_same_named_job():
+    module = script("wait_for_github_checks")
+    required = {".github/workflows/docker-smoke.yml"}
+    runs = [
+        {"id": 10, "path": ".github/workflows/docker-smoke.yml", "event": "push", "name": "Docker smoke", "status": "completed", "conclusion": "failure"},
+        {"id": 11, "path": ".github/workflows/untrusted.yml", "event": "push", "name": "Docker smoke", "status": "completed", "conclusion": "success"},
+    ]
+    assert module.evaluate(runs, required) == ("failed", [".github/workflows/docker-smoke.yml"])
 
 
 def compose_model(tmp_path):
@@ -145,6 +218,15 @@ def test_rendered_compose_accepts_only_isolated_model(tmp_path):
     script("validate_staging_compose").validate(model, project, revision, 3010, release)
 
 
+def test_staging_gateway_preserves_only_explicit_https_proxy_scheme():
+    nginx = (ROOT / "infra" / "ci" / "nginx.conf").read_text(encoding="utf-8")
+    assert "map $http_x_forwarded_proto $pu_forwarded_proto" in nginx
+    assert "https https;" in nginx
+    assert "default $scheme;" in nginx
+    assert "proxy_set_header X-Forwarded-Proto $pu_forwarded_proto;" in nginx
+    assert "proxy_set_header X-Forwarded-Proto $scheme;" not in nginx
+
+
 @pytest.mark.parametrize("mutation", ["host_port", "volume", "privileged", "network", "credential", "mount_escape"])
 def test_rendered_compose_rejects_escape_paths(tmp_path, mutation):
     model, project, revision, release = compose_model(tmp_path)
@@ -178,6 +260,8 @@ def test_staging_workflow_is_opt_in_serial_and_does_not_target_production():
     assert "group: pu-workspace-public-staging" in workflow
     assert "cancel-in-progress: false" in workflow
     assert "StrictHostKeyChecking=yes" in workflow
+    assert "--workflow .github/workflows/staging-preflight.yml" in workflow
+    assert "actions: read" in workflow
     assert "pu-workspace.duckdns.org" not in workflow
     assert "deploy-production.sh" not in workflow
 
@@ -190,6 +274,40 @@ def test_staging_deploy_script_has_lock_backup_rollback_and_public_smoke():
         "release archive must not contain links", "umask 077", "mode must be 600 or 400",
         "database revision is unknown; refusing unproven application rollback",
         "current release escapes staging root", "previous files kept at",
+        "staging deployment must not run as root",
+        "production footprint detected; use a dedicated staging host",
+        "dedicated staging host marker is missing",
+        "staging root must belong to the deploy user",
+        ".pu-staging-archive.sha256",
+        "active staging release files differ from the tested archive",
+        "com.pu-workspace.staging.revision",
+        "existing database volume does not belong to this staging project",
+        "ROLLBACK FAILED: previous staging release could not be started",
+        "ROLLBACK FAILED: previous staging release failed loopback smoke",
+        "ROLLBACK FAILED: previous staging release failed public smoke",
+        "staging rollback verified",
+        "--staging-authenticated",
+        "public_smoke \"$OLD_REVISION\" \"$OLD_REVISION\"",
+        "public_smoke \"$REVISION\" \"$REVISION\"",
+        "command -v awk",
     ]:
         assert marker in deploy
     assert "/opt/pu-workspace|/opt/pu-workspace/*" in deploy
+    assert "compose up -d --no-build --force-recreate --wait --wait-timeout 180 || true" not in deploy
+
+
+def test_staging_preflight_validates_real_compose_without_external_secrets():
+    workflow = (ROOT / ".github" / "workflows" / "staging-preflight.yml").read_text(encoding="utf-8")
+    assert "staging-preflight:" in workflow
+    assert "sh -n scripts/deploy-staging.sh" in workflow
+    assert "scripts/prepare_test_environment.py" in workflow
+    assert "scripts/render_staging_environment.py" in workflow
+    assert ".staging-preflight/runtime/.env.staging" in workflow
+    assert "scripts/validate_staging_compose.py" in workflow
+    assert "secrets." not in workflow
+    assert "STAGING_HOST" not in workflow
+
+
+def test_branch_protection_configuration_includes_staging_preflight():
+    module = script("configure_github_checks")
+    assert "staging-preflight" in module.CHECKS

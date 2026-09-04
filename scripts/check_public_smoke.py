@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import argparse
+import http.cookiejar
 import json
 import os
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from urllib.parse import urljoin, urlparse
+from urllib.request import build_opener, HTTPCookieProcessor, Request, urlopen
 
 
 REQUIRED_UI_MARKERS = (
@@ -15,6 +17,12 @@ REQUIRED_UI_MARKERS = (
     "Исполнение и финансы",
     "Письма",
 )
+PRODUCTION_HOSTS = {
+    "37.252.23.204",
+    "pu-workspace.duckdns.org",
+    "puworkspace.ru",
+    "www.puworkspace.ru",
+}
 
 
 def _get(url: str, timeout: int = 20, token: str | None = None) -> tuple[int, str]:
@@ -78,36 +86,21 @@ def check_public(
     }
 
 
-def check_authenticated_flow(base_url: str, token: str) -> dict[str, object]:
-    """Read-only acceptance check for the deployed project workflow."""
-    base = base_url.rstrip("/") + "/"
-    projects_status, projects_text = _get(urljoin(base, "projects/"), token=token)
+def _check_project_flow(fetch) -> dict[str, object]:
+    """Validate the read-only authenticated project contour with one fetcher."""
+    projects_status, projects_text = fetch("projects/")
     projects_payload = json.loads(projects_text)
     projects = projects_payload.get("projects", projects_payload if isinstance(projects_payload, list) else [])
     if projects_status != 200 or not projects:
         raise RuntimeError("authenticated project catalog is unavailable or empty")
     project_id = int(projects[0]["id"])
-    readiness_status, readiness_text = _get(
-        urljoin(base, f"projects/{project_id}/launch-readiness"), token=token,
-    )
-    dashboard_status, dashboard_text = _get(
-        urljoin(base, f"dashboard/project?project_id={project_id}"), token=token,
-    )
-    documents_status, documents_text = _get(
-        urljoin(base, f"projects/{project_id}/documents?limit=1"), token=token,
-    )
-    contracts_status, contracts_text = _get(
-        urljoin(base, f"projects/{project_id}/contracts"), token=token,
-    )
-    finance_status, finance_text = _get(
-        urljoin(base, f"execution/overview?project_id={project_id}"), token=token,
-    )
-    briefing_status, briefing_text = _get(
-        urljoin(base, f"ai-secretary/daily-briefing?project_id={project_id}"), token=token,
-    )
-    integrations_status, integrations_text = _get(
-        urljoin(base, f"integrations/project?project_id={project_id}"), token=token,
-    )
+    readiness_status, readiness_text = fetch(f"projects/{project_id}/launch-readiness")
+    dashboard_status, dashboard_text = fetch(f"dashboard/project?project_id={project_id}")
+    documents_status, documents_text = fetch(f"projects/{project_id}/documents?limit=1")
+    contracts_status, contracts_text = fetch(f"projects/{project_id}/contracts")
+    finance_status, finance_text = fetch(f"execution/overview?project_id={project_id}")
+    briefing_status, briefing_text = fetch(f"ai-secretary/daily-briefing?project_id={project_id}")
+    integrations_status, integrations_text = fetch(f"integrations/project?project_id={project_id}")
     readiness = json.loads(readiness_text)
     dashboard = json.loads(dashboard_text)
     documents = json.loads(documents_text)
@@ -142,8 +135,57 @@ def check_authenticated_flow(base_url: str, token: str) -> dict[str, object]:
     }
 
 
+def check_authenticated_flow(base_url: str, token: str) -> dict[str, object]:
+    """Read-only bearer-token acceptance check for the deployed workflow."""
+    base = base_url.rstrip("/") + "/"
+    return _check_project_flow(lambda path: _get(urljoin(base, path), token=token))
+
+
+def check_authenticated_session(base_url: str, email: str, password: str) -> dict[str, object]:
+    """Log into the isolated staging account, then perform read-only HTTPS checks."""
+    base = base_url.rstrip("/") + "/"
+    parsed = urlparse(base)
+    if (
+        parsed.scheme != "https"
+        or not email
+        or not password
+        or parsed.hostname in PRODUCTION_HOSTS
+    ):
+        raise ValueError("staging session smoke requires isolated credentials and a non-production host")
+    jar = http.cookiejar.CookieJar()
+    client = build_opener(HTTPCookieProcessor(jar))
+
+    def request(path: str, payload: dict | None = None) -> tuple[int, str]:
+        headers = {"Content-Type": "application/json", "User-Agent": "PU-Workspace-Staging-Smoke/1.0"}
+        headers.update({"X-CSRF-Token": cookie.value for cookie in jar if cookie.name == "pu_csrf"})
+        body = json.dumps(payload).encode() if payload is not None else None
+        with client.open(Request(urljoin(base, path), data=body, headers=headers), timeout=30) as response:
+            return int(response.status), response.read().decode("utf-8", errors="replace")
+
+    login_status, _ = request("auth/login", {"email": email, "password": password})
+    if login_status != 200:
+        raise RuntimeError("staging test account login failed")
+    cookies = {cookie.name: cookie for cookie in jar}
+    if not all(
+        name in cookies and cookies[name].secure
+        for name in ("pu_session", "pu_csrf")
+    ):
+        raise RuntimeError("staging authentication cookies are missing the Secure attribute")
+    me_status, me_text = request("auth/me")
+    if me_status != 200 or json.loads(me_text).get("email") != email:
+        raise RuntimeError("staging authenticated identity is invalid")
+    try:
+        return _check_project_flow(request)
+    finally:
+        request("auth/logout", {})
+
+
 def main() -> int:
-    base_url = sys.argv[1] if len(sys.argv) > 1 else "https://pu-workspace.duckdns.org/"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("base_url", nargs="?", default="https://pu-workspace.duckdns.org/")
+    parser.add_argument("--staging-authenticated", action="store_true")
+    args = parser.parse_args()
+    base_url = args.base_url
     try:
         expected_asset = None
         image_index = Path("/app/app/react_dist/index.html")
@@ -161,6 +203,11 @@ def main() -> int:
         token = os.getenv("PU_WORKSPACE_TOKEN", "").strip()
         if token:
             result["authenticated"] = check_authenticated_flow(base_url, token)
+        if args.staging_authenticated:
+            password = sys.stdin.read().strip()
+            result["staging_authenticated"] = check_authenticated_session(
+                base_url, "ci-admin@example.test", password,
+            )
     except Exception as exc:
         print(f"public smoke failed: {exc}", file=sys.stderr)
         return 1
