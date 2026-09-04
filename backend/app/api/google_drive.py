@@ -95,6 +95,34 @@ def credentials_for_project(project_id: int, db: Session):
     return _adapter_credentials_for_project(project_id, db)
 
 
+def _fetch_google_credentials(flow: Flow, code: str):
+    """Exchange an OAuth code and validate the granted capability set.
+
+    Google can return a superset of the scopes requested in this flow when
+    incremental authorization is enabled.  OAuthLib treats that legitimate
+    superset as a fatal scope change unless its implicit check is disabled.
+    We disable only that implicit comparison and then fail closed with an
+    explicit subset check before any token is persisted.
+    """
+    flow.oauth2session.scope = None
+    token_payload = flow.fetch_token(code=code)
+    credentials = flow.credentials
+
+    raw_scopes = token_payload.get("scope") or credentials.scopes or ()
+    if isinstance(raw_scopes, str):
+        granted_scopes = set(raw_scopes.split())
+    else:
+        granted_scopes = set(raw_scopes)
+
+    missing_scopes = set(SCOPES) - granted_scopes
+    if missing_scopes:
+        raise HTTPException(
+            status_code=400,
+            detail="Google did not grant all required Workspace permissions",
+        )
+    return credentials
+
+
 @router.get("/{project_id}/google/auth")
 def google_auth(
     project_id: int,
@@ -120,7 +148,10 @@ def google_auth(
 
     authorization_url, state = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
+        # PU Workspace always requests its complete, fixed Workspace scope set.
+        # Incremental consent can leave Google's reconnect screen waiting on an
+        # older partial grant, so reconnect with the explicit set instead.
+        include_granted_scopes="false",
         prompt="consent",
         state=_make_oauth_state(project_id),
     )
@@ -155,9 +186,7 @@ def google_callback(
         redirect_uri=redirect_uri,
     )
 
-    flow.fetch_token(code=code)
-
-    credentials = flow.credentials
+    credentials = _fetch_google_credentials(flow, code)
 
     token = db.scalar(
         select(GoogleOAuthToken).where(

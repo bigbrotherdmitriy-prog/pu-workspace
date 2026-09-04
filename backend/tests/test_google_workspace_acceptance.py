@@ -59,13 +59,16 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
     db_session.commit()
 
     fake_flow = SimpleNamespace(
+        oauth2session=SimpleNamespace(scope=list(google_drive_api.SCOPES)),
         credentials=SimpleNamespace(
             token="new-access",
             refresh_token=None,
             token_uri="https://oauth2.googleapis.com/token",
             scopes=[DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND],
         ),
-        fetch_token=lambda **_kwargs: None,
+        fetch_token=lambda **_kwargs: {
+            "scope": " ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
+        },
     )
     monkeypatch.setattr(
         google_drive_api.Flow,
