@@ -13,7 +13,7 @@ export function EvidenceFragmentCard({ input }: EvidenceFragmentCardProps) {
   const model = toEvidenceFragmentViewModel(input);
 
   if (!model.metadataVisible) {
-    return <article className="evidence-fragment-card evidence-fragment-card--hidden">
+    return <article className="evidence-fragment-card evidence-fragment-card--hidden" role="status" aria-live="polite" aria-atomic="true">
       <header className="evidence-fragment-card__header">
         <div><p className="evidence-fragment-card__eyebrow">EVIDENCE</p><h2>Доказательство недоступно</h2></div>
         <span className="evidence-fragment-card__badge evidence-fragment-card__badge--unavailable">{model.statusLabel}</span>
@@ -22,7 +22,7 @@ export function EvidenceFragmentCard({ input }: EvidenceFragmentCardProps) {
     </article>;
   }
 
-  return <article className={`evidence-fragment-card evidence-fragment-card--${model.status}`}>
+  return <article className={`evidence-fragment-card evidence-fragment-card--${model.status}`} role="status" aria-live="polite" aria-atomic="true">
     <header className="evidence-fragment-card__header">
       <div><p className="evidence-fragment-card__eyebrow">EVIDENCE · EXACT VERSION</p><h2>Основание вывода</h2></div>
       <span className={`evidence-fragment-card__badge evidence-fragment-card__badge--${model.status}`}>{model.statusLabel}</span>
@@ -55,15 +55,14 @@ export function EvidenceFragmentCard({ input }: EvidenceFragmentCardProps) {
 
     <section className="evidence-fragment-card__section">
       <h3>Фрагмент</h3>
-      {model.fragmentVisible && model.fragment
-        ? <><p className="evidence-fragment-card__media">{model.fragment.mediaType}</p><blockquote>{model.fragment.excerpt}</blockquote></>
-        : <p className="evidence-fragment-card__notice">{model.reasonLabel ?? "Фрагмент скрыт: актуальность или доступ не подтверждены."}</p>}
+      <p className="evidence-fragment-card__media">{model.fragment.mediaType}</p>
+      <blockquote>{model.fragment.excerpt}</blockquote>
     </section>
 
-    {model.fragmentVisible && <section className="evidence-fragment-card__section evidence-fragment-card__derived">
+    <section className="evidence-fragment-card__section evidence-fragment-card__derived">
       <div><h3>Извлечённый факт</h3><p>{model.extractedFact ?? "Не извлечён"}</p></div>
       <div><h3>Вывод AI</h3><p>{model.aiConclusion ?? "Нет вывода"}</p><small>Вывод AI не является фактом или решением человека.</small></div>
-    </section>}
+    </section>
 
     <section className="evidence-fragment-card__section">
       <h3>Извлечение</h3>

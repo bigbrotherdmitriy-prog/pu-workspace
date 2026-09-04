@@ -3,35 +3,29 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EvidenceFragmentCard } from "./EvidenceFragmentCard";
 import { EVIDENCE_FRAGMENT_SCHEMA_VERSION } from "./evidenceReadModel";
 
-function validInput() {
+function readableInput() {
   return {
     schema_version: EVIDENCE_FRAGMENT_SCHEMA_VERSION as string,
-    capabilities: { metadata: "allow", fragment: "allow", archival_fragment: "deny" },
-    policy: { known: true, version: "policy-7" as string | null },
-    evidence: {
-      id: "evidence-16",
-      revision: 1,
-      source_id: "source-13",
-      source_version_id: "version-15",
-      status: "verified",
-    },
+    state: "readable",
+    status: "verified",
+    version_state: "current",
+    freshness: "fresh",
+    availability: "available",
+    evidence: { id: "evidence-16", revision: 1, source_id: "source-13", source_version_id: "version-15" },
     source: {
       id: "source-13",
       record_version: 4,
       current_source_version_id: "version-15",
-      version_state: "current",
-      freshness: "fresh",
-      availability: "available",
-      provider: "google-workspace",
-      account: "project-mailbox",
-      namespace: "mailbox-primary",
-      origin_project: "Альфа",
+      provider: "synthetic-provider",
+      account: "synthetic-account",
+      namespace: "synthetic-mailbox",
+      origin_project: "Синтетический проект",
     },
     source_version: { id: "version-15", revision: 1, source_id: "source-13" },
     locator: { kind: "page", page: 2 } as Record<string, unknown>,
-    fragment: { media_type: "text/plain", excerpt: "Оплатить до 10 сентября." },
+    fragment: { media_type: "text/plain", excerpt: "Синтетический срок: 10 сентября." },
     extracted_fact: "Срок: 10.09.2026",
-    ai_conclusion: "Возможно, нужна внутренняя задача.",
+    ai_conclusion: "Требуется проверка человеком.",
     extractor: {
       name: "local-ocr",
       version: "2",
@@ -44,132 +38,97 @@ function validInput() {
     confidence: { value: 0.923, kind: "calibrated", calibration_ref: "calibration-2" },
     assessment: {
       verification: "verified",
-      reviewer: "Мария" as string | null,
+      reviewer: "Синтетический проверяющий" as string | null,
       reviewed_at: "2026-09-03T09:01:00Z" as string | null,
       record_version: 3,
     },
-    historical: false,
-    reason_code: null as string | null,
+  };
+}
+
+function unavailableInput() {
+  return {
+    schema_version: EVIDENCE_FRAGMENT_SCHEMA_VERSION as string,
+    state: "unavailable",
+    status: "unavailable",
+    reason_code: "access_revoked",
   };
 }
 
 afterEach(cleanup);
 
-function assertSensitiveContentAbsent(container: HTMLElement, markers: string[]) {
-  const serialized = container.outerHTML;
-  for (const marker of markers) expect(serialized).not.toContain(marker);
-  for (const element of container.querySelectorAll("*")) {
-    for (const attribute of element.getAttributeNames()) {
-      const value = element.getAttribute(attribute) ?? "";
-      for (const marker of markers) expect(value).not.toContain(marker);
-    }
-  }
-  expect(container.querySelectorAll("[hidden], [aria-live], [role='alert'], [title], [aria-label]")).toHaveLength(0);
-}
-
 describe("EvidenceFragmentCard", () => {
-  it("renders verified current readable evidence with separated sections", () => {
-    render(<EvidenceFragmentCard input={validInput()} />);
+  it("renders a server-readable evidence fragment", () => {
+    render(<EvidenceFragmentCard input={readableInput()} />);
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-atomic", "true");
     expect(screen.getByRole("heading", { name: "Основание вывода" })).toBeInTheDocument();
+    expect(screen.getByText("Синтетический срок: 10 сентября.")).toBeInTheDocument();
     expect(screen.getByText("evidence-16/r1")).toBeInTheDocument();
-    expect(screen.getByText("version-15/r1")).toBeInTheDocument();
-    expect(screen.getByText("Оплатить до 10 сентября.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Извлечённый факт" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Вывод AI" })).toBeInTheDocument();
-    expect(screen.getByText(/не гарантия истинности/i)).toBeInTheDocument();
   });
 
-  it("labels a readable unverified fragment for human review", () => {
-    const input = validInput();
-    input.evidence.status = "unverified";
-    input.assessment = { verification: "unverified", reviewer: null, reviewed_at: null, record_version: 1 };
-    render(<EvidenceFragmentCard input={input} />);
-    expect(screen.getAllByText("Не проверено").length).toBeGreaterThan(0);
-    expect(screen.getByText("Оплатить до 10 сентября.")).toBeInTheDocument();
-    expect(screen.getByText(/Confidence не заменяет решение человека/)).toBeInTheDocument();
+  it("announces a change from readable to unavailable and removes prior content", () => {
+    const { container, rerender } = render(<EvidenceFragmentCard input={readableInput()} />);
+    expect(container).toHaveTextContent("Синтетический срок: 10 сентября.");
+    rerender(<EvidenceFragmentCard input={unavailableInput()} />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveTextContent("Доказательство недоступно");
+    expect(container).not.toHaveTextContent("Синтетический срок");
+    expect(container).not.toHaveTextContent("evidence-16");
+    expect(container).not.toHaveTextContent("synthetic-account");
   });
 
-  it.each([
-    ["deny", "deny"],
-    ["stale", "stale"],
-    ["unavailable", "unavailable"],
-    ["revoked", "revoked"],
-    ["expired", "expired"],
-    ["purged", "purged"],
-  ])("removes fragment and derived sensitive text for %s", (_label, state) => {
-    const input = validInput();
-    if (state === "deny") input.capabilities.fragment = "deny";
-    if (state === "stale") { input.evidence.status = "stale"; input.source.freshness = "stale"; input.reason_code = "source_revision_changed"; }
-    if (state === "unavailable") { input.evidence.status = "unavailable"; input.source.availability = "unavailable"; input.reason_code = "provider_unavailable"; }
-    if (state === "revoked") { input.evidence.status = "unavailable"; input.source.availability = "revoked"; input.reason_code = "access_revoked"; }
-    if (state === "expired") { input.evidence.status = "unavailable"; input.source.availability = "expired"; input.reason_code = "fragment_expired"; }
-    if (state === "purged") { input.evidence.status = "unavailable"; input.source.availability = "purged"; input.reason_code = "fragment_purged"; }
+  it("does not retain bytes or metadata when denied payload is malformed with extras", () => {
+    const input = {
+      ...unavailableInput(),
+      fragment: { excerpt: "SENSITIVE-BYTES" },
+      extracted_fact: "SENSITIVE-FACT",
+      ai_conclusion: "SENSITIVE-AI",
+      source: {
+        account: "SENSITIVE-ACCOUNT",
+        provider_locator: "https://provider.example/object?token=secret",
+      },
+    };
     const { container } = render(<EvidenceFragmentCard input={input} />);
-    assertSensitiveContentAbsent(container, ["Оплатить до 10 сентября.", "Срок: 10.09.2026", "Возможно, нужна внутренняя задача."]);
-  });
-
-  it("hides existence details and every sensitive string when metadata is denied", () => {
-    const input = validInput();
-    input.capabilities.metadata = "deny";
-    const { container } = render(<EvidenceFragmentCard input={input} />);
-    expect(screen.getByRole("heading", { name: "Доказательство недоступно" })).toBeInTheDocument();
-    assertSensitiveContentAbsent(container, ["evidence-16", "source-13", "version-15", "google-workspace", "project-mailbox", "mailbox-primary", "Альфа", "Оплатить", "10.09.2026", "Возможно"]);
-  });
-
-  it("removes previously visible content after a denied rerender", () => {
-    const visible = validInput();
-    const { container, rerender } = render(<EvidenceFragmentCard input={visible} />);
-    expect(container).toHaveTextContent("Оплатить до 10 сентября.");
-    const denied = validInput();
-    denied.capabilities.metadata = "deny";
-    rerender(<EvidenceFragmentCard input={denied} />);
-    assertSensitiveContentAbsent(container, ["Оплатить", "Срок: 10.09.2026", "evidence-16", "source-13"]);
-  });
-
-  it("renders malicious HTML as inert text", () => {
-    const input = validInput();
-    input.fragment.excerpt = '<img src=x onerror="globalThis.pwned=true"><script>alert(1)</script>';
-    input.extracted_fact = "<b>Не доверять</b>";
-    const { container } = render(<EvidenceFragmentCard input={input} />);
-    expect(screen.getByText(input.fragment.excerpt)).toBeInTheDocument();
-    expect(screen.getByText(input.extracted_fact)).toBeInTheDocument();
-    expect(container.querySelector("img")).toBeNull();
-    expect(container.querySelector("script")).toBeNull();
-    expect(container.querySelector("b")).toBeNull();
-  });
-
-  it("shows a generic safe state for malformed input without echoing it", () => {
-    const secret = "SENSITIVE-EXCERPT-DO-NOT-ECHO";
-    const { container } = render(<EvidenceFragmentCard input={{ schema_version: "broken", excerpt: secret, title: secret }} />);
     expect(screen.getByText("Не удалось безопасно проверить доказательство.")).toBeInTheDocument();
-    assertSensitiveContentAbsent(container, [secret]);
+    expect(container.outerHTML).not.toContain("SENSITIVE");
+    expect(container.outerHTML).not.toContain("provider.example");
   });
 
-  it("shows the historical warning only for explicitly authorized archival content", () => {
-    const input = validInput();
-    input.historical = true;
-    input.source.version_state = "historical";
-    input.source.current_source_version_id = "version-new";
-    input.capabilities.archival_fragment = "allow";
+  it("renders historical warning only for a readable historical response", () => {
+    const input = readableInput();
+    input.version_state = "historical";
+    input.source.current_source_version_id = "version-current";
     render(<EvidenceFragmentCard input={input} />);
     expect(screen.getByText(/Историческое доказательство/)).toBeInTheDocument();
-    expect(screen.getByText("Оплатить до 10 сентября.")).toBeInTheDocument();
+    expect(screen.getByText("Синтетический срок: 10 сентября.")).toBeInTheDocument();
   });
 
-  it("shows when precise navigation is unavailable", () => {
-    const input = validInput();
-    input.locator = { kind: "page_bbox", page: 1, coordinate_space: "pixels", box: [10, 20, 30, 40], extent: [100, 100], representation_id: "raster-1", precise_navigation: false };
-    render(<EvidenceFragmentCard input={input} />);
-    expect(screen.getByText(/Точная навигация недоступна/)).toBeInTheDocument();
+  it("fails closed for contradictory verified stale input", () => {
+    const input = readableInput();
+    input.freshness = "stale";
+    const { container } = render(<EvidenceFragmentCard input={input} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Доказательство недоступно");
+    expect(container).not.toHaveTextContent("Синтетический срок");
   });
 
-  it("does not fetch, persist, parse HTML or expose mutation controls", () => {
+  it("renders malicious source text as escaped inert text", () => {
+    const input = readableInput();
+    input.fragment.excerpt = '<img src=x onerror="globalThis.pwned=true"><script>alert(1)</script>';
+    const { container } = render(<EvidenceFragmentCard input={input} />);
+    expect(screen.getByText(input.fragment.excerpt)).toBeInTheDocument();
+    expect(container.querySelector("img, script")).toBeNull();
+  });
+
+  it("does not fetch, use storage, or expose mutation controls", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const { container } = render(<EvidenceFragmentCard input={validInput()} />);
+    const storageSpy = vi.spyOn(Storage.prototype, "setItem");
+    const { container } = render(<EvidenceFragmentCard input={readableInput()} />);
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(storageSpy).not.toHaveBeenCalled();
     expect(container.querySelector("button, input, select, textarea, form")).toBeNull();
     expect(container.innerHTML).not.toContain("dangerouslySetInnerHTML");
-    expect(container.innerHTML).not.toContain("localStorage");
     fetchSpy.mockRestore();
+    storageSpy.mockRestore();
   });
 });

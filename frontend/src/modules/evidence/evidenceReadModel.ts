@@ -1,31 +1,22 @@
-export const EVIDENCE_FRAGMENT_SCHEMA_VERSION = "evidence-fragment.v54.1" as const;
+export const EVIDENCE_FRAGMENT_SCHEMA_VERSION = "evidence-fragment.v54.2" as const;
 
-type Capability = "allow" | "deny" | "unknown";
-type EvidenceStatus = "verified" | "unverified" | "stale" | "unavailable";
-type VersionState = "current" | "historical" | "changed" | "unknown";
-type Freshness = "fresh" | "stale" | "unknown";
-type Availability = "available" | "unavailable" | "revoked" | "purged" | "expired" | "unknown";
 type Verification = "verified" | "unverified";
 type ConfidenceKind = "heuristic" | "model" | "calibrated" | "unknown";
+type Dictionary = Record<string, unknown>;
 
 const SAFE_GENERIC_REASON = "Не удалось безопасно проверить доказательство.";
-
 const REASON_LABELS = {
-  access_revoked: "Доступ к источнику отозван.",
-  provider_unavailable: "Источник временно недоступен.",
-  source_not_found: "Источник больше недоступен.",
-  source_revision_changed: "Источник изменился; фрагмент относится к другой версии.",
-  fragment_expired: "Срок хранения фрагмента истёк.",
-  fragment_purged: "Фрагмент удалён по правилам хранения.",
-  policy_denied: "Просмотр фрагмента не разрешён.",
-  metadata_denied: "Сведения о доказательстве недоступны.",
-  verification_pending: "Доказательство ожидает проверки человеком.",
-  version_unknown: "Точная версия источника не подтверждена.",
-  capability_unknown: "Право на просмотр фрагмента не подтверждено.",
-  retention_unknown: "Правила хранения фрагмента не подтверждены.",
-  no_content_version: "Нет достаточно точной версии содержимого.",
+  access_revoked: "Доступ к доказательству отозван.",
+  provider_unavailable: "Доказательство временно недоступно.",
+  source_not_found: "Доказательство больше недоступно.",
+  source_revision_changed: "Версия доказательства изменилась.",
+  fragment_expired: "Срок хранения доказательства истёк.",
+  fragment_purged: "Доказательство удалено по правилам хранения.",
+  policy_denied: "Просмотр доказательства не разрешён.",
+  retention_unknown: "Правила хранения доказательства не подтверждены.",
+  version_unknown: "Точная версия доказательства не подтверждена.",
+  resource_unavailable: "Доказательство недоступно.",
 } as const;
-
 type ReasonCode = keyof typeof REASON_LABELS;
 
 export type EvidenceLocatorViewModel =
@@ -38,27 +29,18 @@ export type EvidenceLocatorViewModel =
   | { kind: "attachment"; label: string; preciseNavigation: true }
   | { kind: "record"; label: string; preciseNavigation: true };
 
-type VisibleViewModel = {
+type ReadableViewModel = {
   kind: "evidence";
   metadataVisible: true;
-  fragmentVisible: boolean;
-  status: EvidenceStatus;
+  fragmentVisible: true;
+  status: Verification;
   statusLabel: string;
-  reasonLabel: string | null;
+  reasonLabel: null;
   historical: boolean;
-  source: {
-    provider: string;
-    account: string;
-    namespace: string;
-    originProject: string;
-  };
-  pins: {
-    evidence: string;
-    source: string;
-    sourceVersion: string;
-  };
+  source: { provider: string; account: string; namespace: string; originProject: string };
+  pins: { evidence: string; source: string; sourceVersion: string };
   locator: EvidenceLocatorViewModel;
-  fragment: { mediaType: string; excerpt: string } | null;
+  fragment: { mediaType: string; excerpt: string };
   extractedFact: string | null;
   aiConclusion: string | null;
   extraction: {
@@ -78,7 +60,7 @@ type VisibleViewModel = {
   };
 };
 
-type HiddenViewModel = {
+type UnavailableViewModel = {
   kind: "hidden";
   metadataVisible: false;
   fragmentVisible: false;
@@ -87,11 +69,9 @@ type HiddenViewModel = {
   reasonLabel: string;
 };
 
-export type EvidenceFragmentViewModel = VisibleViewModel | HiddenViewModel;
+export type EvidenceFragmentViewModel = ReadableViewModel | UnavailableViewModel;
 
-type Dictionary = Record<string, unknown>;
-
-function hidden(reasonLabel = SAFE_GENERIC_REASON): HiddenViewModel {
+function unavailable(reasonLabel = SAFE_GENERIC_REASON): UnavailableViewModel {
   return {
     kind: "hidden",
     metadataVisible: false,
@@ -108,13 +88,17 @@ function record(value: unknown): Dictionary | null {
     : null;
 }
 
-function string(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+function exact(input: Dictionary, keys: readonly string[]): boolean {
+  const actual = Object.keys(input);
+  return actual.length === keys.length && actual.every((key) => keys.includes(key));
 }
 
-function nullableString(value: unknown): string | null | undefined {
-  if (value === null) return null;
-  return string(value) ?? undefined;
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.trim() === value ? value : null;
+}
+
+function nullableText(value: unknown): string | null | undefined {
+  return value === null ? null : text(value) ?? undefined;
 }
 
 function positiveInteger(value: unknown): number | null {
@@ -125,17 +109,12 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function enumValue<const T extends readonly string[]>(value: unknown, values: T): T[number] | null {
-  return typeof value === "string" && values.includes(value) ? value as T[number] : null;
-}
-
 function timestamp(value: unknown): string | null | undefined {
   if (value === null) return null;
-  if (typeof value !== "string" || value.trim() === "" || !Number.isFinite(Date.parse(value))) return undefined;
-  return value;
+  return typeof value === "string" && value !== "" && Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
-function numberTuple(value: unknown, length: number): number[] | null {
+function tuple(value: unknown, length: number): number[] | null {
   if (!Array.isArray(value) || value.length !== length) return null;
   const result = value.map(finiteNumber);
   return result.every((item): item is number => item !== null) ? result : null;
@@ -143,61 +122,73 @@ function numberTuple(value: unknown, length: number): number[] | null {
 
 function parseLocator(value: unknown): EvidenceLocatorViewModel | null {
   const input = record(value);
-  const kind = input && string(input.kind);
+  const kind = input && text(input.kind);
   if (!input || !kind) return null;
   if (kind === "whole_object") {
-    return input.reason_code === "content_read_forbidden"
+    return exact(input, ["kind", "reason_code"]) && text(input.reason_code)
       ? { kind, label: "Весь объект · точная область не определена", preciseNavigation: false }
       : null;
   }
   if (kind === "page") {
     const page = positiveInteger(input.page);
-    return page ? { kind, label: `Страница ${page}`, preciseNavigation: true } : null;
+    return exact(input, ["kind", "page"]) && page
+      ? { kind, label: `Страница ${page}`, preciseNavigation: true }
+      : null;
   }
   if (kind === "page_bbox") {
+    if (!exact(input, ["kind", "page", "coordinate_space", "units", "box", "extent", "representation_id", "precise_navigation"])) return null;
     const page = positiveInteger(input.page);
-    const coordinateSpace = enumValue(input.coordinate_space, ["pixels", "points", "normalized"] as const);
-    const box = numberTuple(input.box, 4);
-    const extent = numberTuple(input.extent, 2);
-    const representationId = string(input.representation_id);
-    if (!page || !coordinateSpace || !box || !extent || !representationId) return null;
+    const coordinateSpace = input.coordinate_space === "original" || input.coordinate_space === "representation"
+      ? input.coordinate_space : null;
+    const units = input.units === "pixels" || input.units === "points" || input.units === "normalized"
+      ? input.units : null;
+    const box = tuple(input.box, 4);
+    const extent = tuple(input.extent, 2);
+    const representationId = text(input.representation_id);
+    if (!page || !coordinateSpace || !units || !box || !extent || !representationId
+      || typeof input.precise_navigation !== "boolean") return null;
     const [x, y, width, height] = box;
     const [extentWidth, extentHeight] = extent;
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || extentWidth <= 0 || extentHeight <= 0
-      || x + width > extentWidth || y + height > extentHeight || typeof input.precise_navigation !== "boolean") return null;
+      || x + width > extentWidth || y + height > extentHeight
+      || units === "normalized" && (extentWidth !== 1 || extentHeight !== 1)) return null;
     return {
       kind,
-      label: `Страница ${page} · область ${box.join(", ")} ${coordinateSpace} · representation ${representationId}`,
+      label: `Страница ${page} · область ${box.join(", ")} ${units} · ${coordinateSpace}`,
       preciseNavigation: input.precise_navigation,
     };
   }
   if (kind === "section_clause") {
-    if (!Array.isArray(input.section_path) || input.section_path.length === 0) return null;
-    const parts = input.section_path.map(string);
-    if (!parts.every((part): part is string => part !== null)) return null;
-    const clause = nullableString(input.clause_label);
-    const anchor = nullableString(input.anchor);
-    if (clause === undefined || anchor === undefined) return null;
+    if (!exact(input, ["kind", "section_path", "clause_label", "anchor"])
+      || !Array.isArray(input.section_path) || input.section_path.length === 0) return null;
+    const path = input.section_path.map(text);
+    const clause = nullableText(input.clause_label);
+    const anchor = nullableText(input.anchor);
+    if (!path.every((part): part is string => part !== null) || clause === undefined || anchor === undefined) return null;
     return {
       kind,
-      label: `${parts.join(" › ")}${clause ? ` · ${clause}` : ""}`,
+      label: `${path.join(" › ")}${clause ? ` · ${clause}` : ""}`,
       preciseNavigation: anchor !== null,
     };
   }
   if (kind === "sheet_cell") {
-    const sheetKey = string(input.sheet_key);
-    const sheetName = nullableString(input.sheet_name);
-    const range = string(input.range_a1);
-    const valueKind = enumValue(input.value_kind, ["formula", "cached_value", "displayed_value"] as const);
-    if (!sheetKey || sheetName === undefined || !range || !valueKind) return null;
-    return { kind, label: `${sheetName ?? sheetKey} · ${range} · ${valueKind}`, preciseNavigation: true };
+    if (!exact(input, ["kind", "sheet_key", "sheet_name", "range_a1", "value_kind"])) return null;
+    const sheetKey = text(input.sheet_key);
+    const sheetName = nullableText(input.sheet_name);
+    const range = text(input.range_a1);
+    const valueKind = input.value_kind === "formula" || input.value_kind === "cached_value"
+      || input.value_kind === "displayed_value" ? input.value_kind : null;
+    return sheetKey && sheetName !== undefined && range && valueKind
+      ? { kind, label: `${sheetName ?? sheetKey} · ${range} · ${valueKind}`, preciseNavigation: true }
+      : null;
   }
   if (kind === "message") {
-    const messageId = string(input.message_external_id);
-    const part = enumValue(input.part, ["body", "subject"] as const);
-    const range = input.char_range === null ? null : numberTuple(input.char_range, 2);
-    if (!messageId || !part || range === null && input.char_range !== null) return null;
-    if (range && (range[0] < 0 || range[1] <= range[0])) return null;
+    if (!exact(input, ["kind", "message_external_id", "part", "char_range"])) return null;
+    const messageId = text(input.message_external_id);
+    const part = input.part === "body" || input.part === "subject" ? input.part : null;
+    const range = input.char_range === null ? null : tuple(input.char_range, 2);
+    if (!messageId || !part || range === null && input.char_range !== null
+      || range && (range[0] < 0 || range[1] <= range[0])) return null;
     return {
       kind,
       label: `Сообщение ${messageId} · ${part}${range ? ` · символы ${range[0]}–${range[1]}` : ""}`,
@@ -205,169 +196,135 @@ function parseLocator(value: unknown): EvidenceLocatorViewModel | null {
     };
   }
   if (kind === "attachment") {
-    const messageId = string(input.message_external_id);
-    const attachmentId = string(input.attachment_external_id);
-    const sourceId = string(input.attachment_source_reference_id);
+    if (!exact(input, ["kind", "message_external_id", "attachment_external_id", "attachment_source_reference_id"])) return null;
+    const messageId = text(input.message_external_id);
+    const attachmentId = text(input.attachment_external_id);
+    const sourceId = text(input.attachment_source_reference_id);
     return messageId && attachmentId && sourceId
       ? { kind, label: `Вложение ${attachmentId} · сообщение ${messageId} · source ${sourceId}`, preciseNavigation: true }
       : null;
   }
   if (kind === "record") {
-    const recordKey = string(input.record_key);
-    if (!Array.isArray(input.field_path) || input.field_path.length === 0) return null;
-    const parts = input.field_path.map(string);
-    return recordKey && parts.every((part): part is string => part !== null)
-      ? { kind, label: `Запись ${recordKey} · ${parts.join(".")}`, preciseNavigation: true }
+    if (!exact(input, ["kind", "record_key", "field_path"]) || !Array.isArray(input.field_path)
+      || input.field_path.length === 0) return null;
+    const recordKey = text(input.record_key);
+    const path = input.field_path.map(text);
+    return recordKey && path.every((part): part is string => part !== null)
+      ? { kind, label: `Запись ${recordKey} · ${path.join(".")}`, preciseNavigation: true }
       : null;
   }
   return null;
 }
 
-function statusLabel(status: EvidenceStatus): string {
-  return {
-    verified: "Проверено",
-    unverified: "Не проверено",
-    stale: "Устарело",
-    unavailable: "Недоступно",
-  }[status];
-}
-
 function confidenceLabel(value: number | null, kind: ConfidenceKind): string {
   if (value === null || kind === "unknown") return "Оценка извлечения: не оценено";
   const formatted = new Intl.NumberFormat("ru-RU", { style: "percent", maximumFractionDigits: 1 }).format(value);
-  const kindLabel = { heuristic: "эвристика", model: "модель", calibrated: "калиброванная", unknown: "" }[kind];
-  return `Оценка извлечения: ${formatted} · ${kindLabel}`;
+  const label = { heuristic: "эвристика", model: "модель", calibrated: "калиброванная", unknown: "" }[kind];
+  return `Оценка извлечения: ${formatted} · ${label}`;
 }
 
-/** Converts an untrusted server response to a display-only, fail-closed model. */
-export function toEvidenceFragmentViewModel(input: unknown): EvidenceFragmentViewModel {
-  const root = record(input);
-  if (!root || root.schema_version !== EVIDENCE_FRAGMENT_SCHEMA_VERSION) return hidden();
-
-  const capabilities = record(root.capabilities);
-  const metadataCapability = capabilities && enumValue(capabilities.metadata, ["allow", "deny", "unknown"] as const);
-  if (metadataCapability !== "allow") return hidden();
-  const fragmentCapability = capabilities && enumValue(capabilities.fragment, ["allow", "deny", "unknown"] as const);
-  const archivalCapability = capabilities && enumValue(capabilities.archival_fragment, ["allow", "deny", "unknown"] as const);
-  if (!fragmentCapability || !archivalCapability) return hidden();
-
-  const policy = record(root.policy);
-  if (!policy || typeof policy.known !== "boolean") return hidden();
-  const policyVersion = nullableString(policy.version);
-  if (policyVersion === undefined || policy.known && policyVersion === null || !policy.known && policyVersion !== null) return hidden();
+/** Parses the server authorization decision; it never derives access locally. */
+export function toEvidenceFragmentViewModel(value: unknown): EvidenceFragmentViewModel {
+  const root = record(value);
+  if (!root || root.schema_version !== EVIDENCE_FRAGMENT_SCHEMA_VERSION) return unavailable();
+  if (root.state === "unavailable") {
+    if (!exact(root, ["schema_version", "state", "status", "reason_code"]) || root.status !== "unavailable") return unavailable();
+    const reason = typeof root.reason_code === "string" && root.reason_code in REASON_LABELS
+      ? root.reason_code as ReasonCode : null;
+    return reason ? unavailable(REASON_LABELS[reason]) : unavailable();
+  }
+  if (root.state !== "readable" || !exact(root, [
+    "schema_version", "state", "status", "version_state", "freshness", "availability",
+    "evidence", "source", "source_version", "locator", "fragment", "extracted_fact",
+    "ai_conclusion", "extractor", "confidence", "assessment",
+  ])) return unavailable();
+  if ((root.status !== "verified" && root.status !== "unverified")
+    || (root.version_state !== "current" && root.version_state !== "historical")
+    || root.freshness !== "fresh" || root.availability !== "available") return unavailable();
 
   const evidence = record(root.evidence);
   const source = record(root.source);
   const sourceVersion = record(root.source_version);
-  const assessment = record(root.assessment);
+  const fragment = record(root.fragment);
   const extractor = record(root.extractor);
   const confidence = record(root.confidence);
-  const fragment = record(root.fragment);
-  if (!evidence || !source || !sourceVersion || !assessment || !extractor || !confidence || !fragment) return hidden();
+  const assessment = record(root.assessment);
+  if (!evidence || !source || !sourceVersion || !fragment || !extractor || !confidence || !assessment
+    || !exact(evidence, ["id", "revision", "source_id", "source_version_id"])
+    || !exact(source, ["id", "record_version", "current_source_version_id", "provider", "account", "namespace", "origin_project"])
+    || !exact(sourceVersion, ["id", "revision", "source_id"])
+    || !exact(fragment, ["media_type", "excerpt"])
+    || !exact(extractor, ["name", "version", "method", "model_provider", "model_id", "model_version", "prompt_version"])
+    || !exact(confidence, ["value", "kind", "calibration_ref"])
+    || !exact(assessment, ["verification", "reviewer", "reviewed_at", "record_version"])) return unavailable();
 
-  const evidenceId = string(evidence.id);
+  const evidenceId = text(evidence.id);
   const evidenceRevision = positiveInteger(evidence.revision);
-  const evidenceSourceId = string(evidence.source_id);
-  const evidenceSourceVersionId = string(evidence.source_version_id);
-  const sourceId = string(source.id);
+  const evidenceSourceId = text(evidence.source_id);
+  const evidenceSourceVersionId = text(evidence.source_version_id);
+  const sourceId = text(source.id);
   const sourceRecordVersion = positiveInteger(source.record_version);
-  const currentSourceVersionId = string(source.current_source_version_id);
-  const sourceVersionId = string(sourceVersion.id);
+  const currentVersionId = text(source.current_source_version_id);
+  const sourceVersionId = text(sourceVersion.id);
   const sourceVersionRevision = positiveInteger(sourceVersion.revision);
-  const sourceVersionSourceId = string(sourceVersion.source_id);
+  const sourceVersionSourceId = text(sourceVersion.source_id);
   if (!evidenceId || !evidenceRevision || !evidenceSourceId || !evidenceSourceVersionId || !sourceId
-    || !sourceRecordVersion || !currentSourceVersionId || !sourceVersionId || !sourceVersionRevision
+    || !sourceRecordVersion || !currentVersionId || !sourceVersionId || !sourceVersionRevision
     || !sourceVersionSourceId || evidenceSourceId !== sourceId || sourceVersionSourceId !== sourceId
-    || evidenceSourceVersionId !== sourceVersionId) return hidden();
+    || evidenceSourceVersionId !== sourceVersionId
+    || root.version_state === "current" && currentVersionId !== sourceVersionId
+    || root.version_state === "historical" && currentVersionId === sourceVersionId) return unavailable();
 
-  const status = enumValue(evidence.status, ["verified", "unverified", "stale", "unavailable"] as const);
-  const versionState = enumValue(source.version_state, ["current", "historical", "changed", "unknown"] as const);
-  const freshness = enumValue(source.freshness, ["fresh", "stale", "unknown"] as const);
-  const availability = enumValue(source.availability, ["available", "unavailable", "revoked", "purged", "expired", "unknown"] as const);
-  const verification = enumValue(assessment.verification, ["verified", "unverified"] as const);
-  const historical = root.historical;
-  if (!status || !versionState || !freshness || !availability || !verification || typeof historical !== "boolean") return hidden();
-  if (historical !== (versionState === "historical")) return hidden();
-  if (versionState === "current" && currentSourceVersionId !== sourceVersionId) return hidden();
-  if ((versionState === "historical" || versionState === "changed") && currentSourceVersionId === sourceVersionId) return hidden();
-  if (status === "verified" && verification !== "verified" || status === "unverified" && verification !== "unverified") return hidden();
-  if (status === "stale" && freshness !== "stale" && versionState !== "changed") return hidden();
-  if (status === "unavailable" && availability === "available") return hidden();
-  if ((status === "verified" || status === "unverified") && (freshness === "stale" || versionState === "changed" || availability !== "available")) return hidden();
-
-  const rawReason = root.reason_code;
-  const reasonCode = rawReason === null ? null : enumValue(rawReason, Object.keys(REASON_LABELS) as ReasonCode[]);
-  if (rawReason !== null && reasonCode === null) return hidden();
-  if (reasonCode === "access_revoked" && availability !== "revoked"
-    || reasonCode === "provider_unavailable" && availability !== "unavailable"
-    || reasonCode === "source_not_found" && availability !== "unavailable"
-    || reasonCode === "source_revision_changed" && versionState !== "changed" && freshness !== "stale"
-    || reasonCode === "fragment_expired" && availability !== "expired"
-    || reasonCode === "fragment_purged" && availability !== "purged"
-    || reasonCode === "policy_denied" && policy.known && fragmentCapability === "allow"
-    || reasonCode === "metadata_denied"
-    || reasonCode === "verification_pending" && status !== "unverified"
-    || reasonCode === "version_unknown" && versionState !== "unknown" && freshness !== "unknown"
-    || reasonCode === "capability_unknown" && fragmentCapability !== "unknown" && archivalCapability !== "unknown"
-    || reasonCode === "retention_unknown" && policy.known) return hidden();
-
-  const provider = string(source.provider);
-  const account = string(source.account);
-  const namespace = string(source.namespace);
-  const originProject = string(source.origin_project);
+  const provider = text(source.provider);
+  const account = text(source.account);
+  const namespace = text(source.namespace);
+  const originProject = text(source.origin_project);
   const locator = parseLocator(root.locator);
-  const mediaType = string(fragment.media_type);
-  const excerpt = string(fragment.excerpt);
-  const extractorName = string(extractor.name);
-  const extractorVersion = string(extractor.version);
-  const method = string(extractor.method);
-  const modelProvider = nullableString(extractor.model_provider);
-  const modelId = nullableString(extractor.model_id);
-  const modelVersion = nullableString(extractor.model_version);
-  const promptVersion = nullableString(extractor.prompt_version);
-  if (!provider || !account || !namespace || !originProject || !locator || !mediaType || !excerpt
-    || !extractorName || !extractorVersion || !method || modelProvider === undefined || modelId === undefined
-    || modelVersion === undefined || promptVersion === undefined) return hidden();
-  if ([modelProvider, modelId, modelVersion].filter((value) => value !== null).length !== 0
-    && [modelProvider, modelId, modelVersion].some((value) => value === null)) return hidden();
+  const mediaType = text(fragment.media_type);
+  const excerpt = text(fragment.excerpt);
+  if (!provider || !account || !namespace || !originProject || !locator || !mediaType || !excerpt) return unavailable();
 
-  const confidenceKind = enumValue(confidence.kind, ["heuristic", "model", "calibrated", "unknown"] as const);
+  const extractorName = text(extractor.name);
+  const extractorVersion = text(extractor.version);
+  const method = text(extractor.method);
+  const modelProvider = nullableText(extractor.model_provider);
+  const modelId = nullableText(extractor.model_id);
+  const modelVersion = nullableText(extractor.model_version);
+  const promptVersion = nullableText(extractor.prompt_version);
+  const allModelNull = [modelProvider, modelId, modelVersion].every((item) => item === null);
+  const allModelPresent = [modelProvider, modelId, modelVersion].every((item) => typeof item === "string");
+  if (!extractorName || !extractorVersion || !method || modelProvider === undefined || modelId === undefined
+    || modelVersion === undefined || promptVersion === undefined || !allModelNull && !allModelPresent) return unavailable();
+
+  const confidenceKind = confidence.kind === "heuristic" || confidence.kind === "model"
+    || confidence.kind === "calibrated" || confidence.kind === "unknown" ? confidence.kind : null;
   const confidenceValue = confidence.value === null ? null : finiteNumber(confidence.value);
-  const calibration = nullableString(confidence.calibration_ref);
+  const calibration = nullableText(confidence.calibration_ref);
   if (!confidenceKind || confidenceValue === null && confidence.value !== null || calibration === undefined
     || confidenceValue !== null && (confidenceValue < 0 || confidenceValue > 1)
     || confidenceKind === "unknown" && (confidenceValue !== null || calibration !== null)
-    || confidenceKind === "calibrated" && calibration === null) return hidden();
+    || confidenceKind === "calibrated" && calibration === null) return unavailable();
 
-  const assessmentVersion = positiveInteger(assessment.record_version);
-  const reviewer = nullableString(assessment.reviewer);
+  const verification = assessment.verification === "verified" || assessment.verification === "unverified"
+    ? assessment.verification : null;
+  const reviewer = nullableText(assessment.reviewer);
   const reviewedAt = timestamp(assessment.reviewed_at);
-  if (!assessmentVersion || reviewer === undefined || reviewedAt === undefined) return hidden();
-  if (verification === "verified" && (!reviewer || !reviewedAt) || verification === "unverified" && (reviewer !== null || reviewedAt !== null)) return hidden();
+  const assessmentVersion = positiveInteger(assessment.record_version);
+  if (!verification || verification !== root.status || reviewer === undefined || reviewedAt === undefined
+    || !assessmentVersion || verification === "verified" && (!reviewer || !reviewedAt)
+    || verification === "unverified" && (reviewer !== null || reviewedAt !== null)) return unavailable();
 
-  const extractedFact = nullableString(root.extracted_fact);
-  const aiConclusion = nullableString(root.ai_conclusion);
-  if (extractedFact === undefined || aiConclusion === undefined) return hidden();
-
-  const currentReadable = versionState === "current" && freshness === "fresh" && availability === "available";
-  const historicalReadable = historical && freshness === "fresh" && availability === "available" && archivalCapability === "allow";
-  const fragmentVisible = policy.known && fragmentCapability === "allow" && archivalCapability !== "unknown"
-    && (currentReadable || historicalReadable);
-  const safeReason = reasonCode ? REASON_LABELS[reasonCode] : fragmentVisible ? null
-    : !policy.known ? REASON_LABELS.retention_unknown
-      : fragmentCapability === "unknown" ? REASON_LABELS.capability_unknown
-        : versionState === "unknown" ? REASON_LABELS.version_unknown
-          : status === "stale" ? REASON_LABELS.source_revision_changed
-            : REASON_LABELS.policy_denied;
-
+  const extractedFact = nullableText(root.extracted_fact);
+  const aiConclusion = nullableText(root.ai_conclusion);
+  if (extractedFact === undefined || aiConclusion === undefined) return unavailable();
   return {
     kind: "evidence",
     metadataVisible: true,
-    fragmentVisible,
-    status,
-    statusLabel: statusLabel(status),
-    reasonLabel: safeReason,
-    historical,
+    fragmentVisible: true,
+    status: root.status,
+    statusLabel: root.status === "verified" ? "Проверено" : "Не проверено",
+    reasonLabel: null,
+    historical: root.version_state === "historical",
     source: { provider, account, namespace, originProject },
     pins: {
       evidence: `${evidenceId}/r${evidenceRevision}`,
@@ -375,9 +332,9 @@ export function toEvidenceFragmentViewModel(input: unknown): EvidenceFragmentVie
       sourceVersion: `${sourceVersionId}/r${sourceVersionRevision}`,
     },
     locator,
-    fragment: fragmentVisible ? { mediaType, excerpt } : null,
-    extractedFact: fragmentVisible ? extractedFact : null,
-    aiConclusion: fragmentVisible ? aiConclusion : null,
+    fragment: { mediaType, excerpt },
+    extractedFact,
+    aiConclusion,
     extraction: {
       extractor: `${extractorName}/${extractorVersion}`,
       method,
@@ -388,7 +345,7 @@ export function toEvidenceFragmentViewModel(input: unknown): EvidenceFragmentVie
     },
     assessment: {
       verification,
-      label: verification === "verified" ? "Проверено человеком" : "Не проверено",
+      label: verification === "verified" ? "Проверено" : "Не проверено",
       reviewer,
       reviewedAt,
       version: assessmentVersion,

@@ -1,172 +1,209 @@
 import { describe, expect, it } from "vitest";
 import { EVIDENCE_FRAGMENT_SCHEMA_VERSION, toEvidenceFragmentViewModel } from "./evidenceReadModel";
 
-function validInput() {
+type MutableRecord = Record<string, unknown>;
+
+function readableInput() {
   return {
     schema_version: EVIDENCE_FRAGMENT_SCHEMA_VERSION as string,
-    capabilities: { metadata: "allow", fragment: "allow", archival_fragment: "deny" },
-    policy: { known: true, version: "policy-7" as string | null },
-    evidence: { id: "evidence-16", revision: 1, source_id: "source-13", source_version_id: "version-15", status: "verified" },
+    state: "readable",
+    status: "verified",
+    version_state: "current",
+    freshness: "fresh",
+    availability: "available",
+    evidence: { id: "evidence-16", revision: 1, source_id: "source-13", source_version_id: "version-15" },
     source: {
-      id: "source-13", record_version: 4, current_source_version_id: "version-15",
-      version_state: "current", freshness: "fresh", availability: "available",
-      provider: "google-workspace", account: "project-mailbox", namespace: "mailbox-primary", origin_project: "Альфа",
+      id: "source-13",
+      record_version: 4,
+      current_source_version_id: "version-15",
+      provider: "synthetic-provider",
+      account: "synthetic-account",
+      namespace: "synthetic-mailbox",
+      origin_project: "Синтетический проект",
     },
     source_version: { id: "version-15", revision: 1, source_id: "source-13" },
-    locator: { kind: "page", page: 2 } as Record<string, unknown>,
-    fragment: { media_type: "text/plain", excerpt: "Оплатить до 10 сентября." },
+    locator: { kind: "page", page: 2 } as MutableRecord,
+    fragment: { media_type: "text/plain", excerpt: "Синтетический срок: 10 сентября." },
     extracted_fact: "Срок: 10.09.2026",
-    ai_conclusion: "Возможно, нужна внутренняя задача.",
+    ai_conclusion: "Требуется проверка человеком.",
     extractor: {
-      name: "local-ocr", version: "2", method: "ocr",
-      model_provider: "local", model_id: "classifier", model_version: "1", prompt_version: "prompt-3",
+      name: "local-ocr",
+      version: "2",
+      method: "ocr",
+      model_provider: "local",
+      model_id: "classifier",
+      model_version: "1",
+      prompt_version: "prompt-3",
     },
     confidence: { value: 0.923, kind: "calibrated", calibration_ref: "calibration-2" },
-    assessment: { verification: "verified", reviewer: "Мария" as string | null, reviewed_at: "2026-09-03T09:01:00Z" as string | null, record_version: 3 },
-    historical: false,
-    reason_code: null as string | null,
+    assessment: {
+      verification: "verified",
+      reviewer: "Синтетический проверяющий" as string | null,
+      reviewed_at: "2026-09-03T09:01:00Z" as string | null,
+      record_version: 3,
+    },
   };
 }
 
-describe("toEvidenceFragmentViewModel", () => {
-  it("accepts verified current readable evidence and preserves exact pins", () => {
-    const model = toEvidenceFragmentViewModel(validInput());
+function unavailableInput(reason = "access_revoked") {
+  return {
+    schema_version: EVIDENCE_FRAGMENT_SCHEMA_VERSION as string,
+    state: "unavailable",
+    status: "unavailable",
+    reason_code: reason,
+  };
+}
+
+describe("strict server evidence DTO", () => {
+  it("accepts a server-authorized current readable variant", () => {
+    const model = toEvidenceFragmentViewModel(readableInput());
     expect(model.kind).toBe("evidence");
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.fragmentVisible).toBe(true);
-    expect(model.statusLabel).toBe("Проверено");
-    expect(model.pins).toEqual({ evidence: "evidence-16/r1", source: "source-13/r4", sourceVersion: "version-15/r1" });
-    expect(model.fragment?.excerpt).toContain("10 сентября");
+    if (model.kind !== "evidence") throw new Error("expected readable evidence");
+    expect(model.fragment.excerpt).toContain("10 сентября");
+    expect(model.pins).toEqual({
+      evidence: "evidence-16/r1",
+      source: "source-13/r4",
+      sourceVersion: "version-15/r1",
+    });
+    expect(model.historical).toBe(false);
   });
 
-  it("allows an explicitly readable unverified fragment for human review", () => {
-    const input = validInput();
-    input.evidence.status = "unverified";
-    input.assessment = { verification: "unverified", reviewer: null, reviewed_at: null, record_version: 1 };
+  it("accepts an explicitly readable unverified variant for human review", () => {
+    const input = readableInput();
+    input.status = "unverified";
+    input.assessment = { verification: "unverified", reviewer: null, reviewed_at: null, record_version: 4 };
     const model = toEvidenceFragmentViewModel(input);
     expect(model.kind).toBe("evidence");
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.fragmentVisible).toBe(true);
-    expect(model.assessment.label).toBe("Не проверено");
+    if (model.kind !== "evidence") throw new Error("expected readable evidence");
+    expect(model.assessment.verification).toBe("unverified");
   });
 
-  it.each([
-    ["stale", { freshness: "stale" }, "source_revision_changed"],
-    ["unavailable", { availability: "unavailable" }, "provider_unavailable"],
-    ["unavailable", { availability: "revoked" }, "access_revoked"],
-    ["unavailable", { availability: "expired" }, "fragment_expired"],
-    ["unavailable", { availability: "purged" }, "fragment_purged"],
-  ])("hides fragment for %s evidence", (status, sourcePatch, reason) => {
-    const input = validInput();
-    input.evidence.status = status;
-    Object.assign(input.source, sourcePatch);
-    input.reason_code = reason;
-    const model = toEvidenceFragmentViewModel(input);
-    expect(model.kind).toBe("evidence");
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.fragmentVisible).toBe(false);
-    expect(model.fragment).toBeNull();
-    expect(model.extractedFact).toBeNull();
-    expect(model.aiConclusion).toBeNull();
-  });
+  it.each(["access_revoked", "policy_denied", "source_revision_changed", "fragment_expired", "resource_unavailable"])(
+    "accepts a minimal unavailable variant without content for %s",
+    (reason) => {
+      const input = unavailableInput(reason);
+      expect(Object.keys(input).sort()).toEqual(["reason_code", "schema_version", "state", "status"]);
+      expect(input).not.toHaveProperty("fragment");
+      expect(input).not.toHaveProperty("extracted_fact");
+      expect(input).not.toHaveProperty("ai_conclusion");
+      expect(input).not.toHaveProperty("source");
+      expect(toEvidenceFragmentViewModel(input)).toMatchObject({
+        kind: "hidden",
+        metadataVisible: false,
+        fragmentVisible: false,
+      });
+    },
+  );
 
-  it("hides all existence metadata when metadata capability is denied", () => {
-    const input = validInput();
-    input.capabilities.metadata = "deny";
-    expect(toEvidenceFragmentViewModel(input)).toMatchObject({ kind: "hidden", metadataVisible: false, fragmentVisible: false });
-  });
+  it.each(["fragment", "extracted_fact", "ai_conclusion", "source", "provider_locator", "account"])(
+    "rejects unavailable payload carrying forbidden field %s",
+    (field) => {
+      const input: MutableRecord = { ...unavailableInput(), [field]: "SENSITIVE-BYTES" };
+      const model = toEvidenceFragmentViewModel(input);
+      expect(model).toMatchObject({ kind: "hidden", reasonLabel: "Не удалось безопасно проверить доказательство." });
+      expect(JSON.stringify(model)).not.toContain("SENSITIVE-BYTES");
+    },
+  );
 
-  it.each([
-    ["unknown schema", (input: ReturnType<typeof validInput>) => { input.schema_version = "future-schema"; }],
-    ["unknown reason", (input: ReturnType<typeof validInput>) => { input.reason_code = "raw_backend_exception"; }],
-    ["unknown metadata capability", (input: ReturnType<typeof validInput>) => { input.capabilities.metadata = "future"; }],
-  ])("fails closed for %s", (_label, change) => {
-    const input = validInput();
-    change(input);
-    const model = toEvidenceFragmentViewModel(input);
-    expect(model.kind).toBe("hidden");
-    expect(model.reasonLabel).toBe("Не удалось безопасно проверить доказательство.");
-  });
-
-  it.each([
-    ["unknown fragment capability", (input: ReturnType<typeof validInput>) => { input.capabilities.fragment = "unknown"; }],
-    ["unknown archival capability", (input: ReturnType<typeof validInput>) => { input.capabilities.archival_fragment = "unknown"; }],
-    ["unknown policy", (input: ReturnType<typeof validInput>) => { input.policy = { known: false, version: null }; }],
-    ["unknown version", (input: ReturnType<typeof validInput>) => { input.source.version_state = "unknown"; }],
-  ])("keeps allowed metadata but hides content for %s", (_label, change) => {
-    const input = validInput();
-    change(input);
-    const model = toEvidenceFragmentViewModel(input);
-    expect(model.kind).toBe("evidence");
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.fragmentVisible).toBe(false);
-    expect(model.fragment).toBeNull();
-  });
-
-  it.each([
-    ["evidence/source mismatch", (input: ReturnType<typeof validInput>) => { input.evidence.source_id = "other-source"; }],
-    ["version/source mismatch", (input: ReturnType<typeof validInput>) => { input.source_version.source_id = "other-source"; }],
-    ["evidence/version mismatch", (input: ReturnType<typeof validInput>) => { input.evidence.source_version_id = "other-version"; }],
-    ["current pointer mismatch", (input: ReturnType<typeof validInput>) => { input.source.current_source_version_id = "other-version"; }],
-    ["malformed revision", (input: ReturnType<typeof validInput>) => { input.evidence.revision = 0; }],
-    ["contradictory assessment", (input: ReturnType<typeof validInput>) => { input.assessment.verification = "unverified"; }],
-  ])("fails closed for malformed or mismatched pins: %s", (_label, change) => {
-    const input = validInput();
-    change(input);
+  it("does not accept client-side capability or archival authorization hints", () => {
+    const input: MutableRecord = {
+      ...readableInput(),
+      capabilities: { fragment: "allow" },
+      archival_fragment: "allow",
+    };
     expect(toEvidenceFragmentViewModel(input).kind).toBe("hidden");
   });
 
-  it("shows historical evidence only with explicit archival authorization", () => {
-    const input = validInput();
-    input.historical = true;
-    input.source.version_state = "historical";
-    input.source.current_source_version_id = "version-new";
-    let model = toEvidenceFragmentViewModel(input);
-    expect(model.kind).toBe("evidence");
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.fragmentVisible).toBe(false);
-    input.capabilities.archival_fragment = "allow";
-    model = toEvidenceFragmentViewModel(input);
-    expect(model.kind).toBe("evidence");
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.historical).toBe(true);
-    expect(model.fragmentVisible).toBe(true);
+  it.each(["unknown", "stale"])("fails closed for contradictory verified %s freshness", (freshness) => {
+    const input = readableInput();
+    input.freshness = freshness;
+    expect(toEvidenceFragmentViewModel(input)).toMatchObject({ kind: "hidden", metadataVisible: false });
   });
 
-  it("formats confidence as extraction quality, not truth", () => {
-    const model = toEvidenceFragmentViewModel(validInput());
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
-    expect(model.extraction.confidence).toMatch(/Оценка извлечения: 92,3\s?%/);
-    expect(model.extraction.calibration).toBe("calibration-2");
+  it.each(["unknown", "revoked", "expired", "purged", "unavailable"])(
+    "fails closed when a readable variant reports %s availability",
+    (availability) => {
+      const input = readableInput();
+      input.availability = availability;
+      expect(toEvidenceFragmentViewModel(input).kind).toBe("hidden");
+    },
+  );
+
+  it("renders historical content only when the server itself returns the readable variant", () => {
+    const input = readableInput();
+    input.version_state = "historical";
+    input.source.current_source_version_id = "version-current";
+    const model = toEvidenceFragmentViewModel(input);
+    expect(model.kind).toBe("evidence");
+    if (model.kind !== "evidence") throw new Error("expected readable evidence");
+    expect(model.historical).toBe(true);
+    expect(model.fragmentVisible).toBe(true);
+
+    const denied = unavailableInput("source_revision_changed");
+    expect(toEvidenceFragmentViewModel(denied)).toMatchObject({ kind: "hidden", fragmentVisible: false });
   });
 
   it.each([
-    [{ kind: "whole_object", reason_code: "content_read_forbidden" }, "whole_object", false],
+    ["evidence source", (input: ReturnType<typeof readableInput>) => { input.evidence.source_id = "other"; }],
+    ["source version", (input: ReturnType<typeof readableInput>) => { input.source_version.source_id = "other"; }],
+    ["evidence version", (input: ReturnType<typeof readableInput>) => { input.evidence.source_version_id = "other"; }],
+    ["current pointer", (input: ReturnType<typeof readableInput>) => { input.source.current_source_version_id = "other"; }],
+    ["assessment", (input: ReturnType<typeof readableInput>) => { input.assessment.verification = "unverified"; }],
+  ])("rejects contradictory binding: %s", (_label, mutate) => {
+    const input = readableInput();
+    mutate(input);
+    expect(toEvidenceFragmentViewModel(input).kind).toBe("hidden");
+  });
+
+  it("rejects sensitive nested extras such as provider locators", () => {
+    const input = readableInput();
+    const source: MutableRecord = input.source;
+    source.provider_locator = "https://provider.example/object?token=secret";
+    const model = toEvidenceFragmentViewModel(input);
+    expect(model.kind).toBe("hidden");
+    expect(JSON.stringify(model)).not.toContain("provider.example");
+  });
+
+  it.each([
+    [{ kind: "whole_object", reason_code: "granularity_unavailable" }, "whole_object", false],
     [{ kind: "page", page: 3 }, "page", true],
-    [{ kind: "page_bbox", page: 1, coordinate_space: "pixels", box: [10, 20, 30, 40], extent: [100, 100], representation_id: "raster-1", precise_navigation: false }, "page_bbox", false],
-    [{ kind: "section_clause", section_path: ["Договор", "Сроки"], clause_label: "2.1", anchor: "clause-2-1" }, "section_clause", true],
+    [{
+      kind: "page_bbox",
+      page: 1,
+      coordinate_space: "representation",
+      units: "pixels",
+      box: [10, 20, 30, 40],
+      extent: [100, 100],
+      representation_id: "raster-1",
+      precise_navigation: false,
+    }, "page_bbox", false],
+    [{ kind: "section_clause", section_path: ["Договор"], clause_label: "2.1", anchor: "clause-2-1" }, "section_clause", true],
     [{ kind: "sheet_cell", sheet_key: "sheet-1", sheet_name: "ДДС", range_a1: "B2:C3", value_kind: "displayed_value" }, "sheet_cell", true],
     [{ kind: "message", message_external_id: "message-1", part: "body", char_range: [5, 20] }, "message", true],
     [{ kind: "attachment", message_external_id: "message-1", attachment_external_id: "attachment-1", attachment_source_reference_id: "source-attachment" }, "attachment", true],
     [{ kind: "record", record_key: "row-7", field_path: ["payment", "amount"] }, "record", true],
-  ])("validates locator variant %s", (locator, kind, preciseNavigation) => {
-    const input = validInput();
+  ])("parses exact locator %s", (locator, kind, precise) => {
+    const input = readableInput();
     input.locator = locator;
     const model = toEvidenceFragmentViewModel(input);
-    if (model.kind !== "evidence") throw new Error("expected visible metadata");
+    if (model.kind !== "evidence") throw new Error("expected readable evidence");
     expect(model.locator.kind).toBe(kind);
-    expect(model.locator.preciseNavigation).toBe(preciseNavigation);
+    expect(model.locator.preciseNavigation).toBe(precise);
   });
 
-  it("fails closed for an invalid locator geometry", () => {
-    const input = validInput();
-    input.locator = { kind: "page_bbox", page: 1, coordinate_space: "pixels", box: [90, 90, 20, 20], extent: [100, 100], representation_id: "raster-1", precise_navigation: true };
+  it("rejects locator extras and invalid geometry", () => {
+    const input = readableInput();
+    input.locator = {
+      kind: "page_bbox",
+      page: 1,
+      coordinate_space: "original",
+      units: "pixels",
+      box: [90, 90, 20, 20],
+      extent: [100, 100],
+      representation_id: "raster-1",
+      precise_navigation: true,
+      signed_url: "https://provider.example/secret",
+    };
     expect(toEvidenceFragmentViewModel(input).kind).toBe("hidden");
-  });
-
-  it("fails closed for a reason that contradicts readable policy state", () => {
-    const input = validInput();
-    input.reason_code = "policy_denied";
-    expect(toEvidenceFragmentViewModel(input)).toMatchObject({ kind: "hidden", reasonLabel: "Не удалось безопасно проверить доказательство." });
   });
 });
