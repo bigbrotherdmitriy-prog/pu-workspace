@@ -8,6 +8,7 @@ import { FinanceModule } from "./modules/finance/FinanceModule";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
+import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState } from "./modules/ai-secretary/messageWorkflow";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
 import { ContractsModule } from "./modules/contracts/ContractsModule";
@@ -257,6 +258,7 @@ type InboxDraft = {
   body: string;
   status: string;
   confidence: number;
+  recipient_to?: string;
   is_corrective_follow_up?: boolean;
   email_compensation?: EmailCompensationOffer | null;
 };
@@ -284,6 +286,9 @@ type InboxMessage = {
   context_evidence: string;
   context_confirmed: boolean;
   status: string;
+  analysis_required?: boolean;
+  workflow_state?: MessageWorkflowState;
+  workflow_reason?: string;
   created_at: string;
   tasks: InboxTask[];
   drafts: InboxDraft[];
@@ -1493,6 +1498,7 @@ export function App() {
           status,
           subject: draft.subject,
           body: draft.body,
+          recipient_to: draft.recipient_to,
         }),
       });
       setNotice(
@@ -3111,14 +3117,8 @@ export function App() {
                         />
                       )}
                       <div>
-                        <span className={`draft-status ${message.status}`}>
-                          {message.status === "completed"
-                            ? "Обработано"
-                            : message.status === "in_progress"
-                              ? "В работе"
-                              : message.context_confirmed
-                                ? "Новое"
-                                : "Подтвердите контекст"}
+                        <span className={`draft-status ${messageWorkflowClass(message.workflow_state || (message.context_confirmed ? "ready" : "needs_context_confirmation"))}`}>
+                          {messageWorkflowLabel(message.workflow_state || (message.context_confirmed ? "ready" : "needs_context_confirmation"))}
                         </span>
                         <h2>{message.source_name}</h2>
                         <div className="inbox-meta">
@@ -3130,6 +3130,7 @@ export function App() {
                           {Math.round(message.context_confidence * 100)}% ·{" "}
                           {message.context_evidence}
                         </p>
+                        {message.workflow_reason && <small>{message.workflow_reason}</small>}
                         {message.source_url && (
                           <a
                             href={message.source_url}
@@ -3298,7 +3299,30 @@ export function App() {
                     )}
                     {message.drafts.map((draft) => (
                       <div className="inbox-draft" key={draft.id}>
-                        <h3>{draft.subject}</h3>
+                        {draft.status === "draft" ? (
+                          <input
+                            aria-label="Тема ответа"
+                            value={draft.subject}
+                            onChange={(e) => setInbox((rows) => rows.map((row) => row.id === message.id
+                              ? { ...row, drafts: row.drafts.map((item) => item.id === draft.id
+                                ? { ...item, subject: e.target.value }
+                                : item) }
+                              : row))}
+                          />
+                        ) : <h3>{draft.subject}</h3>}
+                        {message.source_type === "email" && (
+                          <input
+                            type="email"
+                            aria-label="Получатель ответа"
+                            value={draft.recipient_to || message.source_sender || ""}
+                            disabled={draft.status !== "draft"}
+                            onChange={(e) => setInbox((rows) => rows.map((row) => row.id === message.id
+                              ? { ...row, drafts: row.drafts.map((item) => item.id === draft.id
+                                ? { ...item, recipient_to: e.target.value }
+                                : item) }
+                              : row))}
+                          />
+                        )}
                         <textarea
                           value={draft.body}
                           disabled={draft.status !== "draft"}

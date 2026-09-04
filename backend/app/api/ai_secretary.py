@@ -183,6 +183,10 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         external_id = item.get("document_external_id")
         item["document_id"] = imported.get(external_id)
         item["imported"] = bool(item["document_id"])
+    workflow_state, workflow_reason = _message_workflow_state(
+        row, tasks=tasks, drafts=drafts, risks=risks,
+        completion_suggestions=[suggestion for suggestion, _task in completion_rows],
+    )
     task_payloads = []
     for task in tasks:
         external_task_id = external_id_for(
@@ -229,8 +233,11 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
         "status": row.status, "created_at": row.created_at,
+        "analysis_required": row.analysis_required,
+        "workflow_state": workflow_state, "workflow_reason": workflow_reason,
         "tasks": task_payloads,
         "drafts": [{"id": draft.id, "subject": draft.subject, "body": draft.body,
+                    "recipient_to": draft.recipient_to,
                     "status": draft.status, "confidence": draft.confidence,
                     "is_corrective_follow_up": draft.source_file_name == "corrective-follow-up",
                     "email_compensation": (
@@ -248,6 +255,70 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
                                    for suggestion, task in completion_rows],
         "evidence_refs": evidence_refs,
     }
+
+
+def _message_workflow_state(row: Message, *, tasks: list[Task], drafts: list[ResponseDraft],
+                            risks: list[Risk], completion_suggestions: list[TaskCompletionSuggestion]) -> tuple[str, str]:
+    """Derive the operator-facing state without guessing external outcomes."""
+    if not row.context_confirmed:
+        return "needs_context_confirmation", "Связь с проектом или договором требует подтверждения"
+    if row.status == "completed":
+        return "completed", "Пользователь завершил обработку сообщения"
+    if any(suggestion.status == "proposed" for suggestion in completion_suggestions):
+        return "requires_action", "Нужно подтвердить или отклонить найденный результат задачи"
+    if row.source_type == "email_outgoing" or any(draft.status == "sent" for draft in drafts):
+        return "awaiting_reply", "Исходящее письмо отправлено или зафиксировано; ожидается ответ"
+    if (row.analysis_required or row.source_type in {"email", "telegram"}
+            or tasks or risks or any(draft.status in {"draft", "approved"} for draft in drafts)):
+        return "requires_action", "Нужно проверить предложения, ответ или исходное сообщение"
+    return "ready", "Автоматических предложений нет"
+
+
+def _analyze_confirmed_message(db: Session, row: Message) -> tuple[list[Task], list[ResponseDraft], list[Risk], list[TaskCompletionSuggestion]]:
+    """Materialize proposals once, and only after exact context confirmation.
+
+    The called engines are already idempotent by message/source digest. Keeping
+    ``analysis_required`` true until the final commit makes a crash retryable
+    without creating duplicate proposals.
+    """
+    if not row.context_confirmed or not row.analysis_required:
+        return [], [], [], []
+    synthetic = StorageObject(
+        id=f"message:{row.id}", name=row.source_name, mime_type="text/plain",
+        parent_id="ai-secretary", content_text=row.content,
+    )
+    if row.source_type == "email_outgoing":
+        tasks, drafts, risks = [], [], []
+        completion_suggestions = _create_completion_suggestions(db, row)
+    else:
+        tasks = create_tasks_from_files(
+            db, row.project_id, None, [synthetic], source_type=row.source_type,
+        )
+        drafts = create_response_drafts(
+            db, row.project_id, None, [synthetic], ensure_response=row.source_type == "email",
+        )
+        risks, _decisions = create_governance_items(
+            db, row.project_id, [synthetic], source_type=row.source_type,
+        )
+        completion_suggestions = []
+    for task in tasks:
+        task.message_id = row.id
+        task.external_action_status = "proposed"
+    for draft in drafts:
+        draft.message_id = row.id
+    row.analysis_required = False
+    row.summary = (
+        f"Исходящее письмо проверено. Возможных выполненных задач: {len(completion_suggestions)}. "
+        "Требуется подтверждение пользователя."
+        if row.source_type == "email_outgoing" else
+        brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0)
+    )
+    db.add(AuditLog(
+        action="message_analysis_materialized", entity_type="message", entity_id=row.id,
+        details=(f"tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}; "
+                 f"completion_suggestions={len(completion_suggestions)}"),
+    ))
+    return tasks, drafts, risks, completion_suggestions
 
 
 def _completion_candidate_score(task: Task, content: str) -> tuple[float, str]:
@@ -274,6 +345,11 @@ def _create_completion_suggestions(db: Session, row: Message) -> list[TaskComple
     for task in tasks:
         confidence, evidence = _completion_candidate_score(task, row.content)
         if confidence < 0.45:
+            continue
+        if db.scalar(select(TaskCompletionSuggestion.id).where(
+            TaskCompletionSuggestion.message_id == row.id,
+            TaskCompletionSuggestion.task_id == task.id,
+        )):
             continue
         suggestion = TaskCompletionSuggestion(project_id=row.project_id, message_id=row.id, task_id=task.id,
                                               confidence=confidence, evidence=evidence, status="proposed")
@@ -357,6 +433,7 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox
         context_evidence=evidence, context_confirmed=confidence >= 0.90,
         status=("filtered" if payload.automation_suppressed else
                 "ready" if confidence >= 0.90 else "needs_context_confirmation"),
+        analysis_required=not payload.automation_suppressed,
         mail_connection_id=mailbox_origin.mail_connection_id if mailbox_origin else None,
         provider_message_id=external_id if mailbox_origin else None,
         source_reference_id=mailbox_origin.source_reference_id if mailbox_origin else None,
@@ -368,32 +445,21 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox
             db, message=row, runtime=mailbox_origin.runtime,
             source=mailbox_origin.source, source_version=mailbox_origin.source_version,
             actor=user)
-    synthetic = StorageObject(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)
     if payload.automation_suppressed:
         tasks, drafts, risks, completion_suggestions = [], [], [], []
-    elif row.source_type == "email_outgoing":
-        tasks, drafts, risks = [], [], []
-        completion_suggestions = _create_completion_suggestions(db, row) if row.context_confirmed else []
-    else:
-        tasks = create_tasks_from_files(db, row.project_id, None, [synthetic], source_type=row.source_type)
-        drafts = create_response_drafts(
-            db, row.project_id, None, [synthetic],
-            ensure_response=row.source_type == "email",
+        row.analysis_required = False
+        row.summary = (
+            f"Автоматические действия не создавались: "
+            f"{payload.automation_suppression_reason or 'массовое или рекламное письмо'}."
         )
-        risks, _ = create_governance_items(db, row.project_id, [synthetic], source_type=row.source_type)
-        completion_suggestions = []
-    for task in tasks:
-        task.message_id = row.id
-        task.external_action_status = "proposed"
-    for draft in drafts:
-        draft.message_id = row.id
-    row.summary = (
-        f"Автоматические действия не создавались: {payload.automation_suppression_reason or 'массовое или рекламное письмо'}."
-        if payload.automation_suppressed else
-        f"Исходящее письмо проверено. Возможных выполненных задач: {len(completion_suggestions)}. Требуется подтверждение пользователя."
-        if row.source_type == "email_outgoing" else
-        brief_summary(row.content, row.source_name, len(tasks), len(drafts), 0)
-    )
+    elif row.context_confirmed:
+        tasks, drafts, risks, completion_suggestions = _analyze_confirmed_message(db, row)
+    else:
+        tasks, drafts, risks, completion_suggestions = [], [], [], []
+        row.summary = (
+            "Анализ отложен: сначала подтвердите проект и договор. "
+            "Задачи, календарные действия и проекты ответов ещё не создавались."
+        )
     db.add(AuditLog(action="message_processed", entity_type="message", entity_id=row.id,
                     details=f"source={row.source_type}; tasks={len(tasks)}; drafts={len(drafts)}; risks={len(risks)}; context={confidence:.0%}"))
     db.commit(); db.refresh(row)
@@ -474,6 +540,8 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
     db.add(AuditLog(action="message_context_confirmed", entity_type="message", entity_id=row.id,
                     details=f"project={row.project_id}; contract={row.contract_id or 'none'}"))
     db.commit(); db.refresh(row)
+    _analyze_confirmed_message(db, row)
+    db.commit(); db.refresh(row)
     return _message_payload(db, row, actor=user)
 
 
@@ -532,6 +600,9 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
         entity_id=target_project_id,
         details=f"messages={len(rows)}; moved={moved}; contract={contract.id if contract else 'none'}",
     ))
+    db.commit()
+    for row in rows:
+        _analyze_confirmed_message(db, row)
     db.commit()
     return {"confirmed": len(rows), "moved": moved, "project_id": target_project_id,
             "contract_id": contract.id if contract else None}

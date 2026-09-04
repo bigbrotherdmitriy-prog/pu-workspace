@@ -1,3 +1,5 @@
+from email.utils import parseaddr
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -21,6 +23,7 @@ class DraftUpdate(BaseModel):
     status: str | None = Field(default=None, pattern="^(draft|approved|rejected)$")
     subject: str | None = Field(default=None, min_length=1, max_length=500)
     body: str | None = Field(default=None, min_length=1, max_length=20000)
+    recipient_to: str | None = Field(default=None, min_length=3, max_length=1000)
 
 
 class EmailCompensationProposal(BaseModel):
@@ -40,18 +43,32 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
     if draft is None:
         raise HTTPException(404, "Response draft not found")
     require_project_role(db, user, draft.project_id, "editor")
+    if payload.status == "approved":
+        require_project_role(db, user, draft.project_id, "manager")
     if draft.status == "sent":
         raise HTTPException(409, "Отправленное письмо неизменяемо; подготовьте корректирующий ответ")
     if draft.source_file_name == "corrective-follow-up" and payload.status is not None:
         raise HTTPException(409, "Корректирующий ответ остаётся черновиком до отдельного CONFIRM approval")
     before_status = draft.status
-    edited = payload.subject is not None or payload.body is not None
+    edited = payload.subject is not None or payload.body is not None or payload.recipient_to is not None
     if payload.subject is not None:
         draft.subject = payload.subject.strip()
     if payload.body is not None:
         draft.body = payload.body.strip()
+    if payload.recipient_to is not None:
+        candidate = payload.recipient_to.strip().casefold()
+        parsed = parseaddr(candidate)[1].casefold()
+        if (not parsed or parsed != candidate or candidate.count("@") != 1
+                or candidate.startswith("@") or candidate.endswith("@")
+                or any(separator in candidate for separator in (",", ";", "\r", "\n"))):
+            raise HTTPException(422, "Введите один корректный email получателя")
+        draft.recipient_to = candidate
     if payload.status is not None:
         draft.status = payload.status
+    elif edited and draft.status == "approved":
+        # Approval binds the exact human-visible envelope. Any later mutation,
+        # including the recipient, must require a fresh explicit confirmation.
+        draft.status = "draft"
     db.add(AuditLog(
         action="response_draft_reviewed" if payload.status is not None else "response_draft_edited",
         entity_type="response_draft", entity_id=draft.id,
@@ -59,7 +76,8 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
     ))
     db.commit()
     db.refresh(draft)
-    return {"id": draft.id, "subject": draft.subject, "body": draft.body, "status": draft.status}
+    return {"id": draft.id, "subject": draft.subject, "body": draft.body,
+            "recipient_to": draft.recipient_to, "status": draft.status}
 
 
 @router.get("/{draft_id}/email-compensation")
