@@ -476,7 +476,15 @@ def _validate_insert(mapper, connection, target):
         if ref.type != expected_type or pin.ref != ref:
             raise ValueError("context_target_mismatch")
     if isinstance(target, ActionPolicy):
-        if (canonical_hash(target.rules) != target.policy_hash
+        if target.rules.get("schema_version") == "v54.autonomy-policy.1":
+            from app.autonomy_policy import validate_stored_rules
+            rules = validate_stored_rules(target.rules)
+            if (canonical_hash(rules) != target.policy_hash or target.mode != "CONFIRM"
+                    or ObjectRef.model_validate(target.scope_ref) != ObjectRef.model_validate(rules["project_ref"])
+                    or target.id != ObjectRef.model_validate(rules["policy_ref"]).id.value
+                    or target.revision != rules["revision"] or target.organization_id != rules["organization_id"]):
+                raise ValueError("autonomy_policy_binding_required")
+        elif (canonical_hash(target.rules) != target.policy_hash
                 or target.rules.get("synthetic_only") is not True
                 or target.rules.get("auto_enabled") is not False
                 or target.rules.get("external_execute") is not False):

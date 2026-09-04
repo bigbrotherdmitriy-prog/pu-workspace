@@ -194,7 +194,8 @@ class AuditAppend(StrictDTO):
                    "CLAIM_EXTRACTED", "CLAIM_CONFIRMED", "CLAIM_REJECTED", "CONTEXT_PROPOSED",
                    "AUTHORITY_CHANGED", "MATERIALIZATION_ADMITTED", "MATERIALIZATION_WRITING",
                    "MATERIALIZATION_SEALED", "MATERIALIZATION_DERIVED", "MATERIALIZATION_EXPIRED",
-                   "MATERIALIZATION_PURGED"]
+                   "MATERIALIZATION_PURGED", "AUTONOMY_POLICY_CHANGED",
+                   "AUTONOMY_POLICY_REVOKED"]
     action: VersionPin | None = None
     approval: ObjectRef | None = None
     receipt: ObjectRef | None = None
