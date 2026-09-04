@@ -33,11 +33,11 @@ jobs:
           docker compose exec -T backend alembic heads
           docker compose exec -T backend alembic current
           python scripts/check_ci_smoke.py --seed
-      - name: Browser login and navigation
+      - name: Browser synthetic user journey
         run: |
           pip install playwright==1.55.0
           python -m playwright install --with-deps chromium
-          python scripts/check_ci_browser.py
+          python scripts/check_ci_browser.py --env-file .env.ci --report-dir ci-reports
       - name: Restart API, workers and scheduler; verify persistent data
         run: |
           docker compose restart backend worker scheduler
