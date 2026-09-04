@@ -208,7 +208,7 @@ def test_g_irreversible_send_cannot_rollback_and_follow_up_is_separate_action() 
     )
     sent_receipt = harness.execute(sent, harness.approve(sent, "approval-opaque-1"))
     assert sent_receipt.outcome is Outcome.APPLIED
-    _assert_error("irreversible_action", lambda: harness.mark_rolled_back(sent))
+    _assert_error("irreversible_action", lambda: harness.mark_rolled_back(sent, harness.approve(sent, "approval-rollback")))
 
     correction = _action(
         action_id="action-opaque-correction",
@@ -230,7 +230,7 @@ def test_compensatable_action_requires_a_new_compensation_action() -> None:
     _, harness = _setup()
     action = _action(effect_kind=EffectKind.EXTERNAL_DRAFT, reversibility=Reversibility.COMPENSATABLE)
     harness.execute(action, harness.approve(action, "approval-opaque-1"))
-    _assert_error("compensation_required", lambda: harness.mark_rolled_back(action))
+    _assert_error("compensation_required", lambda: harness.mark_rolled_back(action, harness.approve(action, "approval-compensation")))
 
 
 def test_h_same_provider_object_id_is_strictly_scoped_to_exact_mailbox() -> None:
@@ -331,4 +331,96 @@ def test_reversible_internal_cancel_has_its_own_approval_and_receipt() -> None:
 
     assert receipt.outcome is Outcome.APPLIED
     assert provider.counters["effects"] == 2
-    assert harness.mark_rolled_back(cancel).outcome is Outcome.ROLLED_BACK
+    cancel_approval = harness.approve(cancel, "approval-cancel-rollback")
+    assert harness.mark_rolled_back(cancel, cancel_approval).outcome is Outcome.ROLLED_BACK
+    assert harness.mark_rolled_back(cancel, cancel_approval).outcome is Outcome.ROLLED_BACK
+
+
+def test_same_command_and_payload_cannot_replay_another_action_receipt() -> None:
+    provider, harness = _setup()
+    original = _action()
+    original_approval = harness.approve(original, "approval-original")
+    assert harness.execute(original, original_approval).outcome is Outcome.APPLIED
+
+    forged = replace(original, action_id="action-opaque-forged", revision=2)
+    forged_approval = harness.approve(forged, "approval-forged")
+    _assert_error("command_conflict", lambda: harness.execute(forged, forged_approval))
+    assert provider.counters["effects"] == 1
+
+
+@pytest.mark.parametrize("change", ["authority", "credential", "capability", "project"])
+def test_reconcile_rechecks_live_scope_and_exact_unknown_action(change: str) -> None:
+    provider, harness = _setup()
+    action = _action(effect_kind=EffectKind.EXTERNAL_SEND, reversibility=Reversibility.IRREVERSIBLE)
+    approval = harness.approve(action, "approval-unknown")
+    provider.inject_fault(action.mailbox, action.command_key, Fault.TIMEOUT_AFTER_EFFECT)
+    assert harness.execute(action, approval).outcome is Outcome.UNKNOWN
+
+    if change == "authority":
+        harness.revoke_authority()
+        code = "authority_stale"
+    elif change == "credential":
+        provider.revoke_credentials(MAILBOX_A)
+        code = "credential_stale"
+    elif change == "capability":
+        provider.refresh_capabilities(MAILBOX_A)
+        code = "capability_stale"
+    else:
+        harness.mailbox_projects[MAILBOX_A.key] = "project-b"
+        code = "project_scope_mismatch"
+
+    _assert_error(code, lambda: harness.reconcile(action))
+    assert provider.counters["lookup"] == 0
+
+
+def test_reconcile_rejects_a_forged_action_for_existing_unknown_state() -> None:
+    provider, harness = _setup()
+    action = _action(effect_kind=EffectKind.EXTERNAL_SEND, reversibility=Reversibility.IRREVERSIBLE)
+    provider.inject_fault(action.mailbox, action.command_key, Fault.TIMEOUT_AFTER_EFFECT)
+    assert harness.execute(action, harness.approve(action, "approval-unknown" )).outcome is Outcome.UNKNOWN
+
+    forged = replace(action, action_id="action-opaque-forged", revision=2)
+    _assert_error("command_conflict", lambda: harness.reconcile(forged))
+    assert provider.counters["lookup"] == 0
+
+
+def test_rollback_requires_exact_existing_applied_action_and_live_authority() -> None:
+    provider, harness = _setup()
+    absent = _action()
+    absent_approval = harness.approve(absent, "approval-absent")
+    _assert_error("rollback_not_available", lambda: harness.mark_rolled_back(absent, absent_approval))
+
+    applied = _action(action_id="action-applied", command_key="command-applied")
+    applied_approval = harness.approve(applied, "approval-applied")
+    harness.execute(applied, applied_approval)
+    forged = replace(applied, action_id="action-forged", revision=2)
+    _assert_error(
+        "approval_mismatch",
+        lambda: harness.mark_rolled_back(forged, applied_approval),
+    )
+    harness.revoke_authority()
+    _assert_error("authority_stale", lambda: harness.mark_rolled_back(applied, applied_approval))
+    assert provider.counters["effects"] == 1
+
+
+@pytest.mark.parametrize("target_state", ["missing", "unknown", "different_mailbox"])
+def test_corrective_follow_up_requires_exact_applied_send_target(target_state: str) -> None:
+    provider, harness = _setup()
+    target = _action(effect_kind=EffectKind.EXTERNAL_SEND, reversibility=Reversibility.IRREVERSIBLE)
+    if target_state == "unknown":
+        provider.inject_fault(target.mailbox, target.command_key, Fault.TIMEOUT_AFTER_EFFECT)
+        harness.execute(target, harness.approve(target, "approval-target"))
+    elif target_state == "different_mailbox":
+        target = replace(target, mailbox=MAILBOX_B, project_id="project-b")
+        harness.execute(target, harness.approve(target, "approval-target"))
+
+    correction = _action(
+        action_id="action-correction",
+        command_key="command-correction",
+        payload_hash=payload_digest("synthetic correction"),
+        effect_kind=EffectKind.CORRECTIVE_FOLLOW_UP,
+        reversibility=Reversibility.IRREVERSIBLE,
+        corrects_action_id="missing-action" if target_state == "missing" else target.action_id,
+    )
+    approval = harness.approve(correction, "approval-correction")
+    _assert_error("corrective_action_invalid", lambda: harness.execute(correction, approval))

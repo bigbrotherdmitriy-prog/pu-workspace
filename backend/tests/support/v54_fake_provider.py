@@ -71,6 +71,7 @@ class ContractError(RuntimeError):
         "irreversible_action",
         "mailbox_scope_mismatch",
         "project_scope_mismatch",
+        "rollback_not_available",
         "unknown_outcome",
     }
 
@@ -198,7 +199,7 @@ class StrictFakeProvider:
     def __init__(self) -> None:
         self._mailboxes: dict[str, MailboxIdentity] = {}
         self._capabilities: dict[str, CapabilitySnapshot] = {}
-        self._bindings: dict[tuple[str, str], str] = {}
+        self._bindings: dict[tuple[str, str], ProviderRequest] = {}
         self._effects: dict[tuple[str, str], EffectReceipt] = {}
         self._external: dict[tuple[str, str], EffectReceipt] = {}
         self._faults: dict[tuple[str, str], Fault] = {}
@@ -248,14 +249,14 @@ class StrictFakeProvider:
         self._require_capability(capability, request.effect_kind)
 
         key = (request.mailbox_key, request.command_key)
-        bound_hash = self._bindings.get(key)
-        if bound_hash is not None and bound_hash != request.payload_hash:
+        bound_request = self._bindings.get(key)
+        if bound_request is not None and bound_request != request:
             raise ContractError("command_conflict")
         existing = self._effects.get(key)
         if existing is not None:
             self._record("effect_replayed", request.mailbox_key)
             return existing
-        self._bindings[key] = request.payload_hash
+        self._bindings[key] = request
 
         fault = self._faults.pop(key, None)
         if fault is Fault.TIMEOUT_BEFORE_EFFECT:
@@ -332,6 +333,7 @@ class SyntheticCommunicationActionHarness(CommunicationActionPort):
         self.mailbox_projects = dict(mailbox_projects)
         self._contexts: dict[tuple[str, str], list[ContextRevision]] = {}
         self._states: dict[tuple[str, str], EffectReceipt] = {}
+        self._actions: dict[tuple[str, str], SealedAction] = {}
         self._approvals: dict[str, ExactApproval] = {}
         self._audit: list[dict[str, str | int]] = []
         self._authority_epoch = authority_epoch
@@ -392,12 +394,13 @@ class SyntheticCommunicationActionHarness(CommunicationActionPort):
             raise ContractError("corrective_action_invalid")
         self._require_scope(action)
         self._require_approval(action, approval)
+        if action.effect_kind is EffectKind.CORRECTIVE_FOLLOW_UP:
+            self._require_corrective_target(action)
 
         key = (action.mailbox.key, action.command_key)
         existing = self._states.get(key)
         if existing is not None:
-            if existing.payload_hash != action.payload_hash:
-                raise ContractError("command_conflict")
+            self._require_exact_state(action, existing)
             if existing.outcome is Outcome.UNKNOWN:
                 return existing
             return existing
@@ -418,14 +421,17 @@ class SyntheticCommunicationActionHarness(CommunicationActionPort):
         except TimeoutBeforeEffect:
             receipt = self._receipt(action, Outcome.NOT_APPLIED, retry_safe=True)
             self._states[key] = receipt
+            self._actions[key] = action
             self._audit_event("provider_not_applied", action.action_id, action.revision)
             return receipt
         except TimeoutAfterEffect:
             receipt = self._receipt(action, Outcome.UNKNOWN)
             self._states[key] = receipt
+            self._actions[key] = action
             self._audit_event("provider_unknown", action.action_id, action.revision)
             return receipt
         self._states[key] = receipt
+        self._actions[key] = action
         self._audit_event("provider_applied", action.action_id, action.revision)
         return receipt
 
@@ -444,24 +450,40 @@ class SyntheticCommunicationActionHarness(CommunicationActionPort):
         return self.execute(action, approval)
 
     def reconcile(self, action: SealedAction) -> EffectReceipt:
+        self._require_scope(action)
         key = (action.mailbox.key, action.command_key)
         current = self._states.get(key)
         if current is None or current.outcome is not Outcome.UNKNOWN:
             raise ContractError("unknown_outcome")
+        self._require_exact_state(action, current)
         found = self.provider.lookup(action.mailbox, action.command_key)
         if found is None:
             return current
+        self._require_exact_state(action, found)
+        if found.outcome is not Outcome.APPLIED:
+            raise ContractError("unknown_outcome")
         self._states[key] = found
         self._audit_event("provider_reconciled", action.action_id, action.revision)
         return found
 
-    def mark_rolled_back(self, action: SealedAction) -> EffectReceipt:
+    def mark_rolled_back(self, action: SealedAction, approval: ExactApproval) -> EffectReceipt:
+        self._require_scope(action)
+        self._require_approval(action, approval)
         if action.reversibility is Reversibility.IRREVERSIBLE:
             raise ContractError("irreversible_action")
         if action.reversibility is Reversibility.COMPENSATABLE:
             raise ContractError("compensation_required")
+        key = (action.mailbox.key, action.command_key)
+        prior = self._states.get(key)
+        if prior is None:
+            raise ContractError("rollback_not_available")
+        self._require_exact_state(action, prior)
+        if prior.outcome is Outcome.ROLLED_BACK:
+            return prior
+        if prior.outcome is not Outcome.APPLIED:
+            raise ContractError("rollback_not_available")
         receipt = self._receipt(action, Outcome.ROLLED_BACK)
-        self._states[(action.mailbox.key, action.command_key)] = receipt
+        self._states[key] = receipt
         self._audit_event("effect_rolled_back", action.action_id, action.revision)
         return receipt
 
@@ -516,6 +538,38 @@ class SyntheticCommunicationActionHarness(CommunicationActionPort):
         )
         if expected != actual or self._approvals.get(approval.approval_id) != approval:
             raise ContractError("approval_mismatch")
+
+    def _require_exact_state(self, action: SealedAction, receipt: EffectReceipt) -> None:
+        key = (action.mailbox.key, action.command_key)
+        if (
+            receipt.action_id != action.action_id
+            or receipt.action_revision != action.revision
+            or receipt.command_key != action.command_key
+            or receipt.payload_hash != action.payload_hash
+            or receipt.mailbox_key != action.mailbox.key
+            or self._actions.get(key) != action
+        ):
+            raise ContractError("command_conflict")
+
+    def _require_corrective_target(self, action: SealedAction) -> None:
+        matches = [
+            (key, prior)
+            for key, prior in self._actions.items()
+            if prior.action_id == action.corrects_action_id
+        ]
+        if len(matches) != 1:
+            raise ContractError("corrective_action_invalid")
+        key, prior = matches[0]
+        receipt = self._states.get(key)
+        if (
+            receipt is None
+            or receipt.outcome is not Outcome.APPLIED
+            or prior.mailbox.key != action.mailbox.key
+            or prior.project_id != action.project_id
+            or prior.effect_kind is not EffectKind.EXTERNAL_SEND
+            or prior.reversibility is not Reversibility.IRREVERSIBLE
+        ):
+            raise ContractError("corrective_action_invalid")
 
     @staticmethod
     def _receipt(action: SealedAction, outcome: Outcome, retry_safe: bool = False) -> EffectReceipt:

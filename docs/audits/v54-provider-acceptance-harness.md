@@ -61,3 +61,25 @@
 ## Ограничения и запрос интегратору
 
 Harness не доказывает транзакционность product DB/outbox, работу очереди, конкурентный recovery, реальные permissions/policy или поведение API провайдера. Интегратор должен реализовать один adapter к существующему action pipeline по точному интерфейсу из `docs/acceptance/v54-provider-harness/README_RU.md`, затем прогнать те же сценарии на продуктовой композиции и отдельные live-provider contract tests в изолированной тестовой учётной записи.
+
+## Исправления после независимого review
+
+Отдельный follow-up усиливает именно контракт harness, не повышая статус до
+product PASS:
+
+- idempotency key теперь связан со всем immutable `ProviderRequest`, а не
+  только с payload hash;
+- replay с другим action ID/revision при том же command key запрещён;
+- reconciliation повторно проверяет project, mailbox, authority, capability и
+  credential generation, а найденный receipt обязан точно совпасть с UNKNOWN;
+- rollback разрешён только для существующего exact `APPLIED` reversible action
+  с действующим exact approval;
+- corrective follow-up требует отдельного approval и точного ранее применённого
+  irreversible send в том же mailbox/project;
+- добавлены негативные сценарии forged action, stale live state, rollback без
+  эффекта и invalid corrective target.
+
+В локальном окружении follow-up выполнена Python compilation и
+`git diff --check`. Повтор pytest требует среды с установленным pytest и должен
+быть выполнен интеграционным CI; до этого итог follow-up остаётся
+**CONDITIONAL**, а не заменяется статической проверкой.
