@@ -95,8 +95,11 @@ install -d -m 700 "$ROOT" "$ROOT/releases" "$ROOT/runtime" "$BACKUP_DIR"
 [ "$(readlink -f "$ROOT/runtime")" = "$ROOT/runtime" ] || fail "runtime directory must not escape staging root"
 [ "$(readlink -f "$BACKUP_DIR")" = "$BACKUP_DIR" ] || fail "backup directory must not escape staging root"
 [ ! -e "$CURRENT_LINK" ] || [ -L "$CURRENT_LINK" ] || fail "current must be absent or a symlink"
-CURRENT_TARGET=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
-case "$CURRENT_TARGET" in ''|"$ROOT"/releases/*) ;; *) fail "current release escapes staging root" ;; esac
+CURRENT_TARGET=
+if [ -L "$CURRENT_LINK" ]; then
+  CURRENT_TARGET=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
+  case "$CURRENT_TARGET" in "$ROOT"/releases/*) ;; *) fail "current release escapes staging root" ;; esac
+fi
 [ ! -L "$ROOT/deploy.lock" ] || fail "deploy lock must not be a symlink"
 exec 9>"$ROOT/deploy.lock"
 flock -n 9 || fail "another staging deployment is already in progress"
@@ -203,7 +206,7 @@ docker build \
   --format '{{ index .Config.Labels "com.pu-workspace.staging.revision" }}')" = "$REVISION" ] \
   || fail "built staging image does not carry the expected revision"
 
-PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
+PREVIOUS_RELEASE=$CURRENT_TARGET
 if docker volume inspect "${PROJECT}_data" >/dev/null 2>&1; then
   VOLUME_PROJECT=$(docker volume inspect "${PROJECT}_data" \
     --format '{{ index .Labels "com.docker.compose.project" }}')
