@@ -99,7 +99,14 @@ def staged_world(db_session, user_factory, monkeypatch):
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
     flags = w.db.scalar(select(MailboxCutoverFlags))
-    flags.primary_read = flags.actions = True
+    # The rollout controller accepts only the monotonic promotion lattice.
+    # Attachment-action fixtures therefore represent a fully promoted mailbox,
+    # rather than constructing the now-invalid actions-only shortcut.
+    flags.shadow_write = True
+    flags.shadow_read_compare = True
+    flags.pilot_write = True
+    flags.primary_read = True
+    flags.actions = True
     w.message.attachments_json = (
         '[{"name":"private-name.txt","mime_type":"text/plain","size":%d,'
         '"attachment_id":"%s","document_external_id":"private-external"}]'
