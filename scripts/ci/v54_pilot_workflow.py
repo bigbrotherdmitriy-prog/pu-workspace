@@ -130,6 +130,7 @@ def test_env() -> dict:
         "PUW_V54_TEST_DATABASE_URL": base_url("puw_v54_test_foundation"),
         "PUW_V54_SOURCE_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_CONTEXT_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
+        "PUW_V54_MAILBOX_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_INTEGRATION_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations"),
         "GMAIL_AUTO_SYNC_ENABLED": "false",
@@ -145,10 +146,9 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "runtime": runtime,
         "corpus": {
             "structural": "PASS" if any(p["name"] == "corpus" and p["exit"] == 0 for p in PHASES) else "FAIL",
-            "executed_cases": ["C01", "P02", "P06", "S06", "S07", "S08", "S09"],
+            "executed_cases": ["C01", "P02", "P06", "S02", "S06", "S07", "S08", "S09"],
             "expected_gaps": {
                 "C07": "time-of-day claim unsupported",
-                "S02": "legacy global message identity cutover unresolved",
                 "S10": "external UNKNOWN remains fake-contract only",
                 "P04": "finance outside pilot",
             },
@@ -184,12 +184,14 @@ def main() -> None:
                 raise RuntimeError("migration_head_mismatch")
         run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
                   env=dict(env, PUW_V54_TEST_DATABASE_URL="", PUW_V54_SOURCE_TEST_DATABASE_URL="",
-                           PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_INTEGRATION_DATABASE_URL="",
+                           PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_MAILBOX_TEST_DATABASE_URL="",
+                           PUW_V54_INTEGRATION_DATABASE_URL="",
                            PUW_V54_PROVIDER_MIGRATION_DATABASE_URL=""), timeout=900)
         targets = [
             "backend/tests/test_v54_pilot_foundation.py",
             "backend/tests/test_v54_source_evidence_pilot.py", "backend/tests/test_v54_source_evidence_postgres.py",
             "backend/tests/test_v54_context_communication.py", "backend/tests/test_v54_context_communication_postgres.py",
+            "backend/tests/test_v54_mailbox_identity_postgres.py",
             "backend/tests/test_v54_task_claims.py", "backend/tests/test_v54_action_trust.py",
             "backend/tests/test_v54_action_trust_external_contract.py",
             "backend/tests/test_v54_provider_action_migration.py",

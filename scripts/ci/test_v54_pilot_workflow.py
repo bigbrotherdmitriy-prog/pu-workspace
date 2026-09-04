@@ -50,9 +50,12 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert '"backend/tests/test_v54_provider_action_migration.py"' in source
     assert '"backend/tests/test_v54_product_acceptance.py"' in source
     assert '"backend/tests/test_v54_c01_content_pipeline.py"' in source
-    assert '"executed_cases": ["C01", "P02", "P06", "S06", "S07", "S08", "S09"]' in source
+    assert '"PUW_V54_MAILBOX_TEST_DATABASE_URL": base_url("puw_v54_test_runtime")' in source
+    assert '"backend/tests/test_v54_mailbox_identity_postgres.py"' in source
+    assert '"executed_cases": ["C01", "P02", "P06", "S02", "S06", "S07", "S08", "S09"]' in source
     gaps = source.split('"expected_gaps": {', 1)[1].split("}", 1)[0]
     assert '"C01"' not in gaps
+    assert '"S02"' not in gaps
     assert '"S07"' not in gaps and '"S08"' not in gaps
 
 
