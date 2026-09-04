@@ -3,20 +3,23 @@ import binascii
 import hashlib
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
-from app.integrations.telegram import notify_telegram
 from app.database import get_db
-from app.governance_engine import create_governance_items
+from app.local_upload_staging import (
+    LocalUploadAdmissionDenied,
+    LocalUploadConflict,
+    LocalUploadStagingError,
+    LocalUploadUnavailable,
+    UploadScope,
+    admit_candidate,
+    get_local_upload_runtime,
+    stage_and_enqueue,
+)
 from app.models.user import User
-from app.organizer_engine.content import extract_text
-from app.organizer_engine.types import DriveFile
-from app.response_engine import create_response_drafts
-from app.task_engine import create_tasks_from_files
-from app.document_engine import index_documents
 
 router = APIRouter(prefix="/local-upload", tags=["local-upload"])
 MAX_FILE_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_FILE_BYTES", str(10 * 1024 * 1024)))
@@ -35,51 +38,92 @@ class LocalBatch(BaseModel):
     files: list[LocalFile] = Field(min_length=1, max_length=MAX_FILES)
 
 
+def _decoded_size(value: str) -> int:
+    if not isinstance(value, str) or not value:
+        raise ValueError("invalid_file_content")
+    padding = len(value) - len(value.rstrip("="))
+    if padding > 2 or len(value) % 4:
+        raise ValueError("invalid_file_content")
+    return (len(value) // 4) * 3 - padding
+
+
 def decode_local_file(item: LocalFile) -> bytes:
+    if _decoded_size(item.content_base64) > MAX_FILE_BYTES:
+        raise ValueError("file_too_large")
     try:
         data = base64.b64decode(item.content_base64, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise ValueError(f"Некорректное содержимое файла: {item.path}") from exc
+        raise ValueError("invalid_file_content") from exc
     if len(data) > MAX_FILE_BYTES:
-        raise ValueError(f"Файл больше {MAX_FILE_BYTES // 1024 // 1024} МБ: {item.path}")
+        raise ValueError("file_too_large")
     return data
 
 
-@router.post("/analyze")
-def analyze_local_folder(payload: LocalBatch, db: Session = Depends(get_db), user: User = Depends(require_user)):
+@router.post("/analyze", status_code=202)
+def analyze_local_folder(
+    payload: LocalBatch,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    # Authorization and whole-batch admission happen before base64 decode or
+    # any staging read/write.
     require_project_role(db, user, payload.project_id, "manager")
-    total = 0
-    extracted: list[DriveFile] = []
-    skipped: list[dict] = []
-    for item in payload.files:
-        try:
-            data = decode_local_file(item)
-            total += len(data)
-            if total > MAX_BATCH_BYTES:
-                raise ValueError(f"Одна порция загрузки больше {MAX_BATCH_BYTES // 1024 // 1024} МБ")
-            text = extract_text(data, item.mime_type, item.path)
-            if not text:
-                skipped.append({"path": item.path, "reason": "текст не извлечён"})
-                continue
-            content_digest = hashlib.sha256(data).hexdigest()
-            path_digest = hashlib.sha256(item.path.casefold().encode()).hexdigest()
-            extracted.append(DriveFile(id=f"local:{path_digest}", name=item.path, mime_type=item.mime_type, parent_id="local-upload", md5_checksum=content_digest, size=len(data), content_text=text))
-        except ValueError as exc:
-            skipped.append({"path": item.path, "reason": str(exc)})
-    documents = index_documents(db, payload.project_id, extracted, "local_upload")
-    tasks = create_tasks_from_files(db, payload.project_id, None, extracted, source_type="local_upload")
-    google_synced = calendar_synced = 0
-    drafts = create_response_drafts(db, payload.project_id, None, extracted)
-    risks, decisions = create_governance_items(db, payload.project_id, extracted, source_type="local_upload")
-    if extracted:
-        notify_telegram(
-            f"PU Workspace: локальная рабочая папка — обработано файлов: {len(extracted)}; "
-            f"задач: {len(tasks)}; рисков: {len(risks)}; решений: {len(decisions)}; ответов: {len(drafts)}."
-        )
+    try:
+        runtime = get_local_upload_runtime()
+        estimated = [_decoded_size(item.content_base64) for item in payload.files]
+        if any(size > runtime.max_file_bytes for size in estimated):
+            raise LocalUploadAdmissionDenied("file_too_large")
+        if sum(estimated) > MAX_BATCH_BYTES:
+            raise LocalUploadAdmissionDenied("batch_too_large")
+        decoded = [decode_local_file(item) for item in payload.files]
+        candidates = [
+            admit_candidate(
+                item.path, item.mime_type, content,
+                max_file_bytes=runtime.max_file_bytes,
+                allowed_mime_types=runtime.allowed_mime_types,
+            )
+            for item, content in zip(payload.files, decoded, strict=True)
+        ]
+        request_key = idempotency_key or hashlib.sha256(
+            b"\x00".join(
+                (candidate.display_name + "\x00" + candidate.mime_type).encode()
+                + hashlib.sha256(candidate.content).digest()
+                for candidate in candidates
+            )
+        ).hexdigest()
+        scope = UploadScope(owner_id=int(user.id), project_id=payload.project_id)
+        jobs = [
+            stage_and_enqueue(
+                db, runtime=runtime, scope=scope, candidate=candidate,
+                request_key=request_key, index=index,
+            )
+            for index, candidate in enumerate(candidates)
+        ]
+    except LocalUploadConflict as exc:
+        raise HTTPException(409, str(exc)) from None
+    except LocalUploadUnavailable as exc:
+        raise HTTPException(503, str(exc)) from None
+    except LocalUploadAdmissionDenied as exc:
+        raise HTTPException(422, str(exc)) from None
+    except ValueError as exc:
+        detail = str(exc)
+        if detail not in {"invalid_file_content", "file_too_large"}:
+            detail = "invalid_file_content"
+        raise HTTPException(422, detail) from None
+    except LocalUploadStagingError:
+        raise HTTPException(503, "local_upload_staging_unavailable") from None
     return {
-        "processed": len(extracted), "skipped": skipped, "tasks": len(tasks),
-        "google_tasks": google_synced, "calendar": calendar_synced,
-        "external_actions": "proposed",
-        "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts),
-        "documents": [{"id": row.id, "name": row.name} for row in documents],
+        "status": "queued",
+        "processed": 0,
+        "skipped": [],
+        "tasks": 0,
+        "risks": 0,
+        "decisions": 0,
+        "drafts": 0,
+        "documents": [],
+        "jobs": [
+            {"job_id": item.job_id, "staging_id": item.staging_id, "status": item.status}
+            for item in jobs
+        ],
     }

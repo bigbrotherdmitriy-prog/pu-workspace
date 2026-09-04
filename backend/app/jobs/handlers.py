@@ -6,6 +6,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "v54.synthetic_task":
         from app.pilot_dispatch import run_installed
         return run_installed(payload)
+    if kind == "local_upload.process":
+        from app.local_upload_staging import run_local_upload_job
+        return run_local_upload_job(payload)
     if kind == "organizer.scan":
         from app.organizer import _scan_worker
         _scan_worker(int(payload["session_id"]), int(payload["project_id"]), payload["source_folder_id"], payload.get("auto_apply"))
