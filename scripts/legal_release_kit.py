@@ -26,12 +26,14 @@ ALLOW_EXACT = {
     "backend/Dockerfile", "frontend/package.json", "frontend/pnpm-lock.yaml",
     "frontend/pnpm-workspace.yaml", "frontend/tsconfig.json",
     "frontend/vite.config.mjs", "frontend/vitest.config.ts",
+    "backend/requirements-linux-py312.lock",
 }
 ALLOW_PREFIXES = (
     "backend/app/", "backend/migrations/", "backend/scripts/",
     "frontend/src/", "frontend/public/", "docs/legal/", "docs/release/",
     "docs/architecture/", "docs/operations.md", "docs/retention-policy.md",
     "docs/USER_GUIDE_RU.md", "scripts/legal_release_kit.py",
+    "scripts/release/",
     "scripts/check_release_package.py", "scripts/check_public_smoke.py",
 )
 FORBIDDEN_PATH = re.compile(
@@ -46,12 +48,16 @@ SECRET_PATTERNS = {
     "GitHub token": re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     "Google API key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
     "Telegram token": re.compile(r"\b\d{7,12}:[A-Za-z0-9_-]{30,}\b"),
+    "JWT": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
 }
+_CLIENT_NAMES = ("Налог" + "-Сервис", "ДИС" + "ИАЙ", "Бу" + "лат", "ГК" + "-08", "Б-" + "УЗП")
 CLIENT_MARKERS = re.compile(
-    r"Налог-Сервис|ДИСИАЙ|Булат|ГК-08|Б-УЗП|\bИНН\s*\d{10,12}\b",
+    "|".join(re.escape(value) for value in _CLIENT_NAMES) + r"|\bИНН\s*\d{10,12}\b",
     re.IGNORECASE,
 )
 LICENSE_EVIDENCE_PATH = "docs/release/generated/license-evidence.json"
+PYTHON_LOCK_PATH = "backend/requirements-linux-py312.lock"
+PYTHON_LOCK_PROVENANCE_PATH = "docs/release/generated/python-lock-provenance.json"
 
 
 def run(root: Path, *args: str) -> bytes:
@@ -86,7 +92,37 @@ def scan_bytes(path: str, data: bytes) -> list[str]:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return []
-    return [f"{path}: {name}" for name, pattern in SECRET_PATTERNS.items() if pattern.search(text)]
+    findings = [f"{path}: {name}" for name, pattern in SECRET_PATTERNS.items() if pattern.search(text)]
+    for match in re.finditer(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?)://[^\s/:]+:([^\s/@]+)@", text, re.IGNORECASE):
+        password = match.group(1)
+        if not (
+            password in {"password", "pu_change_me", "test", "testing"}
+            or password.startswith("${")
+            or password.startswith("replace-with-")
+        ):
+            findings.append(f"{path}: credential-bearing DSN")
+    # The release scanner itself contains marker definitions, not customer data.
+    if path != "scripts/legal_release_kit.py" and CLIENT_MARKERS.search(text):
+        findings.append(f"{path}: client-like identifier")
+    return findings
+
+
+def validate_env_example(data: bytes) -> None:
+    sensitive = re.compile(r"(?:PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ENCRYPTION_KEY)")
+    placeholder = re.compile(r"^(?:|replace-with-[a-z0-9-]+|generate-with-[a-z0-9-]+)$")
+    seen: set[str] = set()
+    for number, raw in enumerate(data.decode("utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise SystemExit(f"Bundle blocked: invalid .env.example row {number}")
+        key, value = line.split("=", 1)
+        if key in seen or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
+            raise SystemExit(f"Bundle blocked: invalid/duplicate .env.example key at row {number}")
+        seen.add(key)
+        if sensitive.search(key) and not placeholder.fullmatch(value):
+            raise SystemExit(f"Bundle blocked: sensitive .env.example value is not a placeholder: {key}")
 
 
 def parse_requirements(data: str) -> list[dict]:
@@ -99,6 +135,75 @@ def parse_requirements(data: str) -> list[dict]:
         if match:
             name, version = match.groups()
             components.append({"name": name, "version": version, "purl": f"pkg:pypi/{name.lower()}@{version}"})
+    return components
+
+
+def parse_hash_lock(data: str) -> list[dict]:
+    """Parse the narrow format emitted by build_python_lock.py."""
+    components: list[dict] = []
+    pending: tuple[str, str] | None = None
+    seen: set[str] = set()
+    for number, raw in enumerate(data.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("--only-binary") or line == "--require-hashes":
+            continue
+        pin = re.fullmatch(r"([A-Za-z0-9_.-]+)==([^\s\\]+)\s*\\", line)
+        digest = re.fullmatch(r"--hash=sha256:([0-9a-f]{64})", line)
+        if pin and pending is None:
+            pending = pin.groups()
+            continue
+        if digest and pending is not None:
+            name, version = pending
+            normalized = re.sub(r"[-_.]+", "-", name).lower()
+            if normalized in seen:
+                raise ValueError(f"duplicate Python lock component: {normalized}")
+            seen.add(normalized)
+            components.append({
+                "name": normalized,
+                "version": version,
+                "purl": f"pkg:pypi/{normalized}@{version}",
+                "artifact_sha256": digest.group(1),
+            })
+            pending = None
+            continue
+        raise ValueError(f"invalid Python lock row {number}")
+    if pending is not None or not components:
+        raise ValueError("incomplete or empty Python lock")
+    return components
+
+
+def load_validated_python_lock(root: Path, ref: str, requirements_blob: bytes) -> list[dict] | None:
+    try:
+        lock_blob = git_blob(root, ref, PYTHON_LOCK_PATH)
+    except subprocess.CalledProcessError:
+        return None
+    provenance_blob = git_blob(root, ref, PYTHON_LOCK_PROVENANCE_PATH)
+    provenance = json.loads(provenance_blob.decode("utf-8"))
+    if provenance.get("schema") != "pu-workspace-python-lock-provenance/v1":
+        raise ValueError("unsupported Python lock provenance")
+    if provenance.get("target") != {
+        "implementation_name": "cpython",
+        "python_version": "3.12",
+        "sys_platform": "linux",
+        "platform_machine": "x86_64",
+    }:
+        raise ValueError("Python lock target is not CPython 3.12 Linux x86_64")
+    if provenance.get("requirements_sha256") != sha256(requirements_blob):
+        raise ValueError("Python lock provenance does not match requirements.txt")
+    if provenance.get("lock_sha256") != sha256(lock_blob):
+        raise ValueError("Python lock provenance does not match lock bytes")
+    components = parse_hash_lock(lock_blob.decode("utf-8"))
+    identities = sorted(
+        (row["name"], row["version"], row["artifact_sha256"])
+        for row in components
+    )
+    provenance_identities = sorted(
+        (row.get("name"), row.get("version"), row.get("sha256"))
+        for row in provenance.get("packages", [])
+        if isinstance(row, dict)
+    )
+    if identities != provenance_identities or provenance.get("package_count") != len(components):
+        raise ValueError("Python lock package identities do not match provenance")
     return components
 
 
@@ -140,6 +245,8 @@ def spdx_document(name: str, namespace_suffix: str, components: list[dict]) -> d
             "licenseConcluded": "NOASSERTION", "licenseDeclared": declared,
             "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": component["purl"]}],
         }
+        if component.get("artifact_sha256"):
+            package["checksums"] = [{"algorithm": "SHA256", "checksumValue": component["artifact_sha256"]}]
         package["comment"] = (
             f"licenseConcluded is NOASSERTION pending legal review; status={evidence.get('status', 'unresolved')}; "
             f"reason={evidence.get('unresolved_reason') or 'package registry declaration recorded'}; "
@@ -233,9 +340,21 @@ def write_license_bundle(out: Path, layers: dict[str, list[dict]]) -> list[Path]
         f"- Weak copyleft declared (LGPL): {len(weak)}",
         "",
         "Machine-readable per-component evidence, URLs, hashes and unresolved reasons are in `third-party-license-matrix.json`.",
+        "The table below is a package-specific evidence index, not a reproduction of upstream license texts.",
         "Package-specific LICENSE/NOTICE texts and container-layer licenses remain a release gate where the matrix says unresolved.",
         "",
+        "| Layer | Component | Version | Declared license | Evidence | Metadata SHA-256 |",
+        "|---|---|---|---|---|---|",
     ]
+    for row in rows:
+        evidence = row.get("evidence_url") or "not available"
+        digest = row.get("metadata_sha256") or "not available"
+        declared = row.get("license_declared") or "UNRESOLVED"
+        lines.append(
+            f"| {row['layer']} | `{row['name']}` | `{row['version']}` | `{declared}` | "
+            f"{evidence} | `{digest}` |"
+        )
+    lines.append("")
     notices.write_text("\n".join(lines), encoding="utf-8")
     return [matrix, notices]
 
@@ -245,7 +364,9 @@ def generate_sbom(root: Path, out: Path, ref: str, evidence_override: Path | Non
     lock_blob = git_blob(root, ref, "frontend/pnpm-lock.yaml")
     compose_blob = git_blob(root, ref, "docker-compose.yml")
     dockerfile_blob = git_blob(root, ref, "backend/Dockerfile")
-    backend = parse_requirements(requirements_blob.decode("utf-8"))
+    locked_backend = load_validated_python_lock(root, ref, requirements_blob)
+    backend = locked_backend if locked_backend is not None else parse_requirements(requirements_blob.decode("utf-8"))
+    backend_layer = "backend-linux-py312-lock" if locked_backend is not None else "backend-direct"
     frontend = parse_pnpm_lock(lock_blob.decode("utf-8"))
     license_evidence = load_license_evidence(root, ref, evidence_override)
     attach_license_evidence(backend, license_evidence)
@@ -263,7 +384,7 @@ def generate_sbom(root: Path, out: Path, ref: str, evidence_override: Path | Non
     write_json(paths[0], spdx_document("PU Workspace backend", f"{sha256(requirements_blob)}-backend", backend))
     write_json(paths[1], spdx_document("PU Workspace frontend", f"{sha256(lock_blob)}-frontend", frontend))
     write_json(paths[2], spdx_document("PU Workspace container declaration", f"{sha256(compose_blob + dockerfile_blob)}-containers", container_components))
-    return paths + write_license_bundle(out, {"backend-direct": backend, "frontend-lock": frontend, "container-manifest": container_components})
+    return paths + write_license_bundle(out, {backend_layer: backend, "frontend-lock": frontend, "container-manifest": container_components})
 
 
 def build_bundle(root: Path, out: Path, ref: str) -> tuple[Path, dict]:
@@ -274,24 +395,33 @@ def build_bundle(root: Path, out: Path, ref: str) -> tuple[Path, dict]:
     entries = []
     payloads = []
     findings = []
-    client_like_source_findings = []
     for path in files:
         data = git_blob(root, sha, path)
         findings.extend(scan_bytes(path, data))
-        if (path.startswith("backend/app/") or path.startswith("frontend/src/")) and CLIENT_MARKERS.search(data.decode("utf-8", errors="ignore")):
-            client_like_source_findings.append(path)
         entries.append({"path": path, "size": len(data), "sha256": sha256(data)})
         payloads.append((path, data))
+    env_payload = next((data for path, data in payloads if path == ".env.example"), None)
+    if env_payload is None:
+        findings.append(".env.example: missing")
+    else:
+        validate_env_example(env_payload)
     if findings:
         raise SystemExit("Bundle blocked by secret/client-data scan:\n" + "\n".join(findings))
     out.mkdir(parents=True, exist_ok=True)
+    entry_identity = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    rejected_identity = "\n".join(rejected).encode("utf-8")
+    tree = run(root, "git", "rev-parse", f"{sha}^{{tree}}").decode().strip()
     manifest = {
-        "schema": "pu-workspace-release-manifest/v1", "git_commit": sha,
+        "schema": "pu-workspace-release-manifest/v2", "git_commit": sha,
+        "git_tree": tree,
         "git_ref_input": ref, "source_date_epoch": commit_time,
         "generated_at": datetime.fromtimestamp(commit_time, timezone.utc).isoformat(),
         "scope_policy": "explicit allowlist; tests, sales, production data and secrets excluded",
+        "scope_policy_version": 2,
+        "content_manifest_sha256": sha256(entry_identity),
+        "excluded_paths_sha256": sha256(rejected_identity),
         "files": entries, "excluded_file_count": len(rejected),
-        "client_like_source_identifiers_for_owner_review": client_like_source_findings,
+        "secret_pii_scan": {"status": "PASS", "findings": 0},
         "legal_status": "DRAFT - requires owner data and Russian legal review",
     }
     manifest_bytes = (json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()

@@ -21,3 +21,8 @@ each documented gap, lock the complete Python/container graph, collect every
 package-specific license/notice file, fill the right holder in LICENSE, and
 have the result reviewed. This repository-level NOTICE is not a substitute for
 component license texts or the right holder's signed license terms.
+
+The generated THIRD_PARTY_NOTICES.md now contains a package-specific evidence
+index (component, exact version, declared license, public evidence URL and
+metadata SHA-256). It still does not replace the upstream LICENSE/COPYING/NOTICE
+texts, which remain a release gate until collected and reviewed.

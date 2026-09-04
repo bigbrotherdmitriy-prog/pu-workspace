@@ -2,11 +2,13 @@
 
 Исполнитель не должен использовать production-секреты или неописанные знания разработчика.
 
-- [ ] Получены архив, `SHA256SUMS`, manifest, SBOM и инструкция.
+- [ ] Получены архив, `SHA256SUMS`, manifest, `VERIFICATION_RESULT.json`, SBOM и инструкция.
 - [ ] SHA-256 совпадает; manifest содержит ожидаемый commit.
 - [ ] Стенд изолирован, DNS/TLS и хранилища принадлежат покупателю.
 - [ ] Все секреты созданы заново по `.env.example`; пример не используется как пароль.
 - [ ] PostgreSQL и образы получены из разрешённого registry и зафиксированы digest.
+- [ ] Python установлен из принятого CPython 3.12/Linux lock с `--require-hashes`; provenance совпадает с lock и `backend/requirements.txt`.
+- [ ] Container evidence связывает release commit, RepoDigest, image ID, layers, версии dpkg и SPDX SHA-256.
 - [ ] Миграции применены на пустой БД.
 - [ ] API, workers и scheduler запущены; health/readiness успешны.
 - [ ] Создан тестовый администратор и bootstrap-токен отозван.

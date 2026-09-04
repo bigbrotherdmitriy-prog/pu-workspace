@@ -1,6 +1,6 @@
 # Сторонние компоненты и лицензии
 
-Статус на 2026-09-04: **технический реестр обновлён; внешняя коммерческая выдача заблокирована до решений владельца и юриста**.
+Статус на 2026-09-04: **технический реестр и fail-closed packaging contract обновлены; внешняя коммерческая выдача заблокирована до runtime evidence, решений владельца и юриста**.
 
 Этот документ не утверждает лицензию за правообладателя и не подменяет юридическое заключение. Точный машинный состав формируется командой:
 
@@ -27,6 +27,9 @@ python scripts/legal_release_kit.py sbom --ref <FULL_SHA> --out <EMPTY_DIR> --li
 - `docs/release/generated/THIRD_PARTY_NOTICES.md`;
 - `docs/release/generated/ASSET_PROVENANCE.md`;
 - `docs/audits/v54-wave3-sbom-legal.md`.
+- `docs/release/generated/release-packaging-status.json`;
+- `docs/release/REPRODUCIBLE_PACKAGING_RU.md`;
+- `docs/release/CONTAINER_EVIDENCE_CONTRACT_RU.md`.
 
 Каждый оставшийся `NOASSERTION` имеет адресное объяснение в package `comment` соответствующего SPDX и в `third-party-license-matrix.json`. Значение не заменялось предположением.
 
@@ -45,10 +48,15 @@ python scripts/legal_release_kit.py sbom --ref <FULL_SHA> --out <EMPTY_DIR> --li
 - [x] **Готово:** у каждой неподтверждённой декларации есть причина и источник/отсутствие источника.
 - [x] **Готово:** выполнена отдельная проверка GPL/AGPL/SSPL по подтверждённым declarations.
 - [x] **Готово:** проверены repository assets, отсутствие vendored fonts и внешних media-файлов.
-- [ ] **Требуется документ:** создать и закоммитить Python 3.12 transitive lock с hashes; пересобрать backend SPDX по lock.
-- [ ] **Требуется документ:** закрепить container images digest и снять SBOM фактически собранных слоёв с версиями apt packages.
+- [x] **Готово:** добавлен генератор Python lock, который отклоняет не-Linux report, sdist, yanked и неполные hashes.
+- [x] **Готово:** добавлен строгий контракт digest/layer/dpkg/SPDX container evidence.
+- [x] **Готово:** package-specific metadata provenance добавлен в `THIRD_PARTY_NOTICES.md`.
+- [x] **Готово:** manifest v2 и archive verifier проверяют topology, все file hashes, `.env.example`, secret/PII signatures.
+- [ ] **Блокер product source:** заменить client-like пример в `frontend/src/modules/contracts/ContractDocumentPicker.tsx`; упаковщик корректно отказывает текущему кандидату.
+- [ ] **Требуется runtime-документ:** создать в Linux x86_64 и закоммитить Python 3.12 transitive lock с hashes; пересобрать backend SPDX по lock.
+- [ ] **Требуется runtime-документ:** закрепить container image digest и снять SBOM фактически собранных слоёв с версиями apt packages.
 - [ ] **Требуется документ:** приложить package-specific LICENSE/COPYING/NOTICE texts для всего фактического графа.
 - [ ] **Требуется решение владельца:** заполнить правообладателя и год в корневом `LICENSE`, выбрать модель лицензирования 02 или 03.
 - [ ] **Требуется юрист:** утвердить `licenseConcluded`, LGPL-обязанности, container copyleft и итоговый NOTICE.
 
-До закрытия пяти последних пунктов комплект пригоден для внутренней проверки и due diligence, но не должен обозначаться как полностью готовый к коммерческой передаче.
+До закрытия шести последних пунктов комплект пригоден для внутренней проверки и due diligence, но не должен обозначаться как полностью готовый к коммерческой передаче.
