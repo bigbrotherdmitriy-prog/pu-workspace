@@ -56,13 +56,34 @@ def test_project_candidate_is_available_for_cross_project_routing():
 
 def test_gmail_telegram_notice_is_concise_and_actionable():
     text = _gmail_telegram_notice("Заказчик <client@example.com>", "Нужен акт", {
-        "tasks": [{"id": 1}], "risks": [{"id": 2}], "drafts": [{"id": 3}],
+        "id": 17,
+        "summary": "Нужно согласовать акт до 10 сентября.",
+        "tasks": [{"id": 1, "title": "Согласовать акт"}],
+        "risks": [{"id": 2, "title": "Просрочка согласования"}],
+        "drafts": [{"id": 3, "subject": "Re: Нужен акт", "body": "Добрый день! Акт принят на проверку."}],
     })
     assert "Новое письмо" in text
     assert "Нужен акт" in text
+    assert "Письмо: #17" in text
+    assert "🧠 Анализ:" in text
+    assert "Нужно согласовать акт до 10 сентября." in text
     assert "задач 1" in text
     assert "рисков 1" in text
     assert "черновиков 1" in text
+    assert "Согласовать акт" in text
+    assert "Просрочка согласования" in text
+    assert "Черновик ответа (НЕ отправлен)" in text
+    assert "Добрый день! Акт принят на проверку." in text
+    assert "подтвердите отправку" in text
+    assert len(text) <= 4000
+
+
+def test_gmail_telegram_notice_does_not_claim_reply_when_no_draft_exists():
+    text = _gmail_telegram_notice("robot@example.com", "Служебное уведомление", {
+        "id": 18, "summary": "Автоматическое письмо.", "tasks": [], "risks": [], "drafts": [],
+    })
+    assert "Черновик ответа не создан" in text
+    assert "Черновик ответа (НЕ отправлен)" not in text
 
 
 def test_marketing_email_is_suppressed_by_strong_provider_evidence():

@@ -94,16 +94,49 @@ def _attachments(payload: dict, message_external_id: str | None = None) -> list[
 
 
 def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
-    tasks = len(result.get("tasks", []))
-    drafts = len(result.get("drafts", []))
-    risks = len(result.get("risks", []))
-    return (
-        "✉️ Новое письмо в PU Workspace\n"
-        f"От: {sender[:180]}\n"
-        f"Тема: {subject[:240]}\n"
-        f"Найдено: задач {tasks} · рисков {risks} · черновиков {drafts}\n"
-        "Откройте раздел «Письма» для проверки."
-    )
+    task_rows = result.get("tasks", [])
+    draft_rows = result.get("drafts", [])
+    risk_rows = result.get("risks", [])
+    lines = [
+        "✉️ Новое письмо в PU Workspace",
+        f"От: {sender[:180]}",
+        f"Тема: {subject[:240]}",
+    ]
+    message_id = result.get("id")
+    if message_id:
+        lines.append(f"Письмо: #{message_id}")
+
+    summary = str(result.get("summary") or "").strip()
+    if summary:
+        lines.extend(("", "🧠 Анализ:", summary[:1500]))
+
+    lines.extend((
+        "",
+        f"Найдено: задач {len(task_rows)} · рисков {len(risk_rows)} · черновиков {len(draft_rows)}",
+    ))
+    if task_rows:
+        lines.append("📋 Предлагаемые задачи:")
+        for task in task_rows[:3]:
+            task_id = f"#{task.get('id')} · " if task.get("id") else ""
+            lines.append(f"• {task_id}{str(task.get('title') or 'Без названия')[:260]}")
+    if risk_rows:
+        lines.append("⚠️ Риски:")
+        for risk in risk_rows[:3]:
+            lines.append(f"• {str(risk.get('title') or 'Без названия')[:260]}")
+
+    if draft_rows:
+        draft = draft_rows[0]
+        lines.extend((
+            "",
+            "✍️ Черновик ответа (НЕ отправлен):",
+            str(draft.get("subject") or "Ответ")[:300],
+            str(draft.get("body") or "").strip()[:1500],
+            "",
+            "Проверьте и подтвердите отправку в разделе «Письма».",
+        ))
+    else:
+        lines.extend(("", "Черновик ответа не создан. Проверьте письмо в разделе «Письма»."))
+    return "\n".join(lines)[:4000]
 
 
 def _bulk_email_reason(headers: dict[str, str], label_ids: list[str] | None, subject: str, content: str) -> str | None:
