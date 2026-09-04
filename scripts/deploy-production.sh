@@ -21,6 +21,18 @@ compose_app_services() {
   echo "$services"
 }
 
+remove_app_runtime_containers() {
+  # Compose can leave hash-prefixed replacement containers after an interrupted
+  # parallel recreate. Remove only this project's stateless runtime services;
+  # the PostgreSQL container and its volume are never selected here.
+  for id in $(docker ps -aq --filter label=com.docker.compose.project=app); do
+    service=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$id" 2>/dev/null || true)
+    case "$service" in
+      backend|worker|scheduler|telegram-relay) docker rm -f "$id" >/dev/null 2>&1 || true ;;
+    esac
+  done
+}
+
 fail() {
   echo "deploy failed: $*" >&2
   exit 1
@@ -71,6 +83,7 @@ rollback() {
       ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
       cd "$PREVIOUS_RELEASE"
       APP_SERVICES=$(compose_app_services)
+      remove_app_runtime_containers
       if [ "$DEPLOY_RELAY" = true ]; then
         $COMPOSE up -d --no-build --force-recreate $APP_SERVICES telegram-relay || true
       else
@@ -114,6 +127,7 @@ docker tag "$CANDIDATE_IMAGE" app-backend
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 SWITCHED=true
 APP_SERVICES=$(compose_app_services)
+remove_app_runtime_containers
 if [ "$DEPLOY_RELAY" = true ]; then
   $COMPOSE up -d --no-build --force-recreate $APP_SERVICES telegram-relay
 else

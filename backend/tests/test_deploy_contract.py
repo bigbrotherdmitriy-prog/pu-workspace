@@ -19,6 +19,9 @@ def test_production_deploy_is_fail_closed_and_uses_persistent_proxy_override():
     assert 'relay restart skipped by DEPLOY_RELAY=false' in source
     assert 'exec 9>"$APP_ROOT/deploy.lock"' in source
     assert 'flock -n 9 || fail "another deployment is already in progress"' in source
+    assert "remove_app_runtime_containers" in source
+    assert "backend|worker|scheduler|telegram-relay" in source
+    assert "com.docker.compose.project=app" in source
 
 
 def test_ci_runs_backend_tests_and_frontend_build():
