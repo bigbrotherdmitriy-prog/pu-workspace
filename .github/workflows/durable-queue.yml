@@ -1,7 +1,7 @@
 name: Durable queue recovery
 on:
   push:
-    branches: ['codex/parallel-validation-final', 'codex/v54-wave3-integration']
+    branches: ['codex/parallel-validation-final', 'codex/v54-wave3-integration', 'codex/v54-wave4-integration']
   workflow_dispatch:
   pull_request:
     paths:

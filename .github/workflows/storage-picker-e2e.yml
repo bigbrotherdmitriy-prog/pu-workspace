@@ -3,7 +3,7 @@ name: Storage picker synthetic browser E2E
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'codex/storage-picker-browser-e2e', 'codex/parallel-validation-final']
+    branches: [main, 'codex/storage-picker-browser-e2e', 'codex/parallel-validation-final', 'codex/v54-wave4-integration']
     paths: ['frontend/**', '.github/workflows/storage-picker-e2e.yml']
   pull_request:
     paths: ['frontend/**', '.github/workflows/storage-picker-e2e.yml']
