@@ -194,7 +194,9 @@ def main() -> None:
             "backend/tests/test_v54_provider_action_migration.py",
             "backend/tests/test_v54_autonomy_authorization.py",
             "backend/tests/test_v54_staging_safety_hardening.py",
-            "backend/tests/test_v54_pilot_integration.py", "backend/tests/test_v54_corpus_confirm_subset.py",
+            "backend/tests/test_v54_pilot_integration.py",
+            "backend/tests/test_v54_product_acceptance.py",
+            "backend/tests/test_v54_corpus_confirm_subset.py",
         ]
         run_phase("postgres_abc_integration", [sys.executable, "-m", "pytest", *targets, "-q", "--tb=short", "-rfsE"], env=env, timeout=900)
         corpus = run_phase("corpus", [sys.executable, "docs/acceptance/v54-corpus/validate.py", "--self-test"], timeout=120)

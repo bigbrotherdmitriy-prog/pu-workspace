@@ -29,7 +29,7 @@ from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.task import Task
 from app.models.v54_pilot import (
-    ActionApproval, ActionReceipt, ActionRevision, AuditExtension, ConnectionIdentity,
+    ActionApproval, ActionPolicy, ActionReceipt, ActionRevision, AuditExtension, ConnectionIdentity,
     ContextRelation, DeadlineClaim, Evidence, MailConnection, PilotAction, SourceCurrent,
     SourceReference, SourceVersion,
 )
@@ -527,13 +527,36 @@ class ContextCommunication:
                     operation="metadata", lock=False)
         msg = self._message(db, scope, self._ref(scope, "message", action.message_id))
         revision = db.get(ActionRevision, (row.action_id, row.revision))
-        approval = db.get(ActionApproval, row.approval_id)
-        if (not revision or not approval or revision.envelope_hash != row.envelope_hash
-                or approval.action_id != row.action_id or approval.revision != row.revision
-                or approval.envelope_hash != row.envelope_hash or not row.target_ref):
+        if (not revision or revision.envelope_hash != row.envelope_hash or not row.target_ref):
             raise ContextError("resource_unavailable")
         envelope = ActionEnvelope.model_validate(revision.envelope)
         if canonical_hash(revision.envelope) != row.envelope_hash:
+            raise ContextError("resource_unavailable")
+        if row.authorization_origin == "HUMAN_APPROVAL":
+            approval = db.get(ActionApproval, row.approval_id) if row.approval_id else None
+            if (not approval or approval.action_id != row.action_id
+                    or approval.revision != row.revision
+                    or approval.envelope_hash != row.envelope_hash):
+                raise ContextError("resource_unavailable")
+            confirmed_by = approval.approver_id
+        elif row.authorization_origin == "SERVER_POLICY":
+            policy = db.get(ActionPolicy, (row.policy_id, row.policy_revision)) \
+                if row.policy_id and row.policy_revision else None
+            rules = policy.rules if policy and isinstance(policy.rules, dict) else {}
+            changed_by = ObjectRef.model_validate(rules.get("changed_by"))
+            if (row.approval_id is not None or policy is None
+                    or policy.organization_id != row.organization_id
+                    or policy.policy_hash != row.policy_hash
+                    or envelope.autonomy != "AUTO"
+                    or envelope.policy.ref.id.value != row.policy_id
+                    or envelope.policy.value != row.policy_revision
+                    or envelope.policy_sha256 != row.policy_hash
+                    or changed_by.type != "user"
+                    or changed_by.tenant_id != scope.tenant
+                    or rules.get("authority_epoch") != row.authority_epoch):
+                raise ContextError("resource_unavailable")
+            confirmed_by = int(changed_by.id.value)
+        else:
             raise ContextError("resource_unavailable")
         target = ObjectRef.model_validate(row.target_ref)
         require_same_tenant(scope.tenant, target)
@@ -558,7 +581,7 @@ class ContextCommunication:
             evidence_pins=[p.model_dump(mode="json") for p in envelope.evidence],
             provenance={"kind": "receipt_projection", "receipt": receipt.model_dump(mode="json")},
             state="confirmed", applicability="current" if msg.context_version == envelope.expected_context_version else "stale",
-            confirmed_by=approval.approver_id, confirmed_at=row.recorded_at, receipt_id=row.id)
+            confirmed_by=confirmed_by, confirmed_at=row.recorded_at, receipt_id=row.id)
         db.add(relation)
         db.flush()
         result = self._pin(self._ref(scope, "context_relation", relation.id), 1, "revision")

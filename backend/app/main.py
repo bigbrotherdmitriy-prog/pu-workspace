@@ -28,6 +28,7 @@ from app.api.project_contacts import router as project_contacts_router
 from app.api.jobs import router as jobs_router
 from app.api.evidence import router as evidence_router
 from app.api.autonomy_policy import router as autonomy_policy_router
+from app.api.v54_sandbox_acceptance import router as v54_sandbox_acceptance_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -143,6 +144,7 @@ app.include_router(project_contacts_router)
 app.include_router(jobs_router)
 app.include_router(evidence_router)
 app.include_router(autonomy_policy_router)
+app.include_router(v54_sandbox_acceptance_router)
 app.include_router(google_drive_router)
 app.include_router(yandex_disk_router)
 app.include_router(tasks_router)

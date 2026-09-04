@@ -48,6 +48,7 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert 'HEAD = "a54f001c0a08"' in source
     assert '"PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations")' in source
     assert '"backend/tests/test_v54_provider_action_migration.py"' in source
+    assert '"backend/tests/test_v54_product_acceptance.py"' in source
 
 
 def test_postgres_phase_requests_safe_failure_summary():
