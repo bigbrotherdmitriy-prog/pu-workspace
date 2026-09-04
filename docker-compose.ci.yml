@@ -1,0 +1,86 @@
+# Standalone file. Never merge with the production docker-compose.yml.
+x-environment: &environment
+  DATABASE_URL: postgresql://pu_test:${POSTGRES_PASSWORD:?generate test environment}@db:5432/pu_test
+  APP_SECRET_KEY: ${APP_SECRET_KEY:?generate test environment}
+  TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?generate test environment}
+  BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?generate test environment}
+  PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?set tested commit}
+  PU_BACKGROUND_EXECUTION: durable
+  GMAIL_AUTO_SYNC_ENABLED: "false"
+  AI_SECRETARY_AUTOMATION_ENABLED: "false"
+  GOOGLE_CLIENT_ID: ""
+  GOOGLE_CLIENT_SECRET: ""
+  GOOGLE_REDIRECT_URI: ""
+  TELEGRAM_BOT_TOKEN: ""
+  GEMINI_API_KEY: ""
+  YANDEX_CLIENT_ID: ""
+  YANDEX_CLIENT_SECRET: ""
+
+x-app: &app
+  image: pu-workspace-test:${PU_RELEASE_REVISION:?set tested commit}
+  build:
+    context: .
+    dockerfile: Dockerfile.ci
+  environment: *environment
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pu_test
+      POSTGRES_USER: pu_test
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?generate test environment}
+    volumes:
+      - data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pu_test -d pu_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  migrate:
+    <<: *app
+    command: [alembic, -c, alembic.ini, upgrade, head]
+    depends_on:
+      db:
+        condition: service_healthy
+  backend:
+    <<: *app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/readiness', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 36
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - "127.0.0.1:${PU_TEST_PORT:-3010}:8080"
+    volumes:
+      - ./infra/ci/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [default, edge]
+    depends_on:
+      backend:
+        condition: service_healthy
+  worker:
+    <<: *app
+    command: [python, -m, app.jobs.worker]
+    deploy:
+      replicas: 2
+    stop_grace_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  scheduler:
+    <<: *app
+    command: [python, -m, app.jobs.scheduler]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+volumes:
+  data:
+networks:
+  default:
+    internal: true
+  edge:
