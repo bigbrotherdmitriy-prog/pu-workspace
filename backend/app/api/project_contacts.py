@@ -201,6 +201,7 @@ def create_contact_draft(contact_id: int, data: ContactDraftCreate,
     excerpt = f"Получатель: {contact.name} <{contact.email}>"
     row = ResponseDraft(
         project_id=contact.project_id, reviewer_user_id=user.id,
+        contract_id=contact.contract_id,
         subject=data.subject.strip(), body=data.body.strip(), recipient_to=contact.email,
         status="draft", source_file_id=source_id, source_file_name=contact.name,
         source_excerpt=excerpt, source_excerpt_hash=sha256(f"{source_id}:{data.subject}:{data.body}".encode()).hexdigest(),

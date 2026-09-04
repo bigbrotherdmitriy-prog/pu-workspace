@@ -157,14 +157,22 @@ class ContentExtractionTests(unittest.TestCase):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr(
+                "xl/workbook.xml",
+                '<workbook xmlns="urn:x" xmlns:r="urn:rels"><sheets><sheet name="Детализация" r:id="rId1"/></sheets></workbook>',
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                '<Relationships xmlns="urn:rels"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+            )
+            archive.writestr(
                 "xl/sharedStrings.xml",
                 '<sst xmlns="urn:x"><si><t>Этап</t></si><si><t>Сумма</t></si><si><t>Монтаж</t></si></sst>',
             )
             archive.writestr(
                 "xl/worksheets/sheet1.xml",
                 '<worksheet xmlns="urn:x"><sheetData>'
-                '<row><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>'
-                '<row><c t="s"><v>2</v></c><c><v>1250000</v></c></row>'
+                '<row r="4"><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>'
+                '<row r="9"><c t="s"><v>2</v></c><c><v>1250000</v></c></row>'
                 '</sheetData></worksheet>',
             )
         self.assertEqual(
@@ -173,7 +181,38 @@ class ContentExtractionTests(unittest.TestCase):
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "ГПР.xlsx",
             ),
-            "Этап\tСумма\nМонтаж\t1250000",
+            "Этап\tСумма\t__PU_SOURCE_COORD__:Детализация:4\nМонтаж\t1250000\t__PU_SOURCE_COORD__:Детализация:9",
+        )
+
+    def test_extracts_xlsx_dates_and_preserves_empty_columns(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr(
+                "xl/styles.xml",
+                '<styleSheet xmlns="urn:x"><cellXfs count="2">'
+                '<xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>',
+            )
+            archive.writestr(
+                "xl/workbook.xml",
+                '<workbook xmlns="urn:x"><workbookPr date1904="0"/></workbook>',
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                '<worksheet xmlns="urn:x"><sheetData>'
+                '<row r="1"><c r="A1" t="inlineStr"><is><t>Этап</t></is></c>'
+                '<c r="C1" t="inlineStr"><is><t>Начало</t></is></c></row>'
+                '<row r="2"><c r="A2" t="inlineStr"><is><t>Монтаж</t></is></c>'
+                '<c r="C2" s="1"><v>46388</v></c></row>'
+                '</sheetData></worksheet>',
+            )
+        self.assertEqual(
+            extract_text(
+                buffer.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "ГПР.xlsx",
+            ),
+            "Этап\t\tНачало\t__PU_SOURCE_COORD__:sheet1:1\n"
+            "Монтаж\t\t2027-01-01\t__PU_SOURCE_COORD__:sheet1:2",
         )
 
     @patch("app.organizer_engine.content._ocr_text", return_value="Распознанный текст сканированного акта")

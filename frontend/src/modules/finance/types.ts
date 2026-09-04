@@ -21,11 +21,20 @@ export type FinanceOverview = {
     version: number;
     status: string;
     note?: string;
+    source_format?: string;
   }[];
   schedule: {
     id: number;
     baseline_id: number;
     title: string;
+    sort_order?: number;
+    parent_id?: number;
+    duration_days?: number;
+    is_milestone?: boolean;
+    predecessor_ids?: string;
+    constraint_type?: string;
+    constraint_date?: string;
+    planned_start?: string;
     planned_finish?: string;
     planned_progress: number;
     actual_progress: number;
@@ -54,6 +63,11 @@ export type FinanceOverview = {
     planned_date: string;
     planned_amount: number;
     actual_amount: number;
+    actual_date?: string;
+    counterparty?: string;
+    object_name?: string;
+    category?: string;
+    note?: string;
     status: string;
   }[];
   procurement: {
@@ -77,6 +91,18 @@ export type FinanceOverview = {
   }[];
 };
 
+export type MppPreview = {
+  filename: string;
+  sha256: string;
+  task_count: number;
+  relation_count: number;
+  milestone_count: number;
+  summary_count: number;
+  critical_count: number;
+  planned_start?: string;
+  planned_finish?: string;
+};
+
 export type FinanceDocumentCandidate = {
   document_id: number;
   name: string;
@@ -91,6 +117,10 @@ export type FinanceDocumentCandidate = {
 
 export type FinanceStructuredRow = {
   source_row: number;
+  source_sheet?: string;
+  source_line?: number;
+  source_coordinate: string;
+  source_name?: string;
   title: string;
   category: string;
   planned_start?: string;
@@ -98,6 +128,8 @@ export type FinanceStructuredRow = {
   planned_date?: string;
   amount?: string;
   counterparty?: string;
+  object_name?: string;
+  note?: string;
   direction?: string;
   progress: number;
   issues: string[];

@@ -118,7 +118,14 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         assert dashboard["summary"]["overdue_tasks"] == 1
         assert dashboard["summary"]["overdue_obligations"] == 1
         assert briefing["summary"]["overdue_tasks"] == 1
-        assert briefing["summary"]["overdue_obligations"] == 1
+        # The briefing is an action list: a linked obligation and its task
+        # are one human decision, while the domain dashboard retains both
+        # underlying entity counts.
+        assert briefing["summary"]["overdue_obligations"] == 0
+        assert len([
+            item for item in briefing["attention"]
+            if item["kind"] in {"overdue_task", "overdue_obligation"}
+        ]) == 1
         assert briefing["attention"][0]["priority"] == "critical"
         assert briefing["external_actions_created"] is False
         assert db.scalar(select(AuditLog).where(AuditLog.action == "external_task_action")) is not None

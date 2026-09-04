@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 import os
 
-from app.gemini_analysis import analyze_document_with_gemini, analyze_message_with_gemini, gemini_configured
+from app.gemini_analysis import (
+    analyze_document_with_gemini,
+    analyze_message_with_gemini,
+    compose_message_with_gemini,
+    gemini_configured,
+)
 from app.integrations.contracts import AdapterHealth
 
 
@@ -18,13 +23,22 @@ class GeminiAIAdapter:
 
     def health(self) -> AdapterHealth:
         ready = gemini_configured()
-        return AdapterHealth(ready=ready, detail="configured" if ready else "api key is not configured")
+        return AdapterHealth(
+            ready=ready,
+            detail=(
+                f"configured for {self.model}; connectivity is verified on each analysis request"
+                if ready else "api key is not configured"
+            ),
+        )
 
     def analyze_document(self, text: str, filename: str) -> dict[str, Any]:
         return analyze_document_with_gemini(text, filename)
 
     def analyze_message(self, text: str, context_name: str) -> dict[str, Any]:
         return analyze_message_with_gemini(text, context_name)
+
+    def compose_message(self, text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
+        return compose_message_with_gemini(text, context_name, action, tone)
 
 
 def configured_ai_provider() -> GeminiAIAdapter:

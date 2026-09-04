@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -21,7 +23,7 @@ class DraftUpdate(BaseModel):
 def list_drafts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     rows = db.execute(select(ResponseDraft, User).join(User, User.id == ResponseDraft.reviewer_user_id).where(ResponseDraft.project_id == project_id).order_by(ResponseDraft.created_at.desc(), ResponseDraft.id.desc())).all()
-    return {"drafts": [{"id": d.id, "subject": d.subject, "body": d.body, "status": d.status, "source_file_name": d.source_file_name, "source_excerpt": d.source_excerpt, "confidence": d.confidence, "reviewer_name": u.name, "recipient_to": d.recipient_to} for d, u in rows], "count": len(rows)}
+    return {"drafts": [{"id": d.id, "subject": d.subject, "body": d.body, "status": d.status, "source_file_name": d.source_file_name, "source_excerpt": d.source_excerpt, "confidence": d.confidence, "reviewer_name": u.name, "recipient_to": d.recipient_to, "revision": d.revision, "approved_revision": d.approved_revision} for d, u in rows], "count": len(rows)}
 
 
 @router.patch("/{draft_id}")
@@ -32,12 +34,28 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
     require_project_role(db, user, draft.project_id, "editor")
     before_status = draft.status
     edited = payload.subject is not None or payload.body is not None
+    if draft.status in {"sending", "sent", "unknown"}:
+        raise HTTPException(409, "Mail draft cannot be changed after dispatch starts")
     if payload.subject is not None:
         draft.subject = payload.subject.strip()
     if payload.body is not None:
         draft.body = payload.body.strip()
+    if edited:
+        draft.revision += 1
+        draft.approved_revision = None
+        draft.approved_by_user_id = None
+        draft.approved_at = None
+        draft.status = "draft"
     if payload.status is not None:
         draft.status = payload.status
+        if payload.status == "approved":
+            draft.approved_revision = draft.revision
+            draft.approved_by_user_id = user.id
+            draft.approved_at = datetime.now(timezone.utc)
+        elif payload.status in {"draft", "rejected"}:
+            draft.approved_revision = None
+            draft.approved_by_user_id = None
+            draft.approved_at = None
     db.add(AuditLog(
         action="response_draft_reviewed" if payload.status is not None else "response_draft_edited",
         entity_type="response_draft", entity_id=draft.id,
@@ -45,4 +63,5 @@ def update_draft(draft_id: int, payload: DraftUpdate, db: Session = Depends(get_
     ))
     db.commit()
     db.refresh(draft)
-    return {"id": draft.id, "subject": draft.subject, "body": draft.body, "status": draft.status}
+    return {"id": draft.id, "subject": draft.subject, "body": draft.body, "status": draft.status,
+            "revision": draft.revision, "approved_revision": draft.approved_revision}

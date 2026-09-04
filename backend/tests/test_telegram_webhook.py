@@ -1,7 +1,14 @@
 import os
 from unittest.mock import patch
 
-from app.api.telegram import _authorized_admin, _project_choices_message, _should_prepare_message_replies, _store_ai_message_result
+from app.api.telegram import (
+    _authorized_admin,
+    _project_choices_message,
+    _reanalyze_existing_document,
+    _should_prepare_message_replies,
+    _store_ai_message_result,
+)
+from app.models.audit_log import AuditLog
 from app.models.ai_secretary import Message
 from app.models.organization_contract import Organization
 from app.models.project import Project
@@ -73,3 +80,56 @@ def test_ai_message_result_is_kept_as_reviewable_draft(db_session, user_factory)
     assert drafts[0].message_id == message.id
     assert "Срок подтверждаем" in drafts[0].body
     assert "Нужно подтвердить срок" in message.summary
+
+
+def test_duplicate_document_can_be_reanalyzed_without_duplicate_business_items(
+    db_session, user_factory, monkeypatch,
+):
+    user = user_factory()
+    organization = Organization(name="Test")
+    db_session.add(organization); db_session.flush()
+    project = Project(organization_id=organization.id, name="Project")
+    db_session.add(project); db_session.flush()
+    message = Message(
+        organization_id=organization.id, project_id=project.id,
+        created_by_user_id=user.id, source_type="telegram",
+        source_external_id="telegram-file:1:stable-file", source_name="stages.xlsx",
+        content="Stage 1 deadline 2027-01-10", summary="Local summary",
+        context_evidence="test", context_confirmed=True, status="ready",
+    )
+    db_session.add(message); db_session.flush()
+
+    class Provider:
+        provider = "gemini"
+        model = "gemini-3.8-flash"
+
+        def health(self):
+            return type("Health", (), {"ready": True})()
+
+        def analyze_document(self, text, filename):
+            raise AssertionError("cached result should be used")
+
+    result = {
+        "document_type": "schedule", "executive_summary": "Updated analysis",
+        "parties": [], "contract_references": [], "amounts": [], "dates": [],
+        "obligations": [], "risks": [], "inconsistencies": [], "missing_data": [],
+        "recommended_actions": [], "draft_reply": "", "confidence": "medium",
+    }
+    monkeypatch.setattr("app.api.telegram.configured_ai_provider", lambda: Provider())
+    monkeypatch.setattr("app.api.telegram.prepare_external_ai_text", lambda db, project_id, text: (text, "external_allowed"))
+    monkeypatch.setattr("app.api.telegram.policy_for_project", lambda db, project_id: None)
+    monkeypatch.setattr("app.api.telegram.cached_ai_result", lambda *args, **kwargs: (result, True))
+
+    response = _reanalyze_existing_document(
+        db_session, message,
+        refreshed_content="Stage 1 starts 2027-01-01 and ends 2027-02-01",
+        refreshed_source_name="updated-stages.xlsx",
+    )
+
+    assert "Updated analysis" in response
+    assert "Повторные задачи, риски и документы не создавались" in response
+    assert "Updated analysis" in message.summary
+    assert message.content == "Stage 1 starts 2027-01-01 and ends 2027-02-01"
+    assert message.source_name == "updated-stages.xlsx"
+    audit = db_session.query(AuditLog).filter_by(action="external_ai_reanalysis", entity_id=message.id).one()
+    assert "duplicates_created=false" in audit.details

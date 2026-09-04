@@ -183,6 +183,43 @@ def _store_ai_message_result(
     return drafts
 
 
+def _reanalyze_existing_document(
+    db, inbox_message: Message, *, refreshed_content: str | None = None,
+    refreshed_source_name: str | None = None,
+) -> str:
+    """Refresh AI analysis for a deduplicated Telegram file without side effects."""
+    if refreshed_content is not None:
+        inbox_message.content = refreshed_content
+    if refreshed_source_name:
+        inbox_message.source_name = refreshed_source_name
+    ai_provider = configured_ai_provider()
+    if not ai_provider.health().ready:
+        return "⚠️ Gemini API не настроен. Ранее сохранённая сводка:\n\n" + (inbox_message.summary or "Сводка отсутствует.")
+    try:
+        ai_content, ai_mode = prepare_external_ai_text(db, inbox_message.project_id, inbox_message.content)
+        policy = policy_for_project(db, inbox_message.project_id)
+        prompt_version = policy.prompt_version if policy else "v1"
+        semantic, cache_hit = cached_ai_result(
+            db, provider=ai_provider.provider, model=ai_provider.model,
+            operation="document_analysis", prompt_version=prompt_version,
+            policy_mode=ai_mode, text=ai_content, context=inbox_message.source_name,
+            compute=lambda: ai_provider.analyze_document(ai_content, inbox_message.source_name),
+        )
+        summary = format_gemini_analysis(semantic, inbox_message.source_name)
+        inbox_message.summary = summary
+        db.add(AuditLog(
+            action="external_ai_reanalysis", entity_type="message", entity_id=inbox_message.id,
+            details=(f"provider={ai_provider.provider}; model={ai_provider.model}; mode={ai_mode}; "
+                     f"prompt={prompt_version}; cache_hit={str(cache_hit).lower()}; duplicates_created=false"),
+        ))
+        db.commit()
+        return summary + "\n\nПовторные задачи, риски и документы не создавались."
+    except ExternalAIBlocked:
+        return "ℹ️ Внешний AI отключён политикой проекта. Ранее сохранённая сводка:\n\n" + (inbox_message.summary or "Сводка отсутствует.")
+    except Exception:
+        return "⚠️ Gemini временно недоступен. Ранее сохранённая сводка:\n\n" + (inbox_message.summary or "Сводка отсутствует.")
+
+
 @router.post("/webhook")
 async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
@@ -340,7 +377,20 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             return {"ok": True}
         existing_message = db.scalar(select(Message).where(Message.source_type == "telegram", Message.source_external_id == source_id))
         if existing_message:
-            notify_telegram_chat(chat_id, "Это сообщение уже сохранено во входящих AI Secretary.")
+            if document:
+                notify_telegram_chat(
+                    chat_id,
+                    "Файл уже сохранён. Текст повторно извлечён новым обработчиком; выполняю AI-анализ без создания дублей.",
+                )
+                notify_telegram_chat(
+                    chat_id,
+                    _reanalyze_existing_document(
+                        db, existing_message, refreshed_content=content,
+                        refreshed_source_name=source_name,
+                    ),
+                )
+            else:
+                notify_telegram_chat(chat_id, "Это сообщение уже сохранено во входящих AI Secretary.")
             return {"ok": True}
         project = db.get(Project, link.project_id)
         owner = _project_owner(db, link.project_id)

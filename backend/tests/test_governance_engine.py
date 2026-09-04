@@ -21,6 +21,15 @@ def test_ignores_unrelated_content():
     assert decisions == []
 
 
+def test_forwarding_for_approval_is_not_itself_a_management_decision():
+    risks, decisions = extract_governance_candidates(
+        "Направляю КС на согласование. Документ приложен к письму."
+    )
+
+    assert risks == []
+    assert decisions == []
+
+
 def test_repeated_governance_clause_has_stable_digest_for_batch_deduplication():
     sentence = "Существует риск просрочки поставки оборудования."
     assert _source_digest("risk", sentence) == _source_digest("risk", sentence.upper())

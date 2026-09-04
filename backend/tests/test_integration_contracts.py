@@ -50,9 +50,13 @@ def test_action_publication_is_provider_neutral():
 
 def test_gemini_adapter_conforms_to_ai_contract(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "configured-for-test")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-3.8-flash")
     adapter = GeminiAIAdapter()
     assert isinstance(adapter, AIProviderAdapter)
-    assert adapter.health().ready
+    health = adapter.health()
+    assert health.ready
+    assert "gemini-3.8-flash" in health.detail
+    assert "verified on each analysis request" in health.detail
 
 
 def test_telegram_adapter_conforms_to_channel_contract(monkeypatch):

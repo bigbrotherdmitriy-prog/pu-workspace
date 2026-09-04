@@ -46,6 +46,40 @@ No additional provider is implemented in this slice. The contracts are the seam
 for Yandex 360, VK WorkSpace, Microsoft/Exchange/SharePoint, private file storage,
 corporate APIs and private AI endpoints.
 
+## Почтовый клиент / Communication Center
+
+Целевой почтовый интерфейс является модулем PU Workspace Core, а не интерфейсом
+Gmail. Core хранит проектный контекст, версии черновиков, подтверждения, результат
+действия и аудит. Чтение и отправка выполняются через `ChannelAdapter`; Gmail —
+первая реализация, Яндекс 360 и Microsoft Exchange — последующие адаптеры после
+стабилизации Gmail-среза. Provider SDK, provider message/thread ID и OAuth token
+не должны становиться доменными идентификаторами Core.
+
+Полный нормативный срез, границы существующей реализации и критерии приёмки
+зафиксированы в [Mini-ТЗ Communication Center](MAIL_CLIENT_COMMUNICATION_CENTER_MINI_TZ_RU.md).
+Пользовательский поток приведён в
+[UX-спецификации](ux/MAIL_CLIENT_COMMUNICATION_CENTER_UX_RU.md).
+
+Ключевые инварианты:
+
+- источник письма закреплён за стабильной identity подключения и не меняется при
+  переносе письма между проектами;
+- проект и договор подтверждаются отдельно от AI-анализа и отдельно от отправки;
+- создание, ответ, ответ всем и пересылка сначала создают версионируемый черновик;
+- отправка требует подтверждения точной версии с адресатами и вложениями;
+- изменение любого исполняемого поля аннулирует старое подтверждение;
+- внешний эффект выполняется идемпотентно, получает receipt и append-only audit;
+- неоднозначный результат имеет состояние `UNKNOWN` и сначала сверяется с
+  провайдером; он не отправляется повторно вслепую;
+- AI может анализировать и предлагать текст только в рамках политики проекта,
+  но не получает полномочия на отправку;
+- завершение фонового job не тождественно успешной отправке письма.
+
+Расширение не объявляется реализованным настоящим разделом. До продуктовой
+приёмки требуются отдельные backend, frontend, migration, provider sandbox и
+browser E2E-срезы. Соседние v5.4 mailbox/action контракты должны переиспользоваться
+после их интеграции, а не копироваться в почтовый модуль.
+
 ## Migration backlog (not part of Vertical Slice 1)
 
 1. After a monitored compatibility period, read external IDs from the generic link table.

@@ -31,6 +31,7 @@ from app.models.project_contact import ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.contract_document_link import ContractDocumentLink
 from app.models.job import BackgroundJob, ServiceHeartbeat
+from app.models.mail_settings import MailUserSettings
 
 __all__ = [
     "Project",
@@ -79,4 +80,5 @@ __all__ = [
     "ContractDocumentLink",
     "BackgroundJob",
     "ServiceHeartbeat",
+    "MailUserSettings",
 ]

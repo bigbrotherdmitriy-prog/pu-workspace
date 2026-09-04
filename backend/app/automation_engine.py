@@ -93,6 +93,7 @@ def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | No
     )
     draft = ResponseDraft(
         project_id=rule.project_id, reviewer_user_id=actor.id,
+        contract_id=rule.contract_id,
         subject=subject, body=body, recipient_to=rule.recipient_to, status="draft",
         source_file_id=source_id, source_file_name=rule.name,
         source_excerpt=body, source_excerpt_hash=digest, confidence=1.0,

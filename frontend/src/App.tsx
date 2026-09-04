@@ -4,6 +4,8 @@ import { Login } from "./auth/Login";
 import { useProjectSelection } from "./context/useProjectSelection";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
+import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
+import { GprWorkspace } from "./modules/finance/GprWorkspace";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
@@ -13,10 +15,13 @@ import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
+import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
 import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
 import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
+import { messageNeedsAttention } from "./modules/inbox/messageAttention";
+import { MailClientModule } from "./modules/mail/MailClientModule";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
@@ -307,27 +312,23 @@ type AutomationRule = {
   runs: { id: number; scheduled_for: string; task_id?: number; response_draft_id?: number; status: string }[];
 };
 type NotificationRow = NotificationItem;
-const items = [
-  [CalendarDays, "Сегодня"],
-  [LayoutDashboard, "Рабочий центр"],
-  [Route, "Запуск проекта"],
-  [FolderKanban, "Проекты"],
-  [FileText, "Договоры"],
-  [FileText, "Документы"],
-  [Search, "Центр знаний"],
-  [BarChart3, "Аналитика"],
-  [GitPullRequest, "Предложения"],
-  [ListTodo, "Задачи"],
-  [ClipboardCheck, "Обязательства"],
-  [AlertTriangle, "Риски и решения"],
-  [Users, "Совещания"],
-  [Bell, "Уведомления"],
-  [Mail, "Письма"],
-  [Bot, "AI Secretary"],
-  [Wallet, "Исполнение и финансы"],
-  [CalendarDays, "Интеграции"],
-  [ShieldCheck, "Журнал"],
-  [Settings, "Настройки"],
+const navigationGroups = [
+  { label: "Работа", items: [
+    [LayoutDashboard, "Рабочий центр"], [CalendarDays, "Сегодня"],
+    [Mail, "Письма"], [ListTodo, "Задачи"], [Bot, "AI Secretary"],
+  ] },
+  { label: "Проект", items: [
+    [FolderKanban, "Проекты"], [Route, "Запуск проекта"],
+    [FileText, "Договоры"], [FileText, "Документы"], [Search, "Центр знаний"],
+  ] },
+  { label: "Контроль", items: [
+    [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
+    [Wallet, "Исполнение и финансы"], [BarChart3, "Аналитика"],
+    [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
+  ] },
+  { label: "Система", items: [
+    [CalendarDays, "Интеграции"], [ShieldCheck, "Журнал"], [Settings, "Настройки"],
+  ] },
 ] as const;
 const targetFolders = [
   "00_НЕРАЗОБРАННОЕ",
@@ -389,7 +390,8 @@ export function App() {
     [projectContacts, setProjectContacts] = useState<ProjectContact[]>([]),
     [mailView, setMailView] = useState<"inbox" | "companies">("inbox"),
     [expandedInboxId, setExpandedInboxId] = useState<number | null>(null),
-    [inboxFilter, setInboxFilter] = useState("all"),
+    [inboxFilter, setInboxFilter] = useState("attention"),
+    [inboxVisibleLimit, setInboxVisibleLimit] = useState(10),
     [selectedInboxIds, setSelectedInboxIds] = useState<number[]>([]),
     [bulkInboxProjectId, setBulkInboxProjectId] = useState(initialProjectId),
     [bulkInboxContractId, setBulkInboxContractId] = useState(0),
@@ -448,12 +450,12 @@ export function App() {
   const {
     finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
-    financeExtra, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId,
+    financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
-    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
-    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
+    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
+    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment,
+    addFinanceItem, confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
@@ -683,7 +685,8 @@ export function App() {
         body: JSON.stringify({ query: "newer_than:7d", max_results: 25 }),
       });
       const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Ошибок: ${result.failed}.`;
+      const reclassified = Number(result.reclassified || 0);
+      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Перенесено в фильтр: ${reclassified}. Ошибок: ${result.failed}.`;
       setGmailSyncStatus(message);
       if (!options.silent || result.processed > 0) setNotice(`Gmail: ${message}`);
       if (result.processed > 0 || !options.silent) await load();
@@ -975,9 +978,7 @@ export function App() {
     } catch (e) { setError((e as Error).message); }
   }
   async function deleteContract(item: ContractRow) {
-    const confirmation = window.prompt(
-      `Удалить договор «${item.number}»? Исходные документы не удаляются. Введите точный номер договора:`,
-    );
+    const confirmation = requestContractDeletionConfirmation(item.number);
     if (confirmation === null) return;
     try {
       setError("");
@@ -986,7 +987,11 @@ export function App() {
       });
       setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      const message = (e as Error).message;
+      setError(message);
+      window.alert(message);
+    }
   }
   async function openContractControl(contractId: number) {
     try {
@@ -1987,17 +1992,19 @@ export function App() {
   );
   const inboxCounts = {
     all: inbox.length,
-    attention: inbox.filter((item) => !item.context_confirmed || item.status !== "completed").length,
+    attention: inbox.filter(messageNeedsAttention).length,
     tasks: inbox.filter((item) => item.tasks.length > 0).length,
     drafts: inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length,
+    filtered: inbox.filter((item) => item.status === "filtered").length,
   };
   const visibleInbox = inbox.filter((item) => {
     const matchesQuery = !query || `${item.source_name} ${item.source_sender || ""} ${item.summary}`
       .toLocaleLowerCase("ru-RU").includes(query.toLocaleLowerCase("ru-RU"));
     if (!matchesQuery) return false;
-    if (inboxFilter === "attention") return !item.context_confirmed || item.status !== "completed";
+    if (inboxFilter === "attention") return messageNeedsAttention(item);
     if (inboxFilter === "tasks") return item.tasks.length > 0;
     if (inboxFilter === "drafts") return item.drafts.some((draft) => draft.status !== "sent");
+    if (inboxFilter === "filtered") return item.status === "filtered";
     return true;
   });
   const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
@@ -2029,31 +2036,37 @@ export function App() {
   }
   return (
     <div className="shell">
+      <div className="pu-ambient" aria-hidden="true">
+        <i className="pu-ambient-orb pu-ambient-orb-primary" />
+        <i className="pu-ambient-orb pu-ambient-orb-secondary" />
+        <i className="pu-ambient-grid" />
+      </div>
       <aside
         className={`${collapsed ? "collapsed" : ""} ${mobile ? "mobile-open" : ""}`}
       >
         <div className="sidebar-head">
           <div className="brand-mark">PU</div>
-          {!collapsed && <strong>PU Workspace</strong>}
+          {!collapsed && <div className="sidebar-brand-copy"><strong>PU Workspace</strong><small>Project intelligence</small></div>}
           <button className="icon" onClick={() => setCollapsed(!collapsed)}>
             <ChevronLeft />
           </button>
         </div>
         <nav>
-          {items.map(([Icon, label]) => (
-            <button
-              onClick={() => {
-                setActive(label);
-                setMobile(false);
-              }}
-              className={label === active ? "active" : ""}
-              key={label}
-              title={label}
-            >
-              <Icon />
-              <span>{label}</span>
-            </button>
-          ))}
+          {navigationGroups.map((group) => <div className="nav-group" key={group.label}>
+            {!collapsed && <span className="nav-group-label">{group.label}</span>}
+            {group.items.map(([Icon, label]) => (
+              <button
+                onClick={() => { setActive(label); setMobile(false); }}
+                className={label === active ? "active" : ""}
+                key={label}
+                title={label}
+              >
+                <Icon />
+                <span>{label}</span>
+                {label === "Письма" && inboxCounts.attention > 0 && <b>{inboxCounts.attention}</b>}
+              </button>
+            ))}
+          </div>)}
         </nav>
         <div className="profile">
           <div className="avatar">D</div>
@@ -2082,8 +2095,9 @@ export function App() {
           >
             <Menu />
           </button>
-          <div>
-            <h1>{active}</h1>
+          <div className="page-heading">
+            <span className="page-kicker">{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
+            <h1>{active}<i className="page-live-dot" aria-hidden="true" /></h1>
             <p>
               {active === "Рабочий центр"
                 ? "Главное по проекту на сегодня"
@@ -2124,22 +2138,40 @@ export function App() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Поиск по проекту"
               />
+              <kbd>Ctrl K</kbd>
               <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
             </div>
-            <select
-              value={projectId}
-              onChange={(e) => {
-                const id = Number(e.target.value);
-                rememberProject(id);
-                void load(id);
-              }}
+            <label className="project-switcher">
+              <FolderKanban />
+              <span>Проект</span>
+              <select
+                aria-label="Текущий проект"
+                value={projectId}
+                onChange={(e) => {
+                  const id = Number(e.target.value);
+                  rememberProject(id);
+                  void load(id);
+                }}
+              >
+                {projects.map((p) => <option value={p.id} key={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="header-notifications"
+              aria-label={`Уведомления: ${summary?.unread_notifications || 0}`}
+              onClick={() => setActive("Уведомления")}
             >
-              {projects.map((p) => (
-                <option value={p.id} key={p.id}>
-                  {p.name}
-                </option>
+              <Bell />
+              {(summary?.unread_notifications || 0) > 0 && <b>{summary?.unread_notifications}</b>}
+            </button>
+            <div className="header-team" aria-label="Команда проекта">
+              {(members.length ? members.slice(0, 2) : [{ user_id: 0, name: "Администратор" }]).map((member, index) => (
+                <span key={member.user_id || index} title={member.name}>
+                  {member.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "PU"}
+                </span>
               ))}
-            </select>
+            </div>
             <button className="icon" onClick={() => load()}>
               <RefreshCw />
             </button>
@@ -2150,10 +2182,11 @@ export function App() {
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
             <TodayModule
+              projectId={projectId}
               projectName={projects.find((item) => item.id === projectId)?.name || ""}
               briefing={dailyBriefing}
               summary={summary}
-              inboxAttention={inbox.filter((item) => !item.context_confirmed || item.status !== "completed").length}
+              inboxAttention={inbox.filter(messageNeedsAttention).length}
               onOpen={setActive}
             />
           )}
@@ -2200,9 +2233,12 @@ export function App() {
           ) : active === "Рабочий центр" || showSources ? (
             <>
               <section className="dashboard-hero">
+                <div className="dashboard-signal" aria-hidden="true">
+                  <i /><i /><i />
+                </div>
                 <div className="dashboard-hero-copy">
-                  <span className="dashboard-kicker">ЦЕНТР УПРАВЛЕНИЯ · {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</span>
-                  <h2>{projects.find((item) => item.id === projectId)?.name || "Текущий проект"}</h2>
+                  <span className="dashboard-kicker">{projects.find((item) => item.id === projectId)?.name || "ТЕКУЩИЙ ПРОЕКТ"}</span>
+                  <h2>Всё главное по вашему проекту — в едином центре</h2>
                   <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
                   <div className="dashboard-hero-actions">
                     <button onClick={() => setActive("Сегодня")}><Route /> План на сегодня</button>
@@ -2589,6 +2625,24 @@ export function App() {
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
               onReload={() => void loadFinance()}
             />
+            <DdsWorkspace
+              finance={finance}
+              selectedContractId={selectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
+              onConfirmMany={confirmFinanceMany}
+              onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
+            />
+            <GprWorkspace
+              projectId={projectId}
+              finance={finance}
+              selectedContractId={selectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onUpdateTask={updateScheduleTask}
+              onBulkUpdate={bulkUpdateSchedule}
+              onCloneBaseline={cloneScheduleBaseline}
+              onImported={loadFinance}
+            />
             <FinanceOperations
               finance={finance}
               preview={financeStructuredPreview}
@@ -2600,16 +2654,24 @@ export function App() {
               amount={financeAmount}
               date={financeDate}
               extra={financeExtra}
+              objectName={financeObject}
+              category={financeCategory}
+              note={financeNote}
               sourceDocumentId={financeSourceDocumentId}
               scheduleItemId={financeScheduleItemId}
               budgetLineId={financeBudgetLineId}
+              baselineId={financeBaselineId}
               setKind={setFinanceKind}
               setTitle={setFinanceTitle}
               setAmount={setFinanceAmount}
               setDate={setFinanceDate}
               setExtra={setFinanceExtra}
+              setObjectName={setFinanceObject}
+              setCategory={setFinanceCategory}
+              setNote={setFinanceNote}
               setScheduleItemId={setFinanceScheduleItemId}
               setBudgetLineId={setFinanceBudgetLineId}
+              setBaselineId={setFinanceBaselineId}
               onClosePreview={() => {
                 setFinanceStructuredPreview(null);
                 setFinanceStructuredRows([]);
@@ -2622,6 +2684,8 @@ export function App() {
               onConfirmPayment={(id, amount) =>
                 void confirmCashPayment(id, amount)
               }
+              includeScheduleRegister={false}
+              includeCashFlowRegister={false}
             />
           </div>
         </section>
@@ -2936,7 +3000,7 @@ export function App() {
         <InboxModule
           collapsed={collapsed}
           mode={active === "Письма" ? "mail" : "secretary"}
-          attentionCount={inbox.filter((item) => !item.context_confirmed || item.tasks.some((task) => task.external_action_status === "proposed")).length}
+          attentionCount={inbox.filter(messageNeedsAttention).length}
           syncing={gmailSyncing}
           onSync={() => void syncGmail()}
         >
@@ -2954,6 +3018,23 @@ export function App() {
               onError={setError}
               onUpdateDraft={(draft, status) => void updateDraft(draft, status)}
               onSendDraft={(draft) => void sendGmailDraft(draft)}
+            />}
+            {active === "Письма" && mailView === "inbox" && <MailClientModule
+              projectId={projectId}
+              currentUserEmail={currentUser?.email}
+              projects={projects}
+              contracts={contracts.map((contract) => ({
+                id: contract.id,
+                number: contract.number,
+                title: contract.title,
+                project_id: projectId,
+              }))}
+              syncing={gmailSyncing}
+              syncStatus={gmailSyncStatus}
+              onSync={() => syncGmail()}
+              onOpenContacts={() => setMailView("companies")}
+              onNotice={setNotice}
+              onError={setError}
             />}
             {active === "AI Secretary" && (
               <DailyBriefingPanel briefing={dailyBriefing} onOpenSection={setActive} />
@@ -3034,7 +3115,7 @@ export function App() {
                 Проанализировать
               </button>
             </section>}
-            <section className="inbox-list" style={{ display: active === "Письма" && mailView !== "inbox" ? "none" : undefined }}>
+            <section className="inbox-list" style={{ display: active === "Письма" ? "none" : undefined }}>
               <div className="inbox-toolbar">
                 <div>
                   <strong>Входящие письма и сообщения</strong>
@@ -3048,26 +3129,30 @@ export function App() {
                   ["attention", "Требуют внимания", inboxCounts.attention],
                   ["tasks", "Есть задачи", inboxCounts.tasks],
                   ["drafts", "Есть черновики", inboxCounts.drafts],
+                  ["filtered", "Отфильтровано", inboxCounts.filtered],
                 ].map(([value, label, count]) => (
-                  <button className={inboxFilter === value ? "selected" : ""} onClick={() => setInboxFilter(String(value))} key={value}>
+                  <button className={inboxFilter === value ? "selected" : ""} onClick={() => {
+                    setInboxFilter(String(value));
+                    setInboxVisibleLimit(10);
+                  }} key={value}>
                     {label} <b>{count}</b>
                   </button>
                 ))}
               </div>
-              {visibleInbox.some((item) => !item.context_confirmed) && (
+              {visibleInbox.some((item) => !item.context_confirmed && item.status !== "filtered") && (
                 <div className="inbox-bulk card">
                   <label>
                     <input
                       type="checkbox"
-                      checked={visibleInbox.filter((item) => !item.context_confirmed).every((item) => selectedInboxIds.includes(item.id))}
+                      checked={visibleInbox.filter((item) => !item.context_confirmed && item.status !== "filtered").every((item) => selectedInboxIds.includes(item.id))}
                       onChange={(e) => {
-                        const ids = visibleInbox.filter((item) => !item.context_confirmed).map((item) => item.id);
+                        const ids = visibleInbox.filter((item) => !item.context_confirmed && item.status !== "filtered").map((item) => item.id);
                         setSelectedInboxIds((current) => e.target.checked
                           ? Array.from(new Set([...current, ...ids]))
                           : current.filter((id) => !ids.includes(id)));
                       }}
                     />
-                    Выбрать все нераспределённые ({visibleInbox.filter((item) => !item.context_confirmed).length})
+                    Выбрать все нераспределённые ({visibleInbox.filter((item) => !item.context_confirmed && item.status !== "filtered").length})
                   </label>
                   <select value={bulkInboxProjectId || projectId} onChange={(e) => {
                     setBulkInboxProjectId(Number(e.target.value));
@@ -3091,13 +3176,13 @@ export function App() {
                   <small>Переносятся письма и связанные предложения задач, рисков и ответов. Письма в Gmail не изменяются.</small>
                 </div>
               )}
-              {visibleInbox
+              {visibleInbox.slice(0, inboxVisibleLimit)
                 .map((message) => {
                   const expanded = expandedInboxId === message.id;
                   return (
                   <article className={`card inbox-card ${expanded ? "expanded" : "collapsed"}`} key={message.id}>
                     <div className="inbox-head">
-                      {!message.context_confirmed && (
+                      {!message.context_confirmed && message.status !== "filtered" && (
                         <input
                           className="inbox-select"
                           type="checkbox"
@@ -3110,7 +3195,9 @@ export function App() {
                       )}
                       <div>
                         <span className={`draft-status ${message.status}`}>
-                          {message.status === "completed"
+                          {message.status === "filtered"
+                            ? "Отфильтровано"
+                            : message.status === "completed"
                             ? "Обработано"
                             : message.status === "in_progress"
                               ? "В работе"
@@ -3141,7 +3228,7 @@ export function App() {
                       <button className="inbox-toggle" onClick={() => setExpandedInboxId(expanded ? null : message.id)}>
                         {expanded ? "Свернуть" : "Открыть"}
                       </button>
-                      {message.status !== "completed" ? (
+                      {message.status === "filtered" ? null : message.status !== "completed" ? (
                         <button className="inbox-workflow" onClick={() => updateInboxStatus(message, message.status === "in_progress" ? "completed" : "in_progress")}>
                           {message.status === "in_progress" ? "Завершить" : "В работу"}
                         </button>
@@ -3361,6 +3448,18 @@ export function App() {
                   </article>
                   );
                 })}
+              {visibleInbox.length > 10 && (
+                <div className="inbox-show-more">
+                  <span>Показано {Math.min(inboxVisibleLimit, visibleInbox.length)} из {visibleInbox.length}</span>
+                  <button className="secondary" onClick={() => setInboxVisibleLimit((current) =>
+                    current >= visibleInbox.length ? 10 : Math.min(current + 10, visibleInbox.length)
+                  )}>
+                    {inboxVisibleLimit >= visibleInbox.length
+                      ? "Свернуть список"
+                      : `Показать ещё ${Math.min(10, visibleInbox.length - inboxVisibleLimit)}`}
+                  </button>
+                </div>
+              )}
               {!visibleInbox.length && (
                 <div className="card empty">
                   <Bot />

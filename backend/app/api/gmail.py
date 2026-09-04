@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import base64
-import html
 import json
 import os
 import re
-from datetime import datetime, timezone
-from email.message import EmailMessage
+from html.parser import HTMLParser
 from email.utils import parseaddr
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,7 +21,10 @@ from app.database import get_db
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.governance import Risk
 from app.models.response_draft import ResponseDraft
+from app.models.task import Task
+from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.user import User
 from app.core.integration_types import StorageObject
 from app.document_engine import index_documents
@@ -47,6 +48,51 @@ def _decode(value: str | None) -> str:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode("utf-8", errors="replace")
 
 
+class _SafeMailHTMLText(HTMLParser):
+    _suppressed = {"head", "style", "script", "noscript", "iframe", "object", "embed", "svg"}
+    _blocks = {"p", "div", "li", "tr", "table", "section", "article", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.suppression_depth = 0
+
+    def handle_starttag(self, tag: str, attrs):
+        tag = tag.casefold()
+        if tag in self._suppressed:
+            self.suppression_depth += 1
+        elif self.suppression_depth == 0 and tag == "br":
+            self.parts.append("\n")
+        elif self.suppression_depth == 0 and tag == "li":
+            self.parts.append("\n• ")
+
+    def handle_endtag(self, tag: str):
+        tag = tag.casefold()
+        if tag in self._suppressed:
+            self.suppression_depth = max(0, self.suppression_depth - 1)
+        elif self.suppression_depth == 0 and tag in self._blocks:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str):
+        if self.suppression_depth == 0:
+            self.parts.append(data)
+
+    def text(self) -> str:
+        value = "".join(self.parts).replace("\xa0", " ")
+        value = re.sub(r"[ \t]+\n", "\n", value)
+        value = re.sub(r"\n[ \t]+", "\n", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        value = re.sub(r"[ \t]{2,}", " ", value)
+        return value.strip()
+
+
+def _html_message_text(markup: str) -> str:
+    parser = _SafeMailHTMLText()
+    parser.feed(markup)
+    parser.close()
+    return parser.text()
+
+
 def _message_text(payload: dict) -> str:
     candidates: list[tuple[str, str]] = []
 
@@ -63,7 +109,7 @@ def _message_text(payload: dict) -> str:
     if plain:
         return plain.strip()
     markup = next((text for mime, text in candidates if mime == "text/html"), "")
-    return html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup))).strip()
+    return _html_message_text(markup)
 
 
 def _headers(payload: dict) -> dict[str, str]:
@@ -94,16 +140,49 @@ def _attachments(payload: dict, message_external_id: str | None = None) -> list[
 
 
 def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
-    tasks = len(result.get("tasks", []))
-    drafts = len(result.get("drafts", []))
-    risks = len(result.get("risks", []))
-    return (
-        "✉️ Новое письмо в PU Workspace\n"
-        f"От: {sender[:180]}\n"
-        f"Тема: {subject[:240]}\n"
-        f"Найдено: задач {tasks} · рисков {risks} · черновиков {drafts}\n"
-        "Откройте раздел «Письма» для проверки."
-    )
+    task_rows = result.get("tasks", [])
+    draft_rows = result.get("drafts", [])
+    risk_rows = result.get("risks", [])
+    lines = [
+        "✉️ Новое письмо в PU Workspace",
+        f"От: {sender[:180]}",
+        f"Тема: {subject[:240]}",
+    ]
+    message_id = result.get("id")
+    if message_id:
+        lines.append(f"Письмо: #{message_id}")
+
+    summary = str(result.get("summary") or "").strip()
+    if summary:
+        lines.extend(("", "🧠 Анализ:", summary[:1500]))
+
+    lines.extend((
+        "",
+        f"Найдено: задач {len(task_rows)} · рисков {len(risk_rows)} · черновиков {len(draft_rows)}",
+    ))
+    if task_rows:
+        lines.append("📋 Предлагаемые задачи:")
+        for task in task_rows[:3]:
+            task_id = f"#{task.get('id')} · " if task.get("id") else ""
+            lines.append(f"• {task_id}{str(task.get('title') or 'Без названия')[:260]}")
+    if risk_rows:
+        lines.append("⚠️ Риски:")
+        for risk in risk_rows[:3]:
+            lines.append(f"• {str(risk.get('title') or 'Без названия')[:260]}")
+
+    if draft_rows:
+        draft = draft_rows[0]
+        lines.extend((
+            "",
+            "✍️ Черновик ответа (НЕ отправлен):",
+            str(draft.get("subject") or "Ответ")[:300],
+            str(draft.get("body") or "").strip()[:1500],
+            "",
+            "Проверьте и подтвердите отправку в разделе «Письма».",
+        ))
+    else:
+        lines.extend(("", "Черновик ответа не создан. Проверьте письмо в разделе «Письма»."))
+    return "\n".join(lines)[:4000]
 
 
 def _bulk_email_reason(headers: dict[str, str], label_ids: list[str] | None, subject: str, content: str) -> str | None:
@@ -139,17 +218,97 @@ def _automated_sender_reason(headers: dict[str, str]) -> str | None:
     The message remains visible and can still produce tasks or risks.  We only
     prevent nonsensical replies to machine-only addresses and mail systems.
     """
-    sender = parseaddr(headers.get("from", ""))[1].casefold()
-    local_part = sender.partition("@")[0]
+    sender_reason = _stored_automated_sender_reason(headers.get("from", ""))
     auto_submitted = headers.get("auto-submitted", "").casefold().strip()
     if auto_submitted and auto_submitted != "no":
         return "автоматическое служебное письмо"
     if headers.get("x-auto-response-suppress"):
         return "отправитель запретил автоматические ответы"
-    machine_addresses = ("noreply", "no-reply", "do-not-reply", "donotreply")
-    if any(marker in local_part for marker in machine_addresses):
+    return sender_reason
+
+
+def _stored_automated_sender_reason(sender_value: str) -> str | None:
+    """Classify only strong machine-address evidence available on old rows."""
+    sender = parseaddr(sender_value)[1].casefold()
+    local_part = sender.partition("@")[0].strip()
+    machine_fragments = ("noreply", "no-reply", "no_reply", "do-not-reply", "donotreply")
+    machine_local_parts = {
+        "notification", "notifications", "notify", "robot", "postmaster",
+        "mailer-daemon", "devnull",
+    }
+    if any(marker in local_part for marker in machine_fragments):
         return "адрес отправителя не принимает ответы"
+    if local_part in machine_local_parts:
+        return "служебный адрес автоматических уведомлений"
     return None
+
+
+def _apply_bulk_filter(message: Message, reason: str | None) -> bool:
+    """Backfill safe filtering without overriding a human workflow decision."""
+    if not reason or message.status not in {"needs_review", "needs_context_confirmation", "ready"}:
+        return False
+    message.status = "filtered"
+    message.summary = f"Автоматические действия не создавались: {reason}."
+    return True
+
+
+def _apply_automated_filter(
+    message: Message, reason: str | None, *, has_actions: bool, human_reviewed: bool = False,
+) -> bool:
+    """Keep actionable machine mail, but remove non-actionable noise from attention."""
+    if (
+        not reason or has_actions or human_reviewed
+        or message.status not in {"needs_review", "needs_context_confirmation", "ready"}
+    ):
+        return False
+    message.status = "filtered"
+    message.summary = f"Служебное письмо без действий: {reason}."
+    return True
+
+
+def _message_has_actions(db: Session, message: Message) -> bool:
+    return bool(
+        db.scalar(select(Task.id).where(Task.message_id == message.id))
+        or db.scalar(select(Risk.id).where(
+            Risk.project_id == message.project_id,
+            Risk.source_id == f"message:{message.id}",
+        ))
+        or db.scalar(select(TaskCompletionSuggestion.id).where(
+            TaskCompletionSuggestion.message_id == message.id,
+        ))
+    )
+
+
+def _message_was_reviewed_by_human(db: Session, message: Message) -> bool:
+    evidence = (message.context_evidence or "").casefold()
+    if "пользовател" in evidence or "массово подтвержд" in evidence:
+        return True
+    return db.scalar(select(AuditLog.id).where(
+        AuditLog.entity_type == "message",
+        AuditLog.entity_id == message.id,
+        AuditLog.action.in_({"message_context_confirmed", "message_status_updated"}),
+    )) is not None
+
+
+def _backfill_automated_messages_for_user(db: Session, user: User) -> int:
+    """Reclassify old Gmail pages safely; never touch another user's or reviewed rows."""
+    rows = db.scalars(select(Message).where(
+        Message.created_by_user_id == user.id,
+        Message.source_type == "email",
+        Message.source_url.like("https://mail.google.com/%"),
+        Message.status.in_({"needs_review", "needs_context_confirmation", "ready"}),
+    )).all()
+    changed = 0
+    for message in rows:
+        reason = _stored_automated_sender_reason(message.source_sender or "")
+        if _apply_automated_filter(
+            message,
+            reason,
+            has_actions=_message_has_actions(db, message),
+            human_reviewed=_message_was_reviewed_by_human(db, message),
+        ):
+            changed += 1
+    return changed
 
 
 @router.post("/projects/{project_id}/gmail/sync")
@@ -183,6 +342,19 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 Message.source_external_id == ref["id"],
             ))
             if existing:
+                existing.mail_headers_json = json.dumps({
+                    key: headers[key]
+                    for key in ("subject", "to", "cc", "date", "message-id", "in-reply-to", "references")
+                    if headers.get(key)
+                }, ensure_ascii=False)
+                existing.mail_labels_json = json.dumps(item.get("labelIds") or [])
+                _apply_bulk_filter(existing, bulk_reason)
+                _apply_automated_filter(
+                    existing,
+                    automated_sender_reason,
+                    has_actions=_message_has_actions(db, existing),
+                    human_reviewed=_message_was_reviewed_by_human(db, existing),
+                )
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
@@ -232,9 +404,17 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 automation_suppressed=bool(bulk_reason),
                 automation_suppression_reason=bulk_reason,
                 response_suppressed=bool(automated_sender_reason),
+                response_suppression_reason=automated_sender_reason,
             ), db, user)
+            stored = db.get(Message, result["id"])
+            stored.mail_headers_json = json.dumps({
+                key: headers[key]
+                for key in ("subject", "to", "cc", "date", "message-id", "in-reply-to", "references")
+                if headers.get(key)
+            }, ensure_ascii=False)
+            stored.mail_labels_json = json.dumps(item.get("labelIds") or [])
             processed += 1 if result["status"] else 0
-            if not bulk_reason:
+            if not bulk_reason and result["status"] != "filtered":
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
             thread_key = item.get("threadId") or item["id"]
             if not is_outgoing and not bulk_reason and thread_key not in notified_threads:
@@ -244,10 +424,13 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             db.rollback()
             failed += 1
             errors.append({"message_id": ref.get("id"), "error": exc.__class__.__name__})
+    reclassified = _backfill_automated_messages_for_user(db, user)
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
-                    details=f"query={query}; processed={processed}; skipped={skipped}; failed={failed}"))
+                    details=(f"query={query}; processed={processed}; skipped={skipped}; "
+                             f"failed={failed}; reclassified={reclassified}")))
     db.commit()
-    return {"processed": processed, "skipped": skipped, "failed": failed, "errors": errors[:20]}
+    return {"processed": processed, "skipped": skipped, "failed": failed,
+            "reclassified": reclassified, "errors": errors[:20]}
 
 
 @router.post("/ai-secretary/inbox/{message_id}/attachments/{attachment_index}/import")
@@ -305,35 +488,19 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     draft = db.get(ResponseDraft, draft_id)
     if draft is None:
         raise HTTPException(404, "Response draft not found")
-    require_project_role(db, user, draft.project_id, "manager")
-    if draft.sent_external_id:
-        return {"id": draft.id, "status": "sent", "gmail_message_id": draft.sent_external_id, "already_sent": True}
-    if draft.status != "approved":
-        raise HTTPException(409, "Сначала подтвердите и при необходимости отредактируйте проект ответа")
-    source = db.get(Message, draft.message_id) if draft.message_id else None
-    recipient = draft.recipient_to or (
-        parseaddr(source.source_sender)[1]
-        if source is not None and source.source_type == "email" and source.source_sender else ""
+    if draft.status != "approved" or draft.approved_revision != draft.revision:
+        raise HTTPException(409, "Сначала подтвердите текущую редакцию проекта ответа")
+    from app.api.mail import MailDraftSend, send_mail_draft
+
+    result = send_mail_draft(
+        draft_id,
+        MailDraftSend(revision=draft.revision, idempotency_key=f"legacy-{draft.id}-{draft.revision}"),
+        db,
+        user,
     )
-    if not recipient:
-        raise HTTPException(422, "Не удалось определить адрес получателя")
-    message = EmailMessage()
-    message["To"] = recipient
-    message["Subject"] = (
-        draft.subject if draft.recipient_to or draft.subject.lower().startswith("re:")
-        else f"Re: {draft.subject}"
-    )
-    message.set_content(draft.body)
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    service = google_workspace_for_project(draft.project_id, db).service("gmail", "v1")
-    body = {"raw": raw}
-    if source is not None and source.source_thread_id:
-        body["threadId"] = source.source_thread_id
-    sent = service.users().messages().send(userId="me", body=body).execute()
-    draft.sent_external_id = sent["id"]
-    draft.sent_at = datetime.now(timezone.utc)
-    draft.status = "sent"
-    db.add(AuditLog(action="gmail_reply_sent", entity_type="response_draft", entity_id=draft.id,
-                    details=f"message={source.id if source else 'proactive'}; gmail_message={sent['id']}"))
-    db.commit()
-    return {"id": draft.id, "status": draft.status, "gmail_message_id": draft.sent_external_id, "already_sent": False}
+    return {
+        "id": result["id"],
+        "status": result["status"],
+        "gmail_message_id": (result.get("receipt") or {}).get("external_message_id"),
+        "already_sent": result["idempotent_replay"],
+    }

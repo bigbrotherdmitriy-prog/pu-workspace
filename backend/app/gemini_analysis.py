@@ -47,6 +47,16 @@ MESSAGE_REPLY_SCHEMA = {
     ],
 }
 
+MAIL_COMPOSER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subject": {"type": "string"},
+        "body": {"type": "string"},
+        "notes": {"type": "string"},
+    },
+    "required": ["subject", "body", "notes"],
+}
+
 
 SYSTEM_INSTRUCTION = """Ты — аналитик проектной, договорной и деловой документации.
 Анализируй только предоставленный текст. Не додумывай факты и не используй внешние сведения.
@@ -59,6 +69,25 @@ SYSTEM_INSTRUCTION = """Ты — аналитик проектной, догов
 
 def gemini_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
+
+
+def _generation_config(model: str, schema: dict[str, Any], legacy_temperature: float) -> dict[str, Any]:
+    """Build a model-compatible structured-output configuration.
+
+    Gemini 3.x rejects/deprecates sampling overrides and should use the new
+    thinking-level control.  LOW is intentional for interactive document and
+    message analysis: it bounds latency while the JSON schema and system
+    instruction provide the required determinism.
+    """
+    config: dict[str, Any] = {
+        "responseMimeType": "application/json",
+        "responseSchema": schema,
+    }
+    if model.casefold().startswith("gemini-3"):
+        config["thinkingConfig"] = {"thinkingLevel": "low"}
+    else:
+        config["temperature"] = legacy_temperature
+    return config
 
 
 def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
@@ -78,11 +107,7 @@ def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "responseMimeType": "application/json",
-            "responseSchema": ANALYSIS_SCHEMA,
-        },
+        "generationConfig": _generation_config(model, ANALYSIS_SCHEMA, 0.1),
     }
     with httpx.Client(timeout=90.0) as client:
         response = request_with_retry(
@@ -118,11 +143,7 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-            "responseSchema": MESSAGE_REPLY_SCHEMA,
-        },
+        "generationConfig": _generation_config(model, MESSAGE_REPLY_SCHEMA, 0.2),
     }
     with httpx.Client(timeout=90.0) as client:
         response = request_with_retry(
@@ -135,6 +156,41 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     result = json.loads("".join(part.get("text", "") for part in parts))
     if not isinstance(result, dict):
         raise ValueError("Gemini returned an unexpected response")
+    return result
+
+
+def compose_message_with_gemini(text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
+    import httpx
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    prompt = (
+        f"Контекст: {context_name}\nДействие редактора: {action}\nТон: {tone}\n\n"
+        "Подготовь или переработай деловое письмо на русском языке. Верни тему, готовый текст письма "
+        "и краткое примечание, что пользователю нужно проверить. Не выдумывай имена, даты, суммы, "
+        "обещания, вложения или выполненные действия. Сохраняй факты исходного текста. "
+        "Не добавляй подпись: приложение подставит подтверждённую подпись пользователя.\n\n"
+        "ИСХОДНЫЕ ДАННЫЕ:\n" + text[:20_000]
+    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": _generation_config(model, MAIL_COMPOSER_SCHEMA, 0.2),
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = request_with_retry(
+            client, "POST", f"{base_url}/models/{model}:generateContent",
+            policy=HEAVY_AI_RETRY,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=payload,
+        )
+    parts = response.json()["candidates"][0]["content"]["parts"]
+    result = json.loads("".join(part.get("text", "") for part in parts))
+    if not isinstance(result, dict) or not str(result.get("body") or "").strip():
+        raise ValueError("Gemini returned an unexpected mail draft")
     return result
 
 

@@ -14,7 +14,7 @@ export function InboxModule({ collapsed, mode, attentionCount, syncing, onSync, 
   const isMail = mode === "mail";
   return <section className={`secretary-overlay ${collapsed ? "collapsed" : ""}`}>
     <div className="secretary-page">
-      <section className="card secretary-intro">
+      {!isMail && <section className="card secretary-intro">
         <div className="source-icon">{isMail ? <Mail /> : <Bot />}</div>
         <div>
           <h2>{isMail ? "Входящие письма" : "Входящие AI Secretary"}</h2>
@@ -26,7 +26,7 @@ export function InboxModule({ collapsed, mode, attentionCount, syncing, onSync, 
         {isMail && <button className="inbox-sync" onClick={onSync} disabled={syncing}>
           <RefreshCw /> {syncing ? "Получаю…" : "Получить новые"}
         </button>}
-      </section>
+      </section>}
       {children}
     </div>
   </section>;

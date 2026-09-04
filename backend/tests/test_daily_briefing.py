@@ -9,7 +9,12 @@ import app.models  # noqa: F401
 from app.daily_briefing import build_daily_briefing
 from app.database import Base
 from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleBaseline, ScheduleItem
+from app.models.governance import Decision
 from app.models.organization_contract import Contract
+from app.models.ai_secretary import Message
+from app.models.management import Obligation
+from app.models.response_draft import ResponseDraft
+from app.models.task import Task
 
 
 def test_daily_briefing_route_is_registered():
@@ -38,6 +43,26 @@ def test_daily_briefing_detects_missing_contract_and_finance_links():
             "missing_contract_source", "empty_schedule", "unlinked_budget", "unlinked_cash_flow",
         }
         assert result["external_actions_created"] is False
+
+
+def test_daily_briefing_groups_multiple_empty_schedules_into_one_action():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            ScheduleBaseline(project_id=16, contract_id=None, created_by_user_id=1, name="ГПР №1", version=1),
+            ScheduleBaseline(project_id=16, contract_id=None, created_by_user_id=1, name="ГПР №2", version=2),
+            ScheduleBaseline(project_id=16, contract_id=None, created_by_user_id=1, name="ГПР №3", version=3),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 16, today=date(2026, 8, 30))
+
+        assert result["summary"]["empty_schedules"] == 3
+        items = [row for row in result["attention"] if row["kind"] == "empty_schedule"]
+        assert len(items) == 1
+        assert items[0]["title"] == "В 3 ГПР нет этапов"
+        assert "ГПР №1" in items[0]["evidence"]
 
 
 def test_daily_briefing_requires_explicit_user_confirmation_for_due_payment():
@@ -77,3 +102,197 @@ def test_daily_briefing_requires_explicit_user_confirmation_for_due_payment():
         assert item["priority"] == "critical"
         assert "вручную подтвердить" in item["next_step"]
         assert "Банковская выписка не используется" in item["evidence"]
+
+
+def test_daily_briefing_does_not_duplicate_task_as_linked_obligation():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        task = Task(
+            project_id=11, assignee_user_id=1, created_by_user_id=1,
+            title="Предоставить акт", status="assigned", due_date=date(2026, 8, 1),
+            source_file_id="file-1", source_file_name="Договор.pdf",
+            source_excerpt="Предоставить акт до 01.08.2026", source_excerpt_hash="a" * 64,
+            confidence=0.9,
+        )
+        db.add(task)
+        db.flush()
+        db.add(Obligation(
+            project_id=11, owner_user_id=1, task_id=task.id,
+            title=task.title, status="needs_confirmation", due_date=task.due_date,
+            source_type="document_analysis", source_id="file-1", source_name="Договор.pdf",
+            source_excerpt=task.source_excerpt, source_hash="a" * 64, confidence=0.9,
+        ))
+        db.commit()
+
+        result = build_daily_briefing(db, 11, today=date(2026, 8, 30))
+
+        assert result["summary"]["overdue_tasks"] == 1
+        assert result["summary"]["overdue_obligations"] == 0
+        assert [row["kind"] for row in result["attention"]] == ["overdue_task"]
+
+
+def test_daily_briefing_collapses_same_task_from_duplicate_source_name():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        for index, source_name in enumerate(("Приложение №1ТЗ..docx", "Приложение №1ТЗ._.docx"), 1):
+            db.add(Task(
+                project_id=13, assignee_user_id=1, created_by_user_id=1,
+                title="Предоставить акт", status="assigned", due_date=date(2026, 8, 1),
+                source_file_id=f"file-{index}", source_file_name=source_name,
+                source_excerpt="Предоставить акт до 01.08.2026", source_excerpt_hash=str(index) * 64,
+                confidence=0.9,
+            ))
+        db.commit()
+
+        result = build_daily_briefing(db, 13, today=date(2026, 8, 30))
+
+        assert result["summary"]["overdue_tasks"] == 1
+        assert len([row for row in result["attention"] if row["kind"] == "overdue_task"]) == 1
+
+
+def test_daily_briefing_suppresses_legacy_reference_date_without_deleting_entities():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        task = Task(
+            project_id=14, assignee_user_id=1, created_by_user_id=1,
+            title="Соблюдать требования закона", status="assigned", due_date=date(2006, 7, 27),
+            source_file_id="law-1", source_file_name="Договор.pdf",
+            source_excerpt="Исполнитель обязан соблюдать Федеральный закон от 27.07.2006 № 152-ФЗ",
+            source_excerpt_hash="b" * 64, confidence=0.9, needs_review=True,
+        )
+        db.add(task)
+        db.flush()
+        obligation = Obligation(
+            project_id=14, owner_user_id=1, task_id=task.id,
+            title=task.title, status="needs_confirmation", due_date=task.due_date,
+            source_type="document_analysis", source_id="law-1", source_name="Договор.pdf",
+            source_excerpt=task.source_excerpt, source_hash="b" * 64, confidence=0.9,
+        )
+        db.add(obligation)
+        db.commit()
+
+        result = build_daily_briefing(db, 14, today=date(2026, 8, 30))
+
+        assert result["summary"]["overdue_tasks"] == 0
+        assert result["summary"]["overdue_obligations"] == 0
+        assert db.get(Task, task.id) is not None
+        assert db.get(Obligation, obligation.id) is not None
+
+
+def test_daily_briefing_excludes_filtered_message_from_context_attention():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            Message(
+                organization_id=1, project_id=12, created_by_user_id=1,
+                source_type="email", source_external_id="filtered-1",
+                source_name="Рассылка", content="Рекламное письмо", summary="Отфильтровано",
+                context_confidence=0.0, context_evidence="Категория Промоакции",
+                context_confirmed=False, status="filtered",
+            ),
+            Message(
+                organization_id=1, project_id=12, created_by_user_id=1,
+                source_type="email", source_external_id="business-1",
+                source_name="Письмо заказчика", content="Просим направить акт", summary="Анализ",
+                context_confidence=0.5, context_evidence="Недостаточно признаков",
+                context_confirmed=False, status="needs_context_confirmation",
+            ),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 12, today=date(2026, 8, 30))
+
+        assert result["summary"]["messages_waiting_context"] == 1
+        contexts = [row for row in result["attention"] if row["kind"] == "context"]
+        assert [row["title"] for row in contexts] == ["Письмо заказчика"]
+
+
+def test_daily_briefing_excludes_stale_draft_linked_to_filtered_message():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        message = Message(
+            organization_id=1, project_id=15, created_by_user_id=1,
+            source_type="email", source_external_id="machine-1",
+            source_name="Служебное письмо", content="Автоматическое уведомление",
+            summary="Отфильтровано", context_confidence=0.0,
+            context_evidence="Служебный отправитель", context_confirmed=False,
+            status="filtered",
+        )
+        db.add(message)
+        db.flush()
+        db.add(ResponseDraft(
+            project_id=15, reviewer_user_id=1, message_id=message.id,
+            subject="Re: уведомление", body="Черновик не должен требовать внимания",
+            status="draft", source_file_id=f"message:{message.id}",
+            source_file_name=message.source_name, source_excerpt=message.content,
+            source_excerpt_hash="c" * 64, confidence=0.5,
+        ))
+        db.commit()
+
+        result = build_daily_briefing(db, 15, today=date(2026, 8, 30))
+
+        assert result["summary"]["drafts_waiting_approval"] == 0
+        assert not any(row["kind"] == "draft" for row in result["attention"])
+
+
+def test_daily_briefing_only_counts_actionable_communication_drafts():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            ResponseDraft(
+                project_id=17, reviewer_user_id=1, subject="Ответ по документу", body="Черновик",
+                status="draft", source_file_id="drive-file-1", source_file_name="Договор.pdf",
+                source_excerpt="Фрагмент договора", source_excerpt_hash="d" * 64, confidence=0.8,
+            ),
+            ResponseDraft(
+                project_id=17, reviewer_user_id=1, subject="Ежемесячное письмо", body="Черновик",
+                status="draft", source_file_id="automation:1:2026-09-01", source_file_name="Регламент",
+                source_excerpt="Подготовить письмо", source_excerpt_hash="e" * 64, confidence=1.0,
+            ),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 17, today=date(2026, 8, 30))
+
+        assert result["summary"]["drafts_waiting_approval"] == 1
+        drafts = [row for row in result["attention"] if row["kind"] == "draft"]
+        assert [row["title"] for row in drafts] == ["Ежемесячное письмо"]
+
+
+def test_daily_briefing_hides_legacy_forwarding_noise_and_deduplicates_decisions():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            Decision(
+                project_id=18, initiator_user_id=1, question="Направляю КС на согласование.",
+                status="needs_confirmation", source_type="email", source_id="message:1",
+                source_name="Re: КС", source_excerpt="Направляю КС на согласование.",
+                source_hash="f" * 64, confidence=0.8,
+            ),
+            Decision(
+                project_id=18, initiator_user_id=1, question="Нужно утвердить график платежей.",
+                status="needs_confirmation", source_type="document_analysis", source_id="file:1",
+                source_name="План.xlsx", source_excerpt="Нужно утвердить график платежей.",
+                source_hash="1" * 64, confidence=0.8,
+            ),
+            Decision(
+                project_id=18, initiator_user_id=1, question="Нужно утвердить график платежей.",
+                status="needs_confirmation", source_type="document_analysis", source_id="file:2",
+                source_name="Копия плана.xlsx", source_excerpt="Нужно утвердить график платежей.",
+                source_hash="2" * 64, confidence=0.8,
+            ),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 18, today=date(2026, 8, 30))
+
+        assert result["summary"]["pending_decisions"] == 1
+        decisions = [row for row in result["attention"] if row["kind"] == "decision"]
+        assert [row["title"] for row in decisions] == ["Нужно утвердить график платежей."]
