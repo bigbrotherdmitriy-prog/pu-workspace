@@ -2036,6 +2036,11 @@ export function App() {
   }
   return (
     <div className="shell">
+      <div className="pu-ambient" aria-hidden="true">
+        <i className="pu-ambient-orb pu-ambient-orb-primary" />
+        <i className="pu-ambient-orb pu-ambient-orb-secondary" />
+        <i className="pu-ambient-grid" />
+      </div>
       <aside
         className={`${collapsed ? "collapsed" : ""} ${mobile ? "mobile-open" : ""}`}
       >
@@ -2092,7 +2097,7 @@ export function App() {
           </button>
           <div className="page-heading">
             <span className="page-kicker">{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
-            <h1>{active}</h1>
+            <h1>{active}<i className="page-live-dot" aria-hidden="true" /></h1>
             <p>
               {active === "Рабочий центр"
                 ? "Главное по проекту на сегодня"
@@ -2133,6 +2138,7 @@ export function App() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Поиск по проекту"
               />
+              <kbd>Ctrl K</kbd>
               <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
             </div>
             <label className="project-switcher">
@@ -2211,6 +2217,9 @@ export function App() {
           ) : active === "Рабочий центр" || showSources ? (
             <>
               <section className="dashboard-hero">
+                <div className="dashboard-signal" aria-hidden="true">
+                  <i /><i /><i />
+                </div>
                 <div className="dashboard-hero-copy">
                   <span className="dashboard-kicker">ЦЕНТР УПРАВЛЕНИЯ · {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</span>
                   <h2>{projects.find((item) => item.id === projectId)?.name || "Текущий проект"}</h2>
