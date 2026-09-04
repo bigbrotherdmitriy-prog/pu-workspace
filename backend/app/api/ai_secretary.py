@@ -276,13 +276,18 @@ def update_message_status(message_id: int, payload: MessageStatusUpdate, db: Ses
     return _message_payload(db, row)
 
 
-def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
+def ingest_message(payload: IncomingMessage, db: Session, user: User, *, mailbox_origin=None) -> dict:
     require_project_role(db, user, payload.project_id, "editor")
     project = db.get(Project, payload.project_id)
     if project is None:
         raise HTTPException(404, "Project not found")
     external_id = payload.source_external_id or f"manual:{uuid4()}"
-    existing = db.scalar(select(Message).where(Message.source_type == payload.source_type, Message.source_external_id == external_id))
+    existing = db.scalar(select(Message).where(
+        Message.mail_connection_id == mailbox_origin.mail_connection_id,
+        Message.provider_message_id == external_id,
+    )) if mailbox_origin else db.scalar(select(Message).where(
+        Message.mail_connection_id.is_(None), Message.source_type == payload.source_type,
+        Message.source_external_id == external_id))
     if existing:
         require_project_role(db, user, existing.project_id, "editor")
         if existing.organization_id != project.organization_id:
@@ -312,6 +317,9 @@ def ingest_message(payload: IncomingMessage, db: Session, user: User) -> dict:
         context_evidence=evidence, context_confirmed=confidence >= 0.90,
         status=("filtered" if payload.automation_suppressed else
                 "ready" if confidence >= 0.90 else "needs_context_confirmation"),
+        mail_connection_id=mailbox_origin.mail_connection_id if mailbox_origin else None,
+        provider_message_id=external_id if mailbox_origin else None,
+        source_reference_id=mailbox_origin.source_reference_id if mailbox_origin else None,
     )
     db.add(row); db.flush()
     synthetic = StorageObject(id=f"message:{row.id}", name=row.source_name, mime_type="text/plain", parent_id="ai-secretary", content_text=row.content)

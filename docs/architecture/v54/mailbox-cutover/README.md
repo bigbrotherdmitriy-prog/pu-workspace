@@ -1,7 +1,7 @@
-# Mailbox-scoped identity cutover — безопасный DRAFT
+# Mailbox-scoped identity cutover — default-off foundation
 
-Статус: аудит, read-only tooling и синтетические fixtures. Никаких ORM/Alembic/
-handlers/data changes. Production enable запрещён.
+Статус: additive ORM/Alembic foundation и mailbox-aware Gmail seams реализованы;
+все scoped flags выключены. Production enable запрещён до PostgreSQL acceptance.
 
 ## Подтверждённое состояние базы 4db9d514…
 
@@ -65,7 +65,7 @@ Remove-Item Env:PUW_MAILBOX_OPAQUE_KEY
 ~~~
 
 Первый вызов — default dry-run и не подключается. Второй проверяет PostgreSQL и
-exact schema head a54f001c0a02, открывает REPEATABLE READ / READ ONLY transaction,
+exact schema head a54f001c0a04, открывает REPEATABLE READ / READ ONLY transaction,
 задаёт statement/lock timeout и max messages, выбирает allowlisted metadata и
 всегда rollback. URL, host, database/user, raw ID и DB exception не выводятся.
 Query/fragment options и небезопасное имя database отвергаются, чтобы URL не мог

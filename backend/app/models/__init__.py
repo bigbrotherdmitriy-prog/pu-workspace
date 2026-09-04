@@ -38,6 +38,10 @@ from app.models.v54_pilot import (  # additive, inactive pilot foundation
     PilotAction, ActionRevision, ActionApproval, ActionReceipt, PendingDispatch, AuditExtension,
 )
 from app.models.v54_authority import AuthorityState
+from app.models.mailbox_identity import (
+    MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
+    MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
+)
 
 __all__ = [
     "Project",
@@ -88,4 +92,6 @@ __all__ = [
     "BackgroundJob",
     "ServiceHeartbeat",
     "AuthorityState",
+    "MailboxAuthorityState", "MailboxCredentialGeneration", "MailboxCutoverFlags",
+    "MailboxOriginBinding", "MailboxOriginCurrent", "MailboxOriginDecision",
 ]

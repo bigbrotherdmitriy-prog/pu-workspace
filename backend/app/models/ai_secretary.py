@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, String, Text, UniqueConstraint, Uuid, func, text
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -9,7 +9,9 @@ from app.database import Base
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
-        UniqueConstraint("source_type", "source_external_id", name="uq_message_source"),
+        Index("uq_message_source_legacy", "source_type", "source_external_id", unique=True,
+              postgresql_where=text("mail_connection_id IS NULL"),
+              sqlite_where=text("mail_connection_id IS NULL")),
         UniqueConstraint("organization_id", "id", name="uq_v54_message_scope"),
         UniqueConstraint("mail_connection_id", "provider_message_id", name="uq_v54_message_mailbox"),
         ForeignKeyConstraint(["organization_id", "mail_connection_id"],
@@ -19,6 +21,7 @@ class Message(Base):
                              ["v54_sources.organization_id", "v54_sources.id"],
                              ondelete="RESTRICT", name="fk_v54_message_source"),
         CheckConstraint("context_version > 0", name="ck_v54_message_context_version"),
+        CheckConstraint("origin_version > 0", name="ck_v54_message_origin_version"),
         CheckConstraint("(mail_connection_id IS NULL AND provider_message_id IS NULL AND source_reference_id IS NULL) OR "
                         "(mail_connection_id IS NOT NULL AND provider_message_id IS NOT NULL AND source_reference_id IS NOT NULL)",
                         name="ck_v54_message_origin"),
@@ -32,6 +35,7 @@ class Message(Base):
     source_reference_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False))
     context_version: Mapped[int] = mapped_column(server_default="1")
+    origin_version: Mapped[int] = mapped_column(server_default="1")
     analysis_required: Mapped[bool] = mapped_column(server_default=text("false"))
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

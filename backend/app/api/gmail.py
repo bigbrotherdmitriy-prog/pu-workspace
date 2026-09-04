@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session
 from app.api.ai_secretary import IncomingMessage, ingest_message, project_candidate
 from app.api.project_contacts import contact_for_sender, discover_contact_from_message
 from app.integrations.google_workspace import google_workspace_for_project
+from app.integrations.google_workspace import google_workspace_for_mailbox
+from app.mailbox_identity.runtime import observe_gmail_message, runtime_for_message, runtime_for_project_connection
 from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
@@ -145,6 +147,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
     sync_project = db.get(Project, project_id)
     if sync_project is None:
         raise HTTPException(404, "Project not found")
+    mailbox_runtime = runtime_for_project_connection(db, project_id)
     service = google_workspace_for_project(project_id, db).service("gmail", "v1")
     page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
@@ -163,8 +166,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             bulk_reason = None if is_outgoing else _bulk_email_reason(
                 headers, item.get("labelIds"), subject, content,
             )
+            mailbox_write = bool(mailbox_runtime and mailbox_runtime.flags.pilot_write)
             existing = db.scalar(select(Message).where(
-                Message.source_external_id == ref["id"],
+                Message.mail_connection_id == mailbox_runtime.mail_connection_id,
+                Message.provider_message_id == ref["id"],
+            )) if mailbox_write else db.scalar(select(Message).where(
+                Message.mail_connection_id.is_(None), Message.source_external_id == ref["id"],
                 Message.source_type.in_(("email", "email_outgoing")),
             ))
             if existing:
@@ -217,6 +224,17 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 routing_contract_id = contact.contract_id
             else:
                 routing_evidence = semantic_evidence
+            ingress_origin = None
+            if mailbox_write:
+                source_ref, _observation = observe_gmail_message(
+                    db, runtime=mailbox_runtime, project_id=target_project_id,
+                    provider_message_id=item["id"],
+                    observation_key=str(item.get("historyId") or item["id"]),
+                )
+                ingress_origin = type("IngressOrigin", (), {
+                    "mail_connection_id": mailbox_runtime.mail_connection_id,
+                    "source_reference_id": source_ref.id,
+                })()
             result = ingest_message(IncomingMessage(
                 project_id=target_project_id, source_type=source_type, source_external_id=item["id"],
                 source_name=(f"Исходящее: {recipient} — {subject}" if is_outgoing else f"{sender} — {subject}"),
@@ -227,7 +245,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 routing_confidence=routing_confidence,
                 automation_suppressed=bool(bulk_reason),
                 automation_suppression_reason=bulk_reason,
-            ), db, user)
+            ), db, user, mailbox_origin=ingress_origin)
             processed += 1 if result["status"] else 0
             if not bulk_reason and result.get("context_confirmed"):
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
@@ -236,9 +254,9 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
         except Exception as exc:
             db.rollback()
             failed += 1
-            errors.append({"message_id": ref.get("id"), "error": exc.__class__.__name__})
+            errors.append({"item_index": processed + skipped + failed, "error": exc.__class__.__name__})
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
-                    details=f"query={query}; processed={processed}; skipped={skipped}; failed={failed}"))
+                    details=f"processed={processed}; skipped={skipped}; failed={failed}"))
     db.commit()
     return {"processed": processed, "skipped": skipped, "failed": failed, "errors": errors[:20]}
 
@@ -266,7 +284,12 @@ def import_gmail_attachment(message_id: int, attachment_index: int, db: Session 
     if existing_document:
         return {"document_id": existing_document.id, "name": existing_document.name, "tasks": 0, "drafts": 0,
                 "risks": 0, "decisions": 0, "already_indexed": True}
-    service = google_workspace_for_project(source.project_id, db).service("gmail", "v1")
+    try:
+        mailbox = runtime_for_message(db, source, action=True)
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
+    service = (google_workspace_for_mailbox(mailbox.google_token_id, db)
+               if mailbox else google_workspace_for_project(source.project_id, db)).service("gmail", "v1")
     payload = service.users().messages().attachments().get(
         userId="me", messageId=source.source_external_id, id=attachment_id,
     ).execute()
@@ -318,7 +341,12 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     )
     message.set_content(draft.body)
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    service = google_workspace_for_project(draft.project_id, db).service("gmail", "v1")
+    try:
+        mailbox = runtime_for_message(db, source, action=True) if source is not None else None
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
+    service = (google_workspace_for_mailbox(mailbox.google_token_id, db)
+               if mailbox else google_workspace_for_project(draft.project_id, db)).service("gmail", "v1")
     body = {"raw": raw}
     if source is not None and source.source_thread_id:
         body["threadId"] = source.source_thread_id
@@ -327,6 +355,6 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     draft.sent_at = datetime.now(timezone.utc)
     draft.status = "sent"
     db.add(AuditLog(action="gmail_reply_sent", entity_type="response_draft", entity_id=draft.id,
-                    details=f"message={source.id if source else 'proactive'}; gmail_message={sent['id']}"))
+                    details="status=sent"))
     db.commit()
     return {"id": draft.id, "status": draft.status, "gmail_message_id": draft.sent_external_id, "already_sent": False}

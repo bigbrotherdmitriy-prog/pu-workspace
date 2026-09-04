@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 TOOL_VERSION = "1"
-EXPECTED_SCHEMA_HEAD = "a54f001c0a02"
+EXPECTED_SCHEMA_HEAD = "a54f001c0a04"
 DEFAULT_LIMIT = 100_000
 TEST_MARKERS = ("test", "testing", "ci", "staging", "stage", "dev", "local", "sandbox")
 PROD_MARKERS = ("prod", "production", "live")

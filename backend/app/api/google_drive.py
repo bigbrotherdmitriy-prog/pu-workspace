@@ -15,6 +15,8 @@ from app.models.project import Project
 from app.models.user import User
 from app.core.auth import require_project_role, require_user
 from app.integrations.google_workspace import credentials_for_project as _adapter_credentials_for_project
+from app.mailbox_identity.oauth import OIDCVerificationError, verified_google_subject
+from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
 
 
 router = APIRouter(
@@ -23,6 +25,7 @@ router = APIRouter(
 )
 
 SCOPES = [
+    "openid",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/calendar.events",
@@ -130,6 +133,13 @@ def google_callback(
 
     credentials = flow.credentials
 
+    # Verify signed OIDC identity before mutating any credential row.  Email,
+    # project and token-row identity are deliberately not accepted as mailbox identity.
+    try:
+        account_subject = verified_google_subject(credentials.id_token, config["web"]["client_id"])
+    except OIDCVerificationError as exc:
+        raise HTTPException(401, "Google account identity could not be verified") from exc
+
     token = db.scalar(
         select(GoogleOAuthToken).where(
             GoogleOAuthToken.project_id == project_id
@@ -141,6 +151,7 @@ def google_callback(
             project_id=project_id,
         )
         db.add(token)
+        db.flush()
 
     try:
         token.access_token = encrypt_token(credentials.token)
@@ -149,6 +160,15 @@ def google_callback(
         raise HTTPException(503, str(exc)) from exc
     token.token_uri = credentials.token_uri
     token.scopes = " ".join(credentials.scopes or SCOPES)
+
+    try:
+        MailboxIdentityService().bind_verified_google_subject(
+            db, organization_id=project.organization_id,
+            google_token_id=token.id, subject=account_subject,
+        )
+    except MailboxConflict as exc:
+        db.rollback()
+        raise HTTPException(409, "Explicit mailbox revoke is required") from exc
 
     db.commit()
 
