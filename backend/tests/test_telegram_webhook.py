@@ -120,10 +120,16 @@ def test_duplicate_document_can_be_reanalyzed_without_duplicate_business_items(
     monkeypatch.setattr("app.api.telegram.policy_for_project", lambda db, project_id: None)
     monkeypatch.setattr("app.api.telegram.cached_ai_result", lambda *args, **kwargs: (result, True))
 
-    response = _reanalyze_existing_document(db_session, message)
+    response = _reanalyze_existing_document(
+        db_session, message,
+        refreshed_content="Stage 1 starts 2027-01-01 and ends 2027-02-01",
+        refreshed_source_name="updated-stages.xlsx",
+    )
 
     assert "Updated analysis" in response
     assert "Повторные задачи, риски и документы не создавались" in response
     assert "Updated analysis" in message.summary
+    assert message.content == "Stage 1 starts 2027-01-01 and ends 2027-02-01"
+    assert message.source_name == "updated-stages.xlsx"
     audit = db_session.query(AuditLog).filter_by(action="external_ai_reanalysis", entity_id=message.id).one()
     assert "duplicates_created=false" in audit.details
