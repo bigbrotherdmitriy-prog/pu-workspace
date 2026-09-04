@@ -1,4 +1,4 @@
-"""Wait until every required GitHub Actions check is successful for one SHA."""
+"""Wait until every required GitHub Actions workflow is successful for one SHA."""
 from __future__ import annotations
 
 import argparse
@@ -13,17 +13,16 @@ TERMINAL_FAILURES = {
 }
 
 
-def evaluate(check_runs: list[dict], required: set[str]) -> tuple[str, list[str]]:
+def evaluate(workflow_runs: list[dict], required: set[str]) -> tuple[str, list[str]]:
     latest: dict[str, dict] = {}
-    for run in check_runs:
-        name = str(run.get("name", ""))
-        app_slug = str((run.get("app") or {}).get("slug", ""))
+    for run in workflow_runs:
+        path = str(run.get("path", ""))
         if (
-            name in required
-            and app_slug == "github-actions"
-            and int(run.get("id", 0)) > int(latest.get(name, {}).get("id", 0))
+            path in required
+            and run.get("event") == "push"
+            and int(run.get("id", 0)) > int(latest.get(path, {}).get("id", 0))
         ):
-            latest[name] = run
+            latest[path] = run
     failed = sorted(
         name for name, run in latest.items() if run.get("status") == "completed" and run.get("conclusion") in TERMINAL_FAILURES
     )
@@ -38,7 +37,7 @@ def evaluate(check_runs: list[dict], required: set[str]) -> tuple[str, list[str]
 
 
 def fetch(owner_repo: str, sha: str, token: str) -> list[dict]:
-    url = f"https://api.github.com/repos/{owner_repo}/commits/{sha}/check-runs?per_page=100"
+    url = f"https://api.github.com/repos/{owner_repo}/actions/runs?head_sha={sha}&per_page=100"
     request = Request(url, headers={
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
@@ -46,14 +45,14 @@ def fetch(owner_repo: str, sha: str, token: str) -> list[dict]:
         "X-GitHub-Api-Version": "2022-11-28",
     })
     with urlopen(request, timeout=30) as response:
-        return json.load(response).get("check_runs", [])
+        return json.load(response).get("workflow_runs", [])
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
     parser.add_argument("--sha", required=True)
-    parser.add_argument("--check", action="append", required=True, dest="checks")
+    parser.add_argument("--workflow", action="append", required=True, dest="workflows")
     parser.add_argument("--attempts", type=int, default=40)
     parser.add_argument("--interval", type=int, default=15)
     args = parser.parse_args()
@@ -62,17 +61,17 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         parser.error("GITHUB_TOKEN is required")
-    required = set(args.checks)
+    required = set(args.workflows)
     for attempt in range(args.attempts):
         state, names = evaluate(fetch(args.repository, args.sha, token), required)
         if state == "success":
-            print("All required release checks succeeded: " + ", ".join(sorted(required)))
+            print("All required release workflows succeeded: " + ", ".join(sorted(required)))
             return 0
         if state == "failed":
-            raise SystemExit("Required release checks failed: " + ", ".join(names))
+            raise SystemExit("Required release workflows failed: " + ", ".join(names))
         if attempt + 1 < args.attempts:
             time.sleep(args.interval)
-    raise SystemExit("Timed out waiting for release checks: " + ", ".join(names))
+    raise SystemExit("Timed out waiting for release workflows: " + ", ".join(names))
 
 
 if __name__ == "__main__":
