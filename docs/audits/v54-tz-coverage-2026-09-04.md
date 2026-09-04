@@ -4,11 +4,11 @@
 
 Проверенный интеграционный кандидат: `codex/v54-wave3-integration`
 
-Проверенный продуктовый HEAD: `f869319e226d0563d9c95eec408adcf716ed7e9f`
+Проверенный продуктовый HEAD: `f0c0e26ef7cb971b2cef3965ec91b490471b127d`
 
-Текущая единственная Alembic head: `a54f001c0a08`
+Текущая единственная Alembic head: `a54f001c0a09`
 
-Решение: **MVP5 contract/code coverage — 100% по 13 критериям ТЗ; Wave3 PostgreSQL runtime PASS; полная MVP5 приёмка CONDITIONAL; production enable BLOCKED**
+Решение: **MVP5 code/contract scope — PASS по 13 критериям ТЗ; новый кандидат runtime CONDITIONAL до повторного CI; production enable BLOCKED**
 
 ## Вывод
 
@@ -19,19 +19,18 @@ CONFIRM-путь, узкий policy-authorized AUTO для внутренней 
 PostgreSQL CI. Wave3 добавил схемы `a05`–`a08`, local upload и Gmail attachment
 wiring, поэтому зелёный Wave2 нельзя считать runtime-доказательством Wave3.
 
-Продуктовая компенсация необратимого email, два security blocker local upload и
-product-like deadline/external-confirm сценарий закрыты кодом и regression-
-тестами. Все 13 критериев имеют исполняемое contract coverage. Runtime run
-`33865331595` подтвердил схему `a54f001c0a08`, `1123 passed / 15 skipped` для
-backend, `293 passed / 0 failed` в PostgreSQL-поднаборе, а также PASS для
-`process_reclaim` и cleanup.
+Продуктовая компенсация необратимого email, security blocker local upload и все
+явные MVP5 gaps `C01`, `C07`, `S02`, `S07`, `S08` закрыты кодом и исполняемыми
+contract-тестами. Runtime protocol нового кандидата оставляет только `P04`
+(финансы вне MVP5) и `S10` (live provider не запускался).
 
-Полная MVP5-приёмка при этом остаётся CONDITIONAL: сам runtime-протокол сохраняет
-gaps `C01`, `C07`, `P04`, `S02`, `S07`, `S08`, `S10`. Из них обязательными для
-полного MVP5 acceptance являются `C01` и точные fault-boundary доказательства
-`S07`/`S08`; остальные относятся к решению владельца, multi-mailbox/live-provider
-rollout или будущему финансовому scope. Подробная классификация приведена в
-[сверке релизного gate](v54-wave3-release-reconciliation.md).
+Run `33865331595` подтвердил базовый commit `f869319`, схему `a54f001c0a08`,
+`1123 passed / 15 skipped` backend, `293 passed / 0 failed` в
+PostgreSQL-поднаборе, `process_reclaim=PASS` и cleanup. После этого run добавлены
+новые process-fault probes, content pipeline, mailbox acceptance и миграция
+`a54f001c0a09`; поэтому этот PASS нельзя переносить на `f0c0e26`. Новый кандидат
+остаётся runtime CONDITIONAL до повторного CI. Подробная классификация приведена
+в [сверке релизного gate](v54-wave3-release-reconciliation.md).
 
 ## Источник и границы оценки
 
@@ -75,11 +74,11 @@ commercial readiness являются отдельными gates.
 
 | Критерий §31.8 | Балл | Статус | Фактическое доказательство | Остаток |
 |---|---:|---|---|---|
-| Evidence-backed end-to-end Communication-to-Action | 1 | CONTRACT PASS / ACCEPTANCE GAP | Default-off TestClient acceptance соединяет message/attachment → exact Context/Evidence/deadline → internal AUTO Task → external CONFIRM → UNKNOWN/reconcile → corrective proposal | `C01`: Source/Evidence/Deadline создаются сервисными вызовами; extraction содержимого письма/вложения до claim не доказан |
+| Evidence-backed end-to-end Communication-to-Action | 1 | CODE/CONTRACT PASS | Synthetic C01 pipeline читает реальные corpus bytes, извлекает project/contract/deadline, создаёт exact Evidence и проводит результат через Context, Trust, Task и receipt | Новый PostgreSQL runtime на `f0c0e26` ещё не выполнен; production ingress намеренно не включён |
 | Context Graph для пилотного сценария | 1 | CODE PASS | Hypothesis/confirm/correct с CAS, историей, защитой от late analysis и receipt projection | Более богатый enterprise graph относится к 1.0+, не к MVP5 |
 | CONFIRM для критических действий | 1 | CODE PASS | Точная approval binding, payload/revision/hash invalidation, live Authority перед T2; service worker и global admin не получают обход | Live external provider acceptance остаётся отдельным gate |
 | Action Ledger | 1 | CODE PASS | Append-oriented audit, sealed action, approval/policy origin, execution attempt, outcome observation и receipt | Production-readable полный ledger UI не требуется для зачёта этого узкого пилотного критерия |
-| Idempotency и deduplication | 1 | CONTRACT PASS | Mailbox-scoped dedup, stable command/job binding, один Task/receipt/projection, provider UNKNOWN → lookup вместо повторного dispatch | PostgreSQL runtime пройден; точные crash boundaries `S07`/`S08` и live `S10` остаются отдельными доказательствами |
+| Idempotency и deduplication | 1 | CODE/CONTRACT PASS | Mailbox-scoped dedup, S02 multi-mailbox acceptance, stable command/job binding, S07/S08 process harness, один Task/receipt/projection, provider UNKNOWN → lookup | Требуется новый runtime; live `S10` остаётся отдельным provider gate |
 | Reversible/compensatable/irreversible classification | 1 | CODE PASS | Тип действия входит в sealed envelope; отмена Task является новым действием; irreversible provider outcome не переписывается | UX для компенсирующего email учитывается отдельно в сценарии E |
 | **Итого §31.8** | **6 / 6** |  |  |  |
 
@@ -87,7 +86,7 @@ commercial readiness являются отдельными gates.
 
 | Сценарий §31.9 | Балл | Статус | Фактическое доказательство | Остаток |
 |---|---:|---|---|---|
-| A. Срок вместе с evidence на точный источник/версию; без evidence — unverified | 1 | CONTRACT PASS / ACCEPTANCE GAP | Product-like acceptance создаёт deadline с exact evidence/source/version pins; Evidence API/UI показывает confidence и human assessment, а stale/denied content скрывается | `C01`: extraction содержимого в этот claim не включён; live provider остаётся отдельным gate |
+| A. Срок вместе с evidence на точный источник/версию; без evidence — unverified | 1 | CODE/CONTRACT PASS | C01 извлекает deadline и exact text-range evidence из corpus bytes; C07 хранит date/time/fixed offset без молчаливого усечения; manual review остаётся обязательным | Требуется новый runtime на `a09`; live provider остаётся отдельным gate |
 | B. `create-internal-task=AUTO`, `send-external-message=CONFIRM` | 1 | CODE PASS | a07 разрешает low-risk `task.internal.create` через SERVER_POLICY без фиктивного approval; тот же product-like сценарий требует HUMAN_APPROVAL для external action и проверяет UNKNOWN reconciliation | Live send намеренно не выполняется в CI |
 | C. Изменённый payload инвалидирует старое approval | 1 | CODE PASS | Approval привязан к action/revision/envelope/payload hash; негативные T2 tests блокируют подмену до эффекта | Требуется только общий Wave3 runtime gate |
 | D. Reversible Task отменяется отдельным audited action | 1 | CODE PASS | `task.internal.cancel` имеет отдельные action, permission/approval, receipt и audit; исходная история сохраняется | Нет остатка в границе synthetic pilot |
@@ -105,11 +104,11 @@ commercial readiness являются отдельными gates.
 | `a54f001c0a05` | SourceVersion-bound materialization lifecycle | INTEGRATED |
 | `a54f001c0a06` | Provider action, approval, outbox, attempt и outcome schema | INTEGRATED |
 | `a54f001c0a07` | Явный HUMAN_APPROVAL/SERVER_POLICY authorization origin | INTEGRATED |
-| `a54f001c0a08` | Service retention purge и DB/lease fence local materialization | CURRENT HEAD |
+| `a54f001c0a08` | Service retention purge и DB/lease fence local materialization | INTEGRATED |
+| `a54f001c0a09` | Точное время и fixed-offset timezone DeadlineClaim | CURRENT HEAD |
 
-Все runtime/readiness pins проверенного HEAD ожидают `a54f001c0a08`. Email
-compensation не потребовала миграции; `a08` является единственной
-последовательной миграцией после `a07`.
+Все runtime/readiness pins проверенного HEAD ожидают `a54f001c0a09`. Миграция
+`a09` последовательна после `a08`; новой merge head не создаётся.
 
 ## Фактическое покрытие Wave2 и Wave3
 
@@ -163,6 +162,13 @@ Wave3 `a05`–`a08`.
 - product-like acceptance: default-off/test-DB-only HTTP path проверяет полный
   A/B цикл, раздельные HUMAN_APPROVAL/SERVER_POLICY origins, UNKNOWN lookup и
   отсутствие повторного provider effect;
+- C01 content bridge: synthetic-only extractor читает реальные bytes TXT/MD,
+  создаёт exact text-range evidence и передаёт извлечённые project, contract и
+  deadline в существующие writers без oracle в extractor;
+- C07 deadline precision: `due_time` и fixed-offset timezone сохраняются без
+  усечения, а date-only Task sealing точного времени завершается fail closed;
+- S02/S07/S08 acceptance: PostgreSQL multi-mailbox isolation и точные
+  process-fault boundaries включены в runtime protocol;
 - browser E2E: пять synthetic Playwright-сценариев на реальном `App` покрывают
   readable/manual-review evidence, stale/denied fail-closed, late-reply без
   возврата к старому проекту, attachment import UI и local-upload/AI-policy
@@ -172,7 +178,7 @@ Wave3 `a05`–`a08`.
 `1087 passed, 15 skipped`; профильный a07 regression — `87 passed, 1 PostgreSQL
 skip`; локальный Wave3 CI contract — `26 passed`.
 
-Итоговый candidate затем прошёл обязательные GitHub Actions:
+Базовый candidate `f869319` прошёл обязательные GitHub Actions:
 
 - `v5.4 runtime`, run `33865331595`, `5m40s` — PASS; artifact SHA-256
   `c9f076ab9fddc652904e2a10d918e64d9d459a93aaa389fb8e825572ba8b4575`;
@@ -180,33 +186,35 @@ skip`; локальный Wave3 CI contract — `26 passed`.
 - общий CI, run `33865331644` — PASS;
 - Docker smoke, run `33865331681` — PASS.
 
-Runtime protocol подтверждает `result=PASS`, `cleanup=PASS`, head
+Его runtime protocol подтверждает `result=PASS`, `cleanup=PASS`, head
 `a54f001c0a08`, backend `1123 passed / 15 skipped`, PostgreSQL A/B/C
 `293 passed / 0 failed` и `process_reclaim=PASS`.
 
+Новый `f0c0e26` добавляет исполняемые `C01/C07/S02/S07/S08` и миграцию `a09`.
+Эти изменения ещё не проходили GitHub runtime на точном новом commit, поэтому
+исторические зелёные runs остаются доказательством базы, но не нового delta.
+
 ## Оставшиеся обязательные gate
 
-### 1. Wave3 PostgreSQL и process-fault CI — базовый gate закрыт
+### 1. Повторный runtime на `f0c0e26`
 
-На итоговом кандидате пройдены оба изолированных контура:
+Нужно повторно выполнить на точном новом кандидате:
 
-- `v54-pilot-runtime.yml` — upgrade чистой PostgreSQL до `a54f001c0a08`, A/B/C,
-  Authority/Context/Source CAS, process crash, lease recovery, единственность
-  Task/receipt/audit/projection и cleanup;
+- `v54-pilot-runtime.yml` — upgrade чистой PostgreSQL до `a54f001c0a09`, A/B/C,
+  `C01/C07/S02`, точные `S07/S08`, Authority/Context/Source CAS и cleanup;
 - `durable-queue.yml` — два API, два worker, scheduler, retry/dead-letter/
   redrive/cancel, backup/restore и cleanup.
+- общий CI и Docker smoke.
 
-Общий runtime gate теперь PASS. Однако safe protocol по-прежнему перечисляет
-`S07` и `S08` как неисполненные точные crash boundaries. Общий
-`process_reclaim=PASS` не следует переименовывать в PASS этих двух сценариев.
+PASS принимается только если safe protocol показывает head `a54f001c0a09`,
+`result=PASS`, `cleanup=PASS`, executed cases `C01/C07/S02/S07/S08` и remaining
+gaps только `P04/S10`.
 
-### 2. Product E2E extraction — `C01` остаётся
+### 2. `C01/C07/S02/S07/S08` — закрыты кодом, ожидают runtime
 
-Сценарий §31.9 A требует извлечь срок/обязательство из входящего письма и
-вложения. Текущий product-like acceptance создаёт Source, Evidence и
-DeadlineClaim через сервисные вызовы; content extraction и corpus due-date input
-в эту цепочку не подключены. Поэтому contract coverage остаётся 100%, но полная
-MVP5 acceptance — CONDITIONAL до сквозного synthetic product test.
+Новые contract-тесты и harness закрывают прежние gaps. Их нельзя возвращать в
+список незакрытого функционального scope, но нельзя объявлять runtime PASS до
+исполнения на Linux/PostgreSQL.
 
 ### 3. Email compensation — закрыто кодом
 
@@ -236,9 +244,9 @@ MVP5 acceptance — CONDITIONAL до сквозного synthetic product test.
    идемпотентной бизнес-точки.
 
 PostgreSQL run на `a08` и durable queue workflow прошли. Runtime composition
-остаётся default-off/fail-closed до явного product enable. Gmail attachment path
-нельзя объявлять live-ready без mailbox/provider acceptance; это отдельный
-live-provider gate, а не повтор общего PostgreSQL gate.
+остаётся default-off/fail-closed до явного product enable. Новый `a09` не меняет
+staging, но итоговый release gate всё равно требует общий повторный CI на одной
+зафиксированной head.
 
 ## Что не входит в оставшийся MVP5
 
@@ -258,29 +266,32 @@ live-provider gate, а не повтор общего PostgreSQL gate.
 
 | Gate | Статус сейчас | Условие закрытия |
 |---|---|---|
-| 13 критериев MVP5 | **100% CODE COVERAGE** | Product-like A/B acceptance интегрирован; runtime является отдельным gate |
-| Единственная Alembic head | PASS | Сохранить линейную head `a08` |
+| 13 критериев MVP5 | **PASS, 13/13 CODE/CONTRACT** | `C01/C07/S02/S07/S08` интегрированы; runtime является отдельным gate |
+| Единственная Alembic head | CODE PASS | Сохранить линейную head `a09`; подтвердить чистым upgrade |
 | Wave2 Linux/PostgreSQL runtime | PASS | Уже подтверждён на `f721634` тремя зелёными runs |
-| Wave3 Linux/PostgreSQL runtime | PASS | Runtime `33865331595`, durable `33865331624`, CI `33865331644`, Docker `33865331681` |
-| Staging security runtime | PASS | a08 PostgreSQL и durable runtime пройдены; product enable остаётся отдельным решением |
-| Product E2E extraction | BLOCKED (`C01`) | Подключить содержимое synthetic mail/attachment к extraction → evidence/deadline pipeline |
-| Точные corpus crash boundaries | BLOCKED (`S07`, `S08`) | Отдельно воспроизвести обе точки kill; общий reclaim их не подменяет |
+| Базовый `f869319` Wave3 runtime | PASS | Runtime `33865331595`, durable `33865331624`, CI `33865331644`, Docker `33865331681` |
+| Новый `f0c0e26` Wave3 runtime | CONDITIONAL | Повторить четыре workflow на head `a09` |
+| `C01/C07/S02/S07/S08` | CODE/CONTRACT PASS | Новый protocol должен выполнить эти cases без gaps |
+| Staging security runtime | BASE PASS | a08 PostgreSQL и durable runtime пройдены; итоговый candidate ждёт общий rerun |
 | Email compensation | CODE PASS | Новый corrective follow-up action и UI/API tests готовы; live send не выполнялся |
-| Live provider acceptance | NOT RUN | Изолированная тестовая учётная запись, exact mailbox, no duplicate effect, reconciliation |
-| Production enable | BLOCKED | Все предыдущие gates закрыты и выдано отдельное разрешение владельца |
+| `P04` finance | OUT OF MVP5 / OWNER DECISION | Отдельный scope, если владелец включает финансовый execution |
+| `S10` live provider | SYNTHETIC PASS / LIVE NOT RUN | Изолированная учётная запись, no duplicate effect и reconciliation |
+| Production enable | BLOCKED | Новый runtime PASS, live-provider gate и отдельное разрешение владельца |
 
 ## Следующий безопасный порядок
 
-1. Закрыть `C01` реальной extraction-to-claim композицией на синтетических
-   данных.
-2. Выполнить точные process-fault сценарии `S07` и `S08`.
-3. Провести отдельный live-provider sandbox acceptance.
+1. Выполнить runtime, durable queue, общий CI и Docker smoke на `f0c0e26` или его
+   docs-only потомке.
+2. Проверить head `a09`, executed `C01/C07/S02/S07/S08`, remaining только
+   `P04/S10` и cleanup PASS.
+3. Провести отдельный live-provider sandbox acceptance для `S10`.
 4. Не выполнять merge или production deploy до отдельного решения владельца.
 
 ## Итоговый статус
 
-Кандидат реализует **100% contract/code coverage 13 явных критериев MVP5**, а
-общий Wave3 PostgreSQL/runtime gate на схеме `a54f001c0a08` пройден. Полная MVP5
-приёмка остаётся CONDITIONAL из-за `C01` и точных fault-сценариев `S07`/`S08`.
-Live-provider acceptance не выполнялся. Расширенная Company Memory относится к
-`1.0+` и не должна задерживать закрытие MVP5.
+Кандидат `f0c0e26` реализует **100% code/contract scope 13 явных критериев
+MVP5**. Прежние gaps `C01/C07/S02/S07/S08` закрыты кодом. Runtime остаётся
+CONDITIONAL только потому, что новый delta и head `a54f001c0a09` ещё не прошли
+повторный CI. Functional remaining gaps — только `P04` вне MVP5 и live-provider
+`S10`. Расширенная Company Memory относится к `1.0+` и не должна задерживать
+закрытие MVP5.

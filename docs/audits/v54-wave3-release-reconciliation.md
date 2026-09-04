@@ -2,94 +2,78 @@
 
 Дата: 2026-09-04
 
-Проверяемый кандидат: `f869319e226d0563d9c95eec408adcf716ed7e9f`
+Текущий кандидат: `f0c0e26ef7cb971b2cef3965ec91b490471b127d`
 
-Runtime run: `33865331595`
+Текущая единственная Alembic head: `a54f001c0a09`
 
-Runtime artifact SHA-256:
+Базовый runtime-доказательный commit: `f869319e226d0563d9c95eec408adcf716ed7e9f`
+
+Базовый runtime run: `33865331595`
+
+Базовый artifact SHA-256:
 `c9f076ab9fddc652904e2a10d918e64d9d459a93aaa389fb8e825572ba8b4575`
-
-Текущая единственная Alembic head: `a54f001c0a08`
 
 ## Решение
 
-**Wave 3 PostgreSQL runtime: PASS. MVP5 contract coverage: 100%. Полная MVP5
-приёмка: CONDITIONAL. Live-provider и коммерческая выдача: NOT READY.**
+**MVP5 code/contract scope: PASS. Новый кандидат: runtime CONDITIONAL до
+повторного CI. Live-provider и коммерческая выдача: NOT READY.**
 
-Run `33865331595` снял прежний общий blocker «нет PostgreSQL runtime на Wave 3»:
+Commit `f0c0e26` закрывает прежние gaps `C01`, `C07`, `S02`, `S07` и `S08`
+кодом и исполняемыми contract-тестами. Runtime protocol теперь считает
+исполненными `C01`, `C07`, `P02`, `P06`, `S02`, `S06`, `S07`, `S08`, `S09` и
+оставляет только:
 
-- backend: `1123 passed`, `15 skipped`;
-- PostgreSQL-поднабор: `293 passed`, `0 failed`;
-- `process_reclaim`: PASS;
-- cleanup: PASS;
-- схема после миграций: `a54f001c0a08`.
+- `P04` — финансовый контур вне MVP5;
+- `S10` — live external UNKNOWN/reconciliation не выполнялся.
 
-Длительность runtime run: `5m40s`. Сопутствующие обязательные workflow на том
-же кандидате также завершились успешно:
+Run `33865331595` остаётся валидным доказательством базового commit `f869319`:
+`1123 passed / 15 skipped` backend, `293 passed / 0 failed` PostgreSQL,
+`process_reclaim=PASS`, `cleanup=PASS`, head `a54f001c0a08`. Durable queue run
+`33865331624`, общий CI `33865331644` и Docker smoke `33865331681` также были
+PASS на этой базе.
 
-- durable queue, run `33865331624` — PASS;
-- общий CI, run `33865331644` — PASS;
-- Docker smoke, run `33865331681` — PASS.
+Эти runs нельзя переносить на новый commit: после них добавлены расширенные
+process-fault probes, content-to-evidence pipeline, PostgreSQL multi-mailbox
+acceptance и миграция `a54f001c0a09`. Поэтому текущий runtime gate честно
+остаётся CONDITIONAL до нового запуска на точном `f0c0e26` или его docs-only
+потомке.
 
-Этот результат подтверждает выполнение реально запущенных фаз. Он не превращает
-перечисленные самим протоколом gaps `C01`, `C07`, `P04`, `S02`, `S07`, `S08` и
-`S10` в PASS. Ниже они классифицированы по фактическим границам ТЗ, без
-расширения MVP5.
+## Закрытые gaps MVP5
 
-## Основание классификации
-
-В исходном DOCX §31.8 определяет MVP5 Pilot Ready шестью обязательными
-свойствами: evidence-backed end-to-end Communication-to-Action, пилотный
-Context Graph, CONFIRM, Action Ledger, idempotency/deduplication и базовая
-классификация reversible/compensatable/irreversible. §31.9 добавляет сценарии
-A–G. §31.8 прямо относит расширенную Company Memory, дополнительные Agents,
-richer Context Graph и enterprise policy automation к `1.0+`.
-
-Термин `100% contract coverage` означает, что все 13 явных критериев имеют
-интегрированные контракты и автоматические проверки. Это не равнозначно полной
-приёмке: product-like тест создаёт Source/Evidence/Deadline через сервисные
-методы и не доказывает извлечение этих фактов из содержимого письма и вложения.
-
-## Обязательное для закрытия MVP5
-
-| ID | Статус | Почему остаётся | Условие закрытия |
+| ID | Статус в `f0c0e26` | Фактическое изменение | Что ещё проверяет новый CI |
 |---|---|---|---|
-| `C01` | **BLOCKER — product E2E** | §31.8 и сценарий A требуют цепочку от входящего содержимого до evidence, срока, задачи и черновика. Текущий synthetic acceptance регистрирует Source/Evidence/Deadline программно; runtime-протокол прямо сообщает, что content extraction и corpus due-date input не подключены | Подключить синтетические письмо и вложение к реальному extraction/context pipeline и доказать один HTTP/worker/PostgreSQL сценарий без ручного seed структурированного claim |
-| `S07` | **BLOCKER — fault evidence** | Общий `process_reclaim=PASS` не является точной fault injection после commit pending intent и до enqueue | Воспроизвести process kill на указанной границе и доказать восстановление одного intent, одной Task и одного receipt |
-| `S08` | **BLOCKER — fault evidence** | Проверен reclaim, но не точная граница после business commit и до job completion | Воспроизвести kill на указанной границе и доказать отсутствие повторного business effect после lease recovery |
+| `C01` | **CODE/CONTRACT PASS** | Synthetic-only pipeline читает реальные байты corpus TXT/MD, извлекает project/contract/deadline, создаёт точные Evidence coordinates и проводит результат через Context, DeadlineClaim, Trust, Task и receipt | PostgreSQL A/B/C phase на итоговом commit; production ingress намеренно не включён |
+| `C07` | **CODE/CONTRACT PASS** | `DeadlineClaim` сохраняет `due_date`, `due_time` и fixed-offset timezone без молчаливого усечения; добавлена последовательная миграция `a09` | Чистый upgrade до `a09`, timed-claim regressions и downgrade guard |
+| `S02` | **CODE/CONTRACT PASS** | PostgreSQL acceptance доказывает независимые origins для одинаковых provider message/thread IDs в двух mailbox | Исполнение mailbox PostgreSQL test в новом runtime run |
+| `S07` | **CODE/CONTRACT PASS** | Process harness убивает процесс после commit pending intent и до enqueue, затем проверяет recovery одного intent/Task/receipt | Реальный spawn/kill/recovery на Linux runner |
+| `S08` | **CODE/CONTRACT PASS** | Process harness проверяет pre-commit rollback и kill после business commit до queue completion с receipt replay без второго эффекта | Реальный spawn/kill/lease reclaim на Linux runner |
 
-`S07` и `S08` могут закрыться тестами без изменения продуктовой логики, если
-существующая реализация выдержит fault injection. `C01` является именно пробелом
-сквозной композиции/доказательства, а не только отсутствующим отчётом.
+Эти пункты больше не входят в remaining gaps. Пока CI не запущен, их статус не
+следует повышать до runtime PASS.
 
-## Требует решения владельца, но не является безусловным MVP5 blocker
+## Единственные оставшиеся функциональные ограничения
 
-| ID | Классификация | Решение владельца |
-|---|---|---|
-| `C07` | точность срока | Выбрать: добавить timestamp/timezone в общий DeadlineClaim либо явно ограничить MVP5 календарной датой. До решения нельзя молча отбрасывать `18:30 UTC+03:00` |
-| `P04` | будущий финансовый контур | Подтвердить отдельный scope пользовательского события оплаты и интеграции с ДДС. §31.8/31.9 не требует финансового execution; письмо со счётом само по себе не доказывает оплату |
-| `S02` | multi-mailbox rollout | Для single-mailbox пилота не блокирует §31.8/31.9. Для нескольких mailbox/account владелец должен либо ограничить pilot cohort одним mailbox, либо потребовать полный legacy identity cutover до пилота |
-| каноническая версия | release metadata | Имя файла содержит `v5_4`, титул DOCX — `5.1`. Перед внешней передачей выбрать одно обозначение |
+### `P04` — решение владельца и будущий финансовый scope
 
-Если владелец включает timestamp, finance execution или multi-mailbox в
-утверждённый MVP5 scope, соответствующий пункт становится обязательным blocker
-и должен получить отдельные критерии приёмки.
+§31.8/31.9 не требует финансового execution для MVP5. Письмо со счётом не
+подтверждает оплату; подтверждение оплаты является отдельным пользовательским
+событием. Для интеграции с ДДС владелец должен утвердить DTO, роли, evidence,
+связь с этапом, правила исправления и отдельные financial acceptance tests.
+`P04` не блокирует узкий MVP5, пока финансовый execution явно остаётся вне его
+scope.
 
-## Live-provider gate
+### `S10` — live-provider gate
 
-| ID / контур | Статус | Что ещё требуется |
-|---|---|---|
-| `S10` UNKNOWN/reconciliation | **SYNTHETIC PASS / LIVE NOT RUN** | Изолированная provider sandbox, timeout-after-effect, lookup/reconciliation и доказательство одного внешнего эффекта без blind retry |
-| Gmail/Google provider action | **LIVE NOT RUN** | Тестовая учётная запись, exact mailbox/credential generation, CONFIRM конкретной версии, receipt и audit |
-| `S02` multi-mailbox | **LIVE NOT RUN** | Два тестовых mailbox с одинаковым provider message id и независимыми origins, если multi-mailbox включён в pilot cohort |
-| Provider outage/stale source | **SYNTHETIC PASS / LIVE NOT RUN** | Управляемая недоступность/устаревание provider source и fail-closed UI/API |
-
-Live-provider acceptance не входит в процент contract coverage. Она обязательна
-перед заявлением о готовности реальной интеграции и перед production enable.
+Synthetic provider уже проверяет UNKNOWN, lookup/reconciliation и запрет blind
+retry. Не выполнен сетевой сценарий на изолированной тестовой учётной записи:
+timeout-after-effect, повторное наблюдение provider state и доказательство
+ровно одного внешнего эффекта. `S10` не является пробелом внутренних контрактов,
+но блокирует заявление о live-provider readiness.
 
 ## Требования 1.0+ и будущих версий
 
-Эти пункты не являются остатком MVP5 и не должны снижать его процент:
+Следующие пункты исходный §31.8 относит к `1.0+` или более позднему scope; они не
+являются remaining MVP5:
 
 - расширенная Company Memory;
 - дополнительные специализированные AI Agents;
@@ -100,59 +84,59 @@ Live-provider acceptance не входит в процент contract coverage. 
 - автономное выполнение high-risk, финансовых, юридических, платёжных и
   destructive actions.
 
+## Решения владельца вне code gate
+
+- утвердить, что `P04` остаётся вне MVP5 либо открыть отдельный финансовый
+  backlog;
+- выбрать одно каноническое обозначение версии: имя DOCX содержит `v5_4`, титул
+  документа — `5.1`;
+- определить pilot/live-provider cohort и тестовые учётные записи;
+- заполнить правообладателя и год в корневом `LICENSE`;
+- утвердить модель лицензирования/сделки и точный состав передачи;
+- подтвердить происхождение собственных PWA icons и цепочку прав;
+- отдельно разрешить merge, production enable и deploy.
+
 ## Коммерческий и юридический gate
 
-Runtime PASS не закрывает коммерческую выдачу. По текущему SBOM/legal-аудиту
-реально остаются:
+Runtime и MVP5 code PASS не закрывают коммерческую выдачу. Остаются:
 
-### Требуется решение владельца
-
-- правообладатель и год в корневом `LICENSE`;
-- модель лицензирования/сделки и точный состав передачи;
-- каноническое обозначение версии релиза;
-- подтверждение происхождения пяти PU PWA icons и цепочки прав на собственный
-  код/материалы;
-- отдельное разрешение на merge, production enable и deploy.
-
-### Требуется документ или работа release manager
+### Release manager
 
 - воспроизводимый Python transitive lock с hashes;
 - digest-pinned container inventory и layer/apt SBOM;
 - package-specific LICENSE/COPYING/NOTICE bundle;
-- release archive/manifest/checksum, сформированные только после фиксации
-  финального release SHA.
+- release archive/manifest/checksum после фиксации финального release SHA.
 
-### Требуется профильный юрист
+### Профильный юрист
 
 - цепочка исключительных прав и разрешённые способы использования;
-- `licenseConcluded` для компонентов, обязанности по `psycopg`/LGPL и
-  контейнерным слоям;
-- финальный `LICENSE`/`NOTICE` и модель договора;
+- `licenseConcluded`, обязанности по `psycopg`/LGPL и контейнерным слоям;
+- финальный `LICENSE`/`NOTICE` и договорная модель;
 - режим ПДн, AI providers/subprocessors, retention и data residency для
-  использования реальных данных;
+  реальных данных;
 - пакет Реестра российского ПО, если владелец решает подавать заявление.
 
 ## Итоговый gate
 
-| Gate | Статус после run `33865331595` | Комментарий |
+| Gate | Статус для `f0c0e26` | Условие следующего перехода |
 |---|---|---|
-| 13 критериев MVP5 — contract/code coverage | **PASS, 13/13** | Все критерии имеют интегрированные контракты и тесты |
-| Alembic `a54f001c0a08` | **PASS** | Единственная head подтверждена runtime |
-| Wave 3 PostgreSQL runtime | **PASS** | 1123/15 backend, 293/0 PostgreSQL, reclaim и cleanup PASS |
-| Durable queue / Docker smoke / общий CI | **PASS** | Runs `33865331624`, `33865331681`, `33865331644` |
-| Полный product E2E сценарий A | **BLOCKED (`C01`)** | Реальная extraction-to-claim композиция не доказана |
-| Точные crash boundaries | **BLOCKED (`S07`, `S08`)** | Общий reclaim не заменяет два конкретных fault-сценария |
-| Live provider | **NOT RUN** | `S10` и live mailbox/provider acceptance остаются отдельными |
-| Production enable | **BLOCKED** | Нужны закрытые MVP5 blockers, live-provider gate и решение владельца |
-| Коммерческая выдача | **BLOCKED** | Нужны owner/legal/release artifacts, перечисленные выше |
+| 13 критериев MVP5 — code/contract | **PASS, 13/13** | Не ослаблять fail-closed и approval/authority contracts |
+| `C01`, `C07`, `S02`, `S07`, `S08` | **CODE/CONTRACT PASS** | Новый PostgreSQL/runtime CI на точном кандидате |
+| Alembic graph | **CODE PASS** | Одна head `a54f001c0a09`; подтвердить чистым runtime upgrade |
+| Базовый `f869319` runtime | **PASS** | Историческое доказательство базы, не нового delta |
+| Новый `f0c0e26` runtime | **CONDITIONAL** | Runtime, durable queue, общий CI и Docker smoke должны быть зелёными на новом SHA |
+| `P04` finance | **OUT OF MVP5 / OWNER DECISION** | Отдельное решение и backlog, если функция нужна |
+| `S10` live provider | **SYNTHETIC PASS / LIVE NOT RUN** | Изолированный live-provider acceptance |
+| Production enable | **BLOCKED** | Новый runtime PASS, live-provider gate и отдельное решение владельца |
+| Коммерческая выдача | **BLOCKED** | Закрыть owner/legal/release artifacts |
 
 ## Следующий безопасный порядок
 
-1. Закрыть `C01` реальной product-композицией на синтетическом содержимом.
-2. Выполнить точные process-fault сценарии `S07` и `S08` на PostgreSQL.
-3. Если pilot cohort включает несколько ящиков, закрыть `S02`; иначе письменно
-   зафиксировать single-mailbox ограничение.
-4. Провести live-provider sandbox acceptance для `S10` и Gmail/provider action.
-5. Параллельно собрать release/legal документы; не смешивать их с технической
-   MVP5-приёмкой.
-6. Не выполнять merge или production deploy без отдельного решения владельца.
+1. Запустить `v54-pilot-runtime.yml`, `durable-queue.yml`, общий CI и Docker
+   smoke на точном новом кандидате.
+2. Принять runtime только если safe protocol показывает head `a54f001c0a09`,
+   `result=PASS`, `cleanup=PASS`, выполненные `C01/C07/S02/S07/S08` и remaining
+   gaps только `P04/S10`.
+3. Провести отдельный live-provider sandbox acceptance для `S10`.
+4. Параллельно закрыть owner/legal/release документы.
+5. Не выполнять merge или production deploy без отдельного решения владельца.
