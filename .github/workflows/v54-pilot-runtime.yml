@@ -2,7 +2,9 @@ name: v5.4 synthetic pilot PostgreSQL runtime
 
 on:
   push:
-    branches: ['codex/v54-final-integration']
+    branches:
+      - 'codex/v54-final-integration'
+      - 'codex/v54-wave2-integration'
   workflow_dispatch:
 
 permissions:
