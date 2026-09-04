@@ -152,14 +152,26 @@ body {
 .project-switcher > span { color: #8a958f; }
 .project-switcher > svg { color: var(--pu-v4-green); }
 .content input, .content textarea, .content select,
+.module-overlay input, .module-overlay textarea, .module-overlay select,
+.documents-overlay input, .documents-overlay textarea, .documents-overlay select,
+.projects-overlay input, .projects-overlay textarea, .projects-overlay select,
+.secretary-overlay input, .secretary-overlay textarea, .secretary-overlay select,
 .project-switcher select {
   color: var(--pu-v4-text) !important;
   border-color: #d4ddd8 !important;
   background: #fff !important;
   box-shadow: 0 1px 2px rgba(14, 38, 25, .025) !important;
 }
-.content input::placeholder, .content textarea::placeholder { color: #9aa59f !important; }
+.content input::placeholder, .content textarea::placeholder,
+.module-overlay input::placeholder, .module-overlay textarea::placeholder,
+.documents-overlay input::placeholder, .documents-overlay textarea::placeholder,
+.projects-overlay input::placeholder, .projects-overlay textarea::placeholder,
+.secretary-overlay input::placeholder, .secretary-overlay textarea::placeholder { color: #9aa59f !important; }
 .content input:focus, .content textarea:focus, .content select:focus,
+.module-overlay input:focus, .module-overlay textarea:focus, .module-overlay select:focus,
+.documents-overlay input:focus, .documents-overlay textarea:focus, .documents-overlay select:focus,
+.projects-overlay input:focus, .projects-overlay textarea:focus, .projects-overlay select:focus,
+.secretary-overlay input:focus, .secretary-overlay textarea:focus, .secretary-overlay select:focus,
 .project-switcher select:focus {
   border-color: #63bb95 !important;
   box-shadow: 0 0 0 3px rgba(22, 166, 111, .1) !important;
