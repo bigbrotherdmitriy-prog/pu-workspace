@@ -13,9 +13,14 @@ from app.models.organization_contract import Contract, Organization
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.governance import Decision, Risk
-from app.models.management import Obligation
+from app.models.management import Meeting, Obligation
 from app.models.task import Task
-from app.models.execution_finance import CashFlowEntry, ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import (
+    AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem,
+)
+from app.models.ai_secretary import Message
+from app.models.automation_rule import AutomationRule
+from app.models.project_contact import ProjectContact
 from app.core.integration_types import StorageObject
 from app.core.contract_roles import allowed_parent_kinds, cash_flow_direction, is_financial_contract
 from app.governance_engine import create_governance_items
@@ -87,7 +92,7 @@ class ContractCreate(BaseModel):
     retention_percent: Decimal | None = Field(default=None, ge=0, le=100)
     warranty_until: date | None = None
     signed_at: date | None = None
-    status: str = Field(default="active", pattern="^(draft|active|completed|terminated)$")
+    status: str = Field(default="active", pattern="^(draft|active|completed|terminated|archived)$")
     source_document_id: int | None = None
     notes: str | None = Field(default=None, max_length=5000)
 
@@ -100,7 +105,7 @@ class ContractLinkUpdate(BaseModel):
     advance_amount: Decimal | None = Field(default=None, ge=0)
     retention_percent: Decimal | None = Field(default=None, ge=0, le=100)
     signed_at: date | None = None
-    status: str | None = Field(default=None, pattern="^(draft|active|completed|terminated)$")
+    status: str | None = Field(default=None, pattern="^(draft|active|completed|terminated|archived)$")
     notes: str | None = Field(default=None, max_length=5000)
     source_document_id: int | None = None
     parent_contract_id: int | None = None
@@ -344,6 +349,50 @@ class ContractDelete(BaseModel):
     confirmation: str
 
 
+def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> dict[str, int]:
+    """Return links that would be destroyed or detached by a physical delete."""
+    scoped = (
+        ("child_contracts", Contract, Contract.parent_contract_id),
+        ("documents", ContractDocumentLink, ContractDocumentLink.contract_id),
+        ("schedule_baselines", ScheduleBaseline, ScheduleBaseline.contract_id),
+        ("budget_lines", BudgetLine, BudgetLine.contract_id),
+        ("cash_flow_entries", CashFlowEntry, CashFlowEntry.contract_id),
+        ("procurement_items", ProcurementItem, ProcurementItem.contract_id),
+        ("acceptance_acts", AcceptanceAct, AcceptanceAct.contract_id),
+        ("obligations", Obligation, Obligation.contract_id),
+        ("meetings", Meeting, Meeting.contract_id),
+        ("messages", Message, Message.contract_id),
+        ("contacts", ProjectContact, ProjectContact.contract_id),
+        ("automation_rules", AutomationRule, AutomationRule.contract_id),
+    )
+    result: dict[str, int] = {}
+    for name, model, contract_column in scoped:
+        project_column = getattr(model, "project_id", None)
+        filters = [contract_column == contract_id]
+        if project_column is not None:
+            filters.append(project_column == project_id)
+        count = int(db.scalar(select(func.count()).select_from(model).where(*filters)) or 0)
+        if count:
+            result[name] = count
+    return result
+
+
+@router.get("/projects/{project_id}/contracts/{contract_id}/deletion-preview")
+def contract_deletion_preview(project_id: int, contract_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "owner")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    dependencies = _contract_dependencies(db, project_id, contract_id)
+    return {
+        "contract_id": contract_id,
+        "can_delete": not dependencies,
+        "dependencies": dependencies,
+        "recommended_action": "delete" if not dependencies else "archive",
+        "source_documents_affected": False,
+    }
+
+
 @router.delete("/projects/{project_id}/contracts/{contract_id}")
 def delete_contract(project_id: int, contract_id: int, payload: ContractDelete,
                     db: Session = Depends(get_db), user: User = Depends(require_user)):
@@ -353,11 +402,13 @@ def delete_contract(project_id: int, contract_id: int, payload: ContractDelete,
         raise HTTPException(404, "Contract not found")
     if payload.confirmation.strip() != row.number.strip():
         raise HTTPException(422, "Введите точный номер договора для подтверждения")
-    child = db.scalar(select(Contract.id).where(
-        Contract.project_id == project_id, Contract.parent_contract_id == row.id,
-    ).limit(1))
-    if child is not None:
-        raise HTTPException(409, "У договора есть дочерние договоры. Сначала измените их место в дереве")
+    dependencies = _contract_dependencies(db, project_id, contract_id)
+    if dependencies:
+        raise HTTPException(409, {
+            "code": "contract_has_dependencies",
+            "message": "Договор связан с другими сущностями. Архивируйте его либо сначала снимите связи.",
+            "dependencies": dependencies,
+        })
     number = row.number
     db.delete(row)
     db.flush()

@@ -61,3 +61,5 @@ def test_mvp1_apply_is_idempotent_and_rollback_restores_original():
     assert rollback["errors"] == 0
     assert drive.files["file"].name == "old.pdf"
     assert drive.files["file"].parent_id == "copy"
+    repeated = executor.rollback(1)
+    assert repeated == {"rolled_back": 0, "skipped": 2, "errors": 0, "already_rolled_back": 1}

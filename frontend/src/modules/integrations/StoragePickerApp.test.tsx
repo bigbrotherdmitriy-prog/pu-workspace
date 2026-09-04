@@ -56,7 +56,7 @@ it("shows a non-looping active-job conflict when preparing source analysis", asy
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Подготовить стандарт рабочей папки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Анализировать без копии" }));
   await screen.findByText(/Задание уже находится в очереди/);
   expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/analyze"))).toHaveLength(1);
 });
@@ -81,7 +81,7 @@ it("does not interpret already_queued analysis as completed", async () => {
   });
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Подготовить стандарт рабочей папки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Анализировать без копии" }));
   await screen.findByText(/Готовится таблица «Было → Станет»/);
   expect(screen.queryByText(/обработка завершена/)).not.toBeInTheDocument();
   expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/analyze"))).toHaveLength(1);
@@ -139,4 +139,19 @@ it("does not invent progress for a building snapshot with no worker measurements
   await screen.findByLabelText("Обработка: процент не предоставлен сервером");
   expect(screen.queryByText("5%")).not.toBeInTheDocument();
   expect(screen.queryByText("10%")).not.toBeInTheDocument();
+});
+
+it("shows measured durable-job progress for the metadata snapshot", async () => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.includes("/source-folders/discover")) return { project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "root", breadcrumbs: [{ id: "root", name: "Мой диск" }],
+      folders: [{ id: "opaque-C", name: "Папка", registered: true, is_primary: true, analyzed: false,
+        snapshot_status: "building", snapshot_id: 31, job_id: 42, job_status: "running", job_progress: 63 }] };
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
+  expect(await screen.findByLabelText("Прогресс анализа 63%")).toBeInTheDocument();
+  expect(screen.getByText("63%")).toBeInTheDocument();
 });

@@ -238,6 +238,9 @@ type DriveFolder = {
   snapshot_id?: number;
   snapshot_status?: string;
   item_count?: number;
+  job_id?: number;
+  job_status?: string;
+  job_progress?: number;
 };
 type InboxTask = {
   id: number;
@@ -993,6 +996,19 @@ export function App() {
     } catch (e) { setError((e as Error).message); }
   }
   async function deleteContract(item: ContractRow) {
+    try {
+      const preview = await api(`/projects/${projectId}/contracts/${item.id}/deletion-preview`);
+      if (preview?.can_delete === false) {
+        const count = Object.values(preview.dependencies || {}).reduce((sum: number, value) => sum + Number(value || 0), 0);
+        if (window.confirm(`У договора ${count} связанных объектов. Физическое удаление заблокировано. Архивировать договор с сохранением всех связей?`)) {
+          await archiveContract(item);
+        }
+        return;
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      return;
+    }
     const confirmation = window.prompt(
       `Удалить договор «${item.number}»? Исходные документы не удаляются. Введите точный номер договора:`,
     );
@@ -1003,6 +1019,16 @@ export function App() {
         method: "DELETE", body: JSON.stringify({ confirmation }),
       });
       setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function archiveContract(item: ContractRow) {
+    try {
+      setError("");
+      await api(`/projects/${projectId}/contracts/${item.id}`, {
+        method: "PATCH", body: JSON.stringify({ status: "archived" }),
+      });
+      setNotice(`Договор «${item.number}» архивирован. Все документы, ГПР, ДДС и другие связи сохранены.`);
       await load();
     } catch (e) { setError((e as Error).message); }
   }
@@ -2399,9 +2425,10 @@ export function App() {
                     <div className="source-list">
                       {folders.map((folder) => {
                         const session = processingQueue?.sessions.find((item) => item.id === folder.analysis_result?.organizer_session_id);
-                        const isQueued = session?.status === "queued";
+                        const isQueued = session?.status === "queued" || folder.job_status === "queued" || folder.job_status === "retrying";
                         const queuePosition = session?.queue_position;
-                        const activeProgress = session?.progress == null ? null : Math.max(0, Math.min(100, session.progress));
+                        const measuredProgress = session?.progress ?? folder.job_progress;
+                        const activeProgress = measuredProgress == null ? null : Math.max(0, Math.min(100, measuredProgress));
                         const totalItems = session?.copy_item_count || session?.source_item_count || folder.item_count || 0;
                         const processedItems = session?.processed_item_count ?? null;
                         const remainingItems = processedItems === null || !totalItems ? null : Math.max(0, totalItems - processedItems);
@@ -2438,7 +2465,7 @@ export function App() {
                             {isProcessing && <div className="source-progress" aria-label={activeProgress === null ? "Обработка: процент не предоставлен сервером" : `Прогресс анализа ${activeProgress}%`}>
                               <div className="source-progress-head"><strong>{isQueued ? "В очереди" : activeProgress === null ? "Обработка…" : `${activeProgress}%`}</strong><span>{isQueued && queuePosition ? `позиция ${queuePosition} · ` : ""}{processedItems === null ? "Количество обработанных объектов пока неизвестно" : `${processedItems.toLocaleString("ru-RU")} обработано`}{remainingItems !== null && ` · ${remainingItems.toLocaleString("ru-RU")} осталось`}</span></div>
                               {activeProgress !== null && <div className="source-progress-track"><i style={{ width: `${activeProgress}%` }} /></div>}
-                              <small>{isQueued ? "Ожидает свободного обработчика" : session?.status || "Создаётся снимок папки"}</small>
+                              <small>{isQueued ? "Ожидает свободного обработчика" : session?.status || folder.job_status || "Создаётся снимок папки"}</small>
                             </div>}
                           </div>
                           <div className="source-row-actions">
@@ -2467,20 +2494,23 @@ export function App() {
                                     busyFolder === folder.id ||
                                     folder.analysis_status === "analyzing"
                                   }
-                                  onClick={() => folder.analysis_result?.mode === "safe_copy"
-                                    ? prepareSourceChanges(folder)
-                                    : analyzeFolder(folder)}
+                                  onClick={() => prepareSourceChanges(folder)}
                                 >
                                   {busyFolder === folder.id ||
                                   folder.analysis_status === "analyzing"
                                     ? "Анализ…"
-                                    : folder.analysis_result?.mode === "safe_copy"
-                                      ? "Подготовить стандарт рабочей папки"
                                     : folder.analyzed
-                                      ? "Проанализирована"
-                                      : folder.analysis_status === "failed"
-                                        ? "Повторить стандартизацию"
-                                        : "Создать копию и стандартизировать"}
+                                      ? "Анализ без копии готов"
+                                    : folder.analysis_status === "failed"
+                                        ? "Повторить анализ без копии"
+                                        : "Анализировать без копии"}
+                                </button>
+                                <button
+                                  className="secondary"
+                                  disabled={busyFolder === folder.id || folder.analysis_status === "analyzing"}
+                                  onClick={() => analyzeFolder(folder)}
+                                >
+                                  Создать копию и стандартизировать
                                 </button>
                               </>
                             ) : (
@@ -2496,7 +2526,7 @@ export function App() {
                                     ? "Показать результат привязки"
                                     : folder.registered
                                       ? "Обновить копию и анализ"
-                                      : "Подключить и стандартизировать"}
+                                      : "Подключить папку"}
                               </button>
                             )}
                           </div>
@@ -2671,6 +2701,7 @@ export function App() {
                   if (document) { void openDocument(document); setActive("Документы"); }
                 }}
                 onDelete={(contract) => void deleteContract(contract as ContractRow)}
+                onArchive={(contract) => void archiveContract(contract as ContractRow)}
                 onDropDocuments={(documentIds, parentId) => void prepareDroppedContracts(documentIds, parentId)}
                 onDropFiles={(files, parentId) => void uploadDroppedContracts(files, parentId)}
                 onDropApplications={(files, contractId) => void uploadContractApplications(files, contractId)}
@@ -2753,7 +2784,7 @@ export function App() {
                           <label>Дата подписания<input type="date" value={draft.signedAt} onChange={(event) => change("signedAt", event.target.value)} /></label>
                           <select value={draft.status} onChange={(event) => change("status", event.target.value)}>
                             <option value="draft">Черновик</option><option value="active">Действует</option>
-                            <option value="completed">Завершён</option><option value="terminated">Расторгнут</option>
+                            <option value="completed">Завершён</option><option value="terminated">Расторгнут</option><option value="archived">В архиве</option>
                           </select>
                           <div className="contract-edit-actions">
                             <button className="secondary" onClick={() => setContractEditDrafts((current) => { const next = { ...current }; delete next[item.id]; return next; })}>Отмена</button>
@@ -2762,6 +2793,7 @@ export function App() {
                         </div>;
                       })() : <div className="contract-record-actions">
                         <button className="secondary" onClick={() => beginContractEdit(item)}>Редактировать</button>
+                        {item.status !== "archived" && <button className="secondary" onClick={() => void archiveContract(item)}>Архивировать</button>}
                         <button className="danger" onClick={() => void deleteContract(item)}><Trash2 /> Удалить договор</button>
                       </div>}
                     </div>

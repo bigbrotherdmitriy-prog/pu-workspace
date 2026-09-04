@@ -161,13 +161,21 @@ def test_provider_locator_is_not_interchangeable(bound):
 
 
 def test_browse_restores_selected_folder_and_project(bound):
-    choose(bound)
+    queued = choose(bound).json()
     response = bound.client.get(f'/projects/{bound.new}/source-folders/discover')
     assert response.status_code == 200
     data = response.json()
     assert data['folder_id'] == bound.adapter.ids[-1]
     assert data['project_id'] == bound.new
     assert [row['id'] for row in data['breadcrumbs']][-3:] == bound.adapter.ids
+    parent_view = bound.client.get(
+        f'/projects/{bound.new}/source-folders/discover',
+        params={'folder_id': bound.adapter.ids[-2]},
+    ).json()
+    selected = next(row for row in parent_view['folders'] if row['id'] == bound.adapter.ids[-1])
+    assert selected['job_id'] == queued['job_id']
+    assert selected['job_status'] == 'queued'
+    assert selected['job_progress'] == 0
 
 
 def test_yandex_app_namespace_parent_is_preserved():
@@ -197,19 +205,18 @@ def test_reconfirm_registered_folder_restores_selected_root(bound):
         assert db.get(DriveConnection, bound.connection).root_folder_id == bound.adapter.ids[-1]
 
 
-def test_repeated_ready_job_recovers_missing_analysis_enqueue(bound, monkeypatch):
+def test_ready_snapshot_waits_for_explicit_safe_copy_request(bound):
     result = choose(bound).json()
-    original = workspace._start_safe_copy_pipeline
-    def crash(*args):
-        raise RuntimeError('synthetic interruption before analysis enqueue')
-    monkeypatch.setattr(workspace, '_start_safe_copy_pipeline', crash)
-    with pytest.raises(RuntimeError):
-        workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
-    monkeypatch.setattr(workspace, '_start_safe_copy_pipeline', original)
     workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
     with bound.db() as db:
-        assert db.scalar(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.safe_copy')) is not None
+        db.get(BackgroundJob, result['job_id']).status = 'completed'
+        db.commit()
+        assert db.scalar(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.safe_copy')) is None
         assert len(list(db.scalars(select(VirtualNode)))) == 1
+    explicit = bound.client.post(f'/projects/{bound.new}/snapshots/{result["id"]}/standardize')
+    assert explicit.status_code == 200
+    with bound.db() as db:
+        assert db.scalar(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.safe_copy')) is not None
 
 
 def test_safe_copy_enqueue_failure_does_not_commit_orphan_session(bound, monkeypatch):
@@ -304,7 +311,7 @@ def test_safe_error_and_explicit_retry_keep_target(bound):
         assert retry_job.payload['external_id'] == bound.adapter.ids[-1]
 
 
-def test_real_job_dispatch_and_fake_analysis_keep_new_project(bound, monkeypatch):
+def test_real_job_dispatch_and_explicit_safe_copy_keep_new_project(bound, monkeypatch):
     import app.organizer as organizer
     result = choose(bound).json()
     with bound.db() as db:
@@ -316,6 +323,10 @@ def test_real_job_dispatch_and_fake_analysis_keep_new_project(bound, monkeypatch
     with bound.db() as db:
         assert queue.succeed(db, result['job_id'], 'synthetic-worker', dispatched)
         assert db.get(BackgroundJob, result['job_id']).progress == 100
+        assert db.scalar(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.safe_copy')) is None
+    start = bound.client.post(f'/projects/{bound.new}/snapshots/{result["id"]}/standardize')
+    assert start.status_code == 200
+    with bound.db() as db:
         followup = db.scalar(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.safe_copy'))
         assert followup.payload['project_id'] == bound.new
         next_payload = dict(followup.payload)

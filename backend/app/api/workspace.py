@@ -264,8 +264,6 @@ def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_i
 
 def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_errors: bool = False) -> None:
     db = SessionLocal()
-    start_pipeline = False
-    source_name = ""
     target_valid = False
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
@@ -274,11 +272,9 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
             raise HTTPException(409, "Snapshot does not belong to the requested project")
         target_valid = True
         source = _validate_snapshot_target(db, snapshot, project_id, external_id)
-        source_name = source.name
         if snapshot.status != "ready":
             drive = storage_for_project(project_id, db)
             source_meta = drive.get_object(external_id)
-            source_name = source_meta.name
             items = drive.walk_tree(external_id)
             db.add(VirtualNode(
                 snapshot_id=snapshot.id, external_id=source_meta.id,
@@ -296,7 +292,6 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
             snapshot.status = "ready"
             snapshot.completed_at = datetime.now(timezone.utc)
             db.commit()
-        start_pipeline = True
     except Exception as exc:
         db.rollback()
         failed = db.get(WorkspaceSnapshot, snapshot_id)
@@ -308,8 +303,6 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
             raise
     finally:
         db.close()
-    if start_pipeline:
-        _start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)
 
 
 def recover_incomplete_snapshots() -> int:
@@ -521,10 +514,20 @@ def discover_source_folders(
         )
         if value and value.removeprefix("virtual:").isdigit()
     }
+    snapshot_jobs: dict[int, BackgroundJob] = {}
+    jobs = db.scalars(select(BackgroundJob).where(
+        BackgroundJob.kind.in_(("workspace.snapshot", "workspace.analysis", "workspace.safe_copy")),
+        BackgroundJob.payload["project_id"].as_integer() == project_id,
+    ).order_by(BackgroundJob.id.desc()).limit(1500)).all()
+    for job in jobs:
+        snapshot_id = (job.payload or {}).get("snapshot_id")
+        if isinstance(snapshot_id, int):
+            snapshot_jobs.setdefault(snapshot_id, job)
     folders = []
     for item in provider_folders:
         source = source_by_external.get(item.id)
         snapshot = latest_by_source.get(source.id) if source else None
+        job = snapshot_jobs.get(snapshot.id) if snapshot else None
         folders.append({"id": item.id, "name": item.name, "modifiedTime": item.modified_time, "provider": adapter.provider, "registered": source is not None,
             "is_primary": bool(source.is_primary) if source else False,
             "snapshot_id": snapshot.id if snapshot else None,
@@ -533,7 +536,10 @@ def discover_source_folders(
             "analyzed": snapshot.id in analyzed_snapshot_ids if snapshot else False,
             "analysis_status": snapshot.analysis_status if snapshot else None,
             "analysis_result": snapshot.analysis_result if snapshot else None,
-            "analysis_error": snapshot.analysis_error if snapshot else None})
+            "analysis_error": snapshot.analysis_error if snapshot else None,
+            "job_id": job.id if job else None,
+            "job_status": job.status if job else None,
+            "job_progress": job.progress if job else None})
     return {
         "project_id": project_id,
         "connection_id": connection.connection_id,
@@ -730,6 +736,15 @@ def processing_queue(project_id: int, db: Session = Depends(get_db), user: User 
     """Observable project queue with explicit failed and dead-letter work."""
     require_project_role(db, user, project_id, "viewer")
     snapshots = list(db.scalars(select(WorkspaceSnapshot).where(WorkspaceSnapshot.project_id == project_id).order_by(WorkspaceSnapshot.id.desc()).limit(500)))
+    jobs = list(db.scalars(select(BackgroundJob).where(
+        BackgroundJob.kind.in_(("workspace.snapshot", "workspace.analysis", "workspace.safe_copy")),
+        BackgroundJob.payload["project_id"].as_integer() == project_id,
+    ).order_by(BackgroundJob.id.desc()).limit(1500)))
+    latest_job_by_snapshot: dict[int, BackgroundJob] = {}
+    for job in jobs:
+        snapshot_id = (job.payload or {}).get("snapshot_id")
+        if isinstance(snapshot_id, int):
+            latest_job_by_snapshot.setdefault(snapshot_id, job)
     sessions = db.execute(text("""
         SELECT s.id,s.status,s.progress,s.error_message,s.retry_count,s.created_at,s.updated_at,
                s.source_item_count,s.copy_item_count,s.processed_item_count,s.copy_folder_id,
@@ -747,7 +762,12 @@ def processing_queue(project_id: int, db: Session = Depends(get_db), user: User 
         },
         "snapshots": [{"id": x.id, "status": x.status, "analysis_status": x.analysis_status,
                        "retry_count": x.retry_count, "analysis_retry_count": x.analysis_retry_count,
-                       "error": x.error_message or x.analysis_error} for x in snapshots],
+                       "error": x.error_message or x.analysis_error,
+                       "job_id": latest_job_by_snapshot[x.id].id if x.id in latest_job_by_snapshot else None,
+                       "job_status": latest_job_by_snapshot[x.id].status if x.id in latest_job_by_snapshot else None,
+                       "job_progress": latest_job_by_snapshot[x.id].progress if x.id in latest_job_by_snapshot else None,
+                       "duration_ms": latest_job_by_snapshot[x.id].duration_ms if x.id in latest_job_by_snapshot else None,
+                       } for x in snapshots],
         "sessions": [dict(x) for x in sessions],
     }
 
