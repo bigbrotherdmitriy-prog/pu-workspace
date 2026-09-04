@@ -2156,6 +2156,22 @@ export function App() {
                 {projects.map((p) => <option value={p.id} key={p.id}>{p.name}</option>)}
               </select>
             </label>
+            <button
+              type="button"
+              className="header-notifications"
+              aria-label={`Уведомления: ${summary?.unread_notifications || 0}`}
+              onClick={() => setActive("Уведомления")}
+            >
+              <Bell />
+              {(summary?.unread_notifications || 0) > 0 && <b>{summary?.unread_notifications}</b>}
+            </button>
+            <div className="header-team" aria-label="Команда проекта">
+              {(members.length ? members.slice(0, 2) : [{ user_id: 0, name: "Администратор" }]).map((member, index) => (
+                <span key={member.user_id || index} title={member.name}>
+                  {member.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "PU"}
+                </span>
+              ))}
+            </div>
             <button className="icon" onClick={() => load()}>
               <RefreshCw />
             </button>
@@ -2222,7 +2238,7 @@ export function App() {
                 </div>
                 <div className="dashboard-hero-copy">
                   <span className="dashboard-kicker">{projects.find((item) => item.id === projectId)?.name || "ТЕКУЩИЙ ПРОЕКТ"}</span>
-                  <h2>Главное по проекту — в одном месте</h2>
+                  <h2>Всё главное по вашему проекту — в едином центре</h2>
                   <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
                   <div className="dashboard-hero-actions">
                     <button onClick={() => setActive("Сегодня")}><Route /> План на сегодня</button>
