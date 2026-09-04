@@ -200,7 +200,8 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
             resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
         )
         task_payloads.append({
-            "id": task.id, "title": task.title, "due_date": task.due_date, "confidence": task.confidence,
+            "id": task.id, "record_version": task.record_version,
+            "title": task.title, "due_date": task.due_date, "confidence": task.confidence,
             "external_action_status": task.external_action_status, "google_task_id": external_task_id,
             "google_calendar_event_id": external_calendar_id,
             "external_resources": [

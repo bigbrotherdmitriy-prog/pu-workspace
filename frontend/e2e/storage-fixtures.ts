@@ -33,8 +33,13 @@ export class StorageApi {
   inboxByProject = new Map<number, Record<string, unknown>[]>();
   evidenceReplies = new Map<string, Reply>();
   aiPolicies = new Map<number, Record<string, unknown>>();
-  attachmentImportReply: Reply = { body: { name: "synthetic.pdf", already_indexed: false, tasks: 1, risks: 0, drafts: 0 } };
-  localUploadReplies: Reply[] = [{ body: { processed: 1, tasks: 1, risks: 0, skipped: [] } }];
+  attachmentImportReply: Reply = { body: {
+    staging_id: "synthetic-gmail-staging", job_id: 72, status: "queued", already_queued: false,
+  } };
+  localUploadReplies: Reply[] = [{ body: {
+    status: "queued", processed: 0, tasks: 0, risks: 0, skipped: [], drafts: 0, documents: [],
+    jobs: [{ job_id: 73, staging_id: "synthetic-local-staging", status: "queued" }],
+  } }];
   roots = new Map<number, string>();
   snapshots: Record<string, unknown>[] = [];
   queue: { summary: { active: number; failed: number; dead_letter: number }; snapshots: unknown[]; sessions: unknown[] } = emptyQueue();
@@ -111,6 +116,25 @@ export class StorageApi {
       this.aiPolicies.set(projectId, saved);
       return this.fulfill(route, { body: saved });
     }
+    if (method === "GET" && /^\/mail\/projects\/\d+\/capabilities$/.test(path)) {
+      return this.fulfill(route, { body: {
+        provider: "Gmail", connected: true, features: {
+          compose: true, reply: true, reply_all: true, forward: true,
+          attachment_send: false, threads: true, explicit_revision_approval: true,
+        },
+      } });
+    }
+    if (method === "GET" && /^\/mail\/projects\/\d+\/folders$/.test(path)) {
+      return this.fulfill(route, { body: { folders: [
+        { id: "inbox", name: "Входящие", count: 0 },
+        { id: "attention", name: "Требуют внимания", count: 0 },
+        { id: "drafts", name: "Черновики", count: 0 },
+        { id: "sent", name: "Отправленные", count: 0 },
+      ] } });
+    }
+    if (method === "GET" && /^\/mail\/projects\/\d+\/threads$/.test(path)) {
+      return this.fulfill(route, { body: { threads: [], next_cursor: null } });
+    }
     if (method === "GET" && /^\/projects\/\d+\/source-folders\/discover$/.test(path)) {
       if (this.discoveryReply) return this.fulfill(route, this.discoveryReply(url));
       const selected = url.searchParams.get("provider");
@@ -139,6 +163,8 @@ export class StorageApi {
       "/tasks": { tasks: [] }, "/governance/risks": { risks: [] }, "/governance/decisions": { decisions: [] },
       "/response-drafts": { drafts: [] }, "/ai-secretary/inbox": { messages: this.inboxByProject.get(projectId) || [] }, "/organizer/proposals": { proposals: [] },
       "/ai-secretary/automations": { rules: [] }, "/project-contacts": { contacts: [] },
+      "/mail/settings": { display_name: "Synthetic Operator", signature_html: "", auto_signature_new: true,
+        auto_signature_reply: true, default_font: "Arial", default_font_size: "14px", default_text_color: "#18211d" },
       "/ai-secretary/daily-briefing": { project_id: projectId, date: "2026-09-03", summary: {
         attention: 0, overdue_tasks: 0, overdue_obligations: 0, open_risks: 0, pending_decisions: 0,
         drafts_waiting_approval: 0, messages_waiting_context: 0,

@@ -2,6 +2,7 @@ import { ClipboardCheck } from "lucide-react";
 
 export type ObligationRow = {
   id: number;
+  record_version?: number;
   contract_id?: number;
   task_id?: number;
   title: string;

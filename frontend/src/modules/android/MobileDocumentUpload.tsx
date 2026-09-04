@@ -77,7 +77,7 @@ export function MobileDocumentUpload({ open, projectId, onClose, onComplete }: P
       setBusy(true);
       setError("");
       const batches = partitionFiles(files);
-      const total = { processed: 0, tasks: 0, risks: 0, skipped: 0 };
+      const total = { processed: 0, tasks: 0, risks: 0, skipped: 0, jobs: 0 };
       for (let index = 0; index < batches.length; index += 1) {
         setProgress(`Пачка ${index + 1} из ${batches.length}`);
         const payload = await Promise.all(batches[index].map(async (file) => ({
@@ -93,10 +93,13 @@ export function MobileDocumentUpload({ open, projectId, onClose, onComplete }: P
         total.tasks += result.tasks;
         total.risks += result.risks;
         total.skipped += result.skipped.length;
+        total.jobs += Array.isArray(result.jobs) ? result.jobs.length : 0;
         uploadedCount += batches[index].length;
       }
       setFiles([]);
-      onComplete(`Обработано: ${total.processed}. Задач: ${total.tasks}. Рисков: ${total.risks}. Пропущено: ${total.skipped}.`);
+      onComplete(total.jobs
+        ? `Поставлено в очередь файлов: ${uploadedCount}. Заданий: ${total.jobs}.`
+        : `Обработано: ${total.processed}. Задач: ${total.tasks}. Рисков: ${total.risks}. Пропущено: ${total.skipped}.`);
       onClose();
     } catch (reason) {
       if (uploadedCount) {

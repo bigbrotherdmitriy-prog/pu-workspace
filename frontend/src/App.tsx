@@ -251,6 +251,7 @@ type DriveFolder = {
 };
 type InboxTask = {
   id: number;
+  record_version?: number;
   title: string;
   due_date?: string;
   confidence: number;
@@ -539,9 +540,9 @@ export function App() {
         ] = await Promise.all([
           api(`/dashboard/project?project_id=${id}`),
           api(`/projects/${id}/snapshots`),
-          api(`/tasks?project_id=${id}`),
-          api(`/governance/risks?project_id=${id}`),
-          api(`/governance/decisions?project_id=${id}`),
+          api(`/tasks?project_id=${id}&limit=200`),
+          api(`/governance/risks?project_id=${id}&limit=200`),
+          api(`/governance/decisions?project_id=${id}&limit=200`),
           api(`/projects/${id}/documents?limit=5000`),
           api(`/response-drafts?project_id=${id}`),
           api(`/ai-secretary/inbox?project_id=${id}`).catch(() => ({
@@ -568,7 +569,7 @@ export function App() {
           api(`/analytics/project?project_id=${id}`).catch(() => null),
           api(`/integrations/project?project_id=${id}`).catch(() => ({ adapters: [] })),
           api(`/ai-secretary/automations?project_id=${id}`).catch(() => ({ rules: [] })),
-          api(`/project-contacts?project_id=${id}`).catch(() => ({ contacts: [] })),
+          api(`/project-contacts?project_id=${id}&limit=200`).catch(() => ({ contacts: [] })),
           api(`/ai-secretary/daily-briefing?project_id=${id}`).catch(() => null),
         ]);
         if (
@@ -1218,6 +1219,7 @@ export function App() {
       await api(`/tasks/${task.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          expected_record_version: task.record_version ?? 1,
           status,
           result_note,
           ...(status === "completed" ? { completion_document_id: completionDocumentId || null } : {}),
@@ -1246,7 +1248,11 @@ export function App() {
       if (status !== "confirmed" && !action_note) return;
       await api(`/governance/risks/${risk.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status, action_note }),
+        body: JSON.stringify({
+          status,
+          action_note,
+          expected_record_version: risk.record_version ?? 1,
+        }),
       });
       setNotice("Статус риска обновлён");
       await load();
@@ -1266,6 +1272,7 @@ export function App() {
       await api(`/governance/decisions/${item.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          expected_record_version: item.record_version ?? 1,
           status,
           decision_text: status === "dismissed" ? undefined : note,
           reason: status === "dismissed" ? note : undefined,
@@ -1455,9 +1462,11 @@ export function App() {
     if (!window.confirm(`Импортировать «${attachment.name}» в документы проекта и выполнить анализ?`)) return;
     try {
       const result = await api(`/ai-secretary/inbox/${message.id}/attachments/${index}/import`, { method: "POST" });
-      setNotice(result.already_indexed
-        ? `Вложение «${result.name}» уже находится в документах проекта.`
-        : `Вложение «${result.name}» добавлено: задач ${result.tasks}, рисков ${result.risks}, черновиков ${result.drafts}.`);
+      setNotice(result.job_id
+        ? `Вложение «${attachment.name}» поставлено в очередь: задание №${result.job_id}.`
+        : result.already_indexed
+          ? `Вложение «${result.name || attachment.name}» уже находится в документах проекта.`
+          : `Вложение «${result.name || attachment.name}» добавлено: задач ${result.tasks}, рисков ${result.risks}, черновиков ${result.drafts}.`);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -1474,6 +1483,7 @@ export function App() {
       const result = await api(`/tasks/${task.id}/approve-external`, {
         method: "POST",
         body: JSON.stringify({
+          expected_record_version: task.record_version ?? 1,
           publish_task: true,
           publish_calendar: Boolean(task.due_date),
         }),
@@ -1491,12 +1501,16 @@ export function App() {
   async function assignTask(task: TaskRow, assigneeUserId: number) {
     try {
       const assignee = members.find((member) => member.user_id === assigneeUserId);
-      await api(`/tasks/${task.id}`, {
+      const result = await api(`/tasks/${task.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ assignee_user_id: assigneeUserId }),
+        body: JSON.stringify({
+          assignee_user_id: assigneeUserId,
+          expected_record_version: task.record_version ?? 1,
+        }),
       });
       setTasks((rows) => rows.map((row) => row.id === task.id
-        ? { ...row, assignee_user_id: assigneeUserId, assignee_name: assignee?.name || row.assignee_name }
+        ? { ...row, record_version: result.record_version,
+            assignee_user_id: assigneeUserId, assignee_name: assignee?.name || row.assignee_name }
         : row));
       setNotice(`Исполнитель задачи: ${assignee?.name || "участник проекта"}`);
     } catch (e) {
@@ -1889,9 +1903,9 @@ export function App() {
     if (!projectId) return;
     try {
       const [o, m, n] = await Promise.all([
-        api(`/management/obligations?project_id=${projectId}`),
-        api(`/management/meetings?project_id=${projectId}`),
-        api(`/management/notifications?project_id=${projectId}`),
+        api(`/management/obligations?project_id=${projectId}&limit=200`),
+        api(`/management/meetings?project_id=${projectId}&limit=200`),
+        api(`/management/notifications?project_id=${projectId}&limit=200`),
       ]);
       setObligations(o.obligations);
       setMeetings(m.meetings);
@@ -1917,7 +1931,11 @@ export function App() {
     try {
       await api(`/management/obligations/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status, result_note }),
+        body: JSON.stringify({
+          status,
+          result_note,
+          expected_record_version: item.record_version ?? 1,
+        }),
       });
       setNotice("Статус обязательства обновлён");
       await Promise.all([load(), loadManagement()]);
@@ -1956,7 +1974,11 @@ export function App() {
     try {
       const result = await api(`/management/meetings/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ minutes, status: "completed" }),
+        body: JSON.stringify({
+          minutes,
+          status: "completed",
+          expected_record_version: item.record_version ?? 1,
+        }),
       });
       setNotice(
         `Протокол обработан: задач ${result.tasks}, рисков ${result.risks}, решений ${result.decisions}`,

@@ -31,7 +31,7 @@ def migration_config(output_buffer=None):
 
 def test_provider_revision_is_the_only_head_and_renders_postgresql_offline(monkeypatch):
     assert ScriptDirectory.from_config(migration_config()).get_heads() == [CURRENT_SCHEMA_REVISION]
-    assert CURRENT_SCHEMA_REVISION == "e74a1c5d09b2"
+    assert CURRENT_SCHEMA_REVISION == "d04e8a6c31f2"
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",

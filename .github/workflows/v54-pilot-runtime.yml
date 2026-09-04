@@ -7,6 +7,17 @@ on:
       - 'codex/v54-wave2-integration'
       - 'codex/v54-wave3-integration'
       - 'codex/v54-wave4-integration'
+      - 'codex/mvp1-5-unified'
+  pull_request:
+    paths:
+      - 'backend/app/**'
+      - 'backend/migrations/**'
+      - 'backend/tests/**'
+      - 'scripts/ci/v54_*.py'
+      - 'scripts/ci/test_v54_*.py'
+      - 'scripts/ci/durable_queue/**'
+      - 'docker-compose.queue-ci.yml'
+      - '.github/workflows/v54-pilot-runtime.yml'
   workflow_dispatch:
 
 permissions:

@@ -12,6 +12,7 @@ def test_final_candidate_push_is_branch_scoped_and_read_only():
         "codex/parallel-validation-final",
         "codex/v54-wave3-integration",
         "codex/v54-wave4-integration",
+        "codex/mvp1-5-unified",
     ]
     assert workflow["permissions"] == {"contents": "read"}
     assert "pull_request" in triggers and "workflow_dispatch" in triggers

@@ -73,8 +73,9 @@ function inboxMessage(id: number, evidenceIds: string[] = [], attachments: Recor
 
 async function openMail(page: Parameters<typeof start>[0], messageName: string) {
   await start(page);
-  await page.getByRole("button", { name: "Письма", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "Входящие письма" })).toBeVisible();
+  await page.getByRole("button", { name: "AI Secretary", exact: true }).first().click();
+  await expect(page.getByText("Входящие письма и сообщения", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^Все \d+$/ }).click();
   await page.locator("article.inbox-card").filter({ hasText: messageName })
     .getByRole("button", { name: "Открыть", exact: true }).click();
 }
@@ -151,13 +152,14 @@ test("mailbox attachment import exposes API progress and the indexed UI state", 
   setInbox(mock, [inboxMessage(104, [], [{
     name: "synthetic-attachment.pdf", mime_type: "application/pdf", size: 2048, attachment_id: "attachment-104", imported: false,
   }])]);
-  mock.attachmentImportReply = { body: { name: "synthetic-attachment.pdf", already_indexed: false, tasks: 2, risks: 1, drafts: 0 } };
+  mock.attachmentImportReply = { body: {
+    staging_id: "synthetic-gmail-104", job_id: 72, status: "queued", already_queued: false,
+  } };
   await openMail(page, "Synthetic mail 104");
   page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Импортировать и проанализировать" }).click();
 
-  await expect(page.getByText("Вложение «synthetic-attachment.pdf» добавлено: задач 2, рисков 1, черновиков 0.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Уже в документах" })).toBeVisible();
+  await expect(page.getByText("Вложение «synthetic-attachment.pdf» поставлено в очередь: задание №72.")).toBeVisible();
   const request = mock.requests.find(row => row.path === "/ai-secretary/inbox/104/attachments/0/import");
   expect(request?.method).toBe("POST");
   expect(request?.body).toBeNull();
@@ -167,10 +169,10 @@ test("existing local-upload and AI-policy entries use isolated API routes", asyn
   await page.setViewportSize({ width: 390, height: 844 });
   await start(page);
   await page.getByRole("button", { name: "Добавить документ" }).click();
-  const upload = page.getByRole("dialog", { name: "Загрузка документов с Android" });
+  const upload = page.getByRole("dialog", { name: "Загрузка документов" });
   await upload.locator('input[type="file"]').first().setInputFiles("e2e/fixtures/synthetic-note.txt");
   await upload.getByRole("button", { name: "Загрузить и проанализировать (1)" }).click();
-  await expect(page.getByText("Обработано: 1. Задач: 1. Рисков: 0. Пропущено: 0.")).toBeVisible();
+  await expect(page.getByText("Поставлено в очередь файлов: 1. Заданий: 1.")).toBeVisible();
   const uploadRequest = mock.requests.find(row => row.path === "/local-upload/analyze");
   expect(uploadRequest?.method).toBe("POST");
   expect(JSON.parse(uploadRequest?.body || "{}")).toMatchObject({ project_id: 2, files: [{ path: "synthetic-note.txt", mime_type: "text/plain" }] });

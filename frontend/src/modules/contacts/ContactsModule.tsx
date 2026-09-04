@@ -1,15 +1,20 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Users } from "lucide-react";
 import { api } from "../../api/client";
 
 export type ProjectContact = {
-  id: number; project_id: number; contract_id?: number; name: string; company?: string;
+  id: number; record_version?: number; project_id: number; contract_id?: number; name: string; company?: string;
   email: string; active: boolean; confirmed: boolean; source: string; company_activity?: string;
 };
 export type ContactContract = { id: number; number: string; title: string };
 export type ContactDraft = {
   id: number; subject: string; body: string; status: string; source_file_name: string;
   source_excerpt: string; confidence: number; reviewer_name: string; recipient_to?: string;
+};
+type ContactConflict = {
+  id: number; record_version: number; contact_id: number; contact_record_version: number;
+  contact_name: string; contact_email: string; current_project_id: number;
+  candidate_project_id: number; status: string;
 };
 
 type Props = {
@@ -30,12 +35,48 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
   const [email, setEmail] = useState("");
   const [contractId, setContractId] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [conflicts, setConflicts] = useState<ContactConflict[]>([]);
   const groups = useMemo(() => Object.entries(contacts.reduce<Record<string, ProjectContact[]>>((result, contact) => {
     const key = contact.company?.trim() || "Компания не указана";
     (result[key] ||= []).push(contact);
     return result;
   }, {})), [contacts]);
   const clientDrafts = drafts.filter((draft) => draft.recipient_to);
+
+  async function loadConflicts() {
+    try {
+      const result = await api(`/project-contacts/conflicts?project_id=${projectId}&status=pending&limit=200`);
+      setConflicts(result.conflicts || []);
+    } catch (reason) {
+      onError((reason as Error).message);
+    }
+  }
+
+  useEffect(() => { void loadConflicts(); }, [projectId]);
+
+  async function resolveConflict(conflict: ContactConflict, resolution: "keep_current" | "move_to_candidate" | "reject_candidate") {
+    const reason = window.prompt(
+      resolution === "move_to_candidate"
+        ? `Перенести ${conflict.contact_email} в текущий проект? Укажите основание.`
+        : "Укажите основание решения по конфликту контакта",
+    )?.trim();
+    if (!reason || busy) return;
+    setBusy(true);
+    try {
+      await api(`/project-contacts/conflicts/${conflict.id}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({
+          resolution,
+          reason,
+          expected_record_version: conflict.record_version,
+          expected_contact_record_version: conflict.contact_record_version,
+        }),
+      });
+      onNotice("Конфликт привязки контакта разрешён и записан в историю");
+      await Promise.all([reload(), loadConflicts()]);
+    } catch (reasonValue) { onError((reasonValue as Error).message); }
+    finally { setBusy(false); }
+  }
 
   async function createContact() {
     if (!name.trim() || !email.trim() || busy) return;
@@ -56,7 +97,10 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
     if (busy) return;
     setBusy(true);
     try {
-      await api(`/project-contacts/${contact.id}`, { method: "PATCH", body: JSON.stringify({ confirmed: true }) });
+      await api(`/project-contacts/${contact.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ confirmed: true, expected_record_version: contact.record_version ?? 1 }),
+      });
       onNotice(`Контакт ${contact.email} подтверждён. Следующие письма будут направляться в этот проект.`);
       await reload();
     } catch (reason) { onError((reason as Error).message); }
@@ -78,6 +122,13 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
   }
 
   return <section className="company-directory">
+    {!!conflicts.length && <section className="card company-conflicts">
+      <div><span className="eyebrow">КОНФЛИКТЫ ПРИВЯЗКИ</span><h2>Контакт уже используется в другом проекте</h2><p>Автоматическая маршрутизация приостановлена до вашего решения.</p></div>
+      {conflicts.map((conflict) => <article key={conflict.id}>
+        <div><strong>{conflict.contact_name}</strong><p>{conflict.contact_email}</p><small>Текущий проект: {conflict.current_project_id}; предлагаемый: {conflict.candidate_project_id}</small></div>
+        <div><button className="secondary" disabled={busy} onClick={() => void resolveConflict(conflict, "keep_current")}>Оставить там</button><button className="secondary" disabled={busy} onClick={() => void resolveConflict(conflict, "reject_candidate")}>Отклонить</button><button disabled={busy} onClick={() => void resolveConflict(conflict, "move_to_candidate")}>Перенести сюда</button></div>
+      </article>)}
+    </section>}
     <section className="card company-create">
       <div><span className="eyebrow">КАРТОЧКА КЛИЕНТА</span><h2>Добавить контакт и закрепить за проектом</h2><p>Входящие от подтверждённого email будут автоматически направляться в текущий проект и выбранный договор.</p></div>
       <div className="company-create-form">

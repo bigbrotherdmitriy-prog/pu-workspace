@@ -80,8 +80,9 @@ def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
     assert triggers["push"]["branches"] == [
         "codex/v54-final-integration", "codex/v54-wave2-integration",
         "codex/v54-wave3-integration", "codex/v54-wave4-integration",
+        "codex/mvp1-5-unified",
     ]
-    assert "workflow_dispatch:" in text and "pull_request:" not in text
+    assert "workflow_dispatch:" in text and "pull_request:" in text
     assert "persist-credentials: false" in text
     assert "postgres:16-alpine" in text and "ports:" not in text
     upload = next(
@@ -99,7 +100,7 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert "capture_output=True" in source
     assert "print(result.stdout" not in source and "print(result.stderr" not in source
     assert "DROP DATABASE {}" in source and "pg_terminate_backend" in source
-    assert 'HEAD = "e74a1c5d09b2"' in source
+    assert 'HEAD = "d04e8a6c31f2"' in source
     assert '"PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations")' in source
     assert '"backend/tests/test_v54_provider_action_migration.py"' in source
     assert '"backend/tests/test_v54_product_acceptance.py"' in source

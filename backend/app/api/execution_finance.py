@@ -1,13 +1,15 @@
 import base64
 import binascii
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
+import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -15,13 +17,44 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract
+from app.models.task import Task
 from app.models.user import User
 from app.structured_import import parse_structured_rows
 from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
+
+MONEY_QUANTUM = Decimal("0.01")
+MONEY_MAX = Decimal("9999999999999999.99")
+ISO_4217_CURRENCIES = frozenset({
+    "AED", "AMD", "AUD", "AZN", "BGN", "BRL", "BYN", "CAD", "CHF", "CNY",
+    "CZK", "DKK", "EUR", "GBP", "GEL", "HKD", "HUF", "INR", "JPY", "KGS",
+    "KRW", "KZT", "MDL", "NOK", "PLN", "RON", "RSD", "RUB", "SEK", "SGD",
+    "THB", "TJS", "TRY", "UAH", "USD", "UZS", "VND", "ZAR",
+})
+
+
+def _strict_currency(value: object) -> str:
+    if not isinstance(value, str) or value not in ISO_4217_CURRENCIES:
+        raise ValueError("Валюта должна быть поддерживаемым кодом ISO 4217 в верхнем регистре")
+    return value
+
+
+def _money(value: object, *, allow_zero: bool = True) -> Decimal:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("Некорректная денежная сумма") from exc
+    if not amount.is_finite():
+        raise ValueError("Денежная сумма должна быть конечной")
+    amount = amount.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    if amount < 0 or (not allow_zero and amount == 0):
+        raise ValueError("Денежная сумма должна быть положительной" if not allow_zero else "Денежная сумма не может быть отрицательной")
+    if amount > MONEY_MAX:
+        raise ValueError("Денежная сумма превышает Numeric(18,2)")
+    return amount
 
 
 class BaselineCreate(BaseModel):
@@ -126,7 +159,12 @@ class BudgetCreate(BaseModel):
     description: str = Field(min_length=2, max_length=1000)
     planned_amount: Decimal = Field(ge=0)
     forecast_amount: Decimal | None = Field(default=None, ge=0)
-    currency: str = Field(default="RUB", pattern="^[A-Z]{3}$")
+    currency: str = "RUB"
+
+    _amounts = field_validator("planned_amount", "forecast_amount", mode="before")(
+        lambda value: None if value is None else _money(value)
+    )
+    _currency = field_validator("currency", mode="before")(_strict_currency)
 
 
 class CashFlowCreate(BaseModel):
@@ -136,21 +174,56 @@ class CashFlowCreate(BaseModel):
     title: str = Field(min_length=2, max_length=500)
     planned_date: date
     planned_amount: Decimal = Field(gt=0)
+    currency: str = "RUB"
     counterparty: str | None = Field(default=None, max_length=500)
     object_name: str | None = Field(default=None, max_length=300)
     category: str | None = Field(default=None, max_length=200)
     note: str | None = Field(default=None, max_length=5000)
 
+    _planned_money = field_validator("planned_amount", mode="before")(
+        lambda value: _money(value, allow_zero=False)
+    )
+    _currency = field_validator("currency", mode="before")(_strict_currency)
+
 
 class InvoiceProposalCreate(CashFlowCreate):
     schedule_item_id: int | None = None
     budget_line_id: int | None = None
+    task_id: int | None = None
     source_document_id: int | None = None
+    source_document_version_id: int | None = None
+    source_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
 
 
 class PaymentConfirmation(BaseModel):
     actual_amount: Decimal | None = Field(default=None, gt=0)
     actual_date: date | None = None
+    currency: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
+    expected_document_version_id: int | None = None
+    expected_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
+
+    _actual_money = field_validator("actual_amount", mode="before")(
+        lambda value: None if value is None else _money(value, allow_zero=False)
+    )
+    _currency = field_validator("currency", mode="before")(
+        lambda value: None if value is None else _strict_currency(value)
+    )
+
+
+class PaymentCorrection(PaymentConfirmation):
+    actual_amount: Decimal = Field(gt=0)
+    actual_date: date
+    reason: str = Field(min_length=3, max_length=2000)
+    supersedes_event_id: int
+
+
+class PaymentReversal(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+    supersedes_event_id: int
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
+    expected_document_version_id: int | None = None
+    expected_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
 
 
 class ProcurementCreate(BaseModel):
@@ -160,6 +233,10 @@ class ProcurementCreate(BaseModel):
     supplier: str | None = Field(default=None, max_length=500)
     planned_delivery: date | None = None
     planned_amount: Decimal = Field(default=0, ge=0)
+    currency: str = "RUB"
+
+    _planned_money = field_validator("planned_amount", mode="before")(_money)
+    _currency = field_validator("currency", mode="before")(_strict_currency)
 
 
 class ActCreate(BaseModel):
@@ -170,12 +247,20 @@ class ActCreate(BaseModel):
     title: str = Field(min_length=2, max_length=500)
     act_date: date | None = None
     amount: Decimal = Field(default=0, ge=0)
+    currency: str = "RUB"
+
+    _amount_money = field_validator("amount", mode="before")(_money)
+    _currency = field_validator("currency", mode="before")(_strict_currency)
 
 
 class StatusUpdate(BaseModel):
     status: str = Field(min_length=2, max_length=30)
     actual_amount: Decimal | None = Field(default=None, ge=0)
     actual_date: date | None = None
+
+    _actual_money = field_validator("actual_amount", mode="before")(
+        lambda value: None if value is None else _money(value)
+    )
 
 
 class StructuredImportRequest(BaseModel):
@@ -185,6 +270,8 @@ class StructuredImportRequest(BaseModel):
     baseline_id: int | None = None
     direction: str = Field(default="outflow", pattern="^(inflow|outflow)$")
     source_rows: list[int] = Field(min_length=1, max_length=500)
+    expected_document_version_id: int | None = None
+    expected_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
 
 
 _DOCUMENT_KIND_MARKERS = {
@@ -239,6 +326,155 @@ def _finance_document_hints(name: str, content: str) -> dict:
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
     if contract_id is not None and not db.scalar(select(Contract.id).where(Contract.id == contract_id, Contract.project_id == project_id)):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
+
+
+def _check_task(db: Session, project_id: int, task_id: int | None) -> None:
+    if task_id is not None and not db.scalar(select(Task.id).where(Task.id == task_id, Task.project_id == project_id)):
+        raise HTTPException(422, "Задача не принадлежит выбранному проекту")
+
+
+def _current_document_pin(
+    db: Session,
+    project_id: int,
+    document_id: int,
+    expected_version_id: int | None = None,
+    expected_sha256: str | None = None,
+) -> tuple[DocumentVersion, str]:
+    document = db.scalar(select(Document).where(Document.id == document_id, Document.project_id == project_id))
+    if document is None:
+        raise HTTPException(422, "Документ не принадлежит выбранному проекту")
+    current = db.scalar(select(DocumentVersion).where(
+        DocumentVersion.document_id == document.id,
+        DocumentVersion.version_number == document.current_version,
+    ))
+    if current is None:
+        raise HTTPException(409, "У документа нет доступной текущей версии")
+    digest = hashlib.sha256((current.content or "").encode("utf-8")).hexdigest()
+    if expected_version_id is not None and expected_version_id != current.id:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась")
+    if expected_sha256 is not None and expected_sha256 != digest:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: содержимое документа изменилось")
+    return current, digest
+
+
+def _assert_cash_flow_source_current(
+    db: Session,
+    item: CashFlowEntry,
+    expected_version_id: int | None,
+    expected_sha256: str | None,
+) -> None:
+    if item.source_document_id is None:
+        if expected_version_id is not None or expected_sha256 is not None:
+            raise HTTPException(409, "SOURCE_VERSION_MISMATCH: у платежа нет закреплённого документа")
+        return
+    current, digest = _current_document_pin(
+        db, item.project_id, item.source_document_id, expected_version_id, expected_sha256,
+    )
+    if item.source_document_version_id is not None and item.source_document_version_id != current.id:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: предложение создано по другой версии документа")
+    if item.source_document_sha256 is not None and item.source_document_sha256 != digest:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: закреплённый документ изменился")
+
+
+def _payment_payload_hash(
+    *, event_type: str, item_id: int, amount: Decimal | None, payment_date: date | None,
+    currency: str, supersedes_event_id: int | None, source_version_id: int | None,
+    source_sha256: str | None, reason: str | None,
+) -> str:
+    payload = {
+        "event_type": event_type, "item_id": item_id,
+        "amount": str(amount) if amount is not None else None,
+        "payment_date": payment_date.isoformat() if payment_date else None,
+        "currency": currency, "supersedes_event_id": supersedes_event_id,
+        "source_version_id": source_version_id, "source_sha256": source_sha256,
+        "reason": reason,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _latest_payment_event(db: Session, item_id: int) -> PaymentEvent | None:
+    return db.scalar(select(PaymentEvent).where(
+        PaymentEvent.cash_flow_entry_id == item_id,
+    ).order_by(PaymentEvent.id.desc()))
+
+
+def _locked_cash_flow(db: Session, item_id: int) -> CashFlowEntry:
+    item = db.scalar(select(CashFlowEntry).where(
+        CashFlowEntry.id == item_id,
+    ).with_for_update())
+    if item is None:
+        raise HTTPException(404, "Запись ДДС не найдена")
+    return item
+
+
+def _append_payment_event(
+    db: Session, *, item: CashFlowEntry, user: User, event_type: str,
+    amount: Decimal | None, payment_date: date | None, currency: str,
+    supersedes_event_id: int | None, idempotency_key: str | None,
+    reason: str | None = None,
+) -> tuple[PaymentEvent, bool]:
+    payload_sha256 = _payment_payload_hash(
+        event_type=event_type, item_id=item.id, amount=amount, payment_date=payment_date,
+        currency=currency, supersedes_event_id=supersedes_event_id,
+        source_version_id=item.source_document_version_id,
+        source_sha256=item.source_document_sha256, reason=reason,
+    )
+    key = idempotency_key or f"mvp4:{payload_sha256}"
+    existing = db.scalar(select(PaymentEvent).where(
+        PaymentEvent.cash_flow_entry_id == item.id,
+        PaymentEvent.idempotency_key == key,
+    ))
+    if existing is not None:
+        if existing.payload_sha256 != payload_sha256:
+            raise HTTPException(409, "IDEMPOTENCY_CONFLICT: ключ использован с другим платежным событием")
+        return existing, False
+    event = PaymentEvent(
+        project_id=item.project_id, cash_flow_entry_id=item.id, event_type=event_type,
+        amount=amount, payment_date=payment_date, currency=currency,
+        supersedes_event_id=supersedes_event_id, idempotency_key=key,
+        payload_sha256=payload_sha256,
+        source_document_version_id=item.source_document_version_id,
+        source_document_sha256=item.source_document_sha256,
+        reason=reason, created_by_user_id=user.id,
+    )
+    try:
+        with db.begin_nested():
+            db.add(event)
+            db.flush()
+    except IntegrityError:
+        existing = db.scalar(select(PaymentEvent).where(
+            PaymentEvent.cash_flow_entry_id == item.id,
+            PaymentEvent.idempotency_key == key,
+        ))
+        if existing is None or existing.payload_sha256 != payload_sha256:
+            raise HTTPException(409, "IDEMPOTENCY_CONFLICT: конкурентное платежное событие")
+        return existing, False
+    return event, True
+
+
+def _replayed_payment_event(
+    db: Session, *, item: CashFlowEntry, event_type: str,
+    amount: Decimal | None, payment_date: date | None, currency: str,
+    supersedes_event_id: int | None, idempotency_key: str | None,
+    reason: str | None,
+) -> PaymentEvent | None:
+    if idempotency_key is None:
+        return None
+    existing = db.scalar(select(PaymentEvent).where(
+        PaymentEvent.cash_flow_entry_id == item.id,
+        PaymentEvent.idempotency_key == idempotency_key,
+    ))
+    if existing is None:
+        return None
+    expected_hash = _payment_payload_hash(
+        event_type=event_type, item_id=item.id, amount=amount, payment_date=payment_date,
+        currency=currency, supersedes_event_id=supersedes_event_id,
+        source_version_id=item.source_document_version_id,
+        source_sha256=item.source_document_sha256, reason=reason,
+    )
+    if existing.payload_sha256 != expected_hash:
+        raise HTTPException(409, "IDEMPOTENCY_CONFLICT: ключ использован с другим платежным событием")
+    return existing
 
 
 def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, details: str):
@@ -310,6 +546,108 @@ def _start_from_finish(finish: date, duration_days: int) -> date:
     return finish - timedelta(days=max(0, duration_days - 1))
 
 
+def _dependency_start_offset(predecessor: ScheduleItem, successor: ScheduleItem, link_type: str, lag: int) -> int:
+    predecessor_duration = 0 if predecessor.is_milestone else max(1, predecessor.duration_days or 1)
+    successor_duration = 0 if successor.is_milestone else max(1, successor.duration_days or 1)
+    if link_type == "FS":
+        return predecessor_duration + lag
+    if link_type == "SS":
+        return lag
+    if link_type == "FF":
+        return predecessor_duration - successor_duration + lag
+    return 1 - successor_duration + lag  # SF: successor finish follows predecessor start.
+
+
+def _schedule_cpm(tasks: list[ScheduleItem]) -> dict[int, dict[str, int | bool]]:
+    """Calculate authoritative calendar-day CPM values for one acyclic baseline."""
+    if not tasks:
+        return {}
+    by_id = {task.id: task for task in tasks}
+    referenced = {predecessor_id for task in tasks for predecessor_id in _schedule_predecessor_ids(task.predecessor_ids)}
+    if referenced.difference(by_id):
+        raise HTTPException(422, "Все предшественники должны принадлежать этой версии ГПР")
+    pending = set(by_id)
+    ordered: list[ScheduleItem] = []
+    while pending:
+        ready = sorted(
+            (task_id for task_id in pending
+             if all(predecessor_id not in pending for predecessor_id in _schedule_predecessor_ids(by_id[task_id].predecessor_ids))),
+            key=lambda task_id: (by_id[task_id].sort_order or 0, task_id),
+        )
+        if not ready:
+            raise HTTPException(422, "Зависимости образуют цикл")
+        for task_id in ready:
+            pending.remove(task_id)
+            ordered.append(by_id[task_id])
+
+    date_candidates = [value for task in tasks for value in (task.planned_start, task.constraint_date) if value]
+    origin = min(date_candidates) if date_candidates else date.today()
+    earliest: dict[int, int] = {}
+    violations: dict[int, bool] = {task.id: False for task in tasks}
+    for task in ordered:
+        start = (task.planned_start - origin).days if task.planned_start else 0
+        for predecessor_id, link_type, lag in _schedule_predecessors(task.predecessor_ids):
+            predecessor = by_id[predecessor_id]
+            start = max(start, earliest[predecessor_id] + _dependency_start_offset(predecessor, task, link_type, lag))
+        if task.constraint_date:
+            bound = (task.constraint_date - origin).days
+            duration = 0 if task.is_milestone else max(1, task.duration_days or 1)
+            finish_bound_start = bound - duration + 1
+            if task.constraint_type == "mso":
+                violations[task.id] = start > bound
+                start = max(start, bound)
+            elif task.constraint_type == "snet":
+                start = max(start, bound)
+            elif task.constraint_type == "mfo":
+                violations[task.id] = start > finish_bound_start
+                start = max(start, finish_bound_start)
+            elif task.constraint_type == "fnet":
+                start = max(start, finish_bound_start)
+            elif task.constraint_type == "snlt" and start > bound:
+                violations[task.id] = True
+            elif task.constraint_type == "fnlt" and start > finish_bound_start:
+                violations[task.id] = True
+        earliest[task.id] = start
+
+    def duration(task: ScheduleItem) -> int:
+        return 0 if task.is_milestone else max(1, task.duration_days or 1)
+
+    project_finish = max(earliest[task.id] + duration(task) for task in tasks)
+    latest = {task.id: project_finish - duration(task) for task in tasks}
+    successors: dict[int, list[tuple[ScheduleItem, str, int]]] = {task.id: [] for task in tasks}
+    for successor in tasks:
+        for predecessor_id, link_type, lag in _schedule_predecessors(successor.predecessor_ids):
+            successors[predecessor_id].append((successor, link_type, lag))
+    for task in reversed(ordered):
+        for successor, link_type, lag in successors[task.id]:
+            latest[task.id] = min(
+                latest[task.id],
+                latest[successor.id] - _dependency_start_offset(task, successor, link_type, lag),
+            )
+        if task.constraint_date:
+            bound = (task.constraint_date - origin).days
+            finish_bound_start = bound - duration(task) + 1
+            if task.constraint_type == "mso":
+                latest[task.id] = min(latest[task.id], bound)
+            elif task.constraint_type == "mfo":
+                latest[task.id] = min(latest[task.id], finish_bound_start)
+            elif task.constraint_type == "snlt":
+                latest[task.id] = min(latest[task.id], bound)
+            elif task.constraint_type == "fnlt":
+                latest[task.id] = min(latest[task.id], finish_bound_start)
+
+    return {
+        task.id: {
+            "earliest_start": earliest[task.id],
+            "latest_start": latest[task.id],
+            "total_float": latest[task.id] - earliest[task.id],
+            "is_critical": latest[task.id] - earliest[task.id] <= 0,
+            "constraint_violation": violations[task.id] or latest[task.id] < earliest[task.id],
+        }
+        for task in tasks
+    }
+
+
 def _auto_schedule_baseline(db: Session, baseline_id: int) -> list[int]:
     """Forward-schedule dependent tasks after a plan edit.
 
@@ -366,6 +704,12 @@ def _auto_schedule_baseline(db: Session, baseline_id: int) -> list[int]:
         if constraint_date and constraint in {"mfo", "fnet"}:
             constrained_start = _start_from_finish(constraint_date, duration)
             start = constrained_start if constraint == "mfo" else max(start or constrained_start, constrained_start)
+        if constraint_date and constraint == "snlt" and start and start > constraint_date:
+            raise HTTPException(422, "Ограничение 'начать не позднее' нарушено зависимостями")
+        if constraint_date and constraint == "fnlt" and start:
+            constrained_start = _start_from_finish(constraint_date, duration)
+            if start > constrained_start:
+                raise HTTPException(422, "Ограничение 'закончить не позднее' нарушено зависимостями")
         if start is None:
             continue
         calculated_finish = start if task.is_milestone else _finish_from_start(start, duration)
@@ -413,24 +757,48 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
     acts = list(db.scalars(select(AcceptanceAct).where(AcceptanceAct.project_id == project_id).order_by(AcceptanceAct.act_date.desc(), AcceptanceAct.id.desc())))
+    schedule_cpm: dict[int, dict[str, int | bool]] = {}
+    for baseline in baselines:
+        baseline_tasks = [item for item in schedule if item.baseline_id == baseline.id]
+        schedule_cpm.update(_schedule_cpm(baseline_tasks))
     confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}]
-    planned = sum((x.planned_amount for x in confirmed_budget), Decimal("0"))
-    actual = sum((x.actual_amount for x in confirmed_budget), Decimal("0"))
-    forecast = sum(((x.forecast_amount or x.planned_amount) for x in confirmed_budget), Decimal("0"))
-    balance = Decimal("0"); minimum = Decimal("0"); gap_date = None
-    for row in [x for x in cash if x.status in {"approved", "paid", "received"}]:
-        value = row.actual_amount if row.actual_date else row.planned_amount
-        balance += value if row.direction == "inflow" else -value
-        if balance < minimum:
-            minimum, gap_date = balance, row.actual_date or row.planned_date
+    relevant_cash = [x for x in cash if x.status in {"approved", "paid", "received"}]
+    currencies = sorted({x.currency for x in confirmed_budget} | {x.currency for x in relevant_cash}) or ["RUB"]
+    summary_by_currency: dict[str, dict] = {}
+    for currency in currencies:
+        currency_budget = [x for x in confirmed_budget if x.currency == currency]
+        currency_cash = [x for x in relevant_cash if x.currency == currency]
+        planned = sum((x.planned_amount for x in currency_budget), Decimal("0"))
+        actual = sum((x.actual_amount for x in currency_budget), Decimal("0"))
+        forecast = sum(((x.forecast_amount or x.planned_amount) for x in currency_budget), Decimal("0"))
+        balance = Decimal("0"); minimum = Decimal("0"); gap_date = None
+        for row in currency_cash:
+            value = row.actual_amount if row.actual_date else row.planned_amount
+            balance += value if row.direction == "inflow" else -value
+            if balance < minimum:
+                minimum, gap_date = balance, row.actual_date or row.planned_date
+        summary_by_currency[currency] = {
+            "budget_planned": planned,
+            "budget_committed": sum((x.committed_amount for x in currency_budget), Decimal("0")),
+            "budget_actual": actual,
+            "budget_forecast": forecast,
+            "budget_variance": forecast - planned,
+            "cash_balance_forecast": balance,
+            "cash_gap": minimum,
+            "cash_gap_date": gap_date,
+        }
+    mixed_currency = len(currencies) > 1
+    legacy_money = summary_by_currency[currencies[0]] if not mixed_currency else {key: None for key in (
+        "budget_planned", "budget_committed", "budget_actual", "budget_forecast",
+        "budget_variance", "cash_balance_forecast", "cash_gap", "cash_gap_date",
+    )}
     today = date.today()
     delayed = [x for x in schedule if x.planned_finish and x.planned_finish < today and x.actual_progress < 100]
     late_procurement = [x for x in procurement if x.planned_delivery and x.planned_delivery < today and x.stage not in {"delivered", "accepted", "cancelled"}]
     return {
-        "summary": {"budget_planned": planned, "budget_committed": sum((x.committed_amount for x in confirmed_budget), Decimal("0")),
-                    "budget_actual": actual, "budget_forecast": forecast,
-                    "budget_variance": forecast - planned, "cash_balance_forecast": balance,
-                    "cash_gap": minimum, "cash_gap_date": gap_date, "delayed_schedule": len(delayed),
+        "summary": {**legacy_money, "currency": currencies[0] if not mixed_currency else None,
+                    "mixed_currency": mixed_currency, "by_currency": summary_by_currency,
+                    "delayed_schedule": len(delayed),
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
                     "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
@@ -441,22 +809,28 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                       "predecessor_ids": x.predecessor_ids, "constraint_type": x.constraint_type, "constraint_date": x.constraint_date,
                       "planned_start": x.planned_start,
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
-                      "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status} for x in schedule],
+                      "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status,
+                      **schedule_cpm.get(x.id, {"total_float": 0, "is_critical": False,
+                                                "constraint_violation": False})} for x in schedule],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "category": x.category, "description": x.description,
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
-                       "budget_line_id": x.budget_line_id, "source_document_id": x.source_document_id,
-                       "direction": x.direction, "title": x.title,
-                       "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
-                       "actual_amount": x.actual_amount, "counterparty": x.counterparty,
+                        "budget_line_id": x.budget_line_id, "task_id": x.task_id,
+                        "source_document_id": x.source_document_id,
+                        "source_document_version_id": x.source_document_version_id,
+                        "source_document_sha256": x.source_document_sha256,
+                        "direction": x.direction, "title": x.title,
+                        "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
+                        "actual_amount": x.actual_amount, "currency": x.currency, "counterparty": x.counterparty,
                        "object_name": x.object_name, "category": x.category, "note": x.note,
                        "status": x.status} for x in cash],
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
-                         "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
-                         "planned_amount": x.planned_amount, "actual_amount": x.actual_amount} for x in procurement],
+                          "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
+                          "planned_amount": x.planned_amount, "actual_amount": x.actual_amount, "currency": x.currency} for x in procurement],
         "acts": [{"id": x.id, "contract_id": x.contract_id, "document_id": x.document_id, "number": x.number,
-                  "title": x.title, "act_date": x.act_date, "amount": x.amount, "status": x.status} for x in acts],
+                   "title": x.title, "act_date": x.act_date, "amount": x.amount, "currency": x.currency,
+                   "status": x.status} for x in acts],
     }
 
 
@@ -509,7 +883,7 @@ def document_candidates(project_id: int, contract_id: int | None = None,
             "requires_confirmation": True, "originals_changed": False}
 
 
-def _document_content(db: Session, project_id: int, document_id: int) -> tuple[Document, str]:
+def _document_content(db: Session, project_id: int, document_id: int) -> tuple[Document, DocumentVersion, str, str]:
     document = db.scalar(select(Document).where(Document.id == document_id, Document.project_id == project_id))
     if document is None:
         raise HTTPException(404, "Документ не найден в выбранном проекте")
@@ -519,7 +893,8 @@ def _document_content(db: Session, project_id: int, document_id: int) -> tuple[D
     content = version.content if version and version.content else ""
     if not content.strip():
         raise HTTPException(409, "У документа ещё нет извлечённого табличного текста")
-    return document, content
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return document, version, digest, content
 
 
 def _import_date(value: str | None) -> date | None:
@@ -533,9 +908,10 @@ def structured_preview(document_id: int, project_id: int, kind: str,
     require_project_role(db, user, project_id, "viewer")
     if kind not in {"schedule", "budget", "cash-flow"}:
         raise HTTPException(422, "Поддерживаются ГПР, бюджет и ДДС")
-    document, content = _document_content(db, project_id, document_id)
+    document, version, digest, content = _document_content(db, project_id, document_id)
     preview = parse_structured_rows(content, kind, source_name=document.name)
-    return {"document_id": document.id, "name": document.name, "kind": kind, **preview,
+    return {"document_id": document.id, "document_version_id": version.id, "document_sha256": digest,
+            "name": document.name, "kind": kind, **preview,
             "requires_confirmation": True, "originals_changed": False}
 
 
@@ -544,7 +920,11 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                       db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
-    document, content = _document_content(db, payload.project_id, document_id)
+    document, version, digest, content = _document_content(db, payload.project_id, document_id)
+    if payload.expected_document_version_id is not None and payload.expected_document_version_id != version.id:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась после preview")
+    if payload.expected_document_sha256 is not None and payload.expected_document_sha256 != digest:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: содержимое документа изменилось после preview")
     preview = parse_structured_rows(content, payload.kind, source_name=document.name)
     if len(payload.source_rows) != len(set(payload.source_rows)):
         raise HTTPException(422, "Строки источника не должны повторяться")
@@ -579,7 +959,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                 source_name=source_name, source_excerpt=row["excerpt"], status="planned",
             )
         elif payload.kind == "budget":
-            amount = Decimal(row["amount"])
+            amount = _money(row["amount"])
             item = BudgetLine(
                 project_id=payload.project_id, contract_id=payload.contract_id,
                 category=row["category"], description=row["title"], planned_amount=amount,
@@ -590,8 +970,9 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
             item = CashFlowEntry(
                 project_id=payload.project_id, contract_id=payload.contract_id,
                 source_document_id=document.id, direction=row["direction"] or payload.direction,
+                source_document_version_id=version.id, source_document_sha256=digest,
                 title=row["title"], planned_date=_import_date(row["planned_date"]),
-                planned_amount=Decimal(row["amount"]), counterparty=row["counterparty"],
+                planned_amount=_money(row["amount"], allow_zero=False), counterparty=row["counterparty"],
                 object_name=row.get("object_name"), category=row.get("category"), note=row.get("note"),
                 status="proposed", source_name=source_name, source_excerpt=row["excerpt"],
             )
@@ -917,6 +1298,7 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
         raise HTTPException(422, "Счёт на оплату должен быть расходом ДДС")
     if payload.contract_id is None or payload.schedule_item_id is None or payload.budget_line_id is None:
         raise HTTPException(422, "Для счёта обязательны договор, этап ГПР и строка бюджета")
+    _check_task(db, payload.project_id, payload.task_id)
     if payload.schedule_item_id is not None:
         stage = db.get(ScheduleItem, payload.schedule_item_id)
         if stage is None or stage.project_id != payload.project_id:
@@ -930,45 +1312,161 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
             raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
         if payload.contract_id and budget.contract_id not in {None, payload.contract_id}:
             raise HTTPException(422, "Строка бюджета связана с другим договором")
+        if budget.currency != payload.currency:
+            raise HTTPException(422, "Валюта счёта не совпадает с валютой строки бюджета")
+    pin_version_id = payload.source_document_version_id
+    pin_sha256 = payload.source_document_sha256
     if payload.source_document_id is not None:
-        document = db.get(Document, payload.source_document_id)
-        if document is None or document.project_id != payload.project_id:
-            raise HTTPException(422, "Счёт не принадлежит выбранному проекту")
-    item = CashFlowEntry(**payload.model_dump(), status="proposed")
+        version, digest = _current_document_pin(
+            db, payload.project_id, payload.source_document_id,
+            payload.source_document_version_id, payload.source_document_sha256,
+        )
+        pin_version_id, pin_sha256 = version.id, digest
+    elif pin_version_id is not None or pin_sha256 is not None:
+        raise HTTPException(422, "Версия источника указана без документа")
+    data = payload.model_dump()
+    data["source_document_version_id"] = pin_version_id
+    data["source_document_sha256"] = pin_sha256
+    item = CashFlowEntry(**data, status="proposed")
     db.add(item); db.flush()
     _audit(db, "invoice_cash_flow_proposed", "cash_flow", item.id, user.id,
-           f"contract={payload.contract_id}; schedule={payload.schedule_item_id}; budget={payload.budget_line_id}; document={payload.source_document_id}")
+           f"contract={payload.contract_id}; schedule={payload.schedule_item_id}; task={payload.task_id}; "
+           f"budget={payload.budget_line_id}; document={payload.source_document_id}; version={pin_version_id}")
     db.commit()
     return {"id": item.id, "status": item.status, "requires_payment_confirmation": True}
 
 
 @router.post("/cash-flow/{item_id}/confirm-payment")
 def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    item = db.get(CashFlowEntry, item_id)
-    if item is None:
-        raise HTTPException(404, "Запись ДДС не найдена")
+    item = _locked_cash_flow(db, item_id)
     require_project_role(db, user, item.project_id, "manager")
     paid_status = "received" if item.direction == "inflow" else "paid"
-    actual_amount = payload.actual_amount or item.planned_amount
+    currency = payload.currency or item.currency
+    if currency != item.currency:
+        raise HTTPException(422, "Валюта факта не совпадает с валютой записи ДДС")
+    actual_amount = _money(payload.actual_amount or item.planned_amount, allow_zero=False)
     actual_date = payload.actual_date or date.today()
+    _assert_cash_flow_source_current(
+        db, item, payload.expected_document_version_id, payload.expected_document_sha256,
+    )
     if item.status in {"paid", "received"}:
         if item.actual_amount != actual_amount or item.actual_date != actual_date:
             raise HTTPException(
                 409,
                 "Платёж уже подтверждён с другой суммой или датой; создайте корректирующее событие",
             )
-        return {"id": item.id, "status": item.status, "already_confirmed": True}
+        existing = _latest_payment_event(db, item.id)
+        result = {"id": item.id, "status": item.status, "already_confirmed": True}
+        if existing is not None:
+            result["payment_event_id"] = existing.id
+        return result
     if item.status not in {"proposed", "approved"}:
         raise HTTPException(409, "Эту запись нельзя подтвердить как оплаченную")
-    item.actual_amount = actual_amount
-    item.actual_date = actual_date
-    item.status = paid_status
+    event, created = _append_payment_event(
+        db, item=item, user=user, event_type="confirmation", amount=actual_amount,
+        payment_date=actual_date, currency=currency, supersedes_event_id=None,
+        idempotency_key=payload.idempotency_key,
+    )
+    item.actual_amount, item.actual_date, item.status = event.amount, event.payment_date, paid_status
     _refresh_budget_from_cash_flow(db, item.budget_line_id)
     _audit(db, "cash_flow_payment_confirmed", "cash_flow", item.id, user.id,
-           f"status={paid_status}; amount={actual_amount}; date={item.actual_date}; budget={item.budget_line_id}")
+           f"event={event.id}; status={paid_status}; amount={actual_amount}; date={item.actual_date}; budget={item.budget_line_id}")
     db.commit()
     return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
-            "actual_date": item.actual_date, "already_confirmed": False}
+            "actual_date": item.actual_date, "already_confirmed": not created,
+            "payment_event_id": event.id}
+
+
+@router.post("/cash-flow/{item_id}/correct-payment")
+def correct_payment(item_id: int, payload: PaymentCorrection, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = _locked_cash_flow(db, item_id)
+    require_project_role(db, user, item.project_id, "manager")
+    _assert_cash_flow_source_current(
+        db, item, payload.expected_document_version_id, payload.expected_document_sha256,
+    )
+    currency = payload.currency or item.currency
+    if currency != item.currency:
+        raise HTTPException(422, "Валюта коррекции не совпадает с валютой записи ДДС")
+    replayed = _replayed_payment_event(
+        db, item=item, event_type="correction", amount=payload.actual_amount,
+        payment_date=payload.actual_date, currency=currency,
+        supersedes_event_id=payload.supersedes_event_id,
+        idempotency_key=payload.idempotency_key, reason=payload.reason,
+    )
+    if replayed is not None:
+        return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
+                "actual_date": item.actual_date, "payment_event_id": replayed.id, "created": False}
+    if item.status not in {"paid", "received"}:
+        raise HTTPException(409, "Коррекция возможна только для подтверждённого платежа")
+    latest = _latest_payment_event(db, item.id)
+    if latest is None or latest.event_type == "reversal":
+        raise HTTPException(409, "Нет активного платёжного события для коррекции")
+    if payload.supersedes_event_id != latest.id:
+        raise HTTPException(409, "PAYMENT_EVENT_MISMATCH: платёж уже изменён")
+    event, created = _append_payment_event(
+        db, item=item, user=user, event_type="correction", amount=payload.actual_amount,
+        payment_date=payload.actual_date, currency=currency, supersedes_event_id=latest.id,
+        idempotency_key=payload.idempotency_key, reason=payload.reason,
+    )
+    item.actual_amount, item.actual_date = event.amount, event.payment_date
+    _refresh_budget_from_cash_flow(db, item.budget_line_id)
+    _audit(db, "cash_flow_payment_corrected", "cash_flow", item.id, user.id,
+           f"event={event.id}; supersedes={latest.id}; amount={event.amount}; date={event.payment_date}")
+    db.commit()
+    return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
+            "actual_date": item.actual_date, "payment_event_id": event.id, "created": created}
+
+
+@router.post("/cash-flow/{item_id}/reverse-payment")
+def reverse_payment(item_id: int, payload: PaymentReversal, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = _locked_cash_flow(db, item_id)
+    require_project_role(db, user, item.project_id, "manager")
+    _assert_cash_flow_source_current(
+        db, item, payload.expected_document_version_id, payload.expected_document_sha256,
+    )
+    replayed = _replayed_payment_event(
+        db, item=item, event_type="reversal", amount=None, payment_date=None,
+        currency=item.currency, supersedes_event_id=payload.supersedes_event_id,
+        idempotency_key=payload.idempotency_key, reason=payload.reason,
+    )
+    if replayed is not None:
+        return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
+                "actual_date": item.actual_date, "payment_event_id": replayed.id, "created": False}
+    latest = _latest_payment_event(db, item.id)
+    if item.status not in {"paid", "received"} or latest is None or latest.event_type == "reversal":
+        raise HTTPException(409, "Нет активного подтверждённого платежа для сторно")
+    if payload.supersedes_event_id != latest.id:
+        raise HTTPException(409, "PAYMENT_EVENT_MISMATCH: платёж уже изменён")
+    event, created = _append_payment_event(
+        db, item=item, user=user, event_type="reversal", amount=None, payment_date=None,
+        currency=item.currency, supersedes_event_id=latest.id,
+        idempotency_key=payload.idempotency_key, reason=payload.reason,
+    )
+    item.actual_amount, item.actual_date, item.status = Decimal("0.00"), None, "approved"
+    _refresh_budget_from_cash_flow(db, item.budget_line_id)
+    _audit(db, "cash_flow_payment_reversed", "cash_flow", item.id, user.id,
+           f"event={event.id}; supersedes={latest.id}")
+    db.commit()
+    return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
+            "actual_date": item.actual_date, "payment_event_id": event.id, "created": created}
+
+
+@router.get("/cash-flow/{item_id}/payment-events")
+def payment_events(item_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.get(CashFlowEntry, item_id)
+    if item is None:
+        raise HTTPException(404, "Запись ДДС не найдена")
+    require_project_role(db, user, item.project_id, "viewer")
+    rows = list(db.scalars(select(PaymentEvent).where(
+        PaymentEvent.cash_flow_entry_id == item.id,
+    ).order_by(PaymentEvent.id)))
+    return [{"id": row.id, "event_type": row.event_type, "amount": row.amount,
+             "payment_date": row.payment_date, "currency": row.currency,
+             "supersedes_event_id": row.supersedes_event_id,
+             "payload_sha256": row.payload_sha256,
+             "source_document_version_id": row.source_document_version_id,
+             "source_document_sha256": row.source_document_sha256,
+             "reason": row.reason, "created_at": row.created_at} for row in rows]
 
 
 @router.post("/procurement")
@@ -995,6 +1493,10 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved", "superseded"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
+    if kind == "cash-flow" and item.status in {"paid", "received"} and payload.status != item.status:
+        raise HTTPException(409, "Подтверждённый платёж изменяется только корректировкой или сторно")
+    if kind == "cash-flow" and (payload.actual_amount is not None or payload.actual_date is not None):
+        raise HTTPException(422, "Фактическая сумма и дата задаются только платёжным событием")
     item.status = payload.status
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount

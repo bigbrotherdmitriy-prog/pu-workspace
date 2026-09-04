@@ -21,10 +21,4 @@ export default defineConfig({
     screenshot: "only-on-failure",
     launchOptions: { args: ["--disable-background-networking", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"] },
   },
-  webServer: {
-    command: "pnpm exec vite build --config e2e/vite.config.mjs --configLoader runner && pnpm exec vite preview --config e2e/vite.config.mjs --configLoader runner --host 127.0.0.1 --port 4179 --strictPort",
-    url: "http://127.0.0.1:4179/new/",
-    reuseExistingServer: false,
-    timeout: 90_000,
-  },
 });

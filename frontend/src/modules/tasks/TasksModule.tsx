@@ -1,7 +1,7 @@
 import { ListTodo } from "lucide-react";
 
 export type TaskRow = {
-  id: number; title: string; status: string; priority: string; due_date?: string;
+  id: number; record_version?: number; title: string; status: string; priority: string; due_date?: string;
   assignee_user_id: number; assignee_name: string; source_file_name: string;
   source_excerpt: string; confidence: number; needs_review: boolean; message_id?: number;
   external_action_status: string; google_task_id?: string; google_calendar_event_id?: string;

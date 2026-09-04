@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -10,10 +10,11 @@ class Task(Base):
     __tablename__ = "tasks"
     __table_args__ = (
         UniqueConstraint("project_id", "source_file_id", "source_excerpt_hash", name="uq_task_source_excerpt"),
+        CheckConstraint("record_version > 0", name="ck_tasks_record_version"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    record_version: Mapped[int] = mapped_column(server_default="1")
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     assignee_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))

@@ -3,6 +3,7 @@ import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState }
 
 describe("AI Secretary message workflow", () => {
   it.each<[MessageWorkflowState, string]>([
+    ["filtered", "Отфильтровано"],
     ["needs_context_confirmation", "Подтвердите контекст"],
     ["requires_action", "Требует действия"],
     ["awaiting_reply", "Ожидает ответа"],

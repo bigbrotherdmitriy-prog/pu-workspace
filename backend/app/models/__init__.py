@@ -25,10 +25,10 @@ from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, Wo
 from app.models.organization_contract import Contract, Organization
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
-from app.models.management import Meeting, Notification, Obligation
-from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
+from app.models.management import ManagementHistory, Meeting, Notification, NotificationPolicy, Obligation
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.external_resource import ExternalResourceLink
-from app.models.project_contact import ProjectContact
+from app.models.project_contact import ContactConflict, ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.contract_document_link import ContractDocumentLink
 from app.models.job import BackgroundJob, ServiceHeartbeat
@@ -85,14 +85,18 @@ __all__ = [
     "Obligation",
     "Meeting",
     "Notification",
+    "NotificationPolicy",
+    "ManagementHistory",
     "ScheduleBaseline",
     "ScheduleItem",
     "BudgetLine",
     "CashFlowEntry",
+    "PaymentEvent",
     "ProcurementItem",
     "AcceptanceAct",
     "ExternalResourceLink",
     "ProjectContact",
+    "ContactConflict",
     "TaskCompletionSuggestion",
     "ContractDocumentLink",
     "BackgroundJob",
