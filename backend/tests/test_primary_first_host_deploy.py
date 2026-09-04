@@ -201,6 +201,7 @@ def test_primary_deploy_has_first_host_guardrails_and_no_public_request():
     assert "puworkspace.ru" not in deploy
     assert "docker compose -p app" not in deploy
     assert "app_pu_pgdata" not in deploy
+    assert '--user "$(id -u):$(id -g)"' in deploy
     assert '-v "$RELEASE_DIR:/workspace:ro"' in deploy
     assert "-v /dev/null:/workspace/.env:ro" not in deploy
 

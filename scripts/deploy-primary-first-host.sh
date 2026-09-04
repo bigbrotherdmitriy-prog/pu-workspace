@@ -167,6 +167,7 @@ compose --profile cutover config --format json | python3 "$RELEASE_DIR/scripts/v
 
 echo "[1/6] running candidate backend tests without secrets"
 docker run --rm --network none \
+  --user "$(id -u):$(id -g)" \
   -e PYTHONPATH=/app \
   -e DATABASE_URL=sqlite+pysqlite:///:memory: \
   -v "$RELEASE_DIR:/workspace:ro" \
