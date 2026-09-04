@@ -25,11 +25,19 @@ class GoogleWorkspaceAdapter:
         self.db = db
 
     def configured(self) -> bool:
-        return bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
+        return bool(
+            os.getenv("GOOGLE_CLIENT_ID")
+            and os.getenv("GOOGLE_CLIENT_SECRET")
+            and os.getenv("GOOGLE_REDIRECT_URI")
+        )
 
     def health(self) -> AdapterHealth:
-        token = self.db.scalar(select(GoogleOAuthToken.id).where(GoogleOAuthToken.project_id == self.project_id))
-        ready = token is not None and self.configured()
+        token = self.db.scalar(
+            select(GoogleOAuthToken.access_token).where(
+                GoogleOAuthToken.project_id == self.project_id
+            )
+        )
+        ready = bool(token) and self.configured()
         return AdapterHealth(ready=ready, detail="connected" if ready else "not connected")
 
     def authorized_scopes(self) -> frozenset[str]:
