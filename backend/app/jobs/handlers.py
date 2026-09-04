@@ -3,6 +3,9 @@ from __future__ import annotations
 
 def run(kind: str, payload: dict) -> dict:
     """Resolve handlers lazily so API modules do not import worker infrastructure."""
+    if kind == "v54.synthetic_provider_action":
+        from app.provider_actions.runtime import run_installed
+        return run_installed(payload)
     if kind == "v54.synthetic_task":
         from app.pilot_dispatch import run_installed
         return run_installed(payload)

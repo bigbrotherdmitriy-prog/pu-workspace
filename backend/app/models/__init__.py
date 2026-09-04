@@ -43,6 +43,10 @@ from app.models.mailbox_identity import (
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
 )
 from app.models.materialization import Materialization
+from app.models.v54_provider_action import (
+    ProviderAction, ProviderActionApproval, ProviderDispatchOutbox,
+    ProviderExecutionAttempt, ProviderOutcomeObservation,
+)
 
 __all__ = [
     "Project",
@@ -96,4 +100,6 @@ __all__ = [
     "MailboxAuthorityState", "MailboxCredentialGeneration", "MailboxCutoverFlags",
     "MailboxOriginBinding", "MailboxOriginCurrent", "MailboxOriginDecision",
     "Materialization",
+    "ProviderAction", "ProviderActionApproval", "ProviderDispatchOutbox",
+    "ProviderExecutionAttempt", "ProviderOutcomeObservation",
 ]
