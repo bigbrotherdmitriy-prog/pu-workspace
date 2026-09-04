@@ -145,9 +145,8 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "runtime": runtime,
         "corpus": {
             "structural": "PASS" if any(p["name"] == "corpus" and p["exit"] == 0 for p in PHASES) else "FAIL",
-            "executed_cases": ["P02", "P06", "S06", "S07", "S08", "S09"],
+            "executed_cases": ["C01", "P02", "P06", "S06", "S07", "S08", "S09"],
             "expected_gaps": {
-                "C01": "content extraction and corpus due-date input are not wired to the synthetic fixture",
                 "C07": "time-of-day claim unsupported",
                 "S02": "legacy global message identity cutover unresolved",
                 "S10": "external UNKNOWN remains fake-contract only",
@@ -198,6 +197,7 @@ def main() -> None:
             "backend/tests/test_v54_staging_safety_hardening.py",
             "backend/tests/test_v54_pilot_integration.py",
             "backend/tests/test_v54_product_acceptance.py",
+            "backend/tests/test_v54_c01_content_pipeline.py",
             "backend/tests/test_v54_corpus_confirm_subset.py",
         ]
         run_phase("postgres_abc_integration", [sys.executable, "-m", "pytest", *targets, "-q", "--tb=short", "-rfsE"], env=env, timeout=900)

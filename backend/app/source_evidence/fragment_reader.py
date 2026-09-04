@@ -186,6 +186,19 @@ class MessageLocator(StrictDTO):
         return self
 
 
+class TextRangeLocator(StrictDTO):
+    kind: Literal["text_range"]
+    unit: Literal["unicode_codepoint"]
+    start: StrictInt
+    end: StrictInt
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.start < 0 or self.end <= self.start:
+            raise ValueError("resource_unavailable")
+        return self
+
+
 class AttachmentLocator(StrictDTO):
     kind: Literal["attachment"]
     message_external_id: StrictStr
@@ -233,6 +246,7 @@ EvidenceLocator = Annotated[
         SectionClauseLocator,
         SheetCellLocator,
         MessageLocator,
+        TextRangeLocator,
         AttachmentLocator,
         RecordLocator,
         WholeObjectLocator,
@@ -352,6 +366,9 @@ def _validate_locator(*, scope: RequestScope, source: SourceReference,
             deny()
     elif isinstance(locator, MessageLocator):
         if source.object_kind != "message" or locator.message_external_id != source.external_id:
+            deny()
+    elif isinstance(locator, TextRangeLocator):
+        if source.object_kind not in {"message", "attachment"}:
             deny()
     elif isinstance(locator, AttachmentLocator):
         require_same_tenant(scope.tenant, locator.attachment_source_reference_id)

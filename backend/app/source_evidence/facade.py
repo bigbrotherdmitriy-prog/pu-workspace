@@ -202,8 +202,8 @@ class SourceEvidenceFacade:
         audit(db, self.policy, scope, result.ref, "BLOCKED", now, result)
         return result
 
-    @boundary
-    def create_evidence(self, db, *, scope, source, version, evidence_id):
+    def _create_evidence(self, db, *, scope, source, version, evidence_id,
+                         locator, extractor, confidence, confidence_kind):
         now = self.clock()
         check_ref(scope, source, "source")
         check_pin(scope, version, "source_version")
@@ -216,14 +216,16 @@ class SourceEvidenceFacade:
         prior = load(db, Evidence, Evidence.id == evidence_id, lock=True)
         if prior:
             if (prior.organization_id != self.policy.tenant_id or prior.source_id != row.id
-                    or prior.source_version_id != observation.id or prior.policy_pins != self.policy.policy_pins()):
+                    or prior.source_version_id != observation.id or prior.policy_pins != self.policy.policy_pins()
+                    or prior.locator != locator or prior.extractor != extractor
+                    or prior.confidence != confidence or prior.confidence_kind != confidence_kind):
                 deny()
             return pin(scope, "evidence", prior.id)
         evidence = Evidence(id=evidence_id, organization_id=self.policy.tenant_id, source_id=row.id,
-                            source_version_id=observation.id,
-                            locator={"kind": "whole_object", "reason_code": "synthetic_fixture"},
-                            extractor={"name": "fixture", "version": "1"}, confidence=None,
-                            confidence_kind="unknown", extracted_at=now, policy_pins=self.policy.policy_pins())
+                            source_version_id=observation.id, locator=locator,
+                            extractor=extractor, confidence=confidence,
+                            confidence_kind=confidence_kind, extracted_at=now,
+                            policy_pins=self.policy.policy_pins())
         db.add(evidence)
         db.flush()
         db.add(EvidenceAssessment(evidence_id=evidence.id, organization_id=self.policy.tenant_id,
@@ -233,6 +235,36 @@ class SourceEvidenceFacade:
         result = pin(scope, "evidence", evidence.id)
         audit(db, self.policy, scope, result.ref, "SOURCE_OBSERVED", now, result)
         return result
+
+    @boundary
+    def create_evidence(self, db, *, scope, source, version, evidence_id):
+        return self._create_evidence(
+            db, scope=scope, source=source, version=version, evidence_id=evidence_id,
+            locator={"kind": "whole_object", "reason_code": "synthetic_fixture"},
+            extractor={"name": "fixture", "version": "1"},
+            confidence=None, confidence_kind="unknown",
+        )
+
+    @boundary
+    def create_text_evidence(self, db, *, scope, source, version, evidence_id,
+                             char_start, char_end, confidence):
+        """Persist only exact code-point coordinates for local synthetic extraction.
+
+        Source text stays in the caller-owned in-memory boundary.  This method
+        neither stores a quote nor marks the resulting assessment verified.
+        """
+        if (type(char_start) is not int or type(char_end) is not int
+                or char_start < 0 or char_end <= char_start
+                or type(confidence) is not float or confidence < 0 or confidence > 1):
+            deny()
+        return self._create_evidence(
+            db, scope=scope, source=source, version=version, evidence_id=evidence_id,
+            locator={"kind": "text_range", "unit": "unicode_codepoint",
+                     "start": char_start, "end": char_end},
+            extractor={"name": "pu-synthetic-content", "version": "1",
+                       "method": "local_deterministic"},
+            confidence=confidence, confidence_kind="heuristic",
+        )
 
     @boundary
     def resolve(self, db, *, scope, pin, operation, lock=False):
