@@ -42,6 +42,96 @@ PROBE_CHECKPOINTS = {
     "t2_flushed_before_commit", "t2_uncommitted_worker_terminated",
     "s08_fixture_setup", "s08_t2_committed", "s08_worker_terminated",
 }
+UUID_VALUE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def exact(expected):
+    return lambda value: type(value) is type(expected) and value == expected
+
+
+def nonnegative_int(value) -> bool:
+    return type(value) is int and 0 <= value <= 2 ** 63 - 1
+
+
+def positive_int(value) -> bool:
+    return type(value) is int and 0 < value <= 2 ** 63 - 1
+
+
+def uuid_value(value) -> bool:
+    return isinstance(value, str) and UUID_VALUE.fullmatch(value) is not None
+
+
+COUNTER_SCHEMA = {
+    "tasks": nonnegative_int,
+    "history": nonnegative_int,
+    "receipts": nonnegative_int,
+    "projections": nonnegative_int,
+    "success_audits": nonnegative_int,
+    "job_status": exact("completed"),
+}
+RUNTIME_RECORD_SCHEMAS = (
+    {
+        "probe": exact("process_reclaim"),
+        "job_id": positive_int,
+        "receipt_id": uuid_value,
+        "status": exact("PASS"),
+        "expiry": exact("accelerated"),
+        "external_effects": exact("not_tested"),
+        **COUNTER_SCHEMA,
+    },
+    {
+        "probe": exact("s07_intent_recovery"),
+        "case": exact("S07"),
+        "status": exact("PASS"),
+        "process_kill": exact(True),
+        "pending_before_recovery": nonnegative_int,
+        "jobs_before_recovery": nonnegative_int,
+        "jobs_after_recovery": nonnegative_int,
+        "receipt_id": uuid_value,
+        **COUNTER_SCHEMA,
+    },
+    {
+        "probe": exact("t2_precommit_rollback"),
+        "case": exact("S08-precommit"),
+        "status": exact("PASS"),
+        "process_kill": exact(True),
+        "uncommitted_tasks": nonnegative_int,
+        "uncommitted_receipts": nonnegative_int,
+        "receipt_id": uuid_value,
+        **COUNTER_SCHEMA,
+    },
+    {
+        "probe": exact("s08_receipt_replay"),
+        "case": exact("S08"),
+        "status": exact("PASS"),
+        "process_kill": exact(True),
+        "job_before_reclaim": exact("running"),
+        "receipt_id": uuid_value,
+        **COUNTER_SCHEMA,
+    },
+    {"cleanup": exact("test_schema_dropped")},
+)
+
+
+def validate_runtime_records(runtime: list[dict]) -> list[dict]:
+    """Copy only the exact, typed child protocol; reject everything else."""
+    if type(runtime) is not list or len(runtime) != len(RUNTIME_RECORD_SCHEMAS):
+        raise RuntimeError("runtime_protocol_schema_invalid")
+    validated = []
+    for record, schema in zip(runtime, RUNTIME_RECORD_SCHEMAS):
+        if type(record) is not dict or set(record) != set(schema):
+            raise RuntimeError("runtime_protocol_schema_invalid")
+        if any(not validator(record[field]) for field, validator in schema.items()):
+            raise RuntimeError("runtime_protocol_schema_invalid")
+        validated.append({field: record[field] for field in schema})
+    return validated
+
+
+def parse_runtime_output(output: str) -> list[dict]:
+    records = [json.loads(line) for line in output.splitlines() if line.strip()]
+    return validate_runtime_records(records)
 
 
 def base_url(database: str) -> str:
@@ -140,6 +230,10 @@ def test_env() -> dict:
 
 
 def write_protocol(result: str, failure: BaseException | None, runtime: list[dict]) -> None:
+    if result == "PASS":
+        runtime = validate_runtime_records(runtime)
+    elif runtime:
+        raise RuntimeError("runtime_protocol_schema_invalid")
     protocol = {
         "schema": "puw.v54.runtime.protocol.v1", "result": result, "head": HEAD,
         "commit": os.environ.get("GITHUB_SHA", "local"), "phases": PHASES,
@@ -209,9 +303,7 @@ def main() -> None:
         run_phase("durable_gzip_regression", [sys.executable, "-m", "pytest",
             "scripts/ci/durable_queue/test_contract.py", "scripts/ci/durable_queue/test_run.py", "-q", "--tb=short"], env=env, timeout=180)
         output = run_phase("postgres_process_fault", [sys.executable, "scripts/ci/v54_pilot_runtime.py"], env=env, timeout=180)
-        runtime = [json.loads(line) for line in output.splitlines() if line.strip()]
-        if not runtime or runtime[-1].get("cleanup") != "test_schema_dropped" or runtime[0].get("status") != "PASS":
-            raise RuntimeError("runtime_protocol_failed")
+        runtime = parse_runtime_output(output)
     except BaseException as exc:
         failure = exc
     finally:

@@ -3,12 +3,66 @@ from dataclasses import dataclass
 import importlib.util
 import pickle
 from types import SimpleNamespace
+from copy import deepcopy
 
 import pytest
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def valid_runtime_records():
+    counters = {
+        "tasks": 1,
+        "history": 1,
+        "receipts": 1,
+        "projections": 1,
+        "success_audits": 1,
+        "job_status": "completed",
+    }
+    return [
+        {
+            "probe": "process_reclaim",
+            "job_id": 1,
+            "receipt_id": "00000000-0000-4000-8000-000000000002",
+            "status": "PASS",
+            "expiry": "accelerated",
+            "external_effects": "not_tested",
+            **counters,
+        },
+        {
+            "probe": "s07_intent_recovery",
+            "case": "S07",
+            "status": "PASS",
+            "process_kill": True,
+            "pending_before_recovery": 1,
+            "jobs_before_recovery": 0,
+            "jobs_after_recovery": 1,
+            "receipt_id": "00000000-0000-4000-8000-000000000003",
+            **counters,
+        },
+        {
+            "probe": "t2_precommit_rollback",
+            "case": "S08-precommit",
+            "status": "PASS",
+            "process_kill": True,
+            "uncommitted_tasks": 0,
+            "uncommitted_receipts": 0,
+            "receipt_id": "00000000-0000-4000-8000-000000000004",
+            **counters,
+        },
+        {
+            "probe": "s08_receipt_replay",
+            "case": "S08",
+            "status": "PASS",
+            "process_kill": True,
+            "job_before_reclaim": "running",
+            "receipt_id": "00000000-0000-4000-8000-000000000005",
+            **counters,
+        },
+        {"cleanup": "test_schema_dropped"},
+    ]
 
 
 @dataclass(frozen=True)
@@ -123,6 +177,39 @@ def test_process_probe_records_only_allowlisted_failure_checkpoint(monkeypatch):
     assert module.PHASES[0]["failure_checkpoint"] == "lease_recovery"
     assert module.PHASES[0]["child_error_type"] == "AssertionError"
     assert secret not in str(module.PHASES)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda records: records[0].update({"unknown": "unexpected"}),
+        lambda records: records[1].update({
+            "raw_document": "confidential document contents",
+        }),
+        lambda records: records[2].update({
+            "receipt_id": "postgresql://pilot:secret@provider.example/pilot",
+        }),
+    ],
+    ids=["unknown_field", "raw_document", "dsn_like_value"],
+)
+def test_runtime_protocol_rejects_unallowlisted_or_unsafe_probe_data_before_write(
+    monkeypatch, tmp_path, mutation
+):
+    path = ROOT / "scripts/ci/v54_pilot_workflow.py"
+    spec = importlib.util.spec_from_file_location("v54_pilot_workflow_schema_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    module.PHASES.clear()
+    records = deepcopy(valid_runtime_records())
+    mutation(records)
+    artifact = tmp_path / "protocol.json"
+    monkeypatch.setattr(module, "OUT", artifact)
+
+    with pytest.raises(RuntimeError, match="runtime_protocol_schema_invalid"):
+        module.write_protocol("PASS", None, records)
+
+    assert not artifact.exists()
 
 
 def test_successful_probe_cleanup_preserves_prior_checkpoint():
