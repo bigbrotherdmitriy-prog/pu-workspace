@@ -1,0 +1,114 @@
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [Docker smoke]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: pu-workspace-public-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: >-
+      vars.STAGING_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: staging
+    env:
+      STAGING_HOST: ${{ vars.STAGING_HOST }}
+      STAGING_USER: ${{ vars.STAGING_USER }}
+      STAGING_ROOT: ${{ vars.STAGING_ROOT }}
+      STAGING_PROJECT: ${{ vars.STAGING_PROJECT }}
+      STAGING_PORT: ${{ vars.STAGING_PORT }}
+      STAGING_PUBLIC_URL: ${{ vars.STAGING_PUBLIC_URL }}
+      STAGING_SSH_PORT: ${{ vars.STAGING_SSH_PORT }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve the gated main revision
+        id: revision
+        env:
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = workflow_run ]; then
+            revision="${WORKFLOW_RUN_SHA}"
+          else
+            revision="${GITHUB_SHA}"
+          fi
+          case "$revision" in *[!0-9a-f]*|'') exit 1 ;; esac
+          test "${#revision}" -eq 40
+          echo "sha=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.revision.outputs.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Refuse unsafe or production settings
+        run: python scripts/validate_staging_settings.py
+      - name: Require every protected release check for this exact SHA
+        run: >-
+          python scripts/wait_for_github_checks.py
+          --repository "$GITHUB_REPOSITORY"
+          --sha "${{ steps.revision.outputs.sha }}"
+          --check test-and-build
+          --check docker-smoke
+          --check package-and-secrets
+          --check python-dependencies
+          --check frontend-dependencies
+      - name: Require the revision to still be main HEAD
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main
+          test "$(git rev-parse FETCH_HEAD)" = "${{ steps.revision.outputs.sha }}"
+      - name: Configure pinned SSH host identity
+        id: ssh
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+          if [ "$STAGING_SSH_PORT" = 22 ]; then
+            lookup="$STAGING_HOST"
+          else
+            lookup="[$STAGING_HOST]:$STAGING_SSH_PORT"
+          fi
+          ssh-keygen -F "$lookup" -f "$HOME/.ssh/known_hosts" >/dev/null
+      - name: Package the exact tested source
+        run: git archive --format=tar.gz -o "$RUNNER_TEMP/release.tar.gz" HEAD
+      - name: Upload and deploy only the isolated staging stack
+        env:
+          REVISION: ${{ steps.revision.outputs.sha }}
+        run: |
+          set -euo pipefail
+          remote_dir="/tmp/puw-staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh_opts=(-p "$STAGING_SSH_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          ssh "${ssh_opts[@]}" "$STAGING_USER@$STAGING_HOST" "install -d -m 700 '$remote_dir'"
+          scp -P "$STAGING_SSH_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$RUNNER_TEMP/release.tar.gz" scripts/deploy-staging.sh \
+            "$STAGING_USER@$STAGING_HOST:$remote_dir/"
+          ssh "${ssh_opts[@]}" "$STAGING_USER@$STAGING_HOST" \
+            "sh '$remote_dir/deploy-staging.sh' '$STAGING_ROOT' '$REVISION' '$STAGING_PROJECT' '$STAGING_PORT' '$STAGING_PUBLIC_URL' '$remote_dir/release.tar.gz'"
+      - name: Remove this run's remote transfer files
+        if: always() && steps.ssh.outcome == 'success'
+        run: |
+          remote_dir="/tmp/puw-staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh -p "$STAGING_SSH_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$STAGING_USER@$STAGING_HOST" "rm -rf -- '$remote_dir'" || true
