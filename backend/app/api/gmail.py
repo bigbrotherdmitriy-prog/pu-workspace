@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import parseaddr
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -24,16 +25,21 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
-from app.models.document import Document
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
 from app.models.project import Project
 from app.core.integration_types import StorageObject
-from app.document_engine import index_documents
-from app.governance_engine import create_governance_items
-from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
-from app.task_engine import create_tasks_from_files
+from app.staging.gmail import (
+    GmailAttachmentBinding,
+    GmailAttachmentDenied,
+    GmailAttachmentIntegrityError,
+    GmailAttachmentUnavailable,
+    GmailProviderDownloadAdapter,
+    attachment_declaration,
+    enqueue_staged_gmail_attachment,
+    stage_gmail_attachment,
+)
 
 router = APIRouter(tags=["gmail"])
 MAX_ATTACHMENT_BYTES = int(os.getenv("GMAIL_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
@@ -282,60 +288,82 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
 
 
 @router.post("/ai-secretary/inbox/{message_id}/attachments/{attachment_index}/import")
-def import_gmail_attachment(message_id: int, attachment_index: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def import_gmail_attachment(
+    message_id: int,
+    attachment_index: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    mode: Literal["CONFIRM"] = "CONFIRM",
+):
+    if mode != "CONFIRM":
+        raise HTTPException(409, "Attachment import requires CONFIRM mode")
     source = db.get(Message, message_id)
     if source is None or source.source_type != "email":
         raise HTTPException(404, "Email message not found")
     require_project_role(db, user, source.project_id, "editor")
-    attachments = json.loads(source.attachments_json or "[]")
-    if attachment_index < 0 or attachment_index >= len(attachments):
-        raise HTTPException(404, "Attachment not found")
-    metadata = attachments[attachment_index]
-    attachment_id = metadata.get("attachment_id")
-    if not attachment_id:
-        raise HTTPException(422, "Attachment cannot be downloaded")
-    if int(metadata.get("size") or 0) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
     try:
+        mime_type, declared_size, attachment_id = attachment_declaration(
+            source, attachment_index, max_bytes=MAX_ATTACHMENT_BYTES,
+        )
         mailbox = runtime_for_message(db, source, actor=user, action=True)
-    except ValueError as exc:
+    except (ValueError, GmailAttachmentDenied) as exc:
         raise HTTPException(409, "Mailbox origin is unavailable") from exc
-    external_id = (f"gmail:{mailbox.provider_message_id}:{attachment_id}" if mailbox else
-                   metadata.get("document_external_id") or f"gmail:{source.source_external_id}:{attachment_id}")
-    existing_document = db.scalar(select(Document).where(
-        Document.project_id == source.project_id,
-        Document.external_id == external_id,
-    ))
-    if existing_document:
-        return {"document_id": existing_document.id, "name": existing_document.name, "tasks": 0, "drafts": 0,
-                "risks": 0, "decisions": 0, "already_indexed": True}
-    service = (google_workspace_for_mailbox(mailbox.google_token_id, db)
-               if mailbox else google_workspace_for_project(source.project_id, db)).service("gmail", "v1")
-    payload = service.users().messages().attachments().get(
-        userId="me", messageId=(mailbox.provider_message_id if mailbox else source.source_external_id),
-        id=attachment_id,
-    ).execute()
-    data = base64.urlsafe_b64decode(payload.get("data", "") + "=" * (-len(payload.get("data", "")) % 4))
-    if len(data) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
-    name = metadata.get("name") or "attachment"
-    mime_type = metadata.get("mime_type") or "application/octet-stream"
-    content = extract_text(data, mime_type, name)
-    if not content:
-        raise HTTPException(422, "Текст из вложения не извлечён; возможно, требуется OCR")
-    item = StorageObject(
-        id=external_id, name=name,
-        mime_type=mime_type, parent_id=f"message:{source.id}", size=len(data), content_text=content,
+    if mailbox is None:
+        # Historical/project-token fallback is never sufficient for staging.
+        raise HTTPException(409, "Mailbox origin is unavailable")
+    project = db.get(Project, source.project_id)
+    if project is None or project.organization_id != source.organization_id:
+        raise HTTPException(409, "Attachment scope is unavailable")
+    binding = GmailAttachmentBinding(
+        organization_id=source.organization_id,
+        owner_user_id=user.id,
+        project_id=source.project_id,
+        message_id=source.id,
+        attachment_index=attachment_index,
+        identity_id=mailbox.identity_id,
+        mail_connection_id=mailbox.mail_connection_id,
+        credential_generation=mailbox.generation,
+        binding_epoch=mailbox.binding_epoch,
+        mailbox_flags_record_version=mailbox.flags.record_version,
+        source_reference_id=mailbox.source_reference_id,
+        source_version_id=mailbox.source_version_id,
+        mailbox_binding_id=mailbox.binding_id,
+        declared_mime_type=mime_type,
+        declared_size=declared_size,
+        mode=mode,
     )
-    documents = index_documents(db, source.project_id, [item], "gmail")
-    tasks = create_tasks_from_files(db, source.project_id, source.contract_id, [item], source_type="email_attachment")
-    drafts = create_response_drafts(db, source.project_id, source.contract_id, [item])
-    risks, decisions = create_governance_items(db, source.project_id, [item], source_type="email_attachment")
-    db.add(AuditLog(action="gmail_attachment_imported", entity_type="message", entity_id=source.id,
-                    details=f"documents={len(documents)}; tasks={len(tasks)}; risks={len(risks)}"))
-    db.commit()
-    return {"document_id": documents[0].id, "name": name, "tasks": len(tasks), "drafts": len(drafts),
-            "risks": len(risks), "decisions": len(decisions), "already_indexed": False}
+    service = google_workspace_for_mailbox(mailbox.google_token_id, db).service("gmail", "v1")
+    provider = GmailProviderDownloadAdapter(
+        service,
+        provider_message_id=mailbox.provider_message_id,
+        provider_attachment_id=attachment_id,
+        expected_size=declared_size,
+        max_bytes=MAX_ATTACHMENT_BYTES,
+    )
+    try:
+        staged = stage_gmail_attachment(db, binding, provider, max_bytes=MAX_ATTACHMENT_BYTES)
+        db.add(AuditLog(
+            action="gmail_attachment_staged",
+            entity_type="message",
+            entity_id=source.id,
+            details=f"staging_id={staged.staging_id};status=admitted",
+        ))
+        job = enqueue_staged_gmail_attachment(db, staged.staging_id)
+    except GmailAttachmentUnavailable as exc:
+        db.rollback()
+        raise HTTPException(503, "Attachment staging is unavailable") from exc
+    except GmailAttachmentIntegrityError as exc:
+        db.rollback()
+        raise HTTPException(422, "Attachment integrity validation failed") from exc
+    except GmailAttachmentDenied as exc:
+        db.rollback()
+        raise HTTPException(409, "Attachment import is not authorized") from exc
+    return {
+        "staging_id": staged.staging_id,
+        "job_id": job.id,
+        "status": job.status,
+        "already_queued": staged.duplicate or job.attempts > 0 or job.status != "queued",
+    }
 
 
 @router.post("/response-drafts/{draft_id}/send-gmail")

@@ -295,6 +295,8 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
 
 def test_attachment_uses_origin_mailbox_adapter(db_session, user_factory, monkeypatch):
     from app.api import gmail
+    from app.models.job import BackgroundJob
+    from app.staging.gmail import GmailAttachmentStageResult
     w = world(db_session, user_factory)
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
     flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
@@ -309,15 +311,16 @@ def test_attachment_uses_origin_mailbox_adapter(db_session, user_factory, monkey
     monkeypatch.setattr(gmail, "require_project_role", lambda *a, **k: None)
     monkeypatch.setattr(gmail, "google_workspace_for_project", lambda *a, **k: pytest.fail("project fallback"))
     monkeypatch.setattr(gmail, "google_workspace_for_mailbox", lambda token_id, db: SimpleNamespace(service=lambda *a: Service()))
-    monkeypatch.setattr(gmail, "extract_text", lambda *a: "Synthetic")
-    monkeypatch.setattr(gmail, "index_documents", lambda *a, **k: [SimpleNamespace(id=7)])
-    monkeypatch.setattr(gmail, "create_tasks_from_files", lambda *a, **k: [])
-    monkeypatch.setattr(gmail, "create_response_drafts", lambda *a, **k: [])
-    monkeypatch.setattr(gmail, "create_governance_items", lambda *a, **k: ([], []))
+    def stage(_db, _binding, provider, *, max_bytes):
+        opened = provider.open()
+        assert opened.stream.read() == b"test" and max_bytes == gmail.MAX_ATTACHMENT_BYTES
+        return GmailAttachmentStageResult("a" * 32)
+    monkeypatch.setattr(gmail, "stage_gmail_attachment", stage)
     result = gmail.import_gmail_attachment(w.message.id, 0, w.db, w.user)
-    assert result["document_id"] == 7
+    assert result["job_id"] == w.db.scalar(select(BackgroundJob.id))
     assert calls[0]["messageId"] == "provider-message-synthetic"
-    audit = w.db.scalar(select(AuditLog).where(AuditLog.action == "gmail_attachment_imported"))
+    assert w.db.scalar(select(BackgroundJob)).payload == {"staging_id": "a" * 32}
+    audit = w.db.scalar(select(AuditLog).where(AuditLog.action == "gmail_attachment_staged"))
     assert "safe.txt" not in audit.details
 
 

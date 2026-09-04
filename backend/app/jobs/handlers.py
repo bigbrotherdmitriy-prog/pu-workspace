@@ -38,9 +38,19 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "gmail.sync":
         from app.automations.gmail import sync_authorized_projects_once
         return sync_authorized_projects_once()
+    if kind == "gmail.attachment.materialize":
+        from app.staging.gmail import run_gmail_attachment_job
+        return run_gmail_attachment_job(payload)
     if kind == "ai.rules":
         from app.automation_engine import run_due_rules
         from app.database import SessionLocal
         with SessionLocal() as db:
             return run_due_rules(db)
     raise ValueError(f"Unknown background job kind: {kind}")
+
+
+def notify_outcome(kind: str, payload: dict, status: str) -> None:
+    """Route lifecycle hooks without coupling the generic queue to staging."""
+    if kind == "gmail.attachment.materialize":
+        from app.staging.gmail import notify_gmail_attachment_job_outcome
+        notify_gmail_attachment_job_outcome(payload, status)

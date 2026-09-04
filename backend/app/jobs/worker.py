@@ -9,7 +9,7 @@ import uuid
 from threading import Event, Thread
 
 from app.database import SessionLocal
-from app.jobs.handlers import run
+from app.jobs.handlers import notify_outcome, run
 from app.jobs.queue import claim, execution_owner, fail, heartbeat, recover_expired, set_progress, succeed, touch_service
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -55,12 +55,24 @@ def main() -> None:
         except Exception as exc:
             log.error("Job %s (%s) failed; error_type=%s", job.id, job.kind, exc.__class__.__name__)
             with SessionLocal() as db:
-                fail(db, job.id, worker_id, exc, retryable=not isinstance(exc, (KeyError, TypeError, ValueError)))
+                status = fail(db, job.id, worker_id, exc, retryable=not isinstance(exc, (KeyError, TypeError, ValueError)))
+            if status != "lost":
+                try:
+                    notify_outcome(job.kind, dict(job.payload or {}), status)
+                except Exception as hook_error:
+                    log.error("Job %s lifecycle hook failed; error_type=%s", job.id, hook_error.__class__.__name__)
         else:
             with SessionLocal() as db:
                 set_progress(db, job.id, worker_id, 95)
-                if not succeed(db, job.id, worker_id, result):
+                completed = succeed(db, job.id, worker_id, result)
+                if not completed:
                     log.error("Lease ownership was lost for completed job %s", job.id)
+            if completed:
+                try:
+                    notify_outcome(job.kind, dict(job.payload or {}),
+                                   "cancelled" if (result or {}).get("cancelled") else "completed")
+                except Exception as hook_error:
+                    log.error("Job %s lifecycle hook failed; error_type=%s", job.id, hook_error.__class__.__name__)
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=2)

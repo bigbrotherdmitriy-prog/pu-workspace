@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin
 from app.database import get_db
+from app.jobs.handlers import notify_outcome
 from app.jobs.queue import cancel, metrics, retry
 from app.models.job import BackgroundJob, ServiceHeartbeat
 from app.models.user import User
@@ -35,7 +36,9 @@ def queue_metrics(db: Session = Depends(get_db), _: User = Depends(require_admin
 def cancel_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     if not cancel(db, job_id):
         raise HTTPException(409, "Only queued or retrying jobs can be cancelled")
-    return _job(db.get(BackgroundJob, job_id))
+    job = db.get(BackgroundJob, job_id)
+    notify_outcome(job.kind, dict(job.payload or {}), "cancelled")
+    return _job(job)
 
 @router.post("/{job_id}/retry")
 def retry_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
