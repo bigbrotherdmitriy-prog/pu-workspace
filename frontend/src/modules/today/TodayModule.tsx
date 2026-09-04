@@ -26,6 +26,11 @@ const sectionByKind = {
   decision: "Риски и решения",
   draft: "Письма",
   context: "AI Secretary",
+  missing_contract_source: "Договоры",
+  empty_schedule: "Исполнение и финансы",
+  unlinked_budget: "Исполнение и финансы",
+  unlinked_cash_flow: "Исполнение и финансы",
+  payment_confirmation: "Исполнение и финансы",
 } as const;
 
 export function TodayModule({ projectName, briefing, summary, inboxAttention, onOpen }: Props) {

@@ -156,11 +156,17 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
 
     baseline_ids_with_items = {row.baseline_id for row in schedule_items}
     empty_baselines = [row for row in baselines if row.id not in baseline_ids_with_items]
-    for row in empty_baselines:
+    if empty_baselines:
+        first = empty_baselines[0]
+        count = len(empty_baselines)
+        names = "; ".join(row.name for row in empty_baselines[:3])
+        if count > 3:
+            names += f"; ещё {count - 3}"
         attention.append({
-            "kind": "empty_schedule", "entity_id": row.id, "priority": "high",
-            "title": f"В ГПР «{row.name}» нет этапов", "due_date": None,
-            "source_name": row.name, "evidence": "Невозможно контролировать сроки без этапов ГПР",
+            "kind": "empty_schedule", "entity_id": first.id, "priority": "high",
+            "title": (f"В ГПР «{first.name}» нет этапов" if count == 1 else f"В {count} ГПР нет этапов"),
+            "due_date": None, "source_name": "Графики производства работ",
+            "evidence": f"Без этапов невозможно контролировать сроки. Требуют настройки: {names}",
             "next_step": "Добавить или импортировать этапы ГПР",
         })
 

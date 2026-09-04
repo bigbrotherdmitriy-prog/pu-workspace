@@ -44,6 +44,26 @@ def test_daily_briefing_detects_missing_contract_and_finance_links():
         assert result["external_actions_created"] is False
 
 
+def test_daily_briefing_groups_multiple_empty_schedules_into_one_action():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all([
+            ScheduleBaseline(project_id=16, contract_id=None, created_by_user_id=1, name="ГПР №1", version=1),
+            ScheduleBaseline(project_id=16, contract_id=None, created_by_user_id=1, name="ГПР №2", version=2),
+            ScheduleBaseline(project_id=16, contract_id=None, created_by_user_id=1, name="ГПР №3", version=3),
+        ])
+        db.commit()
+
+        result = build_daily_briefing(db, 16, today=date(2026, 8, 30))
+
+        assert result["summary"]["empty_schedules"] == 3
+        items = [row for row in result["attention"] if row["kind"] == "empty_schedule"]
+        assert len(items) == 1
+        assert items[0]["title"] == "В 3 ГПР нет этапов"
+        assert "ГПР №1" in items[0]["evidence"]
+
+
 def test_daily_briefing_requires_explicit_user_confirmation_for_due_payment():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)

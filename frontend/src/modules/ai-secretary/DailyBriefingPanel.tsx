@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Bot, CalendarClock, CheckCircle2 } from "lucide-react";
 
 export type DailyBriefingItem = {
-  kind: "overdue_task" | "overdue_obligation" | "risk" | "decision" | "draft" | "context";
+  kind: "overdue_task" | "overdue_obligation" | "risk" | "decision" | "draft" | "context"
+    | "missing_contract_source" | "empty_schedule" | "unlinked_budget" | "unlinked_cash_flow"
+    | "payment_confirmation";
   entity_id: number;
   priority: "critical" | "high" | "normal";
   title: string;
@@ -36,6 +38,11 @@ const sectionByKind: Record<DailyBriefingItem["kind"], string> = {
   decision: "Риски и решения",
   draft: "Письма",
   context: "AI Secretary",
+  missing_contract_source: "Договоры",
+  empty_schedule: "Исполнение и финансы",
+  unlinked_budget: "Исполнение и финансы",
+  unlinked_cash_flow: "Исполнение и финансы",
+  payment_confirmation: "Исполнение и финансы",
 };
 
 const labelByKind: Record<DailyBriefingItem["kind"], string> = {
@@ -45,6 +52,11 @@ const labelByKind: Record<DailyBriefingItem["kind"], string> = {
   decision: "Требуется решение",
   draft: "Черновик ждёт проверки",
   context: "Нужно подтвердить контекст",
+  missing_contract_source: "У договора нет документа-источника",
+  empty_schedule: "ГПР требует настройки",
+  unlinked_budget: "Строка бюджета не связана",
+  unlinked_cash_flow: "Запись ДДС связана не полностью",
+  payment_confirmation: "Нужно подтвердить платёж",
 };
 
 type Props = {
