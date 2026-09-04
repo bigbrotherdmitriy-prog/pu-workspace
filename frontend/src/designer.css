@@ -464,6 +464,7 @@ button:not(.icon):not(nav button) { border-radius: var(--pu-radius-sm); }
   .shell > aside { width: 284px; left: -300px; padding-top: max(18px, env(safe-area-inset-top)); }
   .shell > aside.mobile-open { left: 0; }
   header { height: 70px; padding: 0 12px; }
+  .documents-overlay, .documents-overlay.collapsed { left: 0; top: 70px; }
   .content, .documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay { padding: 15px 12px 90px; }
   .card { padding: 17px; border-radius: 15px; }
   .card:hover { transform: none; }

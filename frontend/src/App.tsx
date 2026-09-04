@@ -2136,6 +2136,7 @@ export function App() {
               <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
             </div>
             <select
+              aria-label="Текущий проект"
               value={projectId}
               onChange={(e) => {
                 const id = Number(e.target.value);

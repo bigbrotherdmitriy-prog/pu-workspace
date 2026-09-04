@@ -47,7 +47,7 @@ async function openDocuments() {
 }
 
 function switchToB() {
-  fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Текущий проект" }), { target: { value: "2" } });
 }
 
 describe("project document isolation", () => {
@@ -69,7 +69,7 @@ describe("project document isolation", () => {
     await screen.findByText("Документы не найдены");
     expect(screen.queryByRole("heading", { name: documentA.name })).not.toBeInTheDocument();
     expect(sessionStorage.getItem("pu_active_project_id")).toBe("2");
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Текущий проект" }), { target: { value: "1" } });
     await screen.findByText(documentA.summary);
   });
 
