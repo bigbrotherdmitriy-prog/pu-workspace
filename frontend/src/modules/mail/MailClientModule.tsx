@@ -2,14 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Archive, Bot, CheckCircle2, ChevronRight,
   Clock3, FileText, Inbox, Mail, MailOpen, Paperclip, PenLine, RefreshCw,
-  Reply, ReplyAll, Search, Send, Undo2, XCircle,
+  Reply, ReplyAll, Search, Send, Settings, ShieldAlert, Sparkles, Trash2, Undo2, XCircle,
 } from "lucide-react";
 import { ApiError } from "../../api/client";
 import { mailClientApi } from "./mailClientApi";
 import type {
   DraftInput, MailAddress, MailCapabilities, MailContract, MailDraft, MailFolder,
-  MailFolderKind, MailMessage, MailProject, MailThread,
+  MailFolderKind, MailMessage, MailProject, MailSettings, MailThread,
 } from "./types";
+import { MailSettingsDialog } from "./MailSettingsDialog";
+import { editorHtml, editorPlainText, RichTextEditor } from "./RichTextEditor";
 import "./mail-client.css";
 
 type Props = {
@@ -40,6 +42,11 @@ type ComposerState = {
   dirty: boolean;
 };
 
+const defaultMailSettings: MailSettings = {
+  display_name: "", signature_html: "", auto_signature_new: true, auto_signature_reply: true,
+  default_font: "Arial", default_font_size: "14px", default_text_color: "#18211d",
+};
+
 const emptyCapabilities: MailCapabilities = {
   provider: "mail", connected: false, can_send: false, can_compose: false,
   can_reply: false, can_reply_all: false, can_forward: false, can_attach: false,
@@ -52,11 +59,14 @@ const defaultFolders: MailFolder[] = [
   { kind: "drafts", label: "Черновики" },
   { kind: "sent", label: "Отправленные" },
   { kind: "archive", label: "Архив" },
+  { kind: "spam", label: "Спам" },
+  { kind: "trash", label: "Удалённые" },
   { kind: "all", label: "Вся почта" },
 ];
 
 const folderIcons = {
-  inbox: Inbox, attention: AlertTriangle, drafts: FileText, sent: Send, archive: Archive, all: MailOpen,
+  inbox: Inbox, attention: AlertTriangle, drafts: FileText, sent: Send, archive: Archive,
+  spam: ShieldAlert, trash: Trash2, all: MailOpen,
 };
 
 function addressText(addresses: MailAddress[]): string {
@@ -128,6 +138,20 @@ function initialComposer(projectId: number): ComposerState {
   };
 }
 
+function composeBody(content: string, settings: MailSettings, includeSignature: boolean): string {
+  const body = editorHtml(content, settings.default_font, settings.default_font_size, settings.default_text_color);
+  if (!includeSignature || !editorPlainText(settings.signature_html)) return body;
+  return `${body}<div><br></div><div class="pu-mail-signature">--<br>${settings.signature_html}</div>`;
+}
+
+function bodyForAi(value: string, settings: MailSettings): string {
+  const content = editorPlainText(value);
+  const signature = editorPlainText(settings.signature_html);
+  if (!signature) return content;
+  const suffix = `--\n${signature}`;
+  return content.endsWith(suffix) ? content.slice(0, -suffix.length).trimEnd() : content;
+}
+
 export function MailClientModule({
   projectId, currentUserEmail, projects, contracts, syncing, syncStatus, onSync, onOpenContacts,
   onNotice, onError, client = mailClientApi,
@@ -144,6 +168,13 @@ export function MailClientModule({
   const [showCopy, setShowCopy] = useState(false);
   const [busy, setBusy] = useState("");
   const [confirmSend, setConfirmSend] = useState(false);
+  const [mailSettings, setMailSettings] = useState<MailSettings>(defaultMailSettings);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [showAiAssist, setShowAiAssist] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiTone, setAiTone] = useState<"business" | "neutral" | "friendly">("business");
+  const [aiNotes, setAiNotes] = useState("");
   const requestRef = useRef(0);
   const subjectRef = useRef<HTMLInputElement>(null);
 
@@ -186,6 +217,12 @@ export function MailClientModule({
   }, [projectId]);
 
   useEffect(() => {
+    void client.settings().then(setMailSettings).catch(() => {
+      setMailSettings(defaultMailSettings);
+    });
+  }, [client]);
+
+  useEffect(() => {
     if (!selectedThreadId || folder === "drafts") return;
     const requestId = requestRef.current;
     void client.thread(projectId, selectedThreadId).then((loaded) => {
@@ -205,7 +242,8 @@ export function MailClientModule({
       const target = event.target as HTMLElement | null;
       const editing = target?.matches("input, textarea, select, [contenteditable=true]");
       if (event.key === "Escape") {
-        if (confirmSend) setConfirmSend(false);
+        if (showSettings) setShowSettings(false);
+        else if (confirmSend) setConfirmSend(false);
         else if (composer) setComposer(null);
       } else if (!editing && event.key.toLocaleLowerCase("ru-RU") === "c" && capabilities.can_compose) {
         event.preventDefault();
@@ -223,8 +261,14 @@ export function MailClientModule({
   const selectedMessage = selectedThread?.messages[selectedThread.messages.length - 1] || null;
 
   function openComposer(mode: MailDraft["mode"], message: MailMessage | null = selectedMessage) {
+    setShowAiAssist(false);
+    setAiNotes("");
+    setAiInstruction("");
     if (mode === "compose") {
-      setComposer(initialComposer(projectId));
+      setComposer({
+        ...initialComposer(projectId),
+        body: composeBody("", mailSettings, mailSettings.auto_signature_new),
+      });
       return;
     }
     if (!message) return;
@@ -249,9 +293,13 @@ export function MailClientModule({
       to: recipients.join(", "),
       cc: copies.join(", "),
       subject: mode === "forward" ? forwardSubject(message.subject) : replySubject(message.subject),
-      body: mode === "forward"
-        ? `\n\n---------- Пересылаемое сообщение ----------\nОт: ${message.sender.email}\nТема: ${message.subject}\n\n${message.content}`
-        : "",
+      body: composeBody(
+        mode === "forward"
+          ? `\n\n---------- Пересылаемое сообщение ----------\nОт: ${message.sender.email}\nТема: ${message.subject}\n\n${message.content}`
+          : "",
+        mailSettings,
+        mailSettings.auto_signature_reply,
+      ),
     });
   }
 
@@ -268,7 +316,7 @@ export function MailClientModule({
       to: parseAddresses(current.to).map((email) => ({ email })),
       cc: parseAddresses(current.cc).map((email) => ({ email })),
       bcc: parseAddresses(current.bcc).map((email) => ({ email })),
-      subject: current.subject.trim(), body: current.body.trim(),
+      subject: current.subject.trim(), body: current.body.trim(), body_format: "html",
       status: current.dirty ? "draft" : current.draft.status,
     };
   }
@@ -280,14 +328,14 @@ export function MailClientModule({
       mode: current.mode,
       reply_to_message_id: current.replyTo?.id || null,
       to: parseAddresses(current.to), cc: parseAddresses(current.cc), bcc: parseAddresses(current.bcc),
-      subject: current.subject.trim(), body: current.body.trim(), attachments: [],
+      subject: current.subject.trim(), body: current.body.trim(), body_format: "html", attachments: [],
     };
   }
 
   function validateComposer(current: ComposerState): string {
     if (!parseAddresses(current.to).length) return "Добавьте хотя бы одного получателя";
     if (!current.subject.trim()) return "Укажите тему письма";
-    if (!current.body.trim()) return "Введите текст письма";
+    if (!editorPlainText(current.body)) return "Введите текст письма";
     return "";
   }
 
@@ -346,6 +394,59 @@ export function MailClientModule({
     } finally { setBusy(""); }
   }
 
+  async function saveMailSettings(next: MailSettings) {
+    setSettingsBusy(true);
+    try {
+      const saved = await client.updateSettings(next);
+      setMailSettings(saved);
+      setShowSettings(false);
+      onNotice("Настройки почты и подпись сохранены");
+    } catch (error) {
+      onError((error as Error).message);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function runAiAssist(action: "compose" | "reply" | "improve" | "shorten" | "formal" | "friendly") {
+    if (!composer) return;
+    if (action === "compose" && !aiInstruction.trim() && !editorPlainText(composer.body)) {
+      onError("Опишите Gemini, какое письмо нужно подготовить");
+      return;
+    }
+    setBusy("ai");
+    setAiNotes("");
+    try {
+      const result = await client.assist({
+        project_id: composer.projectId,
+        reply_to_message_id: composer.replyTo?.id || null,
+        action,
+        tone: aiTone,
+        instruction: aiInstruction.trim(),
+        subject: composer.subject,
+        body: bodyForAi(composer.body, mailSettings),
+      });
+      const includeSignature = composer.mode === "compose" ? mailSettings.auto_signature_new : mailSettings.auto_signature_reply;
+      setComposer((current) => current ? {
+        ...current,
+        subject: result.subject || current.subject,
+        body: composeBody(result.body, mailSettings, includeSignature),
+        dirty: true,
+      } : current);
+      setAiNotes(`${result.provider} · ${result.model}: ${result.notes}`);
+      onNotice("Gemini подготовил вариант. Проверьте текст, сохраните и подтвердите версию.");
+    } catch (error) {
+      const message = (error as Error).message;
+      onError(message.includes("external_ai_blocked")
+        ? "Внешний AI запрещён политикой этого проекта"
+        : message.includes("temporarily_unavailable") || message.includes("not_configured")
+          ? "Gemini сейчас недоступен. Текущий текст черновика сохранён без изменений."
+          : message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function confirmContext(message: MailMessage, targetProjectId: number, contractId: number) {
     try {
       await client.confirmContext(message.id, targetProjectId, contractId || null);
@@ -359,6 +460,22 @@ export function MailClientModule({
       await client.setMessageStatus(message.id, message.status === "in_progress" ? "completed" : "in_progress");
       await loadMailbox();
     } catch (error) { onError((error as Error).message); }
+  }
+
+  async function moveMessage(message: MailMessage, destination: "archive" | "spam" | "trash" | "inbox") {
+    if (destination === "trash" && !window.confirm("Переместить письмо в корзину Gmail?")) return;
+    if (destination === "spam" && !window.confirm("Пометить письмо как спам в Gmail?")) return;
+    try {
+      await client.moveMessage(message.id, destination);
+      const labels = { archive: "Письмо перемещено в архив", spam: "Письмо помечено как спам", trash: "Письмо перемещено в корзину", inbox: "Письмо возвращено во входящие" };
+      onNotice(labels[destination]);
+      await loadMailbox(folder, query);
+    } catch (error) {
+      const detail = (error as Error).message;
+      onError(detail.includes("outcome_unknown")
+        ? "Результат операции в Gmail неизвестен. Обновите почту перед повтором."
+        : detail);
+    }
   }
 
   async function switchFolder(kind: MailFolderKind) {
@@ -389,6 +506,7 @@ export function MailClientModule({
             {capabilities.connected ? `${capabilities.provider} подключён` : "Почта не подключена"}
           </span>
           <button type="button" className="secondary" onClick={onOpenContacts}>Контакты</button>
+          <button type="button" className="secondary" onClick={() => setShowSettings(true)}><Settings />Настройки</button>
           <button type="button" onClick={() => void syncAndReload()} disabled={syncing}>
             <RefreshCw className={syncing ? "spinning" : ""} /> {syncing ? "Получаю…" : "Получить новые"}
           </button>
@@ -437,6 +555,13 @@ export function MailClientModule({
               <button disabled={!capabilities.can_reply} onClick={() => openComposer("reply")}><Reply />Ответить</button>
               <button disabled={!capabilities.can_reply_all} onClick={() => openComposer("reply_all")}><ReplyAll />Всем</button>
               <button disabled={!capabilities.can_forward} onClick={() => openComposer("forward")}><ChevronRight />Переслать</button>
+              {selectedMessage.direction === "incoming" && (folder === "spam" || folder === "trash"
+                ? <button onClick={() => void moveMessage(selectedMessage, "inbox")}><Inbox />Во входящие</button>
+                : <>
+                  <button title="Убрать из входящих" onClick={() => void moveMessage(selectedMessage, "archive")}><Archive />Архив</button>
+                  <button title="Пометить как спам" onClick={() => void moveMessage(selectedMessage, "spam")}><ShieldAlert />Спам</button>
+                  <button className="danger" title="Переместить в корзину" onClick={() => void moveMessage(selectedMessage, "trash")}><Trash2 />Удалить</button>
+                </>)}
             </div>
           </div>
           <div className="mail-context-strip">
@@ -463,7 +588,8 @@ export function MailClientModule({
               {message.drafts.map((draft) => <button className="mail-draft-card" key={draft.id} onClick={() => setComposer({
                 draft, mode: draft.mode, replyTo: message, projectId: draft.project_id,
                 contractId: draft.contract_id || 0, to: addressText(draft.to), cc: addressText(draft.cc),
-                bcc: addressText(draft.bcc), subject: draft.subject, body: draft.body, dirty: false,
+                bcc: addressText(draft.bcc), subject: draft.subject,
+                body: editorHtml(draft.body, mailSettings.default_font, mailSettings.default_font_size, mailSettings.default_text_color), dirty: false,
               })}>{statusIcon(draft.status)}<span><strong>{draft.subject}</strong><small>{statusLabel(draft.status)} · версия {draft.revision}</small></span><ChevronRight /></button>)}
               <button className="mail-workflow" onClick={() => void setMessageStatus(message)}>{message.status === "in_progress" ? "Отметить обработанным" : "Взять в работу"}</button>
             </article>)}
@@ -481,8 +607,24 @@ export function MailClientModule({
         <button className="mail-copy-toggle" onClick={() => setShowCopy((value) => !value)}>{showCopy ? "Скрыть копии" : "Копия / скрытая"}</button>
         {showCopy && <><label className="wide">Копия<input value={composer.cc} onChange={(event) => updateComposer({ cc: event.target.value })} /></label><label className="wide">Скрытая копия<input value={composer.bcc} onChange={(event) => updateComposer({ bcc: event.target.value })} /></label></>}
         <label className="wide">Тема<input ref={subjectRef} value={composer.subject} onChange={(event) => updateComposer({ subject: event.target.value })} /></label>
-        <label className="wide">Текст<textarea value={composer.body} onChange={(event) => updateComposer({ body: event.target.value })} /></label>
+        <div className="wide mail-editor-field"><strong>Текст письма</strong><RichTextEditor value={composer.body} onChange={(body) => updateComposer({ body })} font={mailSettings.default_font} fontSize={mailSettings.default_font_size} color={mailSettings.default_text_color} disabled={Boolean(busy)} /></div>
       </div>
+      <section className="mail-ai-compose">
+        <button type="button" className="mail-ai-toggle" onClick={() => setShowAiAssist((value) => !value)}><Sparkles />Помощь Gemini</button>
+        {showAiAssist && <div className="mail-ai-panel">
+          <div><strong>AI-помощник по тексту письма</strong><small>Gemini только предлагает текст и ничего не отправляет.</small></div>
+          <textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder={composer.replyTo ? "Например: подтвердить получение и запросить уточнённый срок" : "Опишите, кому и о чём нужно написать"} />
+          <label>Тон<select value={aiTone} onChange={(event) => setAiTone(event.target.value as typeof aiTone)}><option value="business">Деловой</option><option value="neutral">Нейтральный</option><option value="friendly">Дружелюбный</option></select></label>
+          <div className="mail-ai-actions">
+            <button disabled={Boolean(busy)} onClick={() => void runAiAssist(composer.replyTo ? "reply" : "compose")}>{busy === "ai" ? "Gemini думает…" : composer.replyTo ? "Подготовить ответ" : "Написать письмо"}</button>
+            <button disabled={Boolean(busy)} onClick={() => void runAiAssist("improve")}>Улучшить</button>
+            <button disabled={Boolean(busy)} onClick={() => void runAiAssist("shorten")}>Сократить</button>
+            <button disabled={Boolean(busy)} onClick={() => void runAiAssist("formal")}>Официальнее</button>
+            <button disabled={Boolean(busy)} onClick={() => void runAiAssist("friendly")}>Мягче</button>
+          </div>
+          {aiNotes && <p role="status">{aiNotes}</p>}
+        </div>}
+      </section>
       {composer.replyTo?.attachments.length ? <p className="mail-attachment-warning"><Paperclip /> Вложения исходного письма показаны в переписке, но не добавляются автоматически.</p> : null}
       {composer.draft && <div className={`mail-delivery-state ${composer.draft.status}`} aria-live="polite">{statusIcon(composer.draft.status)}<div><strong>{statusLabel(composer.draft.status)}</strong>{composer.draft.safe_error && <p>{composer.draft.safe_error}</p>}</div></div>}
       {composer.dirty && composer.draft?.approved_revision && <p className="mail-version-warning"><AlertTriangle /> Текст изменён. Сохраните и подтвердите новую версию перед отправкой.</p>}
@@ -501,5 +643,6 @@ export function MailClientModule({
       <p>После отправки письмо нельзя отозвать средствами PU Workspace.</p>
       <footer><button className="secondary" onClick={() => setConfirmSend(false)}><Undo2 />Вернуться к проверке</button><button className="send" onClick={() => void sendDraft()}><Send />Отправить версию {composer.draft.revision}</button></footer>
     </section></div>}
+    {showSettings && <MailSettingsDialog settings={mailSettings} busy={settingsBusy} onClose={() => setShowSettings(false)} onSave={saveMailSettings} />}
   </section>;
 }

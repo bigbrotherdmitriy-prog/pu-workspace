@@ -35,6 +35,10 @@ class FakeMailbox:
             raise TimeoutError("secret provider detail")
         return MailSendReceipt("provider-message-1", "provider-thread-1")
 
+    def move_message(self, external_message_id, destination):
+        self.commands.append((external_message_id, destination))
+        return SimpleNamespace(external_message_id=external_message_id, destination=destination)
+
 
 @pytest.fixture
 def mail_context(db_session):
@@ -132,6 +136,9 @@ def test_routes_expose_provider_neutral_mail_client_contract():
         "/mail/drafts/{draft_id}/approve",
         "/mail/drafts/{draft_id}/send",
         "/mail/drafts/{draft_id}/retry",
+        "/mail/settings",
+        "/mail/assist",
+        "/mail/messages/{message_id}/move",
     }.issubset(paths)
 
 
@@ -242,6 +249,92 @@ def test_send_requires_current_approval_is_idempotent_and_preserves_headers(monk
     audits = mail_context.db.query(AuditLog).filter(AuditLog.entity_id == created["id"]).all()
     assert {row.action for row in audits} >= {"mail_draft_created", "mail_draft_approved", "mail_send_started", "mail_sent"}
     assert all("supplier@example.test" not in (row.details or "") for row in audits)
+
+
+def test_rich_html_is_sanitized_and_sent_as_multipart(monkeypatch, mail_context):
+    adapter = FakeMailbox()
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
+    created = _new_draft(
+        mail_context,
+        body_format="html",
+        body='<div style="font-family:Arial;font-size:14px;color:#123456" onclick="secret()"><strong>Готово</strong> <script>token</script><a href="javascript:bad">ссылка</a></div>',
+    )
+    assert created["body_format"] == "html"
+    assert "onclick" not in created["body"]
+    assert "script" not in created["body"]
+    assert "javascript" not in created["body"]
+    mail.approve_mail_draft(created["id"], mail.MailDraftApproval(revision=1), mail_context.db, mail_context.user)
+    mail.send_mail_draft(created["id"], mail.MailDraftSend(
+        revision=1, idempotency_key="rich-send-command-1"), mail_context.db, mail_context.user)
+    command = adapter.commands[0]
+    assert command.body == "Готово ссылка"
+    assert "<strong>Готово</strong>" in command.html_body
+
+
+def test_mail_settings_are_user_scoped_and_signature_is_sanitized(mail_context):
+    payload = mail.MailSettingsPatch(
+        display_name="Operator",
+        signature_html='<div><b>Иван</b><img src="https://tracker.test/pixel"><script>secret</script></div>',
+        auto_signature_new=True,
+        auto_signature_reply=False,
+        default_font="Calibri",
+        default_font_size="16px",
+        default_text_color="#123456",
+    )
+    saved = mail.update_mail_settings(payload, mail_context.db, mail_context.user)
+    assert "<b>Иван</b>" in saved["signature_html"]
+    assert "tracker" not in saved["signature_html"]
+    assert "secret" not in saved["signature_html"]
+    assert saved["auto_signature_reply"] is False
+    other = mail.get_mail_settings(mail_context.db, mail_context.other_user)
+    assert other["signature_html"] == ""
+
+
+def test_gemini_mail_assist_uses_policy_and_never_sends(monkeypatch, mail_context):
+    class FakeAI:
+        provider = "gemini"
+        model = "gemini-test"
+
+        def health(self):
+            return SimpleNamespace(ready=True)
+
+        def compose_message(self, text, context_name, action, tone):
+            assert "Please review the schedule" in text
+            assert action == "reply"
+            assert tone == "business"
+            return {"subject": "Re: Schedule", "body": "Добрый день! Срок проверяем.", "notes": "Проверьте дату."}
+
+    provider = FakeAI()
+    mailbox = FakeMailbox()
+    monkeypatch.setattr(mail, "configured_ai_provider", lambda: provider)
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: mailbox)
+    result = mail.assist_mail_draft(mail.MailAssistRequest(
+        project_id=mail_context.project.id,
+        reply_to_message_id=mail_context.incoming.id,
+        action="reply",
+        tone="business",
+        instruction="Подготовить ответ",
+        subject="Schedule",
+        body="",
+    ), mail_context.db, mail_context.user)
+    assert result["body"] == "Добрый день! Срок проверяем."
+    assert result["requires_confirmation"] is True
+    assert mailbox.commands == []
+
+
+def test_mail_move_updates_provider_and_local_folder(monkeypatch, mail_context):
+    adapter = FakeMailbox()
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
+    moved = mail.move_mail_message(
+        mail_context.incoming.id, mail.MailMoveRequest(destination="spam"), mail_context.db, mail_context.user,
+    )
+    assert adapter.commands == [("gmail-message-1", "spam")]
+    assert "SPAM" in json.loads(mail_context.incoming.mail_labels_json)
+    assert moved["id"] == mail_context.incoming.id
+    assert mail.mail_messages(mail_context.project.id, "inbox", None, 50, None,
+                              mail_context.db, mail_context.user)["messages"] == []
+    assert mail.mail_messages(mail_context.project.id, "spam", None, 50, None,
+                              mail_context.db, mail_context.user)["messages"][0]["id"] == mail_context.incoming.id
 
 
 def test_unknown_outcome_blocks_retry_and_does_not_leak_provider_error(monkeypatch, mail_context):

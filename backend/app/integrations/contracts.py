@@ -56,6 +56,7 @@ class MailSendCommand:
     bcc: Sequence[str]
     subject: str
     body: str
+    html_body: str | None = None
     thread_id: str | None = None
 
 
@@ -63,6 +64,12 @@ class MailSendCommand:
 class MailSendReceipt:
     external_message_id: str
     external_thread_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MailMoveReceipt:
+    external_message_id: str
+    destination: str
 
 
 class MailNotAppliedError(RuntimeError):
@@ -75,12 +82,14 @@ class MailboxAdapter(IntegrationAdapter, Protocol):
 
     def list_folders(self) -> list[MailFolder]: ...
     def send_message(self, command: MailSendCommand) -> MailSendReceipt: ...
+    def move_message(self, external_message_id: str, destination: str) -> MailMoveReceipt: ...
 
 
 @runtime_checkable
 class AIProviderAdapter(IntegrationAdapter, Protocol):
     def analyze_document(self, text: str, filename: str) -> dict[str, Any]: ...
     def analyze_message(self, text: str, context_name: str) -> dict[str, Any]: ...
+    def compose_message(self, text: str, context_name: str, action: str, tone: str) -> dict[str, Any]: ...
 
 
 @runtime_checkable

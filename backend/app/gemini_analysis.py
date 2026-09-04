@@ -47,6 +47,16 @@ MESSAGE_REPLY_SCHEMA = {
     ],
 }
 
+MAIL_COMPOSER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subject": {"type": "string"},
+        "body": {"type": "string"},
+        "notes": {"type": "string"},
+    },
+    "required": ["subject", "body", "notes"],
+}
+
 
 SYSTEM_INSTRUCTION = """Ты — аналитик проектной, договорной и деловой документации.
 Анализируй только предоставленный текст. Не додумывай факты и не используй внешние сведения.
@@ -146,6 +156,41 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     result = json.loads("".join(part.get("text", "") for part in parts))
     if not isinstance(result, dict):
         raise ValueError("Gemini returned an unexpected response")
+    return result
+
+
+def compose_message_with_gemini(text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
+    import httpx
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    prompt = (
+        f"Контекст: {context_name}\nДействие редактора: {action}\nТон: {tone}\n\n"
+        "Подготовь или переработай деловое письмо на русском языке. Верни тему, готовый текст письма "
+        "и краткое примечание, что пользователю нужно проверить. Не выдумывай имена, даты, суммы, "
+        "обещания, вложения или выполненные действия. Сохраняй факты исходного текста. "
+        "Не добавляй подпись: приложение подставит подтверждённую подпись пользователя.\n\n"
+        "ИСХОДНЫЕ ДАННЫЕ:\n" + text[:20_000]
+    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": _generation_config(model, MAIL_COMPOSER_SCHEMA, 0.2),
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = request_with_retry(
+            client, "POST", f"{base_url}/models/{model}:generateContent",
+            policy=HEAVY_AI_RETRY,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=payload,
+        )
+    parts = response.json()["candidates"][0]["content"]["parts"]
+    result = json.loads("".join(part.get("text", "") for part in parts))
+    if not isinstance(result, dict) or not str(result.get("body") or "").strip():
+        raise ValueError("Gemini returned an unexpected mail draft")
     return result
 
 

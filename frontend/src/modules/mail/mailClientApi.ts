@@ -1,5 +1,5 @@
 import { api } from "../../api/client";
-import type { DraftInput, MailAddress, MailCapabilities, MailDraft, MailFolder, MailFolderKind, MailMessage, MailThread } from "./types";
+import type { DraftInput, MailAddress, MailAssistRequest, MailAssistResult, MailCapabilities, MailDraft, MailFolder, MailFolderKind, MailMessage, MailSettings, MailThread } from "./types";
 
 type RawDraft = Omit<MailDraft, "to" | "cc" | "bcc" | "safe_error" | "receipt" | "message_id"> & {
   to: string[]; cc: string[]; bcc: string[]; error_code?: string | null;
@@ -25,6 +25,15 @@ function safeDraftError(code?: string | null): string | null {
   return "Не удалось завершить отправку. Код ошибки доступен в журнале.";
 }
 
+function plainPreview(value: string): string {
+  if (typeof DOMParser === "undefined" || !/<[a-z][\s\S]*>/i.test(value)) {
+    return value.replace(/\s+/g, " ").trim().slice(0, 180);
+  }
+  const parsed = new DOMParser().parseFromString(value, "text/html");
+  parsed.querySelectorAll("script, style, noscript, iframe, object, embed, svg").forEach((node) => node.remove());
+  return (parsed.body.textContent || "").replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
 function normalizeDraft(raw: RawDraft): MailDraft {
   return {
     ...raw, message_id: raw.reply_to_message_id || null,
@@ -43,7 +52,7 @@ function message(raw: RawMessage): MailMessage {
     id: raw.id, project_id: raw.project_id, contract_id: raw.contract_id,
     thread_id: raw.thread_id, direction: raw.direction, sender: { email: sender },
     to: addresses(raw.headers?.to), cc: addresses(raw.headers?.cc), subject: raw.subject,
-    preview: raw.summary || raw.content.replace(/\s+/g, " ").slice(0, 180), content: raw.content,
+    preview: raw.summary || plainPreview(raw.content), content: raw.content,
     summary: raw.summary, received_at: raw.created_at, status: raw.status,
     needs_attention: !raw.context_confirmed || ["ready", "in_progress"].includes(raw.status),
     context_confirmed: raw.context_confirmed, attachments: raw.attachments || [],
@@ -91,7 +100,7 @@ export const mailClientApi = {
   folders(projectId: number) {
     return api<{ folders: Array<{ id: string; name: string; count?: number }> }>(`/mail/projects/${projectId}/folders`).then((raw) => ({
       folders: raw.folders
-        .filter((item): item is { id: MailFolderKind; name: string; count?: number } => ["inbox", "attention", "drafts", "sent", "archive", "all"].includes(item.id))
+        .filter((item): item is { id: MailFolderKind; name: string; count?: number } => ["inbox", "attention", "drafts", "sent", "archive", "spam", "trash", "all"].includes(item.id))
         .map((item) => ({ kind: item.id, label: item.name, count: item.count } satisfies MailFolder)),
     }));
   },
@@ -109,7 +118,7 @@ export const mailClientApi = {
         const message: MailMessage = {
           id: item.message_id || -item.id, project_id: item.project_id, contract_id: item.contract_id,
           thread_id: `draft:${item.id}`, direction: "outgoing", sender: { email: "Я" }, to: item.to,
-          cc: item.cc, subject: item.subject, preview: item.body.replace(/\s+/g, " ").slice(0, 180),
+          cc: item.cc, subject: item.subject, preview: plainPreview(item.body),
           content: item.body, received_at: date, status: item.status, needs_attention: item.status !== "sent",
           context_confirmed: true, attachments: item.attachments, drafts: [item],
         };
@@ -145,6 +154,7 @@ export const mailClientApi = {
         bcc: draft.bcc.map((row) => row.email),
         subject: draft.subject,
         body: draft.body,
+        body_format: draft.body_format || "html",
       }),
     }).then(normalizeDraft);
   },
@@ -160,6 +170,15 @@ export const mailClientApi = {
       body: JSON.stringify({ revision, idempotency_key: idempotencyKey }),
     }).then(normalizeDraft);
   },
+  settings() {
+    return api<MailSettings>("/mail/settings");
+  },
+  updateSettings(settings: MailSettings) {
+    return api<MailSettings>("/mail/settings", { method: "PUT", body: JSON.stringify(settings) });
+  },
+  assist(input: MailAssistRequest) {
+    return api<MailAssistResult>("/mail/assist", { method: "POST", body: JSON.stringify(input) });
+  },
   confirmContext(messageId: number, projectId: number, contractId: number | null) {
     return api<RawMessage>(`/ai-secretary/inbox/${messageId}/confirm-context`, {
       method: "POST",
@@ -170,6 +189,11 @@ export const mailClientApi = {
     return api<RawMessage>(`/ai-secretary/inbox/${messageId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    }).then(message);
+  },
+  moveMessage(messageId: number, destination: "archive" | "spam" | "trash" | "inbox") {
+    return api<RawMessage>(`/mail/messages/${messageId}/move`, {
+      method: "POST", body: JSON.stringify({ destination }),
     }).then(message);
   },
 };
