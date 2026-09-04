@@ -301,9 +301,14 @@ class FilesystemStagingStorage:
                     os.mkdir(shard_name, 0o700, dir_fd=root_fd)
                 except FileExistsError:
                     pass
+            named = os.stat(shard_name, dir_fd=root_fd, follow_symlinks=False)
+            if stat.S_ISLNK(named.st_mode) or not stat.S_ISDIR(named.st_mode):
+                raise StagingSecurityError("unsafe_storage_shard")
             shard_fd = os.open(shard_name, flags, dir_fd=root_fd)
             opened = os.fstat(shard_fd)
-            if not stat.S_ISDIR(opened.st_mode) or stat.S_IMODE(opened.st_mode) & 0o077:
+            if ((opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+                    or not stat.S_ISDIR(opened.st_mode)
+                    or stat.S_IMODE(opened.st_mode) & 0o077):
                 raise StagingSecurityError("unsafe_storage_shard")
             yield self._root / shard_name, shard_fd
         except FileNotFoundError:

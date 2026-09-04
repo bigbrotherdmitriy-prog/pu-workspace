@@ -139,6 +139,8 @@ def test_writer_never_removes_a_preexisting_same_fence_partial(store):
     object_id, fence = new_object_id(), new_fence()
     shard = store._root / object_id[:2]
     shard.mkdir()
+    if os.name == "posix":
+        shard.chmod(0o700)
     partial = shard / f"{object_id}.partial.{fence}"
     partial.write_bytes(b"another-active-writer")
     with pytest.raises(StagingConflict, match="writer_fence_exists"):
@@ -540,6 +542,8 @@ def test_cleanup_is_exact_and_preserves_active_and_foreign_partials(store):
     stale, active, foreign_fence = new_fence(), new_fence(), new_fence()
     shard = store._root / "ef"
     shard.mkdir()
+    if os.name == "posix":
+        shard.chmod(0o700)
     stale_path = shard / f"{object_id}.partial.{stale}"
     active_path = shard / f"{object_id}.partial.{active}"
     foreign_path = shard / f"{foreign_id}.partial.{foreign_fence}"
@@ -553,16 +557,16 @@ def test_cleanup_is_exact_and_preserves_active_and_foreign_partials(store):
 
 def test_delete_is_idempotent_but_io_error_is_not_success(store, monkeypatch):
     descriptor = write(store, b"delete")
-    path = path_for(store, descriptor)
-    original = Path.unlink
-    def fail(self, *args, **kwargs):
-        if self == path:
+    final_name = f"{descriptor.object_id}.enc"
+    original = store._unlink_name
+    def fail(shard, name):
+        if name == final_name:
             raise PermissionError
-        return original(self, *args, **kwargs)
-    monkeypatch.setattr(Path, "unlink", fail)
+        return original(shard, name)
+    monkeypatch.setattr(store, "_unlink_name", fail)
     with pytest.raises(StagingIOError, match="delete_failed"):
         store.delete(descriptor.object_id)
-    monkeypatch.setattr(Path, "unlink", original)
+    monkeypatch.setattr(store, "_unlink_name", original)
     store.delete(descriptor.object_id)
     store.delete(descriptor.object_id)
 
