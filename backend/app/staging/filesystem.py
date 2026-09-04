@@ -286,37 +286,38 @@ class FilesystemStagingStorage:
 
         root_fd = shard_fd = -1
         try:
-            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            root_fd = os.open(self._root, flags)
-            root_opened = os.fstat(root_fd)
-            root_named = self._root.lstat()
-            if ((root_opened.st_dev, root_opened.st_ino) != (root_named.st_dev, root_named.st_ino)
-                    or (root_opened.st_dev, root_opened.st_ino) != self._root_identity
-                    or not stat.S_ISDIR(root_opened.st_mode)
-                    or stat.S_IMODE(root_opened.st_mode) & 0o077):
-                raise StagingSecurityError("unsafe_storage_root")
-            shard_name = object_id[:2]
-            if create:
-                try:
-                    os.mkdir(shard_name, 0o700, dir_fd=root_fd)
-                except FileExistsError:
-                    pass
-            named = os.stat(shard_name, dir_fd=root_fd, follow_symlinks=False)
-            if stat.S_ISLNK(named.st_mode) or not stat.S_ISDIR(named.st_mode):
-                raise StagingSecurityError("unsafe_storage_shard")
-            shard_fd = os.open(shard_name, flags, dir_fd=root_fd)
-            opened = os.fstat(shard_fd)
-            if ((opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
-                    or not stat.S_ISDIR(opened.st_mode)
-                    or stat.S_IMODE(opened.st_mode) & 0o077):
-                raise StagingSecurityError("unsafe_storage_shard")
+            try:
+                flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                root_fd = os.open(self._root, flags)
+                root_opened = os.fstat(root_fd)
+                root_named = self._root.lstat()
+                if ((root_opened.st_dev, root_opened.st_ino) != (root_named.st_dev, root_named.st_ino)
+                        or (root_opened.st_dev, root_opened.st_ino) != self._root_identity
+                        or not stat.S_ISDIR(root_opened.st_mode)
+                        or stat.S_IMODE(root_opened.st_mode) & 0o077):
+                    raise StagingSecurityError("unsafe_storage_root")
+                shard_name = object_id[:2]
+                if create:
+                    try:
+                        os.mkdir(shard_name, 0o700, dir_fd=root_fd)
+                    except FileExistsError:
+                        pass
+                named = os.stat(shard_name, dir_fd=root_fd, follow_symlinks=False)
+                if stat.S_ISLNK(named.st_mode) or not stat.S_ISDIR(named.st_mode):
+                    raise StagingSecurityError("unsafe_storage_shard")
+                shard_fd = os.open(shard_name, flags, dir_fd=root_fd)
+                opened = os.fstat(shard_fd)
+                if ((opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+                        or not stat.S_ISDIR(opened.st_mode)
+                        or stat.S_IMODE(opened.st_mode) & 0o077):
+                    raise StagingSecurityError("unsafe_storage_shard")
+            except FileNotFoundError:
+                raise StagingIOError("object_unavailable") from None
+            except StagingError:
+                raise
+            except OSError:
+                raise StagingIOError("storage_shard_unavailable") from None
             yield self._root / shard_name, shard_fd
-        except FileNotFoundError:
-            raise StagingIOError("object_unavailable") from None
-        except StagingError:
-            raise
-        except OSError:
-            raise StagingIOError("storage_shard_unavailable") from None
         finally:
             if shard_fd >= 0:
                 os.close(shard_fd)
