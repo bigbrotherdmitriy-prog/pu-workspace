@@ -35,6 +35,15 @@ def test_wrap_is_domain_bound_to_object_reference_and_exact_kek_version():
             unwrap_dek(wrapped, object_id=object_id, kek=kek, resolver=resolver)
 
 
+def test_key_wrap_is_nonce_free_and_deterministic_for_one_exact_binding():
+    resolver = Keys({("kms/pilot", "v1"): b"1" * 32})
+    kek = KekRef("kms/pilot", "v1")
+    first = wrap_dek(b"d" * 32, object_id="1" * 32, kek=kek, resolver=resolver)
+    second = wrap_dek(b"d" * 32, object_id="1" * 32, kek=kek, resolver=resolver)
+    assert first == second
+    assert len(first) == 56
+
+
 def test_rotation_requires_exact_old_key_and_has_no_fallback():
     old = KekRef("kms/pilot", "old")
     wrapped = wrap_dek(
@@ -79,3 +88,11 @@ def test_tampered_wrapped_key_is_rejected():
     tampered = wrapped[:-2] + replacement + wrapped[-1]
     with pytest.raises(StagingIntegrityError, match="wrapped_key_invalid"):
         unwrap_dek(tampered, object_id="1" * 32, kek=kek, resolver=resolver)
+
+
+def test_public_wrap_boundary_rejects_noncanonical_object_id_safely():
+    with pytest.raises(StagingSecurityError, match="invalid_opaque_id"):
+        wrap_dek(
+            b"d" * 32, object_id="../secret", kek=KekRef("kms/pilot", "v1"),
+            resolver=Keys({("kms/pilot", "v1"): b"1" * 32}),
+        )

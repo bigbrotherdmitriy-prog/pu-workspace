@@ -46,7 +46,9 @@ class StagingDescriptor:
     """Non-business metadata safe to persist outside the ciphertext.
 
     It intentionally has no filename, MIME, locator, owner, project, URL,
-    filesystem path, plaintext digest or plaintext size.
+    filesystem path, plaintext digest or plaintext size. The ciphertext uses
+    fixed-size padded frames: storage observers can see the chunk-count bucket,
+    but not the exact plaintext size within that bucket.
     """
 
     object_id: str
@@ -69,11 +71,7 @@ class StagingStorage(Protocol):
     ) -> StagingDescriptor: ...
 
     def read_chunks(self, descriptor: StagingDescriptor, *, max_bytes: int) -> Iterator[bytes]:
-        """Yield bounded authenticated chunks.
-
-        A caller must exhaust the iterator before committing derived effects:
-        only exhaustion authenticates the footer, total size and digest.
-        """
+        """Verify the complete object, then yield bounded authenticated chunks."""
         ...
 
     def delete(self, object_id: str) -> None: ...
