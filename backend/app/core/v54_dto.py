@@ -1,4 +1,4 @@
-"""Narrow CONFIRM DTOs shared by the three pilot streams; not HTTP endpoints."""
+"""Narrow sealed-action DTOs shared by the v5.4 pilot streams."""
 from __future__ import annotations
 
 import hashlib
@@ -96,7 +96,7 @@ class ActionEnvelope(StrictDTO):
     policy: VersionPin
     policy_sha256: StrictStr
     risk: Literal["LOW"]
-    autonomy: Literal["CONFIRM"]
+    autonomy: Literal["CONFIRM", "AUTO"]
     reversal: Literal["COMPENSATABLE"]
     effects: tuple[StrictStr, ...]
     payload: CreateTaskPayload | CancelTaskPayload
@@ -131,7 +131,7 @@ class ActionEnvelope(StrictDTO):
                     or self.effects != ("internal_task.create", "task_history.append")):
                 raise ValueError("invalid create effect")
             refs.extend([self.payload.assignee_ref, self.payload.contract_ref])
-        elif (not isinstance(self.payload, CancelTaskPayload) or self.target.ref.type != "task"
+        elif (self.autonomy != "CONFIRM" or not isinstance(self.payload, CancelTaskPayload) or self.target.ref.type != "task"
               or not self.compensates_action_ref or self.compensates_action_ref.type != "action"
               or self.compensates_action_ref == self.action_ref
               or self.effects != ("internal_task.cancel", "task_history.append")):

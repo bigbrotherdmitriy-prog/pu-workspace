@@ -197,10 +197,13 @@ class AutonomyPolicyService:
         except Exception:
             return False
 
-    def _current(self, db, scope: RequestScope) -> ActionPolicy | None:
-        rows = list(db.scalars(select(ActionPolicy).where(
+    def _current(self, db, scope: RequestScope, *, lock=True) -> ActionPolicy | None:
+        query = select(ActionPolicy).where(
             ActionPolicy.organization_id == int(scope.tenant.value),
-        ).order_by(ActionPolicy.revision.desc()).with_for_update().execution_options(populate_existing=True)))
+        ).order_by(ActionPolicy.revision.desc()).execution_options(populate_existing=True)
+        if lock:
+            query = query.with_for_update()
+        rows = list(db.scalars(query))
         matches = [row for row in rows if self._matches_scope(row, scope)]
         if not matches:
             return None
@@ -208,6 +211,29 @@ class AutonomyPolicyService:
         if len(ids) != 1:
             _deny()
         return matches[0]
+
+    def lock_current_view(self, db, *, scope: RequestScope):
+        """Lock enabling owner authority before the exact current policy row."""
+        peek = self._current(db, scope, lock=False)
+        if peek is None:
+            return None, None
+        try:
+            rules = validate_stored_rules(peek.rules)
+            changed_by = ObjectRef.model_validate(rules["changed_by"])
+            owner = self.authority.require_principal(
+                db, tenant_id=int(scope.tenant.value), project_id=int(scope.project.id.value),
+                principal_kind="user", principal_id=changed_by.id.value,
+                operation="autonomy.policy.manage", now=self._now(), lock=True,
+            )
+        except (AuthorityDenied, ValueError, TypeError, KeyError):
+            _deny()
+        current = self._current(db, scope, lock=True)
+        if current is None or current.id != peek.id or current.revision != peek.revision:
+            raise AutonomyConflict("stale_policy_decision")
+        view = self._view(db, current, scope, require_live_owner=False)
+        if owner.membership_role != "owner" or owner.authority_epoch != rules["authority_epoch"]:
+            _deny()
+        return current, view.model_copy(update={"valid_until": min(view.valid_until, owner.valid_until)})
 
     def _view(self, db, row: ActionPolicy, scope: RequestScope, *, require_live_owner: bool) -> AutonomyPolicyView:
         try:
@@ -357,10 +383,7 @@ class AutonomyPolicyService:
             requester = self.authority.require(db, scope, "action.freeze", now, lock=True)
         except AuthorityDenied:
             _deny()
-        row = self._current(db, scope)
-        view = None
-        if row is not None:
-            view = self._view(db, row, scope, require_live_owner=True)
+        row, view = self.lock_current_view(db, scope=scope)
         if candidate.stage != "EXECUTE":
             mode, reason = "ASSIST", "advisory_stage"
         elif candidate.action_type == CREATE_INTERNAL_TASK:

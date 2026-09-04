@@ -1,4 +1,4 @@
-"""Caller-transaction CONFIRM trust facade, deliberately not wired to workers."""
+"""Caller-transaction trust facade for human CONFIRM and internal-task AUTO."""
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -20,19 +20,37 @@ from app.models.v54_pilot import (
 
 
 class TrustFacade:
-    def __init__(self, *, guards: Guards):
-        self.guards = guards
+    def __init__(self, *, guards: Guards, autonomy=None):
+        # ``autonomy`` is an explicitly injected AutonomyPolicyService.  There is
+        # no environment/config fallback and therefore no production activation.
+        self.guards, self.autonomy = guards, autonomy
 
     def _policy(self, db, scope, e, *, live=True):
         policy = db.scalar(select(ActionPolicy).where(ActionPolicy.id == e.policy.ref.id.value,
             ActionPolicy.revision == e.policy.value, ActionPolicy.organization_id == int(scope.tenant.value))
-            .with_for_update().execution_options(populate_existing=True))
+            .execution_options(populate_existing=True))
         if policy is None:
             raise TrustConflict("policy_unavailable")
-        if live:
+        if live and policy.rules.get("schema_version") == "v54.autonomy-policy.1":
+            if self.autonomy is None:
+                raise TrustConflict("policy_unavailable")
+            try:
+                current, view = self.autonomy.lock_current_view(db, scope=scope)
+            except ValueError as exc:
+                raise TrustConflict("policy_unavailable") from exc
+            if (current is None or view is None or current.id != policy.id
+                    or current.revision != policy.revision or view.policy != e.policy
+                    or view.policy_sha256 != e.policy_sha256
+                    or (e.autonomy == "AUTO" and (
+                        e.action_type != "task.internal.create" or not view.enabled
+                        or view.create_internal_task != "AUTO"))):
+                raise TrustConflict("policy_unavailable")
+        elif live:
+            db.refresh(policy, with_for_update=True)
             latest = db.scalar(select(func.max(ActionPolicy.revision)).where(
                 ActionPolicy.id == policy.id, ActionPolicy.organization_id == policy.organization_id))
-            if (latest != policy.revision or policy.mode != "CONFIRM" or utc(policy.valid_until) <= self.guards.now()
+            if (e.autonomy != "CONFIRM" or latest != policy.revision or policy.mode != "CONFIRM"
+                    or utc(policy.valid_until) <= self.guards.now()
                     or policy.policy_hash != e.policy_sha256 or canonical_hash(policy.rules) != e.policy_sha256
                     or ObjectRef.model_validate(policy.scope_ref) != scope.project
                     or policy.rules.get("synthetic_only") is not True
@@ -43,7 +61,7 @@ class TrustFacade:
             self.guards.resolve(db, scope, e.policy, "review")
         return policy
 
-    def _load(self, db, scope, pin, *, operation, live_policy=True):
+    def _load(self, db, scope, pin, *, operation, live_policy=True, authorization=None):
         if pin.ref.type != "action" or pin.version_kind != "revision":
             raise TrustConflict("invalid_action_pin")
         self.guards.allow(db, scope, operation, pin.ref)
@@ -57,12 +75,67 @@ class TrustFacade:
             raise TrustConflict("seal_mismatch")
         # Immutable revision peek above, authority/policy then action locks.
         self._policy(db, scope, e, live=live_policy)
+        if authorization is not None and authorization.authorization_origin == "SERVER_POLICY":
+            self._server_policy(db, scope, row, e, authorization)
         action = db.scalar(select(PilotAction).where(PilotAction.id == row.action_id,
             PilotAction.organization_id == int(scope.tenant.value)).with_for_update()
             .execution_options(populate_existing=True))
         if action is None or action.project_id != int(scope.project.id.value) or e.project_ref != scope.project:
             raise TrustConflict("resource_unavailable")
         return action, row, e
+
+    @staticmethod
+    def _candidate(row, envelope):
+        from app.autonomy_policy import ActionCandidate
+        payload = envelope.payload.model_dump(mode="json")
+        return ActionCandidate(
+            action_type=envelope.action_type, stage="EXECUTE", risk=envelope.risk,
+            reversal=envelope.reversal, effects=envelope.effects,
+            envelope_sha256=row.envelope_hash, payload_sha256=canonical_hash(payload),
+        )
+
+    def _server_policy(self, db, scope, row, envelope, authorization):
+        from app.autonomy_policy import AutonomyDecision
+        if (self.autonomy is None or envelope.autonomy != "AUTO"
+                or envelope.action_type != "task.internal.create"):
+            raise TrustConflict("server_policy_not_applicable")
+        try:
+            candidate = self._candidate(row, envelope)
+            decision = AutonomyDecision.model_validate(authorization.authorization_decision)
+            if (canonical_hash(candidate.model_dump(mode="json")) != authorization.action_hash
+                    or canonical_hash(decision.model_dump(mode="json")) != authorization.decision_hash
+                    or authorization.envelope_hash != candidate.envelope_sha256
+                    or authorization.payload_hash != candidate.payload_sha256
+                    or authorization.policy != decision.policy or authorization.policy != envelope.policy
+                    or authorization.policy_sha256 != decision.policy_sha256
+                    or authorization.policy_sha256 != envelope.policy_sha256
+                    or authorization.authority_epoch != decision.policy_authority_epoch
+                    or utc(authorization.authorization_valid_until) != decision.valid_until
+                    or utc(authorization.authorization_valid_until) <= self.guards.now()
+                    or decision.mode != "AUTO"):
+                raise TrustConflict("server_policy_binding_mismatch")
+            self.autonomy.recheck(db, scope=scope, candidate=candidate, decision=decision)
+        except TrustConflict:
+            raise
+        except (ValueError, TypeError, KeyError) as exc:
+            raise TrustConflict("server_policy_binding_mismatch") from exc
+        return decision
+
+    @staticmethod
+    def _pending_authorization(pending, scope):
+        values = dict(
+            authorization_origin=pending.authorization_origin,
+            approval=(reference(scope, "approval", pending.approval_id)
+                      if pending.approval_id is not None else None),
+            policy=(revision(reference(scope, "policy", pending.policy_id), pending.policy_revision)
+                    if pending.policy_id is not None else None),
+            policy_sha256=pending.policy_hash, authority_epoch=pending.authority_epoch,
+            decision_hash=pending.decision_hash, action_hash=pending.action_hash,
+            payload_hash=pending.payload_hash, authorization_decision=pending.authorization_decision,
+            authorization_valid_until=(utc(pending.authorization_valid_until)
+                                       if pending.authorization_valid_until else None),
+        )
+        return values
 
     def _event(self, db, scope, action_pin, event, *, approval=None, receipt=None, job=None):
         # Only constructs the common DTO. append_audit below is the sole writer.
@@ -121,7 +194,8 @@ class TrustFacade:
             action = PilotAction(id=e.action_ref.id.value, organization_id=int(scope.tenant.value),
                 project_id=int(scope.project.id.value), message_id=message.id, claim_id=e.claim.ref.id.value,
                 action_type=e.action_type, compensates_action_id=compensates, record_version=1,
-                reservation_fence=0, business_state="AWAITING_APPROVAL")
+                reservation_fence=0,
+                business_state="AWAITING_POLICY" if e.autonomy == "AUTO" else "AWAITING_APPROVAL")
             db.add(action)
             db.flush()
         live_pins(db, guards=self.guards, scope=scope, envelope=e, action=action, operation="review")
@@ -134,7 +208,8 @@ class TrustFacade:
         pending = db.get(PendingDispatch, action.id)
         if pending:
             pending.pending = False
-        action.current_revision, action.business_state = e.revision, "AWAITING_APPROVAL"
+        action.current_revision = e.revision
+        action.business_state = "AWAITING_POLICY" if e.autonomy == "AUTO" else "AWAITING_APPROVAL"
         action.record_version += 1
         db.add(ActionRevision(action_id=action.id, revision=e.revision, organization_id=action.organization_id,
             claim_id=action.claim_id, claim_revision=e.claim.value, policy_id=e.policy.ref.id.value,
@@ -148,6 +223,8 @@ class TrustFacade:
     def approve(self, db, *, scope: RequestScope, action: VersionPin, envelope_hash: str,
                 command_key: str, expires_at) -> ObjectRef:
         obj, row, e = self._load(db, scope, action, operation="action.approve")
+        if e.autonomy != "CONFIRM":
+            raise TrustConflict("approval_binding_invalid")
         self.guards.enabled(db, scope, e.action_type)
         if (not command_key or len(command_key) > 200 or row.envelope_hash != envelope_hash
                 or obj.current_revision != action.value
@@ -226,25 +303,93 @@ class TrustFacade:
             event=self._event(db, scope, pin, "APPROVAL_REVOKED", approval=approval))
 
     def request_dispatch(self, db, *, scope: RequestScope, action: VersionPin,
-                         approval: ObjectRef, expected_record_version: int) -> None:
+                         approval: ObjectRef | None, expected_record_version: int,
+                         decision=None) -> None:
         obj, row, e = self._load(db, scope, action, operation="action.dispatch")
         self.guards.enabled(db, scope, e.action_type)
         if e.requested_by != scope.actor:
             raise TrustConflict("requester_mismatch")
-        self._grant(db, scope, obj, row, action, approval)
-        if obj.business_state != "READY":
-            raise TrustConflict("action_not_ready")
+        server_values = None
+        if e.autonomy == "CONFIRM":
+            if decision is not None or approval is None:
+                raise TrustConflict("approval_binding_invalid")
+            self._grant(db, scope, obj, row, action, approval)
+            if obj.business_state != "READY":
+                raise TrustConflict("action_not_ready")
+            origin = "HUMAN_APPROVAL"
+        else:
+            if approval is not None or self.autonomy is None or obj.business_state not in {"AWAITING_POLICY", "READY"}:
+                raise TrustConflict("server_policy_not_applicable")
+            existing_pending = db.get(PendingDispatch, obj.id, populate_existing=True)
+            if (decision is None and existing_pending is not None and existing_pending.pending
+                    and existing_pending.authorization_origin == "SERVER_POLICY"
+                    and (existing_pending.revision, existing_pending.envelope_hash)
+                    == (row.revision, row.envelope_hash)):
+                from types import SimpleNamespace
+                authorization = self._pending_authorization(existing_pending, scope)
+                self._server_policy(
+                    db, scope, row, e,
+                    SimpleNamespace(envelope_hash=row.envelope_hash, **authorization),
+                )
+                live_pins(db, guards=self.guards, scope=scope, envelope=e,
+                          action=obj, operation="dispatch")
+                return
+            candidate = self._candidate(row, e)
+            try:
+                from app.autonomy_policy import AutonomyDecision
+                decision = AutonomyDecision.model_validate(
+                    (decision or self.autonomy.decide(db, scope=scope, candidate=candidate)).model_dump(mode="json")
+                )
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise TrustConflict("server_policy_not_applicable") from exc
+            decision_dump = decision.model_dump(mode="json")
+            server_values = dict(
+                policy_id=decision.policy.ref.id.value if decision.policy else None,
+                policy_revision=decision.policy.value if decision.policy else None,
+                policy_hash=decision.policy_sha256,
+                authority_epoch=decision.policy_authority_epoch,
+                decision_hash=canonical_hash(decision_dump),
+                action_hash=canonical_hash(candidate.model_dump(mode="json")),
+                payload_hash=candidate.payload_sha256,
+                authorization_decision=decision_dump,
+                authorization_valid_until=decision.valid_until,
+            )
+            from app.core.v54_interfaces import DispatchBinding
+            probe = DispatchBinding(
+                action=action, authorization_origin="SERVER_POLICY", approval=None,
+                policy=decision.policy, policy_sha256=decision.policy_sha256,
+                authority_epoch=decision.policy_authority_epoch,
+                decision_hash=server_values["decision_hash"], action_hash=server_values["action_hash"],
+                payload_hash=server_values["payload_hash"], authorization_decision=decision_dump,
+                authorization_valid_until=decision.valid_until, envelope_hash=row.envelope_hash,
+                command_key=row.command_key, job=reference(scope, "background_job", 1),
+                worker_id="authorization-probe", job_attempt=1, locked_at=self.guards.now(),
+            )
+            self._server_policy(db, scope, row, e, probe)
+            obj.business_state = "READY"
+            origin = "SERVER_POLICY"
         live_pins(db, guards=self.guards, scope=scope, envelope=e, action=obj, operation="dispatch")
         pending = db.get(PendingDispatch, obj.id)
-        if pending and pending.pending and (pending.revision, pending.envelope_hash, pending.approval_id) == (
-                row.revision, row.envelope_hash, approval.id.value):
-            return
+        if pending and pending.pending:
+            expected = (row.revision, row.envelope_hash, origin,
+                        approval.id.value if approval else None)
+            actual = (pending.revision, pending.envelope_hash,
+                      pending.authorization_origin, pending.approval_id)
+            if actual == expected and (origin == "HUMAN_APPROVAL" or all(
+                    getattr(pending, key) == value for key, value in server_values.items())):
+                return
+            raise TrustConflict("dispatch_binding_mismatch")
         if type(expected_record_version) is not int or obj.record_version != expected_record_version:
             raise TrustConflict("action_version_conflict")
         if pending is None:
             pending = PendingDispatch(action_id=obj.id, organization_id=obj.organization_id)
             db.add(pending)
-        pending.revision, pending.envelope_hash, pending.approval_id = row.revision, row.envelope_hash, approval.id.value
+        pending.revision, pending.envelope_hash = row.revision, row.envelope_hash
+        pending.authorization_origin = origin
+        pending.approval_id = approval.id.value if approval else None
+        for key in ("policy_id", "policy_revision", "policy_hash", "authority_epoch", "decision_hash",
+                    "action_hash", "payload_hash", "authorization_decision", "authorization_valid_until"):
+            setattr(pending, key, server_values.get(key) if server_values else None)
         pending.pending, pending.job_id = True, None
         obj.record_version += 1
         db.flush()
@@ -254,7 +399,9 @@ class TrustFacade:
     def execute(self, db, *, scope: RequestScope, binding: DispatchBinding,
                 mutation: TaskMutation) -> ObjectRef:
         binding = DispatchBinding.model_validate(binding.model_dump(mode="json"))
-        obj, row, e = self._load(db, scope, binding.action, operation="action.receipt.read", live_policy=False)
+        obj, row, e = self._load(db, scope, binding.action, operation="action.receipt.read",
+                                 live_policy=binding.authorization_origin == "SERVER_POLICY",
+                                 authorization=binding)
         if (row.envelope_hash != binding.envelope_hash or row.command_key != binding.command_key
                 or e.requested_by != scope.actor):
             raise TrustConflict("dispatch_binding_mismatch")
@@ -263,7 +410,17 @@ class TrustFacade:
         if receipt:
             if (receipt.outcome != "APPLIED" or obj.business_state != "SUCCEEDED"
                     or receipt.revision != row.revision or receipt.envelope_hash != row.envelope_hash
-                    or receipt.approval_id != binding.approval.id.value):
+                    or receipt.authorization_origin != binding.authorization_origin
+                    or receipt.approval_id != (binding.approval.id.value if binding.approval else None)
+                    or (binding.authorization_origin == "SERVER_POLICY" and any((
+                        receipt.policy_id != binding.policy.ref.id.value,
+                        receipt.policy_revision != binding.policy.value,
+                        receipt.policy_hash != binding.policy_sha256,
+                        receipt.authority_epoch != binding.authority_epoch,
+                        receipt.decision_hash != binding.decision_hash,
+                        receipt.action_hash != binding.action_hash,
+                        receipt.payload_hash != binding.payload_hash,
+                    )))):
                 raise TrustConflict("outcome_not_replayable")
             # Authorized history read, not a new dispatch: expiry/target change or
             # completed/reclaimed job cannot undo or duplicate an existing effect.
@@ -272,12 +429,18 @@ class TrustFacade:
         self.guards.allow(db, scope, "action.execute", binding.action.ref)
         self.guards.enabled(db, scope, e.action_type)
         self._policy(db, scope, e)
-        self._grant(db, scope, obj, row, binding.action, binding.approval)
+        if binding.authorization_origin == "HUMAN_APPROVAL":
+            self._grant(db, scope, obj, row, binding.action, binding.approval)
+        else:
+            self._server_policy(db, scope, row, e, binding)
         pending = db.get(PendingDispatch, obj.id, populate_existing=True)
         if (obj.business_state != "READY" or pending is None
                 or pending.organization_id != obj.organization_id
-                or (pending.revision, pending.envelope_hash, pending.approval_id) != (
-                    row.revision, row.envelope_hash, binding.approval.id.value)
+                or (pending.revision, pending.envelope_hash, pending.authorization_origin,
+                    pending.approval_id) != (row.revision, row.envelope_hash,
+                    binding.authorization_origin, binding.approval.id.value if binding.approval else None)
+                or any(getattr(binding, key) != value
+                       for key, value in self._pending_authorization(pending, scope).items())
                 or pending.job_id != int(binding.job.id.value)):
             raise TrustConflict("dispatch_binding_mismatch")
         live_pins(db, guards=self.guards, scope=scope, envelope=e, action=obj, operation="dispatch")
@@ -294,7 +457,10 @@ class TrustFacade:
         # may outlive the grant: reject BEFORE calling the domain mutation.
         self.guards.enabled(db, scope, e.action_type)
         self._policy(db, scope, e)
-        self._grant(db, scope, obj, row, binding.action, binding.approval)
+        if binding.authorization_origin == "HUMAN_APPROVAL":
+            self._grant(db, scope, obj, row, binding.action, binding.approval)
+        else:
+            self._server_policy(db, scope, row, e, binding)
         self._job(job, binding)
         transaction = db.get_transaction()
         target = mutation.apply(db, scope=scope, binding=binding)
@@ -316,9 +482,18 @@ class TrustFacade:
         # Mutation must not commit/rollback/close; caller aborts the whole T2 on
         # any failure. Recheck time/lease after DB-only work, before receipt flush.
         self._job(job, binding)
-        self._grant(db, scope, obj, row, binding.action, binding.approval)
+        if binding.authorization_origin == "HUMAN_APPROVAL":
+            self._grant(db, scope, obj, row, binding.action, binding.approval)
+        else:
+            self._server_policy(db, scope, row, e, binding)
         receipt = ActionReceipt(organization_id=obj.organization_id, action_id=obj.id, revision=row.revision,
-            envelope_hash=row.envelope_hash, approval_id=binding.approval.id.value, job_id=job.id,
+            envelope_hash=row.envelope_hash, authorization_origin=binding.authorization_origin,
+            approval_id=binding.approval.id.value if binding.approval else None,
+            policy_id=pending.policy_id, policy_revision=pending.policy_revision,
+            policy_hash=pending.policy_hash, authority_epoch=pending.authority_epoch,
+            decision_hash=pending.decision_hash, action_hash=pending.action_hash,
+            payload_hash=pending.payload_hash, authorization_decision=pending.authorization_decision,
+            authorization_valid_until=pending.authorization_valid_until, job_id=job.id,
             fence=obj.reservation_fence, outcome="APPLIED", target_ref=target.model_dump(mode="json"),
             recorded_at=self.guards.now())
         db.add(receipt)

@@ -113,12 +113,10 @@ def test_confirm_envelope_keeps_canonical_bytes(envelope):
     assert canonical_hash(envelope) == canonical_hash(parsed.model_dump(mode="json"))
 
 
-@pytest.mark.parametrize("mutation", ["auto", "external", "float", "cross_tenant", "unknown", "duplicate_pin", "wrong_target", "bool_version"])
+@pytest.mark.parametrize("mutation", ["external", "float", "cross_tenant", "unknown", "duplicate_pin", "wrong_target", "bool_version"])
 def test_envelope_rejects_unsafe_or_ambiguous_mutations(mutation):
     value = envelopes()[0]
-    if mutation == "auto":
-        value["autonomy"] = "AUTO"
-    elif mutation == "external":
+    if mutation == "external":
         value["payload"]["publish_external"] = True
     elif mutation == "float":
         value["revision"] = 1.0
@@ -431,7 +429,7 @@ def test_downgrade_refuses_to_erase_pilot_history(db):
 
 def test_single_head_and_postgresql_offline_migration(monkeypatch):
     heads = ScriptDirectory.from_config(migration_config()).get_heads()
-    assert heads == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a06"]
+    assert heads == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a07"]
     # Explicit synthetic URL, offline only: never inherit DATABASE_URL.
     monkeypatch.setenv("DATABASE_URL","postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline")
     buf = StringIO()

@@ -1,7 +1,7 @@
 # v5.4 autonomy policy backend
 
-Status: backend assignment and decision boundary implemented; production AUTO
-execution remains intentionally unwired.
+Status: backend assignment, authorization-origin schema, and synthetic internal
+Task AUTO path implemented; production AUTO remains intentionally unwired.
 
 ## Implemented boundary
 
@@ -40,27 +40,26 @@ other payload content.
 All responses are `no-store`. The authenticated actor and tenant are constructed
 from server context and project ownership; neither is accepted from the body.
 
-## Schema handoff before AUTO execution
+## Schema/runtime handoff implemented in A07
 
-No migration was added in this change. Actual AUTO task execution cannot safely
-reuse the current CONFIRM executor because:
+Migration `a54f001c0a07` makes authorization origin explicit and mutually
+exclusive on `PendingDispatch` and `ActionReceipt`. Existing rows become
+`HUMAN_APPROVAL`. The `SERVER_POLICY` branch has no `approval_id` and persists
+the exact policy id/revision/hash, enabling authority epoch, decision hash,
+sealed action hash, envelope hash, payload hash, decision document, and expiry.
+Composite foreign keys bind the policy hash and immutable action revision;
+checks and indexes enforce/query the two origins. No synthetic human approval is
+created.
 
-1. `ActionEnvelope.autonomy` currently accepts only CONFIRM.
-2. `PendingDispatch.approval_id` is mandatory and foreign-keyed to a human
-   `ActionApproval`.
-3. `ActionReceipt.approval_id` is mandatory and has the same human-approval
-   binding.
-4. `TrustFacade` validates only the inactive synthetic CONFIRM policy shape.
+`ActionEnvelope.autonomy = AUTO` is valid only for
+`task.internal.create` with the exact LOW / COMPENSATABLE / two-effect shape.
+T1 seals the AUTO decision into `PendingDispatch`. T2 takes Project → live
+requester/enabling-owner `AuthorityState` → exact current policy → action locks,
+then rechecks policy, epoch, revocation, expiry, envelope and payload immediately
+before the DB-only `Task` + `TaskHistory` mutation. The receipt copies that same
+authorization binding in the transaction containing the mutation and audit.
 
-The integration/schema owner should add an explicit authorization-origin binding
-(`HUMAN_APPROVAL` or `SERVER_POLICY`) to pending dispatch and receipt, and for the
-server-policy branch persist the exact policy id/revision/hash, enabling authority
-epoch, decision hash, and sealed action/envelope hash. Constraints must require
-exactly one origin and must never create a synthetic human approval. T2 must
-recheck that binding under the existing Project → AuthorityState → policy →
-action lock order before the DB-only task mutation and append the decision and
-receipt in the same transaction.
-
-Until that migration and Trust integration exist, an AUTO decision is an
-authorization assessment only: this backend does not enqueue, invoke providers,
-or mutate a Task. No production feature flag was enabled.
+This remains an explicitly injected synthetic runtime. No provider is invoked,
+no production feature flag or config loader was added, and external message,
+email, financial, legal, destructive, and access capabilities remain CONFIRM or
+deny. Existing human CONFIRM dispatch is retained unchanged at the boundary.

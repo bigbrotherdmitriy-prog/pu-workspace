@@ -7,39 +7,49 @@ from datetime import date
 
 from sqlalchemy import select
 
-from app.action_trust.facade import TrustFacade
 from app.action_trust.guards import TrustConflict, reference
 from app.action_trust.validation import live_pins
 from app.core.v54_dto import canonical_hash
 from app.models.job import BackgroundJob
 from app.models.management import Obligation
 from app.models.task import Task, TaskHistory
-from app.models.v54_pilot import ActionReceipt, PendingDispatch
+from app.models.v54_pilot import ActionReceipt, ActionRevision, PendingDispatch, PilotAction
 
 
 class InternalTaskMutation:
-    def __init__(self, *, guards):
+    def __init__(self, *, guards, trust=None):
         self.guards = guards
+        self.trust = trust
 
     def apply(self, db, *, scope, binding):
-        trust = TrustFacade(guards=self.guards)
-        action, revision, envelope = trust._load(db, scope, binding.action, operation="action.execute")
+        # TrustFacade owns authorization and the Project -> Authority -> policy
+        # -> action locks.  This helper is deliberately not an independent
+        # executor; it consumes the already-locked T2 reservation only.
+        revision = db.get(ActionRevision, (binding.action.ref.id.value, binding.action.value))
+        action = db.get(PilotAction, binding.action.ref.id.value)
+        if revision is None or action is None:
+            raise TrustConflict("task_binding_mismatch")
+        from app.core.v54_dto import ActionEnvelope
+        envelope = ActionEnvelope.model_validate(revision.envelope)
         self.guards.enabled(db, scope, envelope.action_type)
         if (action.business_state != "EXECUTING" or action.reservation_fence <= 0
                 or envelope.requested_by != scope.actor
                 or revision.command_key != binding.command_key
                 or revision.envelope_hash != binding.envelope_hash):
             raise TrustConflict("task_binding_mismatch")
-        trust._grant(db, scope, action, revision, binding.action, binding.approval)
         pending = db.get(PendingDispatch, action.id, populate_existing=True)
         if (pending is None or not pending.pending or pending.organization_id != action.organization_id
-                or (pending.revision, pending.envelope_hash, pending.approval_id, pending.job_id) != (
-                    revision.revision, revision.envelope_hash, binding.approval.id.value, int(binding.job.id.value))
+                or (pending.revision, pending.envelope_hash, pending.authorization_origin,
+                    pending.approval_id, pending.job_id) != (
+                    revision.revision, revision.envelope_hash, binding.authorization_origin,
+                    binding.approval.id.value if binding.approval else None, int(binding.job.id.value))
+                or any(getattr(binding, key) != value
+                       for key, value in self._authorization(pending, scope).items())
                 or db.scalar(select(ActionReceipt.id).where(ActionReceipt.action_id == action.id))):
             raise TrustConflict("task_binding_mismatch")
         job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == int(binding.job.id.value))
                         .with_for_update().execution_options(populate_existing=True))
-        trust._job(job, binding)
+        self._job(job, binding)
         live_pins(db, guards=self.guards, scope=scope, envelope=envelope, action=action, operation="dispatch")
         if envelope.action_type == "task.internal.create":
             payload = envelope.payload
@@ -49,7 +59,7 @@ class InternalTaskMutation:
                 assignee_user_id=int(payload.assignee_ref.id.value), created_by_user_id=int(scope.actor.id.value),
                 title=payload.title, due_date=date.fromisoformat(payload.due_date), status="assigned",
                 record_version=1, source_type="v54_synthetic", source_file_id=action.id,
-                source_file_name="Synthetic CONFIRM", source_excerpt="",
+                source_file_name="V5.4 internal action", source_excerpt="",
                 source_excerpt_hash=canonical_hash({"action_id": action.id}), confidence=1.0,
                 needs_review=False, external_action_status="not_requested")
             db.add(task)
@@ -70,3 +80,15 @@ class InternalTaskMutation:
             old_status=old_status, new_status=task.status, changed_by_user_id=int(scope.actor.id.value)))
         db.flush()
         return reference(scope, "task", task.id)
+
+    def _authorization(self, pending, scope):
+        if self.trust is not None:
+            return self.trust._pending_authorization(pending, scope)
+        from app.action_trust.facade import TrustFacade
+        return TrustFacade._pending_authorization(pending, scope)
+
+    def _job(self, job, binding):
+        if self.trust is not None:
+            return self.trust._job(job, binding)
+        from app.action_trust.facade import TrustFacade
+        return TrustFacade(guards=self.guards)._job(job, binding)

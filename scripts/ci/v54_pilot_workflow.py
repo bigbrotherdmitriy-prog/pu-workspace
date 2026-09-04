@@ -21,7 +21,7 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
-HEAD = "a54f001c0a06"
+HEAD = "a54f001c0a07"
 DATABASES = ("puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime")
 PHASES: list[dict] = []
 CREATED: list[str] = []
@@ -149,7 +149,7 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
                 "S07": "process kill between T1 and enqueue not exercised",
                 "S08": "process kill inside T2 before commit not exercised; transactional rollback is exercised",
                 "S10": "external UNKNOWN remains fake-contract only",
-                "P04": "finance outside pilot", "P06_AUTO": "AUTO remains denied",
+                "P04": "finance outside pilot",
             },
         },
         "cleanup": "PASS" if not CREATED else "FAIL",
@@ -192,6 +192,7 @@ def main() -> None:
             "backend/tests/test_v54_task_claims.py", "backend/tests/test_v54_action_trust.py",
             "backend/tests/test_v54_action_trust_external_contract.py",
             "backend/tests/test_v54_provider_action_migration.py",
+            "backend/tests/test_v54_autonomy_authorization.py",
             "backend/tests/test_v54_pilot_integration.py", "backend/tests/test_v54_corpus_confirm_subset.py",
         ]
         run_phase("postgres_abc_integration", [sys.executable, "-m", "pytest", *targets, "-q", "--tb=short", "-rfsE"], env=env, timeout=900)

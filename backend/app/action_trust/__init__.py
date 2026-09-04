@@ -1,1 +1,1 @@
-"""Opt-in CONFIRM facade. No API, worker wiring, AUTO or external execution."""
+"""Opt-in Trust facade; synthetic internal AUTO only, never external AUTO."""

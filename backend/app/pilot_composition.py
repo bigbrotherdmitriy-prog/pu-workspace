@@ -141,14 +141,14 @@ class _OrderedContext(ContextCommunication):
 
 
 class SyntheticComposition:
-    def __init__(self, *, policy, clock=utcnow, enabled=False):
+    def __init__(self, *, policy, clock=utcnow, enabled=False, autonomy=None):
         self.policy, self.clock, self.enabled = policy, clock, enabled
         self.resolver = SyntheticResolver(policy, clock)
         self.source = self.resolver.source
         self.guards = Guards(resolver=self.resolver, authorize=self.authorize, gate=self.gate, clock=clock)
-        self.trust = TrustFacade(guards=self.guards)
+        self.trust = TrustFacade(guards=self.guards, autonomy=autonomy)
         self.claims = DeadlineClaims(guards=self.guards)
-        self.mutation = InternalTaskMutation(guards=self.guards)
+        self.mutation = InternalTaskMutation(guards=self.guards, trust=self.trust)
 
     def authorize(self, db, scope, operation, subject, *, lock):
         require_same_tenant(scope.tenant, subject)

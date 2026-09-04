@@ -249,6 +249,7 @@ class ActionPolicy(Scoped, Base):
     __table_args__ = (
         PrimaryKeyConstraint("id", "revision"),
         UniqueConstraint("organization_id", "id", "revision", name="uq_v54_policy_scope"),
+        UniqueConstraint("organization_id", "id", "revision", "policy_hash", name="uq_v54_policy_hash_binding"),
         CheckConstraint("revision > 0", name="ck_v54_policy_revision"),
         CheckConstraint("mode = 'CONFIRM'", name="ck_v54_policy_confirm_only"),
     )
@@ -343,17 +344,52 @@ class ActionReceipt(Scoped, Base):
     __table_args__ = (
         scoped_unique("uq_v54_receipt_scope"),
         UniqueConstraint("organization_id", "action_id", name="uq_v54_single_business_receipt"),
+        ForeignKeyConstraint(["organization_id", "action_id", "revision", "envelope_hash"],
+                             ["v54_action_revisions.organization_id", "v54_action_revisions.action_id",
+                              "v54_action_revisions.revision", "v54_action_revisions.envelope_hash"],
+                             ondelete="RESTRICT", name="fk_v54_receipts_sealed_action"),
         ForeignKeyConstraint(["organization_id", "approval_id", "action_id", "revision", "envelope_hash"],
                              ["v54_approvals.organization_id", "v54_approvals.id", "v54_approvals.action_id",
                               "v54_approvals.revision", "v54_approvals.envelope_hash"],
                              ondelete="RESTRICT", name="fk_v54_receipt_approval"),
+        ForeignKeyConstraint(["organization_id", "policy_id", "policy_revision", "policy_hash"],
+                             ["v54_action_policies.organization_id", "v54_action_policies.id",
+                              "v54_action_policies.revision", "v54_action_policies.policy_hash"],
+                             ondelete="RESTRICT", name="fk_v54_receipts_server_policy"),
+        CheckConstraint("authorization_origin IN ('HUMAN_APPROVAL','SERVER_POLICY')",
+                        name="ck_v54_receipts_authorization_origin"),
+        CheckConstraint(
+            "(authorization_origin = 'HUMAN_APPROVAL' AND approval_id IS NOT NULL "
+            "AND policy_id IS NULL AND policy_revision IS NULL AND policy_hash IS NULL "
+            "AND authority_epoch IS NULL AND decision_hash IS NULL AND action_hash IS NULL "
+            "AND payload_hash IS NULL AND authorization_decision IS NULL AND authorization_valid_until IS NULL) OR "
+            "(authorization_origin = 'SERVER_POLICY' AND approval_id IS NULL "
+            "AND policy_id IS NOT NULL AND policy_revision IS NOT NULL AND policy_hash IS NOT NULL "
+            "AND authority_epoch IS NOT NULL AND decision_hash IS NOT NULL AND action_hash IS NOT NULL "
+            "AND payload_hash IS NOT NULL AND authorization_decision IS NOT NULL AND authorization_valid_until IS NOT NULL)",
+            name="ck_v54_receipts_authorization_exclusive"),
+        CheckConstraint("authorization_origin != 'SERVER_POLICY' OR (policy_revision > 0 AND authority_epoch > 0 "
+                        "AND length(policy_hash) = 64 AND length(decision_hash) = 64 AND length(action_hash) = 64 "
+                        "AND length(envelope_hash) = 64 AND length(payload_hash) = 64)",
+                        name="ck_v54_receipts_authorization_values"),
+        Index("ix_v54_receipts_authorization", "authorization_origin", "organization_id", "policy_id", "policy_revision"),
         CheckConstraint("outcome IN ('APPLIED','NOT_APPLIED','UNKNOWN')", name="ck_v54_receipt_outcome"),
         CheckConstraint("fence > 0", name="ck_v54_receipt_fence"),
     )
     action_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
     revision: Mapped[int] = mapped_column()
     envelope_hash: Mapped[str] = mapped_column(String(64))
-    approval_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    authorization_origin: Mapped[str] = mapped_column(String(20), server_default="HUMAN_APPROVAL")
+    approval_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    policy_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    policy_revision: Mapped[int | None] = mapped_column()
+    policy_hash: Mapped[str | None] = mapped_column(String(64))
+    authority_epoch: Mapped[int | None] = mapped_column()
+    decision_hash: Mapped[str | None] = mapped_column(String(64))
+    action_hash: Mapped[str | None] = mapped_column(String(64))
+    payload_hash: Mapped[str | None] = mapped_column(String(64))
+    authorization_decision: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    authorization_valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     job_id: Mapped[int] = mapped_column(ForeignKey("background_jobs.id", ondelete="RESTRICT"))
     fence: Mapped[int] = mapped_column()
     outcome: Mapped[str] = mapped_column(String(20))
@@ -369,13 +405,48 @@ class PendingDispatch(Base):
                              ["v54_approvals.organization_id", "v54_approvals.id", "v54_approvals.action_id",
                               "v54_approvals.revision", "v54_approvals.envelope_hash"],
                              ondelete="RESTRICT", name="fk_v54_pending_approval"),
+        ForeignKeyConstraint(["organization_id", "action_id", "revision", "envelope_hash"],
+                             ["v54_action_revisions.organization_id", "v54_action_revisions.action_id",
+                              "v54_action_revisions.revision", "v54_action_revisions.envelope_hash"],
+                             ondelete="RESTRICT", name="fk_v54_pending_dispatch_sealed_action"),
+        ForeignKeyConstraint(["organization_id", "policy_id", "policy_revision", "policy_hash"],
+                             ["v54_action_policies.organization_id", "v54_action_policies.id",
+                              "v54_action_policies.revision", "v54_action_policies.policy_hash"],
+                             ondelete="RESTRICT", name="fk_v54_pending_dispatch_server_policy"),
+        CheckConstraint("authorization_origin IN ('HUMAN_APPROVAL','SERVER_POLICY')",
+                        name="ck_v54_pending_dispatch_authorization_origin"),
+        CheckConstraint(
+            "(authorization_origin = 'HUMAN_APPROVAL' AND approval_id IS NOT NULL "
+            "AND policy_id IS NULL AND policy_revision IS NULL AND policy_hash IS NULL "
+            "AND authority_epoch IS NULL AND decision_hash IS NULL AND action_hash IS NULL "
+            "AND payload_hash IS NULL AND authorization_decision IS NULL AND authorization_valid_until IS NULL) OR "
+            "(authorization_origin = 'SERVER_POLICY' AND approval_id IS NULL "
+            "AND policy_id IS NOT NULL AND policy_revision IS NOT NULL AND policy_hash IS NOT NULL "
+            "AND authority_epoch IS NOT NULL AND decision_hash IS NOT NULL AND action_hash IS NOT NULL "
+            "AND payload_hash IS NOT NULL AND authorization_decision IS NOT NULL AND authorization_valid_until IS NOT NULL)",
+            name="ck_v54_pending_dispatch_authorization_exclusive"),
+        CheckConstraint("authorization_origin != 'SERVER_POLICY' OR (policy_revision > 0 AND authority_epoch > 0 "
+                        "AND length(policy_hash) = 64 AND length(decision_hash) = 64 AND length(action_hash) = 64 "
+                        "AND length(envelope_hash) = 64 AND length(payload_hash) = 64)",
+                        name="ck_v54_pending_dispatch_authorization_values"),
         Index("ix_v54_pending_dispatch", "pending", "organization_id"),
+        Index("ix_v54_pending_dispatch_authorization", "authorization_origin", "organization_id", "policy_id", "policy_revision"),
     )
     action_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))
     revision: Mapped[int] = mapped_column()
     envelope_hash: Mapped[str] = mapped_column(String(64))
-    approval_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    authorization_origin: Mapped[str] = mapped_column(String(20), server_default="HUMAN_APPROVAL")
+    approval_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    policy_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False))
+    policy_revision: Mapped[int | None] = mapped_column()
+    policy_hash: Mapped[str | None] = mapped_column(String(64))
+    authority_epoch: Mapped[int | None] = mapped_column()
+    decision_hash: Mapped[str | None] = mapped_column(String(64))
+    action_hash: Mapped[str | None] = mapped_column(String(64))
+    payload_hash: Mapped[str | None] = mapped_column(String(64))
+    authorization_decision: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    authorization_valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pending: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     job_id: Mapped[int | None] = mapped_column(ForeignKey("background_jobs.id", ondelete="RESTRICT"))
 
@@ -506,6 +577,50 @@ def _validate_insert(mapper, connection, target):
                 or policy["policy_hash"] != seal.policy_sha256
                 or action["business_state"] in {"EXECUTING", "UNKNOWN", "SUCCEEDED"}):
             raise ValueError("seal_binding_mismatch")
+    if isinstance(target, (PendingDispatch, ActionReceipt)):
+        from app.action_trust.guards import utc
+        origin = target.authorization_origin or "HUMAN_APPROVAL"
+        policy_values = (
+            target.policy_id, target.policy_revision, target.policy_hash, target.authority_epoch,
+            target.decision_hash, target.action_hash, target.payload_hash,
+            target.authorization_decision, target.authorization_valid_until,
+        )
+        if origin == "HUMAN_APPROVAL":
+            if target.approval_id is None or any(value is not None for value in policy_values):
+                raise ValueError("authorization_origin_binding_required")
+        elif origin == "SERVER_POLICY":
+            from app.autonomy_policy import ActionCandidate, AutonomyDecision
+            if target.approval_id is not None or any(value is None for value in policy_values):
+                raise ValueError("authorization_origin_binding_required")
+            revision_row = connection.execute(select(ActionRevision.__table__).where(
+                ActionRevision.organization_id == target.organization_id,
+                ActionRevision.action_id == target.action_id,
+                ActionRevision.revision == target.revision,
+                ActionRevision.envelope_hash == target.envelope_hash,
+            )).mappings().first()
+            if revision_row is None:
+                raise ValueError("authorization_origin_binding_required")
+            seal = ActionEnvelope.model_validate(revision_row["envelope"])
+            decision = AutonomyDecision.model_validate(target.authorization_decision)
+            candidate = ActionCandidate(
+                action_type=seal.action_type, stage="EXECUTE", risk=seal.risk,
+                reversal=seal.reversal, effects=seal.effects,
+                envelope_sha256=revision_row["envelope_hash"],
+                payload_sha256=canonical_hash(seal.payload.model_dump(mode="json")),
+            )
+            if (seal.autonomy != "AUTO" or seal.action_type != "task.internal.create"
+                    or canonical_hash(decision.model_dump(mode="json")) != target.decision_hash
+                    or canonical_hash(candidate.model_dump(mode="json")) != target.action_hash
+                    or candidate.payload_sha256 != target.payload_hash
+                    or decision.mode != "AUTO" or decision.policy is None
+                    or decision.policy.ref.id.value != target.policy_id
+                    or decision.policy.value != target.policy_revision
+                    or decision.policy_sha256 != target.policy_hash
+                    or decision.policy_authority_epoch != target.authority_epoch
+                    or decision.valid_until != utc(target.authorization_valid_until)):
+                raise ValueError("authorization_origin_binding_required")
+        else:
+            raise ValueError("authorization_origin_binding_required")
 
 
 for _model in (ConnectionIdentity, MailConnection, SourceReference, SourceVersion, SourceCurrent,

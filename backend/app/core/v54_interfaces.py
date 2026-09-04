@@ -118,7 +118,16 @@ class ContextConfirmation(StrictDTO):
 
 class DispatchBinding(StrictDTO):
     action: VersionPin
-    approval: ObjectRef
+    authorization_origin: Literal["HUMAN_APPROVAL", "SERVER_POLICY"] = "HUMAN_APPROVAL"
+    approval: ObjectRef | None = None
+    policy: VersionPin | None = None
+    policy_sha256: StrictStr | None = None
+    authority_epoch: StrictInt | None = None
+    decision_hash: StrictStr | None = None
+    action_hash: StrictStr | None = None
+    payload_hash: StrictStr | None = None
+    authorization_decision: dict | None = None
+    authorization_valid_until: AwareDatetime | None = None
     envelope_hash: StrictStr
     command_key: StrictStr
     job: ObjectRef
@@ -131,9 +140,28 @@ class DispatchBinding(StrictDTO):
     @model_validator(mode="after")
     def validate_binding(self):
         import re
-        require_same_tenant(self.action.ref.tenant_id, self.approval, self.job)
+        refs = [self.job]
+        if self.approval:
+            refs.append(self.approval)
+        if self.policy:
+            refs.append(self.policy.ref)
+        require_same_tenant(self.action.ref.tenant_id, *refs)
+        hashes = (self.policy_sha256, self.decision_hash, self.action_hash, self.payload_hash)
+        human = (self.authorization_origin == "HUMAN_APPROVAL" and self.approval is not None
+                 and self.policy is None and all(value is None for value in hashes)
+                 and self.authority_epoch is None and self.authorization_decision is None
+                 and self.authorization_valid_until is None)
+        server = (self.authorization_origin == "SERVER_POLICY" and self.approval is None
+                  and self.policy is not None and self.policy.ref.type == "policy"
+                  and self.policy.version_kind == "revision" and self.policy.value > 0
+                  and self.authority_epoch is not None and self.authority_epoch > 0
+                  and self.authorization_decision is not None
+                  and self.authorization_valid_until is not None
+                  and all(value is not None and re.fullmatch("[0-9a-f]{64}", value) for value in hashes))
         if (self.action.ref.type != "action" or self.action.version_kind != "revision"
-                or self.approval.type != "approval" or self.job.type != "background_job"
+                or not (human or server)
+                or (self.approval is not None and self.approval.type != "approval")
+                or self.job.type != "background_job"
                 or not re.fullmatch("[0-9a-f]{64}", self.envelope_hash)
                 or not self.command_key or len(self.command_key) > 200
                 or not self.worker_id or self.job_attempt <= 0):
@@ -173,8 +201,9 @@ class TrustWriter(Protocol):
         ...
 
     def request_dispatch(self, db: Session, *, scope: RequestScope, action: VersionPin,
-                         approval: ObjectRef, expected_record_version: int) -> None:
-        """T1 persists PendingDispatch only. Caller commits BEFORE queue enqueue."""
+                         approval: ObjectRef | None, expected_record_version: int,
+                         decision=None) -> None:
+        """T1 persists one human or exact server-policy PendingDispatch origin."""
         ...
 
 

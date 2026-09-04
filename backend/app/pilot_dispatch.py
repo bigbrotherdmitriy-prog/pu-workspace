@@ -4,6 +4,7 @@ Only an isolated synthetic harness may install a runtime; no environment flag
 alone supplies authority. Production loader/cutover is deliberately unavailable.
 """
 from uuid import UUID
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -80,11 +81,25 @@ class SyntheticDispatch:
             component.guards.enabled(db, scope, action.action_type)
             pin = revision(reference(scope, "action", action.id), pending.revision)
             action, sealed, envelope = component.trust._load(db, scope, pin, operation="action.dispatch")
-            component.trust._grant(db, scope, action, sealed, pin, reference(scope, "approval", pending.approval_id))
+            authorization = component.trust._pending_authorization(pending, scope)
+            if pending.authorization_origin == "HUMAN_APPROVAL":
+                component.trust._grant(db, scope, action, sealed, pin, authorization["approval"])
+            else:
+                component.trust._server_policy(
+                    db, scope, sealed, envelope,
+                    SimpleNamespace(envelope_hash=sealed.envelope_hash, **authorization),
+                )
             payload = {"tenant_id": action.organization_id, "action_id": action.id,
                        "revision": sealed.revision, "correlation_id": correlation}
             key = sealed.command_key
             seal, approval_id = sealed.envelope_hash, pending.approval_id
+            authorization_snapshot = {
+                key: getattr(pending, key) for key in (
+                    "authorization_origin", "policy_id", "policy_revision", "policy_hash",
+                    "authority_epoch", "decision_hash", "action_hash", "payload_hash",
+                    "authorization_decision", "authorization_valid_until",
+                )
+            }
         with self.sessions() as queue_db:
             job = enqueue(queue_db, KIND, payload, idempotency_key=key)
             # Global queue keys must never bind to another tenant/kind/action.
@@ -99,6 +114,8 @@ class SyntheticDispatch:
             pending = db.get(PendingDispatch, action_id, populate_existing=True)
             if (not pending or not pending.pending or (pending.revision, pending.envelope_hash, pending.approval_id)
                     != (pin.value, seal, approval_id) or action.current_revision != pin.value):
+                raise TrustConflict("pilot_intent_changed")
+            if any(getattr(pending, key) != value for key, value in authorization_snapshot.items()):
                 raise TrustConflict("pilot_intent_changed")
             pending.job_id = job_id
         return job_id
@@ -129,9 +146,9 @@ class SyntheticDispatch:
             scope = self._scope(action, sealed, payload["correlation_id"])
             component = self.composition_for_scope(scope)
             component.guards.allow(db, scope, "action.receipt.read", reference(scope, "action", action.id))
-            # Same project -> action ordering as T1/recovery/Trust. A worker can
-            # arrive before enqueue's marker transaction or after that process dies.
-            action = db.scalar(select(PilotAction).where(PilotAction.id == action.id).with_for_update())
+            # Do not lock the action here: Trust T2 must first acquire the live
+            # Project -> AuthorityState -> policy locks, then the action lock.
+            # A worker may still arrive before the enqueue marker transaction.
             pending = db.get(PendingDispatch, action.id, populate_existing=True)
             job = db.get(BackgroundJob, job_id, populate_existing=True)
             if (not pending or not job or job.kind != KIND or job.payload != payload
@@ -143,8 +160,9 @@ class SyntheticDispatch:
                     raise TrustConflict("pilot_dispatch_not_linked")
                 pending.job_id = job_id
                 db.flush()
+            authorization = component.trust._pending_authorization(pending, scope)
             binding = DispatchBinding(action=revision(reference(scope, "action", action.id), sealed.revision),
-                approval=reference(scope, "approval", pending.approval_id), envelope_hash=sealed.envelope_hash,
+                **authorization, envelope_hash=sealed.envelope_hash,
                 command_key=sealed.command_key, job=reference(scope, "background_job", job_id),
                 worker_id=worker_id, job_attempt=attempt, locked_at=utc(locked_at))
             receipt = component.trust.execute(db, scope=scope, binding=binding, mutation=component.mutation)
