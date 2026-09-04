@@ -2,7 +2,7 @@
 
 Дата: 2026-09-04
 
-Текущий кандидат: `f0c0e26ef7cb971b2cef3965ec91b490471b127d`
+Проверенный кандидат: `8ccc194bc834328e51a73225981f74d81775789a`
 
 Текущая единственная Alembic head: `a54f001c0a09`
 
@@ -15,10 +15,26 @@
 
 ## Решение
 
-**MVP5 code/contract scope: PASS. Новый кандидат: runtime CONDITIONAL до
-повторного CI. Live-provider и коммерческая выдача: NOT READY.**
+**MVP5 code/contract scope: PASS. Изолированный PostgreSQL/Linux runtime:
+PASS. Live-provider и коммерческая выдача: NOT READY.**
 
-Commit `f0c0e26` закрывает прежние gaps `C01`, `C07`, `S02`, `S07` и `S08`
+Финальный кандидат `8ccc194` прошёл все четыре обязательных GitHub Actions на
+точном SHA:
+
+- `v5.4 synthetic pilot PostgreSQL runtime`, run `33872553514`, `6m28s` — PASS;
+- `Durable queue recovery`, run `33872553425`, `4m02s` — PASS;
+- `PU Workspace CI`, run `33872553588`, `3m56s` — PASS;
+- `Docker smoke`, run `33872553529`, `54s` — PASS.
+
+Безопасный runtime artifact имеет SHA-256
+`4f0f29da5576891b7ab4aa48d4f6530d04d3ae2373ce82dbf7488179b886da78`.
+Его закрытая схема `puw.v54.runtime.protocol.v1` подтвердила
+`result=PASS`, `cleanup=PASS`, head `a54f001c0a09`, полный backend
+`1132 passed / 16 skipped`, PostgreSQL A/B/C integration
+`301 passed / 0 skipped` и process-fault проверки `S07/S08` без повторных
+Task, receipt, projection или success audit. Raw output не публиковался.
+
+Commit `8ccc194` закрывает прежние gaps `C01`, `C07`, `S02`, `S07` и `S08`
 кодом и исполняемыми contract-тестами. Runtime protocol теперь считает
 исполненными `C01`, `C07`, `P02`, `P06`, `S02`, `S06`, `S07`, `S08`, `S09` и
 оставляет только:
@@ -32,24 +48,22 @@ Run `33865331595` остаётся валидным доказательство
 `33865331624`, общий CI `33865331644` и Docker smoke `33865331681` также были
 PASS на этой базе.
 
-Эти runs нельзя переносить на новый commit: после них добавлены расширенные
-process-fault probes, content-to-evidence pipeline, PostgreSQL multi-mailbox
-acceptance и миграция `a54f001c0a09`. Поэтому текущий runtime gate честно
-остаётся CONDITIONAL до нового запуска на точном `f0c0e26` или его docs-only
-потомке.
+Исторические runs нельзя было переносить на новый delta. Поэтому выполнен новый
+набор из четырёх workflow на точном `8ccc194`; он подтвердил delta, head `a09`
+и итоговый runtime PASS.
 
 ## Закрытые gaps MVP5
 
-| ID | Статус в `f0c0e26` | Фактическое изменение | Что ещё проверяет новый CI |
+| ID | Статус в `8ccc194` | Фактическое изменение | Итоговое runtime-доказательство |
 |---|---|---|---|
-| `C01` | **CODE/CONTRACT PASS** | Synthetic-only pipeline читает реальные байты corpus TXT/MD, извлекает project/contract/deadline, создаёт точные Evidence coordinates и проводит результат через Context, DeadlineClaim, Trust, Task и receipt | PostgreSQL A/B/C phase на итоговом commit; production ingress намеренно не включён |
-| `C07` | **CODE/CONTRACT PASS** | `DeadlineClaim` сохраняет `due_date`, `due_time` и fixed-offset timezone без молчаливого усечения; добавлена последовательная миграция `a09` | Чистый upgrade до `a09`, timed-claim regressions и downgrade guard |
-| `S02` | **CODE/CONTRACT PASS** | PostgreSQL acceptance доказывает независимые origins для одинаковых provider message/thread IDs в двух mailbox | Исполнение mailbox PostgreSQL test в новом runtime run |
-| `S07` | **CODE/CONTRACT PASS** | Process harness убивает процесс после commit pending intent и до enqueue, затем проверяет recovery одного intent/Task/receipt | Реальный spawn/kill/recovery на Linux runner |
-| `S08` | **CODE/CONTRACT PASS** | Process harness проверяет pre-commit rollback и kill после business commit до queue completion с receipt replay без второго эффекта | Реальный spawn/kill/lease reclaim на Linux runner |
+| `C01` | **RUNTIME PASS** | Synthetic-only pipeline читает реальные байты corpus TXT/MD, извлекает project/contract/deadline, создаёт точные Evidence coordinates и проводит результат через Context, DeadlineClaim, Trust, Task и receipt | PostgreSQL A/B/C phase прошла; production ingress намеренно не включён |
+| `C07` | **RUNTIME PASS** | `DeadlineClaim` сохраняет `due_date`, `due_time` и fixed-offset timezone без молчаливого усечения; добавлена последовательная миграция `a09` | Чистый upgrade до `a09`, timed-claim regressions и downgrade guard прошли |
+| `S02` | **RUNTIME PASS** | PostgreSQL acceptance доказывает независимые origins для одинаковых provider message/thread IDs в двух mailbox | Mailbox PostgreSQL test исполнен в итоговом runtime run |
+| `S07` | **RUNTIME PASS** | Process harness убивает процесс после commit pending intent и до enqueue, затем проверяет recovery одного intent/Task/receipt | Реальный spawn/kill/recovery прошёл на Linux runner |
+| `S08` | **RUNTIME PASS** | Process harness проверяет pre-commit rollback и kill после business commit до queue completion с receipt replay без второго эффекта | Реальный spawn/kill/lease reclaim прошёл на Linux runner |
 
-Эти пункты больше не входят в remaining gaps. Пока CI не запущен, их статус не
-следует повышать до runtime PASS.
+Эти пункты больше не входят в remaining gaps и подтверждены итоговым
+PostgreSQL/Linux runtime.
 
 ## Единственные оставшиеся функциональные ограничения
 
@@ -118,25 +132,21 @@ Runtime и MVP5 code PASS не закрывают коммерческую вы�
 
 ## Итоговый gate
 
-| Gate | Статус для `f0c0e26` | Условие следующего перехода |
+| Gate | Статус для `8ccc194` | Условие следующего перехода |
 |---|---|---|
 | 13 критериев MVP5 — code/contract | **PASS, 13/13** | Не ослаблять fail-closed и approval/authority contracts |
-| `C01`, `C07`, `S02`, `S07`, `S08` | **CODE/CONTRACT PASS** | Новый PostgreSQL/runtime CI на точном кандидате |
-| Alembic graph | **CODE PASS** | Одна head `a54f001c0a09`; подтвердить чистым runtime upgrade |
+| `C01`, `C07`, `S02`, `S07`, `S08` | **RUNTIME PASS** | Не ослаблять exact evidence, mailbox isolation и process-fault contracts |
+| Alembic graph | **RUNTIME PASS** | Одна head `a54f001c0a09`, чистый runtime upgrade подтверждён |
 | Базовый `f869319` runtime | **PASS** | Историческое доказательство базы, не нового delta |
-| Новый `f0c0e26` runtime | **CONDITIONAL** | Runtime, durable queue, общий CI и Docker smoke должны быть зелёными на новом SHA |
+| Новый `8ccc194` runtime | **PASS** | Все четыре workflow зелёные на точном SHA |
 | `P04` finance | **OUT OF MVP5 / OWNER DECISION** | Отдельное решение и backlog, если функция нужна |
 | `S10` live provider | **SYNTHETIC PASS / LIVE NOT RUN** | Изолированный live-provider acceptance |
-| Production enable | **BLOCKED** | Новый runtime PASS, live-provider gate и отдельное решение владельца |
+| Production enable | **BLOCKED** | Live-provider gate и отдельное решение владельца |
 | Коммерческая выдача | **BLOCKED** | Закрыть owner/legal/release artifacts |
 
 ## Следующий безопасный порядок
 
-1. Запустить `v54-pilot-runtime.yml`, `durable-queue.yml`, общий CI и Docker
-   smoke на точном новом кандидате.
-2. Принять runtime только если safe protocol показывает head `a54f001c0a09`,
-   `result=PASS`, `cleanup=PASS`, выполненные `C01/C07/S02/S07/S08` и remaining
-   gaps только `P04/S10`.
-3. Провести отдельный live-provider sandbox acceptance для `S10`.
-4. Параллельно закрыть owner/legal/release документы.
-5. Не выполнять merge или production deploy без отдельного решения владельца.
+1. Провести отдельный live-provider sandbox acceptance для `S10` на тестовой
+   учётной записи без production-данных.
+2. Параллельно закрыть owner/legal/release документы.
+3. Не выполнять merge или production deploy без отдельного решения владельца.
