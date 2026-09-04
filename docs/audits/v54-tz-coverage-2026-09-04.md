@@ -4,11 +4,11 @@
 
 Проверенный интеграционный кандидат: `codex/v54-wave3-integration`
 
-Проверенный HEAD: `7758bdd`
+Проверенный продуктовый HEAD: `73d111f`
 
 Текущая единственная Alembic head: `a54f001c0a08`
 
-Решение: **MVP5 — 88% по критериям ТЗ; Wave3 runtime CONDITIONAL; production enable BLOCKED**
+Решение: **MVP5 code coverage — 100% по 13 критериям ТЗ; Wave3 runtime CONDITIONAL; production enable BLOCKED**
 
 ## Вывод
 
@@ -19,11 +19,11 @@ CONFIRM-путь, узкий policy-authorized AUTO для внутренней 
 PostgreSQL CI. Wave3 добавил схемы `a05`–`a08`, local upload и Gmail attachment
 wiring, поэтому зелёный Wave2 нельзя считать runtime-доказательством Wave3.
 
-Продуктовая компенсация необратимого email и два security blocker local upload
-закрыты кодом и regression-тестами. До полного MVP5 остаются product-like
-проверка полного deadline/external-confirm сценария и зелёный PostgreSQL/
-process-fault CI на итоговой Wave3 head. До этого нельзя заявлять ни production
-readiness, ни live-provider acceptance.
+Продуктовая компенсация необратимого email, два security blocker local upload и
+product-like deadline/external-confirm сценарий закрыты кодом и regression-
+тестами. Все 13 критериев имеют исполняемое покрытие. До runtime-приёмки остаётся
+зелёный PostgreSQL/process-fault CI на итоговой Wave3 head; до него нельзя
+заявлять ни production readiness, ни live-provider acceptance.
 
 ## Источник и границы оценки
 
@@ -56,8 +56,7 @@ Context Graph и enterprise policy automation. Product Scope остальных 
   runtime-доказательство отсутствует;
 - `0` — требуемый продуктовый результат ещё не интегрирован.
 
-Расчёт: `(5,5 балла по §31.8 + 6 баллов по §31.9) / 13 × 100 = 88,5%`,
-округлённо **88%**.
+Расчёт: `(6 баллов по §31.8 + 7 баллов по §31.9) / 13 × 100 = 100%`.
 
 Этот процент показывает покрытие критериев MVP5, а не вероятность отсутствия
 дефектов. Production readiness является отдельным бинарным gate и сейчас не
@@ -67,26 +66,26 @@ Context Graph и enterprise policy automation. Product Scope остальных 
 
 | Критерий §31.8 | Балл | Статус | Фактическое доказательство | Остаток |
 |---|---:|---|---|---|
-| Evidence-backed end-to-end Communication-to-Action | 0,5 | PARTIAL | Source/Evidence pins, Context, Trust, Task, receipt/audit, Evidence UI и отдельный corrective email action соединены; local/Gmail ingress используют a05 lifecycle | Полный deadline/external-confirm путь ещё не принят как единый product-like сценарий; Wave3 PostgreSQL runtime не пройден |
+| Evidence-backed end-to-end Communication-to-Action | 1 | CODE PASS | Default-off TestClient acceptance соединяет message/attachment → exact Context/Evidence/deadline → internal AUTO Task → external CONFIRM → UNKNOWN/reconcile → corrective proposal | Wave3 PostgreSQL runtime остаётся отдельным бинарным gate |
 | Context Graph для пилотного сценария | 1 | CODE PASS | Hypothesis/confirm/correct с CAS, историей, защитой от late analysis и receipt projection | Более богатый enterprise graph относится к 1.0+, не к MVP5 |
 | CONFIRM для критических действий | 1 | CODE PASS | Точная approval binding, payload/revision/hash invalidation, live Authority перед T2; service worker и global admin не получают обход | Live external provider acceptance остаётся отдельным gate |
 | Action Ledger | 1 | CODE PASS | Append-oriented audit, sealed action, approval/policy origin, execution attempt, outcome observation и receipt | Production-readable полный ledger UI не требуется для зачёта этого узкого пилотного критерия |
 | Idempotency и deduplication | 1 | CODE PASS | Mailbox-scoped dedup, stable command/job binding, один Task/receipt/projection, provider UNKNOWN → lookup вместо повторного dispatch | Конкурентность новых a05–a08 должна подтвердиться Wave3 PostgreSQL CI |
 | Reversible/compensatable/irreversible classification | 1 | CODE PASS | Тип действия входит в sealed envelope; отмена Task является новым действием; irreversible provider outcome не переписывается | UX для компенсирующего email учитывается отдельно в сценарии E |
-| **Итого §31.8** | **5,5 / 6** |  |  |  |
+| **Итого §31.8** | **6 / 6** |  |  |  |
 
 ## Матрица дополнительных сценариев A–G
 
 | Сценарий §31.9 | Балл | Статус | Фактическое доказательство | Остаток |
 |---|---:|---|---|---|
-| A. Срок вместе с evidence на точный источник/версию; без evidence — unverified | 0,5 | PARTIAL | Read-only Evidence API/UI показывает exact source/version/locator, confidence и human assessment; stale/denied content скрывается | Browser path показывает evidence, но не завершённый продуктовый договорный deadline flow |
-| B. `create-internal-task=AUTO`, `send-external-message=CONFIRM` | 0,5 | PARTIAL | a07 разрешает только low-risk `task.internal.create` через точную SERVER_POLICY без фиктивного human approval; внешние действия не становятся AUTO | External message остаётся synthetic/default-off; live/product send не принят |
+| A. Срок вместе с evidence на точный источник/версию; без evidence — unverified | 1 | CODE PASS | Product-like acceptance создаёт deadline с exact evidence/source/version pins; Evidence API/UI показывает confidence и human assessment, а stale/denied content скрывается | Live provider остаётся отдельным gate |
+| B. `create-internal-task=AUTO`, `send-external-message=CONFIRM` | 1 | CODE PASS | a07 разрешает low-risk `task.internal.create` через SERVER_POLICY без фиктивного approval; тот же product-like сценарий требует HUMAN_APPROVAL для external action и проверяет UNKNOWN reconciliation | Live send намеренно не выполняется в CI |
 | C. Изменённый payload инвалидирует старое approval | 1 | CODE PASS | Approval привязан к action/revision/envelope/payload hash; негативные T2 tests блокируют подмену до эффекта | Требуется только общий Wave3 runtime gate |
 | D. Reversible Task отменяется отдельным audited action | 1 | CODE PASS | `task.internal.cancel` имеет отдельные action, permission/approval, receipt и audit; исходная история сохраняется | Нет остатка в границе synthetic pilot |
 | E. Для отправленного email UI предлагает новый compensating follow-up | 1 | CODE PASS | Исходный APPLIED email неизменяем; API/UI создают отдельный FROZEN corrective draft с новым CONFIRM, exact source/outcome/mailbox/project/evidence pins и fail-closed recheck | Live send намеренно не выполняется до отдельной provider acceptance |
 | F. Source остаётся у клиента; запрещённая копия не создаётся | 1 | CODE PASS | a05 связывает SourceVersion/Evidence/Materialization, staging шифрует представление, payload содержит только `staging_id`; a08 добавляет service retention purge и DB/lease fence от дублей | Требуется PostgreSQL fault-runtime доказательство a08 перед enable |
 | G. Недоступный или устаревший provider source явно маркируется | 1 | CODE PASS | Fail-closed resolver и EvidencePanel показывают unavailable/stale без выдачи fragment; late reply не возвращает старый проект | Live provider outage ещё не проверен |
-| **Итого §31.9** | **6 / 7** |  |  |  |
+| **Итого §31.9** | **7 / 7** |  |  |  |
 
 ## Реализованная последовательность схемы
 
@@ -112,6 +111,7 @@ compensation не потребовала миграции; `a08` являетс�
 [Gmail attachment wiring](v54-gmail-a05-wiring.md),
 [provider runtime](v54-provider-action-runtime.md),
 [autonomy authorization](v54-autonomy-authorization.md),
+[product-like acceptance](v54-product-acceptance.md),
 [security review](v54-wave3-security-review.md) и
 [Wave3 CI gate](v54-wave3-ci-gate.md).
 
@@ -151,6 +151,9 @@ Wave3 `a05`–`a08`.
   claim fence перед legacy commits и partial unique identity local Document;
 - email compensation: неизменяемый исходный outcome, отдельные corrective
   action/draft, новый CONFIRM и защита от stale source observation;
+- product-like acceptance: default-off/test-DB-only HTTP path проверяет полный
+  A/B цикл, раздельные HUMAN_APPROVAL/SERVER_POLICY origins, UNKNOWN lookup и
+  отсутствие повторного provider effect;
 - browser E2E: пять synthetic Playwright-сценариев на реальном `App` покрывают
   readable/manual-review evidence, stale/denied fail-closed, late-reply без
   возврата к старому проекту, attachment import UI и local-upload/AI-policy
@@ -225,7 +228,7 @@ Wave3 PostgreSQL и mailbox/provider acceptance.
 
 | Gate | Статус сейчас | Условие закрытия |
 |---|---|---|
-| 13 критериев MVP5 | **88%** | Подтвердить A/B единым product-like acceptance и Wave3 runtime |
+| 13 критериев MVP5 | **100% CODE COVERAGE** | Product-like A/B acceptance интегрирован; runtime является отдельным gate |
 | Единственная Alembic head | PASS | Сохранить линейную head `a08` |
 | Wave2 Linux/PostgreSQL runtime | PASS | Уже подтверждён на `f721634` тремя зелёными runs |
 | Wave3 Linux/PostgreSQL runtime | CONDITIONAL | Зелёные runtime и durable-queue artifacts на точном финальном SHA |
@@ -236,18 +239,17 @@ Wave3 PostgreSQL и mailbox/provider acceptance.
 
 ## Следующий безопасный порядок
 
-1. Завершить product-like synthetic acceptance полного A/B пути.
-2. Запустить полный backend/frontend/browser contract и проверить одну Alembic
+1. Запустить полный backend/frontend/browser contract и проверить одну Alembic
    head.
-3. Выполнить оба изолированных Wave3 GitHub workflow и проверить safe JSON
+2. Выполнить оба изолированных Wave3 GitHub workflow и проверить safe JSON
    artifacts и cleanup.
-4. После зелёного CI провести отдельный live-provider sandbox acceptance.
-5. Не выполнять merge или production deploy до отдельного решения владельца.
+3. После зелёного CI провести отдельный live-provider sandbox acceptance.
+4. Не выполнять merge или production deploy до отдельного решения владельца.
 
 ## Итоговый статус
 
-Кандидат реализует **88% явных критериев MVP5** и является сильным
-Wave3 code candidate. Он ещё не является production-ready: product-like полный
-A/B путь и PostgreSQL/process-fault CI не приняты на схеме `a54f001c0a08`.
+Кандидат реализует **100% исполняемого покрытия 13 явных критериев MVP5**.
+Он ещё не является production-ready: PostgreSQL/process-fault CI не принят на
+схеме `a54f001c0a08`, а live-provider acceptance не выполнялся.
 Company Memory
 не является недостающим пунктом MVP5 и не должна задерживать его закрытие.
