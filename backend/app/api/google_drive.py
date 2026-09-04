@@ -69,6 +69,32 @@ def credentials_for_project(project_id: int, db: Session):
     return _adapter_credentials_for_project(project_id, db)
 
 
+def _fetch_google_credentials(flow: Flow, code: str):
+    """Exchange an OAuth code and validate the granted capability set.
+
+    Google may return a legitimate superset of the requested scopes. OAuthLib's
+    implicit equality check rejects that response, so it is disabled only for
+    the exchange and replaced with an explicit fail-closed subset check before
+    the OIDC identity is verified or any credential is persisted.
+    """
+    flow.oauth2session.scope = None
+    token_payload = flow.fetch_token(code=code)
+    credentials = flow.credentials
+
+    raw_scopes = token_payload.get("scope") or credentials.scopes or ()
+    if isinstance(raw_scopes, str):
+        granted_scopes = set(raw_scopes.split())
+    else:
+        granted_scopes = set(raw_scopes)
+
+    if set(SCOPES) - granted_scopes:
+        raise HTTPException(
+            status_code=400,
+            detail="Google did not grant all required Workspace permissions",
+        )
+    return credentials
+
+
 @router.get("/{project_id}/google/auth")
 def google_auth(
     project_id: int,
@@ -94,7 +120,9 @@ def google_auth(
 
     authorization_url, state = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
+        # Request the complete fixed Workspace capability set on reconnect.
+        # Incremental consent can retain an older partial grant.
+        include_granted_scopes="false",
         prompt="consent",
         state=_make_oauth_state(project_id),
     )
@@ -129,9 +157,7 @@ def google_callback(
         redirect_uri=redirect_uri,
     )
 
-    flow.fetch_token(code=code)
-
-    credentials = flow.credentials
+    credentials = _fetch_google_credentials(flow, code)
 
     # Verify signed OIDC identity before mutating any credential row.  Email,
     # project and token-row identity are deliberately not accepted as mailbox identity.

@@ -139,7 +139,11 @@ def test_invalid_oidc_callback_persists_no_credential(db_session, monkeypatch):
     project = Project(name="OIDC project", organization_id=org.id); db.add(project); db.commit()
     credentials = SimpleNamespace(id_token="invalid", token="access", refresh_token="refresh",
                                   token_uri="https://oauth2.googleapis.com/token", scopes=[])
-    flow = SimpleNamespace(fetch_token=lambda **kwargs: None, credentials=credentials)
+    flow = SimpleNamespace(
+        oauth2session=SimpleNamespace(scope=list(google_drive.SCOPES)),
+        fetch_token=lambda **kwargs: {"scope": list(google_drive.SCOPES)},
+        credentials=credentials,
+    )
     monkeypatch.setattr(google_drive, "_project_from_oauth_state", lambda state: project.id)
     monkeypatch.setattr(google_drive, "google_config", lambda: ({"web": {"client_id": "client"}}, "https://callback.example.test"))
     monkeypatch.setattr(google_drive.Flow, "from_client_config", lambda *a, **k: flow)
