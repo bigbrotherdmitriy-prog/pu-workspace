@@ -1,7 +1,7 @@
 name: Security and release gates
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
