@@ -377,23 +377,25 @@ export function MailClientModule({
     composer.draft.approved_revision === composer.draft.revision && composer.draft.status === "approved");
 
   return <section className="mail-client" aria-label="Почтовый клиент">
-    <header className="mail-client-header">
-      <div>
-        <span className="eyebrow">КОММУНИКАЦИОННЫЙ ЦЕНТР</span>
-        <h2>Почта проекта</h2>
-        <p>Письма, контекст и AI-помощь. Отправка — только после подтверждения точной версии.</p>
-      </div>
-      <div className="mail-client-header-actions">
-        <span className={`mail-connection ${capabilities.connected ? "ready" : "offline"}`}>
-          {capabilities.connected ? `${capabilities.provider} подключён` : "Почта не подключена"}
-        </span>
-        <button type="button" className="secondary" onClick={onOpenContacts}>Контакты</button>
-        <button type="button" onClick={() => void syncAndReload()} disabled={syncing}>
-          <RefreshCw className={syncing ? "spinning" : ""} /> {syncing ? "Получаю…" : "Получить новые"}
-        </button>
-      </div>
-    </header>
-    {syncStatus && <p className="mail-sync-status" aria-live="polite">{syncStatus}</p>}
+    <div className="mail-client-top">
+      <header className="mail-client-header">
+        <div>
+          <span className="eyebrow">КОММУНИКАЦИОННЫЙ ЦЕНТР</span>
+          <h2>Почта проекта</h2>
+          <p>Письма, контекст и AI-помощь. Отправка — только после подтверждения точной версии.</p>
+        </div>
+        <div className="mail-client-header-actions">
+          <span className={`mail-connection ${capabilities.connected ? "ready" : "offline"}`}>
+            {capabilities.connected ? `${capabilities.provider} подключён` : "Почта не подключена"}
+          </span>
+          <button type="button" className="secondary" onClick={onOpenContacts}>Контакты</button>
+          <button type="button" onClick={() => void syncAndReload()} disabled={syncing}>
+            <RefreshCw className={syncing ? "spinning" : ""} /> {syncing ? "Получаю…" : "Получить новые"}
+          </button>
+        </div>
+      </header>
+      {syncStatus && <p className="mail-sync-status" aria-live="polite">{syncStatus}</p>}
+    </div>
     {safeError && <div className="mail-safe-error" role="alert">
       <AlertTriangle /><div><strong>Почтовый интерфейс пока недоступен</strong><p>{safeError}</p><button onClick={() => void loadMailbox()}>Повторить</button></div>
     </div>}

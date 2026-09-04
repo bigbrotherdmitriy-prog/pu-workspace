@@ -60,7 +60,7 @@ function mockClient(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderClient(client = mockClient()) {
+function renderClient(client = mockClient(), propOverrides: Record<string, unknown> = {}) {
   const props = {
     projectId: 7,
     currentUserEmail: "operator@example.test",
@@ -73,11 +73,26 @@ function renderClient(client = mockClient()) {
     onNotice: vi.fn(),
     onError: vi.fn(),
     client: client as never,
+    ...propOverrides,
   };
   return { ...render(<MailClientModule {...props} />), client, props };
 }
 
 describe("MailClientModule", () => {
+  it("keeps sync feedback inside the compact header area", async () => {
+    const { container } = renderClient(mockClient(), { syncStatus: "Проверено 16:06. Новых: 0." });
+    await screen.findByText("Проверено 16:06. Новых: 0.");
+
+    const client = container.querySelector(".mail-client");
+    const top = container.querySelector(".mail-client-top");
+    const status = container.querySelector(".mail-sync-status");
+    const layout = container.querySelector(".mail-layout");
+
+    expect(client?.children[0]).toBe(top);
+    expect(client?.children[1]).toBe(layout);
+    expect(top).toContainElement(status as HTMLElement);
+  });
+
   it("turns HTML email into readable safe text instead of showing source markup", () => {
     const body = readableMessageBody("<html><style>.hidden{display:none}</style><p>Добрый день!<br>Срок — 10 сентября.</p><script>secret()</script></html>");
     expect(body).toBe("Добрый день!\nСрок — 10 сентября.");
