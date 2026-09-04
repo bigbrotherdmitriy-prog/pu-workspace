@@ -131,11 +131,33 @@ def read(db, evidence, *, resolver=None, store=None, actor_scope=None, limits=No
 
 @pytest.mark.parametrize("verified", [True, False])
 def test_current_verified_and_unverified_are_readable(db, verified):
-    _, _, evidence = ready(db, verified=verified)
+    source, _, evidence = ready(db, verified=verified)
     result = read(db, evidence)
     assert result.fragment == TEXT.decode()
     assert result.verification == ("verified" if verified else "unverified")
+    assert result.effective_status == ("verified" if verified else "unverified")
+    assert result.historical is False
+    assert result.assessment_record_version == (2 if verified else 1)
+    assert result.version_state == "current"
+    assert result.freshness == "fresh"
+    assert result.availability == "available"
+    assert result.valid_until == NOW + timedelta(minutes=4)
+    assert result.extractor.model_dump() == {"name": "fixture", "version": "1",
+                                             "method": None, "model_provider": None,
+                                             "model_id": None, "model_version": None,
+                                             "prompt_version": None,
+                                             "configuration_digest": None}
+    assert result.confidence is None
+    assert result.confidence_kind == "unknown"
+    assert result.extracted_at == NOW
     assert result.evidence_pin == evidence
+
+
+def test_effective_status_never_elevates_unverified_resolver_state(db):
+    _, _, evidence = ready(db, verified=True)
+    result = read(db, evidence, resolver=ResolverDouble(verification="unverified"))
+    assert result.verification == "verified"
+    assert result.effective_status == "unverified"
 
 
 @pytest.mark.parametrize("change", [
@@ -294,9 +316,12 @@ def test_all_locator_variants(index, db):
     source = db.get(SourceReference, source_pin.ref.id.value)
     evidence_row = db.get(Evidence, evidence.ref.id.value)
     object_kind, locator = locator_cases(source.id)[index]
-    source.object_kind = object_kind
     if object_kind == "attachment":
-        source.parent_source_id = uid(12)
+        db.execute(update(SourceReference).where(SourceReference.id == source.id).values(
+            object_kind=object_kind, parent_source_id=uid(12)))
+        db.expire(source)
+    else:
+        source.object_kind = object_kind
     evidence_row.locator = locator
     assert read(db, evidence).locator.kind == locator["kind"]
 
@@ -405,7 +430,7 @@ def test_attachment_locator_requires_exact_parent_and_source_binding(db, changed
     assert store.calls == []
 
 
-def test_reader_emits_only_select_and_does_not_mutate_rows_or_session(db):
+def test_reader_uses_one_lineage_select_and_does_not_mutate_rows_or_session(db):
     _, _, evidence = ready(db)
     row = db.get(Evidence, evidence.ref.id.value)
     before = {column.key: deepcopy(getattr(row, column.key)) for column in Evidence.__table__.columns}
@@ -419,10 +444,73 @@ def test_reader_emits_only_select_and_does_not_mutate_rows_or_session(db):
     read(db, evidence)
     event.remove(db.bind, "before_cursor_execute", capture)
     after = {column.key: deepcopy(getattr(row, column.key)) for column in Evidence.__table__.columns}
-    assert statements and all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
+    assert len(statements) == 1
+    assert statements[0].lstrip().upper().startswith("SELECT")
     assert before == after
     assert set(db.dirty) == dirty_before and set(db.new) == new_before and set(db.deleted) == deleted_before
     assert db.in_transaction()
+
+
+def test_attachment_parent_is_loaded_in_the_same_lineage_select(db):
+    source_pin, _, evidence = ready(db)
+    source = db.get(SourceReference, source_pin.ref.id.value)
+    db.execute(update(SourceReference).where(SourceReference.id == source.id).values(
+        object_kind="attachment", parent_source_id=uid(12)))
+    db.execute(update(Evidence).where(Evidence.id == evidence.ref.id.value).values(
+        locator=locator_cases(source.id)[5][1]))
+    db.expire_all()
+    statements = []
+
+    @event.listens_for(db.bind, "before_cursor_execute")
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement)
+
+    assert read(db, evidence).locator.kind == "attachment"
+    event.remove(db.bind, "before_cursor_execute", capture)
+    assert len(statements) == 1
+
+
+@pytest.mark.parametrize("deadline_owner", ["resolver", "assessment", "source", "descriptor"])
+def test_result_valid_until_is_earliest_live_gate(db, deadline_owner):
+    source_pin, version, evidence = ready(db)
+    source = db.get(SourceReference, source_pin.ref.id.value)
+    assessment = db.get(EvidenceAssessment, evidence.ref.id.value)
+    evidence_row = db.get(Evidence, evidence.ref.id.value)
+    deadlines = {
+        "resolver": NOW + timedelta(seconds=31),
+        "assessment": NOW + timedelta(seconds=32),
+        "source": NOW + timedelta(seconds=33),
+        "descriptor": NOW + timedelta(seconds=34),
+    }
+    assessment.valid_until = deadlines["assessment"]
+    source.next_check_at = deadlines["source"]
+    evidence_row.representation_ref = descriptor(
+        evidence, source_pin, version, expires_at=deadlines["descriptor"].isoformat())
+    resolver = ResolverDouble(valid_until=deadlines["resolver"])
+    expected = deadlines[deadline_owner]
+    if deadline_owner != "resolver":
+        resolver.changes["valid_until"] = NOW + timedelta(minutes=5)
+    if deadline_owner != "assessment": assessment.valid_until = NOW + timedelta(minutes=5)
+    if deadline_owner != "source": source.next_check_at = NOW + timedelta(minutes=5)
+    if deadline_owner != "descriptor":
+        evidence_row.representation_ref = descriptor(
+            evidence, source_pin, version, expires_at=(NOW + timedelta(minutes=5)).isoformat())
+    assert read(db, evidence, resolver=resolver).valid_until == expected
+
+
+@pytest.mark.parametrize("mutation", ["future_extracted", "bad_extractor", "unknown_with_confidence"])
+def test_invalid_extraction_provenance_fails_before_store(db, mutation):
+    _, _, evidence = ready(db)
+    row = db.get(Evidence, evidence.ref.id.value)
+    if mutation == "future_extracted": row.extracted_at = NOW + timedelta(seconds=1)
+    elif mutation == "bad_extractor": row.extractor = {"name": "fixture", "secret": "not-allowed"}
+    else:
+        row.confidence = 0.8
+        row.confidence_kind = "unknown"
+    store = StoreDouble()
+    with pytest.raises(SourceEvidenceError, match="^resource_unavailable$"):
+        read(db, evidence, store=store)
+    assert store.calls == []
 
 
 def test_no_fallback_to_latest_or_another_representation(db):

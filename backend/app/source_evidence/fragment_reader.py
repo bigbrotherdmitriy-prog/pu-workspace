@@ -23,8 +23,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.core.v54_interfaces import RequestScope, Resolution, require_resolution
 from app.core.v54_permissions import SourceEvidenceError, deny, utc
@@ -263,6 +263,31 @@ class FragmentStorePayload(StrictDTO):
     fragment: StrictBytes
 
 
+class ExtractorMetadata(StrictDTO):
+    name: StrictStr
+    version: StrictStr | None = None
+    method: StrictStr | None = None
+    model_provider: StrictStr | None = None
+    model_id: StrictStr | None = None
+    model_version: StrictStr | None = None
+    prompt_version: StrictStr | None = None
+    configuration_digest: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def validate_metadata(self):
+        for value in (
+            self.name, self.version, self.method, self.model_provider,
+            self.model_id, self.model_version, self.prompt_version,
+            self.configuration_digest,
+        ):
+            if value is not None:
+                _nonempty(value, limit=255)
+        model_fields = (self.model_provider, self.model_id, self.model_version)
+        if any(value is not None for value in model_fields) and any(value is None for value in model_fields):
+            raise ValueError("resource_unavailable")
+        return self
+
+
 class FragmentReadResult(StrictDTO):
     evidence_pin: VersionPin
     source_ref: ObjectRef
@@ -271,6 +296,17 @@ class FragmentReadResult(StrictDTO):
     kind: Literal["extracted_text", "quote"]
     media_type: StrictStr
     verification: Literal["verified", "unverified"]
+    effective_status: Literal["verified", "unverified"]
+    historical: Literal[False]
+    assessment_record_version: StrictInt
+    version_state: Literal["current"]
+    freshness: Literal["fresh"]
+    availability: Literal["available"]
+    valid_until: AwareDatetime
+    extractor: ExtractorMetadata
+    confidence: StrictFloat | None
+    confidence_kind: Literal["heuristic", "model", "calibrated", "unknown"]
+    extracted_at: AwareDatetime
     locator: EvidenceLocator
     fragment: StrictStr
 
@@ -304,11 +340,8 @@ def _safe_boundary(function):
     return call
 
 
-def _one(db: Session, model, *conditions):
-    return db.scalar(select(model).where(*conditions))
-
-
-def _validate_locator(db: Session, *, scope: RequestScope, source: SourceReference,
+def _validate_locator(*, scope: RequestScope, source: SourceReference,
+                      parent: SourceReference | None,
                       descriptor: RepresentationDescriptor, raw: object) -> EvidenceLocator:
     locator = _LOCATOR.validate_python(raw)
     if isinstance(locator, PageBBoxLocator):
@@ -327,12 +360,6 @@ def _validate_locator(db: Session, *, scope: RequestScope, source: SourceReferen
                 or locator.attachment_external_id != source.external_id
                 or not source.parent_source_id):
             deny()
-        parent = _one(
-            db,
-            SourceReference,
-            SourceReference.id == source.parent_source_id,
-            SourceReference.organization_id == int(scope.tenant.value),
-        )
         if (not parent or parent.object_kind != "message"
                 or parent.identity_id != source.identity_id
                 or parent.namespace != source.namespace
@@ -370,28 +397,83 @@ def read_fragment(
     project_id = int(scope.project.id.value)
 
     with db.no_autoflush:
-        evidence = _one(db, Evidence, Evidence.id == evidence_pin.ref.id.value,
-                        Evidence.organization_id == tenant_id)
-        if not evidence or evidence.revision != evidence_pin.value:
+        parent_source = aliased(SourceReference, name="parent_source")
+        lineage = db.execute(
+            select(
+                Evidence,
+                EvidenceAssessment,
+                SourceReference,
+                SourceVersion,
+                SourceCurrent,
+                ConnectionIdentity,
+                MailConnection,
+                parent_source,
+            )
+            .select_from(Evidence)
+            .join(EvidenceAssessment, and_(
+                EvidenceAssessment.evidence_id == Evidence.id,
+                EvidenceAssessment.organization_id == Evidence.organization_id,
+            ))
+            .join(SourceReference, and_(
+                SourceReference.id == Evidence.source_id,
+                SourceReference.organization_id == Evidence.organization_id,
+            ))
+            .join(SourceVersion, and_(
+                SourceVersion.id == Evidence.source_version_id,
+                SourceVersion.source_id == Evidence.source_id,
+                SourceVersion.organization_id == Evidence.organization_id,
+            ))
+            .join(SourceCurrent, and_(
+                SourceCurrent.source_id == Evidence.source_id,
+                SourceCurrent.organization_id == Evidence.organization_id,
+            ))
+            .join(ConnectionIdentity, and_(
+                ConnectionIdentity.id == SourceReference.identity_id,
+                ConnectionIdentity.organization_id == Evidence.organization_id,
+            ))
+            .join(MailConnection, and_(
+                MailConnection.identity_id == SourceReference.identity_id,
+                MailConnection.namespace == SourceReference.namespace,
+                MailConnection.organization_id == Evidence.organization_id,
+            ))
+            .outerjoin(parent_source, and_(
+                parent_source.id == SourceReference.parent_source_id,
+                parent_source.organization_id == Evidence.organization_id,
+            ))
+            .where(
+                Evidence.id == evidence_pin.ref.id.value,
+                Evidence.organization_id == tenant_id,
+                Evidence.revision == evidence_pin.value,
+                SourceReference.origin_project_id == project_id,
+            )
+        ).one_or_none()
+        if lineage is None:
             deny()
-        assessment = _one(db, EvidenceAssessment,
-                          EvidenceAssessment.evidence_id == evidence.id,
-                          EvidenceAssessment.organization_id == tenant_id)
-        source = _one(db, SourceReference, SourceReference.id == evidence.source_id,
-                      SourceReference.organization_id == tenant_id,
-                      SourceReference.origin_project_id == project_id)
-        version = _one(db, SourceVersion, SourceVersion.id == evidence.source_version_id,
-                       SourceVersion.organization_id == tenant_id,
-                       SourceVersion.source_id == evidence.source_id)
-        current = _one(db, SourceCurrent, SourceCurrent.source_id == evidence.source_id,
-                       SourceCurrent.organization_id == tenant_id)
-        if not assessment or not source or not version or not current:
+        evidence, assessment, source, version, current, identity, mailbox, parent = lineage
+        if (evidence.id != evidence_pin.ref.id.value
+                or evidence.organization_id != tenant_id
+                or evidence.revision != evidence_pin.value
+                or assessment.evidence_id != evidence.id
+                or assessment.organization_id != tenant_id
+                or source.id != evidence.source_id
+                or source.organization_id != tenant_id
+                or source.origin_project_id != project_id
+                or version.id != evidence.source_version_id
+                or version.source_id != source.id
+                or version.organization_id != tenant_id
+                or current.source_id != source.id
+                or current.organization_id != tenant_id
+                or current.version_id != version.id
+                or identity.id != source.identity_id
+                or identity.organization_id != tenant_id
+                or mailbox.identity_id != identity.id
+                or mailbox.organization_id != tenant_id
+                or mailbox.namespace != source.namespace
+                or source.parent_source_id is None and parent is not None
+                or source.parent_source_id is not None
+                and (parent is None or parent.id != source.parent_source_id
+                     or parent.organization_id != tenant_id)):
             deny()
-        identity = _one(db, ConnectionIdentity, ConnectionIdentity.id == source.identity_id,
-                        ConnectionIdentity.organization_id == tenant_id)
-        mailbox = _one(db, MailConnection, MailConnection.identity_id == source.identity_id,
-                       MailConnection.organization_id == tenant_id,
-                       MailConnection.namespace == source.namespace)
 
         checked_at = utc(assessment.checked_at)
         valid_until = utc(assessment.valid_until)
@@ -400,12 +482,12 @@ def read_fragment(
         observed_at = utc(version.observed_at)
         verified_at = utc(identity.verified_at) if identity else None
         reviewed_at = utc(assessment.reviewed_at)
+        extracted_at = utc(evidence.extracted_at)
         policy_pins = source.policy_pins
         if (not identity or not mailbox or identity.state != "verified" or mailbox.state != "active"
                 or identity.binding_epoch <= 0 or identity.record_version <= 0
                 or identity.credential_generation is None or identity.credential_generation <= 0
                 or verified_at is None or verified_at > now or mailbox.record_version <= 0
-                or current.version_id != version.id
                 or version.revision != 1 or version.consistency not in {"revision_bound", "digest_observed"}
                 or (version.consistency == "revision_bound" and not version.provider_revision)
                 or (version.consistency == "digest_observed" and not version.integrity)
@@ -416,8 +498,10 @@ def read_fragment(
                 or assessment.freshness != "fresh" or assessment.availability != "available"
                 or checked_at is None or checked_at > now or valid_until is None or valid_until <= now
                 or assessment.verification not in {"verified", "unverified"}
+                or assessment.record_version <= 0
                 or (assessment.verification == "verified"
                     and (assessment.reviewed_by is None or reviewed_at is None or reviewed_at > now))
+                or extracted_at is None or extracted_at > now
                 or not isinstance(policy_pins, dict) or evidence.policy_pins != policy_pins
                 or set(policy_pins) != {"access", "retention", "residency"}
                 or not isinstance(source.residency, dict) or not source.residency):
@@ -433,6 +517,15 @@ def read_fragment(
         if resolution.binding_epoch != identity.binding_epoch:
             deny()
 
+        extractor = ExtractorMetadata.model_validate(evidence.extractor)
+        if (evidence.confidence_kind not in {"heuristic", "model", "calibrated", "unknown"}
+                or evidence.confidence is not None
+                and (not isinstance(evidence.confidence, float)
+                     or evidence.confidence < 0 or evidence.confidence > 1)
+                or evidence.confidence_kind == "unknown" and evidence.confidence is not None
+                or evidence.confidence_kind != "unknown" and evidence.confidence is None):
+            deny()
+
         descriptor = RepresentationDescriptor.model_validate(evidence.representation_ref)
         source_ref = ObjectRef(
             namespace="pu", type="source", tenant_id=scope.tenant,
@@ -443,13 +536,20 @@ def read_fragment(
                           id={"kind": "uuid", "value": version.id}),
             version_kind="revision", value=version.revision,
         )
-        if (descriptor.retention_state != "active" or utc(descriptor.expires_at) <= now
+        descriptor_expires_at = utc(descriptor.expires_at)
+        resolution_valid_until = utc(resolution.valid_until)
+        if (descriptor.retention_state != "active" or descriptor_expires_at is None
+                or descriptor_expires_at <= now or resolution_valid_until is None
                 or descriptor.evidence_pin != evidence_pin
                 or descriptor.source_ref != source_ref
                 or descriptor.source_version_pin != source_version_pin):
             deny()
         locator = _validate_locator(
-            db, scope=scope, source=source, descriptor=descriptor, raw=evidence.locator
+            scope=scope, source=source, parent=parent,
+            descriptor=descriptor, raw=evidence.locator
+        )
+        effective_valid_until = min(
+            resolution_valid_until, valid_until, source_next_check, descriptor_expires_at,
         )
 
         request = FragmentStoreRequest(
@@ -489,6 +589,21 @@ def read_fragment(
             kind=descriptor.kind,
             media_type=descriptor.media_type,
             verification=assessment.verification,
+            effective_status=(
+                "verified"
+                if assessment.verification == "verified" and resolution.verification == "verified"
+                else "unverified"
+            ),
+            historical=False,
+            assessment_record_version=assessment.record_version,
+            version_state="current",
+            freshness="fresh",
+            availability="available",
+            valid_until=effective_valid_until,
+            extractor=extractor,
+            confidence=evidence.confidence,
+            confidence_kind=evidence.confidence_kind,
+            extracted_at=extracted_at,
             locator=locator,
             fragment=fragment,
         )
