@@ -172,6 +172,21 @@ def test_primary_local_smoke_rejects_public_and_reserved_targets():
         module.run("http://127.0.0.1:3000", "a" * 40)
 
 
+def test_primary_local_smoke_accepts_only_expected_pre_cutover_readiness_failures():
+    module = script("check_primary_local_smoke")
+    expected = {
+        "checks": {
+            "database": {"required": True, "ok": True},
+            "schema": {"required": True, "ok": True},
+            "durable_workers": {"required": True, "ok": False},
+            "durable_scheduler": {"required": True, "ok": False},
+        }
+    }
+    assert module.candidate_readiness_acceptable(expected)
+    expected["checks"]["database"]["ok"] = False
+    assert not module.candidate_readiness_acceptable(expected)
+
+
 def test_primary_deploy_has_first_host_guardrails_and_no_public_request():
     deploy = (ROOT / "scripts" / "deploy-primary-first-host.sh").read_text(encoding="utf-8")
     for marker in [
@@ -214,6 +229,8 @@ def test_primary_compose_is_standalone_loopback_only_and_has_no_relay():
     assert "telegram-relay" not in compose
     assert "network_mode: host" not in compose
     assert "profiles: [cutover]" in compose
+    assert "python -m scripts.preflight" not in compose
+    assert "http://127.0.0.1:8000/health" in compose
     assert "pu-workspace.duckdns.org" not in compose
 
 

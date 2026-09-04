@@ -14,6 +14,20 @@ def read_json(base: str, path: str) -> dict:
         return json.load(response)
 
 
+def candidate_readiness_acceptable(readiness: dict) -> bool:
+    if readiness.get("ready"):
+        return True
+    checks = readiness.get("checks")
+    if not isinstance(checks, dict):
+        return False
+    failed_required = {
+        name
+        for name, check in checks.items()
+        if isinstance(check, dict) and check.get("required") and not check.get("ok")
+    }
+    return failed_required == {"durable_workers", "durable_scheduler"}
+
+
 def run(base: str, expected_release: str) -> None:
     parsed = urlparse(base)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
@@ -24,9 +38,9 @@ def run(base: str, expected_release: str) -> None:
     for _attempt in range(60):
         try:
             readiness = read_json(base, "/api/readiness")
-            if readiness.get("ready"):
+            if candidate_readiness_acceptable(readiness):
                 break
-            last_error = "readiness=false"
+            last_error = "unexpected required readiness failure"
         except (HTTPError, URLError, TimeoutError, ValueError) as error:
             last_error = type(error).__name__
         time.sleep(2)
