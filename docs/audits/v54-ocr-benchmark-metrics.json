@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "corpus": {
+    "synthetic": true,
+    "pages": 20,
+    "documents": 5
+  },
+  "engine": {
+    "baseline": "local_tesseract",
+    "version": "tesseract v5.5.3.20260724",
+    "languages": [
+      "rus",
+      "eng"
+    ]
+  },
+  "external_vision": {
+    "enabled": false,
+    "used": false,
+    "allowed_boundary": "AIProviderAdapter"
+  },
+  "technical": {
+    "success_pages": 20,
+    "success_rate": 1.0,
+    "recognized_pages": 20,
+    "failures": [],
+    "mean_ms_per_page": 2601.878,
+    "p95_ms_per_page": 4364.261,
+    "mean_benchmark_ms_per_page": 5942.247
+  },
+  "quality": {
+    "before_preprocessing": {
+      "mean_character_accuracy": 0.9989,
+      "mean_confidence": 0.9559
+    },
+    "after_preprocessing": {
+      "mean_character_accuracy": 1.0,
+      "mean_confidence": 0.9576
+    },
+    "fields": {
+      "number": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "date": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "party": {
+        "tp": 40,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "amount": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    }
+  },
+  "review": {
+    "pages": 0,
+    "rate": 0.0,
+    "threshold": 0.72,
+    "low_confidence_policy_violations": 0,
+    "legal_financial_actions_allowed_for_low_confidence": false
+  },
+  "evidence": {
+    "extracted_fields": 100,
+    "with_page_and_coordinates": 100,
+    "coverage": 1.0
+  },
+  "gate": {
+    "technical_success_target": 0.95,
+    "field_precision_recall_target": 0.8,
+    "pass": true
+  }
+}

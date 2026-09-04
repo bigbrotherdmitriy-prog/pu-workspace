@@ -306,6 +306,15 @@ def _ocr_enabled() -> bool:
     return os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _tesseract_binary() -> str | None:
+    """Resolve the local engine explicitly when a service image does not export PATH."""
+    configured = os.getenv("TESSERACT_CMD", "").strip()
+    if configured:
+        candidate = Path(configured)
+        return str(candidate) if candidate.is_file() else None
+    return shutil.which("tesseract")
+
+
 def _projection_score(image) -> float:
     """Reward rotations that concentrate dark pixels into horizontal text rows."""
     width, height = image.size
@@ -321,16 +330,18 @@ def _projection_score(image) -> float:
 
 
 def _detect_orientation(path: Path, timeout: float) -> int:
-    if not shutil.which("tesseract"):
+    command = _tesseract_binary()
+    if not command:
         return 0
     try:
         result = subprocess.run(
-            ["tesseract", str(path), "stdout", "-l", "osd", "--psm", "0"],
-            capture_output=True, text=True, timeout=max(1, timeout), check=False,
+            [command, str(path), "stdout", "-l", "osd", "--psm", "0"],
+            capture_output=True, timeout=max(1, timeout), check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return 0
-    match = re.search(r"Rotate:\s*(0|90|180|270)", result.stdout + "\n" + result.stderr)
+    output = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace")
+    match = re.search(r"Rotate:\s*(0|90|180|270)", output)
     return int(match.group(1)) if match else 0
 
 
@@ -421,7 +432,8 @@ def _tesseract_page(
     *,
     psm: int | None = None,
 ) -> PageExtraction:
-    if not shutil.which("tesseract"):
+    command = _tesseract_binary()
+    if not command:
         return PageExtraction(page=page, text="", confidence=0.0, method="ocr")
     budget = max(1, timeout or OCR_TIMEOUT_SECONDS)
     processed = path.with_name(f"{path.stem}-processed.png")
@@ -432,22 +444,29 @@ def _tesseract_page(
         width, height, actions = 0, 0, ["preprocessing_failed"]
     result = subprocess.run(
         [
-            "tesseract", str(processed), "stdout",
+            command, str(processed), "stdout",
             "-l", os.getenv("OCR_LANGUAGES", "rus+eng"),
             "--psm", str(psm or OCR_PSM),
             "-c", "preserve_interword_spaces=1", "tsv",
         ],
-        capture_output=True, text=True, timeout=budget, check=False,
+        capture_output=True, timeout=budget, check=False,
     )
-    tokens = _parse_tsv(result.stdout) if result.returncode == 0 else []
+    output = (
+        result.stdout.decode("utf-8", errors="replace")
+        if isinstance(result.stdout, bytes) else result.stdout
+    )
+    tokens = _parse_tsv(output) if result.returncode == 0 else []
     return _page_from_tokens(page, tokens, width, height, actions)
 
 
 def _run_tesseract(path: Path, psm: int, timeout: float) -> str:
     """Return plain OCR text for the bounded adaptive fallback path."""
+    command = _tesseract_binary()
+    if not command:
+        return ""
     result = subprocess.run(
         [
-            "tesseract", str(path), "stdout",
+            command, str(path), "stdout",
             "-l", os.getenv("OCR_LANGUAGES", "rus+eng"),
             "--psm", str(psm),
             "-c", "preserve_interword_spaces=1",
@@ -831,10 +850,12 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
     if not is_pdf:
         text = _extract_native_text(data, mime_type, filename)
         used_ocr = False
+        attempted_ocr = False
         page = _native_page(1, text)
         if len(text.strip()) < OCR_MIN_NATIVE_CHARS:
             try:
                 is_image = mime_type.startswith("image/") or suffix in {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}
+                attempted_ocr = is_image and _ocr_enabled()
                 if is_image:
                     ocr_page = _ocr_image_page(data, suffix)
                     # Keep the legacy bounded OCR seam as a fail-safe. It also
@@ -853,6 +874,7 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
         pages = [page]
         fields = _extract_fields(pages)
         confidence = _result_confidence(pages, fields)
+        needs_review = attempted_ocr and confidence < OCR_REVIEW_CONFIDENCE
         return ExtractionResult(
             text=finalized,
             method="ocr" if used_ocr else "native",
@@ -860,7 +882,8 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
             ocr_pages=1 if used_ocr else 0,
             confidence=confidence, pages=pages, fields=fields,
             table_cells=_extract_table_cells(pages),
-            needs_review=used_ocr and confidence < OCR_REVIEW_CONFIDENCE,
+            needs_review=needs_review,
+            warnings=["manual_review_required"] if needs_review else [],
         )
 
     from pypdf import PdfReader
@@ -908,7 +931,8 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
         warnings.append(f"ocr_page_limit:{OCR_MAX_PAGES}")
     fields = _extract_fields(page_results)
     confidence = _result_confidence(page_results, fields)
-    needs_review = used_ocr and confidence < OCR_REVIEW_CONFIDENCE
+    attempted_ocr = bool(weak_pages) and _ocr_enabled()
+    needs_review = attempted_ocr and confidence < OCR_REVIEW_CONFIDENCE
     if needs_review:
         warnings.append("manual_review_required")
     return ExtractionResult(
