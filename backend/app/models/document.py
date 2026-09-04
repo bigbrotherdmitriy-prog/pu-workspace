@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -7,6 +7,14 @@ from app.database import Base
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        Index(
+            "uq_documents_local_upload_identity",
+            "project_id", "external_id", unique=True,
+            postgresql_where=text("source = 'local_upload' AND external_id IS NOT NULL"),
+            sqlite_where=text("source = 'local_upload' AND external_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,

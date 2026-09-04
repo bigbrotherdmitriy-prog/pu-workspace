@@ -31,7 +31,7 @@ def migration_config(output_buffer=None):
 
 def test_provider_revision_is_the_only_head_and_renders_postgresql_offline(monkeypatch):
     assert ScriptDirectory.from_config(migration_config()).get_heads() == [CURRENT_SCHEMA_REVISION]
-    assert CURRENT_SCHEMA_REVISION == "a54f001c0a07"
+    assert CURRENT_SCHEMA_REVISION == "a54f001c0a08"
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",
@@ -107,7 +107,7 @@ def test_postgresql_provider_upgrade_from_a05_and_round_trip(monkeypatch):
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a05"
             assert not set(PROVIDER_TABLES) & set(inspect(connection).get_table_names())
-        command.upgrade(config, "a54f001c0a07")
+        command.upgrade(config, "a54f001c0a08")
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_SCHEMA_REVISION
             assert set(PROVIDER_TABLES) <= set(inspect(connection).get_table_names())

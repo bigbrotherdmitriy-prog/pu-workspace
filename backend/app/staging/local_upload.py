@@ -7,27 +7,32 @@ then delegates every representation transition to MaterializationLifecycle.
 from __future__ import annotations
 
 import hashlib
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, Mapping
 from uuid import UUID, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.v54_interfaces import RequestScope
 from app.core.v54_permissions import SourceEvidenceError, object_ref, utc
-from app.core.v54_refs import VersionPin
+from app.core.v54_refs import ObjectRef, TaggedId, VersionPin
 from app.jobs.queue import utcnow as queue_now
 from app.local_upload_staging import (
     CleanupDecision, FinalizedUpload, LocalUploadConflict, MaterializedUpload,
     UploadReservation, UploadScope,
 )
 from app.models.job import BackgroundJob
+from app.models.audit_log import AuditLog
 from app.models.materialization import Materialization
+from app.models.project import Project
 from app.models.v54_pilot import (
-    ConnectionIdentity, Evidence, SourceCurrent, SourceReference, SourceVersion,
+    AuditExtension, ConnectionIdentity, Evidence, SourceCurrent, SourceReference,
+    SourceVersion,
 )
-from app.source_evidence.common import audit
+from app.source_evidence.common import audit, cas
 from app.staging.contracts import KekRef, StagingDescriptor, StagingStorage
 from app.staging.lifecycle import (
     LifecycleAuthority, MaterializationLifecycle, MaterializationManifest,
@@ -35,6 +40,40 @@ from app.staging.lifecycle import (
 )
 
 _NAMESPACE = UUID("a4d8f512-6b68-4dd6-9df4-7384bd62292d")
+_SERVICE_PRINCIPAL = re.compile(r"^[a-z][a-z0-9.-]{2,99}$")
+
+
+@dataclass(frozen=True, slots=True)
+class LocalUploadRetentionAuthority:
+    """Explicit server capability; it never derives authority from a user row."""
+
+    service_principal: str
+    scopes: frozenset[tuple[int, int]]
+    allowed_residencies: frozenset[str]
+    allowed_keks: frozenset[KekRef]
+
+    def __post_init__(self) -> None:
+        if (
+            not _SERVICE_PRINCIPAL.fullmatch(self.service_principal)
+            or not self.scopes
+            or any(type(tenant) is not int or tenant <= 0 or type(project) is not int
+                   or project <= 0 for tenant, project in self.scopes)
+            or not self.allowed_residencies or not self.allowed_keks
+        ):
+            raise ValueError("resource_unavailable")
+
+    def require(self, db: Any, row: Materialization) -> None:
+        project = db.scalar(select(Project).where(
+            Project.id == row.project_id,
+            Project.organization_id == row.organization_id,
+        ).with_for_update())
+        if (
+            project is None
+            or (row.organization_id, row.project_id) not in self.scopes
+            or row.residency not in self.allowed_residencies
+            or KekRef(row.kek_reference, row.kek_version) not in self.allowed_keks
+        ):
+            raise SourceEvidenceError("resource_unavailable")
 
 
 def _stable_uuid(label: str, value: str) -> str:
@@ -70,6 +109,7 @@ class A05LocalUploadLifecycle:
         authority_factory: Callable[[Any, UploadScope], LifecycleAuthority],
         clock: Callable[[], datetime], residency: str, kek: KekRef,
         max_file_bytes: int,
+        retention_authority: LocalUploadRetentionAuthority | None = None,
     ) -> None:
         if (not isinstance(storage, StagingStorage) or not callable(authority_factory)
                 or not callable(clock) or type(residency) is not str or not residency
@@ -82,6 +122,11 @@ class A05LocalUploadLifecycle:
         self.residency = residency
         self.kek = kek
         self.max_file_bytes = max_file_bytes
+        if retention_authority is not None and not isinstance(
+            retention_authority, LocalUploadRetentionAuthority,
+        ):
+            raise ValueError("resource_unavailable")
+        self.retention_authority = retention_authority
 
     def _service(self, db: Any, upload_scope: UploadScope) -> tuple[MaterializationLifecycle, RequestScope]:
         authority = self.authority_factory(db, upload_scope)
@@ -450,3 +495,162 @@ class A05LocalUploadLifecycle:
             db, scope=request_scope, materialization=service._pin(request_scope, row),
         )
         return None
+
+    def _service_audit(
+        self, db: Any, row: Materialization, event: str, now: datetime,
+        record_version: int,
+    ) -> None:
+        authority = self.retention_authority
+        if authority is None or event not in {
+            "MATERIALIZATION_EXPIRED", "MATERIALIZATION_PURGED",
+        }:
+            raise SourceEvidenceError("resource_unavailable")
+        sequence = db.scalar(select(func.coalesce(func.max(AuditExtension.sequence), 0)).where(
+            AuditExtension.organization_id == row.organization_id,
+            AuditExtension.subject_type == "materialization",
+            AuditExtension.subject_id == row.id,
+        )) + 1
+        ledger = AuditLog(
+            action=f"v54.{event}", entity_type="materialization",
+            entity_id=None, details=None,
+        )
+        db.add(ledger)
+        db.flush()
+        tenant = TaggedId(kind="int", value=str(row.organization_id))
+        subject = ObjectRef(
+            namespace="pu", type="materialization", tenant_id=tenant,
+            id={"kind": "uuid", "value": row.id},
+        )
+        pin = VersionPin(
+            ref=subject, version_kind="record_version", value=record_version,
+        )
+        db.add(AuditExtension(
+            organization_id=row.organization_id, audit_log_id=ledger.id,
+            subject_type="materialization", subject_id=row.id,
+            sequence=sequence, actor_id=None,
+            service_principal=authority.service_principal,
+            project_id=row.project_id,
+            correlation_id=_stable_uuid(
+                "retention", f"{row.organization_id}:{row.project_id}:{row.id}",
+            ),
+            action_pin=None, subject_pin=pin.model_dump(mode="json"),
+            approval_id=None, receipt_id=None, job_id=None, relation_refs=[],
+        ))
+        db.flush()
+
+    def _retention_binding(
+        self, db: Any, materialization_id: str,
+    ) -> tuple[Materialization, BackgroundJob, str]:
+        authority = self.retention_authority
+        if authority is None:
+            raise SourceEvidenceError("resource_unavailable")
+        row = db.scalar(select(Materialization).where(
+            Materialization.id == materialization_id,
+            Materialization.state.in_(("DERIVED", "EXPIRED")),
+        ).with_for_update())
+        if row is None:
+            raise SourceEvidenceError("resource_unavailable")
+        authority.require(db, row)
+        source = db.scalar(select(SourceReference).where(
+            SourceReference.id == row.source_id,
+            SourceReference.organization_id == row.organization_id,
+            SourceReference.origin_project_id == row.project_id,
+            SourceReference.namespace == "local-upload",
+        ))
+        if source is None:
+            raise SourceEvidenceError("resource_unavailable")
+        job = self._job(db, row)
+        if (
+            job is None or job.status not in {"failed", "dead_letter"}
+            or job.payload != {"staging_id": self._staging_id(row.id)}
+        ):
+            raise SourceEvidenceError("resource_unavailable")
+        outcome = job.status
+        if row.state == "EXPIRED":
+            retired = RetiredMaterializationManifest.model_validate(row.manifest)
+            if retired.outcome != outcome:
+                raise SourceEvidenceError("resource_unavailable")
+        return row, job, outcome
+
+    def recover_retention(self, session_factory: Callable[[], Any], *, limit: int) -> int:
+        """Expire, delete, then tombstone failed local uploads without user authority."""
+        if (
+            self.retention_authority is None or not callable(session_factory)
+            or type(limit) is not int or not 1 <= limit <= 500
+        ):
+            raise SourceEvidenceError("resource_unavailable")
+        now = utc(self.clock())
+        with session_factory() as db:
+            candidates = list(db.scalars(select(Materialization.id).join(
+                SourceReference,
+                (SourceReference.id == Materialization.source_id)
+                & (SourceReference.organization_id == Materialization.organization_id),
+            ).where(
+                SourceReference.namespace == "local-upload",
+                Materialization.state.in_(("DERIVED", "EXPIRED")),
+                Materialization.retention_until <= now,
+            ).order_by(Materialization.retention_until, Materialization.id).limit(limit * 4)))
+
+        purged = 0
+        for materialization_id in candidates:
+            if purged >= limit:
+                break
+            try:
+                with session_factory() as db:
+                    row, _, outcome = self._retention_binding(db, materialization_id)
+                    if utc(row.retention_until) > now:
+                        raise SourceEvidenceError("resource_unavailable")
+                    if row.state == "DERIVED":
+                        storage = MaterializationManifest.model_validate(row.manifest).storage
+                        next_version = row.record_version + 1
+                        cas(db, Materialization, [
+                            Materialization.id == row.id,
+                            Materialization.organization_id == row.organization_id,
+                            Materialization.project_id == row.project_id,
+                            Materialization.owner_id == row.owner_id,
+                            Materialization.state == "DERIVED",
+                        ], row.record_version, state="EXPIRED", expired_at=now,
+                            active_fence=None, manifest=RetiredMaterializationManifest(
+                                schema_version="v54.materialization.retired.1",
+                                storage=storage, outcome=outcome,
+                            ).model_dump(mode="json"))
+                        row = db.get(Materialization, materialization_id)
+                        self._service_audit(
+                            db, row, "MATERIALIZATION_EXPIRED", now, next_version,
+                        )
+                        db.commit()
+                    descriptor = _descriptor(
+                        RetiredMaterializationManifest.model_validate(row.manifest)
+                        .storage.model_dump()
+                    )
+
+                self.storage.delete(descriptor.object_id)
+
+                with session_factory() as db:
+                    row, _, outcome = self._retention_binding(db, materialization_id)
+                    if row.state != "EXPIRED":
+                        raise SourceEvidenceError("resource_unavailable")
+                    next_version = row.record_version + 1
+                    cas(db, Materialization, [
+                        Materialization.id == row.id,
+                        Materialization.organization_id == row.organization_id,
+                        Materialization.project_id == row.project_id,
+                        Materialization.owner_id == row.owner_id,
+                        Materialization.state == "EXPIRED",
+                    ], row.record_version, state="PURGED",
+                        manifest=PurgeTombstone(
+                            schema_version="v54.materialization.tombstone.1",
+                            outcome=outcome,
+                        ).model_dump(mode="json", exclude_none=True),
+                        wrapped_dek=None, format_version=None, chunk_size=None,
+                        active_fence=None, purged_at=now)
+                    row = db.get(Materialization, materialization_id)
+                    self._service_audit(
+                        db, row, "MATERIALIZATION_PURGED", now, next_version,
+                    )
+                    db.commit()
+                purged += 1
+            except Exception:
+                # Per-object fail closed. No locator, exception text, or content is logged.
+                continue
+        return purged

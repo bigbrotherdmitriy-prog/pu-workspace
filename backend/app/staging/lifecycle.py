@@ -82,14 +82,14 @@ class MaterializationManifest(StrictDTO):
 
 class PurgeTombstone(StrictDTO):
     schema_version: Literal["v54.materialization.tombstone.1"]
-    outcome: Literal["completed", "cancelled"] | None = None
+    outcome: Literal["completed", "cancelled", "failed", "dead_letter"] | None = None
     result: dict | None = None
 
 
 class RetiredMaterializationManifest(StrictDTO):
     schema_version: Literal["v54.materialization.retired.1"]
     storage: StoredDescriptor
-    outcome: Literal["completed", "cancelled"]
+    outcome: Literal["completed", "cancelled", "failed", "dead_letter"]
     result: dict | None = None
 
 

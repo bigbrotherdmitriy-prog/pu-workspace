@@ -18,7 +18,12 @@ from pathlib import PurePosixPath
 from threading import RLock
 from typing import Any, Callable, Literal, Mapping, Protocol, runtime_checkable
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.jobs.queue import current_execution_claim, enqueue
+from app.jobs.queue import utcnow as queue_now
+from app.models.job import BackgroundJob
 from app.staging import KekRef, StagingDescriptor, StagingStorage, new_fence, new_object_id
 from app.staging.contracts import StagingError, StagingIntegrityError
 
@@ -161,6 +166,8 @@ class LocalUploadLifecycle(Protocol):
         claim: tuple[Any, ...],
     ) -> None: ...
 
+    def recover_retention(self, session_factory: Callable[[], Any], *, limit: int) -> int: ...
+
 
 class LocalUploadLifecycleAdapter:
     """Fail-closed seam for the future a05 lifecycle implementation.
@@ -226,6 +233,12 @@ class LocalUploadLifecycleAdapter:
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable") from None
         if result is not None:
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
+
+    def recover_retention(self, session_factory: Callable[[], Any], *, limit: int) -> int:
+        result = self._call("recover_retention", int, session_factory, limit=limit)
+        if type(result) is not int or not 0 <= result <= limit:
+            raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
+        return result
 
 
 @runtime_checkable
@@ -564,6 +577,17 @@ def cleanup_finalized_upload(
     return False
 
 
+def recover_local_upload_retention(*, limit: int = 50) -> int:
+    """Run the bounded service-owned retention hook when rollout is configured."""
+    if type(limit) is not int or not 1 <= limit <= 500:
+        raise LocalUploadUnavailable("invalid_retention_limit")
+    with _runtime_lock:
+        runtime = _runtime
+    if runtime is None:
+        return 0
+    return runtime.lifecycle.recover_retention(runtime.session_factory, limit=limit)
+
+
 def _validated_result(result: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(result, Mapping) or set(result) != ALLOWED_RESULT_KEYS:
         raise LocalUploadStagingError("unsafe_processor_result")
@@ -581,6 +605,67 @@ def _validated_result(result: Mapping[str, Any]) -> dict[str, Any]:
         raise LocalUploadStagingError("unsafe_processor_result")
     counts["documents"] = list(documents)
     return counts
+
+
+class _LeaseFencedSession:
+    """Proxy legacy helpers while holding the exact job claim through each write.
+
+    A ``FOR UPDATE`` lock and the subsequent business commit are one transaction,
+    so lease recovery cannot overlap the durable write.  The proxy is intentionally
+    private: it adds no queue or alternative ownership token.
+    """
+
+    def __init__(self, session: Any, claim: tuple[Any, ...]) -> None:
+        self._session = session
+        self._claim = claim
+
+    def _require_live_claim(self) -> None:
+        if not isinstance(self._session, Session):
+            return
+        job_id, worker_id, attempt, locked_at = self._claim
+        no_autoflush = getattr(self._session, "no_autoflush", None)
+        context = no_autoflush if no_autoflush is not None else _NullContext()
+        with context:
+            job = self._session.scalar(
+                select(BackgroundJob).where(BackgroundJob.id == job_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )
+        if (
+            job is None or job.status != "running" or job.worker_id != worker_id
+            or job.attempts != attempt or job.locked_at is None or locked_at is None
+            or _as_utc(job.locked_at) != _as_utc(locked_at)
+            or job.lease_expires_at is None
+            or _as_utc(job.lease_expires_at) <= queue_now()
+            or job.cancelled_at is not None
+        ):
+            self._session.rollback()
+            raise LocalUploadUnavailable("local_upload_claim_lost")
+
+    def flush(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_live_claim()
+        return self._session.flush(*args, **kwargs)
+
+    def commit(self) -> None:
+        self._require_live_claim()
+        self._session.commit()
+
+    def rollback(self) -> None:
+        self._session.rollback()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+
+class _NullContext:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
 def run_local_upload_job(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -627,8 +712,9 @@ def run_local_upload_job(payload: Mapping[str, Any]) -> dict[str, Any]:
             actual = hashlib.sha256(content).hexdigest()
             if len(content) != record.size or not hmac.compare_digest(actual, record.checksum):
                 raise StagingIntegrityError("plaintext_integrity_mismatch")
+            fenced_session = _LeaseFencedSession(session, claim)
             result = _validated_result(runtime.processor.process(
-                session, record=record, content=content,
+                fenced_session, record=record, content=content,
                 operation_key=f"local-upload:{staging_id}",
             ))
         except LocalUploadCancelled:
@@ -661,7 +747,7 @@ def run_local_upload_job(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise
         # Business rows converge on operation_key and commit before lifecycle
         # finalization, so a crash can safely resume cleanup without reprocessing.
-        _commit(session, "local_upload_processing_commit_unavailable")
+        _commit(fenced_session, "local_upload_processing_commit_unavailable")
         decision = runtime.lifecycle.finalize(
             session, scope=record.scope, staging_id=staging_id, job_id=job_id,
             claim=claim, outcome="completed", result=result,

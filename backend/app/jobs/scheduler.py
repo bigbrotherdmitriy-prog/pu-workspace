@@ -34,8 +34,12 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
             job = enqueue(db, kind, {}, idempotency_key=_bucket(kind, interval, now))
             created += int(job.status == "queued" and job.attempts == 0)
     from app.pilot_dispatch import recover_installed
+    from app.local_upload_staging import recover_local_upload_retention
     from app.staging.gmail import recover_gmail_attachment_jobs
-    return created + recover_installed() + recover_gmail_attachment_jobs()
+    return (
+        created + recover_installed() + recover_gmail_attachment_jobs()
+        + recover_local_upload_retention()
+    )
 
 
 def main() -> None:

@@ -461,12 +461,18 @@ class AuditExtension(Scoped, Base):
         scoped_fk("receipt_id", "v54_receipts", "fk_v54_audit_receipt"),
         UniqueConstraint("organization_id", "subject_type", "subject_id", "sequence", name="uq_v54_audit_sequence"),
         CheckConstraint("sequence > 0", name="ck_v54_audit_sequence"),
+        CheckConstraint(
+            "(actor_id IS NOT NULL AND service_principal IS NULL) OR "
+            "(actor_id IS NULL AND service_principal IS NOT NULL)",
+            name="ck_v54_audit_actor_origin",
+        ),
     )
     audit_log_id: Mapped[int] = mapped_column(ForeignKey("audit_logs.id", ondelete="RESTRICT"), unique=True)
     subject_type: Mapped[str] = mapped_column(String(40))
     subject_id: Mapped[str] = mapped_column(String(40))
     sequence: Mapped[int] = mapped_column()
-    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    service_principal: Mapped[str | None] = mapped_column(String(100))
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"))
     action_pin: Mapped[dict | None] = mapped_column(JSON)
     subject_pin: Mapped[dict | None] = mapped_column(JSON)
