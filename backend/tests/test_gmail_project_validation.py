@@ -308,3 +308,19 @@ def test_unconfirmed_outgoing_has_no_completion_suggestions(world, monkeypatch):
 def test_unknown_sender_does_not_create_confirmed_contact(world, monkeypatch):
     sync(world, monkeypatch, mail())
     assert not list(world[0].scalars(select(ProjectContact)))
+
+
+def test_confirmed_message_discovers_one_reviewable_company_contact(world, monkeypatch):
+    db, _, projects = world
+    item = mail(subject="Project Alpha", sender="Sales Person <sales@supplier.example>")
+
+    assert sync(world, monkeypatch, item)["processed"] == 1
+    discovered = list(db.scalars(select(ProjectContact)))
+    assert len(discovered) == 1
+    assert discovered[0].project_id == projects[0].id
+    assert discovered[0].email == "sales@supplier.example"
+    assert discovered[0].company == "supplier.example"
+    assert discovered[0].confirmed is False
+
+    assert sync(world, monkeypatch, item)["skipped"] == 1
+    assert len(list(db.scalars(select(ProjectContact)))) == 1
