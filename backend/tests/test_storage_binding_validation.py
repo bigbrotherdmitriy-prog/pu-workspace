@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from contextlib import contextmanager
 import json
 from urllib.parse import quote
 
@@ -78,6 +79,7 @@ class FakeStorage:
 
 @pytest.fixture(params=['google_drive', 'yandex_disk'])
 def bound(tmp_path, monkeypatch, request):
+    from app.organizer_engine import managed_copies as lifecycle
     engine = create_engine(f'sqlite:///{tmp_path / "binding.sqlite"}', connect_args={'check_same_thread': False})
     @event.listens_for(engine, 'connect')
     def functions(connection, _):
@@ -85,6 +87,8 @@ def bound(tmp_path, monkeypatch, request):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     adapter = FakeStorage(request.param)
+    # The cleanup tests below inject this synthetic adapter instead of credentials.
+    monkeypatch.setattr(lifecycle, '_require_cleanup_capability', lambda provider: None)
     with factory() as db:
         org = Organization(name='Synthetic owner')
         owner = User(name='Owner', email='owner@example.test')
@@ -184,6 +188,35 @@ def _managed_copy(bound, copy_id='managed-copy-id'):
         return snapshot.id, session.id
 
 
+@contextmanager
+def _cleanup_claim(bound, payload):
+    """Exercise the handler with the same exact claim context as the real worker."""
+    with bound.db() as db:
+        actor = db.scalar(select(ProjectMember.user_id).where(
+            ProjectMember.project_id == bound.new, ProjectMember.role == 'owner'))
+        key = f"workspace.safe_copy_cleanup:{bound.new}:{actor}:{payload['command_key']}"
+        job = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == key))
+        if job is None:
+            job = queue.enqueue(db, 'workspace.safe_copy_cleanup', payload, idempotency_key=key, priority=-100)
+        if job.status != 'running':
+            job.priority = -100
+            db.commit()
+            claimed = queue.claim(db, 'synthetic-cleanup-worker')
+            assert claimed.id == job.id
+            job = claimed
+        claim = (job.id, job.worker_id, job.attempts, job.locked_at)
+    with queue.execution_owner(claim[0], claim[1], attempt=claim[2], locked_at=claim[3]):
+        yield
+    with bound.db() as db:
+        assert queue.succeed(db, claim[0], claim[1])
+
+
+def _run_cleanup(bound, payload):
+    from app.organizer_engine import managed_copies as lifecycle
+    with _cleanup_claim(bound, payload):
+        return lifecycle.run_managed_copy_cleanup(payload)
+
+
 def test_managed_copy_cleanup_is_cas_idempotent_and_preserves_history(bound, monkeypatch):
     from app.organizer_engine import managed_copies as lifecycle
     from app.jobs import handlers
@@ -215,8 +248,9 @@ def test_managed_copy_cleanup_is_cas_idempotent_and_preserves_history(bound, mon
         assert set(queued.payload) == {'project_id', 'cleanup_version', 'command_key'}
         payload = dict(queued.payload)
 
-    result = handlers.run('workspace.safe_copy_cleanup', payload)
-    replay = handlers.run('workspace.safe_copy_cleanup', payload)
+    with _cleanup_claim(bound, payload):
+        result = handlers.run('workspace.safe_copy_cleanup', payload)
+        replay = handlers.run('workspace.safe_copy_cleanup', payload)
     assert result['message'] == 'Копии удалены, можете архивировать проект'
     assert replay['idempotent_replay'] is True
     assert set(replay) == set(result)
@@ -251,7 +285,7 @@ def test_cleanup_after_earlier_completed_generation(bound, monkeypatch):
     monkeypatch.setattr(lifecycle, 'storage_for_project', lambda project_id, db: bound.adapter)
     with bound.db() as db:
         version = lifecycle.cleanup_version(lifecycle.managed_copies(db, bound.new))
-    lifecycle.run_managed_copy_cleanup({'project_id': bound.new, 'cleanup_version': version,
+    _run_cleanup(bound, {'project_id': bound.new, 'cleanup_version': version,
                                         'command_key': 'cleanup:first:001'})
     with bound.db() as db:
         old = db.get(WorkspaceSnapshot, snapshot_id)
@@ -264,7 +298,7 @@ def test_cleanup_after_earlier_completed_generation(bound, monkeypatch):
                                       'organizer_session_id': session.id, 'copy_folder_id': 'second-copy'})
         db.add(fresh); db.commit()
         version = lifecycle.cleanup_version(lifecycle.managed_copies(db, bound.new))
-    result = lifecycle.run_managed_copy_cleanup({'project_id': bound.new, 'cleanup_version': version,
+    result = _run_cleanup(bound, {'project_id': bound.new, 'cleanup_version': version,
                                                  'command_key': 'cleanup:second:001'})
     assert result['trashed'] == 1
     assert bound.adapter.trash_calls == ['managed-copy-id', 'second-copy']
@@ -322,8 +356,8 @@ def test_cleanup_recovers_after_crash_without_second_provider_effect(bound, monk
     }
     bound.adapter.crash_after_trash_once = True
     with pytest.raises(RuntimeError):
-        lifecycle.run_managed_copy_cleanup(payload)
-    result = lifecycle.run_managed_copy_cleanup(payload)
+        _run_cleanup(bound, payload)
+    result = _run_cleanup(bound, payload)
     assert result['trashed'] == 1
     # The adapter received a replay, while its provider-effect set stayed singular.
     assert bound.adapter.trash_calls == ['managed-copy-id', 'managed-copy-id']
@@ -352,7 +386,7 @@ def test_cleanup_lease_recovery_after_item_receipt_finishes_without_provider_rep
             }, sort_keys=True, separators=(',', ':')),
         ))
         db.commit()
-    result = lifecycle.run_managed_copy_cleanup({
+    result = _run_cleanup(bound, {
         'project_id': bound.new,
         'cleanup_version': version,
         'command_key': 'cleanup:lease:001',
@@ -372,7 +406,7 @@ def test_cleanup_fails_closed_when_provider_has_not_proven_retry_safety(bound, m
         records = lifecycle.managed_copies(db, bound.new)
         version = lifecycle.cleanup_version(records)
     with pytest.raises(ValueError, match='managed_copy_cleanup_capability_unavailable'):
-        lifecycle.run_managed_copy_cleanup({
+        _run_cleanup(bound, {
             'project_id': bound.new,
             'cleanup_version': version,
             'command_key': 'cleanup:capability:001',
