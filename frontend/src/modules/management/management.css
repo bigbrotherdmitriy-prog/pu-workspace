@@ -42,6 +42,9 @@
 .management-error { background: #fff0ef; color: #8c2823; }
 .management-warning { background: #fff7db; color: #6a4b00; }
 .management-error button { margin-top: 8px; }
+.management-attention-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; padding: 0; border: 0; }
+.management-attention-filter legend { width: 100%; color: var(--management-muted); font-size: 0.76rem; font-weight: 700; }
+.management-attention-filter button[aria-pressed="true"] { background: #244a2d; color: #fff; }
 
 .attention-list,
 .proposal-list,

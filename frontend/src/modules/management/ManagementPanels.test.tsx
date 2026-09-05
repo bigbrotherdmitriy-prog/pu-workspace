@@ -38,12 +38,28 @@ describe("MVP3 management panels", () => {
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 
+  it("exposes an explicit entity filter", () => {
+    const onFilterChange = vi.fn();
+    render(<AttentionPanel state="ready" items={[risk]} total={1} onSelect={vi.fn()}
+      filter="all" onFilterChange={onFilterChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Риски" }));
+    expect(onFilterChange).toHaveBeenCalledWith("risk");
+  });
+
   it("blocks obligation execution when confidence is low", () => {
     render(<ObligationDetailPanel obligation={obligation} history={[]} historyState="idle" mutationState="idle"
       onLoadHistory={vi.fn()} onTransition={vi.fn()} />);
     expect(screen.getByRole("alert")).toHaveTextContent("Низкая уверенность");
     expect(screen.getByRole("button", { name: "В работу" })).toBeDisabled();
     expect(screen.getByText("Доказательство ev-17")).toBeInTheDocument();
+  });
+
+  it("blocks governed mutations for a viewer", () => {
+    render(<ObligationDetailPanel obligation={obligation} history={[]} historyState="idle" mutationState="idle"
+      canManage={false} onLoadHistory={vi.fn()} onTransition={vi.fn()} />);
+    expect(screen.getByText("Для изменения требуется роль менеджера проекта.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Подтвердить" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "В работу" })).toBeDisabled();
   });
 
   it("shows CAS conflict and requests an exact history", () => {

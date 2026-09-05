@@ -2250,7 +2250,7 @@ export function App() {
                   </button>
                 </div>
               </section>
-              <ManagementCenter projectId={projectId || null} enabled={ready} />
+              <ManagementCenter projectId={projectId || null} enabled={ready} canManage={canManageSupply} />
               <div className="metrics dashboard-metrics">
                 {metrics.map(([label, value, tone]) => (
                   <button

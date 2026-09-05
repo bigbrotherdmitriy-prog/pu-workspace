@@ -8,6 +8,8 @@ type Props = {
   error?: string | null;
   onRetry?: () => void;
   onSelect: (item: AttentionItem) => void;
+  filter?: "all" | AttentionItem["entityType"];
+  onFilterChange?: (value: "all" | AttentionItem["entityType"]) => void;
 };
 
 const kindLabel: Record<AttentionItem["kind"], string> = {
@@ -20,11 +22,17 @@ const kindLabel: Record<AttentionItem["kind"], string> = {
   decision: "Решение",
 };
 
-export function AttentionPanel({ state, items, total, error, onRetry, onSelect }: Props) {
+export function AttentionPanel({ state, items, total, error, onRetry, onSelect, filter = "all", onFilterChange }: Props) {
   return <section className="management-card" aria-labelledby="management-attention-title">
     <header><div><span className="management-eyebrow">ЦЕНТР УПРАВЛЕНИЯ</span>
       <h2 id="management-attention-title">Требует внимания</h2></div>
       {state !== "loading" && <span className="management-count">{total}</span>}</header>
+    {onFilterChange && <fieldset className="management-attention-filter">
+      <legend>Фильтр внимания</legend>
+      {([ ["all", "Все"], ["obligation", "Обязательства"], ["task", "Задачи"],
+        ["risk", "Риски"], ["decision", "Решения"] ] as const).map(([value, label]) =>
+        <button key={value} type="button" aria-pressed={filter === value} onClick={() => onFilterChange(value)}>{label}</button>)}
+    </fieldset>}
     {state === "idle" && <p className="management-muted">Выберите проект, чтобы увидеть контрольный список.</p>}
     {state === "loading" && <p role="status">Загружаем актуальное состояние…</p>}
     {state === "error" && <div role="alert" className="management-error"><p>{error || "Не удалось загрузить данные."}</p>

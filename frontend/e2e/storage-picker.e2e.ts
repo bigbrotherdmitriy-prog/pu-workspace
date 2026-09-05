@@ -152,7 +152,7 @@ for (const action of ["standardize", "analyze"] as const) {
       analysis_result: action === "analyze" ? { mode: "safe_copy" } : null };
     mock.discoveryReply = () => ({ body: result });
     await start(page); await open(page);
-    await picker(page).getByRole("button", { name: action === "analyze" ? "Подготовить стандарт рабочей папки" : "Создать копию и стандартизировать", exact: true }).click();
+    await picker(page).getByRole("button", { name: action === "analyze" ? "Анализировать без копии" : "Создать копию и стандартизировать", exact: true }).click();
     await expect(page.getByText(action === "analyze" ? /Готовится таблица «Было → Станет»/ : /задание уже существует \(retrying\)/)).toBeVisible();
     await expect(page.getByText(/обработка завершена/)).toHaveCount(0);
     expect(mock.count(`/${action}`)).toBe(1);

@@ -1,7 +1,8 @@
 import { test as base, expect, type Page, type Request, type Route } from "@playwright/test";
 
 export type Provider = "google_drive" | "yandex_disk";
-type Reply = { status?: number; body: unknown };
+export type Reply = { status?: number; body: unknown };
+type ReplyFactory = (request: Request) => Reply;
 export const origin = "http://127.0.0.1:4179";
 export const specialPath = "disk:/Заказчик/Проект #1/Этап ? 50%";
 const projects = [{ id: 1, name: "Persistent Project" }, { id: 2, name: "Новый проект" }];
@@ -42,6 +43,9 @@ export class StorageApi {
   confirmReply?: Reply;
   analyzeReply: Reply = { body: { snapshot_id: 31, status: "analyzing", already_queued: true } };
   standardizeReply: Reply = { body: { snapshot_id: 31, session_id: 42, status: "retrying", already_queued: true } };
+  currentUser: Record<string, unknown> = { id: 900, name: "Synthetic Operator", email: "operator@example.invalid", is_admin: true };
+  membersByProject = new Map<number, Record<string, unknown>[]>();
+  customReplies = new Map<string, Reply | ReplyFactory>();
   private holds: { match: (url: URL) => boolean; arrived: (request: Request) => void; reply: Promise<Reply> }[] = [];
 
   hold(match: (url: URL) => boolean) {
@@ -53,6 +57,9 @@ export class StorageApi {
     return { request, release };
   }
   count(fragment: string) { return this.requests.filter(request => request.path.includes(fragment)).length; }
+  reply(method: string, path: string, value: Reply | ReplyFactory) {
+    this.customReplies.set(`${method.toUpperCase()} ${path}`, value);
+  }
   confirm(id: string, projectId = 2, status = "building") {
     return { ...binding(this.provider, projectId), id: 31, job_id: 42, folder_id: id,
       source_folder: names[paths[this.provider].indexOf(id)], status, already_queued: false };
@@ -76,6 +83,8 @@ export class StorageApi {
     }
     const path = url.pathname;
     const projectId = Number(path.match(/^\/projects\/(\d+)/)?.[1] || url.searchParams.get("project_id") || 2);
+    const custom = this.customReplies.get(`${method} ${path}${url.search}`);
+    if (custom) return this.fulfill(route, typeof custom === "function" ? custom(request) : custom);
     const evidenceMatch = path.match(/^\/api\/v54\/evidence\/([^/]+)\/fragment$/);
     if (method === "GET" && evidenceMatch) {
       const evidenceId = decodeURIComponent(evidenceMatch[1]);
@@ -131,7 +140,7 @@ export class StorageApi {
     if (method === "POST" && /^\/projects\/\d+\/snapshots\/31\/standardize$/.test(path)) return this.fulfill(route, this.standardizeReply);
     if (method !== "GET") return this.block(route, `Unexpected write ${method} ${path}`);
     const single: Record<string, unknown> = {
-      "/auth/me": { id: 900, name: "Synthetic Operator", email: "operator@example.invalid", is_admin: true },
+      "/auth/me": this.currentUser,
       "/organizations/current/requisites": { id: 901, name: "Synthetic Organization", requisites_status: "draft" },
       "/projects/": { projects: this.projectRows },
       "/api/readiness": { ready: true, google_drive_ready: true, telegram_ready: false, checks: {} },
@@ -151,7 +160,7 @@ export class StorageApi {
         budget_planned: 0, budget_committed: 0, budget_actual: 0, budget_forecast: 0, budget_variance: 0, cash_balance_forecast: 0,
         cash_gap: 0, cash_gap_date: null, delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 0, unlinked_invoices: 0,
       } },
-      "/management/obligations": { obligations: [] }, "/management/meetings": { meetings: [] }, "/management/notifications": { notifications: [] },
+      "/management/obligations": { obligations: [], count: 0 }, "/management/meetings": { meetings: [] }, "/management/notifications": { notifications: [] },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },
       "/integrations/project": { project_id: projectId, adapters: [
@@ -163,12 +172,26 @@ export class StorageApi {
         { key: "ai-policy", provider: "policy", capability: "ai", name: "Политика AI", description: "Синтетическая политика проекта", available: true, connected: true, action: "ai_policy" },
       ] },
     };
+    if (method === "GET" && path === "/management/v2/attention") return this.fulfill(route, { body: {
+      items: [], total: 0, offset: 0, limit: 50, generated_at: "2026-09-05T10:00:00Z", external_actions_created: false,
+    } });
+    if (method === "GET" && /^\/management\/v2\/projects\/\d+\/digest-preference$/.test(path)) {
+      return this.fulfill(route, { body: { project_id: projectId, user_id: Number(this.currentUser.id) || 900,
+        timezone: "Europe/Moscow", quiet_start: "20:00:00", quiet_end: "08:00:00", channel: "in_app",
+        cadence: "daily", record_version: 0, persisted: false, external_actions_enabled: false } });
+    }
+    if (method === "GET" && /^\/projects\/\d+$/.test(path)) {
+      return this.fulfill(route, { body: { id: projectId, organization_id: 901, name: `Synthetic project ${projectId}` } });
+    }
+    if (method === "GET" && path === "/api/mvp4/supply") {
+      return this.fulfill(route, { body: { items: [], total: 0 } });
+    }
     if (path in single) return this.fulfill(route, { body: single[path] });
     const scoped: Record<string, unknown> = {
       snapshots: { snapshots: this.snapshots.filter(row => row.project_id === projectId) },
       "processing-queue": this.queue,
       "google/status": { authorized: true, gmail_authorized: false },
-      documents: { documents: [] }, contracts: { contracts: [] }, members: { members: [] },
+      documents: { documents: [] }, contracts: { contracts: [] }, members: { members: this.membersByProject.get(projectId) || [] },
       "ai-policy": this.aiPolicies.get(projectId) || { project_id: projectId, mode: "local_only", dlp_enabled: true, prompt_version: "v1" },
     };
     const suffix = path.replace(/^\/projects\/\d+\//, "");

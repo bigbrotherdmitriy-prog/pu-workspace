@@ -10,13 +10,20 @@ import { useManagementCenter } from "./useManagementCenter";
 type Props = {
   projectId: number | null;
   enabled?: boolean;
+  canManage?: boolean;
 };
 
-export function ManagementCenter({ projectId, enabled = true }: Props) {
+export function ManagementCenter({ projectId, enabled = true, canManage = true }: Props) {
   const controller = useManagementCenter(projectId, enabled);
   const [selected, setSelected] = useState<AttentionItem | null>(null);
+  const [filter, setFilter] = useState<"all" | AttentionItem["entityType"]>("all");
 
-  useEffect(() => setSelected(null), [projectId]);
+  useEffect(() => { setSelected(null); setFilter("all"); }, [projectId]);
+
+  const attention = useMemo(
+    () => filter === "all" ? controller.state.attention : controller.state.attention.filter((item) => item.entityType === filter),
+    [controller.state.attention, filter],
+  );
 
   const obligation = useMemo(
     () => selected?.entityType === "obligation"
@@ -35,11 +42,13 @@ export function ManagementCenter({ projectId, enabled = true }: Props) {
   return <section className="management-center" aria-label="Центр управления проектом">
     <AttentionPanel
       state={controller.state.loadState}
-      items={controller.state.attention}
-      total={controller.state.attentionTotal}
+      items={attention}
+      total={filter === "all" ? controller.state.attentionTotal : attention.length}
       error={controller.state.error}
       onRetry={() => void controller.reload()}
       onSelect={select}
+      filter={filter}
+      onFilterChange={(value) => { setFilter(value); setSelected(null); }}
     />
     {selected?.entityType === "obligation" && <ObligationDetailPanel
       obligation={obligation}
@@ -50,6 +59,7 @@ export function ManagementCenter({ projectId, enabled = true }: Props) {
       mutationMessage={controller.state.mutationMessage}
       onLoadHistory={(id) => void controller.loadHistory("obligation", id)}
       onTransition={(item, status) => void controller.transitionObligation(item, status)}
+      canManage={canManage}
     />}
     {(selected?.entityType === "risk" || selected?.entityType === "decision") && <RiskDecisionPanel
       item={selected}
@@ -59,6 +69,7 @@ export function ManagementCenter({ projectId, enabled = true }: Props) {
       mutationMessage={controller.state.mutationMessage}
       onLoadHistory={(item) => void controller.loadHistory(item.entityType as "risk" | "decision", item.entityId)}
       onTransition={(item, status) => void controller.transitionGovernance(item, status)}
+      canManage={canManage}
     />}
     {selected?.entityType === "task" && <section className="management-card management-empty">
       <h2>{selected.title}</h2>

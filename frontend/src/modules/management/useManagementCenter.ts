@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api/client";
 import {
   parseAttentionResponse,
@@ -66,9 +66,13 @@ function safeError(error: unknown): string {
 }
 
 export function useManagementCenter(projectId: number | null, enabled = true) {
+  const requestSequence = useRef(0);
+  const activeProject = useRef(projectId);
+  activeProject.current = projectId;
   const [state, setState] = useState<ManagementCenterState>(initialState);
 
   const reload = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     if (!enabled || !projectId) {
       setState(initialState);
       return;
@@ -85,6 +89,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
       const obligations = parseObligationsResponse(obligationsRaw);
       const notifications = parseNotificationsResponse(notificationsRaw);
       const digestPreference = parseDigestPreference(preferenceRaw);
+      if (sequence !== requestSequence.current || activeProject.current !== projectId) return;
       setState((current) => ({
         ...current,
         loadState: attention.items.length || obligations.length || notifications.length ? "ready" : "empty",
@@ -97,6 +102,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
         error: null,
       }));
     } catch (error) {
+      if (sequence !== requestSequence.current || activeProject.current !== projectId) return;
       setState((current) => ({ ...current, loadState: "error", error: safeError(error) }));
     }
   }, [enabled, projectId]);
@@ -111,8 +117,10 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
       : `/management/v2/${entityType}s/${entityId}/history?project_id=${projectId}`;
     try {
       const history = parseHistoryResponse(await api<unknown>(path));
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, history, historyState: history.length ? "ready" : "empty" }));
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, historyState: "error", historyError: safeError(error) }));
     }
   }, [projectId]);
@@ -122,6 +130,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
     status: string,
     options: { reason?: string; resultNote?: string } = {},
   ) => {
+    if (!projectId) return;
     setState((current) => ({ ...current, mutationState: "saving", mutationMessage: null }));
     try {
       await api<unknown>(`/management/v2/obligations/${obligation.id}`, {
@@ -129,16 +138,18 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
         body: JSON.stringify({ expected_version: obligation.recordVersion, status,
           reason: options.reason || null, result_note: options.resultNote || null }),
       });
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, mutationState: "saved", mutationMessage: "Изменение сохранено." }));
       await reload();
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       const conflict = error instanceof ApiError && error.status === 409;
       setState((current) => ({ ...current, mutationState: conflict ? "conflict" : "error",
         mutationMessage: conflict
           ? "Запись уже изменена другим пользователем. Обновите данные и повторите действие."
           : safeError(error) }));
     }
-  }, [reload]);
+  }, [projectId, reload]);
 
   const transitionGovernance = useCallback(async (
     item: AttentionItem,
@@ -154,9 +165,11 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
           reason: options.reason || null, action_note: options.actionNote || null,
           decision_text: options.decisionText || null }),
       });
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, mutationState: "saved", mutationMessage: "Изменение сохранено." }));
       await reload();
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       const conflict = error instanceof ApiError && error.status === 409;
       setState((current) => ({ ...current, mutationState: conflict ? "conflict" : "error",
         mutationMessage: conflict
@@ -173,8 +186,10 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, candidates }),
       }));
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, proposals, proposalState: proposals.length ? "ready" : "empty" }));
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, proposalState: "error", mutationMessage: safeError(error) }));
     }
   }, [projectId]);
@@ -190,10 +205,12 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
             create_internal_task: createInternalTask }),
         },
       ));
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, mutationState: "saved", mutationMessage: "Предложение подтверждено.",
         proposals: current.proposals.map((item) => item.entityType === confirmed.entityType && item.entityId === confirmed.entityId
           ? confirmed : item) }));
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       const conflict = error instanceof ApiError && error.status === 409;
       setState((current) => ({ ...current, mutationState: conflict ? "conflict" : "error",
         mutationMessage: conflict ? "Предложение уже изменено. Получите новую версию перед подтверждением." : safeError(error) }));
@@ -217,9 +234,11 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
           quiet_start: preference.quietStart, quiet_end: preference.quietEnd,
           channel: preference.channel, cadence: preference.cadence, local_date: preference.localDate }),
       }));
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, digestJob, mutationState: "saved",
         mutationMessage: "Сводка поставлена в надёжную очередь." }));
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, mutationState: "error", mutationMessage: safeError(error) }));
     }
   }, [projectId]);
@@ -235,9 +254,11 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
           quiet_start: preference.quietStart, quiet_end: preference.quietEnd,
           channel: preference.channel, cadence: preference.cadence }),
       }));
+      if (activeProject.current !== projectId) return;
       setState((current) => ({ ...current, digestPreference: saved, mutationState: "saved",
         mutationMessage: "Настройки сводки сохранены." }));
     } catch (error) {
+      if (activeProject.current !== projectId) return;
       const conflict = error instanceof ApiError && error.status === 409;
       setState((current) => ({ ...current, mutationState: conflict ? "conflict" : "error",
         mutationMessage: conflict
