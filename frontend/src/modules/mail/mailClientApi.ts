@@ -93,6 +93,7 @@ export const mailClientApi = {
       can_reply_all: raw.features.reply_all,
       can_forward: raw.features.forward,
       can_attach: raw.features.attachment_send,
+      can_move: raw.features.move,
       supports_threads: raw.features.threads,
       versioned_approval: raw.features.explicit_revision_approval,
     } satisfies MailCapabilities));

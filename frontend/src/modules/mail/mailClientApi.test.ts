@@ -13,7 +13,7 @@ describe("mailClientApi contract adapter", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({
         provider: "google_workspace", connected: true,
-        features: { compose: true, reply: true, reply_all: true, forward: true, attachment_send: false, threads: true, explicit_revision_approval: true },
+        features: { compose: true, reply: true, reply_all: true, forward: true, attachment_send: false, move: true, threads: true, explicit_revision_approval: true },
       }))
       .mockResolvedValueOnce(response({ folders: [
         { id: "inbox", name: "Входящие", kind: "core", count: 9 },
@@ -28,7 +28,7 @@ describe("mailClientApi contract adapter", () => {
 
     const capabilities = await mailClientApi.capabilities(7);
     const folders = await mailClientApi.folders(7);
-    expect(capabilities).toMatchObject({ provider: "google_workspace", can_compose: true, can_attach: false, versioned_approval: true });
+    expect(capabilities).toMatchObject({ provider: "google_workspace", can_compose: true, can_attach: false, can_move: true, versioned_approval: true });
     expect(folders.folders.map((item) => item.kind)).toEqual(["inbox", "attention", "drafts", "sent", "archive", "all"]);
     expect(folders.folders.find((item) => item.kind === "attention")?.count).toBe(2);
   });

@@ -8,6 +8,7 @@ import type { MailCapabilities, MailDraft, MailMessage, MailThread } from "./typ
 const capabilities: MailCapabilities = {
   provider: "Gmail", connected: true, can_send: true, can_compose: true,
   can_reply: true, can_reply_all: true, can_forward: true, can_attach: false,
+  can_move: true,
   supports_threads: true, versioned_approval: true,
 };
 

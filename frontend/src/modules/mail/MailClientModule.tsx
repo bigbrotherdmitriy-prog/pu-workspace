@@ -50,6 +50,7 @@ const defaultMailSettings: MailSettings = {
 const emptyCapabilities: MailCapabilities = {
   provider: "mail", connected: false, can_send: false, can_compose: false,
   can_reply: false, can_reply_all: false, can_forward: false, can_attach: false,
+  can_move: false,
   supports_threads: false, versioned_approval: false,
 };
 
@@ -523,6 +524,7 @@ export function MailClientModule({
           <PenLine /> Написать
         </button>
         {!capabilities.can_compose && <small>Создание писем не поддерживается подключённым адаптером.</small>}
+        {capabilities.connected && !capabilities.can_move && <small>Для архива, спама и корзины переподключите Google в разделе «Интеграции».</small>}
         <nav>
           {activeFolders.map((item) => {
             const Icon = folderIcons[item.kind];
@@ -555,7 +557,7 @@ export function MailClientModule({
               <button disabled={!capabilities.can_reply} onClick={() => openComposer("reply")}><Reply />Ответить</button>
               <button disabled={!capabilities.can_reply_all} onClick={() => openComposer("reply_all")}><ReplyAll />Всем</button>
               <button disabled={!capabilities.can_forward} onClick={() => openComposer("forward")}><ChevronRight />Переслать</button>
-              {selectedMessage.direction === "incoming" && (folder === "spam" || folder === "trash"
+              {selectedMessage.direction === "incoming" && capabilities.can_move && (folder === "spam" || folder === "trash"
                 ? <button onClick={() => void moveMessage(selectedMessage, "inbox")}><Inbox />Во входящие</button>
                 : <>
                   <button title="Убрать из входящих" onClick={() => void moveMessage(selectedMessage, "archive")}><Archive />Архив</button>

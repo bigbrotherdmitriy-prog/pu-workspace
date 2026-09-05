@@ -24,6 +24,29 @@ class GmailMailboxAdapter:
     def health(self) -> AdapterHealth:
         return self._workspace.health()
 
+    def capabilities(self) -> dict[str, bool]:
+        scopes = self._workspace.authorized_scopes()
+        can_read = bool({
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+        }.intersection(scopes))
+        can_send = "https://www.googleapis.com/auth/gmail.send" in scopes
+        can_move = "https://www.googleapis.com/auth/gmail.modify" in scopes
+        return {
+            "folders": can_read,
+            "threads": can_read,
+            "compose": can_send,
+            "reply": can_send,
+            "reply_all": can_send,
+            "forward": can_send,
+            "cc_bcc": can_send,
+            "attachment_metadata": can_read,
+            "attachment_send": False,
+            "move": can_move,
+            "explicit_revision_approval": True,
+            "automatic_send": False,
+        }
+
     def _service(self):
         return self._workspace.service("gmail", "v1")
 
@@ -69,6 +92,8 @@ class GmailMailboxAdapter:
         )
 
     def move_message(self, external_message_id: str, destination: str) -> MailMoveReceipt:
+        if not self.capabilities()["move"]:
+            raise MailNotAppliedError("gmail_modify_scope_required")
         service = self._service().users().messages()
         try:
             if destination == "trash":

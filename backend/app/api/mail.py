@@ -384,22 +384,11 @@ def mail_capabilities(project_id: int, db: Session = Depends(get_db), user: User
     require_project_role(db, user, project_id, "viewer")
     adapter = mailbox_adapter_for_project(project_id, db)
     health = adapter.health()
+    features = dict(adapter.capabilities())
     return {
         "provider": adapter.provider,
-        "connected": health.ready,
-        "features": {
-            "folders": True,
-            "threads": True,
-            "compose": True,
-            "reply": True,
-            "reply_all": True,
-            "forward": True,
-            "cc_bcc": True,
-            "attachment_metadata": True,
-            "attachment_send": False,
-            "explicit_revision_approval": True,
-            "automatic_send": False,
-        },
+        "connected": health.ready and bool(features.get("folders")),
+        "features": features,
     }
 
 
@@ -407,10 +396,12 @@ def mail_capabilities(project_id: int, db: Session = Depends(get_db), user: User
 def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     adapter = mailbox_adapter_for_project(project_id, db)
-    try:
-        provider_folders = adapter.list_folders()
-    except Exception as exc:
-        raise HTTPException(502, "mail_provider_unavailable") from exc
+    # The UI currently exposes only PU Workspace core folders.  Do not make
+    # opening the locally persisted mailbox depend on a provider label-list
+    # request: tab changes used to call Gmail repeatedly and a provider 429
+    # made the entire mailbox unavailable even though its messages were
+    # already safely stored in PostgreSQL.  Provider calls remain limited to
+    # explicit sync/send/move operations.
     message_rows = _message_rows(db, project_id, "all", None, None)
     counts = {
         "inbox": len(_message_rows(db, project_id, "inbox", None, None)),
@@ -429,7 +420,6 @@ def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = De
         "provider": adapter.provider,
         "folders": [
             *[{"id": key, "name": name, "kind": "core", "count": counts[key]} for key, name in MAIL_FOLDERS],
-            *[{"id": item.id, "name": item.name, "kind": item.kind} for item in provider_folders],
         ],
     }
 

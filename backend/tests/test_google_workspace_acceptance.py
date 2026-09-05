@@ -16,6 +16,7 @@ TASKS = "https://www.googleapis.com/auth/tasks"
 CALENDAR = "https://www.googleapis.com/auth/calendar.events"
 GMAIL_READ = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify"
 
 
 def _project(db_session) -> Project:
@@ -64,10 +65,10 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
             token="new-access",
             refresh_token=None,
             token_uri="https://oauth2.googleapis.com/token",
-            scopes=[DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND],
+            scopes=[DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY],
         ),
         fetch_token=lambda **_kwargs: {
-            "scope": " ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
+            "scope": " ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY)),
         },
     )
     monkeypatch.setattr(
@@ -90,7 +91,7 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
     assert "stable-refresh" not in stored.refresh_token
     assert decrypt_token(stored.access_token) == "new-access"
     assert decrypt_token(stored.refresh_token) == "stable-refresh"
-    assert set(stored.scopes.split()) == {DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND}
+    assert set(stored.scopes.split()) == {DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY}
 
 
 def test_capability_gating_requires_every_scope_for_each_google_surface(
@@ -124,6 +125,13 @@ def test_capability_gating_requires_every_scope_for_each_google_surface(
     db_session.commit()
 
     gmail = _status_by_capability(db_session, project.id)["channel"]
+    assert gmail.connected is False
+    assert gmail.action == "oauth"
+
+    token.scopes += f" {GMAIL_MODIFY}"
+    db_session.commit()
+
+    gmail = _status_by_capability(db_session, project.id)["channel"]
     assert gmail.connected is True
     assert gmail.action == "sync"
 
@@ -137,7 +145,7 @@ def test_capabilities_fail_closed_without_provider_configuration(db_session, mon
         project_id=project.id,
         access_token="synthetic-access-token",
         refresh_token="synthetic-refresh-token",
-        scopes=" ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
+        scopes=" ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY)),
     ))
     db_session.commit()
 
@@ -158,7 +166,7 @@ def test_capabilities_fail_closed_for_incomplete_token_or_oauth_config(
         project_id=project.id,
         access_token=None,
         refresh_token="synthetic-refresh-token",
-        scopes=" ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
+        scopes=" ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY)),
     )
     db_session.add(token)
     db_session.commit()

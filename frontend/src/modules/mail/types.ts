@@ -90,6 +90,7 @@ export type MailCapabilities = {
   can_reply_all: boolean;
   can_forward: boolean;
   can_attach: boolean;
+  can_move: boolean;
   supports_threads: boolean;
   versioned_approval: boolean;
 };

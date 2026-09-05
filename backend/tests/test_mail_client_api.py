@@ -24,6 +24,14 @@ class FakeMailbox:
     def health(self):
         return AdapterHealth(True, "ready")
 
+    def capabilities(self):
+        return {
+            "folders": True, "threads": True, "compose": True, "reply": True,
+            "reply_all": True, "forward": True, "cc_bcc": True,
+            "attachment_metadata": True, "attachment_send": False, "move": True,
+            "explicit_revision_approval": True, "automatic_send": False,
+        }
+
     def list_folders(self):
         return [MailFolder("TEAM", "Команда", "user")]
 
@@ -187,18 +195,18 @@ def test_single_message_fallback_thread_can_be_opened(mail_context):
     assert [item["id"] for item in result["messages"]] == [row.id]
 
 
-def test_folder_adapter_errors_are_safe(monkeypatch, mail_context):
+def test_core_folders_remain_available_when_provider_labels_are_unavailable(monkeypatch, mail_context):
     adapter = FakeMailbox()
     monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
-    result = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
-    assert result["provider"] == "fake_mail"
-    assert any(item["id"] == "TEAM" for item in result["folders"])
-
     monkeypatch.setattr(adapter, "list_folders", lambda: (_ for _ in ()).throw(RuntimeError("token=secret")))
-    with pytest.raises(HTTPException) as error:
-        mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
-    assert error.value.detail == "mail_provider_unavailable"
-    assert "secret" not in str(error.value)
+
+    result = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
+
+    assert result["provider"] == "fake_mail"
+    assert {item["id"] for item in result["folders"]} == {
+        "inbox", "attention", "drafts", "sent", "archive", "spam", "trash", "all",
+    }
+    assert "secret" not in str(result)
 
 
 def test_edit_invalidates_approval_and_revision_conflicts(mail_context):

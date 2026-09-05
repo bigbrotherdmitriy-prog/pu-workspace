@@ -20,6 +20,7 @@ def test_gmail_routes_and_scopes_are_explicit():
     assert "/response-drafts/{draft_id}/send-gmail" in paths
     assert "https://www.googleapis.com/auth/gmail.readonly" in SCOPES
     assert "https://www.googleapis.com/auth/gmail.send" in SCOPES
+    assert "https://www.googleapis.com/auth/gmail.modify" in SCOPES
 
 
 def test_gmail_payload_prefers_plain_text():

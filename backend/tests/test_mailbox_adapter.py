@@ -60,12 +60,20 @@ class Service:
 
 
 class Workspace:
-    def __init__(self):
+    def __init__(self, scopes=None):
         self.gmail = Service()
+        self.scopes = frozenset(scopes or {
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/gmail.modify",
+        })
 
     def health(self):
         from app.integrations.contracts import AdapterHealth
         return AdapterHealth(True, "ready")
+
+    def authorized_scopes(self):
+        return self.scopes
 
     def service(self, api, version):
         assert (api, version) == ("gmail", "v1")
@@ -121,6 +129,19 @@ def test_gmail_adapter_sends_safe_html_alternative_and_moves_messages():
         "modify",
         {"userId": "me", "id": "gm-1", "body": {"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}},
     )
+
+
+def test_gmail_adapter_fails_closed_for_move_without_modify_scope():
+    workspace = Workspace(scopes={
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+    })
+    adapter = GmailMailboxAdapter(workspace)
+    assert adapter.capabilities()["move"] is False
+    with pytest.raises(MailNotAppliedError) as error:
+        adapter.move_message("gm-1", "trash")
+    assert str(error.value) == "gmail_modify_scope_required"
+    assert workspace.gmail.users_api.messages_api.move is None
 
 
 def test_gmail_adapter_classifies_service_setup_failure_as_not_applied():
