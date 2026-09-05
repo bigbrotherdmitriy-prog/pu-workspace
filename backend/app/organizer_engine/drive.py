@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from googleapiclient.http import MediaIoBaseDownload
 
-from app.integrations.contracts import AdapterHealth, StorageCopyResult
+from app.integrations.contracts import AdapterHealth, StorageCopyResult, StorageUnavailable
 
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
 from .content import extract_text
@@ -43,6 +43,15 @@ class DriveClient:
     """
 
     provider = "google_drive"
+    supports_exact_native_export = False
+
+    def read_native_export_exact(self, object_id: str, *, revision: str,
+                                 mime_type: str, max_bytes: int) -> tuple[bytes, str]:
+        # files.export accepts fileId + MIME only. A metadata read before/after
+        # export is not a revision-bound download. Do not silently use latest.
+        # IR: a verified revision-export transport must own this capability.
+        raise StorageUnavailable("native_export_revision_unavailable")
+
     # Drive API v3 exposes an output-only monotonically increasing ``version``,
     # but files.update does not accept that value (or a resource ETag) as an
     # atomic mutation precondition.  Read-before-write is not sufficient for
