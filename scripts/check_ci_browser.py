@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import time
 from urllib.parse import urlparse
 
 from check_ci_smoke import environment
@@ -37,6 +38,33 @@ def browser_base(env: dict[str, str]) -> str:
     ):
         raise ValueError("Browser smoke writes require an isolated loopback port")
     return base
+
+
+def wait_for_jobs(page, base: str, job_ids: list[int], timeout_seconds: int = 90) -> None:
+    """Wait for the durable workers before asserting refreshed UI state."""
+    pending = set(job_ids)
+    deadline = time.monotonic() + timeout_seconds
+    last_statuses: dict[int, str] = {job_id: "queued" for job_id in pending}
+    while pending and time.monotonic() < deadline:
+        response = page.request.get(f"{base}/admin/jobs?limit=100")
+        assert response.ok, "Could not inspect synthetic upload jobs"
+        rows = {int(item["id"]): item for item in response.json().get("jobs", [])}
+        for job_id in tuple(pending):
+            job = rows.get(job_id)
+            if not job:
+                continue
+            status = str(job.get("status", "unknown"))
+            last_statuses[job_id] = status
+            if status == "completed":
+                pending.remove(job_id)
+            elif status in {"failed", "dead_letter", "cancelled"}:
+                raise AssertionError(
+                    f"Synthetic upload job {job_id} ended with {status}: "
+                    f"{job.get('error') or 'no error detail'}"
+                )
+        if pending:
+            page.wait_for_timeout(1_000)
+    assert not pending, f"Synthetic upload jobs did not complete: {last_statuses}"
 
 
 def run(env_file: str, report_dir: Path) -> dict[str, object]:
@@ -107,11 +135,17 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
             and response.url.endswith("/local-upload/analyze")
         ) as upload_info:
             submit.click()
-        assert upload_info.value.ok, "Synthetic local upload failed"
+        upload_response = upload_info.value
+        assert upload_response.ok, "Synthetic local upload failed"
+        upload_result = upload_response.json()
         expect(dialog).not_to_be_visible(timeout=20_000)
         expect(page.get_by_text(re.compile(
             r"(?:Поставлено в очередь файлов|Обработано):\s*1\."
         ))).to_be_visible()
+        job_ids = [int(item["job_id"]) for item in upload_result.get("jobs", [])]
+        if job_ids:
+            wait_for_jobs(page, base, job_ids)
+            page.reload(wait_until="networkidle")
 
         # Documents: verify the uploaded file appears and its detail can open.
         page.get_by_text("Документы", exact=True).first.click()
