@@ -431,6 +431,9 @@ class SupplyService:
                 SupplyCase.project_id == project_id,
             )
             .with_for_update()
+            # A caller may have read this case before waiting on another writer.
+            # Refresh the identity map from the locked row before checking CAS.
+            .execution_options(populate_existing=True)
         )
         if row is None:
             raise SupplyDenied("resource_unavailable")
