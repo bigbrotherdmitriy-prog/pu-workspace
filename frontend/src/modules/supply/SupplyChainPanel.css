@@ -5,6 +5,8 @@
 .supply-chain__status { padding: 5px 9px; border-radius: 999px; background: #edf2ee; font-size: 12px; }
 .supply-chain__steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0; list-style: none; }
 .supply-chain__steps li { padding: 8px; border-radius: 10px; background: #f4f7f5; text-align: center; font-size: 12px; }
+.supply-chain__steps li.complete { background: #e7f5ec; color: #185b32; }
+.supply-chain__steps li.active { background: #173e2c; color: #fff; font-weight: 700; }
 .supply-chain__quantities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .supply-chain__quantities div { padding: 10px; border: 1px solid #e4ebe6; border-radius: 12px; }
 .supply-chain__quantities dt { color: #607168; font-size: 11px; }
@@ -14,4 +16,15 @@
 .supply-chain__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .supply-chain__actions button { border: 0; border-radius: 10px; padding: 9px 12px; background: #173e2c; color: #fff; cursor: pointer; }
 .supply-chain__actions button:disabled { opacity: .55; cursor: wait; }
+.supply-center { display: grid; gap: 16px; margin-top: 20px; }
+.supply-center__head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 18px; border: 1px solid var(--border, #d9e2dc); border-radius: 18px; background: var(--surface, #fff); }
+.supply-center__head h2, .supply-center__head p { margin: 4px 0; }
+.supply-center__head button, .supply-center__message button { border: 1px solid #c8d5cd; border-radius: 10px; padding: 9px 12px; background: #fff; cursor: pointer; }
+.supply-center__items { display: grid; gap: 14px; }
+.supply-center__empty, .supply-center__message { padding: 14px 16px; border-radius: 12px; background: #f4f7f5; }
+.supply-center__empty p, .supply-center__message p { margin: 5px 0; }
+.supply-center__message--blocked, .supply-center__message--conflict { background: #fff3d6; color: #714f00; }
+.supply-center__message--error { background: #fde9e7; color: #78251e; }
+.supply-center__message--saved { background: #e7f5ec; color: #185b32; }
 @media (max-width: 720px) { .supply-chain__steps, .supply-chain__quantities { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 720px) { .supply-center__head { flex-direction: column; } }

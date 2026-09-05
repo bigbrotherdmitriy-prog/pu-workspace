@@ -52,6 +52,85 @@ export interface SupplyCaseView {
   externalActionStatus: "not_created";
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+const supplyStatuses = new Set<SupplyStatus>([
+  "needs_review", "request_pending_approval", "request_rejected", "request_approved",
+  "order_draft", "order_approved", "order_recorded", "partially_delivered", "delivered",
+  "delivery_discrepancy", "act_pending_approval", "partially_accepted", "accepted", "cancelled",
+]);
+
+function record(value: unknown, label: string): UnknownRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label}: invalid object`);
+  return value as UnknownRecord;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  if (!Number.isInteger(value) || Number(value) <= 0) throw new Error(`${label}: invalid integer`);
+  return Number(value);
+}
+
+function text(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${label}: invalid text`);
+  return value;
+}
+
+export function parseSupplyList(value: unknown, projectId: number): SupplyCaseView[] {
+  const envelope = record(value, "supply response");
+  if (!Array.isArray(envelope.items) || !Number.isInteger(envelope.total)) {
+    throw new Error("supply response: invalid envelope");
+  }
+  const items = envelope.items.map((raw, index): SupplyCaseView => {
+    const item = record(raw, `supply item ${index}`);
+    const status = text(item.status, "status") as SupplyStatus;
+    if (!supplyStatuses.has(status)) throw new Error("status: unsupported value");
+    const reviewState = text(item.reviewState, "reviewState");
+    if (!["needs_review", "verified", "rejected"].includes(reviewState)) {
+      throw new Error("reviewState: unsupported value");
+    }
+    const rowProjectId = positiveInteger(item.projectId, "projectId");
+    if (rowProjectId !== projectId) throw new Error("projectId: scope mismatch");
+    if (item.evidenceRevision !== 1 || item.externalActionStatus !== "not_created") {
+      throw new Error("supply item: unsafe evidence or external action state");
+    }
+    return {
+      id: positiveInteger(item.id, "id"),
+      recordVersion: positiveInteger(item.recordVersion, "recordVersion"),
+      title: text(item.title, "title"),
+      supplier: text(item.supplier, "supplier"),
+      status,
+      reviewState: reviewState as SupplyCaseView["reviewState"],
+      requestedQuantity: text(item.requestedQuantity, "requestedQuantity"),
+      orderedQuantity: text(item.orderedQuantity, "orderedQuantity"),
+      deliveredQuantity: text(item.deliveredQuantity, "deliveredQuantity"),
+      acceptedQuantity: text(item.acceptedQuantity, "acceptedQuantity"),
+      unit: text(item.unit, "unit"),
+      currency: text(item.currency, "currency"),
+      projectId: rowProjectId,
+      contractId: positiveInteger(item.contractId, "contractId"),
+      scheduleBaselineId: positiveInteger(item.scheduleBaselineId, "scheduleBaselineId"),
+      scheduleBaselineVersion: positiveInteger(item.scheduleBaselineVersion, "scheduleBaselineVersion"),
+      scheduleItemId: positiveInteger(item.scheduleItemId, "scheduleItemId"),
+      taskId: positiveInteger(item.taskId, "taskId"),
+      documentVersionId: positiveInteger(item.documentVersionId, "documentVersionId"),
+      evidenceId: text(item.evidenceId, "evidenceId"),
+      evidenceRevision: 1,
+      sourceVersionId: text(item.sourceVersionId, "sourceVersionId"),
+      discrepancyCode: item.discrepancyCode === null || typeof item.discrepancyCode === "undefined"
+        ? null : text(item.discrepancyCode, "discrepancyCode"),
+      externalActionStatus: "not_created",
+    };
+  });
+  if (envelope.total !== items.length) throw new Error("supply response: total mismatch");
+  return items;
+}
+
+export function parseProjectOrganization(value: unknown, projectId: number): number {
+  const project = record(value, "project response");
+  if (positiveInteger(project.id, "project id") !== projectId) throw new Error("project response: scope mismatch");
+  return positiveInteger(project.organization_id, "organization id");
+}
+
 const managerActions: Partial<Record<SupplyStatus, SupplyAction>> = {
   needs_review: "review",
   request_pending_approval: "approve_request",
@@ -69,9 +148,13 @@ const editorActions: Partial<Record<SupplyStatus, SupplyAction[]>> = {
   partially_accepted: ["record_delivery", "propose_act"],
 };
 
-export function availableSupplyActions(item: SupplyCaseView, canManage: boolean): SupplyAction[] {
+export function availableSupplyActions(
+  item: SupplyCaseView,
+  canManage: boolean,
+  canEdit = canManage,
+): SupplyAction[] {
   if (item.externalActionStatus !== "not_created") return [];
-  const actions = [...(editorActions[item.status] ?? [])];
+  const actions = canEdit ? [...(editorActions[item.status] ?? [])] : [];
   const managerAction = managerActions[item.status];
   if (canManage && managerAction) actions.unshift(managerAction);
   return actions;
@@ -87,4 +170,38 @@ export const supplyActionLabels: Record<SupplyAction, string> = {
   resolve_discrepancy: "Разобрать расхождение",
   propose_act: "Подготовить акт",
   approve_act: "Согласовать акт внутри системы",
+};
+
+export const supplyStatusLabels: Record<SupplyStatus, string> = {
+  needs_review: "Нужна проверка",
+  request_pending_approval: "Заявка ждёт согласования",
+  request_rejected: "Заявка отклонена",
+  request_approved: "Заявка согласована",
+  order_draft: "Проект заказа",
+  order_approved: "Заказ согласован",
+  order_recorded: "Размещение зафиксировано",
+  partially_delivered: "Частичная поставка",
+  delivered: "Поставка зафиксирована",
+  delivery_discrepancy: "Расхождение поставки",
+  act_pending_approval: "Акт ждёт согласования",
+  partially_accepted: "Частичная приёмка",
+  accepted: "Принято",
+  cancelled: "Отменено",
+};
+
+export const supplyActiveStep: Record<SupplyStatus, number> = {
+  needs_review: 0,
+  request_pending_approval: 1,
+  request_rejected: 1,
+  request_approved: 1,
+  order_draft: 2,
+  order_approved: 2,
+  order_recorded: 2,
+  partially_delivered: 3,
+  delivered: 3,
+  delivery_discrepancy: 3,
+  act_pending_approval: 4,
+  partially_accepted: 4,
+  accepted: 4,
+  cancelled: 0,
 };

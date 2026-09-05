@@ -1,17 +1,26 @@
-import { availableSupplyActions, supplyActionLabels, type SupplyAction, type SupplyCaseView } from "./supplyReadModel";
+import {
+  availableSupplyActions,
+  supplyActionLabels,
+  supplyActiveStep,
+  supplyStatusLabels,
+  type SupplyAction,
+  type SupplyCaseView,
+} from "./supplyReadModel";
 import "./SupplyChainPanel.css";
 
 interface Props {
   item: SupplyCaseView;
   canManage: boolean;
+  canEdit?: boolean;
   busy?: boolean;
   onAction: (action: SupplyAction, item: SupplyCaseView) => void;
 }
 
 const steps = ["Заявка", "Согласование", "Заказ", "Поставка", "Акт"];
 
-export function SupplyChainPanel({ item, canManage, busy = false, onAction }: Props) {
-  const actions = availableSupplyActions(item, canManage);
+export function SupplyChainPanel({ item, canManage, canEdit = canManage, busy = false, onAction }: Props) {
+  const actions = availableSupplyActions(item, canManage, canEdit);
+  const activeStep = supplyActiveStep[item.status];
   return <section className="supply-chain" aria-label="Закупка, поставка и акт">
     <header>
       <div>
@@ -19,11 +28,12 @@ export function SupplyChainPanel({ item, canManage, busy = false, onAction }: Pr
         <h3>{item.title}</h3>
         <p>{item.supplier}</p>
       </div>
-      <span className={`supply-chain__status supply-chain__status--${item.status}`}>{item.status}</span>
+      <span className={`supply-chain__status supply-chain__status--${item.status}`}>{supplyStatusLabels[item.status]}</span>
     </header>
 
     <ol className="supply-chain__steps">
-      {steps.map((step) => <li key={step}>{step}</li>)}
+      {steps.map((step, index) => <li key={step} className={index < activeStep ? "complete" : index === activeStep ? "active" : ""}
+        aria-current={index === activeStep ? "step" : undefined}>{step}</li>)}
     </ol>
 
     <dl className="supply-chain__quantities">

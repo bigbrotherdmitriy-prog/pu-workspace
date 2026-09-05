@@ -18,6 +18,8 @@ const base: SupplyCaseView = {
 describe("SupplyChainPanel", () => {
   it("shows exact business links and the no-external-action boundary", () => {
     render(<SupplyChainPanel item={base} canManage onAction={vi.fn()} />);
+    expect(screen.getByText("Заявка ждёт согласования")).toBeInTheDocument();
+    expect(screen.getByText("Согласование")).toHaveAttribute("aria-current", "step");
     fireEvent.click(screen.getByText("Связи и доказательства"));
     expect(screen.getByText(/Договор #5/)).toBeInTheDocument();
     expect(screen.getByText(/ГПР #6 v2/)).toBeInTheDocument();
@@ -47,9 +49,16 @@ describe("SupplyChainPanel", () => {
 
   it("exposes partial delivery and act actions without implying signature", () => {
     const item = { ...base, status: "partially_delivered" as const, deliveredQuantity: "4" };
-    render(<SupplyChainPanel item={item} canManage={false} onAction={vi.fn()} />);
+    render(<SupplyChainPanel item={item} canManage={false} canEdit onAction={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Зафиксировать поставку" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Подготовить акт" })).toBeInTheDocument();
     expect(screen.queryByText(/подписать/i)).not.toBeInTheDocument();
+  });
+
+  it("does not expose editor actions to a viewer", () => {
+    const item = { ...base, status: "order_approved" as const };
+    render(<SupplyChainPanel item={item} canManage={false} canEdit={false} onAction={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Зафиксировать размещение" })).not.toBeInTheDocument();
+    expect(screen.getByText("Действий сейчас нет")).toBeInTheDocument();
   });
 });

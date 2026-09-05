@@ -37,6 +37,7 @@ import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { ManagementCenter } from "./modules/management";
 import { ForecastPanel, useForecast } from "./modules/forecast";
+import { SupplyCenter } from "./modules/supply";
 import { formatMoney } from "./utils/numberFormat";
 import {
   Activity,
@@ -171,6 +172,13 @@ type CurrentUser = {
   name: string;
   email: string;
   is_admin: boolean;
+};
+const PROJECT_ROLE_LEVEL: Record<string, number> = {
+  viewer: 10,
+  member: 20,
+  editor: 30,
+  manager: 40,
+  owner: 50,
 };
 type ContractRow = {
   id: number;
@@ -2045,6 +2053,10 @@ export function App() {
       setExpandedInboxId(hit.id);
     } else setActive("Рабочий центр");
   }
+  const currentProjectRole = members.find((member) => member.user_id === currentUser?.id)?.role || "";
+  const currentProjectRoleLevel = PROJECT_ROLE_LEVEL[currentProjectRole] || 0;
+  const canEditSupply = Boolean(currentUser?.is_admin || currentProjectRoleLevel >= PROJECT_ROLE_LEVEL.editor);
+  const canManageSupply = Boolean(currentUser?.is_admin || currentProjectRoleLevel >= PROJECT_ROLE_LEVEL.manager);
   return (
     <div className="shell">
       <aside
@@ -2671,6 +2683,12 @@ export function App() {
               acknowledgedForecastId={acknowledgedForecastId}
               onReload={() => void forecast.reload()}
               onAcknowledge={setAcknowledgedForecastId}
+            />
+            <SupplyCenter
+              projectId={projectId || null}
+              enabled={ready}
+              canEdit={canEditSupply}
+              canManage={canManageSupply}
             />
           </div>
         </section>
