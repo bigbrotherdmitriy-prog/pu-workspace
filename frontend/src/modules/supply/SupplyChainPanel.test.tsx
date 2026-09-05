@@ -8,7 +8,7 @@ afterEach(cleanup);
 const base: SupplyCaseView = {
   id: 1, recordVersion: 3, title: "Синтетическое оборудование", supplier: "Тестовый поставщик",
   status: "request_pending_approval", reviewState: "verified", requestedQuantity: "10",
-  orderedQuantity: "0", deliveredQuantity: "0", acceptedQuantity: "0", unit: "шт", currency: "RUB",
+  orderedQuantity: "0", deliveredQuantity: "0", acceptedQuantity: "0", unit: "шт", unitPrice: "100.25", currency: "RUB",
   projectId: 4, contractId: 5, scheduleBaselineId: 6, scheduleBaselineVersion: 2,
   scheduleItemId: 7, taskId: 8, documentVersionId: 9,
   evidenceId: "00000000-0000-4000-8000-000000000010", evidenceRevision: 1,

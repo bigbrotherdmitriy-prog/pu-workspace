@@ -23,6 +23,7 @@ export type SupplyAction =
   | "record_delivery"
   | "resolve_discrepancy"
   | "propose_act"
+  | "propose_dds"
   | "approve_act";
 
 export interface SupplyCaseView {
@@ -37,6 +38,7 @@ export interface SupplyCaseView {
   deliveredQuantity: string;
   acceptedQuantity: string;
   unit: string;
+  unitPrice: string;
   currency: string;
   projectId: number;
   contractId: number;
@@ -116,6 +118,7 @@ export function parseSupplyList(value: unknown, projectId: number): SupplyCaseVi
       deliveredQuantity: text(item.deliveredQuantity, "deliveredQuantity"),
       acceptedQuantity: text(item.acceptedQuantity, "acceptedQuantity"),
       unit: text(item.unit, "unit"),
+      unitPrice: text(item.unitPrice, "unitPrice"),
       currency: text(item.currency, "currency"),
       projectId: rowProjectId,
       contractId: positiveInteger(item.contractId, "contractId"),
@@ -190,10 +193,11 @@ const managerActions: Partial<Record<SupplyStatus, SupplyAction>> = {
 const editorActions: Partial<Record<SupplyStatus, SupplyAction[]>> = {
   request_approved: ["prepare_order"],
   order_approved: ["record_order"],
-  order_recorded: ["record_delivery"],
-  partially_delivered: ["record_delivery", "propose_act"],
-  delivered: ["propose_act"],
-  partially_accepted: ["record_delivery", "propose_act"],
+  order_recorded: ["record_delivery", "propose_dds"],
+  partially_delivered: ["record_delivery", "propose_act", "propose_dds"],
+  delivered: ["propose_act", "propose_dds"],
+  partially_accepted: ["record_delivery", "propose_act", "propose_dds"],
+  accepted: ["propose_dds"],
 };
 
 export function availableSupplyActions(
@@ -217,6 +221,7 @@ export const supplyActionLabels: Record<SupplyAction, string> = {
   record_delivery: "Зафиксировать поставку",
   resolve_discrepancy: "Разобрать расхождение",
   propose_act: "Подготовить акт",
+  propose_dds: "Предложить запись ДДС",
   approve_act: "Согласовать акт внутри системы",
 };
 

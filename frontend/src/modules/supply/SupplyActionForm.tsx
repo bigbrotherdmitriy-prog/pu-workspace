@@ -14,7 +14,7 @@ type Props = {
 
 const quantityPattern = /^\d{1,15}(?:\.\d{1,3})?$/;
 const moneyPattern = /^\d{1,15}(?:\.\d{1,2})?$/;
-const needsEvidence = new Set<SupplyAction>(["record_order", "record_delivery", "propose_act"]);
+const needsEvidence = new Set<SupplyAction>(["record_order", "record_delivery", "propose_act", "propose_dds"]);
 
 function positive(value: string, pattern: RegExp): boolean {
   return pattern.test(value) && Number(value) > 0;
@@ -33,6 +33,11 @@ export function SupplyActionForm({ action, item, evidence, evidenceLoading, onCa
   const [decision, setDecision] = useState(action === "review" ? "confirm" : "accept_recorded_quantity");
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
+  const [plannedDate, setPlannedDate] = useState("");
+  const [budgetLineId, setBudgetLineId] = useState("");
+  const [ddsAmount, setDdsAmount] = useState(
+    (Number(item.orderedQuantity) * Number(item.unitPrice)).toFixed(2),
+  );
   const [correctedTitle, setCorrectedTitle] = useState("");
   const [correctedSupplier, setCorrectedSupplier] = useState("");
   const [reference, setReference] = useState("");
@@ -74,6 +79,22 @@ export function SupplyActionForm({ action, item, evidence, evidenceLoading, onCa
       fields.act_number = actNumber.trim();
     }
     if (action === "resolve_discrepancy") fields.decision = decision;
+    if (action === "propose_dds") {
+      if (!moneyPattern.test(ddsAmount) || Number(ddsAmount) <= 0) {
+        return setError("Сумма ДДС: максимум 2 знака после точки.");
+      }
+      if (!plannedDate) return setError("Укажите плановую дату.");
+      if (!/^\d+$/.test(budgetLineId) || Number(budgetLineId) <= 0) {
+        return setError("Укажите подтверждённую строку бюджета.");
+      }
+      fields.contract_id = item.contractId;
+      fields.schedule_item_id = item.scheduleItemId;
+      fields.budget_line_id = Number(budgetLineId);
+      fields.planned_date = plannedDate;
+      fields.amount = ddsAmount;
+      fields.currency = item.currency;
+      fields.evidence_assessment_version = selected?.assessmentVersion;
+    }
     if (action === "record_delivery") {
       if (discrepancyCode && discrepancyNote.trim().length < 3) return setError("Опишите расхождение.");
       if (!discrepancyCode && discrepancyNote) return setError("Выберите тип расхождения.");
@@ -107,6 +128,13 @@ export function SupplyActionForm({ action, item, evidence, evidenceLoading, onCa
       <label>Номер заказа<input value={reference} onChange={(event) => setReference(event.target.value)} required /></label></>}
     {(action === "record_delivery" || action === "propose_act") && <label>Количество<input value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label>}
     {action === "propose_act" && <label>Номер акта<input value={actNumber} onChange={(event) => setActNumber(event.target.value)} required /></label>}
+    {action === "propose_dds" && <>
+      <p>Договор #{item.contractId} · этап ГПР #{item.scheduleItemId} · валюта {item.currency}</p>
+      <label>Сумма предложения ДДС<input value={ddsAmount} onChange={(event) => setDdsAmount(event.target.value)} required /></label>
+      <label>Плановая дата<input type="date" value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} required /></label>
+      <label>Подтверждённая строка бюджета #<input inputMode="numeric" value={budgetLineId} onChange={(event) => setBudgetLineId(event.target.value)} required /></label>
+      <p>Будет создано только предложение. Оплата и проводка не выполняются.</p>
+    </>}
     {action === "record_delivery" && <><label>Расхождение<select value={discrepancyCode} onChange={(event) => setDiscrepancyCode(event.target.value)}>
       <option value="">Нет</option><option value="quantity">Количество</option><option value="quality">Качество</option>
       <option value="damage">Повреждение</option><option value="documents">Документы</option><option value="other">Другое</option>

@@ -15,9 +15,9 @@ export function SupplyCenter({ projectId, enabled = true, canEdit, canManage }: 
   const controller = useSupplyCases(projectId, enabled, canManage);
   const [form, setForm] = useState<{ action: SupplyAction; item: SupplyCaseView } | null>(null);
   const formActions = new Set<SupplyAction>([
-    "review", "prepare_order", "record_order", "record_delivery", "resolve_discrepancy", "propose_act",
+    "review", "prepare_order", "record_order", "record_delivery", "resolve_discrepancy", "propose_act", "propose_dds",
   ]);
-  const evidenceActions = new Set<SupplyAction>(["record_order", "record_delivery", "propose_act"]);
+  const evidenceActions = new Set<SupplyAction>(["record_order", "record_delivery", "propose_act", "propose_dds"]);
   useEffect(() => setForm(null), [projectId, enabled]);
 
   function startAction(action: SupplyAction, item: SupplyCaseView) {

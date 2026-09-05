@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -106,6 +107,31 @@ class ProposeAcceptanceAct(VersionedCommand):
 
 class ResolveDiscrepancy(VersionedCommand):
     decision: Literal["accept_recorded_quantity", "return_to_delivery"]
+
+
+class CreateDdsProposal(VersionedCommand):
+    """Human-requested proposal only; it never confirms or executes payment."""
+
+    contract_id: int = Field(gt=0)
+    schedule_item_id: int = Field(gt=0)
+    budget_line_id: int = Field(gt=0)
+    planned_date: date
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    evidence_assessment_version: int = Field(gt=0)
+    evidence: EvidenceLink
+
+
+class DdsProposalResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    supply_case_id: int
+    cash_flow_id: int
+    supply_record_version: int
+    status: Literal["proposed"] = "proposed"
+    requires_human_confirmation: Literal[True] = True
+    payment_created: Literal[False] = False
+    already_applied: bool = False
 
 
 class SupplyMutationResult(BaseModel):

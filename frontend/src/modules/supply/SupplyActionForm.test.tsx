@@ -9,7 +9,7 @@ const item: SupplyCaseView = {
   id: 1, recordVersion: 5, title: "Synthetic item", supplier: "Synthetic supplier",
   status: "order_recorded", reviewState: "verified", requestedQuantity: "10.000",
   orderedQuantity: "10.000", deliveredQuantity: "0.000", acceptedQuantity: "0.000",
-  unit: "pcs", currency: "RUB", projectId: 7, contractId: 8, scheduleBaselineId: 9,
+  unit: "pcs", unitPrice: "100.25", currency: "RUB", projectId: 7, contractId: 8, scheduleBaselineId: 9,
   scheduleBaselineVersion: 2, scheduleItemId: 10, taskId: 11, documentVersionId: 12,
   evidenceId: "00000000-0000-4000-8000-000000000013", evidenceRevision: 1,
   sourceVersionId: "00000000-0000-4000-8000-000000000014", externalActionStatus: "not_created",
@@ -92,5 +92,29 @@ describe("SupplyActionForm", () => {
       accepted_quantity: "3.125", act_number: "ACT-42",
       evidence: expect.objectContaining({ document_version_id: 22 }),
     }));
+  });
+
+  it("creates only an explicit stage-bound DDS proposal with exact evidence", () => {
+    const submit = form("propose_dds");
+    fireEvent.change(screen.getByLabelText("Плановая дата"), { target: { value: "2026-09-12" } });
+    fireEvent.change(screen.getByLabelText(/Подтверждённая строка бюджета/), { target: { value: "44" } });
+    fireEvent.change(screen.getByLabelText("Точное доказательство"), { target: { value: exact.evidenceId } });
+    fireEvent.submit(screen.getByLabelText("Форма действия снабжения"));
+    expect(submit).toHaveBeenCalledWith({
+      contract_id: 8,
+      schedule_item_id: 10,
+      budget_line_id: 44,
+      planned_date: "2026-09-12",
+      amount: "1002.50",
+      currency: "RUB",
+      evidence_assessment_version: 3,
+      evidence: {
+        evidence_id: exact.evidenceId,
+        evidence_revision: 1,
+        source_version_id: exact.sourceVersionId,
+        document_version_id: exact.documentVersionId,
+      },
+    });
+    expect(screen.getByText(/только предложение/)).toBeInTheDocument();
   });
 });

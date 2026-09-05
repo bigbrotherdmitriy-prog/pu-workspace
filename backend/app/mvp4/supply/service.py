@@ -13,13 +13,16 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.execution_finance import ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import BudgetLine, CashFlowEntry
 from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.task import Task
-from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceReference, SourceVersion
+from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceCurrent, SourceReference, SourceVersion
 from app.mvp4.supply.contracts import (
     CreateSupplyRequest,
+    CreateDdsProposal,
+    DdsProposalResult,
     EvidenceLink,
     PrepareOrder,
     ProposeAcceptanceAct,
@@ -218,6 +221,10 @@ class SupplyService:
             )
         )
         source = db.get(SourceReference, source_version.source_id) if source_version is not None else None
+        current = db.scalar(select(SourceCurrent).where(
+            SourceCurrent.organization_id == organization_id,
+            SourceCurrent.source_id == source_version.source_id,
+        )) if source_version is not None else None
         document_version = db.get(DocumentVersion, link.document_version_id)
         document = db.get(Document, document_version.document_id) if document_version is not None else None
         if (
@@ -229,6 +236,8 @@ class SupplyService:
             or evidence.source_id != source_version.source_id
             or source.origin_project_id != project_id
             or source_version.legacy_document_version_id != link.document_version_id
+            or current is None
+            or current.version_id != source_version.id
             or document.project_id != project_id
             or not isinstance(evidence.locator, dict)
             or not evidence.locator
@@ -476,6 +485,129 @@ class SupplyService:
         )
         db.flush()
         return self._result(row)
+
+    def create_dds_proposal(
+        self,
+        db: Session,
+        *,
+        organization_id: int,
+        project_id: int,
+        supply_case_id: int,
+        actor_user_id: int,
+        command: CreateDdsProposal,
+    ) -> DdsProposalResult:
+        """Create an evidence-backed plan entry, never a payment or provider effect."""
+        self._require_role(db, actor_user_id=actor_user_id, project_id=project_id, minimum="editor")
+        row = self._locked(
+            db, organization_id=organization_id, project_id=project_id, supply_case_id=supply_case_id
+        )
+        _, payload_hash = _canonical_payload(command)
+        receipt = db.scalar(select(SupplyCommandReceipt).where(
+            SupplyCommandReceipt.supply_case_id == row.id,
+            SupplyCommandReceipt.command_key == command.command_key,
+        ))
+        if receipt is not None:
+            if receipt.payload_hash != payload_hash or not receipt.result_status.startswith("dds:"):
+                raise SupplyConflict("idempotency_key_conflict")
+            return DdsProposalResult(
+                supply_case_id=row.id,
+                cash_flow_id=int(receipt.result_status.removeprefix("dds:")),
+                supply_record_version=receipt.resulting_record_version,
+                already_applied=True,
+            )
+        if row.record_version != command.expected_version:
+            raise SupplyConflict("record_version_conflict")
+        if (
+            row.review_state != "verified"
+            or row.status not in {
+                "order_recorded", "partially_delivered", "delivered",
+                "act_pending_approval", "partially_accepted", "accepted",
+            }
+            or not row.order_reference
+            or command.contract_id != row.contract_id
+            or command.schedule_item_id != row.schedule_item_id
+            or command.currency != row.currency
+        ):
+            raise SupplyConflict("dds_proposal_not_ready")
+
+        budget = db.scalar(select(BudgetLine).where(
+            BudgetLine.id == command.budget_line_id,
+            BudgetLine.project_id == project_id,
+        ).with_for_update())
+        if (
+            budget is None
+            or budget.contract_id != row.contract_id
+            or budget.schedule_item_id != row.schedule_item_id
+            or budget.currency != row.currency
+            or budget.status not in {"approved", "active"}
+            or budget.review_status != "confirmed"
+        ):
+            raise SupplyDenied("resource_unavailable")
+
+        evidence, verified, available = self._validate_evidence(
+            db,
+            organization_id=organization_id,
+            project_id=project_id,
+            link=command.evidence,
+            require_verified=True,
+        )
+        if not verified or not available:
+            raise SupplyDenied("manual_review_required")
+        assessment = db.scalar(select(EvidenceAssessment).where(
+            EvidenceAssessment.organization_id == organization_id,
+            EvidenceAssessment.evidence_id == str(command.evidence.evidence_id),
+            EvidenceAssessment.record_version == command.evidence_assessment_version,
+        ))
+        if assessment is None:
+            raise SupplyDenied("manual_review_required")
+        document_version = db.get(DocumentVersion, command.evidence.document_version_id)
+        if document_version is None:
+            raise SupplyDenied("resource_unavailable")
+
+        cash_flow = CashFlowEntry(
+            project_id=project_id,
+            contract_id=row.contract_id,
+            schedule_item_id=row.schedule_item_id,
+            budget_line_id=budget.id,
+            task_id=row.task_id,
+            source_document_id=document_version.document_id,
+            source_document_version_id=document_version.id,
+            evidence_id=str(command.evidence.evidence_id),
+            evidence_revision=command.evidence.evidence_revision,
+            evidence_assessment_version=command.evidence_assessment_version,
+            confidence=evidence.confidence,
+            review_status="pending_confirmation",
+            direction="outflow",
+            title=f"Снабжение #{row.id}: {row.title}",
+            planned_date=command.planned_date,
+            planned_amount=command.amount,
+            actual_amount=Decimal("0"),
+            counterparty=row.supplier,
+            status="proposed",
+        )
+        db.add(cash_flow)
+        db.flush()
+        row.record_version += 1
+        self._append_version(
+            db, row=row, event="dds_proposed", actor_user_id=actor_user_id, evidence=command.evidence
+        )
+        db.add(SupplyCommandReceipt(
+            supply_case_id=row.id,
+            organization_id=row.organization_id,
+            project_id=row.project_id,
+            command_key=command.command_key,
+            payload_hash=payload_hash,
+            event="dds_proposed",
+            result_status=f"dds:{cash_flow.id}",
+            resulting_record_version=row.record_version,
+            actor_user_id=actor_user_id,
+        ))
+        db.flush()
+        return DdsProposalResult(
+            supply_case_id=row.id,
+            cash_flow_id=cash_flow.id,
+            supply_record_version=row.record_version,
+        )
 
     def review_request(self, db: Session, *, organization_id: int, project_id: int,
                        supply_case_id: int, actor_user_id: int,

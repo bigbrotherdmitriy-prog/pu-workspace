@@ -15,6 +15,7 @@ const supplyItem = {
   deliveredQuantity: "0.000",
   acceptedQuantity: "0.000",
   unit: "шт",
+  unitPrice: "100.25",
   currency: "RUB",
   projectId: 7,
   contractId: 5,

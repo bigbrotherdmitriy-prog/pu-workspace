@@ -23,6 +23,7 @@ const actionPaths: Record<SupplyAction, string> = {
   record_delivery: "deliveries",
   resolve_discrepancy: "resolve-discrepancy",
   propose_act: "acceptance-acts",
+  propose_dds: "dds-proposals",
   approve_act: "approve-acceptance-act",
 };
 

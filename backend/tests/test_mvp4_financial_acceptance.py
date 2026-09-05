@@ -49,6 +49,7 @@ from app.models.v54_pilot import (
     SourceVersion,
 )
 from app.mvp4.supply.contracts import (
+    CreateDdsProposal,
     CreateSupplyRequest,
     EvidenceLink,
     PrepareOrder,
@@ -807,3 +808,122 @@ def test_supply_router_requires_one_matching_idempotency_key():
         _require_idempotency("supply-command-123", "different-command")
     assert conflict.value.status_code == 409
     assert conflict.value.detail == "idempotency_key_conflict"
+
+
+def _recorded_supply_and_budget(world):
+    service = SupplyService()
+    created = service.create_request(
+        world["db"], actor_user_id=world["editor"].id, command=_supply_request(world)
+    )
+    common = {
+        "organization_id": world["organization"].id,
+        "project_id": world["project"].id,
+        "supply_case_id": created.supply_case_id,
+    }
+    service.approve_request(
+        world["db"], **common, actor_user_id=world["manager"].id,
+        command=VersionedCommand(command_key="dds:approve:request", expected_version=1),
+    )
+    service.prepare_order(
+        world["db"], **common, actor_user_id=world["editor"].id,
+        command=PrepareOrder(command_key="dds:prepare:order", expected_version=2,
+                             ordered_quantity=Decimal("3.125"), order_reference="PO-DDS-1"),
+    )
+    service.approve_order(
+        world["db"], **common, actor_user_id=world["manager"].id,
+        command=VersionedCommand(command_key="dds:approve:order", expected_version=3),
+    )
+    service.record_order(
+        world["db"], **common, actor_user_id=world["editor"].id,
+        command=RecordOrder(command_key="dds:record:order", expected_version=4,
+                            evidence=_supply_pin(world)),
+    )
+    budget_result = create_budget(
+        BudgetCreate(
+            project_id=world["project"].id, contract_id=world["contract"].id,
+            schedule_item_id=world["stage"].id, task_id=world["task"].id,
+            category="supply", description="Synthetic supply budget",
+            planned_amount=Decimal("1000.00"), currency="RUB", **_finance_pin(world),
+        ), world["db"], world["editor"],
+    )
+    budget = world["db"].get(BudgetLine, budget_result["id"])
+    update_status("budget", budget.id, StatusUpdate(status="approved"),
+                  world["db"], world["manager"])
+    return service, common, world["db"].get(SupplyCase, created.supply_case_id), budget
+
+
+def _dds_command(world, budget, *, key="dds:proposal:0001", expected_version=5):
+    return CreateDdsProposal(
+        command_key=key,
+        expected_version=expected_version,
+        contract_id=world["contract"].id,
+        schedule_item_id=world["stage"].id,
+        budget_line_id=budget.id,
+        planned_date=date(2026, 9, 12),
+        amount=Decimal("313.28"),
+        currency="RUB",
+        evidence_assessment_version=world["assessment"].record_version,
+        evidence=_supply_pin(world),
+    )
+
+
+def test_supply_dds_is_only_exact_evidence_backed_proposal_until_human_confirms(financial_world):
+    world = financial_world
+    service, common, supply, budget = _recorded_supply_and_budget(world)
+    command = _dds_command(world, budget)
+
+    result = service.create_dds_proposal(
+        world["db"], **common, actor_user_id=world["editor"].id, command=command,
+    )
+    replay = service.create_dds_proposal(
+        world["db"], **common, actor_user_id=world["editor"].id, command=command,
+    )
+    cash = world["db"].get(CashFlowEntry, result.cash_flow_id)
+
+    assert replay == result.model_copy(update={"already_applied": True})
+    assert (cash.status, cash.actual_amount, cash.actual_date) == ("proposed", Decimal("0"), None)
+    assert (cash.contract_id, cash.schedule_item_id, cash.budget_line_id) == (
+        world["contract"].id, world["stage"].id, budget.id,
+    )
+    assert (cash.evidence_id, cash.evidence_revision, cash.source_document_version_id) == (
+        world["evidence"].id, 1, world["document_version"].id,
+    )
+    assert result.requires_human_confirmation is True
+    assert result.payment_created is False
+    assert supply.record_version == 6
+    assert world["db"].scalar(select(func.count(BackgroundJob.id))) == 0
+
+    update_status("cash-flow", cash.id, StatusUpdate(status="approved", expected_status="proposed"),
+                  world["db"], world["manager"])
+    assert (cash.status, cash.actual_date, cash.actual_amount) == ("approved", None, Decimal("0"))
+
+
+def test_supply_dds_fails_closed_for_stale_cas_scope_role_and_assessment(financial_world):
+    world = financial_world
+    service, common, _supply, budget = _recorded_supply_and_budget(world)
+    command = _dds_command(world, budget)
+
+    with pytest.raises(SupplyDenied, match="resource_unavailable"):
+        service.create_dds_proposal(
+            world["db"], **common, actor_user_id=world["viewer"].id, command=command,
+        )
+    with pytest.raises(SupplyDenied, match="resource_unavailable"):
+        service.create_dds_proposal(
+            world["db"], organization_id=world["organization"].id,
+            project_id=world["other_project"].id, supply_case_id=common["supply_case_id"],
+            actor_user_id=world["editor"].id, command=command,
+        )
+    with pytest.raises(SupplyConflict, match="record_version_conflict"):
+        service.create_dds_proposal(
+            world["db"], **common, actor_user_id=world["editor"].id,
+            command=command.model_copy(update={"expected_version": 4, "command_key": "dds:stale:0001"}),
+        )
+
+    world["assessment"].freshness = "stale"
+    world["db"].flush()
+    with pytest.raises(SupplyDenied, match="manual_review_required"):
+        service.create_dds_proposal(
+            world["db"], **common, actor_user_id=world["editor"].id,
+            command=command.model_copy(update={"command_key": "dds:stale:evidence"}),
+        )
+    assert world["db"].scalar(select(func.count(CashFlowEntry.id))) == 0

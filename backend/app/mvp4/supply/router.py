@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.user import User
 from app.mvp4.supply.contracts import (
     CreateSupplyRequest,
+    CreateDdsProposal,
     PrepareOrder,
     ProposeAcceptanceAct,
     RecordDelivery,
@@ -47,6 +48,7 @@ def _view(row: SupplyCase) -> dict:
         "deliveredQuantity": str(row.delivered_quantity),
         "acceptedQuantity": str(row.accepted_quantity),
         "unit": row.unit,
+        "unitPrice": str(row.unit_price),
         "currency": row.currency,
         "projectId": row.project_id,
         "contractId": row.contract_id,
@@ -108,6 +110,19 @@ def review_request(supply_case_id: int, organization_id: int, project_id: int,
     require_project_role(db, user, project_id, "manager")
     _require_idempotency(payload.command_key, idempotency_key)
     return _run(db, lambda: service.review_request(
+        db, organization_id=organization_id, project_id=project_id,
+        supply_case_id=supply_case_id, actor_user_id=user.id, command=payload,
+    ))
+
+
+@router.post("/{supply_case_id}/dds-proposals")
+def create_dds_proposal(supply_case_id: int, organization_id: int, project_id: int,
+                        payload: CreateDdsProposal, db: Session = Depends(get_db),
+                        user: User = Depends(require_user),
+                        idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=120)):
+    require_project_role(db, user, project_id, "editor")
+    _require_idempotency(payload.command_key, idempotency_key)
+    return _run(db, lambda: service.create_dds_proposal(
         db, organization_id=organization_id, project_id=project_id,
         supply_case_id=supply_case_id, actor_user_id=user.id, command=payload,
     ))
