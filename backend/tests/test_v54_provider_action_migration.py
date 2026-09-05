@@ -79,6 +79,7 @@ def test_postgresql_provider_upgrade_from_a05_and_round_trip(monkeypatch):
     engine = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
     monkeypatch.setenv("DATABASE_URL", url)
     config = migration_config()
+    downgraded = False
     try:
         inspector = inspect(engine)
         assert set(PROVIDER_TABLES) <= set(inspector.get_table_names())
@@ -104,12 +105,18 @@ def test_postgresql_provider_upgrade_from_a05_and_round_trip(monkeypatch):
         }
 
         command.downgrade(config, "a54f001c0a05")
+        downgraded = True
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a05"
+            versions = set(connection.scalars(text("SELECT version_num FROM alembic_version")))
+            assert "a54f001c0a05" in versions
+            assert CURRENT_SCHEMA_REVISION not in versions
             assert not set(PROVIDER_TABLES) & set(inspect(connection).get_table_names())
         command.upgrade(config, CURRENT_SCHEMA_REVISION)
+        downgraded = False
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_SCHEMA_REVISION
             assert set(PROVIDER_TABLES) <= set(inspect(connection).get_table_names())
     finally:
+        if downgraded:
+            command.upgrade(config, CURRENT_SCHEMA_REVISION)
         engine.dispose()

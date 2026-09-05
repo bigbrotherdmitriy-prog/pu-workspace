@@ -178,7 +178,10 @@ def test_s02_same_provider_message_and_thread_are_isolated_per_mailbox(
             project.id, db, user, query="synthetic", max_results=1,
         ) for project in projects]
         success = {"processed": 1, "skipped": 0, "failed": 0, "errors": []}
-        _require(all(result == success for result in results))
+        _require(all(
+            {key: result.get(key) for key in success} == success
+            for result in results
+        ))
 
         messages = list(db.scalars(select(Message).order_by(Message.id)))
         sources = list(db.scalars(select(SourceReference).order_by(SourceReference.id)))

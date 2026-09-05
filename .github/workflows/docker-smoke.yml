@@ -82,6 +82,8 @@ jobs:
       - name: Restart API, workers and scheduler; verify persistent data
         run: |
           docker compose restart backend worker scheduler
+          docker compose up -d --wait --wait-timeout 180 backend worker scheduler
+          docker compose restart gateway
           python scripts/check_ci_smoke.py
       - name: Restore backup into a second isolated database and compare data
         run: |
