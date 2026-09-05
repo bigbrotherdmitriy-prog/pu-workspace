@@ -19,6 +19,7 @@ from typing import BinaryIO, Callable, Collection, ContextManager, Literal, Prot
 from sqlalchemy import select
 
 from app.core.auth import ROLE_LEVEL
+from app.integrations.google_retry import GoogleReadError, execute_google_read
 from app.mailbox_identity.runtime import require_mailbox_authority, runtime_for_message
 from app.models.ai_secretary import Message
 from app.models.project import Project
@@ -292,13 +293,20 @@ class GmailProviderDownloadAdapter:
     def __repr__(self) -> str:
         return "<GmailProviderDownloadAdapter redacted>"
 
-    def open(self) -> ProviderAttachment:
+    def open(self, *, before_attempt: Callable[[], None] | None = None) -> ProviderAttachment:
         if self._opened:
             raise GmailAttachmentDenied("provider_attachment_already_opened")
         self._opened = True
-        payload = self._service.users().messages().attachments().get(
-            userId="me", messageId=self._message_id, id=self._attachment_id,
-        ).execute()
+        try:
+            payload = execute_google_read(lambda: (
+                self._service.users().messages().attachments().get(
+                    userId="me", messageId=self._message_id, id=self._attachment_id,
+                )
+            ), before_attempt=before_attempt)
+        except GoogleReadError as exc:
+            if exc.retryable:
+                raise GmailAttachmentUnavailable("provider_attachment_unavailable") from None
+            raise GmailAttachmentDenied("provider_attachment_denied") from None
         encoded = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(encoded, str):
             raise GmailAttachmentIntegrityError("provider_attachment_invalid")
@@ -322,13 +330,18 @@ class _PreDownloadGuard:
     def __repr__(self) -> str:
         return "<GmailAttachmentProvider guarded>"
 
-    def open(self) -> ProviderAttachment:
+    def _authorize(self) -> None:
         # Use an independent transaction so concurrent revoke/rotation is visible
         # and authorization cannot expire a05's in-progress lifecycle objects.
         from app.database import SessionLocal
         with SessionLocal() as auth_db:
             validate_gmail_attachment_binding(auth_db, self._binding, max_bytes=self._max_bytes)
-            return self._provider.open()
+
+    def open(self) -> ProviderAttachment:
+        if isinstance(self._provider, GmailProviderDownloadAdapter):
+            return self._provider.open(before_attempt=self._authorize)
+        self._authorize()
+        return self._provider.open()
 
 
 def stage_gmail_attachment(db, binding: GmailAttachmentBinding,

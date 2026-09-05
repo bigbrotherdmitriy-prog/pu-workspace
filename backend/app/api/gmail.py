@@ -6,7 +6,7 @@ import json
 import os
 import re
 from email.utils import parseaddr
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from app.api.ai_secretary import IncomingMessage, ingest_message, project_candid
 from app.api.project_contacts import contact_for_sender, discover_contact_from_message
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.google_workspace import google_workspace_for_mailbox
+from app.integrations.google_retry import GoogleReadError, execute_google_read
 from app.mailbox_identity.runtime import (
     observe_gmail_message,
     require_mailbox_authority,
@@ -107,7 +108,13 @@ def _attachments(payload: dict, message_external_id: str | None = None) -> list[
     return result[:100]
 
 
-def _gmail_message_refs(service, *, query: str, max_results: int):
+def _gmail_message_refs(
+    service,
+    *,
+    query: str,
+    max_results: int,
+    before_attempt: Callable[[], None] | None = None,
+):
     """Yield a bounded Gmail listing across opaque provider pages.
 
     Gmail may return fewer rows than ``maxResults`` while still providing a
@@ -122,7 +129,10 @@ def _gmail_message_refs(service, *, query: str, max_results: int):
         request = {"userId": "me", "q": query, "maxResults": remaining}
         if page_token is not None:
             request["pageToken"] = page_token
-        page = service.users().messages().list(**request).execute()
+        page = execute_google_read(
+            lambda: service.users().messages().list(**request),
+            before_attempt=before_attempt,
+        )
         if not isinstance(page, dict):
             raise ValueError("gmail_page_unavailable")
         refs = page.get("messages") or []
@@ -186,7 +196,13 @@ def _bulk_email_reason(headers: dict[str, str], label_ids: list[str] | None, sub
 @router.post("/projects/{project_id}/gmail/sync")
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
-    return sync_gmail_project(project_id, db, user, query=payload.query, max_results=payload.max_results)
+    try:
+        return sync_gmail_project(
+            project_id, db, user,
+            query=payload.query, max_results=payload.max_results,
+        )
+    except GoogleReadError as exc:
+        raise HTTPException(503, "Gmail synchronization is temporarily unavailable") from exc
 
 
 def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:
@@ -202,11 +218,31 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
         raise HTTPException(409, "Mailbox cohort requires an explicit current-generation write flag")
     service = (google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
                if mailbox_runtime else google_workspace_for_project(project_id, db)).service("gmail", "v1")
+    def before_provider_read():
+        if mailbox_runtime is None:
+            return
+        try:
+            current = runtime_for_project_connection(db, project_id)
+        except ValueError:
+            current = None
+        if (current is None or current.organization_id != mailbox_runtime.organization_id
+                or current.identity_id != mailbox_runtime.identity_id
+                or current.mail_connection_id != mailbox_runtime.mail_connection_id
+                or current.generation != mailbox_runtime.generation
+                or current.binding_epoch != mailbox_runtime.binding_epoch
+                or current.google_token_id != mailbox_runtime.google_token_id
+                or not current.flags.pilot_write):
+            raise GoogleReadError("mailbox_generation_changed", retryable=False)
     processed = skipped = failed = 0
     errors: list[dict] = []
-    for ref in _gmail_message_refs(service, query=query, max_results=max_results):
+    for ref in _gmail_message_refs(
+        service, query=query, max_results=max_results,
+        before_attempt=before_provider_read,
+    ):
         try:
-            item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
+            item = execute_google_read(lambda: service.users().messages().get(
+                userId="me", id=ref["id"], format="full",
+            ), before_attempt=before_provider_read)
             headers = _headers(item.get("payload", {}))
             content = _message_text(item.get("payload", {})) or item.get("snippet", "")
             subject = headers.get("subject") or "Письмо без темы"
