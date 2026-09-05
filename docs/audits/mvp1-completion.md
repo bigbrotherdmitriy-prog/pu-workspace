@@ -1,7 +1,7 @@
 # MVP1 completion — synthetic acceptance result
 
-Дата: 2026-09-04  
-Ветка: `codex/mvp1-completion`  
+Дата: 2026-09-04
+Ветка: `codex/mvp1-completion`
 База: `a19fffde54e51aee0b42220c83f6c19b1d3b9055`
 
 ## Решение
