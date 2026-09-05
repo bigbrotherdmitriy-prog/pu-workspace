@@ -3,7 +3,7 @@ name: MVP1 storage mutation synthetic runtime
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/mvp1-storage-mutation-browser-runtime']
+    branches: ['codex/mvp1-storage-mutation-browser-runtime', 'codex/mvp1234-wave2-integration']
     paths: ['backend/**', 'frontend/**', '.github/workflows/storage-mutation-runtime.yml']
 
 permissions:

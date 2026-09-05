@@ -2,8 +2,20 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("name", ["v54-pilot-runtime.yml", "storage-mutation-runtime.yml"])
+def test_integrated_candidate_push_starts_isolated_runtime(name):
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text(encoding="utf8"))
+    triggers = workflow.get("on", workflow.get(True))
+    assert "codex/mvp1234-wave2-integration" in triggers["push"]["branches"]
+    assert "workflow_dispatch" in triggers
+    assert workflow["permissions"] == {"contents": "read"}
 
 
 def test_history_database_is_owned_scoped_and_migrated_before_acceptance(monkeypatch):
