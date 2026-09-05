@@ -109,7 +109,9 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
             submit.click()
         assert upload_info.value.ok, "Synthetic local upload failed"
         expect(dialog).not_to_be_visible(timeout=20_000)
-        expect(page.get_by_text(re.compile(r"Обработано:\s*1\."))).to_be_visible()
+        expect(page.get_by_text(re.compile(
+            r"(?:Поставлено в очередь файлов|Обработано):\s*1\."
+        ))).to_be_visible()
 
         # Documents: verify the uploaded file appears and its detail can open.
         page.get_by_text("Документы", exact=True).first.click()
