@@ -7,3 +7,4 @@ export * from "./ObligationDetailPanel";
 export * from "./RiskDecisionPanel";
 export * from "./MeetingProposalPanel";
 export * from "./DeadlineDigestPanel";
+export * from "./ManagementCenter";

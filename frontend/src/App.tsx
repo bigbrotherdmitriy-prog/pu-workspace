@@ -35,6 +35,7 @@ import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/Anal
 import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
 import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
+import { ManagementCenter } from "./modules/management";
 import { formatMoney } from "./utils/numberFormat";
 import {
   Activity,
@@ -2228,6 +2229,7 @@ export function App() {
                   </button>
                 </div>
               </section>
+              <ManagementCenter projectId={projectId || null} enabled={ready} />
               <div className="metrics dashboard-metrics">
                 {metrics.map(([label, value, tone]) => (
                   <button

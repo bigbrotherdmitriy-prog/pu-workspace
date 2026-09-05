@@ -1,3 +1,10 @@
+.management-center {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
 .management-card {
   --management-ink: #17221a;
   --management-muted: #607065;
@@ -71,6 +78,7 @@
 .management-digest-state { display: grid; gap: 4px; border-radius: 12px; background: #eef5ef; padding: 12px; }
 
 @media (max-width: 620px) {
+  .management-center { grid-template-columns: 1fr; }
   .management-card { padding: 15px; border-radius: 14px; }
   .management-card > header { align-items: center; }
   .management-facts { grid-template-columns: 1fr; }
