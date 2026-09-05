@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ProviderActionCenter } from "../provider-actions";
 import { AttentionPanel } from "./AttentionPanel";
 import { DeadlineDigestPanel } from "./DeadlineDigestPanel";
 import { ObligationDetailPanel } from "./ObligationDetailPanel";
@@ -75,5 +76,6 @@ export function ManagementCenter({ projectId, enabled = true }: Props) {
       onSave={(preference) => void controller.saveDigestPreference(preference)}
       onEnqueue={(preference) => void controller.enqueueDigest(preference)}
     />
+    <ProviderActionCenter projectId={projectId} enabled={enabled} />
   </section>;
 }
