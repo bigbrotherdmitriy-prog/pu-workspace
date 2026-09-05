@@ -52,6 +52,34 @@ describe("useManagementCenter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([{ confirmationAvailable: false }, { originStatus: "invalid_source", confirmationAvailable: true },
+    { originStatus: "future_unknown", confirmationAvailable: true }, { originReason: "meeting_source_binding_required" }])
+  ("blocks source-denied proposals before POST %j", async flags => {
+    const fetchMock = initialFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useManagementCenter(3));
+    await waitFor(() => expect(result.current.state.loadState).toBe("ready"));
+    await act(async () => result.current.confirmMeetingProposal({ kind: "task", entityType: "obligation", entityId: 9,
+      recordVersion: 2, status: "needs_confirmation", reviewState: "needs_review", taskId: null, ...flags }, true));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.current.state.mutationState).toBe("error");
+    expect(result.current.state.mutationMessage).toContain("Подтверждение недоступно");
+  });
+
+  it("cannot bypass a loaded denial by passing a stale flagless proposal", async () => {
+    const fetchMock = initialFetch().mockResolvedValueOnce(response({ external_actions_created: false,
+      proposals: [{ kind: "task", entity_type: "obligation", entity_id: 9, record_version: 2,
+        status: "needs_confirmation", review_state: "needs_review", task_id: null, confirmation_available: false }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useManagementCenter(3));
+    await waitFor(() => expect(result.current.state.loadState).toBe("ready"));
+    await act(async () => result.current.proposeMeetingActions(5, []));
+    await act(async () => result.current.confirmMeetingProposal({ kind: "task", entityType: "obligation", entityId: 9,
+      recordVersion: 2, status: "needs_confirmation", reviewState: "needs_review", taskId: null }, true));
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(result.current.state.mutationState).toBe("error");
+  });
+
   it("fails closed when the server shape is incomplete", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ items: [], total: 0, generated_at: "bad", external_actions_created: false }))

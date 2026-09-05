@@ -102,6 +102,28 @@ describe("MVP3 management panels", () => {
     expect(onConfirm).toHaveBeenCalledWith(proposal, true);
   });
 
+  it.each([{ confirmationAvailable: false }, { originStatus: "invalid_source", confirmationAvailable: true },
+    { originStatus: "future_unknown", confirmationAvailable: true }, { originReason: "meeting_source_binding_required" }])
+  ("disables source-denied confirmation %j", flags => {
+    const onConfirm = vi.fn();
+    const proposal = { kind: "task" as const, entityType: "obligation" as const, entityId: 9,
+      recordVersion: 2, status: "needs_confirmation", reviewState: "needs_review", taskId: null, ...flags };
+    render(<MeetingProposalPanel state="ready" proposals={[proposal]} onConfirm={onConfirm} />);
+    expect(screen.getByRole("button", { name: "Подтвердить" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(/Подтверждение недоступно/);
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("does not render an unknown origin reason as trusted UI text", () => {
+    render(<MeetingProposalPanel state="ready" proposals={[{ kind: "decision", entityType: "decision", entityId: 10,
+      recordVersion: 1, status: "needs_confirmation", reviewState: "needs_review", taskId: null,
+      originReason: "raw-private-server-reason" }]} onConfirm={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Подтвердить" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("статус источника не распознан");
+    expect(screen.queryByText(/raw-private-server-reason/)).not.toBeInTheDocument();
+  });
+
   it("shows only confirmed digest facts and marks API gap", () => {
     render(<DeadlineDigestPanel deadlinePolicy={null} digestState={{ status: "deferred_quiet_hours",
       localDate: "2026-09-05", deferredUntil: "2026-09-06T08:00:00+03:00", notificationId: null,

@@ -1946,7 +1946,12 @@ export function App() {
         body: JSON.stringify({ minutes, status: "completed" }),
       });
       setNotice(
-        result.proposal_state === "awaiting_evidence"
+        result.proposal_state === "invalid_source" || result.origin_status === "invalid_source"
+          || result.origin_reason === "meeting_source_binding_required"
+          ? "Протокол сохранён. Требуется привязка протокола к источнику и его неизменяемой версии; эта привязка пока не реализована. Создание и подтверждение предложений по протоколу недоступны."
+          : result.confirmation_available === false || result.origin_status !== undefined || result.origin_reason !== undefined
+          ? "Протокол сохранён. Подтверждение предложений недоступно: статус источника не подтверждён. Обновите данные или обратитесь к администратору."
+          : result.proposal_state === "awaiting_evidence"
           ? "Протокол сохранён. Проверьте предложения и доказательства перед созданием задач и решений."
           : "Протокол сохранён.",
       );

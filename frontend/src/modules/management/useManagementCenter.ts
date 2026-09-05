@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api/client";
 import {
+  meetingProposalBlockReason,
   parseAttentionResponse,
   parseHistoryResponse,
   parseDigestEnqueueResult,
@@ -196,6 +197,13 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
 
   const confirmMeetingProposal = useCallback(async (proposal: MeetingProposal, createInternalTask: boolean) => {
     if (!projectId) return;
+    const currentProposal = state.proposals.find(item => item.entityType === proposal.entityType && item.entityId === proposal.entityId);
+    const blockedReason = meetingProposalBlockReason(proposal)
+      || (currentProposal && meetingProposalBlockReason(currentProposal));
+    if (blockedReason) {
+      setState(current => ({ ...current, mutationState: "error", mutationMessage: blockedReason }));
+      return;
+    }
     setState((current) => ({ ...current, mutationState: "saving", mutationMessage: null }));
     try {
       const confirmed = parseMeetingProposalConfirmation(await api<unknown>(
@@ -215,7 +223,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
       setState((current) => ({ ...current, mutationState: conflict ? "conflict" : "error",
         mutationMessage: conflict ? "Предложение уже изменено. Получите новую версию перед подтверждением." : safeError(error) }));
     }
-  }, [projectId]);
+  }, [projectId, state.proposals]);
 
   const enqueueDigest = useCallback(async (preference: {
     timezone: string;

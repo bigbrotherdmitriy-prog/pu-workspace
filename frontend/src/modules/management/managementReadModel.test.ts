@@ -90,12 +90,43 @@ describe("management runtime validation", () => {
         status: "needs_confirmation", reviewState: "needs_review", taskId: null }]);
   });
 
+  it("preserves explicit unbound meeting authority flags", () => {
+    expect(parseMeetingProposals([{ kind: "task", entity_type: "obligation", entity_id: 8,
+      record_version: 2, status: "needs_confirmation", review_state: "needs_review", task_id: null,
+      origin_status: "invalid_source", origin_reason: "meeting_source_binding_required", confirmation_available: false }])[0])
+      .toMatchObject({ originStatus: "invalid_source", originReason: "meeting_source_binding_required", confirmationAvailable: false });
+  });
+
+  it.each([{ confirmation_available: "false" }, { confirmation_available: null },
+    { origin_status: false }, { origin_status: "" }, { origin_reason: {} }])("rejects malformed optional origin flags %j", flags => {
+    expect(() => parseMeetingProposals([{ kind: "task", entity_type: "obligation", entity_id: 8,
+      record_version: 2, status: "needs_confirmation", review_state: "needs_review", task_id: null, ...flags }]))
+      .toThrow("invalid_meeting_proposals");
+  });
+
   it("requires the no-external-action flag on proposal envelopes", () => {
     const proposal = { kind: "decision", entity_type: "decision", entity_id: 8, record_version: 2,
       status: "needs_confirmation", review_state: "needs_review", task_id: null };
     expect(parseMeetingProposalEnvelope({ proposals: [proposal], external_actions_created: false })).toHaveLength(1);
     expect(parseMeetingProposalConfirmation({ proposal, external_actions_created: false }).entityId).toBe(8);
     expect(() => parseMeetingProposalEnvelope({ proposals: [proposal], external_actions_created: true })).toThrow();
+  });
+
+  it.each([
+    [{ confirmation_available: false }, { confirmation_available: true }],
+    [{ confirmation_available: true }, { confirmation_available: false }],
+    [{ origin_status: "unknown_future", confirmation_available: true }, {}],
+    [{}, { origin_status: "unknown_future", confirmation_available: true }],
+  ])("never overrides a denial between envelope and row %j %j", (envelopeFlags, rowFlags) => {
+    const proposal = { kind: "decision", entity_type: "decision", entity_id: 8, record_version: 2,
+      status: "needs_confirmation", review_state: "needs_review", task_id: null, ...rowFlags };
+    expect(parseMeetingProposalEnvelope({ proposals: [proposal], external_actions_created: false, ...envelopeFlags })[0]
+      .confirmationAvailable).toBe(false);
+  });
+
+  it("rejects malformed envelope origin metadata even for an empty list", () => {
+    expect(() => parseMeetingProposalEnvelope({ proposals: [], external_actions_created: false, origin_status: null }))
+      .toThrow("invalid_meeting_proposals");
   });
 
   it("validates a durable digest enqueue receipt", () => {

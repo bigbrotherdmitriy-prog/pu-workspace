@@ -79,6 +79,9 @@ export type MeetingProposal = {
   status: string;
   reviewState: string;
   taskId: number | null;
+  originStatus?: string;
+  originReason?: string;
+  confirmationAvailable?: boolean;
 };
 
 export type MeetingActionCandidate = {
@@ -296,6 +299,39 @@ export function parseNotificationsResponse(value: unknown): DigestNotification[]
   });
 }
 
+type ProposalOrigin = Pick<MeetingProposal, "originStatus" | "originReason" | "confirmationAvailable">;
+
+function parseProposalOrigin(item: Dictionary): ProposalOrigin {
+  const result: ProposalOrigin = {};
+  for (const [wire, key] of [["origin_status", "originStatus"], ["origin_reason", "originReason"]] as const) {
+    if (item[wire] !== undefined) {
+      const value = text(item[wire]);
+      if (!value || value.length > 128) throw new Error("invalid_meeting_proposals");
+      result[key] = value;
+    }
+  }
+  if (item.confirmation_available !== undefined) {
+    if (typeof item.confirmation_available !== "boolean") throw new Error("invalid_meeting_proposals");
+    result.confirmationAvailable = item.confirmation_available;
+  }
+  return result;
+}
+
+export function meetingProposalBlockReason(proposal: ProposalOrigin): string | null {
+  if (proposal.originStatus === "invalid_source" || proposal.originReason === "meeting_source_binding_required") {
+    return "Подтверждение недоступно: требуется привязка протокола к источнику и его неизменяемой версии. Привязка пока не реализована.";
+  }
+  // No positive origin-status contract exists yet. Unknown supplied flags must
+  // not become authority, even alongside confirmation_available=true.
+  if (proposal.originStatus !== undefined || proposal.originReason !== undefined) {
+    return "Подтверждение недоступно: статус источника не распознан. Обновите данные или обратитесь к администратору.";
+  }
+  if (proposal.confirmationAvailable !== undefined && proposal.confirmationAvailable !== true) {
+    return "Подтверждение недоступно: сервер не разрешил это действие. Обновите данные или обратитесь к администратору.";
+  }
+  return null;
+}
+
 export function parseMeetingProposals(value: unknown): MeetingProposal[] {
   if (!Array.isArray(value)) throw new Error("invalid_meeting_proposals");
   return value.map((raw): MeetingProposal => {
@@ -313,20 +349,26 @@ export function parseMeetingProposals(value: unknown): MeetingProposal[] {
       throw new Error("invalid_meeting_proposals");
     }
     return { kind: kind as MeetingProposal["kind"], entityType: entityType as MeetingProposal["entityType"],
-      entityId, recordVersion, status, reviewState, taskId: taskId as number | null };
+      entityId, recordVersion, status, reviewState, taskId: taskId as number | null, ...parseProposalOrigin(item) };
   });
 }
 
 export function parseMeetingProposalEnvelope(value: unknown): MeetingProposal[] {
   const root = dictionary(value);
   if (!root || root.external_actions_created !== false) throw new Error("invalid_meeting_proposals");
-  return parseMeetingProposals(root.proposals);
+  const origin = parseProposalOrigin(root);
+  return parseMeetingProposals(root.proposals).map(proposal => ({
+    ...proposal, ...origin,
+    // An envelope denial cannot be overridden by a row, or vice versa.
+    ...(meetingProposalBlockReason(origin) || meetingProposalBlockReason(proposal)
+      ? { confirmationAvailable: false } : {}),
+  }));
 }
 
 export function parseMeetingProposalConfirmation(value: unknown): MeetingProposal {
   const root = dictionary(value);
   if (!root || root.external_actions_created !== false) throw new Error("invalid_meeting_proposals");
-  const proposals = parseMeetingProposals([root.proposal]);
+  const proposals = parseMeetingProposalEnvelope({ ...root, proposals: [root.proposal] });
   return proposals[0];
 }
 
