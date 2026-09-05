@@ -19,8 +19,8 @@ def _config() -> Config:
 
 def test_contract_version_migration_is_the_single_sequential_head():
     script = ScriptDirectory.from_config(_config())
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a11"]
-    revision = script.get_revision(CURRENT_SCHEMA_REVISION)
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a13"]
+    revision = script.get_revision("a54f001c0a11")
     assert revision.down_revision == "a54f001c0a10"
 
 
