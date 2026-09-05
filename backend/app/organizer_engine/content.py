@@ -76,6 +76,8 @@ class ExtractionResult:
     table_cells: list[TableCell] = field(default_factory=list)
     needs_review: bool = False
     warnings: list[str] = field(default_factory=list)
+    spreadsheet_cells: list[dict] = field(default_factory=list)
+    spreadsheet_sheets: list[dict] = field(default_factory=list)
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -109,6 +111,8 @@ class ExtractionResult:
                 for cell in self.table_cells[:2000]
             ],
             "warnings": self.warnings,
+            "spreadsheet_cells": self.spreadsheet_cells,
+            "spreadsheet_sheets": self.spreadsheet_sheets,
         }
 
 
@@ -131,29 +135,8 @@ def _zip_xml_text(data: bytes, prefixes: tuple[str, ...]) -> str:
 
 def _xlsx_text(data: bytes) -> str:
     """Preserve spreadsheet rows and columns for the structured import preview."""
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        shared: list[str] = []
-        if "xl/sharedStrings.xml" in archive.namelist():
-            root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
-            shared = [" ".join(node.itertext()).strip() for node in root]
-        lines: list[str] = []
-        for name in sorted(item for item in archive.namelist() if item.startswith("xl/worksheets/") and item.endswith(".xml")):
-            root = ElementTree.fromstring(archive.read(name))
-            for row in (node for node in root.iter() if node.tag.endswith("}row")):
-                values: list[str] = []
-                for cell in (node for node in row if node.tag.endswith("}c")):
-                    kind = cell.attrib.get("t")
-                    raw = next((node.text or "" for node in cell.iter() if node.tag.endswith("}v")), "")
-                    if kind == "s" and raw.isdigit() and int(raw) < len(shared):
-                        value = shared[int(raw)]
-                    elif kind == "inlineStr":
-                        value = " ".join(node.text or "" for node in cell.iter() if node.tag.endswith("}t"))
-                    else:
-                        value = raw
-                    values.append(value.replace("\t", " ").replace("\n", " ").strip())
-                if any(values):
-                    lines.append("\t".join(values))
-        return "\n".join(lines)
+    from app.ocr_quality.xlsx_cells import extract_xlsx_cells
+    return extract_xlsx_cells(data).text
 
 
 def _xls_text(data: bytes) -> str:
@@ -544,6 +527,16 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
     """Extract text plus provider-neutral quality metadata."""
     suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     is_pdf = mime_type == "application/pdf" or suffix == "pdf"
+    if suffix == "xlsx" or mime_type.endswith("spreadsheetml.sheet"):
+        from app.ocr_quality.xlsx_cells import extract_xlsx_cells
+        workbook = extract_xlsx_cells(data)
+        return ExtractionResult(
+            text=workbook.text, method="native", quality=_quality(workbook.text, used_ocr=False),
+            confidence=0.0 if workbook.needs_review else 1.0,
+            needs_review=workbook.needs_review, warnings=workbook.warnings,
+            spreadsheet_cells=workbook.cells,
+            spreadsheet_sheets=workbook.sheets,
+        )
     if not is_pdf:
         text = _extract_native_text(data, mime_type, filename)
         used_ocr = False
