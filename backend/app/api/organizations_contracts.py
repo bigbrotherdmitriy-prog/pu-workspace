@@ -32,6 +32,7 @@ from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.models.contract_document_link import ContractDocumentLink
 from app.organization_requisites import remember_contract_organizations
+from app.contract_evidence import extract_contract_evidence, persist_contract_evidence
 
 router = APIRouter(tags=["organizations", "contracts"])
 
@@ -431,66 +432,70 @@ def _contract_source_text(document: Document, db: Session | None = None) -> str:
     return "\n".join(dict.fromkeys(parts))
 
 
-def _decimal_value(raw: str) -> Decimal:
-    return Decimal(re.sub(r"\s+", "", raw).replace(",", "."))
-
-
 def _contract_financial_terms(content: str) -> dict:
-    """Extract explicit contract price, advance and retention with source evidence."""
-    result: dict[str, Decimal | str | None] = {
-        "amount": None, "advance_amount": None, "advance_percent": None,
-        "retention_percent": None, "amount_evidence": None,
-        "advance_evidence": None, "retention_evidence": None,
-    }
-    money_pattern = r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:руб(?:\.|лей|ля)?|₽)"
-    percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
-    lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines() if line.strip()]
-    for line in lines:
-        lowered = line.casefold()
-        money = re.search(money_pattern, line, re.IGNORECASE)
-        percent = re.search(percent_pattern, line)
-        if result["amount"] is None and money and re.search(
-            r"цена\s+(?:настоящего\s+)?договора|стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость",
-            lowered,
-        ):
-            result["amount"] = _decimal_value(money.group(1))
-            result["amount_evidence"] = line[:500]
-        if "аванс" in lowered:
-            if result["advance_amount"] is None and money:
-                result["advance_amount"] = _decimal_value(money.group(1))
-            if result["advance_percent"] is None and percent:
-                result["advance_percent"] = _decimal_value(percent.group(1))
-            if money or percent:
-                result["advance_evidence"] = line[:500]
-        if result["retention_percent"] is None and percent and re.search(r"удержан|удержива|гарантийн.*удерж", lowered):
-            result["retention_percent"] = _decimal_value(percent.group(1))
-            result["retention_evidence"] = line[:500]
-    if result["advance_amount"] is None and result["advance_percent"] is not None and result["amount"] is not None:
-        result["advance_amount"] = (result["amount"] * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
-    return result
+    """Compatibility entrypoint for exact local contract-term extraction."""
+    return extract_contract_evidence(content)
 
 
-def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
+def _apply_contract_financial_terms(row: Contract, terms: dict, *, allow_auto_apply: bool = True) -> dict:
     applied: list[str] = []
     mismatches: list[dict] = []
-    for field, label, evidence_field, tolerance in (
+    if terms.get("manual_review_required") or not allow_auto_apply:
+        return {
+            "applied": [],
+            "mismatches": [],
+            "terms": terms,
+            "manual_review_required": True,
+            "reason_codes": terms.get("reason_codes", []) or ["exact_evidence_required"],
+        }
+    fields = (
         ("amount", "Сумма договора", "amount_evidence", Decimal("1")),
         ("advance_amount", "Аванс", "advance_evidence", Decimal("1")),
         ("retention_percent", "Удержание", "retention_evidence", Decimal("0.01")),
-    ):
+    )
+    # Preflight the complete proposal.  A single conflict makes the operation
+    # all-or-nothing, so no unrelated empty field is silently populated.
+    for field, label, evidence_field, tolerance in fields:
         extracted = terms.get(field)
         if extracted is None:
             continue
         current = getattr(row, field)
-        if current is None:
-            setattr(row, field, extracted)
-            applied.append(field)
-        elif abs(Decimal(current) - Decimal(extracted)) > tolerance:
+        if current is not None and abs(Decimal(current) - Decimal(extracted)) > tolerance:
             mismatches.append({
                 "field": field, "label": label, "current": str(current),
                 "extracted": str(extracted), "evidence": terms.get(evidence_field),
             })
-    return {"applied": applied, "mismatches": mismatches, "terms": terms}
+    extracted_signed_at = terms.get("signed_at")
+    if extracted_signed_at is not None and row.signed_at is not None and row.signed_at != extracted_signed_at:
+        proof = terms.get("field_evidence", {}).get("signed_at", [])
+        mismatches.append({
+            "field": "signed_at", "label": "Дата договора",
+            "current": row.signed_at.isoformat(), "extracted": extracted_signed_at.isoformat(),
+            "evidence": proof[0]["excerpt"] if proof else None,
+        })
+    if mismatches:
+        return {
+            "applied": [],
+            "mismatches": mismatches,
+            "terms": terms,
+            "manual_review_required": True,
+            "reason_codes": ["existing_value_conflict"],
+        }
+    for field, _label, _evidence_field, _tolerance in fields:
+        extracted = terms.get(field)
+        if extracted is not None and getattr(row, field) is None:
+            setattr(row, field, extracted)
+            applied.append(field)
+    if extracted_signed_at is not None and row.signed_at is None:
+        row.signed_at = extracted_signed_at
+        applied.append("signed_at")
+    return {
+        "applied": applied,
+        "mismatches": mismatches,
+        "terms": terms,
+        "manual_review_required": bool(mismatches),
+        "reason_codes": ["existing_value_conflict"] if mismatches else [],
+    }
 
 
 def _rank_contract_documents(db: Session, project_id: int, row: Contract) -> list[dict]:
@@ -618,7 +623,48 @@ def analyze_contract(project_id: int, contract_id: int,
     if not content:
         raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
     source_id = document.external_id or f"document:{document.id}"
-    financial_check = _apply_contract_financial_terms(row, _contract_financial_terms(content))
+    document_version = db.scalar(select(DocumentVersion).where(
+        DocumentVersion.document_id == document.id,
+        DocumentVersion.version_number == document.current_version,
+    ))
+    if document_version is None or not document_version.content.strip():
+        extracted_terms = {
+            "status": "manual_review_required",
+            "manual_review_required": True,
+            "reason_codes": ["exact_document_version_unavailable"],
+            "field_evidence": {},
+        }
+        evidence_result = {
+            "status": "manual_review_required",
+            "manual_review_required": True,
+            "reason_codes": ["exact_document_version_unavailable"],
+            "document_version_id": None,
+            "source_id": None,
+            "source_version_id": None,
+            "evidence": [],
+        }
+    else:
+        extracted_terms = _contract_financial_terms(document_version.content)
+        project = db.get(Project, project_id)
+        evidence_result = persist_contract_evidence(
+            db,
+            organization_id=project.organization_id,
+            project_id=project_id,
+            document_version=document_version,
+            extraction=extracted_terms,
+        )
+    financial_check = _apply_contract_financial_terms(
+        row,
+        extracted_terms,
+        allow_auto_apply=evidence_result["status"] == "ready",
+    )
+    financial_check["evidence"] = evidence_result
+    financial_check["manual_review_required"] = bool(
+        financial_check["manual_review_required"] or evidence_result["manual_review_required"]
+    )
+    financial_check["reason_codes"] = sorted(set(
+        financial_check.get("reason_codes", []) + evidence_result.get("reason_codes", [])
+    ))
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",
         parent_id=document.parent_external_id or "contracts", content_text=content,
@@ -645,7 +691,9 @@ def analyze_contract(project_id: int, contract_id: int,
                  f"decisions_created={len(created_decisions)}; payment_proposals={len(payment_rows)}; "
                  f"organizations_remembered={len(remembered_organizations)}; automatically_linked={automatically_linked}; "
                  f"financial_fields_applied={','.join(financial_check['applied']) or 'none'}; "
-                 f"financial_mismatches={len(financial_check['mismatches'])}; originals_changed=false"),
+                 f"financial_mismatches={len(financial_check['mismatches'])}; "
+                 f"financial_manual_review={str(financial_check['manual_review_required']).lower()}; "
+                 f"evidence_count={len(evidence_result['evidence'])}; originals_changed=false"),
     ))
     db.commit()
     result = _contract(row, db)

@@ -126,7 +126,7 @@ def test_contract_candidate_prefers_requisites_in_extracted_text_over_generic_fi
     assert "совпадает номер договора" in reasons
 
 
-def test_extracts_and_applies_contract_price_advance_and_retention():
+def test_derived_advance_requires_review_and_does_not_partially_apply_terms():
     terms = _contract_financial_terms(
         "Цена настоящего договора составляет 10 000 000,00 руб.\n"
         "Заказчик выплачивает аванс в размере 20%.\n"
@@ -137,6 +137,21 @@ def test_extracts_and_applies_contract_price_advance_and_retention():
     assert terms["retention_percent"] == Decimal("5")
     contract = Contract(project_id=1, number="1", title="Работы", status="active")
     check = _apply_contract_financial_terms(contract, terms)
+    assert check["applied"] == []
+    assert check["manual_review_required"] is True
+    assert contract.amount is None
+
+
+def test_explicit_high_confidence_terms_can_be_applied_after_exact_evidence_gate():
+    terms = _contract_financial_terms(
+        "Цена настоящего договора составляет 10 000 000,00 руб.\n"
+        "Заказчик выплачивает аванс 2 000 000,00 руб.\n"
+        "Гарантийное удержание составляет 5%."
+    )
+    contract = Contract(project_id=1, number="1", title="Работы", status="active")
+
+    check = _apply_contract_financial_terms(contract, terms)
+
     assert set(check["applied"]) == {"amount", "advance_amount", "retention_percent"}
 
 
@@ -147,3 +162,21 @@ def test_financial_check_reports_mismatch_without_overwriting_user_value():
     ))
     assert contract.amount == Decimal("9000000")
     assert check["mismatches"][0]["field"] == "amount"
+
+
+def test_existing_value_conflict_blocks_partial_application_of_other_terms():
+    contract = Contract(
+        project_id=1, number="1", title="Работы", status="active",
+        amount=Decimal("9000000"),
+    )
+    terms = _contract_financial_terms(
+        "Стоимость работ составляет 10 000 000 руб.\n"
+        "Аванс составляет 2 000 000 руб."
+    )
+
+    check = _apply_contract_financial_terms(contract, terms)
+
+    assert check["reason_codes"] == ["existing_value_conflict"]
+    assert check["applied"] == []
+    assert contract.amount == Decimal("9000000")
+    assert contract.advance_amount is None
