@@ -101,6 +101,10 @@ export type MppPreview = {
   critical_count: number;
   planned_start?: string;
   planned_finish?: string;
+  added_count: number;
+  changed_count: number;
+  removed_count: number;
+  preserved_actual_count: number;
 };
 
 export type FinanceDocumentCandidate = {
