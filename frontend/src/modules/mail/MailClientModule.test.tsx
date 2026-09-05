@@ -43,7 +43,7 @@ afterEach(() => {
 function mockClient(overrides: Record<string, unknown> = {}) {
   return {
     capabilities: vi.fn().mockResolvedValue(capabilities),
-    folders: vi.fn().mockResolvedValue({ folders: [
+    folders: vi.fn().mockResolvedValue({ provider_available: true, provider_error: null, folders: [
       { kind: "inbox", label: "Входящие", count: 1 },
       { kind: "attention", label: "Требуют внимания", count: 1 },
       { kind: "drafts", label: "Черновики", count: 1 },
@@ -130,6 +130,22 @@ describe("MailClientModule", () => {
     expect(screen.getByRole("button", { name: /Черновики/ })).toBeInTheDocument();
     expect(screen.queryByText(/не добавляются автоматически/i)).not.toBeInTheDocument();
     expect(client.threads).toHaveBeenCalledWith(7, "inbox", "");
+  });
+
+  it("keeps saved mail usable when the live provider is temporarily unavailable", async () => {
+    const client = mockClient({
+      folders: vi.fn().mockResolvedValue({
+        provider_available: false,
+        provider_error: "temporarily_unavailable",
+        folders: [{ kind: "inbox", label: "Входящие", count: 1 }],
+      }),
+    });
+    const { container } = renderClient(client);
+
+    expect(await screen.findByRole("heading", { name: "Срок поставки" })).toBeInTheDocument();
+    expect(screen.getByText(/Показаны сохранённые письма/)).toBeInTheDocument();
+    expect(screen.queryByText("Почтовый интерфейс пока недоступен")).not.toBeInTheDocument();
+    expect(container.querySelector(".mail-layout")).toBeInTheDocument();
   });
 
   it("switches folders through the backend contract and never invents local sent mail", async () => {

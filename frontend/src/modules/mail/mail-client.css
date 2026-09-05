@@ -15,7 +15,9 @@
 .mail-connection.ready { background: #e3f6ef; color: #087a59; }
 .mail-connection.offline { background: #fff1dd; color: #925d00; }
 .mail-sync-status { margin: 0; padding: 7px 12px; border-radius: 9px; background: #eff9f5; color: #087a59; font-size: 13px; line-height: 1.35; }
-.mail-safe-error { display: flex; gap: 14px; align-items: flex-start; padding: 20px; border: 1px solid #f1c6c6; border-radius: 14px; background: #fff3f3; color: #9f3030; }
+.mail-provider-warning { display: flex; align-items: center; gap: 8px; margin: 0; padding: 9px 12px; border: 1px solid #ead5a9; border-radius: 9px; background: #fff8e8; color: #795719; font-size: 13px; line-height: 1.35; }
+.mail-provider-warning svg { flex: 0 0 auto; width: 17px; }
+.mail-safe-error { display: flex; align-self: start; width: 100%; min-height: 0; height: auto; gap: 14px; align-items: flex-start; padding: 16px 18px; border: 1px solid #f1c6c6; border-radius: 14px; background: #fff3f3; color: #9f3030; }
 .mail-safe-error svg { flex: 0 0 auto; }
 .mail-safe-error p { margin: 5px 0 12px; }
 .mail-safe-error button { border-color: #9f3030; background: #fff; color: #9f3030; }

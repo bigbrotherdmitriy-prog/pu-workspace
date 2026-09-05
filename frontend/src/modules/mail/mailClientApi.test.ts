@@ -15,7 +15,7 @@ describe("mailClientApi contract adapter", () => {
         provider: "google_workspace", connected: true,
         features: { compose: true, reply: true, reply_all: true, forward: true, attachment_send: false, threads: true, explicit_revision_approval: true },
       }))
-      .mockResolvedValueOnce(response({ folders: [
+      .mockResolvedValueOnce(response({ provider_available: false, provider_error: "temporarily_unavailable", folders: [
         { id: "inbox", name: "Входящие", kind: "core", count: 9 },
         { id: "attention", name: "Требуют внимания", kind: "core", count: 2 },
         { id: "drafts", name: "Черновики", kind: "core", count: 3 },
@@ -31,6 +31,7 @@ describe("mailClientApi contract adapter", () => {
     expect(capabilities).toMatchObject({ provider: "google_workspace", can_compose: true, can_attach: false, versioned_approval: true });
     expect(folders.folders.map((item) => item.kind)).toEqual(["inbox", "attention", "drafts", "sent", "archive", "all"]);
     expect(folders.folders.find((item) => item.kind === "attention")?.count).toBe(2);
+    expect(folders).toMatchObject({ provider_available: false, provider_error: "temporarily_unavailable" });
   });
 
   it("normalizes list previews and complete thread messages", async () => {

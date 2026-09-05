@@ -404,13 +404,24 @@ def mail_capabilities(project_id: int, db: Session = Depends(get_db), user: User
 
 
 @router.get("/projects/{project_id}/folders")
-def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+                 include_provider_folders: bool = False):
     require_project_role(db, user, project_id, "viewer")
     adapter = mailbox_adapter_for_project(project_id, db)
+    provider_folders = []
     try:
-        provider_folders = adapter.list_folders()
-    except Exception as exc:
-        raise HTTPException(502, "mail_provider_unavailable") from exc
+        provider_available = adapter.health().ready
+    except Exception:
+        provider_available = False
+    provider_error = None if provider_available else "not_connected"
+    if include_provider_folders:
+        try:
+            provider_folders = adapter.list_folders()
+        except Exception:
+            # Provider labels are an optional live view. Core folders and messages are
+            # durable local data and must remain readable during a provider outage.
+            provider_available = False
+            provider_error = "temporarily_unavailable"
     message_rows = _message_rows(db, project_id, "all", None, None)
     counts = {
         "inbox": len(_message_rows(db, project_id, "inbox", None, None)),
@@ -427,6 +438,9 @@ def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = De
     }
     return {
         "provider": adapter.provider,
+        "provider_available": provider_available,
+        "provider_error": provider_error,
+        "provider_folders_loaded": include_provider_folders and provider_available,
         "folders": [
             *[{"id": key, "name": name, "kind": "core", "count": counts[key]} for key, name in MAIL_FOLDERS],
             *[{"id": item.id, "name": item.name, "kind": item.kind} for item in provider_folders],
