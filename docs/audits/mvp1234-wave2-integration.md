@@ -1,6 +1,7 @@
 # PU Workspace — MVP1–MVP4 wave 2 integration
 
 Продолжение после этого checkpoint: [parallel final hardening](mvp1234-final-hardening.md).
+Последующий инкремент и карта полного ТЗ: [closure increment 2026-09-05](tz-closure-increment-2026-09-05.md).
 Ниже сохранены исторические результаты этого этапа, а не метрики текущего HEAD.
 
 Дата: 2026-09-05
