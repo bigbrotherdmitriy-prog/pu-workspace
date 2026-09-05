@@ -19,7 +19,7 @@ def config(output=None):
 
 def test_contact_resolution_is_one_sequential_local_head():
     script = ScriptDirectory.from_config(config())
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a14"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a15"]
     assert script.get_revision("a54f001c0a12").down_revision == "a54f001c0a11"
 
 

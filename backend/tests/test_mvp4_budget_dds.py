@@ -569,7 +569,7 @@ def test_cash_flow_fact_history_is_immutable(db_session, user_factory, monkeypat
 def test_budget_dds_migration_is_single_sequential_head():
     script = ScriptDirectory.from_config(_migration_config())
 
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a14"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a15"]
     assert script.get_revision(CURRENT_SCHEMA_REVISION).down_revision == "a54f001c0a13"
 
 

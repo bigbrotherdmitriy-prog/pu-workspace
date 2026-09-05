@@ -31,7 +31,7 @@ def migration_config(output_buffer=None):
 
 def test_provider_revision_is_the_only_head_and_renders_postgresql_offline(monkeypatch):
     assert ScriptDirectory.from_config(migration_config()).get_heads() == [CURRENT_SCHEMA_REVISION]
-    assert CURRENT_SCHEMA_REVISION == "a54f001c0a14"
+    assert CURRENT_SCHEMA_REVISION == "a54f001c0a15"
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",
@@ -61,6 +61,27 @@ def test_provider_revision_is_the_only_head_and_renders_postgresql_offline(monke
     assert "synthetic_only = true" in sql
     assert "raw_payload" not in sql and "payload_json" not in sql
     assert "DROP TABLE" not in sql and "INSERT INTO v54_provider" not in sql
+
+
+def test_product_outbox_policy_is_sequential_and_fail_closed(monkeypatch):
+    script = ScriptDirectory.from_config(migration_config())
+    assert script.get_revision("a54f001c0a15").down_revision == "a54f001c0a14"
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",
+    )
+    output = StringIO()
+    command.upgrade(migration_config(output), "a54f001c0a14:a54f001c0a15", sql=True)
+    sql = output.getvalue()
+
+    assert "DROP CONSTRAINT ck_v54_provider_confirm_synthetic" in sql
+    assert "gmail.message.send" in sql
+    assert "google.tasks.upsert" in sql
+    assert "google.calendar.upsert" in sql
+    assert "provider = 'google_workspace'" in sql
+    assert "mode = 'CONFIRM'" in sql
+    assert "synthetic_only = false" in sql
+    assert "AUTO" not in sql
 
 
 def safe_postgres_url():
