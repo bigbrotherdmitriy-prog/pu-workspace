@@ -376,5 +376,8 @@ def safe_copy_cleanup_status(project_id: int, job_id: int, db: Session = Depends
         "progress": job.progress,
         "trashed": result.get("trashed"),
         "message": result.get("message"),
-        "originals_affected": False,
+        "originals_affected": (
+            result["originals_affected"]
+            if type(result.get("originals_affected")) is bool else None
+        ),
     }

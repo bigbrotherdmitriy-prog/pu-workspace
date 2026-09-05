@@ -4,7 +4,7 @@ export type CleanupStatus = {
   progress: number;
   trashed?: number;
   message?: string;
-  originals_affected: false;
+  originals_affected: boolean | null;
 };
 
 type Api = <T = unknown>(path: string, options?: RequestInit) => Promise<T>;
@@ -21,11 +21,12 @@ export async function waitForSafeCopyCleanup(
   const delayMs = options.delayMs ?? 1000;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const result = await request<CleanupStatus>(`/projects/${projectId}/safe-copies/cleanup/${jobId}`);
-    if (!result || result.job_id !== jobId || result.originals_affected !== false) {
+    if (!result || result.job_id !== jobId || result.originals_affected === true) {
       throw new Error("Ответ очистки не подтверждает сохранность оригиналов.");
     }
     if (TERMINAL.has(result.status)) {
       if (result.status !== "completed") throw new Error("Не удалось безопасно очистить копии. Повторите из журнала заданий.");
+      if (result.originals_affected !== false) throw new Error("Ответ очистки не подтверждает сохранность оригиналов.");
       if (!Number.isSafeInteger(result.trashed) || (result.trashed ?? -1) < 0) {
         throw new Error("Результат очистки ещё не подтверждён.");
       }

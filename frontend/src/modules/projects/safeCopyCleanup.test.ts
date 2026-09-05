@@ -7,14 +7,15 @@ describe("managed safe-copy cleanup", () => {
   it("waits for the durable receipt and exposes the canonical completion message", async () => {
     vi.useFakeTimers();
     const api = vi.fn()
-      .mockResolvedValueOnce({ job_id: 9, status: "running", progress: 50, originals_affected: false })
+      .mockResolvedValueOnce({ job_id: 9, status: "running", progress: 50, originals_affected: null })
       .mockResolvedValueOnce({
         job_id: 9, status: "completed", progress: 100, trashed: 2,
         message: "Копии удалены, можете архивировать проект", originals_affected: false,
       });
     const pending = waitForSafeCopyCleanup(api, 7, 9, { attempts: 3, delayMs: 5 });
+    const completion = expect(pending).resolves.toMatchObject({ status: "completed", trashed: 2 });
     await vi.advanceTimersByTimeAsync(5);
-    await expect(pending).resolves.toMatchObject({ status: "completed", trashed: 2 });
+    await completion;
     expect(api).toHaveBeenCalledTimes(2);
   });
 
@@ -41,6 +42,11 @@ describe("managed safe-copy cleanup", () => {
 
   it("rejects another job's result", async () => {
     const api = vi.fn().mockResolvedValue({job_id: 10, status: "completed", trashed: 2, originals_affected: false});
+    await expect(waitForSafeCopyCleanup(api, 7, 9)).rejects.toThrow("не подтверждает");
+  });
+
+  it("rejects completed status with unknown preservation proof", async () => {
+    const api = vi.fn().mockResolvedValue({job_id: 9, status: "completed", trashed: 1, originals_affected: null});
     await expect(waitForSafeCopyCleanup(api, 7, 9)).rejects.toThrow("не подтверждает");
   });
 });
