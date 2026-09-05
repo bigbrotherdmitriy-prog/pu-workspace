@@ -1,0 +1,23 @@
+.forecast-panel { --forecast-ink:#17231a; --forecast-muted:#637069; --forecast-line:#dce7de; display:grid; gap:18px; color:var(--forecast-ink); }
+.forecast-panel button { border:1px solid #73977b; border-radius:10px; background:#eff7f0; color:#24512e; padding:10px 14px; font:inherit; cursor:pointer; }
+.forecast-panel button:disabled { cursor:not-allowed; opacity:.55; }
+.forecast-state,.forecast-section,.forecast-header,.forecast-confirm { border:1px solid var(--forecast-line); border-radius:18px; background:#fff; padding:20px; }
+.forecast-header { display:flex; justify-content:space-between; gap:20px; align-items:center; background:linear-gradient(135deg,#f8fbf8,#eef6ef); }
+.forecast-header h2,.forecast-section h3,.forecast-header p,.forecast-confirm p { margin-top:0; }
+.forecast-header h2 { margin-bottom:8px; }.forecast-header p,.forecast-confirm p { margin-bottom:0; color:var(--forecast-muted); }
+.forecast-eyebrow { color:#4f7658; font-size:.72rem; font-weight:800; letter-spacing:.1em; }
+.forecast-confidence { min-width:94px; border-radius:16px; padding:14px; text-align:center; background:#edf5ee; }
+.forecast-confidence strong { display:block; font-size:1.45rem; }.forecast-confidence span { color:var(--forecast-muted); font-size:.76rem; }
+.forecast-confidence.low { background:#fff0dc; color:#7d4500; }.forecast-confidence.high { background:#e7f5e9; color:#246032; }
+.forecast-warning { border-left:4px solid #d68a12; border-radius:10px; background:#fff7e6; padding:12px 14px; color:#724700; }
+.forecast-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.forecast-metrics article { display:grid; gap:5px; border:1px solid var(--forecast-line); border-radius:14px; background:#fff; padding:16px; }
+.forecast-metrics span,.forecast-metrics small { color:var(--forecast-muted); }.forecast-metrics strong { font-size:1.2rem; }.forecast-metrics .negative strong { color:#a22c25; }
+.forecast-section > header { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }.forecast-section code { color:#4d6653; overflow-wrap:anywhere; }
+.forecast-table { overflow-x:auto; }.forecast-table table { width:100%; border-collapse:collapse; }.forecast-table th,.forecast-table td { border-bottom:1px solid var(--forecast-line); padding:12px 10px; text-align:left; vertical-align:top; }.forecast-table th { color:var(--forecast-muted); font-size:.78rem; }
+.forecast-panel details { margin-top:7px; }.forecast-panel summary { color:#3a6745; cursor:pointer; font-size:.82rem; }.forecast-panel details p { margin-bottom:8px; }
+.forecast-columns { display:grid; grid-template-columns:1fr 1fr; gap:18px; }.forecast-list,.forecast-risks ul,.forecast-sources { list-style:none; padding:0; margin:10px 0 0; }.forecast-list > li { display:grid; grid-template-columns:1fr auto; gap:5px 12px; border-top:1px solid var(--forecast-line); padding:12px 0; }.forecast-list div { display:grid; gap:3px; }.forecast-list span { color:var(--forecast-muted); font-size:.84rem; }.forecast-list details { grid-column:1/-1; }
+.forecast-sources { display:grid; gap:5px; }.forecast-sources li { display:grid; gap:2px; border-radius:8px; background:#f3f7f3; padding:8px; }.forecast-sources span,.forecast-sources small { color:var(--forecast-muted); font-size:.76rem; overflow-wrap:anywhere; }.forecast-unverified { color:#8a5600!important; }
+.forecast-risks > ul { display:grid; gap:10px; }.forecast-risks > ul > li { border-left:4px solid #c89a44; border-radius:10px; background:#fbf8f0; padding:12px; }.forecast-risks > ul > li.severity-high { border-left-color:#d77c25; }.forecast-risks > ul > li.severity-critical { border-left-color:#c83f35; background:#fff4f2; }.forecast-risks p { margin:5px 0; }
+.forecast-confirm { display:flex; justify-content:space-between; gap:20px; align-items:center; }.forecast-confirm div { max-width:720px; }
+@media (max-width:800px) { .forecast-metrics,.forecast-columns { grid-template-columns:1fr; }.forecast-header,.forecast-confirm,.forecast-section > header { align-items:stretch; flex-direction:column; }.forecast-confidence { align-self:flex-start; }.forecast-confirm button { width:100%; } }
