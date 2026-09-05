@@ -51,6 +51,7 @@ from app.models.v54_provider_action import (
 from app.models.search import SavedSearchView, SavedSearchViewHistory
 from app.mvp4.supply.models import SupplyCase, SupplyCaseVersion, SupplyCommandReceipt
 from app.models.management_digest import ManagementDigestPreference, ManagementProposalOrigin
+from app.models.meeting_source_binding import MeetingSourceBinding
 
 __all__ = [
     "Project",
@@ -117,4 +118,5 @@ __all__ = [
     "SavedSearchView", "SavedSearchViewHistory",
     "SupplyCase", "SupplyCaseVersion", "SupplyCommandReceipt",
     "ManagementDigestPreference", "ManagementProposalOrigin",
+    "MeetingSourceBinding",
 ]

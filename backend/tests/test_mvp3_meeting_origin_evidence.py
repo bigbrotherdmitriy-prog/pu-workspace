@@ -121,7 +121,7 @@ def test_api_denies_unbound_candidates_but_still_saves_minutes(world):
     assert failure.value.status_code == 422 and failure.value.detail == "invalid_meeting_source"
 
     result = management.finish_meeting(1, management.MeetingUpdate(
-        minutes="New synthetic protocol", status="completed"), world, user)
+        expected_version=1, minutes="New synthetic protocol", status="completed"), world, user)
     assert result["proposal_state"] == "invalid_source"
     assert result["origin_reason"] == "meeting_source_binding_required"
     assert world.get(Meeting, 1).minutes == "New synthetic protocol"
@@ -141,8 +141,11 @@ def test_alternate_api_confirmation_and_task_mapping_cannot_bypass_origin(world)
     # Previously confirmed historical rows remain visible, but do not authorize
     # a new materialization without a protocol version/source binding.
     scope = ManagementLifecycle().scope(world, project_id=4, actor_user_id=2)
-    row = ManagementLifecycle().transition_obligation(world, scope=scope,
-        obligation_id=row.id, expected_version=1, status="confirmed")
+    with pytest.raises(ManagementDenied, match="invalid_meeting_source"):
+        ManagementLifecycle().transition_obligation(world, scope=scope,
+            obligation_id=row.id, expected_version=1, status="confirmed")
+    # Explicit historical fixture, not a bypass through today's lifecycle.
+    row.status = "confirmed"
     world.commit()
     with pytest.raises(HTTPException) as failure:
         management.map_obligation_task(row.id, row.record_version, world, user)

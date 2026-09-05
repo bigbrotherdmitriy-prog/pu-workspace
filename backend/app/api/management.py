@@ -1,8 +1,9 @@
 from datetime import date, datetime, time, timedelta
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.models.organization_contract import Contract
 from app.models.user import User
 from app.mvp3.attention import attention_page
 from app.mvp3.lifecycle import ManagementConflict, ManagementDenied, ManagementLifecycle, normalized_task_state
+from app.mvp3.meeting_source_binding import MeetingSourceBindingService
 from app.mvp3.meeting_digest import (
     DigestPreference,
     DigestPreferenceService,
@@ -75,6 +77,19 @@ class EvidenceProposalCreate(BaseModel):
     candidates: list[MeetingActionCandidate] = Field(min_length=1, max_length=100)
 
 
+class MeetingProposalCreate(EvidenceProposalCreate):
+    meeting_source_binding_id: UUID | None = None
+
+
+class MeetingSourceBind(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: int = Field(gt=0)
+    expected_version: int = Field(ge=1)
+    command_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+
+
 class EvidenceProposalConfirm(BaseModel):
     project_id: int = Field(gt=0)
     expected_version: int = Field(ge=1)
@@ -121,6 +136,7 @@ class MeetingCreate(BaseModel):
 
 
 class MeetingUpdate(BaseModel):
+    expected_version: int = Field(ge=1)
     minutes: str = Field(min_length=3, max_length=50000)
     status: str = Field(default="completed", pattern="^(held|completed|cancelled)$")
 
@@ -138,16 +154,19 @@ def _obligation_payload(item: Obligation) -> dict:
 
 
 @router.post("/v2/meetings/{meeting_id}/proposals")
-def propose_meeting_actions(meeting_id: int, payload: EvidenceProposalCreate,
+def propose_meeting_actions(meeting_id: int, payload: MeetingProposalCreate,
                             db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
     try:
         result = _meeting_proposals.propose(
             db, project_id=payload.project_id, meeting_id=meeting_id,
             actor_user_id=user.id, candidates=payload.candidates,
+            meeting_source_binding_id=str(payload.meeting_source_binding_id) if getattr(payload, "meeting_source_binding_id", None) else None,
         )
+        origin = MeetingSourceBindingService().origin(db, project_id=payload.project_id,
+            meeting_id=meeting_id, actor_user_id=user.id)
         db.commit()
-        return {"proposals": result, "external_actions_created": False}
+        return {"proposals": result, "external_actions_created": False, **origin}
     except (ManagementDenied, ManagementConflict) as exc:
         db.rollback(); _lifecycle_error(exc)
 
@@ -162,7 +181,7 @@ def list_meeting_actions(meeting_id: int, project_id: int,
             origin_type="meeting", origin_id=meeting_id,
         )
         return {"proposals": result, "external_actions_created": False,
-                **_meeting_proposals.unbound_meeting_origin()}
+                **MeetingSourceBindingService().origin(db, project_id=project_id, meeting_id=meeting_id, actor_user_id=user.id)}
     except (ManagementDenied, ManagementConflict) as exc:
         _lifecycle_error(exc)
 
@@ -290,7 +309,7 @@ def transition_evidence_obligation(obligation_id: int, payload: LifecycleTransit
         scope = _lifecycle.scope(db, project_id=row.project_id, actor_user_id=user.id)
         if payload.status == "confirmed":
             _meeting_proposals.require_bound_origin(db, project_id=row.project_id,
-                entity_type="obligation", entity_id=row.id)
+                entity_type="obligation", entity_id=row.id, actor_user_id=user.id)
         row = _lifecycle.transition_obligation(db, scope=scope, obligation_id=obligation_id,
                                                expected_version=payload.expected_version, status=payload.status,
                                                reason=payload.reason, result_note=payload.result_note)
@@ -327,7 +346,7 @@ def map_obligation_task(obligation_id: int, expected_version: int, db: Session =
         scope = _lifecycle.scope(db, project_id=row.project_id, actor_user_id=user.id)
         if row.task_id is None:
             _meeting_proposals.require_bound_origin(db, project_id=row.project_id,
-                entity_type="obligation", entity_id=row.id)
+                entity_type="obligation", entity_id=row.id, actor_user_id=user.id)
         task = _lifecycle.ensure_internal_task(db, scope=scope, obligation_id=row.id,
                                                expected_version=expected_version)
         db.commit(); db.refresh(task)
@@ -377,7 +396,7 @@ def transition_governance(entity_type: str, entity_id: int, payload: GovernanceT
         scope = _lifecycle.scope(db, project_id=payload.project_id, actor_user_id=user.id)
         if entity_type == "decisions" and payload.status == "confirmed":
             _meeting_proposals.require_bound_origin(db, project_id=payload.project_id,
-                entity_type="decision", entity_id=entity_id)
+                entity_type="decision", entity_id=entity_id, actor_user_id=user.id)
         row = _lifecycle.transition_governance(db, scope=scope, entity_type=entity_type[:-1], entity_id=entity_id,
                                                expected_version=payload.expected_version, status=payload.status,
                                                reason=payload.reason, action_note=payload.action_note,
@@ -439,9 +458,9 @@ def update_obligation(obligation_id: int, payload: ObligationUpdate, db: Session
     require_project_role(db, user, item.project_id, "editor")
     if item.status not in {"confirmed", "in_progress", "fulfilled", "breached"} and payload.status != "dismissed":
         try:
-            _meeting_proposals.require_bound_origin(db, project_id=item.project_id,
-                entity_type="obligation", entity_id=item.id)
-        except ManagementDenied as exc:
+            MeetingSourceBindingService().require_entity(db, project_id=item.project_id,
+                entity_type="obligation", entity_id=item.id, actor_user_id=user.id, versioned=False)
+        except (ManagementDenied, ManagementConflict) as exc:
             _lifecycle_error(exc)
     if payload.status in {"fulfilled", "breached"} and not (payload.result_note or item.result_note or "").strip():
         raise HTTPException(422, "Укажите подтверждаемый результат или основание нарушения")
@@ -460,7 +479,8 @@ def meetings(project_id: int, db: Session = Depends(get_db), user: User = Depend
     rows = db.scalars(select(Meeting).where(Meeting.project_id == project_id).order_by(Meeting.scheduled_at.desc(), Meeting.id.desc())).all()
     return {"meetings": [{"id": x.id, "project_id": x.project_id, "contract_id": x.contract_id,
                            "title": x.title, "scheduled_at": x.scheduled_at, "participants": x.participants,
-                           "agenda": x.agenda, "minutes": x.minutes, "status": x.status} for x in rows], "count": len(rows)}
+                           "agenda": x.agenda, "minutes": x.minutes, "status": x.status,
+                           "record_version": x.record_version} for x in rows], "count": len(rows)}
 
 
 @router.post("/meetings")
@@ -472,7 +492,7 @@ def create_meeting(payload: MeetingCreate, db: Session = Depends(get_db), user: 
     db.add(item); db.flush()
     db.add(AuditLog(action="meeting_created", entity_type="meeting", entity_id=item.id, details=f"user={user.id}"))
     db.commit(); db.refresh(item)
-    return {"id": item.id, "status": item.status}
+    return {"id": item.id, "status": item.status, "record_version": item.record_version}
 
 
 @router.patch("/meetings/{meeting_id}")
@@ -481,17 +501,40 @@ def finish_meeting(meeting_id: int, payload: MeetingUpdate, db: Session = Depend
     if item is None:
         raise HTTPException(404, "Meeting not found")
     require_project_role(db, user, item.project_id, "editor")
-    item.minutes, item.status = payload.minutes.strip(), payload.status
-    db.commit(); db.refresh(item)
+    try:
+        item = MeetingSourceBindingService().edit(db, project_id=item.project_id, meeting_id=meeting_id,
+            actor_user_id=user.id, expected_version=payload.expected_version, minutes=payload.minutes, status=payload.status)
+        db.commit(); db.refresh(item)
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
     proposal_state = "invalid_source" if payload.status == "completed" else "not_required"
-    db.add(AuditLog(action="meeting_minutes_recorded", entity_type="meeting", entity_id=item.id,
-                    details=f"status={item.status}; proposal_state={proposal_state}; user={user.id}"))
-    db.commit()
-    # Minutes remain editable legacy records. Meeting extraction cannot resume
-    # until an authoritative protocol source/version binding is persisted.
-    return {"id": item.id, "status": item.status, "proposal_state": proposal_state,
+    return {"id": item.id, "status": item.status, "record_version": item.record_version, "proposal_state": proposal_state,
             **_meeting_proposals.unbound_meeting_origin(),
             "tasks": 0, "risks": 0, "decisions": 0}
+
+
+@router.get("/v2/meetings/{meeting_id}/eligible-sources")
+def eligible_meeting_sources(meeting_id: int, project_id: int,
+        db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    try:
+        return MeetingSourceBindingService().eligible(db, project_id=project_id, meeting_id=meeting_id, actor_user_id=user.id)
+    except (ManagementDenied, ManagementConflict) as exc:
+        _lifecycle_error(exc)
+
+
+@router.post("/v2/meetings/{meeting_id}/source-binding")
+def bind_meeting_source(meeting_id: int, payload: MeetingSourceBind,
+        db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
+    try:
+        result = MeetingSourceBindingService().bind(db, project_id=payload.project_id, meeting_id=meeting_id,
+            actor_user_id=user.id, expected_version=payload.expected_version, command_id=str(payload.command_id),
+            source_id=str(payload.source_id), source_version_id=str(payload.source_version_id))
+        db.commit()
+        return result
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
 
 
 def _ensure_notification(db: Session, user_id: int, project_id: int, kind: str, title: str, body: str,

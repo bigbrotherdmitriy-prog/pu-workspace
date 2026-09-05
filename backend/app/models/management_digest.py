@@ -6,11 +6,13 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     JSON,
     String,
     Time,
     UniqueConstraint,
+    Uuid,
     event,
     func,
 )
@@ -52,6 +54,11 @@ class ManagementProposalOrigin(Base):
 
     __tablename__ = "management_proposal_origins"
     __table_args__ = (
+        ForeignKeyConstraint(["project_id", "origin_id", "meeting_source_binding_id"],
+            ["meeting_source_bindings.project_id", "meeting_source_bindings.meeting_id", "meeting_source_bindings.id"],
+            name="fk_proposal_meeting_binding", ondelete="RESTRICT"),
+        CheckConstraint("meeting_source_binding_id IS NULL OR origin_type = 'meeting'",
+            name="ck_proposal_meeting_binding_kind"),
         UniqueConstraint(
             "project_id", "origin_type", "origin_id", "entity_type", "entity_id",
             name="uq_management_proposal_origin_target",
@@ -67,6 +74,7 @@ class ManagementProposalOrigin(Base):
     )
     origin_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     origin_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    meeting_source_binding_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
     entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
     entity_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     proposal_kind: Mapped[str] = mapped_column(String(20), nullable=False)

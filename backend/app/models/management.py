@@ -67,7 +67,12 @@ event.listen(ObligationHistory, "before_delete", _deny_obligation_history_mutati
 
 class Meeting(Base):
     __tablename__ = "meetings"
+    __table_args__ = (
+        UniqueConstraint("project_id", "id", name="uq_meeting_project_id"),
+        CheckConstraint("record_version > 0", name="ck_meeting_record_version"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))

@@ -47,7 +47,7 @@ def test_mvp3_routes_are_registered():
 def test_meeting_and_obligation_contracts():
     meeting = MeetingCreate(project_id=1, title="Планёрка", agenda="Проверить сроки")
     assert meeting.contract_id is None
-    assert MeetingUpdate(minutes="Подрядчик должен направить акт до 28 августа.").status == "completed"
+    assert MeetingUpdate(expected_version=1, minutes="Подрядчик должен направить акт до 28 августа.").status == "completed"
     assert ObligationUpdate(status="confirmed").result_note is None
 
 
@@ -91,7 +91,7 @@ def test_finishing_meeting_does_not_create_unverified_business_entities():
         db.add(meeting); db.commit()
 
         result = finish_meeting(
-            meeting.id, MeetingUpdate(minutes="Sensitive synthetic minutes", status="completed"), db, user,
+            meeting.id, MeetingUpdate(expected_version=1, minutes="Sensitive synthetic minutes", status="completed"), db, user,
         )
 
         assert result["proposal_state"] == "invalid_source"

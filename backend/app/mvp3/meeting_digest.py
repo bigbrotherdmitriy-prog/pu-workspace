@@ -28,6 +28,7 @@ from app.models.project_member import ProjectMember
 from app.models.v54_pilot import Evidence, SourceReference
 from app.mvp3.attention import attention_page
 from app.mvp3.lifecycle import ManagementConflict, ManagementDenied, ManagementLifecycle
+from app.mvp3.meeting_source_binding import MeetingSourceBindingService
 
 
 class MeetingActionCandidate(BaseModel):
@@ -100,15 +101,14 @@ class MeetingProposalService:
         self.lifecycle = lifecycle or ManagementLifecycle()
 
     def propose(self, db: Session, *, project_id: int, meeting_id: int, actor_user_id: int,
-                candidates: list[MeetingActionCandidate]) -> list[dict]:
-        self.lifecycle.scope(db, project_id=project_id, actor_user_id=actor_user_id)
-        meeting = db.get(Meeting, meeting_id)
-        if meeting is None or meeting.project_id != project_id or meeting.status != "completed":
-            raise ManagementDenied("resource_unavailable")
-        # Meeting.minutes is mutable and has no authoritative source/version pin.
-        # Candidate Evidence proves its own source, not a relation to this meeting.
-        # Do not manufacture that relation from title, text hash or updated_at.
-        raise ManagementDenied("invalid_meeting_source")
+                candidates: list[MeetingActionCandidate], meeting_source_binding_id: str | None = None) -> list[dict]:
+        bindings = MeetingSourceBindingService()
+        binding, scope = bindings.require(db, project_id=project_id, meeting_id=meeting_id,
+            actor_user_id=actor_user_id, binding_id=meeting_source_binding_id)
+        for candidate in candidates:
+            bindings.evidence(db, scope, binding, candidate.evidence_pins)
+        return self._propose(db, scope=scope, origin_type="meeting", origin_id=meeting_id,
+            candidates=candidates, meeting_source_binding_id=binding.id)
 
     def propose_message(self, db: Session, *, project_id: int, message_id: int, actor_user_id: int,
                         candidates: list[MeetingActionCandidate]) -> list[dict]:
@@ -123,9 +123,10 @@ class MeetingProposalService:
                              candidates=candidates)
 
     def _propose(self, db: Session, *, scope, origin_type: str, origin_id: int,
-                 candidates: list[MeetingActionCandidate]) -> list[dict]:
+                 candidates: list[MeetingActionCandidate], meeting_source_binding_id: str | None = None) -> list[dict]:
         if origin_type == "meeting":
-            raise ManagementDenied("invalid_meeting_source")
+            binding, scope = MeetingSourceBindingService().require(db, project_id=scope.project_id,
+                meeting_id=origin_id, actor_user_id=scope.actor_user_id, binding_id=meeting_source_binding_id)
         if not candidates or len(candidates) > 100:
             raise ManagementDenied("invalid_input")
 
@@ -133,11 +134,14 @@ class MeetingProposalService:
         for candidate in candidates:
             # Validate and canonicalize before deriving the existing lifecycle key.
             pins, _, _ = self.lifecycle.evidence(db, scope, candidate.evidence_pins)
+            if origin_type == "meeting":
+                MeetingSourceBindingService().evidence(db, scope, binding, pins)
             if candidate.kind in {"obligation", "task"}:
                 digest = hashlib.sha256(repr(pins).encode()).hexdigest()
                 row = db.scalar(select(Obligation).where(
                     Obligation.project_id == scope.project_id, Obligation.source_hash == digest,
                 ))
+                reused = row is not None
                 if row is None:
                     row = self.lifecycle.create_obligation(
                         db, scope=scope, title=candidate.title, owner_user_id=candidate.owner_user_id,
@@ -154,6 +158,7 @@ class MeetingProposalService:
                 row = db.scalar(select(Decision).where(
                     Decision.project_id == scope.project_id, Decision.source_hash == digest,
                 ))
+                reused = row is not None
                 if row is None:
                     row = self.lifecycle.create_decision(
                         db, scope=scope, question=candidate.title, owner_user_id=candidate.owner_user_id,
@@ -171,10 +176,19 @@ class MeetingProposalService:
                 ManagementProposalOrigin.entity_id == row.id,
             ))
             if link is None:
+                # Never relabel an existing non-meeting/other-binding proposal.
+                other_links = db.scalars(select(ManagementProposalOrigin).where(
+                    ManagementProposalOrigin.project_id == scope.project_id,
+                    ManagementProposalOrigin.entity_type == ("obligation" if candidate.kind in {"obligation", "task"} else "decision"),
+                    ManagementProposalOrigin.entity_id == row.id)).all()
+                if (origin_type == "meeting" and (reused or other_links or row.status != "needs_confirmation")) or (
+                    origin_type != "meeting" and any(item.origin_type == "meeting" for item in other_links)):
+                    raise ManagementDenied("evidence_already_bound")
                 link = ManagementProposalOrigin(
                     project_id=scope.project_id,
                     origin_type=origin_type,
                     origin_id=origin_id,
+                    meeting_source_binding_id=meeting_source_binding_id,
                     entity_type="obligation" if candidate.kind in {"obligation", "task"} else "decision",
                     entity_id=row.id,
                     proposal_kind=candidate.kind,
@@ -186,8 +200,11 @@ class MeetingProposalService:
                 db.add(AuditLog(action="mvp3_proposal_created", entity_type=origin_type,
                                 entity_id=origin_id,
                                 details=f"proposal_type={candidate.kind};proposal_id={row.id}"))
-            elif link.evidence_pins != pins or link.proposal_kind != candidate.kind:
+            elif (link.evidence_pins != pins or link.proposal_kind != candidate.kind
+                  or link.meeting_source_binding_id != meeting_source_binding_id):
                 raise ManagementDenied("resource_unavailable")
+            if origin_type == "meeting":
+                result[-1].update(self.bound_meeting_origin(binding))
         return result
 
     def list_for_origin(self, db: Session, *, project_id: int, actor_user_id: int,
@@ -196,7 +213,8 @@ class MeetingProposalService:
             db, project_id=project_id, actor_user_id=actor_user_id, minimum="viewer",
         )
         if origin_type == "meeting":
-            origin = db.get(Meeting, origin_id)
+            origin, scope = MeetingSourceBindingService()._meeting(db, project_id=project_id,
+                meeting_id=origin_id, actor_user_id=actor_user_id, minimum="viewer")
             # Historical links remain readable after minutes/status changes.
             valid = origin is not None and origin.project_id == project_id
         else:
@@ -229,9 +247,21 @@ class MeetingProposalService:
                 "manual_review_required": row.status == "needs_confirmation" or row.review_state == "needs_review",
             })
             if origin_type == "meeting":
-                # Preserve the historical business status without presenting an
-                # unbound protocol as validated or authorizing a new confirmation.
-                item.update(self.unbound_meeting_origin())
+                if link.meeting_source_binding_id is None:
+                    item.update(self.unbound_meeting_origin())
+                else:
+                    # Read authority is required even for an obsolete binding.
+                    from app.models.meeting_source_binding import MeetingSourceBinding
+                    old = db.get(MeetingSourceBinding, link.meeting_source_binding_id)
+                    if old is None:
+                        raise ManagementDenied("resource_unavailable")
+                    bindings = MeetingSourceBindingService()
+                    bindings._source(db, scope, old.source_id, old.source_version_id)
+                    bindings.evidence(db, scope, old, link.evidence_pins)
+                    if origin.record_version == old.meeting_record_version and origin.status == "completed":
+                        item.update(self.bound_meeting_origin(old))
+                    else:
+                        item.update(self.unbound_meeting_origin())
             result.append(item)
         return result
 
@@ -241,17 +271,15 @@ class MeetingProposalService:
                 "confirmation_available": False}
 
     @staticmethod
-    def require_bound_origin(db: Session, *, project_id: int, entity_type: str, entity_id: int) -> None:
-        # Existing origin links are append-only. They contain candidate evidence,
-        # but none can prove an immutable version of a meeting protocol today.
-        linked = db.scalar(select(ManagementProposalOrigin.id).where(
-            ManagementProposalOrigin.project_id == project_id,
-            ManagementProposalOrigin.entity_type == entity_type,
-            ManagementProposalOrigin.entity_id == entity_id,
-            ManagementProposalOrigin.origin_type == "meeting",
-        ).limit(1))
-        if linked is not None:
-            raise ManagementDenied("invalid_meeting_source")
+    def bound_meeting_origin(binding) -> dict:
+        return {key: value for key, value in MeetingSourceBindingService.serialize(binding).items()
+                if key != "external_actions_created"}
+
+    @staticmethod
+    def require_bound_origin(db: Session, *, project_id: int, entity_type: str, entity_id: int,
+                             actor_user_id: int | None = None):
+        return MeetingSourceBindingService().require_entity(db, project_id=project_id,
+            actor_user_id=actor_user_id, entity_type=entity_type, entity_id=entity_id)
 
     @staticmethod
     def _require_message_evidence(db: Session, message: Message, raw_pins: list[dict]) -> None:
@@ -273,8 +301,13 @@ class MeetingProposalService:
             row = db.get(Obligation, entity_id)
             if row is None or row.project_id != project_id:
                 raise ManagementDenied("resource_unavailable")
-            self.require_bound_origin(db, project_id=project_id, entity_type="obligation", entity_id=row.id)
+            binding = self.require_bound_origin(db, project_id=project_id, entity_type="obligation", entity_id=row.id,
+                actor_user_id=actor_user_id)
             self.lifecycle.evidence(db, scope, row.evidence_pins or [])
+            if (binding is not None and row.status != "needs_confirmation" and create_internal_task
+                    and row.task_id is None and row.record_version != expected_version):
+                # Existing confirmation is not a receipt for a new Task command.
+                raise ManagementConflict("version_conflict")
             if row.status == "needs_confirmation":
                 row = self.lifecycle.transition_obligation(
                     db, scope=scope, obligation_id=row.id, expected_version=expected_version, status="confirmed",
@@ -287,12 +320,16 @@ class MeetingProposalService:
                     db, scope=scope, obligation_id=row.id, expected_version=row.record_version,
                 )
                 row = db.get(Obligation, row.id)
-            return self._proposal("task" if create_internal_task else "obligation", "obligation", row)
+            result = self._proposal("task" if create_internal_task else "obligation", "obligation", row)
+            if binding is not None:
+                result.update(self.bound_meeting_origin(binding))
+            return result
         if entity_type == "decision" and not create_internal_task:
             row = db.get(Decision, entity_id)
             if row is None or row.project_id != project_id:
                 raise ManagementDenied("resource_unavailable")
-            self.require_bound_origin(db, project_id=project_id, entity_type="decision", entity_id=row.id)
+            binding = self.require_bound_origin(db, project_id=project_id, entity_type="decision", entity_id=row.id,
+                actor_user_id=actor_user_id)
             self.lifecycle.evidence(db, scope, row.evidence_pins or [])
             if row.status == "needs_confirmation":
                 row = self.lifecycle.transition_governance(
@@ -301,7 +338,10 @@ class MeetingProposalService:
                 )
             elif row.status != "confirmed":
                 raise ManagementDenied("resource_unavailable")
-            return self._proposal("decision", "decision", row)
+            result = self._proposal("decision", "decision", row)
+            if binding is not None:
+                result.update(self.bound_meeting_origin(binding))
+            return result
         raise ManagementDenied("resource_unavailable")
 
     @staticmethod

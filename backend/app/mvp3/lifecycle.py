@@ -180,6 +180,10 @@ class ManagementLifecycle:
         row = db.get(Obligation, obligation_id)
         if row is None or row.project_id != scope.project_id:
             raise ManagementDenied("resource_unavailable")
+        if status == "confirmed":
+            from app.mvp3.meeting_source_binding import MeetingSourceBindingService
+            MeetingSourceBindingService().require_entity(db, project_id=scope.project_id,
+                actor_user_id=scope.actor_user_id, entity_type="obligation", entity_id=obligation_id)
         if status not in OBLIGATION_TRANSITIONS.get(row.status, set()):
             raise ManagementDenied("invalid_transition")
         reason = _text(reason, required=row.status in {"fulfilled", "breached", "dismissed"}, limit=2000)
@@ -201,6 +205,10 @@ class ManagementLifecycle:
     def ensure_internal_task(self, db: Session, *, scope: ManagementScope, obligation_id: int,
                              expected_version: int) -> Task:
         row = db.get(Obligation, obligation_id)
+        if row is not None and row.task_id is None:
+            from app.mvp3.meeting_source_binding import MeetingSourceBindingService
+            MeetingSourceBindingService().require_entity(db, project_id=scope.project_id,
+                actor_user_id=scope.actor_user_id, entity_type="obligation", entity_id=obligation_id)
         if row is None or row.project_id != scope.project_id or row.status not in {"confirmed", "in_progress"}:
             raise ManagementDenied("resource_unavailable")
         if row.record_version != expected_version:
@@ -277,6 +285,10 @@ class ManagementLifecycle:
         if entity_type not in {"risk", "decision"}:
             raise ManagementDenied("resource_unavailable")
         model, transitions = (Risk, RISK_TRANSITIONS) if entity_type == "risk" else (Decision, DECISION_TRANSITIONS)
+        if entity_type == "decision" and status == "confirmed":
+            from app.mvp3.meeting_source_binding import MeetingSourceBindingService
+            MeetingSourceBindingService().require_entity(db, project_id=scope.project_id,
+                actor_user_id=scope.actor_user_id, entity_type=entity_type, entity_id=entity_id)
         row = db.get(model, entity_id)
         if row is None or row.project_id != scope.project_id or status not in transitions.get(row.status, set()):
             raise ManagementDenied("resource_unavailable")
