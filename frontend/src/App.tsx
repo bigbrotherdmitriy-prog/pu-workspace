@@ -2170,8 +2170,8 @@ export function App() {
             <Menu />
           </button>
           <div className="page-heading">
-            <span className="page-kicker">{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
-            <h1>{active}<i className="page-live-dot" aria-hidden="true" /></h1>
+            <span className="page-kicker"><b>PU</b><i aria-hidden="true" />{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
+            <h1>{active}</h1>
             <p>
               {active === "Рабочий центр"
                 ? "Главное по проекту на сегодня"
@@ -2310,53 +2310,60 @@ export function App() {
             />
           ) : active === "Рабочий центр" || showSources ? (
             <>
-              <section className="dashboard-hero">
-                <div className="dashboard-signal" aria-hidden="true">
-                  <i /><i /><i />
-                </div>
-                <div className="dashboard-hero-copy">
-                  <span className="dashboard-kicker">{projects.find((item) => item.id === projectId)?.name || "ТЕКУЩИЙ ПРОЕКТ"}</span>
-                  <h2>Всё главное по вашему проекту — в едином центре</h2>
-                  <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
-                  <div className="dashboard-hero-actions">
-                    <button onClick={() => setActive("Сегодня")}><Route /> План на сегодня</button>
-                    <button className="secondary" onClick={() => setActive("AI Secretary")}><Bot /> Спросить AI Secretary</button>
+              <section className="dashboard-overview-deck">
+                <div className="dashboard-hero">
+                  <div className="dashboard-signal" aria-hidden="true">
+                    <i /><i /><i />
+                  </div>
+                  <div className="dashboard-hero-copy">
+                    <span className="dashboard-kicker"><Activity /> Оперативный контур · {projects.find((item) => item.id === projectId)?.name || "Текущий проект"}</span>
+                    <h2>Штаб управления проектом</h2>
+                    <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
+                    <div className="dashboard-hero-actions">
+                      <button onClick={() => setActive("Сегодня")}><Route /> Открыть план дня</button>
+                      <button className="secondary" onClick={() => setActive("AI Secretary")}><Bot /> Запросить сводку</button>
+                    </div>
+                    <div className="dashboard-shift-meta" aria-label="Контур контроля проекта">
+                      <span><i /> ГПР и сроки</span>
+                      <span><i /> Договоры</span>
+                      <span><i /> ДДС и обязательства</span>
+                    </div>
+                  </div>
+                  <div className={`dashboard-focus ${summary?.attention ? "needs-attention" : "clear"}`}>
+                    <span>{summary?.attention ? "Требует решения" : "Контур стабилен"}</span>
+                    <strong>{String(summary?.attention || 0).padStart(2, "0")}</strong>
+                    <p>{summary?.attention ? "контрольных пунктов" : "критичных пунктов"}</p>
+                    <button onClick={() => setActive(summary?.attention ? "Риски и решения" : "Сегодня")}>
+                      {summary?.attention ? "Перейти к разбору" : "Открыть план"} <ArrowRight />
+                    </button>
                   </div>
                 </div>
-                <div className={`dashboard-focus ${summary?.attention ? "needs-attention" : "clear"}`}>
-                  <span>{summary?.attention ? "ГЛАВНЫЙ ФОКУС" : "СТАТУС ПРОЕКТА"}</span>
-                  <strong>{summary?.attention || 0}</strong>
-                  <p>{summary?.attention ? "пунктов ждут проверки" : "критичных пунктов нет"}</p>
-                  <button onClick={() => setActive(summary?.attention ? "Риски и решения" : "Сегодня")}>
-                    {summary?.attention ? "Разобрать сейчас" : "Открыть план"} <ArrowRight />
-                  </button>
+                <div className="metrics dashboard-metrics">
+                  {metrics.map(([label, value, tone]) => label === "Просрочено" ? (
+                    <OverdueMetric
+                      key={String(label)}
+                      tasks={summary?.overdue_tasks || 0}
+                      obligations={summary?.overdue_obligations || 0}
+                      onOpenTasks={() => openMetric("Просрочено")}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className={String(tone)}
+                      key={String(label)}
+                      onClick={() => openMetric(String(label))}
+                      aria-label={`Открыть раздел: ${label}`}
+                    >
+                      <span>{label}</span><strong>{value}</strong><small>В реестр <ArrowRight /></small>
+                    </button>
+                  ))}
                 </div>
               </section>
-              <div className="metrics dashboard-metrics">
-                {metrics.map(([label, value, tone]) => label === "Просрочено" ? (
-                  <OverdueMetric
-                    key={String(label)}
-                    tasks={summary?.overdue_tasks || 0}
-                    obligations={summary?.overdue_obligations || 0}
-                    onOpenTasks={() => openMetric("Просрочено")}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    className={String(tone)}
-                    key={String(label)}
-                    onClick={() => openMetric(String(label))}
-                    aria-label={`Открыть раздел: ${label}`}
-                  >
-                    <span>{label}</span><strong>{value}</strong><small>Открыть раздел <ArrowRight /></small>
-                  </button>
-                ))}
-              </div>
               <div className="dashboard-command-grid">
                 <section className="card dashboard-attention-card">
                   <div className="card-head">
                     <div>
-                      <span className="eyebrow">КОНТРОЛЬ И РЕШЕНИЯ</span>
+                      <span className="eyebrow">Контроль и решения</span>
                       <h2>Что требует внимания</h2>
                       <p>
                         Задачи, риски и решения из подтверждённых источников
@@ -2393,7 +2400,7 @@ export function App() {
                 <section className="card dashboard-actions-card">
                   <div className="card-head">
                     <div>
-                      <span className="eyebrow">БЫСТРЫЙ СТАРТ</span>
+                      <span className="eyebrow">Быстрый доступ</span>
                       <h2>Быстрые действия</h2>
                       <p>Без изменения оригиналов</p>
                     </div>
@@ -2410,7 +2417,7 @@ export function App() {
                 <section className="card dashboard-inbox">
                   <div className="card-head">
                     <div>
-                      <span className="eyebrow">КОММУНИКАЦИИ</span>
+                      <span className="eyebrow">Коммуникации</span>
                       <h2>Входящие, требующие реакции</h2>
                       <p>Новые письма, неподтверждённый контекст и работа в процессе</p>
                     </div>
@@ -2434,7 +2441,7 @@ export function App() {
                 </section>
                 <section className="card dashboard-ai-card">
                   <div className="dashboard-ai-icon"><Bot /></div>
-                  <span className="eyebrow">AI SECRETARY</span>
+                  <span className="eyebrow">AI Secretary</span>
                   <h2>Контекст проекта собран</h2>
                   <p>{dailyBriefing?.next_step || "Секретарь проверяет письма, документы, сроки и договорные обязательства."}</p>
                   <div className="dashboard-ai-facts">
