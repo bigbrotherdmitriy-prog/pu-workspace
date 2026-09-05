@@ -718,6 +718,12 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .finance-list small { color: #748091; }
 .finance-list b { padding: 4px 7px; border-radius: 999px; background: #fff4db; color: #946000; font-size: 10px; }
 .finance-list button { padding: 7px 9px; border: 1px solid #185adb; border-radius: 7px; background: #fff; color: #185adb; font-weight: 650; cursor: pointer; }
+.finance-schedule-register { grid-column: 1 / -1; }
+.finance-plan-fact { display: grid; gap: 0; margin-top: 14px; border-top: 1px solid #dce4ee; }
+.finance-plan-fact > strong { padding: 14px 0 6px; }
+.finance-plan-fact > div { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #eef2f6; }
+.finance-plan-fact span { display: grid; gap: 4px; }
+.finance-plan-fact small { color: #687588; }
 .finance-empty { color: #8a94a5; }
 .finance-warning { margin: 12px 0 0; padding: 9px; border-radius: 8px; background: #fff8e8; color: #946000; }
 .finance-forecast .good { padding: 12px; border-radius: 8px; background: #eaf7f3; color: #13745f; }

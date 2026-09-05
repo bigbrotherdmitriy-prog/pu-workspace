@@ -4,7 +4,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -27,8 +27,15 @@ class BaselineCreate(BaseModel):
     note: str | None = Field(default=None, max_length=5000)
 
 
+class BaselineClone(BaseModel):
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=2, max_length=500)
+    note: str | None = Field(default=None, max_length=5000)
+
+
 class ScheduleItemCreate(BaseModel):
     baseline_id: int
+    expected_baseline_version: int | None = Field(default=None, ge=1)
     title: str = Field(min_length=2, max_length=500)
     planned_start: date | None = None
     planned_finish: date | None = None
@@ -39,6 +46,12 @@ class ScheduleProgress(BaseModel):
     actual_progress: float = Field(ge=0, le=100)
     actual_start: date | None = None
     actual_finish: date | None = None
+    expected_actual_progress: float | None = Field(default=None, ge=0, le=100)
+    evidence_ref: str | None = Field(
+        default=None,
+        max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$",
+    )
 
 
 class BudgetCreate(BaseModel):
@@ -101,6 +114,7 @@ class ActCreate(BaseModel):
 
 class StatusUpdate(BaseModel):
     status: str = Field(min_length=2, max_length=30)
+    expected_status: str | None = Field(default=None, min_length=2, max_length=30)
     actual_amount: Decimal | None = Field(default=None, ge=0)
     actual_date: date | None = None
 
@@ -110,6 +124,7 @@ class StructuredImportRequest(BaseModel):
     contract_id: int | None = None
     kind: str = Field(pattern="^(schedule|budget|cash-flow)$")
     baseline_id: int | None = None
+    expected_baseline_version: int | None = Field(default=None, ge=1)
     direction: str = Field(default="outflow", pattern="^(inflow|outflow)$")
     source_rows: list[int] = Field(min_length=1, max_length=500)
 
@@ -172,6 +187,32 @@ def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, de
     db.add(AuditLog(action=action, entity_type=kind, entity_id=entity_id, details=f"user={user_id}; {details}"))
 
 
+def _schedule_scope(model, contract_id: int | None):
+    return model.contract_id.is_(None) if contract_id is None else model.contract_id == contract_id
+
+
+def _lock_schedule_project(db: Session, project_id: int) -> None:
+    """Serialize baseline version allocation in PostgreSQL; SQLite tests remain portable."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:namespace, :project_id)"), {
+            "namespace": 0x475052,  # ASCII GPR
+            "project_id": project_id,
+        })
+
+
+def _current_approved_baseline(db: Session, baseline: ScheduleBaseline) -> ScheduleBaseline | None:
+    return db.scalar(
+        select(ScheduleBaseline)
+        .where(
+            ScheduleBaseline.project_id == baseline.project_id,
+            _schedule_scope(ScheduleBaseline, baseline.contract_id),
+            ScheduleBaseline.status == "approved",
+        )
+        .order_by(ScheduleBaseline.version.desc(), ScheduleBaseline.id.desc())
+        .with_for_update()
+    )
+
+
 def _linked_budget_totals(rows: list[CashFlowEntry]) -> tuple[Decimal, Decimal]:
     committed = sum((row.planned_amount for row in rows if row.direction == "outflow" and row.status in {"approved", "paid"}), Decimal("0"))
     actual = sum((row.actual_amount for row in rows if row.direction == "outflow" and row.status == "paid"), Decimal("0"))
@@ -192,6 +233,11 @@ def _refresh_budget_from_cash_flow(db: Session, budget_line_id: int | None) -> N
 def overview(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     baselines = list(db.scalars(select(ScheduleBaseline).where(ScheduleBaseline.project_id == project_id).order_by(ScheduleBaseline.version.desc())))
+    current_by_contract: dict[int | None, int] = {}
+    for row in baselines:
+        if row.status == "approved" and row.contract_id not in current_by_contract:
+            current_by_contract[row.contract_id] = row.id
+    current_baseline_ids = set(current_by_contract.values())
     schedule = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id).order_by(ScheduleItem.planned_finish, ScheduleItem.id)))
     budget = list(db.scalars(select(BudgetLine).where(BudgetLine.project_id == project_id).order_by(BudgetLine.id.desc())))
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
@@ -208,7 +254,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         if balance < minimum:
             minimum, gap_date = balance, row.actual_date or row.planned_date
     today = date.today()
-    delayed = [x for x in schedule if x.planned_finish and x.planned_finish < today and x.actual_progress < 100]
+    delayed = [x for x in schedule if x.baseline_id in current_baseline_ids and x.planned_finish and x.planned_finish < today and x.actual_progress < 100]
     late_procurement = [x for x in procurement if x.planned_delivery and x.planned_delivery < today and x.stage not in {"delivered", "accepted", "cancelled"}]
     return {
         "summary": {"budget_planned": planned, "budget_committed": sum((x.committed_amount for x in confirmed_budget), Decimal("0")),
@@ -218,7 +264,9 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
                     "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
-        "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note} for x in baselines],
+        "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version,
+                       "status": x.status, "note": x.note,
+                       "is_current": current_by_contract.get(x.contract_id) == x.id} for x in baselines],
         "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "planned_start": x.planned_start,
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status} for x in schedule],
@@ -334,19 +382,36 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
 
     baseline = None
     if payload.kind == "schedule":
-        baseline = db.get(ScheduleBaseline, payload.baseline_id) if payload.baseline_id else None
+        _lock_schedule_project(db, payload.project_id)
+        baseline = db.scalar(select(ScheduleBaseline).where(
+            ScheduleBaseline.id == payload.baseline_id,
+        ).with_for_update()) if payload.baseline_id else None
         if baseline is None or baseline.project_id != payload.project_id:
             raise HTTPException(422, "Для импорта ГПР выберите черновик baseline проекта")
         if baseline.status != "draft":
             raise HTTPException(409, "Утверждённый baseline неизменяем")
+        if payload.expected_baseline_version is None:
+            raise HTTPException(422, "Для импорта ГПР укажите ожидаемую версию baseline")
+        if baseline.version != payload.expected_baseline_version:
+            raise HTTPException(409, "Версия baseline изменилась; обновите ГПР перед импортом")
         if payload.contract_id and baseline.contract_id not in {None, payload.contract_id}:
             raise HTTPException(422, "Baseline связан с другим договором")
 
     created = []
+    resolved = []
+    replayed = []
     for source_row in payload.source_rows:
         row = selected[source_row]
         source_name = f"{document.name}, строка {source_row}"
         if payload.kind == "schedule":
+            existing = db.scalar(select(ScheduleItem).where(
+                ScheduleItem.baseline_id == baseline.id,
+                ScheduleItem.source_name == source_name,
+            ).order_by(ScheduleItem.id))
+            if existing is not None:
+                resolved.append(existing.id)
+                replayed.append(existing.id)
+                continue
             item = ScheduleItem(
                 project_id=payload.project_id, baseline_id=baseline.id, title=row["title"],
                 planned_start=_import_date(row["planned_start"]),
@@ -373,20 +438,31 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
         db.add(item)
         db.flush()
         created.append(item.id)
+        resolved.append(item.id)
     db.add(AuditLog(
         action="structured_document_imported", entity_type="document", entity_id=document.id,
         details=(f"user={user.id}; kind={payload.kind}; contract={payload.contract_id}; "
-                 f"rows={','.join(map(str, payload.source_rows))}; created={','.join(map(str, created))}; originals_changed=false"),
+                 f"rows={','.join(map(str, payload.source_rows))}; created={','.join(map(str, created))}; "
+                 f"replayed={','.join(map(str, replayed))}; originals_changed=false"),
     ))
     db.commit()
-    return {"document_id": document.id, "kind": payload.kind, "created_ids": created,
-            "created": len(created), "status": "proposed", "originals_changed": False}
+    return {"document_id": document.id, "kind": payload.kind, "created_ids": resolved,
+            "created": len(created), "already_existing": len(replayed),
+            "status": "proposed", "originals_changed": False}
 
 
 @router.post("/baselines")
 def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "manager")
     _check_contract(db, payload.project_id, payload.contract_id)
+    _lock_schedule_project(db, payload.project_id)
+    existing_draft = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.project_id == payload.project_id,
+        _schedule_scope(ScheduleBaseline, payload.contract_id),
+        ScheduleBaseline.status == "draft",
+    ).order_by(ScheduleBaseline.version.desc()).with_for_update())
+    if existing_draft is not None:
+        raise HTTPException(409, "Для договора уже существует черновик ГПР; завершите или удалите его перед новой версией")
     version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == payload.project_id)) or 0) + 1
     item = ScheduleBaseline(project_id=payload.project_id, contract_id=payload.contract_id,
                             created_by_user_id=user.id, name=payload.name.strip(), version=version, note=payload.note)
@@ -394,15 +470,95 @@ def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user
     return {"id": item.id, "version": item.version, "status": item.status}
 
 
+@router.post("/baselines/{baseline_id}/clone")
+def clone_baseline(baseline_id: int, payload: BaselineClone,
+                   db: Session = Depends(get_db), user: User = Depends(require_user)):
+    source = db.get(ScheduleBaseline, baseline_id)
+    if source is None:
+        raise HTTPException(404, "Baseline not found")
+    require_project_role(db, user, source.project_id, "manager")
+    _lock_schedule_project(db, source.project_id)
+    source = db.scalar(select(ScheduleBaseline).where(ScheduleBaseline.id == baseline_id).with_for_update())
+    if source.version != payload.expected_version:
+        raise HTTPException(409, "Версия исходного baseline изменилась; обновите ГПР")
+    if source.status != "approved":
+        raise HTTPException(409, "Новую редакцию можно создать только из текущего утверждённого baseline")
+    current = _current_approved_baseline(db, source)
+    if current is None or current.id != source.id:
+        raise HTTPException(409, "Исходный baseline больше не является текущим")
+    draft = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.project_id == source.project_id,
+        _schedule_scope(ScheduleBaseline, source.contract_id),
+        ScheduleBaseline.status == "draft",
+    ).order_by(ScheduleBaseline.version.desc()).with_for_update())
+    if draft is not None:
+        return {"id": draft.id, "version": draft.version, "status": draft.status, "already_created": True}
+    version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(
+        ScheduleBaseline.project_id == source.project_id,
+    )) or 0) + 1
+    draft = ScheduleBaseline(
+        project_id=source.project_id,
+        contract_id=source.contract_id,
+        created_by_user_id=user.id,
+        name=(payload.name or source.name).strip(),
+        version=version,
+        status="draft",
+        note=payload.note if payload.note is not None else source.note,
+    )
+    db.add(draft)
+    db.flush()
+    source_items = list(db.scalars(select(ScheduleItem).where(
+        ScheduleItem.baseline_id == source.id,
+    ).order_by(ScheduleItem.id)))
+    for source_item in source_items:
+        db.add(ScheduleItem(
+            project_id=source.project_id,
+            baseline_id=draft.id,
+            title=source_item.title,
+            planned_start=source_item.planned_start,
+            planned_finish=source_item.planned_finish,
+            planned_progress=source_item.planned_progress,
+            actual_start=None,
+            actual_finish=None,
+            actual_progress=0,
+            status="planned",
+            source_name=source_item.source_name,
+            source_excerpt=source_item.source_excerpt,
+        ))
+    _audit(db, "baseline_cloned", "schedule_baseline", draft.id, user.id,
+           f"source_baseline={source.id}; version={version}; facts_copied=false")
+    db.commit()
+    db.refresh(draft)
+    return {"id": draft.id, "version": draft.version, "status": draft.status, "already_created": False}
+
+
 @router.post("/schedule-items")
 def create_schedule_item(payload: ScheduleItemCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     baseline = db.get(ScheduleBaseline, payload.baseline_id)
     if baseline is None: raise HTTPException(404, "Baseline not found")
     require_project_role(db, user, baseline.project_id, "editor")
-    if baseline.status == "approved": raise HTTPException(409, "Утверждённый baseline неизменяем; создайте новую версию")
-    item = ScheduleItem(project_id=baseline.project_id, **payload.model_dump())
+    _lock_schedule_project(db, baseline.project_id)
+    baseline = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.id == payload.baseline_id,
+    ).with_for_update())
+    if baseline.status != "draft": raise HTTPException(409, "Утверждённый или архивный baseline неизменяем; создайте новую версию")
+    if payload.expected_baseline_version is None:
+        raise HTTPException(422, "Укажите ожидаемую версию baseline")
+    if payload.expected_baseline_version != baseline.version:
+        raise HTTPException(409, "Версия baseline изменилась; обновите ГПР")
+    item_data = payload.model_dump(exclude={"expected_baseline_version"})
+    duplicate = db.scalar(select(ScheduleItem).where(
+        ScheduleItem.baseline_id == baseline.id,
+        ScheduleItem.title == payload.title,
+        ScheduleItem.planned_start == payload.planned_start,
+        ScheduleItem.planned_finish == payload.planned_finish,
+        ScheduleItem.planned_progress == payload.planned_progress,
+    ).order_by(ScheduleItem.id))
+    if duplicate is not None:
+        return {"id": duplicate.id, "status": duplicate.status, "already_created": True}
+    item = ScheduleItem(project_id=baseline.project_id, **item_data)
     db.add(item); db.flush(); _audit(db, "schedule_item_created", "schedule_item", item.id, user.id, "proposal"); db.commit(); db.refresh(item)
-    return {"id": item.id, "status": item.status}
+    return {"id": item.id, "status": item.status, "already_created": False}
 
 
 @router.patch("/schedule-items/{item_id}")
@@ -410,10 +566,31 @@ def update_schedule(item_id: int, payload: ScheduleProgress, db: Session = Depen
     item = db.get(ScheduleItem, item_id)
     if item is None: raise HTTPException(404, "Schedule item not found")
     require_project_role(db, user, item.project_id, "editor")
-    for name, value in payload.model_dump(exclude_unset=True).items(): setattr(item, name, value)
+    _lock_schedule_project(db, item.project_id)
+    item = db.scalar(select(ScheduleItem).where(ScheduleItem.id == item_id).with_for_update())
+    baseline = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.id == item.baseline_id,
+    ).with_for_update())
+    if baseline is None or baseline.status != "approved":
+        raise HTTPException(409, "Факт можно вносить только в текущий утверждённый baseline")
+    current = _current_approved_baseline(db, baseline)
+    if current is None or current.id != baseline.id:
+        raise HTTPException(409, "Факт нельзя вносить в историческую версию ГПР")
+    values = payload.model_dump(exclude_unset=True, exclude={"expected_actual_progress", "evidence_ref"})
+    if all(getattr(item, name) == value for name, value in values.items()):
+        return {"id": item.id, "status": item.status, "actual_progress": item.actual_progress,
+                "already_applied": True}
+    if payload.expected_actual_progress is None:
+        raise HTTPException(422, "Укажите ожидаемое текущее значение факта")
+    if item.actual_progress != payload.expected_actual_progress:
+        raise HTTPException(409, "Факт ГПР уже изменён; обновите данные перед повтором")
+    for name, value in values.items(): setattr(item, name, value)
     item.status = "completed" if item.actual_progress == 100 else "in_progress"
-    _audit(db, "schedule_actual_updated", "schedule_item", item.id, user.id, f"progress={item.actual_progress}"); db.commit()
-    return {"id": item.id, "status": item.status, "actual_progress": item.actual_progress}
+    evidence = payload.evidence_ref or "none"
+    _audit(db, "schedule_actual_updated", "schedule_item", item.id, user.id,
+           f"progress={item.actual_progress}; evidence_ref={evidence}"); db.commit()
+    return {"id": item.id, "status": item.status, "actual_progress": item.actual_progress,
+            "already_applied": False}
 
 
 @router.post("/budget")
@@ -558,10 +735,29 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     item = db.get(model, item_id)
     if item is None: raise HTTPException(404, "Item not found")
     require_project_role(db, user, item.project_id, "manager")
+    if kind == "baselines":
+        _lock_schedule_project(db, item.project_id)
+    item = db.scalar(select(model).where(model.id == item_id).with_for_update())
     allowed = {"budget": {"approved", "active", "closed", "rejected"}, "cash-flow": {"approved", "cancelled"},
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
-               "baselines": {"approved", "superseded"}}[kind]
+               "baselines": {"approved"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
+    if item.status == payload.status:
+        return {"id": item.id, "status": item.status, "already_applied": True}
+    if payload.expected_status is not None and item.status != payload.expected_status:
+        raise HTTPException(409, "Статус уже изменён; обновите данные перед повтором")
+    superseded_id = None
+    if kind == "baselines":
+        if payload.expected_status is None:
+            raise HTTPException(422, "Для утверждения baseline укажите ожидаемый статус")
+        if item.status != "draft":
+            raise HTTPException(409, "Утвердить можно только черновик baseline")
+        current = _current_approved_baseline(db, item)
+        if current is not None and current.id != item.id:
+            current.status = "superseded"
+            superseded_id = current.id
+            _audit(db, "baseline_superseded", "schedule_baseline", current.id, user.id,
+                   f"replacement_baseline={item.id}; replacement_version={item.version}")
     item.status = payload.status
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
@@ -571,4 +767,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     if kind == "cash-flow":
         _refresh_budget_from_cash_flow(db, item.budget_line_id)
     _audit(db, f"{kind}_status_updated", kind, item.id, user.id, f"status={payload.status}"); db.commit()
-    return {"id": item.id, "status": item.status}
+    result = {"id": item.id, "status": item.status, "already_applied": False}
+    if kind == "baselines":
+        result["superseded_id"] = superseded_id
+    return result

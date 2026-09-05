@@ -478,7 +478,7 @@ export function App() {
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment, correctCashPayment,
+    addFinanceItem, confirmFinance, cloneBaseline, confirmCashPayment, correctCashPayment, updateScheduleActual,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
 
@@ -2635,6 +2635,8 @@ export function App() {
               onConfirm={(kind, id, status) =>
                 void confirmFinance(kind, id, status)
               }
+              onCloneBaseline={(id, version) => void cloneBaseline(id, version)}
+              onUpdateSchedule={(id, currentProgress) => void updateScheduleActual(id, currentProgress)}
               onConfirmPayment={(id, amount) =>
                 void confirmCashPayment(id, amount)
               }

@@ -115,6 +115,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           contract_id: selectedFinanceContractId || null,
           kind: financeStructuredPreview.kind,
           baseline_id: baseline?.id || null,
+          expected_baseline_version: baseline?.version || null,
           direction: "outflow",
           source_rows: financeStructuredRows,
         }),
@@ -162,7 +163,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         const baseline = finance?.baselines.find((row) => row.status === "draft");
         if (!baseline) throw new Error("Сначала создайте черновик версии ГПР");
         path = "/execution/schedule-items";
-        body = { baseline_id: baseline.id, title: financeTitle.trim(), planned_finish: financeDate || null, planned_progress: amount };
+        body = { baseline_id: baseline.id, expected_baseline_version: baseline.version, title: financeTitle.trim(), planned_finish: financeDate || null, planned_progress: amount };
       }
       await api(path, { method: "POST", body: JSON.stringify(body) });
       setFinanceTitle("");
@@ -177,9 +178,26 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   async function confirmFinance(kind: string, id: number, status: string) {
+    const baseline = kind === "baselines" ? finance?.baselines.find((item) => item.id === id) : null;
+    if (baseline && !window.confirm(`Утвердить ГПР версии ${baseline.version}? Текущий утверждённый план станет историческим, а плановые поля этой версии будут заблокированы.`)) return;
     try {
-      await api(`/execution/${kind}/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
-      setNotice("Статус финансовой записи подтверждён и сохранён в аудите");
+      await api(`/execution/${kind}/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, expected_status: baseline?.status }),
+      });
+      setNotice(baseline ? "Новая версия ГПР утверждена; прежний план сохранён в истории" : "Статус финансовой записи подтверждён и сохранён в аудите");
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
+  async function cloneBaseline(id: number, version: number) {
+    if (!window.confirm(`Создать черновик новой версии из утверждённого ГПР v${version}? Фактическое исполнение копироваться не будет.`)) return;
+    try {
+      await api(`/execution/baselines/${id}/clone`, {
+        method: "POST",
+        body: JSON.stringify({ expected_version: version }),
+      });
+      setNotice("Создан черновик новой версии ГПР; утверждённый план не изменён");
       await loadFinance();
     } catch (error) { setError((error as Error).message); }
   }
@@ -225,7 +243,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
-  async function updateScheduleActual(id: number) {
+  async function updateScheduleActual(id: number, currentProgress: number) {
     const value = window.prompt("Фактическая готовность, %", "100");
     if (value === null) return;
     const progress = Number(value);
@@ -233,8 +251,9 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       setError("Введите число от 0 до 100");
       return;
     }
+    if (!window.confirm(`Записать факт выполнения ${progress}%? Плановые сроки и объём не изменятся.`)) return;
     try {
-      await api(`/execution/schedule-items/${id}`, { method: "PATCH", body: JSON.stringify({ actual_progress: progress, actual_finish: progress === 100 ? new Date().toISOString().slice(0, 10) : null }) });
+      await api(`/execution/schedule-items/${id}`, { method: "PATCH", body: JSON.stringify({ actual_progress: progress, actual_finish: progress === 100 ? new Date().toISOString().slice(0, 10) : null, expected_actual_progress: currentProgress }) });
       setNotice("Факт по работе ГПР обновлён");
       await loadFinance();
     } catch (error) { setError((error as Error).message); }
@@ -263,6 +282,6 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment, correctCashPayment, updateScheduleActual, recordFinanceActual,
+    addFinanceItem, confirmFinance, cloneBaseline, confirmCashPayment, correctCashPayment, updateScheduleActual, recordFinanceActual,
   };
 }

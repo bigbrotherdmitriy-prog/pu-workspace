@@ -21,13 +21,17 @@ export type FinanceOverview = {
     version: number;
     status: string;
     note?: string;
+    is_current: boolean;
   }[];
   schedule: {
     id: number;
     baseline_id: number;
     title: string;
+    planned_start?: string;
     planned_finish?: string;
     planned_progress: number;
+    actual_start?: string;
+    actual_finish?: string;
     actual_progress: number;
     status: string;
   }[];
