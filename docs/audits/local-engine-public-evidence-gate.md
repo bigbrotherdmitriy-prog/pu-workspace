@@ -9,6 +9,10 @@ private preprocessed TSV pass, while the public `extract_text_result` result
 could return no fields or invalid coordinates and still receive PASS. Failed
 pages also disappeared from the false-negative denominator.
 
+Independent review additionally reproduced a 20-page false PASS with two malformed
+public field results. Page success is now credited only after the whole public
+result is validated; the regression requires 18/20 technical successes and FAIL.
+
 Six regression cases failed before the fix: missing public evidence; wrong page;
 negative coordinates; coordinates outside the page; NaN coordinates; missing
 fields on a failed extraction. A valid-public-evidence control passed.
@@ -38,7 +42,7 @@ Missing artifacts fail the job. Failure/timeout cannot become PASS.
 
 ## Local checks
 
-- OCR regression plus existing benchmark/commercial/batch tests: **26 passed,
+- OCR regression plus existing benchmark/commercial/batch tests: **27 passed,
   1 skipped** (Tesseract unavailable).
 - Local-engine harness and workflow contracts: **14 passed**.
 - Real local helper execution: **FAIL, 0 passed, 3 skipped**. This is expected

@@ -266,23 +266,26 @@ def run_benchmark(corpus_path: Path, *, font_path: str | None = None) -> dict[st
                 extraction_started = time.perf_counter()
                 result = extract_text_result(buffer.getvalue(), "image/png", f"{case.case_id}.png")
                 elapsed_ms.append((time.perf_counter() - extraction_started) * 1000)
-                technical_successes += int(result.method == "ocr" and result.ocr_pages == 1)
-                recognized_pages += int(bool(result.text.strip()))
-                review_pages += int(result.needs_review)
-                if result.confidence < OCR_REVIEW_CONFIDENCE and not result.needs_review:
-                    low_confidence_policy_violations += 1
-
                 fields = result.fields
                 actual = _field_sets(fields)
+                locations = [_public_evidence_is_located(evidence, result.pages)
+                             for values in fields.values() for evidence in values]
+                # Validate the whole public result before crediting a successful page.
+                succeeded = int(result.method == "ocr" and result.ocr_pages == 1)
+                recognized = int(bool(result.text.strip()))
+                reviewed = int(result.needs_review)
+                violation = int(result.confidence < OCR_REVIEW_CONFIDENCE and not result.needs_review)
                 for name in FIELD_NAMES:
                     wanted = expected_fields[name]
                     counters[name]["tp"] += len(actual[name] & wanted)
                     counters[name]["fp"] += len(actual[name] - wanted)
                     counters[name]["fn"] -= len(actual[name] & wanted)
-                for values in fields.values():
-                    for evidence in values:
-                        evidence_total += 1
-                        evidence_with_coordinates += int(_public_evidence_is_located(evidence, result.pages))
+                evidence_total += len(locations)
+                evidence_with_coordinates += sum(locations)
+                technical_successes += succeeded
+                recognized_pages += recognized
+                review_pages += reviewed
+                low_confidence_policy_violations += violation
             except Exception as exc:
                 failures.append({"case_id": case.case_id, "reason": exc.__class__.__name__})
             benchmark_elapsed_ms.append((time.perf_counter() - started) * 1000)

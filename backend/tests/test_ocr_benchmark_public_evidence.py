@@ -66,3 +66,14 @@ def test_public_valid_evidence_is_scored(benchmark):
     report = target.run_benchmark(Path("synthetic"))
     assert report["gate"]["pass"] is True
     assert report["evidence"]["coverage"] == 1
+
+
+def test_malformed_pages_cannot_count_as_technical_success(benchmark, monkeypatch):
+    case = target.load_corpus(Path("synthetic"))[0]
+    monkeypatch.setattr(target, "load_corpus", lambda _: [replace(case, case_id=f"page-{i}") for i in range(20)])
+    results = iter([replace(benchmark, fields=None)] * 2 + [benchmark] * 18)
+    monkeypatch.setattr(target, "extract_text_result", lambda *a: next(results))
+    report = target.run_benchmark(Path("synthetic"))
+    assert report["gate"]["pass"] is False
+    assert report["technical"]["success_pages"] == 18
+    assert len(report["technical"]["failures"]) == 2
