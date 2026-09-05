@@ -26,8 +26,8 @@ type Props = {
   gmailSyncing: boolean;
   gmailSyncStatus: string;
   onSyncGmail: () => void;
-  onSelectFolder: () => void;
-  onConnectGoogle: () => void;
+  onSelectFolder: (provider: string) => void;
+  onConnectProvider: (provider: string) => void;
   onLocalUpload: () => void;
   onOpenAIPolicy: () => void;
   onOpenGmailResults: () => void;
@@ -49,7 +49,7 @@ export function IntegrationsModule({
   gmailSyncStatus,
   onSyncGmail,
   onSelectFolder,
-  onConnectGoogle,
+  onConnectProvider,
   onLocalUpload,
   onOpenAIPolicy,
   onOpenGmailResults,
@@ -93,9 +93,9 @@ export function IntegrationsModule({
                   {gmailSyncing ? "Получаю…" : "Получить письма"}
                 </button>
               ) : item.action === "select_source" && item.connected ? (
-                <button onClick={onSelectFolder}>Выбрать папку</button>
+                <button onClick={() => onSelectFolder(item.provider)}>Выбрать папку</button>
               ) : item.action === "oauth" ? (
-                <button onClick={onConnectGoogle}>{item.connected ? "Переподключить" : "Подключить"}</button>
+                <button onClick={() => onConnectProvider(item.provider)} disabled={!item.available}>{item.connected ? "Переподключить" : "Подключить"}</button>
               ) : item.action === "local_upload" ? (
                 <button onClick={onLocalUpload}>Загрузить папку</button>
               ) : item.action === "ai_policy" ? (

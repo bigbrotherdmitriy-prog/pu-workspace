@@ -42,6 +42,7 @@ class Organization(Base):
 
 class Contract(Base):
     __tablename__ = "contracts"
+    record_version: Mapped[int] = mapped_column(server_default="1")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

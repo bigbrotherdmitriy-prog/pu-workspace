@@ -12,6 +12,7 @@ from app.core.token_crypto import (
     encrypt_token,
     rotate_token,
 )
+from app.core.oauth_state import make_oauth_state, project_from_oauth_state
 from fastapi import HTTPException
 
 
@@ -76,6 +77,13 @@ class SecurityTests(unittest.TestCase):
             tampered = ("A" if state[0] != "A" else "B") + state[1:]
             with self.assertRaises(HTTPException):
                 _project_from_oauth_state(tampered)
+
+    def test_oauth_state_cannot_be_replayed_between_providers(self):
+        with patch.dict(os.environ, {"APP_SECRET_KEY": "a" * 32}):
+            state = make_oauth_state(42, "yandex_disk")
+            self.assertEqual(project_from_oauth_state(state, "yandex_disk"), 42)
+            with self.assertRaises(HTTPException):
+                project_from_oauth_state(state, "google")
 
 
 if __name__ == "__main__":

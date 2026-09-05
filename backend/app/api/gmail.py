@@ -4,8 +4,11 @@ import base64
 import json
 import os
 import re
+from datetime import datetime, timezone
+from email.message import EmailMessage
 from html.parser import HTMLParser
 from email.utils import parseaddr
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -15,6 +18,13 @@ from sqlalchemy.orm import Session
 from app.api.ai_secretary import IncomingMessage, ingest_message, project_candidate
 from app.api.project_contacts import contact_for_sender, discover_contact_from_message
 from app.integrations.google_workspace import google_workspace_for_project
+from app.integrations.google_workspace import google_workspace_for_mailbox
+from app.mailbox_identity.runtime import (
+    observe_gmail_message,
+    require_mailbox_authority,
+    runtime_for_message,
+    runtime_for_project_connection,
+)
 from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
@@ -26,12 +36,19 @@ from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.user import User
+from app.models.project import Project
 from app.core.integration_types import StorageObject
-from app.document_engine import index_documents
-from app.governance_engine import create_governance_items
-from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
-from app.task_engine import create_tasks_from_files
+from app.staging.gmail import (
+    GmailAttachmentBinding,
+    GmailAttachmentDenied,
+    GmailAttachmentIntegrityError,
+    GmailAttachmentUnavailable,
+    GmailProviderDownloadAdapter,
+    attachment_declaration,
+    enqueue_staged_gmail_attachment,
+    stage_gmail_attachment,
+)
 
 router = APIRouter(tags=["gmail"])
 MAX_ATTACHMENT_BYTES = int(os.getenv("GMAIL_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
@@ -318,7 +335,18 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
 
 
 def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:
-    service = google_workspace_for_project(project_id, db).service("gmail", "v1")
+    require_project_role(db, user, project_id, "editor")
+    sync_project = db.get(Project, project_id)
+    if sync_project is None:
+        raise HTTPException(404, "Project not found")
+    try:
+        mailbox_runtime = runtime_for_project_connection(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox identity is unavailable") from exc
+    if mailbox_runtime and mailbox_runtime.mailbox_cohort and not mailbox_runtime.flags.pilot_write:
+        raise HTTPException(409, "Mailbox cohort requires an explicit current-generation write flag")
+    service = (google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
+               if mailbox_runtime else google_workspace_for_project(project_id, db)).service("gmail", "v1")
     page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
@@ -338,10 +366,28 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 headers, item.get("labelIds"), subject, content,
             )
             automated_sender_reason = None if is_outgoing else _automated_sender_reason(headers)
+            mailbox_write = bool(mailbox_runtime and mailbox_runtime.flags.pilot_write)
             existing = db.scalar(select(Message).where(
-                Message.source_external_id == ref["id"],
+                Message.mail_connection_id == mailbox_runtime.mail_connection_id,
+                Message.provider_message_id == ref["id"],
+            )) if mailbox_write else db.scalar(select(Message).where(
+                Message.mail_connection_id.is_(None), Message.source_external_id == ref["id"],
+                Message.source_type.in_(("email", "email_outgoing")),
             ))
             if existing:
+                require_project_role(db, user, existing.project_id, "editor")
+                if existing.organization_id != sync_project.organization_id:
+                    raise HTTPException(409, "Message identity requires mailbox-scoped reconciliation")
+                if mailbox_write:
+                    source_ref, observation = observe_gmail_message(
+                        db, runtime=mailbox_runtime, project_id=existing.project_id,
+                        provider_message_id=item["id"], provider_thread_id=item.get("threadId"),
+                        observation_key=str(item.get("historyId") or item["id"]),
+                    )
+                    from app.mailbox_identity.service import MailboxIdentityService
+                    MailboxIdentityService().record_provider_observed_origin(
+                        db, message=existing, runtime=mailbox_runtime, source=source_ref,
+                        source_version=observation, actor=user)
                 existing.mail_headers_json = json.dumps({
                     key: headers[key]
                     for key in ("subject", "to", "cc", "date", "message-id", "in-reply-to", "references")
@@ -360,7 +406,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 existing_attachments = json.loads(existing.attachments_json or "[]")
                 if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
-                if existing.source_sender and not bulk_reason:
+                if existing.source_sender and not bulk_reason and existing.context_confirmed:
                     discover_contact_from_message(db, existing.project_id, existing.source_sender, existing.content, user)
                 # Older messages may have been synchronized before email fallback
                 # drafts existed. Backfill a reviewable draft without sending it
@@ -383,17 +429,39 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             if not content.strip():
                 skipped += 1
                 continue
+            target_project_id, routing_confidence, semantic_evidence = project_candidate(
+                db, project_id, f"{subject}\n{content}", user,
+            )
             contact = contact_for_sender(db, project_id, correspondent, user)
-            if contact is not None:
+            routing_evidence = None
+            routing_contract_id = None
+            if contact is not None and (routing_confidence == 0.40 or
+                                       (routing_confidence >= 0.90 and target_project_id != contact.project_id)):
+                routing_confidence = 0.40
+                routing_evidence = (f"Конфликт email и содержания; кандидаты проектов: {contact.project_id},{target_project_id}; "
+                                    f"{semantic_evidence}; требуется подтверждение")[:1000]
+            elif contact is not None:
                 target_project_id = contact.project_id
+                routing_confidence = 0.99
                 routing_evidence = f"Проект определён по email клиента: {contact.email}"
                 routing_contract_id = contact.contract_id
             else:
-                target_project_id, _, _ = project_candidate(
-                    db, project_id, f"{subject}\n{correspondent}\n{content}", user,
+                routing_evidence = semantic_evidence
+            ingress_origin = None
+            if mailbox_write:
+                source_ref, _observation = observe_gmail_message(
+                    db, runtime=mailbox_runtime, project_id=target_project_id,
+                    provider_message_id=item["id"],
+                    provider_thread_id=item.get("threadId"),
+                    observation_key=str(item.get("historyId") or item["id"]),
                 )
-                routing_evidence = None
-                routing_contract_id = None
+                ingress_origin = type("IngressOrigin", (), {
+                    "mail_connection_id": mailbox_runtime.mail_connection_id,
+                    "source_reference_id": source_ref.id,
+                    "runtime": mailbox_runtime,
+                    "source": source_ref,
+                    "source_version": _observation,
+                })()
             result = ingest_message(IncomingMessage(
                 project_id=target_project_id, source_type=source_type, source_external_id=item["id"],
                 source_name=(f"Исходящее: {recipient} — {subject}" if is_outgoing else f"{sender} — {subject}"),
@@ -401,11 +469,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 source_sender=correspondent, source_thread_id=item.get("threadId"), content=content,
                 attachments=attachments,
                 routing_contract_id=routing_contract_id, routing_evidence=routing_evidence,
+                routing_confidence=routing_confidence,
                 automation_suppressed=bool(bulk_reason),
                 automation_suppression_reason=bulk_reason,
                 response_suppressed=bool(automated_sender_reason),
                 response_suppression_reason=automated_sender_reason,
-            ), db, user)
+            ), db, user, mailbox_origin=ingress_origin)
             stored = db.get(Message, result["id"])
             stored.mail_headers_json = json.dumps({
                 key: headers[key]
@@ -414,7 +483,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             }, ensure_ascii=False)
             stored.mail_labels_json = json.dumps(item.get("labelIds") or [])
             processed += 1 if result["status"] else 0
-            if not bulk_reason and result["status"] != "filtered":
+            if not bulk_reason and not automated_sender_reason and result.get("context_confirmed"):
                 discover_contact_from_message(db, target_project_id, correspondent, content, user)
             thread_key = item.get("threadId") or item["id"]
             if not is_outgoing and not bulk_reason and thread_key not in notified_threads:
@@ -423,7 +492,7 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
         except Exception as exc:
             db.rollback()
             failed += 1
-            errors.append({"message_id": ref.get("id"), "error": exc.__class__.__name__})
+            errors.append({"item_index": processed + skipped + failed, "error": exc.__class__.__name__})
     reclassified = _backfill_automated_messages_for_user(db, user)
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
                     details=(f"query={query}; processed={processed}; skipped={skipped}; "
@@ -434,53 +503,89 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
 
 
 @router.post("/ai-secretary/inbox/{message_id}/attachments/{attachment_index}/import")
-def import_gmail_attachment(message_id: int, attachment_index: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def import_gmail_attachment(
+    message_id: int,
+    attachment_index: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+    mode: Literal["CONFIRM"] = "CONFIRM",
+):
+    if mode != "CONFIRM":
+        raise HTTPException(409, "Attachment import requires CONFIRM mode")
     source = db.get(Message, message_id)
     if source is None or source.source_type != "email":
         raise HTTPException(404, "Email message not found")
     require_project_role(db, user, source.project_id, "editor")
-    attachments = json.loads(source.attachments_json or "[]")
-    if attachment_index < 0 or attachment_index >= len(attachments):
-        raise HTTPException(404, "Attachment not found")
-    metadata = attachments[attachment_index]
-    attachment_id = metadata.get("attachment_id")
-    if not attachment_id:
-        raise HTTPException(422, "Attachment cannot be downloaded")
-    if int(metadata.get("size") or 0) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
-    external_id = metadata.get("document_external_id") or f"gmail:{source.source_external_id}:{attachment_id}"
-    existing_document = db.scalar(select(Document).where(
-        Document.project_id == source.project_id,
-        Document.external_id == external_id,
-    ))
-    if existing_document:
-        return {"document_id": existing_document.id, "name": existing_document.name, "tasks": 0, "drafts": 0,
-                "risks": 0, "decisions": 0, "already_indexed": True}
-    service = google_workspace_for_project(source.project_id, db).service("gmail", "v1")
-    payload = service.users().messages().attachments().get(
-        userId="me", messageId=source.source_external_id, id=attachment_id,
-    ).execute()
-    data = base64.urlsafe_b64decode(payload.get("data", "") + "=" * (-len(payload.get("data", "")) % 4))
-    if len(data) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(413, f"Attachment exceeds {MAX_ATTACHMENT_BYTES // 1024 // 1024} MB")
-    name = metadata.get("name") or "attachment"
-    mime_type = metadata.get("mime_type") or "application/octet-stream"
-    content = extract_text(data, mime_type, name)
-    if not content:
-        raise HTTPException(422, "Текст из вложения не извлечён; возможно, требуется OCR")
-    item = StorageObject(
-        id=external_id, name=name,
-        mime_type=mime_type, parent_id=f"message:{source.id}", size=len(data), content_text=content,
+    try:
+        mime_type, declared_size, attachment_id = attachment_declaration(
+            source, attachment_index, max_bytes=MAX_ATTACHMENT_BYTES,
+        )
+        mailbox = runtime_for_message(db, source, actor=user, action=True)
+    except (ValueError, GmailAttachmentDenied) as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
+    if mailbox is None:
+        # Historical/project-token fallback is never sufficient for staging.
+        raise HTTPException(409, "Mailbox origin is unavailable")
+    try:
+        mailbox_authority = require_mailbox_authority(
+            db, runtime=mailbox, actor=user, permission="action",
+        )
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
+    project = db.get(Project, source.project_id)
+    if project is None or project.organization_id != source.organization_id:
+        raise HTTPException(409, "Attachment scope is unavailable")
+    binding = GmailAttachmentBinding(
+        organization_id=source.organization_id,
+        owner_user_id=user.id,
+        project_id=source.project_id,
+        message_id=source.id,
+        attachment_index=attachment_index,
+        identity_id=mailbox.identity_id,
+        mail_connection_id=mailbox.mail_connection_id,
+        credential_generation=mailbox.generation,
+        binding_epoch=mailbox.binding_epoch,
+        mailbox_flags_record_version=mailbox.flags.record_version,
+        mailbox_authority_version=mailbox_authority.authority_version,
+        source_reference_id=mailbox.source_reference_id,
+        source_version_id=mailbox.source_version_id,
+        mailbox_binding_id=mailbox.binding_id,
+        declared_mime_type=mime_type,
+        declared_size=declared_size,
+        mode=mode,
     )
-    documents = index_documents(db, source.project_id, [item], "gmail")
-    tasks = create_tasks_from_files(db, source.project_id, source.contract_id, [item], source_type="email_attachment")
-    drafts = create_response_drafts(db, source.project_id, source.contract_id, [item])
-    risks, decisions = create_governance_items(db, source.project_id, [item], source_type="email_attachment")
-    db.add(AuditLog(action="gmail_attachment_imported", entity_type="message", entity_id=source.id,
-                    details=f"name={name}; documents={len(documents)}; tasks={len(tasks)}; risks={len(risks)}"))
-    db.commit()
-    return {"document_id": documents[0].id, "name": name, "tasks": len(tasks), "drafts": len(drafts),
-            "risks": len(risks), "decisions": len(decisions), "already_indexed": False}
+    service = google_workspace_for_mailbox(mailbox.google_token_id, db).service("gmail", "v1")
+    provider = GmailProviderDownloadAdapter(
+        service,
+        provider_message_id=mailbox.provider_message_id,
+        provider_attachment_id=attachment_id,
+        expected_size=declared_size,
+        max_bytes=MAX_ATTACHMENT_BYTES,
+    )
+    try:
+        staged = stage_gmail_attachment(db, binding, provider, max_bytes=MAX_ATTACHMENT_BYTES)
+        db.add(AuditLog(
+            action="gmail_attachment_staged",
+            entity_type="message",
+            entity_id=source.id,
+            details=f"staging_id={staged.staging_id};status=admitted",
+        ))
+        job = enqueue_staged_gmail_attachment(db, staged.staging_id)
+    except GmailAttachmentUnavailable as exc:
+        db.rollback()
+        raise HTTPException(503, "Attachment staging is unavailable") from exc
+    except GmailAttachmentIntegrityError as exc:
+        db.rollback()
+        raise HTTPException(422, "Attachment integrity validation failed") from exc
+    except GmailAttachmentDenied as exc:
+        db.rollback()
+        raise HTTPException(409, "Attachment import is not authorized") from exc
+    return {
+        "staging_id": staged.staging_id,
+        "job_id": job.id,
+        "status": job.status,
+        "already_queued": staged.duplicate or job.attempts > 0 or job.status != "queued",
+    }
 
 
 @router.post("/response-drafts/{draft_id}/send-gmail")
@@ -488,19 +593,47 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     draft = db.get(ResponseDraft, draft_id)
     if draft is None:
         raise HTTPException(404, "Response draft not found")
+    require_project_role(db, user, draft.project_id, "manager")
+    if draft.source_file_name == "corrective-follow-up":
+        raise HTTPException(409, "Corrective follow-up requires separate CONFIRM provider action")
+    source = db.get(Message, draft.message_id) if draft.message_id else None
+    try:
+        mailbox = runtime_for_message(db, source, actor=user, action=True) if source is not None else None
+    except ValueError as exc:
+        raise HTTPException(409, "Mailbox origin is unavailable") from exc
+    if draft.sent_external_id:
+        return {"id": draft.id, "status": "sent", "gmail_message_id": draft.sent_external_id, "already_sent": True}
     if draft.status != "approved" or draft.approved_revision != draft.revision:
         raise HTTPException(409, "Сначала подтвердите текущую редакцию проекта ответа")
-    from app.api.mail import MailDraftSend, send_mail_draft
-
-    result = send_mail_draft(
-        draft_id,
-        MailDraftSend(revision=draft.revision, idempotency_key=f"legacy-{draft.id}-{draft.revision}"),
-        db,
-        user,
+    recipient = draft.recipient_to or (
+        parseaddr(source.source_sender)[1]
+        if source is not None and source.source_type == "email" and source.source_sender else ""
     )
-    return {
-        "id": result["id"],
-        "status": result["status"],
-        "gmail_message_id": (result.get("receipt") or {}).get("external_message_id"),
-        "already_sent": result["idempotent_replay"],
-    }
+    if not recipient:
+        raise HTTPException(422, "Не удалось определить адрес получателя")
+    message = EmailMessage()
+    message["To"] = recipient
+    message["Subject"] = (
+        draft.subject if draft.recipient_to or draft.subject.lower().startswith("re:")
+        else f"Re: {draft.subject}"
+    )
+    message.set_content(draft.body)
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    service = (
+        google_workspace_for_mailbox(mailbox.google_token_id, db)
+        if mailbox else google_workspace_for_project(draft.project_id, db)
+    ).service("gmail", "v1")
+    body = {"raw": raw}
+    thread_id = mailbox.provider_thread_id if mailbox else source.source_thread_id if source is not None else None
+    if thread_id:
+        body["threadId"] = thread_id
+    sent = service.users().messages().send(userId="me", body=body).execute()
+    draft.sent_external_id = sent["id"]
+    draft.sent_at = datetime.now(timezone.utc)
+    draft.status = "sent"
+    db.add(AuditLog(
+        action="gmail_reply_sent", entity_type="response_draft", entity_id=draft.id,
+        details=f"status=sent; revision={draft.revision}; mailbox_origin={bool(mailbox)}",
+    ))
+    db.commit()
+    return {"id": draft.id, "status": draft.status, "gmail_message_id": draft.sent_external_id, "already_sent": False}

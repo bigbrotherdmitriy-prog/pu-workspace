@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, FileUp, Link2, Move, Network, Trash2, X } from "lucide-react";
+import { Archive, FileText, FileUp, Link2, Move, Network, Trash2, X } from "lucide-react";
 import { buildContractTree } from "./contractTree";
 
 export type SchemeDocument = { id: number; name: string; source?: string; source_url?: string };
@@ -10,6 +10,7 @@ export type SchemeContract = {
   counterparty?: string;
   contract_kind?: string;
   parent_contract_id?: number;
+  status?: string;
   linked_documents?: SchemeDocument[];
 };
 
@@ -20,6 +21,7 @@ type Props = {
   onConnect: (parentId: number, childId: number) => void;
   onOpenDocument: (documentId: number) => void;
   onDelete?: (contract: SchemeContract) => void;
+  onArchive?: (contract: SchemeContract) => void;
   onDropDocuments?: (documentIds: number[], parentContractId?: number) => void;
   onDropFiles?: (files: File[], parentContractId?: number) => void;
   onDropApplications?: (files: File[], contractId: number) => void;
@@ -66,7 +68,7 @@ function kindLabel(kind?: string) {
   return "Заказчик";
 }
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [positions, setPositions] = useState<Record<number, Point>>(() => defaultPositions(contracts));
   const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
@@ -197,7 +199,8 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       </div>
       <p className="contract-finance-confirmation">После анализа откроется предварительный просмотр. Строки ГПР, бюджета и ДДС создаются только после вашего подтверждения.</p>
       {onDelete && <div className="contract-scheme-delete-zone">
-        <p><strong>Удаление карточки договора</strong><small>Исходные файлы и документы проекта останутся на месте.</small></p>
+        <p><strong>Архивирование и удаление</strong><small>Архив сохраняет все связи. Физическое удаление доступно только для договора без зависимостей.</small></p>
+        {onArchive && selected.status !== "archived" && <button className="secondary" onClick={() => onArchive(selected)}><Archive /> Архивировать договор</button>}
         <button className="danger" onClick={() => onDelete(selected)}><Trash2 /> Удалить договор</button>
       </div>}
     </aside>}

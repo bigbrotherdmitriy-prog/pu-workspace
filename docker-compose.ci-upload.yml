@@ -1,0 +1,16 @@
+# Docker-smoke-only extension. Staging and production must not load this file.
+x-local-upload-ci: &local-upload-ci
+  environment:
+    PU_LOCAL_UPLOAD_CI_RUNTIME: ${PU_LOCAL_UPLOAD_CI_RUNTIME:?generate CI environment}
+    PU_LOCAL_UPLOAD_STAGING_ROOT: ${PU_LOCAL_UPLOAD_STAGING_ROOT:?generate CI environment}
+  volumes:
+    - staging:/var/lib/pu-workspace-ci-staging
+
+services:
+  backend:
+    <<: *local-upload-ci
+  worker:
+    <<: *local-upload-ci
+
+volumes:
+  staging:

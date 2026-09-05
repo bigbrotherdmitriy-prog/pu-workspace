@@ -9,7 +9,10 @@ import app.models  # noqa: F401 - registers all tables in Base.metadata
 
 config = context.config
 if config.config_file_name:
-    fileConfig(config.config_file_name)
+    # Alembic is also executed in-process by readiness and regression tests.
+    # Keep application loggers alive instead of letting ``fileConfig`` disable
+    # every logger that is not declared in alembic.ini.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 database_url = os.getenv("DATABASE_URL")
 if database_url:

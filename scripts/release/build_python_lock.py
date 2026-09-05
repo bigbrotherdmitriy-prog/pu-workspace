@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Build a target-specific, hash-locked Python requirements file from a pip report.
+
+The resolver itself must run inside the target Linux/Python environment.  This
+tool deliberately rejects cross-platform reports so a Windows resolution cannot
+silently be labelled as the production Linux dependency graph.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+PIN = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^\s;]+)$")
+SAFE_URL = re.compile(r"^https://files\.pythonhosted\.org/")
+TARGET = {
+    "implementation_name": "cpython",
+    "python_version": "3.12",
+    "sys_platform": "linux",
+    "platform_machine": "x86_64",
+}
+
+
+class LockError(ValueError):
+    """A resolver report cannot be promoted to a release lock."""
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def canonical_name(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def direct_pins(requirements: str) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for raw in requirements.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = PIN.fullmatch(line)
+        if not match:
+            raise LockError(f"direct requirement is not an exact pin: {line}")
+        name, version = match.groups()
+        normalized = canonical_name(name)
+        if normalized in pins:
+            raise LockError(f"duplicate direct requirement: {normalized}")
+        pins[normalized] = version
+    if not pins:
+        raise LockError("no direct requirements")
+    return pins
+
+
+def _target_matches(environment: dict[str, Any]) -> bool:
+    machine = str(environment.get("platform_machine", "")).lower()
+    machine = "x86_64" if machine in {"amd64", "x86_64"} else machine
+    actual = {
+        "implementation_name": str(environment.get("implementation_name", "")).lower(),
+        "python_version": str(environment.get("python_version", "")),
+        "sys_platform": str(environment.get("sys_platform", "")).lower(),
+        "platform_machine": machine,
+    }
+    return actual == TARGET
+
+
+def parse_report(report: dict[str, Any], requirements: bytes) -> list[dict[str, Any]]:
+    if report.get("version") != "1" or not isinstance(report.get("pip_version"), str):
+        raise LockError("unsupported pip report")
+    environment = report.get("environment")
+    if not isinstance(environment, dict) or not _target_matches(environment):
+        raise LockError("pip report was not produced by CPython 3.12 on Linux x86_64")
+    expected = direct_pins(requirements.decode("utf-8"))
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    requested: dict[str, str] = {}
+    for item in report.get("install", []):
+        if not isinstance(item, dict) or item.get("is_yanked") is True:
+            raise LockError("yanked or malformed distribution in report")
+        metadata = item.get("metadata")
+        download = item.get("download_info")
+        archive = download.get("archive_info") if isinstance(download, dict) else None
+        hashes = archive.get("hashes") if isinstance(archive, dict) else None
+        name = metadata.get("name") if isinstance(metadata, dict) else None
+        version = metadata.get("version") if isinstance(metadata, dict) else None
+        url = download.get("url") if isinstance(download, dict) else None
+        digest = hashes.get("sha256") if isinstance(hashes, dict) else None
+        if not all(isinstance(value, str) and value for value in (name, version, url, digest)):
+            raise LockError("distribution lacks name, version, URL or SHA-256")
+        normalized = canonical_name(name)
+        if normalized in seen:
+            raise LockError(f"duplicate resolved distribution: {normalized}")
+        if not SAFE_URL.match(url) or not url.lower().endswith(".whl"):
+            raise LockError(f"non-wheel or non-PyPI artifact for {normalized}")
+        if not SHA256.fullmatch(digest):
+            raise LockError(f"invalid SHA-256 for {normalized}")
+        seen.add(normalized)
+        if item.get("requested") is True:
+            requested[normalized] = version
+        rows.append({
+            "name": normalized,
+            "version": version,
+            "sha256": digest,
+            "artifact_url": url,
+            "requested": item.get("requested") is True,
+        })
+    if requested != expected:
+        raise LockError(f"requested pins differ from input: expected={sorted(expected)} actual={sorted(requested)}")
+    if not rows:
+        raise LockError("empty resolver result")
+    return sorted(rows, key=lambda row: row["name"])
+
+
+def render_lock(rows: list[dict[str, Any]], requirements_sha256: str, pip_version: str) -> str:
+    lines = [
+        "# Generated by scripts/release/build_python_lock.py; DO NOT EDIT.",
+        "# Target: CPython 3.12 / Linux x86_64 / binary wheels only.",
+        f"# Input backend/requirements.txt SHA-256: {requirements_sha256}",
+        f"# Resolver: pip {pip_version}",
+        "--only-binary=:all:",
+        "--require-hashes",
+        "",
+    ]
+    for row in rows:
+        lines.append(f"{row['name']}=={row['version']} \\")
+        lines.append(f"    --hash=sha256:{row['sha256']}")
+    return "\n".join(lines) + "\n"
+
+
+def build(report_path: Path, requirements_path: Path, lock_path: Path, provenance_path: Path) -> dict[str, Any]:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    requirements = requirements_path.read_bytes()
+    rows = parse_report(report, requirements)
+    input_digest = sha256_bytes(requirements)
+    lock = render_lock(rows, input_digest, report["pip_version"])
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    provenance_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(lock, encoding="utf-8", newline="\n")
+    value = {
+        "schema": "pu-workspace-python-lock-provenance/v1",
+        "target": TARGET,
+        "pip_version": report["pip_version"],
+        "requirements_sha256": input_digest,
+        "lock_sha256": sha256_bytes(lock.encode("utf-8")),
+        "package_count": len(rows),
+        "direct_package_count": sum(1 for row in rows if row["requested"]),
+        "packages": rows,
+        "legal_effect": "artifact identity evidence only; not a license conclusion",
+    }
+    provenance_path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return value
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--requirements", type=Path, required=True)
+    parser.add_argument("--lock-out", type=Path, required=True)
+    parser.add_argument("--provenance-out", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        build(args.report, args.requirements, args.lock_out, args.provenance_out)
+    except (LockError, OSError, json.JSONDecodeError) as exc:
+        print(f"python lock rejected: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

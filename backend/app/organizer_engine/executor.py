@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from .config import FOLDER_STRUCTURE, MIN_AUTO_CONFIDENCE
-from .drive import DriveClient
+from app.integrations.contracts import MutableStorageAdapter
 from .naming import build_standard_name
 from .repository import OrganizerRepository
 
@@ -22,7 +22,7 @@ def source_metadata_changed(item, current) -> bool:
 
 
 class OrganizerExecutor:
-    def __init__(self, repo: OrganizerRepository, drive: DriveClient):
+    def __init__(self, repo: OrganizerRepository, drive: MutableStorageAdapter):
         self.repo = repo
         self.drive = drive
 
@@ -542,6 +542,15 @@ class OrganizerExecutor:
 
         if not proposal or not proposal["copy_folder_id"]:
             raise ValueError("Proposal/safe copy not found")
+
+        if proposal["status"] == "rolled_back":
+            operations = self.repo.operations(proposal_id, limit)
+            return {
+                "rolled_back": 0,
+                "skipped": len(operations),
+                "errors": 0,
+                "already_rolled_back": 1,
+            }
 
         if proposal["status"] not in {"applied", "rollback_partial"}:
             raise ValueError("Only an applied proposal can be rolled back")

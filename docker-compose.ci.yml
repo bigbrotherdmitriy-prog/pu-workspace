@@ -6,6 +6,7 @@ x-environment: &environment
   BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:?generate test environment}
   PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?set tested commit}
   PU_BACKGROUND_EXECUTION: durable
+  PU_V54_SYNTHETIC_ACCEPTANCE: "false"
   GMAIL_AUTO_SYNC_ENABLED: "false"
   AI_SECRETARY_AUTOMATION_ENABLED: "false"
   GOOGLE_CLIENT_ID: ""
@@ -78,8 +79,10 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
 volumes:
   data:
+
 networks:
   default:
     internal: true

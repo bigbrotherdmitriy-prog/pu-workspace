@@ -1,0 +1,94 @@
+{
+  "contract_version": "v54-context-communication/1",
+  "notice": "Documentation fixtures, not executable API requests. IDs are aliases. Evidence/Action owner refs are opaque; their schemas are not defined here. No real mailbox or network.",
+  "fixtures": {
+    "organization_id": "org-1",
+    "actor_id": "operator-1",
+    "projects": ["project-alpha", "project-beta"],
+    "contracts": [{"id": "contract-a", "number": "TEST-A-2026", "project_id": "project-alpha"}],
+    "contact": {"id": "contact-1", "normalized_email": "contractor@example.test", "confirmed_project_ids": ["project-alpha", "project-beta"]},
+    "connections": ["mailbox-1", "mailbox-2"],
+    "source": {
+      "from": "Contractor <contractor@example.test>",
+      "to": "pilot@example.test",
+      "subject": "Проект Альфа, договор TEST-A-2026",
+      "body": "По договору TEST-A-2026 проекта Альфа просим предоставить исправленный акт. Требования и срок — во вложении.",
+      "attachment": {"name": "request.txt", "content": "Предоставить исправленный акт по договору TEST-A-2026 до 10.09.2026 18:00 Europe/Moscow"}
+    },
+    "unavailable_tenant": {"organization_id": "org-2", "project_id": "project-secret", "expected_visibility": "not_found"}
+  },
+  "normalized_envelope": {
+    "message_id": "message-1",
+    "organization_id": "org-1",
+    "mail_connection_id": "mailbox-1",
+    "provider": "gmail",
+    "transport": "fake",
+    "provider_message_id": "fake-provider-message-1",
+    "provider_thread_id": "fake-thread-1",
+    "rfc_message_id": "<request-1@example.test>",
+    "in_reply_to": null,
+    "references": [],
+    "direction": "inbound",
+    "source_ref": "source-owner:message-1:v1",
+    "attachment_refs": ["source-owner:attachment-1:v1"],
+    "project_id": null,
+    "contract_id": null,
+    "identity_state": "verified",
+    "context_version": 0
+  },
+  "context_resolution": {
+    "analysis_ref": "analysis-1",
+    "requires_review": true,
+    "candidate_relation_refs": ["relation-project-1", "relation-contract-1"],
+    "relations": [
+      {"relation_id": "relation-project-1", "lineage_id": "lineage-project-1", "revision": 1, "organization_id": "org-1", "source": {"type": "Message", "id": "message-1"}, "target": {"type": "Project", "id": "project-alpha"}, "relation_type": "communication.project", "scope": {"kind": "mailbox", "id": "mailbox-1"}, "state": "hypothesis", "confidence": 0.95, "evidence_refs": ["evidence-owner:project-claim-1:v1"], "origin": {"kind": "model", "provider": "mock", "model": "synthetic", "prompt_version": "pilot-v1", "rule_ref": null, "analysis_ref": "analysis-1"}, "initiated_by": "operator-1", "created_at": "2026-09-03T09:00:00Z", "confirmed_by": null, "confirmed_at": null, "supersedes_relation_id": null, "expected_source_version": "source-owner:message-1:v1", "expected_target_version": "project-alpha:v1", "applicability": "current", "record_version": 1, "correlation_id": "correlation-1", "ledger_event_ref": "ledger-owner:relation-created-1"},
+      {"relation_id": "relation-contract-1", "lineage_id": "lineage-contract-1", "revision": 1, "organization_id": "org-1", "source": {"type": "Message", "id": "message-1"}, "target": {"type": "Contract", "id": "contract-a"}, "relation_type": "communication.contract", "scope": {"kind": "mailbox", "id": "mailbox-1"}, "state": "hypothesis", "confidence": 0.95, "evidence_refs": ["evidence-owner:contract-claim-1:v1"], "origin": {"kind": "model", "provider": "mock", "model": "synthetic", "prompt_version": "pilot-v1", "rule_ref": null, "analysis_ref": "analysis-1"}, "initiated_by": "operator-1", "created_at": "2026-09-03T09:00:00Z", "confirmed_by": null, "confirmed_at": null, "supersedes_relation_id": null, "expected_source_version": "source-owner:message-1:v1", "expected_target_version": "contract-a:v1", "applicability": "current", "record_version": 1, "correlation_id": "correlation-1", "ledger_event_ref": "ledger-owner:relation-created-2"}
+    ],
+    "human_confirmation_result": {"relation_refs": ["relation-project-1", "relation-contract-1"], "state": "confirmed", "confirmed_by": "operator-1", "confirmed_at": "2026-09-03T09:05:00Z", "record_version": 2, "message_context_version": 1, "confidence_unchanged": 0.95, "ledger_event_ref": "ledger-owner:context-confirmed-1"},
+    "deadline_view": {"value": "2026-09-10T18:00:00+03:00", "timezone": "Europe/Moscow", "evidence_ref": "evidence-owner:deadline-claim-1:v1", "claim_anchor": "evidence-owner:claim-anchor-1", "source_ref": "source-owner:attachment-1:v1", "locator_resolution": "By Evidence owner under viewer ACL; fragment must equal fixture attachment content"}
+  },
+  "background_job_payload": {
+    "organization_id": "org-1",
+    "mail_connection_id": "mailbox-1",
+    "message_id": "message-1",
+    "analysis_run_id": "analysis-1",
+    "actor_id": "operator-1",
+    "expected_context_version": 0,
+    "correlation_id": "correlation-1"
+  },
+  "action_owner_handoff": {
+    "scope": {"organization_id": "org-1", "scope_project_id": "project-alpha", "actor_ref": "operator-1", "analysis_ref": "analysis-1", "correlation_id": "correlation-1"},
+    "preconditions": {"expected_context_version": 1, "mail_connection_id": "mailbox-1", "relation_refs": ["relation-project-1", "relation-contract-1"], "relation_record_versions": [2, 2], "source_ref": "source-owner:attachment-1:v1"},
+    "intents": [
+      {"action_type": "create-internal-task", "intent_key_parts": ["org-1", "message-1", "evidence-owner:claim-anchor-1", "create-internal-task"], "revision": 1, "evidence_refs": ["evidence-owner:deadline-claim-1:v1"], "payload_ref": "proposal-owner:task-payload-1:v1", "proposal_ref": "proposal-owner:task-1:v1", "required_mode": "CONFIRM"},
+      {"action_type": "prepare-response-draft", "intent_key_parts": ["org-1", "message-1", "evidence-owner:claim-anchor-1", "prepare-response-draft"], "revision": 1, "evidence_refs": ["evidence-owner:deadline-claim-1:v1"], "payload_ref": "proposal-owner:draft-payload-1:v1", "proposal_ref": "proposal-owner:draft-1:v1", "required_mode": "ASSIST"},
+      {"action_type": "send-external-message", "intent_key_parts": ["org-1", "message-1", "evidence-owner:claim-anchor-1", "send-external-message"], "revision": 1, "evidence_refs": ["evidence-owner:deadline-claim-1:v1"], "payload_ref": "proposal-owner:send-payload-1:v1", "proposal_ref": "proposal-owner:send-1:v1", "required_mode": "CONFIRM", "depends_on_success": "execution-owner:create-task-1"}
+    ],
+    "business_payload_illustrations_not_owner_schema": {
+      "task": {"title": "Предоставить исправленный акт", "project_id": "project-alpha", "contract_id": "contract-a", "assigned_to": "operator-1", "due_at": "2026-09-10T18:00:00+03:00"},
+      "reply": {"recipient": "contractor@example.test", "body": "Задача на исправленный акт создана. Срок: 10.09.2026 18:00 Europe/Moscow.", "mail_connection_id": "mailbox-1", "in_reply_to": "<request-1@example.test>", "references": ["<request-1@example.test>"]}
+    },
+    "owner_returns_after_separate_confirmations": {
+      "approval_refs": ["approval-owner:task-1:v1", "approval-owner:send-1:v1"],
+      "execution_refs": ["execution-owner:create-task-1", "execution-owner:send-1"],
+      "ledger_event_refs": ["ledger-owner:task-created-1", "ledger-owner:send-confirmed-1"],
+      "task_id": "task-1",
+      "draft_id": "draft-1",
+      "outbound_identity": {"mail_connection_id": "mailbox-1", "provider_message_id": "fake-outgoing-1", "rfc_message_id": "<outgoing-1@example.test>"},
+      "hash_note": "Canonical payload hashes and immutable receipts are produced and verified by the action owner, not invented by this fixture."
+    }
+  },
+  "reply_and_escalation": {
+    "reply": {"mail_connection_id": "mailbox-1", "provider_message_id": "fake-reply-1", "from": "contractor@example.test", "in_reply_to": "<outgoing-1@example.test>", "references": ["<request-1@example.test>", "<outgoing-1@example.test>"]},
+    "expected_after_reply": {"response_expectation_state": "response_received", "task_status": "assigned", "completed": false},
+    "alternative_without_reply": {"requires_confirmed_open_task": true, "due_at": "2026-09-10T18:00:00+03:00", "dedup_key_parts": ["expectation-1", "deadline-revision-1", "internal-level-1", "2026-09-10T15:00:00Z"], "external_send_allowed": false}
+  },
+  "independent_negative_cases": [
+    {"case": "second-mailbox-same-provider-id", "mail_connection_id": "mailbox-2", "provider_message_id": "fake-provider-message-1", "expected": "new Message identity, not a duplicate of message-1"},
+    {"case": "manual-correction-after-send", "message_id": "message-1", "new_project_id": "project-beta", "new_contract_id": null, "human_evidence_ref": "evidence-owner:manual-correction-1:v1", "expected": {"old_project_relation": "superseded", "new_project_relation": "confirmed, same lineage revision 2, new relation_id", "old_contract_relation": "superseded without replacement", "origin_mail_connection_id": "mailbox-1", "existing_task": "unchanged; separate corrective action required", "global_rule_created": false, "pending_old_approvals_valid": false}},
+    {"case": "legacy-unknown-mailbox", "message_id": "legacy-message-1", "project_id": "project-alpha", "mail_connection_id": null, "expected": "preserve visible legacy projection, legacy_unverified, no inferred mailbox and no send"},
+    {"case": "reanalysis-same-claim-new-model", "message_id": "message-1", "claim_anchor": "evidence-owner:claim-anchor-1", "generation": 2, "expected_new_task_count": 0, "expected_new_send_count": 0},
+    {"case": "send-timeout-after-possible-delivery", "execution_ref": "execution-owner:send-1", "expected": "unknown; no automatic resend until shared Execution reconciles"},
+    {"case": "conflicting-contract-candidates", "expected": "hypotheses only; reviewer selects accessible project and matching contract; no execute"}
+  ]
+}

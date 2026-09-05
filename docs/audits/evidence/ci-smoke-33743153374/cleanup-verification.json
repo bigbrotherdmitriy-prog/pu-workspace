@@ -1,0 +1,10 @@
+{
+  "project": "puw-ci-33743153374-1",
+  "remaining_resource_counts": {
+    "containers": 0,
+    "networks": 0,
+    "volumes": 0
+  },
+  "temporary_files_removed": true,
+  "cleanup_confirmed": true
+}

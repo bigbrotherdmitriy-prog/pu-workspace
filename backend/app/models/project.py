@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -9,6 +9,7 @@ from app.database import Base
 class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_v54_project_scope"),
         CheckConstraint(
             "(site_latitude IS NULL AND site_longitude IS NULL AND site_geofence_radius_m IS NULL) OR "
             "(site_latitude IS NOT NULL AND site_longitude IS NOT NULL AND site_geofence_radius_m IS NOT NULL)",
@@ -25,6 +26,7 @@ class Project(Base):
             name="ck_projects_site_accuracy",
         ),
     )
+    record_version: Mapped[int] = mapped_column(server_default="1")
 
     id: Mapped[int] = mapped_column(
         primary_key=True,

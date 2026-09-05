@@ -1,13 +1,14 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
 class Risk(Base):
     __tablename__ = "risks"
-    __table_args__ = (UniqueConstraint("project_id", "source_hash", name="uq_risk_source_hash"),)
+    __table_args__ = (UniqueConstraint("project_id", "source_hash", name="uq_risk_source_hash"), CheckConstraint("record_version > 0", name="ck_risks_record_version"))
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     kind: Mapped[str] = mapped_column(String(30), default="risk", index=True)
@@ -28,8 +29,9 @@ class Risk(Base):
 
 class Decision(Base):
     __tablename__ = "decisions"
-    __table_args__ = (UniqueConstraint("project_id", "source_hash", name="uq_decision_source_hash"),)
+    __table_args__ = (UniqueConstraint("project_id", "source_hash", name="uq_decision_source_hash"), CheckConstraint("record_version > 0", name="ck_decisions_record_version"))
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     initiator_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     question: Mapped[str] = mapped_column(Text)

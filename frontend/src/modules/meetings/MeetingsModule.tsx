@@ -2,6 +2,7 @@ import { Users } from "lucide-react";
 
 export type MeetingRow = {
   id: number;
+  record_version?: number;
   contract_id?: number;
   title: string;
   scheduled_at?: string;

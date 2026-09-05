@@ -1,0 +1,5 @@
+{
+  "expected_bootstrap_conflict_confirmed": true,
+  "expected_http_status": 409,
+  "expected_exit_code": 1
+}

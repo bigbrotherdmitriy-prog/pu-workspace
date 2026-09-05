@@ -32,6 +32,23 @@ def run(base, env, seed=False):
         with client.open(Request(base + path, data=body, headers=headers), timeout=30) as response:
             return json.load(response)
 
+    def wait_for_job(job_id, timeout_seconds=90):
+        deadline = time.monotonic() + timeout_seconds
+        last_status = "queued"
+        while time.monotonic() < deadline:
+            jobs = request("/admin/jobs?limit=100").get("jobs", [])
+            job = next((item for item in jobs if item.get("id") == job_id), None)
+            if job:
+                last_status = job.get("status", "unknown")
+                if last_status == "completed":
+                    return job
+                if last_status in {"failed", "dead_letter", "cancelled"}:
+                    raise AssertionError(
+                        f"Upload job {job_id} ended with {last_status}: {job.get('error') or 'no error detail'}"
+                    )
+            time.sleep(1)
+        raise AssertionError(f"Upload job {job_id} did not complete; last status={last_status}")
+
     last_failure = 'not ready'
     for attempt in range(60):
         try:
@@ -65,7 +82,9 @@ def run(base, env, seed=False):
             'path': 'nested/acceptance.txt', 'mime_type': 'text/plain',
             'content_base64': base64.b64encode('Просим подготовить акт выполненных работ до 30.12.2026. Ответственный: Иванов.'.encode()).decode(),
         }]})
-        assert result['processed'] == 1 and result['documents'], 'Upload did not produce a document'
+        assert result.get('status') == 'queued' and len(result.get('jobs', [])) == 1, \
+            'Upload was not admitted to the durable queue'
+        wait_for_job(result['jobs'][0]['job_id'])
     projects = {item['name']: item['id'] for item in request('/projects/')['projects']}
     first, second = projects['CI project A'], projects['CI project B']
     documents = request(f'/projects/{first}/documents')['documents']
