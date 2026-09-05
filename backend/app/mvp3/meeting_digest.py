@@ -477,7 +477,12 @@ def schedule_digest_jobs(db: Session, *, now: datetime | None = None) -> int:
         ProjectMember,
         (ProjectMember.project_id == ManagementDigestPreference.project_id)
         & (ProjectMember.user_id == ManagementDigestPreference.user_id),
-    ).order_by(ManagementDigestPreference.id)).all()
+    ).order_by(ManagementDigestPreference.id).limit(1001)).all()
+    # A scheduler pass is deliberately bounded and fails closed instead of
+    # silently starving preferences beyond the safety cap.
+    if len(rows) > 1000:
+        raise ValueError("digest_scheduler_capacity_exceeded")
+    due: list[tuple[ManagementDigestPreference, date, str]] = []
     for row in rows:
         try:
             preference = DigestPreference(
@@ -500,9 +505,16 @@ def schedule_digest_jobs(db: Session, *, now: datetime | None = None) -> int:
             f"mvp3.digest.preference:{row.id}:v{row.record_version}:"
             f"{local.date().isoformat()}"
         )
-        if db.scalar(select(BackgroundJob.id).where(BackgroundJob.idempotency_key == key)):
+        due.append((row, local.date(), key))
+    if not due:
+        return 0
+    existing = set(db.scalars(select(BackgroundJob.idempotency_key).where(
+        BackgroundJob.idempotency_key.in_([key for _, _, key in due]),
+    )))
+    for row, local_date, key in due:
+        if key in existing:
             continue
-        enqueue_persisted_digest(db, preference=row, local_date=local.date())
+        enqueue_persisted_digest(db, preference=row, local_date=local_date)
         scheduled += 1
     return scheduled
 

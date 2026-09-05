@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -409,10 +409,16 @@ def evidence_attention(project_id: int, offset: int = 0, limit: int = 50, kinds:
 
 
 @router.get("/obligations")
-def obligations(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def obligations(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+                offset: int = 0, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
-    rows = db.scalars(select(Obligation).where(Obligation.project_id == project_id).order_by(Obligation.due_date, Obligation.id.desc())).all()
-    return {"obligations": [_obligation_payload(row) for row in rows], "count": len(rows)}
+    if offset < 0 or limit < 1 or limit > 200:
+        raise HTTPException(422, "Invalid pagination")
+    total = db.scalar(select(func.count(Obligation.id)).where(Obligation.project_id == project_id)) or 0
+    rows = db.scalars(select(Obligation).where(Obligation.project_id == project_id)
+                      .order_by(Obligation.due_date, Obligation.id.desc()).offset(offset).limit(limit)).all()
+    return {"obligations": [_obligation_payload(row) for row in rows], "count": total,
+            "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
 
 @router.patch("/obligations/{obligation_id}")

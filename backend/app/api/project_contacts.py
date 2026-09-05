@@ -279,13 +279,22 @@ def resolve_contact(contact_id: int, data: ContactResolutionCommand,
 
 
 @router.get("")
-def list_contacts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def list_contacts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+                  offset: int = 0, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
+    if offset < 0 or limit < 1 or limit > 200:
+        raise HTTPException(422, "Invalid pagination")
+    total = db.scalar(select(func.count(ProjectContact.id)).where(
+        ProjectContact.project_id == project_id,
+        ProjectContact.active.is_(True),
+    )) or 0
     rows = list(db.scalars(select(ProjectContact).where(
         ProjectContact.project_id == project_id,
         ProjectContact.active.is_(True),
-    ).order_by(ProjectContact.company, ProjectContact.name, ProjectContact.id)))
-    return {"contacts": [payload(row) for row in rows]}
+    ).order_by(ProjectContact.company, ProjectContact.name, ProjectContact.id)
+      .offset(offset).limit(limit)))
+    return {"contacts": [payload(row) for row in rows], "count": total,
+            "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
 
 @router.post("")

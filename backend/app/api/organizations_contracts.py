@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 import re
@@ -318,10 +319,16 @@ def update_organization(organization_id: int, payload: OrganizationUpdate,
 
 
 @router.get("/projects/{project_id}/contracts")
-def list_contracts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def list_contracts(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+                   offset: int = 0, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
-    rows = db.scalars(select(Contract).where(Contract.project_id == project_id).order_by(Contract.id.desc())).all()
-    return {"contracts": [_contract(row, db) for row in rows]}
+    if offset < 0 or limit < 1 or limit > 200:
+        raise HTTPException(422, "Invalid pagination")
+    total = db.scalar(select(func.count(Contract.id)).where(Contract.project_id == project_id)) or 0
+    rows = db.scalars(select(Contract).where(Contract.project_id == project_id)
+                      .order_by(Contract.id.desc()).offset(offset).limit(limit)).all()
+    return {"contracts": _contract_list_payloads(rows, db), "count": total,
+            "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
 
 @router.get("/projects/{project_id}/contracts/{contract_id}/versions")
@@ -890,6 +897,112 @@ def initialize_contract_control(project_id: int, contract_id: int,
         db.commit()
         db.refresh(baseline)
     return {"created": created, "baseline_id": baseline.id, "contract_id": contract_id}
+
+
+def _contract_list_payloads(rows: list[Contract], db: Session) -> list[dict]:
+    """Serialize a bounded contract page using a constant number of queries."""
+    if not rows:
+        return []
+    project_id = rows[0].project_id
+    contract_ids = [row.id for row in rows]
+    payloads = {row.id: _contract(row) for row in rows}
+
+    versions_by_contract: dict[int, list[ContractVersion]] = defaultdict(list)
+    for version in db.scalars(select(ContractVersion).where(
+        ContractVersion.project_id == project_id,
+        ContractVersion.contract_id.in_(contract_ids),
+    ).order_by(ContractVersion.contract_id, ContractVersion.sequence)):
+        versions_by_contract[version.contract_id].append(version)
+
+    document_ids_by_contract: dict[int, set[int]] = {
+        row.id: ({row.source_document_id} if row.source_document_id else set()) for row in rows
+    }
+    for contract_id, document_id in db.execute(select(
+        CashFlowEntry.contract_id, CashFlowEntry.source_document_id,
+    ).where(
+        CashFlowEntry.project_id == project_id,
+        CashFlowEntry.contract_id.in_(contract_ids),
+        CashFlowEntry.source_document_id.is_not(None),
+    )):
+        document_ids_by_contract[contract_id].add(document_id)
+    for contract_id, document_id in db.execute(select(
+        ContractDocumentLink.contract_id, ContractDocumentLink.document_id,
+    ).where(
+        ContractDocumentLink.project_id == project_id,
+        ContractDocumentLink.contract_id.in_(contract_ids),
+    )):
+        document_ids_by_contract[contract_id].add(document_id)
+    all_document_ids = set().union(*document_ids_by_contract.values())
+    documents = {
+        row.id: row for row in db.scalars(select(Document).where(
+            Document.project_id == project_id,
+            Document.id.in_(all_document_ids),
+        ))
+    } if all_document_ids else {}
+
+    source_documents = {
+        row.id: documents.get(row.source_document_id) for row in rows if row.source_document_id
+    }
+    source_ids = {
+        row.id: ((source.external_id or f"document:{source.id}") if source else None)
+        for row in rows for source in [source_documents.get(row.id)]
+    }
+    source_file_ids = [value for value in source_ids.values() if value]
+    task_counts = dict(db.execute(select(Task.source_file_id, func.count(Task.id)).where(
+        Task.project_id == project_id,
+        Task.source_file_id.in_(source_file_ids),
+    ).group_by(Task.source_file_id)).all()) if source_file_ids else {}
+    obligation_counts = dict(db.execute(select(Obligation.contract_id, func.count(Obligation.id)).where(
+        Obligation.project_id == project_id,
+        Obligation.contract_id.in_(contract_ids),
+    ).group_by(Obligation.contract_id)).all())
+    risk_counts = dict(db.execute(select(Risk.source_id, func.count(Risk.id)).where(
+        Risk.project_id == project_id,
+        Risk.source_id.in_(source_file_ids),
+    ).group_by(Risk.source_id)).all()) if source_file_ids else {}
+    decision_counts = dict(db.execute(select(Decision.source_id, func.count(Decision.id)).where(
+        Decision.project_id == project_id,
+        Decision.source_id.in_(source_file_ids),
+    ).group_by(Decision.source_id)).all()) if source_file_ids else {}
+
+    version_has_content: set[int] = set()
+    source_document_ids = [source.id for source in source_documents.values() if source]
+    if source_document_ids:
+        version_has_content = set(db.scalars(select(DocumentVersion.document_id).where(
+            DocumentVersion.document_id.in_(source_document_ids),
+            func.length(func.trim(DocumentVersion.content)) > 0,
+        ).distinct()))
+
+    for row in rows:
+        result = payloads[row.id]
+        result["version_history"] = [
+            _contract_version(version) for version in versions_by_contract[row.id]
+        ]
+        linked = sorted(
+            (documents[document_id] for document_id in document_ids_by_contract[row.id]
+             if document_id in documents),
+            key=lambda document: (document.name, document.id),
+        )
+        result["linked_documents"] = [{
+            "id": document.id,
+            "name": document.name,
+            "source": document.source,
+            "source_url": document.source_url if hasattr(document, "source_url") else None,
+        } for document in linked]
+        source = source_documents.get(row.id)
+        source_id = source_ids.get(row.id)
+        result["analysis"] = {
+            "source_ready": bool(source and (
+                (source.summary and source.summary.strip())
+                or (source.notes and source.notes.strip())
+                or source.id in version_has_content
+            )),
+            "tasks": task_counts.get(source_id, 0),
+            "obligations": obligation_counts.get(row.id, 0),
+            "risks": risk_counts.get(source_id, 0) if source_id else 0,
+            "decisions": decision_counts.get(source_id, 0) if source_id else 0,
+        }
+    return [payloads[row.id] for row in rows]
 
 
 def _contract(row: Contract, db: Session | None = None) -> dict:

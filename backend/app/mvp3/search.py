@@ -330,98 +330,159 @@ def _collect(db: Session, project: Project, organization_id: int, filters: Searc
         contract_items, contract_truncated = _search_contracts(db, project, filters)
         items.extend(contract_items)
         truncated = truncated or contract_truncated
-
-    if "document" in kinds:
-        query = select(Document).where(Document.project_id == project.id)
-        if filters.query:
-            query = query.where(_contains((Document.name, Document.mime_type), filters.query))
-        rows = db.scalars(query.order_by(Document.id).limit(MAX_SCAN_ROWS_PER_TYPE + 1)).all()
-        truncated = truncated or len(rows) > MAX_SCAN_ROWS_PER_TYPE
-        for row in rows[:MAX_SCAN_ROWS_PER_TYPE]:
-            contract = _linked_contract(db, project.id, document_id=row.id)
-            if not _contract_filter_match(contract, filters) or not _date_allowed(row.source_modified_at, filters):
-                continue
-            links = [{"relation": "entity", "href": f"/projects/{project.id}/documents/{row.id}"}]
-            if contract:
-                links.append({"relation": "contract", "href": f"/projects/{project.id}/contracts/{contract.id}"})
-            items.append(_result(kind="document", entity_id=row.id, name=row.name, at=row.source_modified_at,
-                                 project=project, status=row.status, contract=contract, links=links))
-
-    if "task" in kinds:
-        query = select(Task).where(Task.project_id == project.id)
-        if filters.query:
-            query = query.where(_contains((Task.title, Task.source_file_name), filters.query))
-        rows = db.scalars(query.order_by(Task.id).limit(MAX_SCAN_ROWS_PER_TYPE + 1)).all()
-        truncated = truncated or len(rows) > MAX_SCAN_ROWS_PER_TYPE
-        for row in rows[:MAX_SCAN_ROWS_PER_TYPE]:
-            contract = _linked_contract(db, project.id, task_id=row.id)
-            if not _contract_filter_match(contract, filters) or not _date_allowed(row.due_date, filters):
-                continue
-            items.append(_result(kind="task", entity_id=row.id, name=row.title, at=row.due_date, project=project,
-                                 status=row.status, contract=contract,
-                                 links=[{"relation": "entity", "href": f"/tasks/{row.id}"}]))
-
-    if "message" in kinds:
-        query = select(Message).where(
-            Message.project_id == project.id,
-            Message.organization_id == organization_id,
-        )
-        if filters.query:
-            query = query.where(_contains((Message.source_name,), filters.query))
-        rows = db.scalars(query.order_by(Message.id).limit(MAX_SCAN_ROWS_PER_TYPE + 1)).all()
-        truncated = truncated or len(rows) > MAX_SCAN_ROWS_PER_TYPE
-        for row in rows[:MAX_SCAN_ROWS_PER_TYPE]:
-            contract = db.scalar(select(Contract).where(
-                Contract.id == row.contract_id,
-                Contract.project_id == project.id,
-            )) if row.contract_id else None
-            if not _contract_filter_match(contract, filters) or not _date_allowed(row.updated_at, filters):
-                continue
-            links = [{"relation": "entity", "href": f"/ai-secretary/inbox?project_id={project.id}"}]
-            links.extend(_source_evidence_links(
-                db,
-                organization_id=organization_id,
-                project_id=project.id,
-                source_reference_id=row.source_reference_id,
-            ))
-            items.append(_result(
-                kind="message",
-                entity_id=row.id,
-                name=row.source_name,
-                at=row.updated_at,
-                project=project,
-                status=row.status,
-                contract=contract,
-                links=links,
-            ))
-
-    for kind, model, name_column, date_column in (
-        ("obligation", Obligation, Obligation.title, Obligation.due_date),
-        ("risk", Risk, Risk.title, Risk.updated_at),
-        ("decision", Decision, Decision.question, Decision.updated_at),
-    ):
+    scanned: dict[str, list] = {}
+    definitions = (
+        ("document", Document, (Document.name, Document.mime_type)),
+        ("task", Task, (Task.title, Task.source_file_name)),
+        ("message", Message, (Message.source_name,)),
+        ("obligation", Obligation, (Obligation.title, Obligation.source_name)),
+        ("risk", Risk, (Risk.title, Risk.source_name)),
+        ("decision", Decision, (Decision.question, Decision.source_name)),
+    )
+    for kind, model, columns in definitions:
         if kind not in kinds:
             continue
         query = select(model).where(model.project_id == project.id)
+        if kind == "message":
+            query = query.where(Message.organization_id == organization_id)
         if filters.query:
-            query = query.where(_contains((name_column, model.source_name), filters.query))
+            query = query.where(_contains(columns, filters.query))
         rows = db.scalars(query.order_by(model.id).limit(MAX_SCAN_ROWS_PER_TYPE + 1)).all()
         truncated = truncated or len(rows) > MAX_SCAN_ROWS_PER_TYPE
-        for row in rows[:MAX_SCAN_ROWS_PER_TYPE]:
-            contract = _linked_contract(
-                db, project.id,
-                obligation_id=row.id if kind == "obligation" else row.obligation_id,
-            )
+        scanned[kind] = rows[:MAX_SCAN_ROWS_PER_TYPE]
+
+    # Resolve links for the whole bounded scan. Query count is constant rather
+    # than proportional to the number of returned rows.
+    requested_contract_ids = {
+        row.contract_id for row in scanned.get("message", []) if row.contract_id
+    } | {
+        row.contract_id for row in scanned.get("obligation", []) if row.contract_id
+    }
+    document_ids = [row.id for row in scanned.get("document", [])]
+    task_ids = [row.id for row in scanned.get("task", [])]
+    obligation_ids = {
+        row.id for row in scanned.get("obligation", [])
+    } | {
+        row.obligation_id for kind in ("risk", "decision")
+        for row in scanned.get(kind, []) if row.obligation_id
+    }
+    linked_obligations = db.scalars(select(Obligation).where(
+        Obligation.project_id == project.id,
+        or_(Obligation.id.in_(obligation_ids), Obligation.task_id.in_(task_ids)),
+    )).all() if obligation_ids or task_ids else []
+    requested_contract_ids.update(row.contract_id for row in linked_obligations if row.contract_id)
+    contract_rows = db.scalars(select(Contract).where(
+        Contract.project_id == project.id,
+        Contract.id.in_(requested_contract_ids),
+    )).all() if requested_contract_ids else []
+    contracts = {row.id: row for row in contract_rows}
+    obligation_contract = {row.id: contracts.get(row.contract_id) for row in linked_obligations}
+    task_contract: dict[int, Contract | None] = {}
+    for row in sorted(linked_obligations, key=lambda value: value.id):
+        if row.task_id is not None:
+            task_contract.setdefault(row.task_id, contracts.get(row.contract_id))
+
+    document_contract: dict[int, Contract] = {}
+    if document_ids:
+        direct = db.scalars(select(Contract).where(
+            Contract.project_id == project.id,
+            Contract.source_document_id.in_(document_ids),
+        ).order_by(Contract.id)).all()
+        links = db.execute(select(ContractDocumentLink.document_id, Contract).join(
+            Contract, and_(
+                Contract.id == ContractDocumentLink.contract_id,
+                Contract.project_id == ContractDocumentLink.project_id,
+            ),
+        ).where(
+            ContractDocumentLink.project_id == project.id,
+            ContractDocumentLink.document_id.in_(document_ids),
+        ).order_by(Contract.id)).all()
+        for contract in direct:
+            document_contract.setdefault(contract.source_document_id, contract)
+        for document_id, contract in links:
+            document_contract.setdefault(document_id, contract)
+
+    evidence_ids = []
+    for kind in ("obligation", "risk", "decision"):
+        for row in scanned.get(kind, []):
+            for pin in row.evidence_pins or []:
+                try:
+                    if (pin.get("version_kind") == "revision" and pin.get("value") == 1
+                            and pin["ref"]["type"] == "evidence"):
+                        evidence_ids.append(pin["ref"]["id"]["value"])
+                except (AttributeError, KeyError, TypeError):
+                    continue
+    allowed_evidence = set(db.scalars(select(Evidence.id).join(SourceReference, and_(
+        SourceReference.id == Evidence.source_id,
+        SourceReference.organization_id == Evidence.organization_id,
+    )).where(
+        Evidence.organization_id == organization_id,
+        Evidence.id.in_(evidence_ids),
+        SourceReference.origin_project_id == project.id,
+    ))) if evidence_ids else set()
+    message_source_ids = [row.source_reference_id for row in scanned.get("message", []) if row.source_reference_id]
+    source_evidence: dict[str, list[str]] = {}
+    if message_source_ids:
+        pairs = db.execute(select(Evidence.source_id, Evidence.id).join(SourceReference, and_(
+            SourceReference.id == Evidence.source_id,
+            SourceReference.organization_id == Evidence.organization_id,
+        )).where(
+            Evidence.organization_id == organization_id,
+            Evidence.source_id.in_(message_source_ids),
+            SourceReference.origin_project_id == project.id,
+        ).order_by(Evidence.source_id, Evidence.id).limit(MAX_SCAN_ROWS_PER_TYPE + 1)).all()
+        truncated = truncated or len(pairs) > MAX_SCAN_ROWS_PER_TYPE
+        for source_id, evidence_id in pairs[:MAX_SCAN_ROWS_PER_TYPE]:
+            source_evidence.setdefault(source_id, [])
+            if len(source_evidence[source_id]) < 20:
+                source_evidence[source_id].append(evidence_id)
+
+    for row in scanned.get("document", []):
+        contract = document_contract.get(row.id)
+        if not _contract_filter_match(contract, filters) or not _date_allowed(row.source_modified_at, filters):
+            continue
+        links = [{"relation": "entity", "href": f"/projects/{project.id}/documents/{row.id}"}]
+        if contract:
+            links.append({"relation": "contract", "href": f"/projects/{project.id}/contracts/{contract.id}"})
+        items.append(_result(kind="document", entity_id=row.id, name=row.name, at=row.source_modified_at,
+                             project=project, status=row.status, contract=contract, links=links))
+    for row in scanned.get("task", []):
+        contract = task_contract.get(row.id)
+        if _contract_filter_match(contract, filters) and _date_allowed(row.due_date, filters):
+            items.append(_result(kind="task", entity_id=row.id, name=row.title, at=row.due_date, project=project,
+                                 status=row.status, contract=contract,
+                                 links=[{"relation": "entity", "href": f"/tasks/{row.id}"}]))
+    for row in scanned.get("message", []):
+        contract = contracts.get(row.contract_id)
+        if not _contract_filter_match(contract, filters) or not _date_allowed(row.updated_at, filters):
+            continue
+        links = [{"relation": "entity", "href": f"/ai-secretary/inbox?project_id={project.id}"}]
+        links.extend({"relation": "evidence", "href": f"/api/v54/evidence/{evidence_id}/fragment?revision=1",
+                      "revision": 1} for evidence_id in source_evidence.get(row.source_reference_id, []))
+        items.append(_result(kind="message", entity_id=row.id, name=row.source_name, at=row.updated_at,
+                             project=project, status=row.status, contract=contract, links=links))
+    for kind, name_column, date_column in (
+        ("obligation", Obligation.title, Obligation.due_date),
+        ("risk", Risk.title, Risk.updated_at),
+        ("decision", Decision.question, Decision.updated_at),
+    ):
+        for row in scanned.get(kind, []):
+            contract = (contracts.get(row.contract_id) if kind == "obligation"
+                        else obligation_contract.get(row.obligation_id))
             at = getattr(row, date_column.key)
             if not _contract_filter_match(contract, filters) or not _date_allowed(at, filters):
                 continue
             links = [{"relation": "entity", "href": f"/management/v2/{kind}s/{row.id}"}]
-            links.extend(_evidence_links(
-                db,
-                organization_id=organization_id,
-                project_id=project.id,
-                pins=row.evidence_pins,
-            ))
+            row_evidence_ids = []
+            for pin in row.evidence_pins or []:
+                try:
+                    evidence_id = pin["ref"]["id"]["value"]
+                    if evidence_id in allowed_evidence and evidence_id not in row_evidence_ids:
+                        row_evidence_ids.append(evidence_id)
+                except (KeyError, TypeError):
+                    continue
+            links.extend({"relation": "evidence", "href": f"/api/v54/evidence/{evidence_id}/fragment?revision=1",
+                          "revision": 1} for evidence_id in row_evidence_ids)
             items.append(_result(kind=kind, entity_id=row.id, name=getattr(row, name_column.key), at=at,
                                  project=project, status=row.status, contract=contract, links=links))
     return items, truncated

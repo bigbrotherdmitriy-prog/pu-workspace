@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
@@ -35,10 +35,16 @@ def open_issues(project_id: int, db: Session = Depends(get_db), user: User = Dep
 
 
 @router.get("/risks")
-def risks(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def risks(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+          offset: int = 0, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
-    rows = db.scalars(select(Risk).where(Risk.project_id == project_id).order_by(Risk.created_at.desc())).all()
-    return {"risks": [{"id": x.id, "kind": x.kind, "title": x.title, "criticality": x.criticality, "status": x.status, "action_note": x.action_note, "source_name": x.source_name, "confidence": x.confidence} for x in rows]}
+    if offset < 0 or limit < 1 or limit > 200:
+        raise HTTPException(422, "Invalid pagination")
+    total = db.scalar(select(func.count(Risk.id)).where(Risk.project_id == project_id)) or 0
+    rows = db.scalars(select(Risk).where(Risk.project_id == project_id)
+                      .order_by(Risk.created_at.desc(), Risk.id.desc()).offset(offset).limit(limit)).all()
+    return {"risks": [{"id": x.id, "kind": x.kind, "title": x.title, "criticality": x.criticality, "status": x.status, "action_note": x.action_note, "source_name": x.source_name, "confidence": x.confidence} for x in rows],
+            "count": total, "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
 
 @router.patch("/risks/{risk_id}")
@@ -55,10 +61,16 @@ def update_risk(risk_id: int, payload: RiskUpdate, db: Session = Depends(get_db)
 
 
 @router.get("/decisions")
-def decisions(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def decisions(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+              offset: int = 0, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
-    rows = db.scalars(select(Decision).where(Decision.project_id == project_id).order_by(Decision.created_at.desc())).all()
-    return {"decisions": [{"id": x.id, "question": x.question, "status": x.status, "decision_text": x.decision_text, "reason": x.reason, "source_name": x.source_name, "confidence": x.confidence} for x in rows]}
+    if offset < 0 or limit < 1 or limit > 200:
+        raise HTTPException(422, "Invalid pagination")
+    total = db.scalar(select(func.count(Decision.id)).where(Decision.project_id == project_id)) or 0
+    rows = db.scalars(select(Decision).where(Decision.project_id == project_id)
+                      .order_by(Decision.created_at.desc(), Decision.id.desc()).offset(offset).limit(limit)).all()
+    return {"decisions": [{"id": x.id, "question": x.question, "status": x.status, "decision_text": x.decision_text, "reason": x.reason, "source_name": x.source_name, "confidence": x.confidence} for x in rows],
+            "count": total, "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
 
 @router.patch("/decisions/{decision_id}")
