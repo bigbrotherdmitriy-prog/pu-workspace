@@ -57,6 +57,10 @@ class FakeStorage:
     def walk_tree(self, identifier):
         return self.list_children(identifier)
 
+    def read_bytes(self, identifier, max_bytes):
+        item = self.items[identifier]
+        return b'Synthetic contract C-100 dated 2026-09-05 amount 1000', item.mime_type
+
 
 @pytest.fixture(params=['google_drive', 'yandex_disk'])
 def bound(tmp_path, monkeypatch, request):
@@ -138,6 +142,125 @@ def test_confirm_after_completion_does_not_duplicate(bound):
     assert second['already_queued'] is True
 
 
+def test_explicit_refresh_invalidates_completed_snapshot_cache(bound):
+    first = choose(bound).json()
+    workspace._build_snapshot(first['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with bound.db() as db:
+        db.get(BackgroundJob, first['job_id']).status = 'completed'
+        db.commit()
+
+    changed_id = f'{bound.adapter.ids[-1]}/synthetic-contract'
+    bound.adapter.items[changed_id] = StorageObject(
+        changed_id,
+        'Contract.pdf',
+        'application/pdf',
+        bound.adapter.ids[-1],
+        md5_checksum='revision-1',
+        size=101,
+        modified_time='2026-09-05T08:00:00Z',
+        provider=bound.adapter.provider,
+    )
+    refreshed = choose(bound, params={
+        'provider': bound.adapter.provider,
+        'connection_id': 'chosen-account',
+        'refresh': 'true',
+    }).json()
+    assert refreshed['id'] != first['id']
+    assert refreshed['already_queued'] is False
+
+    # A repeated refresh while the new snapshot is queued is idempotent.
+    repeated = choose(bound, params={
+        'provider': bound.adapter.provider,
+        'connection_id': 'chosen-account',
+        'refresh': 'true',
+    }).json()
+    assert (repeated['id'], repeated['job_id'], repeated['already_queued']) == (
+        refreshed['id'], refreshed['job_id'], True,
+    )
+
+    workspace._build_snapshot(refreshed['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with bound.db() as db:
+        db.get(BackgroundJob, refreshed['job_id']).status = 'completed'
+        db.commit()
+        current = db.scalar(select(VirtualNode).where(
+            VirtualNode.snapshot_id == refreshed['id'],
+            VirtualNode.external_id == changed_id,
+        ))
+        assert (current.checksum, current.size_bytes) == ('revision-1', 101)
+        assert db.scalar(select(VirtualNode).where(
+            VirtualNode.snapshot_id == first['id'],
+            VirtualNode.external_id == changed_id,
+        )) is None
+
+    bound.adapter.items[changed_id].md5_checksum = 'revision-2'
+    bound.adapter.items[changed_id].size = 202
+    bound.adapter.items[changed_id].modified_time = '2026-09-05T09:00:00Z'
+    second_refresh = choose(bound, params={
+        'provider': bound.adapter.provider,
+        'connection_id': 'chosen-account',
+        'refresh': 'true',
+    }).json()
+    workspace._build_snapshot(second_refresh['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with bound.db() as db:
+        changed = db.scalar(select(VirtualNode).where(
+            VirtualNode.snapshot_id == second_refresh['id'],
+            VirtualNode.external_id == changed_id,
+        ))
+        previous = db.scalar(select(VirtualNode).where(
+            VirtualNode.snapshot_id == refreshed['id'],
+            VirtualNode.external_id == changed_id,
+        ))
+        assert (changed.checksum, changed.size_bytes) == ('revision-2', 202)
+        assert (previous.checksum, previous.size_bytes) == ('revision-1', 101)
+
+
+def test_snapshot_analysis_reports_measured_progress_and_bound_result(bound):
+    file_id = f'{bound.adapter.ids[-1]}/contract.txt'
+    bound.adapter.items[file_id] = StorageObject(
+        file_id,
+        'Contract C-100.txt',
+        'text/plain',
+        bound.adapter.ids[-1],
+        md5_checksum='analysis-input',
+        size=56,
+        provider=bound.adapter.provider,
+    )
+    selected = choose(bound).json()
+    workspace._build_snapshot(selected['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with bound.db() as db:
+        db.get(BackgroundJob, selected['job_id']).status = 'completed'
+        db.commit()
+
+    queued = bound.client.post(f'/projects/{bound.new}/snapshots/{selected["id"]}/analyze')
+    assert queued.status_code == 200
+    with bound.db() as db:
+        job = queue.claim(db, f'{bound.adapter.provider}-worker')
+        assert job.kind == 'workspace.analysis'
+        payload = dict(job.payload)
+        job_id = job.id
+    result = handlers.run('workspace.analysis', payload)
+    with bound.db() as db:
+        assert queue.succeed(db, job_id, f'{bound.adapter.provider}-worker', result)
+
+    status = bound.client.get(f'/projects/{bound.new}/processing-queue').json()
+    snapshot = next(item for item in status['snapshots'] if item['id'] == selected['id'])
+    assert snapshot['job_status'] == 'completed'
+    assert snapshot['job_progress'] == 100
+    with bound.db() as db:
+        stored = db.get(WorkspaceSnapshot, selected['id'])
+        assert stored.analysis_status == 'ready'
+        assert stored.analysis_result['storage_binding'] == {
+            'project_id': bound.new,
+            'provider': bound.adapter.provider,
+            'connection_id': 'chosen-account',
+            'connection_row_id': bound.connection,
+            'folder_id': bound.adapter.ids[-1],
+        }
+        assert stored.analysis_result['status'] == 'ready'
+        assert stored.analysis_result['text_extracted'] == 1
+    assert bound.client.get(f'/projects/{bound.old}/snapshots').json()['snapshots'] == []
+
+
 def test_async_payload_cannot_target_another_project(bound):
     result = choose(bound).json()
     with pytest.raises(HTTPException):
@@ -176,6 +299,26 @@ def test_browse_restores_selected_folder_and_project(bound):
     assert selected['job_id'] == queued['job_id']
     assert selected['job_status'] == 'queued'
     assert selected['job_progress'] == 0
+
+
+def test_discovery_reloads_provider_children_without_stale_cache(bound):
+    parent = bound.adapter.ids[-1]
+    first = bound.client.get(
+        f'/projects/{bound.new}/source-folders/discover',
+        params={'folder_id': parent, 'provider': bound.adapter.provider, 'connection_id': 'chosen-account'},
+    ).json()
+    assert first['folders'] == []
+
+    added_id = f'{parent}/new-child'
+    bound.adapter.items[added_id] = bound.adapter.folder(added_id, 'New child', parent)
+    second = bound.client.get(
+        f'/projects/{bound.new}/source-folders/discover',
+        params={'folder_id': parent, 'provider': bound.adapter.provider, 'connection_id': 'chosen-account'},
+    ).json()
+    assert [(item['id'], item['name']) for item in second['folders']] == [(added_id, 'New child')]
+    assert second['project_id'] == bound.new
+    assert second['provider'] == bound.adapter.provider
+    assert second['connection_id'] == 'chosen-account'
 
 
 def test_yandex_app_namespace_parent_is_preserved():

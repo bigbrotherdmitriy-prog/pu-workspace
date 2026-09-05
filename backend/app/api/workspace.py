@@ -576,6 +576,7 @@ def queue_workspace_snapshot(
     user: User = Depends(require_user),
     provider: str | None = None,
     connection_id: str | None = None,
+    refresh: bool = Query(False),
 ):
     require_project_role(db, user, project_id, "manager")
     # Serialize confirmations for a project on PostgreSQL, including source creation.
@@ -594,9 +595,18 @@ def queue_workspace_snapshot(
     def response(snapshot, job_id, repeated):
         return {"id": snapshot.id, "status": snapshot.status, "source_folder": source.name,
                 "already_queued": repeated, "job_id": job_id, **_binding(connection, external_id)}
-    if active:
+    active_job = _active_snapshot_job(db, active.id, project_id) if active else None
+    # Ordinary retries remain idempotent. A deliberate refresh may supersede a
+    # completed metadata snapshot so newly added or changed provider objects are
+    # observed, but it never creates concurrent work for the same source.
+    reuse_active = bool(active) and (
+        not refresh or active.status != "ready" or active_job is not None
+    )
+    if reuse_active:
         _validate_snapshot_target(db, active, project_id, external_id)
-        job = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == f"workspace.snapshot:{active.id}"))
+        job = active_job or db.scalar(select(BackgroundJob).where(
+            BackgroundJob.idempotency_key == f"workspace.snapshot:{active.id}"
+        ))
         if job is None and active.status == "building":
             job = enqueue(db, "workspace.snapshot", {
                 "snapshot_id": active.id, "project_id": project_id, "external_id": external_id,
@@ -613,6 +623,10 @@ def queue_workspace_snapshot(
         has_source = db.scalar(select(SourceFolder.id).where(SourceFolder.project_id == project_id).limit(1)) is not None
         source = SourceFolder(project_id=project_id, external_id=external_id, name=source_meta.name, provider=drive.provider, is_primary=not has_source)
         db.add(source)
+    else:
+        # The provider may rename a selected folder between snapshots. Keep the
+        # stable locator while refreshing its display metadata.
+        source.name = source_meta.name
     if connection.id is None:
         db.add(connection)
     db.flush()
