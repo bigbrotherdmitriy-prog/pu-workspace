@@ -15,6 +15,9 @@ ActionKind = Literal[
     "synthetic.effect.rollback",
     "synthetic.effect.compensate",
     "synthetic.effect.corrective",
+    "gmail.message.send",
+    "google.tasks.upsert",
+    "google.calendar.upsert",
 ]
 Outcome = Literal["APPLIED", "NOT_APPLIED", "UNKNOWN"]
 
@@ -27,7 +30,7 @@ class ProviderActionError(RuntimeError):
         "capability_stale", "command_conflict", "confirm_only", "credential_stale",
         "dispatch_binding_mismatch", "evidence_stale", "invalid_envelope", "mailbox_scope_mismatch",
         "outcome_not_reconcilable", "project_scope_mismatch", "provider_receipt_mismatch",
-        "relation_invalid", "synthetic_only",
+        "relation_invalid", "synthetic_only", "payload_stale", "resource_unavailable",
     }
 
     def __init__(self, code: str):
@@ -41,6 +44,10 @@ class TimeoutBeforeEffect(TimeoutError):
 
 class TimeoutAfterEffect(TimeoutError):
     """Adapter cannot prove whether the provider effect happened."""
+
+
+class ProviderPreconditionFailed(ValueError):
+    """The adapter proved that it stopped before any provider mutation."""
 
 
 @dataclass(frozen=True)
@@ -87,13 +94,18 @@ class ActionEnvelope:
                 or (self.relation_action_id is not None and self.relation_action_id == self.action_id)
                 or self.action_kind not in {"synthetic.effect.apply", "synthetic.effect.send",
                                             "synthetic.effect.rollback", "synthetic.effect.compensate",
-                                            "synthetic.effect.corrective"}
+                                            "synthetic.effect.corrective", "gmail.message.send",
+                                            "google.tasks.upsert", "google.calendar.upsert"}
                 or self.reversibility not in {"REVERSIBLE", "COMPENSATABLE", "IRREVERSIBLE"}
                 or self.relation_kind not in {None, "ROLLBACK", "COMPENSATION", "CORRECTIVE"}):
             raise ProviderActionError("invalid_envelope")
         if self.mode != "CONFIRM":
             raise ProviderActionError("confirm_only")
-        if not self.synthetic_only or self.provider != "synthetic" or not self.action_kind.startswith("synthetic."):
+        synthetic = self.synthetic_only and self.provider == "synthetic" and self.action_kind.startswith("synthetic.")
+        product = (not self.synthetic_only and self.provider == "google_workspace"
+                   and self.action_kind in {"gmail.message.send", "google.tasks.upsert",
+                                            "google.calendar.upsert"})
+        if not (synthetic or product):
             raise ProviderActionError("synthetic_only")
 
     @property

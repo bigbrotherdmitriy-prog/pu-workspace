@@ -84,21 +84,11 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
 
         adapter = SimpleNamespace(provider="pilot_action_adapter")
         monkeypatch.setattr(tasks_api, "configured_action_adapter", lambda _project_id, _db: adapter)
-        monkeypatch.setattr(
-            tasks_api,
-            "publish_actions",
-            lambda *_args, **_kwargs: SimpleNamespace(
-                task_synced=1,
-                task_failed=0,
-                calendar_synced=1,
-                calendar_failed=0,
-            ),
-        )
-        monkeypatch.setattr(
-            tasks_api,
-            "external_id_for",
-            lambda _db, **kwargs: f"pilot-{kwargs['resource_type']}-1",
-        )
+        queued = []
+        monkeypatch.setattr(tasks_api, "queue_confirmed_action", lambda _db, **kwargs: (
+            queued.append(kwargs) or {"action_id": kwargs["action_kind"], "revision": 1,
+                                      "job_id": len(queued), "already_queued": False}
+        ))
 
         published = approve_external(
             task.id,
@@ -111,7 +101,10 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         briefing = build_daily_briefing(db, project.id, today=date.today())
 
         assert published["provider"] == "pilot_action_adapter"
-        assert published["external_action_status"] == "executed"
+        assert published["external_action_status"] == "queued"
+        assert [item["action_kind"] for item in queued] == [
+            "google.tasks.upsert", "google.calendar.upsert",
+        ]
         assert db.get(Task, task.id).needs_review is False
         assert notifications["unread"] == 1
         assert notifications["notifications"][0]["kind"] == "overdue"

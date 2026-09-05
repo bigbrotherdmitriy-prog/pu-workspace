@@ -19,7 +19,11 @@ class ProviderAction(Base):
         UniqueConstraint("organization_id", "mailbox_key", "command_key", name="uq_v54_provider_command"),
         UniqueConstraint("organization_id", "idempotency_key", name="uq_v54_provider_idempotency"),
         CheckConstraint("revision > 0 AND organization_id > 0 AND project_id > 0", name="ck_v54_provider_action_scope"),
-        CheckConstraint("mode = 'CONFIRM' AND synthetic_only = true AND provider = 'synthetic'",
+        CheckConstraint(
+            "mode = 'CONFIRM' AND ((synthetic_only = true AND provider = 'synthetic' "
+            "AND action_kind LIKE 'synthetic.%') OR (synthetic_only = false "
+            "AND provider = 'google_workspace' AND action_kind IN "
+            "('gmail.message.send','google.tasks.upsert','google.calendar.upsert')))",
                         name="ck_v54_provider_confirm_synthetic"),
         CheckConstraint("length(payload_hash) = 64 AND length(mailbox_key) = 64 AND length(envelope_hash) = 64",
                         name="ck_v54_provider_action_hashes"),

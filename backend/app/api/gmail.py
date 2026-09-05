@@ -5,8 +5,6 @@ import html
 import json
 import os
 import re
-from datetime import datetime, timezone
-from email.message import EmailMessage
 from email.utils import parseaddr
 from typing import Literal
 
@@ -45,6 +43,8 @@ from app.staging.gmail import (
     enqueue_staged_gmail_attachment,
     stage_gmail_attachment,
 )
+from app.provider_actions.contracts import ProviderActionError
+from app.provider_actions.product import queue_confirmed_action
 
 router = APIRouter(tags=["gmail"])
 MAX_ATTACHMENT_BYTES = int(os.getenv("GMAIL_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
@@ -412,25 +412,19 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     )
     if not recipient:
         raise HTTPException(422, "Не удалось определить адрес получателя")
-    message = EmailMessage()
-    message["To"] = recipient
-    message["Subject"] = (
-        draft.subject if draft.recipient_to or draft.subject.lower().startswith("re:")
-        else f"Re: {draft.subject}"
-    )
-    message.set_content(draft.body)
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    service = (google_workspace_for_mailbox(mailbox.google_token_id, db)
-               if mailbox else google_workspace_for_project(draft.project_id, db)).service("gmail", "v1")
-    body = {"raw": raw}
-    thread_id = mailbox.provider_thread_id if mailbox else source.source_thread_id if source is not None else None
-    if thread_id:
-        body["threadId"] = thread_id
-    sent = service.users().messages().send(userId="me", body=body).execute()
-    draft.sent_external_id = sent["id"]
-    draft.sent_at = datetime.now(timezone.utc)
-    draft.status = "sent"
-    db.add(AuditLog(action="gmail_reply_sent", entity_type="response_draft", entity_id=draft.id,
-                    details="status=sent"))
-    db.commit()
-    return {"id": draft.id, "status": draft.status, "gmail_message_id": draft.sent_external_id, "already_sent": False}
+    # The provider call is deliberately absent from the API lifecycle.  The
+    # worker reloads this row and verifies the exact approved content hash,
+    # mailbox generation and human authority immediately before the effect.
+    try:
+        queued = queue_confirmed_action(
+            db, action_kind="gmail.message.send", target_id=draft.id, actor=user,
+        )
+    except ProviderActionError as exc:
+        db.rollback()
+        raise HTTPException(409, f"Gmail action is unavailable ({exc.code})") from exc
+    draft = db.get(ResponseDraft, draft.id)
+    if draft.status == "approved":
+        draft.status = "sending"
+        db.commit()
+    return {"id": draft.id, "status": "queued", "gmail_message_id": None,
+            "already_sent": False, **queued}

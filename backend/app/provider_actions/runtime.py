@@ -24,6 +24,7 @@ from app.provider_actions.contracts import (
     LiveAuthorityResolver,
     ProviderActionAdapter,
     ProviderActionError,
+    ProviderPreconditionFailed,
     ProviderReceipt,
     ProviderRequest,
     TimeoutAfterEffect,
@@ -32,6 +33,7 @@ from app.provider_actions.contracts import (
 
 
 KIND = "v54.synthetic_provider_action"
+PRODUCT_KIND = "provider.action.dispatch"
 _installed_runtime = None
 
 
@@ -59,14 +61,18 @@ class ProviderActionRuntime:
     """Durable fail-closed adapter/outbox/reconciliation orchestration."""
 
     def __init__(self, *, sessions, adapter: ProviderActionAdapter,
-                 authority: LiveAuthorityResolver, clock=lambda: datetime.now(timezone.utc)):
+                 authority: LiveAuthorityResolver, clock=lambda: datetime.now(timezone.utc),
+                 allow_product: bool = False):
         bind = sessions.kw["bind"]
         database = bind.url.database or ""
-        if bind.url.get_backend_name() == "postgresql" and not database.startswith("puw_v54_test_"):
+        if (not allow_product and bind.url.get_backend_name() == "postgresql"
+                and not database.startswith("puw_v54_test_")):
             raise ProviderActionError("synthetic_only")
-        if bind.url.get_backend_name() not in {"sqlite", "postgresql"} or adapter.name != "synthetic":
+        expected_adapter = "google_workspace" if allow_product else "synthetic"
+        if bind.url.get_backend_name() not in {"sqlite", "postgresql"} or adapter.name != expected_adapter:
             raise ProviderActionError("synthetic_only")
         self.sessions, self.adapter, self.authority, self.clock = sessions, adapter, authority, clock
+        self.kind = PRODUCT_KIND if allow_product else KIND
 
     def freeze(self, envelope: ActionEnvelope, *, actor_id: str, correlation_id: str):
         with self.sessions.begin() as db:
@@ -172,8 +178,8 @@ class ProviderActionRuntime:
             idempotency_key = row.idempotency_key
             seal = row.envelope_hash
         with self.sessions() as queue_db:
-            job = enqueue(queue_db, KIND, payload, idempotency_key=idempotency_key, max_attempts=3)
-            if job.kind != KIND or job.payload != payload:
+            job = enqueue(queue_db, self.kind, payload, idempotency_key=idempotency_key, max_attempts=3)
+            if job.kind != self.kind or job.payload != payload:
                 raise ProviderActionError("dispatch_binding_mismatch")
             job_id = job.id
         with self.sessions.begin() as db:
@@ -232,6 +238,9 @@ class ProviderActionRuntime:
                                            source=source, job_id=job_id)
         try:
             receipt = self.adapter.dispatch(request)
+        except ProviderPreconditionFailed:
+            return self._record(action_id, revision, "NOT_APPLIED", source="DISPATCH",
+                                job_id=job_id, retry_safe=False, safe_code="precondition_failed")
         except TimeoutBeforeEffect:
             return self._record(action_id, revision, "NOT_APPLIED", source="DISPATCH",
                                 job_id=job_id, retry_safe=True, safe_code="timeout_before_effect")
@@ -350,7 +359,7 @@ class ProviderActionRuntime:
         if (type(payload["organization_id"]) is not int or payload != expected_payload
                 or not outbox or not approval or outbox.job_id not in (None, job_id)
                 or outbox.envelope_hash != row.envelope_hash or not job
-                or job.kind != KIND or job.payload != expected_payload or job.idempotency_key != row.idempotency_key
+                or job.kind != self.kind or job.payload != expected_payload or job.idempotency_key != row.idempotency_key
                 or job.status != "running" or job.worker_id != worker_id or job.attempts != job_attempt
                 or not job.locked_at or _utc(job.locked_at) != _utc(locked_at) or not job.lease_expires_at
                 or _utc(job.lease_expires_at) <= _utc(self.clock())):

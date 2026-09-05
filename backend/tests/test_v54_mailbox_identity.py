@@ -40,7 +40,11 @@ def world(db_session, user_factory):
     org = Organization(name="Synthetic mailbox org"); db.add(org); db.flush()
     project = Project(name="Synthetic mailbox project", organization_id=org.id); db.add(project); db.flush()
     db.add(ProjectMember(project_id=project.id, user_id=user.id, role="manager"))
-    token = GoogleOAuthToken(project_id=project.id, token_uri="https://oauth2.googleapis.com/token")
+    token = GoogleOAuthToken(
+        project_id=project.id,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes="https://www.googleapis.com/auth/gmail.send",
+    )
     db.add(token); db.flush()
     identity, mail, generation = MailboxIdentityService().bind_verified_google_subject(
         db, organization_id=org.id, google_token_id=token.id, subject="oidc-subject-synthetic", now=NOW)
@@ -277,6 +281,7 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
     flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     other = Project(name="Moved context", organization_id=w.org.id); w.db.add(other); w.db.flush()
+    w.db.add(ProjectMember(project_id=other.id, user_id=w.user.id, role="manager"))
     w.message.project_id = other.id
     w.message.source_thread_id = "legacy-wrong-thread"
     draft = ResponseDraft(project_id=other.id, reviewer_user_id=w.user.id, message_id=w.message.id,
@@ -292,9 +297,15 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
     monkeypatch.setattr(gmail, "require_project_role", lambda *a, **k: None)
     monkeypatch.setattr(gmail, "google_workspace_for_project", lambda *a, **k: pytest.fail("project fallback"))
     monkeypatch.setattr(gmail, "google_workspace_for_mailbox", lambda token_id, db: SimpleNamespace(service=lambda *a: Service()))
-    gmail.send_gmail(draft.id, w.db, w.user)
-    assert calls and calls[0]["body"]["threadId"] == "provider-thread-synthetic"
-    assert draft.status == "sent"
+    result = gmail.send_gmail(draft.id, w.db, w.user)
+    from app.models.job import BackgroundJob
+    from app.models.v54_provider_action import ProviderAction
+    action = w.db.get(ProviderAction, (result["action_id"], result["revision"]))
+    job = w.db.get(BackgroundJob, result["job_id"])
+    assert calls == []  # API queues; only the worker may perform provider I/O.
+    assert result["status"] == "queued" and draft.status == "sending"
+    assert action.project_id == other.id and action.credential_generation == w.generation
+    assert set(job.payload) == {"organization_id", "action_id", "revision"}
 
 
 def test_attachment_uses_origin_mailbox_adapter(db_session, user_factory, monkeypatch):
