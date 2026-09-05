@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.drive_connection import DriveConnection
+from app.models.organization_contract import Organization
 from app.models.organizer import OrganizerAction, OrganizerProposal, OrganizerSession
 from app.models.project import Project
 from app.models.workspace import SourceFolder, VirtualNode, WorkspaceSnapshot
@@ -11,7 +12,9 @@ from app.organizer_engine.storage_mutations import MutationConflict
 
 
 def world(db_session):
-    project = Project(name="Synthetic storage project")
+    organization = Organization(name="Synthetic storage tenant")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="Synthetic storage project", organization_id=organization.id)
     db_session.add(project); db_session.flush()
     connection = DriveConnection(project_id=project.id, provider="google_drive", account_email="synthetic@example.test",
                                  root_folder_id="root/nested", connection_id="connection-1", status="connected")
