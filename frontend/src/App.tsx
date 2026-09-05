@@ -27,6 +27,7 @@ import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
 import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
 import { MeetingsModule, type MeetingRow } from "./modules/meetings/MeetingsModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
+import { useProjectSearch } from "./modules/search/useProjectSearch";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
@@ -1952,6 +1953,7 @@ export function App() {
       setError((e as Error).message);
     }
   }
+  const { hits: projectSearchHits } = useProjectSearch(projectId, query);
   if (!ready) return <Login onDone={() => setReady(true)} />;
   const metrics = [
     ["Требуют внимания", summary?.attention || 0, "warn"],
@@ -2013,17 +2015,6 @@ export function App() {
     if (inboxFilter === "drafts") return item.drafts.some((draft) => draft.status !== "sent");
     return true;
   });
-  const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
-  const projectSearchHits: ProjectSearchHit[] = normalizedQuery.length < 2 ? [] : [
-    ...documentRows.filter((item) => `${item.name} ${item.summary || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "document" as const, title: item.name, detail: item.summary || item.status })),
-    ...contracts.filter((item) => `${item.number} ${item.title} ${item.counterparty || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "contract" as const, title: `${item.number} — ${item.title}`, detail: item.counterparty || item.status })),
-    ...tasks.filter((item) => `${item.title} ${item.source_excerpt || ""} ${item.source_file_name}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "task" as const, title: item.title, detail: `${item.status}${item.due_date ? ` · до ${item.due_date}` : ""}` })),
-    ...inbox.filter((item) => `${item.source_name} ${item.source_sender || ""} ${item.summary}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "message" as const, title: item.source_name, detail: item.source_sender || item.summary })),
-  ].slice(0, 30);
   function openProjectSearchHit(hit: ProjectSearchHit) {
     setQuery("");
     if (hit.kind === "document") {
@@ -2034,11 +2025,13 @@ export function App() {
       setActive("Договоры");
     } else if (hit.kind === "task") {
       setActive("Задачи");
-    } else {
+    } else if (hit.kind === "obligation") setActive("Обязательства");
+    else if (hit.kind === "risk" || hit.kind === "decision") setActive("Риски и решения");
+    else if (hit.kind === "message") {
       setActive("Письма");
       setMailView("inbox");
       setExpandedInboxId(hit.id);
-    }
+    } else setActive("Рабочий центр");
   }
   return (
     <div className="shell">

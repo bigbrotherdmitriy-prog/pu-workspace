@@ -3,7 +3,7 @@ import "./project-search.css";
 
 export type ProjectSearchHit = {
   id: number;
-  kind: "document" | "contract" | "task" | "message";
+  kind: "project" | "document" | "contract" | "task" | "obligation" | "risk" | "decision" | "message";
   title: string;
   detail: string;
 };
@@ -15,16 +15,24 @@ type Props = {
 };
 
 const icons = {
+  project: ScrollText,
   document: FileText,
   contract: ScrollText,
   task: ListTodo,
+  obligation: ListTodo,
+  risk: Mail,
+  decision: Mail,
   message: Mail,
 };
 
 const labels = {
+  project: "Проект",
   document: "Документ",
   contract: "Договор",
   task: "Задача",
+  obligation: "Обязательство",
+  risk: "Риск",
+  decision: "Решение",
   message: "Письмо",
 };
 

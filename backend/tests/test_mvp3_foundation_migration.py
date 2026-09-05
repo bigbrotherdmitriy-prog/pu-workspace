@@ -19,9 +19,15 @@ def config(output=None):
 
 def test_mvp3_foundation_is_single_sequential_head():
     script = ScriptDirectory.from_config(config())
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a12"]
-    revision = script.get_revision("a54f001c0a10")
-    assert revision.down_revision == "a54f001c0a09"
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a13"]
+    search_revision = script.get_revision(CURRENT_SCHEMA_REVISION)
+    assert search_revision.down_revision == "a54f001c0a12"
+    contact_revision = script.get_revision("a54f001c0a12")
+    assert contact_revision.down_revision == "a54f001c0a11"
+    contract_revision = script.get_revision("a54f001c0a11")
+    assert contract_revision.down_revision == "a54f001c0a10"
+    foundation_revision = script.get_revision("a54f001c0a10")
+    assert foundation_revision.down_revision == "a54f001c0a09"
 
 
 def test_mvp3_foundation_offline_upgrade_contains_cas_evidence_and_history(monkeypatch):
