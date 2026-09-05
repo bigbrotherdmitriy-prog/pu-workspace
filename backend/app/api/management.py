@@ -54,7 +54,6 @@ class NotificationPolicyUpdate(BaseModel):
     escalation_delays: list[int] = Field(default_factory=lambda: [0, 60, 240], min_length=1, max_length=10)
     channels: list[str] = Field(default_factory=lambda: ["in_app"], min_length=1, max_length=3)
     enabled: bool = True
-
     @field_validator("timezone")
     @classmethod
     def valid_timezone(cls, value: str) -> str:
@@ -76,6 +75,10 @@ class NotificationPolicyUpdate(BaseModel):
         if len(value) != len(set(value)) or any(channel not in ALLOWED_CHANNELS for channel in value):
             raise ValueError("unsupported or duplicate notification channel")
         return value
+
+
+class NotificationRead(BaseModel):
+    expected_record_version: int = Field(default=1, ge=1)
 
 
 def _obligation_payload(item: Obligation) -> dict:
@@ -397,7 +400,8 @@ def list_notifications(project_id: int, db: Session = Depends(get_db), user: Use
     if cursor is not None: query = query.where(Notification.id < cursor)
     rows = list(db.scalars(query.order_by(Notification.id.desc()).limit(limit + 1)))
     has_more = len(rows) > limit; rows = rows[:limit]
-    return {"notifications": [{"id": x.id, "kind": x.kind, "title": x.title, "body": x.body,
+    return {"notifications": [{"id": x.id, "record_version": x.record_version,
+                                "kind": x.kind, "title": x.title, "body": x.body,
                                 "entity_type": x.entity_type, "entity_id": x.entity_id,
                                 "is_read": x.is_read, "created_at": x.created_at} for x in rows],
             "unread": len([x for x in rows if not x.is_read]),
@@ -426,10 +430,29 @@ def management_history(entity_type: str, entity_id: int, project_id: int,
 
 
 @router.post("/notifications/{notification_id}/read")
-def read_notification(notification_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    item = db.get(Notification, notification_id)
-    if item is None or item.user_id != user.id:
+def read_notification(notification_id: int, payload: NotificationRead,
+                      db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.scalar(select(Notification).where(
+        Notification.id == notification_id,
+        Notification.user_id == user.id,
+    ).with_for_update())
+    if item is None:
         raise HTTPException(404, "Notification not found")
     require_project_role(db, user, item.project_id, "viewer")
-    item.is_read = True; db.commit()
-    return {"id": item.id, "is_read": True}
+    if item.record_version != payload.expected_record_version:
+        raise HTTPException(409, {"code": "record_version_conflict",
+                                  "expected": payload.expected_record_version,
+                                  "actual": item.record_version})
+    if not item.is_read:
+        item.is_read = True
+        item.record_version += 1
+        append_management_history(
+            db, project_id=item.project_id, entity_type="notification", entity_id=item.id,
+            record_version=item.record_version, action="read", actor_user_id=user.id,
+            old_values={"is_read": False}, new_values={"is_read": True},
+            evidence={"kind": item.kind, "entity_type": item.entity_type,
+                      "entity_id": item.entity_id},
+            reason="Пользователь отметил уведомление прочитанным",
+        )
+        db.commit(); db.refresh(item)
+    return {"id": item.id, "record_version": item.record_version, "is_read": True}

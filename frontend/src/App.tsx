@@ -2005,10 +2005,13 @@ export function App() {
     try {
       await api(`/management/notifications/${item.id}/read`, {
         method: "POST",
+        body: JSON.stringify({ expected_record_version: item.record_version }),
       });
       setNotifications((rows) =>
         rows.map((row) =>
-          row.id === item.id ? { ...row, is_read: true } : row,
+          row.id === item.id
+            ? { ...row, is_read: true, record_version: item.record_version + 1 }
+            : row,
         ),
       );
     } catch (e) {

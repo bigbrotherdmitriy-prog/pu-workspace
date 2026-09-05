@@ -6,7 +6,14 @@ from sqlalchemy import func, select
 
 from app.api import management as management_api
 from app.api.governance import DecisionUpdate, RiskUpdate, update_decision, update_risk
-from app.api.management import MeetingUpdate, ObligationUpdate, finish_meeting, update_obligation
+from app.api.management import (
+    MeetingUpdate,
+    NotificationRead,
+    ObligationUpdate,
+    finish_meeting,
+    read_notification,
+    update_obligation,
+)
 from app.api.project_contacts import (
     ContactConflictResolve,
     ContactUpdate,
@@ -16,7 +23,7 @@ from app.api.project_contacts import (
 )
 from app.api.tasks import TaskUpdate, update_task
 from app.models.governance import Decision, Risk
-from app.models.management import ManagementHistory, Meeting, Obligation
+from app.models.management import ManagementHistory, Meeting, Notification, Obligation
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_contact import ContactConflict, ProjectContact
@@ -81,6 +88,32 @@ def test_every_management_mutation_rejects_stale_version_and_appends_history(db_
     assert rows[0].record_version == 2
     assert rows[0].old_values != rows[0].new_values
     assert rows[0].actor_user_id == user.id
+
+
+def test_marking_notification_read_is_cas_versioned_and_audited(db_session, user_factory):
+    _, user, project, _ = world(db_session, user_factory)
+    item = Notification(
+        project_id=project.id, user_id=user.id, kind="deadline", title="Срок",
+        body="Проверьте обязательство", entity_type="obligation", entity_id=17,
+        dedupe_key="notification-cas-test",
+    )
+    db_session.add(item); db_session.commit()
+
+    result = read_notification(
+        item.id, NotificationRead(expected_record_version=1), db_session, user,
+    )
+    assert result == {"id": item.id, "record_version": 2, "is_read": True}
+    history = db_session.scalar(select(ManagementHistory).where(
+        ManagementHistory.entity_type == "notification",
+        ManagementHistory.entity_id == item.id,
+    ))
+    assert history.action == "read" and history.record_version == 2
+
+    with pytest.raises(HTTPException) as error:
+        read_notification(
+            item.id, NotificationRead(expected_record_version=1), db_session, user,
+        )
+    assert error.value.status_code == 409
 
 
 def test_project_contact_cas_and_history(db_session, user_factory):

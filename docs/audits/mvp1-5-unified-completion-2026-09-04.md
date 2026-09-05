@@ -22,9 +22,7 @@ Alembic head: `d04e8a6c31f2`
 
 ## Текущие автоматические доказательства
 
-- полный backend: `1391 passed, 24 skipped` (после добавления двух новых
-  PostgreSQL-only finance gates; исходный полный прогон до их добавления —
-  `1391 passed, 22 skipped`);
+- полный backend: `1392 passed, 24 skipped`;
 - полный frontend unit: `182 passed` в `31` файле;
 - browser E2E: `20 passed`;
 - схемные и миграционные проверки: `100 passed, 5 skipped`;
