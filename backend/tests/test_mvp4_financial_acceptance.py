@@ -21,6 +21,7 @@ from app.api.execution_finance import (
     create_schedule_item,
     update_status,
 )
+from app.api.evidence import list_current_project_evidence
 from app.contract_evidence import extract_contract_evidence, persist_contract_evidence
 from app.execution_forecast.engine import build_forecast
 from app.execution_forecast.repository import load_forecast_input
@@ -57,6 +58,7 @@ from app.mvp4.supply.contracts import (
     ReviewSupplyRequest,
     VersionedCommand,
 )
+from app.mvp4.supply.router import _require_idempotency
 from app.mvp4.supply.models import SupplyCase, SupplyCaseVersion
 from app.mvp4.supply.service import SupplyConflict, SupplyDenied, SupplyService
 
@@ -761,3 +763,47 @@ def test_financial_acceptance_logs_and_payloads_do_not_contain_document_content(
     assert secret_marker not in audit_payload
     assert secret_marker not in job_payload
     assert world["document"].name not in audit_payload
+
+
+def test_supply_evidence_selector_returns_only_exact_current_project_pins(financial_world):
+    world = financial_world
+
+    result = list_current_project_evidence(
+        project_id=world["project"].id,
+        db=world["db"],
+        user=world["viewer"],
+    )
+
+    assert result == {
+        "projectId": world["project"].id,
+        "items": [{
+            "evidenceId": world["evidence"].id,
+            "evidenceRevision": 1,
+            "sourceVersionId": world["source_version"].id,
+            "documentVersionId": world["document_version"].id,
+            "assessmentVersion": 1,
+            "verification": "verified",
+            "confidence": 0.96,
+            "locator": {"kind": "page", "page": 2},
+        }],
+        "total": 1,
+    }
+
+
+def test_supply_evidence_selector_enforces_project_role(financial_world):
+    world = financial_world
+    with pytest.raises(HTTPException) as denied:
+        list_current_project_evidence(
+            project_id=world["project"].id,
+            db=world["db"],
+            user=world["outsider"],
+        )
+    assert denied.value.status_code == 403
+
+
+def test_supply_router_requires_one_matching_idempotency_key():
+    _require_idempotency("supply-command-123", "supply-command-123")
+    with pytest.raises(HTTPException) as conflict:
+        _require_idempotency("supply-command-123", "different-command")
+    assert conflict.value.status_code == 409
+    assert conflict.value.detail == "idempotency_key_conflict"

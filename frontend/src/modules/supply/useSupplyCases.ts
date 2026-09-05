@@ -2,28 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api/client";
 import {
   parseProjectOrganization,
+  parseSupplyEvidenceOptions,
   parseSupplyList,
   type SupplyAction,
   type SupplyCaseView,
+  type SupplyEvidenceOption,
 } from "./supplyReadModel";
+import type { SupplyActionFields } from "./SupplyActionForm";
 
 export type SupplyLoadState = "idle" | "loading" | "ready" | "empty" | "error";
 export type SupplyMutationState = "idle" | "saving" | "saved" | "blocked" | "conflict" | "error";
 
-const executableActions = new Set<SupplyAction>(["approve_request", "approve_order", "approve_act"]);
-const actionPaths: Record<"approve_request" | "approve_order" | "approve_act", string> = {
+const managerActions = new Set<SupplyAction>(["approve_request", "approve_order", "approve_act", "review", "resolve_discrepancy"]);
+const actionPaths: Record<SupplyAction, string> = {
+  review: "review",
   approve_request: "approve-request",
+  prepare_order: "order",
   approve_order: "approve-order",
+  record_order: "record-order",
+  record_delivery: "deliveries",
+  resolve_discrepancy: "resolve-discrepancy",
+  propose_act: "acceptance-acts",
   approve_act: "approve-acceptance-act",
-};
-
-const blockedReasons: Record<Exclude<SupplyAction, "approve_request" | "approve_order" | "approve_act">, string> = {
-  review: "Откройте связанное доказательство и укажите решение проверки. Без явного решения заявка не изменяется.",
-  prepare_order: "Для подготовки заказа нужны количество и номер заказа. Введите их в специализированной форме — данные не подставляются автоматически.",
-  record_order: "Нужно новое точное доказательство размещения заказа. Сначала привяжите подтверждающий документ.",
-  record_delivery: "Нужны количество поставки и новое точное доказательство. Без них поставка не фиксируется.",
-  resolve_discrepancy: "Выберите решение по расхождению в специализированной форме. Система не принимает его автоматически.",
-  propose_act: "Нужны номер акта, принятое количество и точное доказательство. Без этих данных акт не создаётся.",
 };
 
 function safeError(error: unknown): string {
@@ -68,11 +68,15 @@ export function useSupplyCases(
   const [mutationState, setMutationState] = useState<SupplyMutationState>("idle");
   const [mutationMessage, setMutationMessage] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [evidence, setEvidence] = useState<SupplyEvidenceOption[]>([]);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
 
   useEffect(() => {
     setBusyId(null);
     setMutationState("idle");
     setMutationMessage(null);
+    setEvidence([]);
+    setEvidenceLoading(false);
   }, [enabled, projectId]);
 
   const reload = useCallback(async () => {
@@ -108,23 +112,39 @@ export function useSupplyCases(
 
   useEffect(() => { void reload(); }, [reload]);
 
-  const runAction = useCallback(async (action: SupplyAction, item: SupplyCaseView) => {
+  const loadEvidence = useCallback(async () => {
+    if (!projectId || !organizationId) return [];
+    const selectedProject = projectId;
+    setEvidenceLoading(true);
+    try {
+      const raw = await api<unknown>(`/api/v54/evidence?project_id=${selectedProject}`, { cache: "no-store" });
+      const options = parseSupplyEvidenceOptions(raw, selectedProject);
+      if (activeProject.current !== selectedProject) return [];
+      setEvidence(options);
+      return options;
+    } catch (caught) {
+      if (activeProject.current === selectedProject) {
+        setEvidence([]);
+        setMutationState("error");
+        setMutationMessage(safeError(caught));
+      }
+      return [];
+    } finally {
+      if (activeProject.current === selectedProject) setEvidenceLoading(false);
+    }
+  }, [organizationId, projectId]);
+
+  const runAction = useCallback(async (action: SupplyAction, item: SupplyCaseView, fields: SupplyActionFields = {}) => {
     if (!projectId || !organizationId || item.projectId !== projectId) {
       setMutationState("blocked");
       setMutationMessage("Контекст проекта изменился. Обновите цепочку снабжения.");
       return;
     }
-    if (!executableActions.has(action)) {
-      setMutationState("blocked");
-      setMutationMessage(blockedReasons[action as keyof typeof blockedReasons]);
-      return;
-    }
-    if (!canManage) {
+    if (managerActions.has(action) && !canManage) {
       setMutationState("blocked");
       setMutationMessage("Для согласования требуется роль менеджера проекта.");
       return;
     }
-    const executable = action as keyof typeof actionPaths;
     const key = commandKey(projectId, item, action);
     setBusyId(item.id);
     setMutationState("saving");
@@ -134,10 +154,10 @@ export function useSupplyCases(
         organization_id: String(organizationId),
         project_id: String(projectId),
       });
-      const raw = await api<unknown>(`/api/mvp4/supply/${item.id}/${actionPaths[executable]}?${query}`, {
+      const raw = await api<unknown>(`/api/mvp4/supply/${item.id}/${actionPaths[action]}?${query}`, {
         method: "POST",
         headers: { "Idempotency-Key": key },
-        body: JSON.stringify({ command_key: key, expected_version: item.recordVersion }),
+        body: JSON.stringify({ command_key: key, expected_version: item.recordVersion, ...fields }),
       });
       parseMutationResult(raw, item);
       if (activeProject.current !== projectId) return;
@@ -159,5 +179,6 @@ export function useSupplyCases(
 
   return {
     loadState, items, error, mutationState, mutationMessage, busyId, reload, runAction,
+    evidence, evidenceLoading, loadEvidence,
   };
 }

@@ -26,5 +26,13 @@
 .supply-center__message--blocked, .supply-center__message--conflict { background: #fff3d6; color: #714f00; }
 .supply-center__message--error { background: #fde9e7; color: #78251e; }
 .supply-center__message--saved { background: #e7f5ec; color: #185b32; }
+.supply-action-form { display: grid; gap: 12px; padding: 18px; border: 2px solid #8eaa99; border-radius: 16px; background: #f8fbf9; }
+.supply-action-form h4, .supply-action-form p { margin: 0; }
+.supply-action-form label { display: grid; gap: 5px; font-size: 13px; font-weight: 650; }
+.supply-action-form input, .supply-action-form select, .supply-action-form textarea { width: 100%; box-sizing: border-box; border: 1px solid #bccbc2; border-radius: 9px; padding: 9px; background: #fff; color: inherit; }
+.supply-action-form [role="alert"] { padding: 10px; border-radius: 9px; background: #fde9e7; color: #78251e; }
+.supply-action-form__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.supply-action-form__buttons button { border: 1px solid #173e2c; border-radius: 9px; padding: 9px 12px; background: #173e2c; color: #fff; cursor: pointer; }
+.supply-action-form__buttons button[type="button"] { background: #fff; color: #173e2c; }
 @media (max-width: 720px) { .supply-chain__steps, .supply-chain__quantities { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 720px) { .supply-center__head { flex-direction: column; } }

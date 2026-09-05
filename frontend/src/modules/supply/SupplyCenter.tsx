@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
+import { SupplyActionForm, type SupplyActionFields } from "./SupplyActionForm";
 import { SupplyChainPanel } from "./SupplyChainPanel";
+import type { SupplyAction, SupplyCaseView } from "./supplyReadModel";
 import { useSupplyCases } from "./useSupplyCases";
 
 type Props = {
@@ -10,6 +13,27 @@ type Props = {
 
 export function SupplyCenter({ projectId, enabled = true, canEdit, canManage }: Props) {
   const controller = useSupplyCases(projectId, enabled, canManage);
+  const [form, setForm] = useState<{ action: SupplyAction; item: SupplyCaseView } | null>(null);
+  const formActions = new Set<SupplyAction>([
+    "review", "prepare_order", "record_order", "record_delivery", "resolve_discrepancy", "propose_act",
+  ]);
+  const evidenceActions = new Set<SupplyAction>(["record_order", "record_delivery", "propose_act"]);
+  useEffect(() => setForm(null), [projectId, enabled]);
+
+  function startAction(action: SupplyAction, item: SupplyCaseView) {
+    if (!formActions.has(action)) {
+      void controller.runAction(action, item);
+      return;
+    }
+    setForm({ action, item });
+    if (evidenceActions.has(action)) void controller.loadEvidence();
+  }
+
+  function submitForm(fields: SupplyActionFields) {
+    if (!form) return;
+    void controller.runAction(form.action, form.item, fields);
+    setForm(null);
+  }
 
   return <section className="supply-center" aria-label="Снабжение и приёмка">
     <div className="supply-center__head">
@@ -35,6 +59,14 @@ export function SupplyCenter({ projectId, enabled = true, canEdit, canManage }: 
       className={`supply-center__message supply-center__message--${controller.mutationState}`}>
       {controller.mutationMessage}
     </p>}
+    {form && <SupplyActionForm
+      action={form.action}
+      item={form.item}
+      evidence={controller.evidence}
+      evidenceLoading={controller.evidenceLoading}
+      onCancel={() => setForm(null)}
+      onSubmit={submitForm}
+    />}
     <div className="supply-center__items">
       {controller.items.map((item) => <SupplyChainPanel
         key={item.id}
@@ -42,7 +74,7 @@ export function SupplyCenter({ projectId, enabled = true, canEdit, canManage }: 
         canEdit={canEdit}
         canManage={canManage}
         busy={controller.busyId === item.id}
-        onAction={(action, current) => void controller.runAction(action, current)}
+        onAction={startAction}
       />)}
     </div>
   </section>;

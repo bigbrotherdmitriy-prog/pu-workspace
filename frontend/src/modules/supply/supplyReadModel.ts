@@ -52,6 +52,17 @@ export interface SupplyCaseView {
   externalActionStatus: "not_created";
 }
 
+export interface SupplyEvidenceOption {
+  evidenceId: string;
+  evidenceRevision: 1;
+  sourceVersionId: string;
+  documentVersionId: number;
+  assessmentVersion: number;
+  verification: "verified" | "unverified";
+  confidence: number | null;
+  locator: { kind: "page"; page: number } | { kind: "exact_fragment" | "unavailable" };
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 const supplyStatuses = new Set<SupplyStatus>([
@@ -122,6 +133,43 @@ export function parseSupplyList(value: unknown, projectId: number): SupplyCaseVi
     };
   });
   if (envelope.total !== items.length) throw new Error("supply response: total mismatch");
+  return items;
+}
+
+export function parseSupplyEvidenceOptions(value: unknown, projectId: number): SupplyEvidenceOption[] {
+  const envelope = record(value, "evidence response");
+  if (positiveInteger(envelope.projectId, "evidence projectId") !== projectId
+    || !Array.isArray(envelope.items) || !Number.isInteger(envelope.total)) {
+    throw new Error("evidence response: invalid envelope");
+  }
+  const items = envelope.items.map((raw, index): SupplyEvidenceOption => {
+    const item = record(raw, `evidence item ${index}`);
+    const locator = record(item.locator, "evidence locator");
+    const kind = text(locator.kind, "evidence locator kind");
+    const verification = text(item.verification, "verification");
+    const confidence = item.confidence === null ? null
+      : typeof item.confidence === "number" && Number.isFinite(item.confidence)
+        && item.confidence >= 0 && item.confidence <= 1 ? item.confidence : NaN;
+    if (item.evidenceRevision !== 1 || !["verified", "unverified"].includes(verification)
+      || Number.isNaN(confidence) || !["page", "exact_fragment", "unavailable"].includes(kind)) {
+      throw new Error("evidence item: unsafe value");
+    }
+    const safeLocator = kind === "page"
+      ? { kind: "page" as const, page: positiveInteger(locator.page, "evidence page") }
+      : { kind: kind as "exact_fragment" | "unavailable" };
+    if (safeLocator.kind === "page" && !safeLocator.page) throw new Error("evidence page: invalid");
+    return {
+      evidenceId: text(item.evidenceId, "evidenceId"),
+      evidenceRevision: 1,
+      sourceVersionId: text(item.sourceVersionId, "sourceVersionId"),
+      documentVersionId: positiveInteger(item.documentVersionId, "documentVersionId"),
+      assessmentVersion: positiveInteger(item.assessmentVersion, "assessmentVersion"),
+      verification: verification as SupplyEvidenceOption["verification"],
+      confidence: confidence as number | null,
+      locator: safeLocator as SupplyEvidenceOption["locator"],
+    };
+  });
+  if (items.length !== envelope.total) throw new Error("evidence response: total mismatch");
   return items;
 }
 
