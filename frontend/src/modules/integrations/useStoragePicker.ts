@@ -147,7 +147,7 @@ export function useStoragePicker<T extends PickerFolder>(projectId: number, proj
     await discover(pinned.project_id, pinned.provider, path, pinned);
   }
 
-  async function confirm(folder: T) {
+  async function confirm(folder: T, options: { refresh?: boolean } = {}) {
     const request = capture();
     if (!request || loading || confirming.current || needsReopen) return false;
     const pinned = request.context;
@@ -159,7 +159,9 @@ export function useStoragePicker<T extends PickerFolder>(projectId: number, proj
     latestSubmission.current.set(pinned.project_id, submission);
     confirming.current = true; setBusyFolder(folder.id); setError("");
     try {
-      const result = await api<StorageSelection>(`/projects/${pinned.project_id}/source-folders/${encodeURIComponent(folder.id)}/snapshot-queue?${guards(pinned)}`, { method: "POST" });
+      const query = guards(pinned);
+      if (options.refresh) query.set("refresh", "true");
+      const result = await api<StorageSelection>(`/projects/${pinned.project_id}/source-folders/${encodeURIComponent(folder.id)}/snapshot-queue?${query}`, { method: "POST" });
       if (!matches(pinned, result, true) || result.folder_id !== folder.id) throw new ApiError(reopenMessage, 409, "");
       // Retain a verified result under its own project even if the user left it.
       if (latestSubmission.current.get(pinned.project_id) === submission) {

@@ -193,6 +193,19 @@ describe("project-scoped storage picker", () => {
     expect(result.current.context?.connection_row_id).toBe(12);
     expect(result.current.busyFolder).toBe("");
   });
+
+  it("requests an explicit immutable refresh without changing the selected binding", async () => {
+    mockApi.mockResolvedValueOnce(discovery());
+    const { result } = mount();
+    await act(() => result.current.open("google_drive"));
+    mockApi.mockResolvedValueOnce({ ...confirmation(), id: 32, job_id: 43 });
+    await act(() => result.current.confirm(folder, { refresh: true }));
+    const request = new URL(mockApi.mock.calls[1][0], "https://local.test");
+    expect(request.searchParams.get("refresh")).toBe("true");
+    expect(request.searchParams.get("provider")).toBe("google_drive");
+    expect(request.searchParams.get("connection_id")).toBe("account-2");
+    expect(result.current.selection?.id).toBe(32);
+  });
 });
 
 describe("explicit project restoration", () => {

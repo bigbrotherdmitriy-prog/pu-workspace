@@ -1081,6 +1081,12 @@ export function App() {
   async function queueFolder(folder: DriveFolder) {
     await picker.confirm(folder);
   }
+  async function refreshFolder(folder: DriveFolder) {
+    const refreshed = await picker.confirm(folder, { refresh: true });
+    if (refreshed) {
+      setNotice(`Создан новый снимок «${folder.name}». Изменения на диске поставлены в очередь анализа.`);
+    }
+  }
   async function makePrimary(folder: DriveFolder) {
     const request = picker.capture();
     if (!request) return;
@@ -2509,6 +2515,13 @@ export function App() {
                                   onClick={() => queueFolder(folder)}
                                 >
                                   {busyFolder === folder.id ? "Подтверждаю…" : "Выбрать эту папку"}
+                                </button>
+                                <button
+                                  className="secondary"
+                                  disabled={!!busyFolder || picker.loading || picker.needsReopen}
+                                  onClick={() => void refreshFolder(folder)}
+                                >
+                                  {busyFolder === folder.id ? "Обновляю снимок…" : "Обновить изменения с диска"}
                                 </button>
                                 <button
                                   className="analyze"
