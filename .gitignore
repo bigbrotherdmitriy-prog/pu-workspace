@@ -10,6 +10,7 @@ __pycache__/
 *.pyo
 .pytest_cache/
 pytest-of-*/
+.pytest-*/
 
 # Backups / temporary files
 *.bak
