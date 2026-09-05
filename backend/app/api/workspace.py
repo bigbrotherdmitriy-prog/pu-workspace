@@ -186,11 +186,17 @@ def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, 
     from app.organizer import _scan_worker
 
     with SessionLocal() as check_db:
-        _validate_snapshot_target(check_db, check_db.get(WorkspaceSnapshot, snapshot_id), project_id, source_folder_id)
+        snapshot = check_db.get(WorkspaceSnapshot, snapshot_id)
+        source = _validate_snapshot_target(check_db, snapshot, project_id, source_folder_id)
+        from app.organizer_engine.managed_copies import snapshot_copy_key
+        managed_copy_key = snapshot_copy_key(snapshot, source)
         session = OrganizerRepository(check_db).get_session(session_id)
         if session is None or session["project_id"] != project_id or session["source_folder_id"] != source_folder_id:
             raise HTTPException(409, "Organizer session does not match the snapshot target")
-    _scan_worker(session_id, project_id, source_folder_id, auto_apply=True, raise_errors=raise_errors)
+    _scan_worker(
+        session_id, project_id, source_folder_id, auto_apply=True,
+        raise_errors=raise_errors, managed_copy_key=managed_copy_key,
+    )
     db = SessionLocal()
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
@@ -226,6 +232,9 @@ def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_i
         snapshot = _locked_snapshot(db, snapshot_id)
         if snapshot is None:
             return None
+        project = db.get(Project, project_id)
+        if project is None or project.archived_at is not None:
+            raise HTTPException(409, "Archived projects cannot create safe copies")
         _validate_snapshot_target(db, snapshot, project_id, source_folder_id)
         queued = db.scalar(select(BackgroundJob).where(
             BackgroundJob.idempotency_key == f"workspace.safe_copy:{snapshot_id}"))

@@ -38,6 +38,7 @@ import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/gove
 import { ManagementCenter } from "./modules/management";
 import { ForecastPanel, useForecast } from "./modules/forecast";
 import { SupplyCenter } from "./modules/supply";
+import { waitForSafeCopyCleanup } from "./modules/projects/safeCopyCleanup";
 import { formatMoney } from "./utils/numberFormat";
 import {
   Activity,
@@ -665,27 +666,35 @@ export function App() {
       if (!summary.count) {
         setCopyCleanupResults((current) => ({
           ...current,
-          [project.id]: { count: 0, message: "Безопасных копий нет. Можно архивировать проект." },
+          [project.id]: { count: 0, message: "Управляемых копий для очистки нет. Можно архивировать проект." },
         }));
         setNotice("Безопасных копий PU Workspace для очистки нет");
         return;
       }
       const confirmation = window.prompt(
-        `Будут перемещены в корзину Google Drive только ${summary.count} безопасных копий PU Workspace. Оригиналы не затрагиваются. Для подтверждения введите точное название проекта:`,
+        `Будут перемещены в корзину хранилища только ${summary.count} управляемых копий PU Workspace. Оригиналы не затрагиваются. Для подтверждения введите точное название проекта:`,
       );
       if (confirmation === null) return;
-      const result = await api(`/projects/${project.id}/safe-copies/trash`, {
+      const commandKey = crypto.randomUUID();
+      const queued = await api(`/projects/${project.id}/safe-copies/trash`, {
         method: "POST",
-        body: JSON.stringify({ confirmation }),
+        headers: { "Idempotency-Key": commandKey },
+        body: JSON.stringify({
+          confirmation,
+          expected_cleanup_version: summary.cleanup_version,
+          command_key: commandKey,
+        }),
       });
+      setNotice(`Очистка ${queued.count} управляемых копий запущена. Оригиналы не затрагиваются.`);
+      const result = await waitForSafeCopyCleanup(api, project.id, queued.job_id);
       setCopyCleanupResults((current) => ({
         ...current,
         [project.id]: {
-          count: result.trashed,
-          message: `Копии удалены: ${result.trashed}. Исходные папки не изменены. Можно архивировать проект.`,
+          count: result.trashed ?? queued.count,
+          message: result.message || "Копии удалены, можете архивировать проект",
         },
       }));
-      setNotice(`В корзину Google Drive перемещено безопасных копий: ${result.trashed}. Оригиналы не изменены.`);
+      setNotice(`Копии удалены: ${result.trashed}. Можете архивировать проект. Оригиналы не изменены.`);
       await load();
     } catch (e) {
       setError((e as Error).message);

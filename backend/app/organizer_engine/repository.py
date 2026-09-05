@@ -17,7 +17,7 @@ class OrganizerRepository:
         self.db = db
 
     def project(self, project_id: int):
-        return self.db.execute(text("SELECT id,name FROM projects WHERE id=:id"), {"id": project_id}).mappings().first()
+        return self.db.execute(text("SELECT id,name,archived_at FROM projects WHERE id=:id"), {"id": project_id}).mappings().first()
 
     def create_session(self, project_id: int, source_folder_id: str, source_folder_name: str) -> int:
         return int(self.db.execute(text("""

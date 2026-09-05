@@ -32,11 +32,11 @@ def test_frontend_keeps_cleanup_result_visible_on_project_card():
     app = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     assert "project-cleanup-result" in app
     assert "Копии удалены:" in app
-    assert "Можно архивировать проект" in app
+    assert "Копии удалены, можете архивировать проект" in app
     assert "copyCleanupResults[item.id]" in app
 
 
-def test_cleanup_discovers_tracked_and_orphaned_safe_copies_only():
+def test_cleanup_uses_tracked_ids_and_never_grants_delete_rights_by_name():
     sessions = [
         SimpleNamespace(
             source_folder_id="source-dci", source_folder_name="DCI",
@@ -74,5 +74,4 @@ def test_cleanup_discovers_tracked_and_orphaned_safe_copies_only():
             ]
 
     copies = _discover_project_safe_copies(Db(), 7, Drive())
-    assert set(copies) == {"tracked-copy", "orphan-copy"}
-    assert copies["orphan-copy"] is None
+    assert set(copies) == {"tracked-copy"}

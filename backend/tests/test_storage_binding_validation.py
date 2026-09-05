@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 from urllib.parse import quote
 
 import pytest
@@ -15,6 +16,7 @@ from app.integrations import storage
 from app.integrations.yandex_disk import YandexDiskStorageAdapter
 from app.jobs import handlers, queue
 from app.models.drive_connection import DriveConnection
+from app.models.audit_log import AuditLog
 from app.models.integration_credential import IntegrationCredential
 from app.models.google_token import GoogleOAuthToken
 from app.models.job import BackgroundJob
@@ -27,6 +29,8 @@ from app.models.workspace import SourceFolder, VirtualNode, WorkspaceSnapshot
 
 
 class FakeStorage:
+    supports_managed_copy_cleanup = True
+
     def __init__(self, provider):
         self.provider = provider
         self.root = 'disk:/' if provider == 'yandex_disk' else 'root'
@@ -41,6 +45,9 @@ class FakeStorage:
         self.items[self.other] = self.folder(self.other, 'Project #1', self.root)
         self.calls = []
         self.error = None
+        self.trashed: set[str] = set()
+        self.trash_calls: list[str] = []
+        self.crash_after_trash_once = False
 
     def folder(self, identifier, name, parent):
         return StorageObject(identifier, name, 'inode/directory', parent, provider=self.provider)
@@ -60,6 +67,13 @@ class FakeStorage:
     def read_bytes(self, identifier, max_bytes):
         item = self.items[identifier]
         return b'Synthetic contract C-100 dated 2026-09-05 amount 1000', item.mime_type
+
+    def trash_safe_copy(self, identifier):
+        self.trash_calls.append(identifier)
+        self.trashed.add(identifier)
+        if self.crash_after_trash_once:
+            self.crash_after_trash_once = False
+            raise RuntimeError('synthetic crash after provider effect')
 
 
 @pytest.fixture(params=['google_drive', 'yandex_disk'])
@@ -140,6 +154,243 @@ def test_confirm_after_completion_does_not_duplicate(bound):
     second = choose(bound).json()
     assert second['id'] == first['id']
     assert second['already_queued'] is True
+
+
+def _managed_copy(bound, copy_id='managed-copy-id'):
+    first = choose(bound).json()
+    with bound.db() as db:
+        snapshot = db.get(WorkspaceSnapshot, first['id'])
+        snapshot.status = 'ready'
+        session = OrganizerSession(
+            project_id=bound.new,
+            source_folder_id=bound.adapter.ids[-1],
+            source_folder_name='Project #1',
+            copy_folder_id=copy_id,
+            copy_folder_name='Project #1 managed copy',
+            status='proposed',
+            progress=100,
+        )
+        db.add(session); db.flush()
+        snapshot.analysis_status = 'ready'
+        snapshot.analysis_result = {
+            **dict(snapshot.analysis_result or {}),
+            'mode': 'safe_copy',
+            'organizer_session_id': session.id,
+            'copy_folder_id': copy_id,
+            'status': 'proposed',
+            'originals_modified': False,
+        }
+        db.commit()
+        return snapshot.id, session.id
+
+
+def test_managed_copy_cleanup_is_cas_idempotent_and_preserves_history(bound, monkeypatch):
+    from app.organizer_engine import managed_copies as lifecycle
+    from app.jobs import handlers
+
+    snapshot_id, session_id = _managed_copy(bound)
+    # A lookalike and the original exist, but neither has an exact managed record.
+    bound.adapter.items['lookalike'] = bound.adapter.folder(
+        'lookalike', 'Project #1 (безопасная копия 2026-09-05 UTC)', bound.adapter.root,
+    )
+    monkeypatch.setattr(lifecycle, 'SessionLocal', bound.db)
+    monkeypatch.setattr(lifecycle, 'storage_for_project', lambda project_id, db: bound.adapter)
+
+    summary = bound.client.get(f'/projects/{bound.new}/safe-copies').json()
+    assert summary['count'] == 1 and summary['managed_only'] is True
+    command_key = f'cleanup:{bound.adapter.provider}:001'
+    response = bound.client.post(
+        f'/projects/{bound.new}/safe-copies/trash',
+        headers={'Idempotency-Key': command_key},
+        json={
+            'confirmation': 'New project',
+            'expected_cleanup_version': summary['cleanup_version'],
+            'command_key': command_key,
+        },
+    )
+    assert response.status_code == 200, response.text
+    job = response.json()
+    with bound.db() as db:
+        queued = db.get(BackgroundJob, job['job_id'])
+        assert set(queued.payload) == {'project_id', 'cleanup_version', 'command_key'}
+        payload = dict(queued.payload)
+
+    result = handlers.run('workspace.safe_copy_cleanup', payload)
+    replay = handlers.run('workspace.safe_copy_cleanup', payload)
+    assert result['message'] == 'Копии удалены, можете архивировать проект'
+    assert replay['idempotent_replay'] is True
+    assert set(replay) == set(result)
+    assert replay['originals_affected'] is False
+    assert {key: value for key, value in replay.items() if key != 'idempotent_replay'} == {
+        key: value for key, value in result.items() if key != 'idempotent_replay'
+    }
+    assert bound.adapter.trash_calls == ['managed-copy-id']
+    assert 'lookalike' not in bound.adapter.trashed
+    assert bound.adapter.ids[-1] not in bound.adapter.trashed
+    with bound.db() as db:
+        # Historical identity is immutable; cleanup is represented by receipts.
+        session = db.get(OrganizerSession, session_id)
+        assert session.copy_folder_id == 'managed-copy-id'
+        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
+        assert snapshot.analysis_result['copy_folder_id'] == 'managed-copy-id'
+    assert bound.client.get(f'/projects/{bound.new}/safe-copies').json()['count'] == 0
+    replay_http = bound.client.post(
+        f'/projects/{bound.new}/safe-copies/trash',
+        headers={'Idempotency-Key': command_key},
+        json={'confirmation': 'New project', 'expected_cleanup_version': summary['cleanup_version'],
+              'command_key': command_key},
+    )
+    assert replay_http.status_code == 200
+    assert replay_http.json()['job_id'] == job['job_id']
+
+
+def test_cleanup_after_earlier_completed_generation(bound, monkeypatch):
+    from app.organizer_engine import managed_copies as lifecycle
+    snapshot_id, session_id = _managed_copy(bound)
+    monkeypatch.setattr(lifecycle, 'SessionLocal', bound.db)
+    monkeypatch.setattr(lifecycle, 'storage_for_project', lambda project_id, db: bound.adapter)
+    with bound.db() as db:
+        version = lifecycle.cleanup_version(lifecycle.managed_copies(db, bound.new))
+    lifecycle.run_managed_copy_cleanup({'project_id': bound.new, 'cleanup_version': version,
+                                        'command_key': 'cleanup:first:001'})
+    with bound.db() as db:
+        old = db.get(WorkspaceSnapshot, snapshot_id)
+        session = OrganizerSession(project_id=bound.new, source_folder_id=bound.adapter.ids[-1],
+                                   source_folder_name='Synthetic', copy_folder_id='second-copy',
+                                   status='proposed', progress=100)
+        db.add(session); db.flush()
+        fresh = WorkspaceSnapshot(project_id=bound.new, source_folder_id=old.source_folder_id,
+                                  status='ready', analysis_result={**old.analysis_result,
+                                      'organizer_session_id': session.id, 'copy_folder_id': 'second-copy'})
+        db.add(fresh); db.commit()
+        version = lifecycle.cleanup_version(lifecycle.managed_copies(db, bound.new))
+    result = lifecycle.run_managed_copy_cleanup({'project_id': bound.new, 'cleanup_version': version,
+                                                 'command_key': 'cleanup:second:001'})
+    assert result['trashed'] == 1
+    assert bound.adapter.trash_calls == ['managed-copy-id', 'second-copy']
+
+
+def test_copy_that_is_another_projects_original_is_excluded(bound):
+    _managed_copy(bound)
+    with bound.db() as db:
+        db.add(SourceFolder(project_id=bound.old, provider=bound.adapter.provider,
+                            external_id='managed-copy-id', name='Other original'))
+        db.commit()
+    assert bound.client.get(f'/projects/{bound.new}/safe-copies').json()['count'] == 0
+
+
+def test_cleanup_summary_and_status_deny_outsider(bound):
+    _managed_copy(bound)
+    assert bound.client.get(f'/projects/{bound.new}/safe-copies', headers={'X-User': 'other'}).status_code == 403
+    assert bound.client.get(f'/projects/{bound.new}/safe-copies/cleanup/1', headers={'X-User': 'other'}).status_code == 403
+
+
+def test_cleanup_rejects_stale_version_and_mismatched_idempotency_key(bound):
+    _managed_copy(bound)
+    summary = bound.client.get(f'/projects/{bound.new}/safe-copies').json()
+    body = {
+        'confirmation': 'New project',
+        'expected_cleanup_version': '0' * 64,
+        'command_key': 'cleanup:stale:001',
+    }
+    stale = bound.client.post(
+        f'/projects/{bound.new}/safe-copies/trash',
+        headers={'Idempotency-Key': body['command_key']}, json=body,
+    )
+    assert stale.status_code == 409
+    body['expected_cleanup_version'] = summary['cleanup_version']
+    mismatch = bound.client.post(
+        f'/projects/{bound.new}/safe-copies/trash',
+        headers={'Idempotency-Key': 'different-command'}, json=body,
+    )
+    assert mismatch.status_code == 422
+
+
+def test_cleanup_recovers_after_crash_without_second_provider_effect(bound, monkeypatch):
+    from app.organizer_engine import managed_copies as lifecycle
+
+    _managed_copy(bound)
+    monkeypatch.setattr(lifecycle, 'SessionLocal', bound.db)
+    monkeypatch.setattr(lifecycle, 'storage_for_project', lambda project_id, db: bound.adapter)
+    with bound.db() as db:
+        records = lifecycle.managed_copies(db, bound.new)
+        version = lifecycle.cleanup_version(records)
+    payload = {
+        'project_id': bound.new,
+        'cleanup_version': version,
+        'command_key': 'cleanup:crash:001',
+    }
+    bound.adapter.crash_after_trash_once = True
+    with pytest.raises(RuntimeError):
+        lifecycle.run_managed_copy_cleanup(payload)
+    result = lifecycle.run_managed_copy_cleanup(payload)
+    assert result['trashed'] == 1
+    # The adapter received a replay, while its provider-effect set stayed singular.
+    assert bound.adapter.trash_calls == ['managed-copy-id', 'managed-copy-id']
+    assert bound.adapter.trashed == {'managed-copy-id'}
+
+
+def test_cleanup_lease_recovery_after_item_receipt_finishes_without_provider_replay(bound, monkeypatch):
+    from app.organizer_engine import managed_copies as lifecycle
+
+    _managed_copy(bound)
+    monkeypatch.setattr(lifecycle, 'SessionLocal', bound.db)
+    monkeypatch.setattr(lifecycle, 'storage_for_project', lambda project_id, db: bound.adapter)
+    with bound.db() as db:
+        records = lifecycle.managed_copies(db, bound.new)
+        version = lifecycle.cleanup_version(records)
+        db.add(AuditLog(
+            action=lifecycle.ITEM_RECEIPT,
+            entity_type='project',
+            entity_id=bound.new,
+            details=json.dumps({
+                'schema': lifecycle.SCHEMA,
+                'identity': records[0].identity,
+                'command_key': 'cleanup:lease:001',
+                'provider': bound.adapter.provider,
+                'source_revision': records[0].source_revision,
+            }, sort_keys=True, separators=(',', ':')),
+        ))
+        db.commit()
+    result = lifecycle.run_managed_copy_cleanup({
+        'project_id': bound.new,
+        'cleanup_version': version,
+        'command_key': 'cleanup:lease:001',
+    })
+    assert result['trashed'] == 1
+    assert bound.adapter.trash_calls == []
+
+
+def test_cleanup_fails_closed_when_provider_has_not_proven_retry_safety(bound, monkeypatch):
+    from app.organizer_engine import managed_copies as lifecycle
+
+    _managed_copy(bound)
+    monkeypatch.setattr(lifecycle, 'SessionLocal', bound.db)
+    monkeypatch.setattr(lifecycle, 'storage_for_project', lambda project_id, db: bound.adapter)
+    monkeypatch.setattr(bound.adapter, 'supports_managed_copy_cleanup', False)
+    with bound.db() as db:
+        records = lifecycle.managed_copies(db, bound.new)
+        version = lifecycle.cleanup_version(records)
+    with pytest.raises(ValueError, match='managed_copy_cleanup_capability_unavailable'):
+        lifecycle.run_managed_copy_cleanup({
+            'project_id': bound.new,
+            'cleanup_version': version,
+            'command_key': 'cleanup:capability:001',
+        })
+    assert bound.adapter.trash_calls == []
+
+
+def test_archived_project_cannot_enqueue_or_execute_new_managed_copy(bound):
+    first = choose(bound).json()
+    with bound.db() as db:
+        snapshot = db.get(WorkspaceSnapshot, first['id'])
+        snapshot.status = 'ready'
+        db.get(Project, bound.new).archived_at = workspace.datetime.now(workspace.timezone.utc)
+        db.commit()
+    before = len(bound.adapter.calls)
+    response = bound.client.post(f'/projects/{bound.new}/snapshots/{first["id"]}/standardize')
+    assert response.status_code == 409
+    assert len(bound.adapter.calls) == before
 
 
 def test_explicit_refresh_invalidates_completed_snapshot_cache(bound):

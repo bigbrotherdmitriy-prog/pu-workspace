@@ -44,6 +44,9 @@ def run(kind: str, payload: dict) -> dict:
             int(payload["project_id"]), payload["source_folder_id"], raise_errors=True,
         )
         return {"snapshot_id": int(payload["snapshot_id"]), "session_id": int(payload["session_id"])}
+    if kind == "workspace.safe_copy_cleanup":
+        from app.organizer_engine.managed_copies import run_managed_copy_cleanup
+        return run_managed_copy_cleanup(payload)
     if kind == "workspace.storage_mutation":
         from app.organizer_engine.storage_mutation_jobs import run_storage_mutation_job
         return run_storage_mutation_job(payload)

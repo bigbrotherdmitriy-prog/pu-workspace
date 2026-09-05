@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
-import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -12,6 +11,7 @@ from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.organization_contract import Organization
 from app.models.audit_log import AuditLog
+from app.models.job import BackgroundJob
 from app.models.organizer import OrganizerSession
 from app.models.document import Document
 from app.models.organization_contract import Contract
@@ -20,8 +20,8 @@ from app.models.project_contact import ProjectContact
 from app.models.ai_secretary import Message
 from app.models.workspace import SourceFolder
 from app.core.auth import require_project_role, require_user
-from app.organizer import get_drive_service
 from app.organizer_engine.drive import DriveClient
+from app.organizer_engine.managed_copies import cleanup_version, managed_copies
 
 
 router = APIRouter(
@@ -58,6 +58,8 @@ class ProjectResponse(BaseModel):
 
 class SafeCopyCleanup(BaseModel):
     confirmation: str
+    expected_cleanup_version: str = Field(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$")
+    command_key: str = Field(min_length=8, max_length=200)
 
 
 @router.get("/")
@@ -283,67 +285,96 @@ def _safe_copy_sessions(db: Session, project_id: int):
     return result
 
 
-_SAFE_COPY_NAME = re.compile(
-    r"^(?P<source>.+) \(безопасная копия \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} UTC\)$",
-    re.IGNORECASE,
-)
-
-
 def _discover_project_safe_copies(db: Session, project_id: int, drive: DriveClient):
-    """Find tracked and orphaned PU copies without ever matching source folders."""
-    sessions = list(db.scalars(select(OrganizerSession).where(OrganizerSession.project_id == project_id)))
-    source_names = {row.source_folder_name.strip().casefold() for row in sessions if row.source_folder_name}
-    tracked = {
-        row.copy_folder_id: row
-        for row in sessions
-        if row.copy_folder_id and row.copy_folder_id not in {"manual", row.source_folder_id}
-        and not row.copy_folder_id.startswith("virtual:")
-    }
-    discovered = dict(tracked)
-    parent_ids = {"root"}
-    for row in sessions:
-        if not row.source_folder_id or row.source_folder_id == "manual":
-            continue
-        try:
-            parent_ids.add(drive.get_file_meta(row.source_folder_id).parent_id or "root")
-        except (KeyError, ValueError):
-            # A removed source cannot broaden cleanup; tracked IDs remain eligible.
-            continue
-    for parent_id in parent_ids:
-        for item in drive.list_children(parent_id):
-            match = _SAFE_COPY_NAME.fullmatch(item.name.strip())
-            if item.is_folder and match and match.group("source").strip().casefold() in source_names:
-                discovered.setdefault(item.id, None)
-    return discovered
+    """Legacy helper restricted to exact DB-tracked IDs; names never grant deletion rights."""
+    del drive
+    return {row.copy_folder_id: row for row in _safe_copy_sessions(db, project_id)}
 
 
 @router.get("/{project_id}/safe-copies")
 def safe_copy_summary(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "owner")
-    drive = DriveClient(get_drive_service(project_id=project_id, db=db))
-    copies = _discover_project_safe_copies(db, project_id, drive)
-    return {"count": len(copies), "recoverable": True, "originals_affected": False}
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    copies = managed_copies(db, project_id)
+    return {
+        "count": len(copies),
+        "cleanup_version": cleanup_version(copies),
+        "recoverable": True,
+        "originals_affected": False,
+        "managed_only": True,
+    }
 
 
 @router.post("/{project_id}/safe-copies/trash")
 def trash_safe_copies(project_id: int, payload: SafeCopyCleanup,
-                      db: Session = Depends(get_db), user: User = Depends(require_user)):
+                      request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "owner")
-    project = db.get(Project, project_id)
+    project = db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     if project is None:
         raise HTTPException(404, "Project not found")
     if payload.confirmation != project.name:
         raise HTTPException(422, "Введите точное название проекта для подтверждения")
-    drive = DriveClient(get_drive_service(project_id=project_id, db=db))
-    copies = _discover_project_safe_copies(db, project_id, drive)
-    trashed = 0
-    for copy_id, row in copies.items():
-        drive.trash_safe_copy(copy_id)
-        if row is not None:
-            row.copy_folder_id = None
-            row.copy_folder_name = None
-        trashed += 1
-    db.add(AuditLog(action="project_safe_copies_trashed", entity_type="project", entity_id=project_id,
-                    details=f"count={trashed}; originals_affected=false"))
-    db.commit()
-    return {"trashed": trashed, "recoverable": True, "originals_affected": False}
+    header_key = request.headers.get("Idempotency-Key", "").strip()
+    if not header_key or header_key != payload.command_key:
+        raise HTTPException(422, "Idempotency-Key must match command_key")
+    key = f"workspace.safe_copy_cleanup:{project_id}:{user.id}:{header_key}"
+    prior = db.scalar(select(BackgroundJob).where(BackgroundJob.idempotency_key == key))
+    if prior is not None:
+        if prior.payload.get("cleanup_version") != payload.expected_cleanup_version:
+            raise HTTPException(409, "Idempotency-Key already belongs to another cleanup")
+        return {
+            "job_id": prior.id, "status": prior.status,
+            "count": (prior.result or {}).get("trashed", 0),
+            "already_queued": True, "originals_affected": False,
+        }
+    copies = managed_copies(db, project_id)
+    current_version = cleanup_version(copies)
+    if current_version != payload.expected_cleanup_version:
+        raise HTTPException(409, "Safe-copy list changed; refresh before cleanup")
+    active = db.scalar(select(BackgroundJob).where(
+        BackgroundJob.kind == "workspace.safe_copy_cleanup",
+        BackgroundJob.status.in_(("queued", "running", "retrying")),
+        BackgroundJob.payload["project_id"].as_integer() == project_id,
+    ).order_by(BackgroundJob.id.desc()).limit(1))
+    if active is not None and active.idempotency_key != f"workspace.safe_copy_cleanup:{project_id}:{user.id}:{header_key}":
+        raise HTTPException(409, "Safe-copy cleanup is already running")
+    from app.jobs.queue import enqueue
+    job = enqueue(
+        db,
+        "workspace.safe_copy_cleanup",
+        {
+            "project_id": project_id,
+            "cleanup_version": current_version,
+            "command_key": header_key,
+        },
+        idempotency_key=key,
+    )
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "count": len(copies),
+        "already_queued": active is not None or job.attempts > 0,
+        "originals_affected": False,
+    }
+
+
+@router.get("/{project_id}/safe-copies/cleanup/{job_id}")
+def safe_copy_cleanup_status(project_id: int, job_id: int, db: Session = Depends(get_db),
+                             user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "owner")
+    job = db.get(BackgroundJob, job_id)
+    if (
+        job is None or job.kind != "workspace.safe_copy_cleanup"
+        or int((job.payload or {}).get("project_id") or -1) != project_id
+    ):
+        raise HTTPException(404, "Cleanup job not found")
+    result = dict(job.result or {})
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "progress": job.progress,
+        "trashed": result.get("trashed"),
+        "message": result.get("message"),
+        "originals_affected": False,
+    }

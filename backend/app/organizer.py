@@ -109,6 +109,7 @@ def _scan_worker(
     source_folder_id: str,
     auto_apply: bool | None = None,
     raise_errors: bool = False,
+    managed_copy_key: str | None = None,
 ):
     db = SessionLocal()
     repo = OrganizerRepository(db)
@@ -120,7 +121,7 @@ def _scan_worker(
             repo.update_session(session_id, status="proposed", progress=100)
             return
         project = repo.project(project_id)
-        if not project:
+        if not project or project.get("archived_at") is not None:
             raise ValueError("Project not found")
         drive = storage_for_project(project_id, db)
         if session["copy_folder_id"]:
@@ -128,6 +129,10 @@ def _scan_worker(
             source_name = session["source_folder_name"]
             repo.update_session(session_id, status="analyzing", progress=max(55, session["progress"] or 0))
         else:
+            if managed_copy_key and not bool(getattr(drive, "supports_managed_copy_idempotency", False)):
+                # A deterministic folder name alone proves neither ownership nor
+                # completion after a crash. Do not activate that reuse path.
+                raise ValueError("managed_copy_reconciliation_unavailable")
             repo.update_session(session_id, status="scanning", progress=5)
             source = drive.get_object(source_folder_id)
             if not source.is_folder:
@@ -137,6 +142,7 @@ def _scan_worker(
             repo.update_session(session_id, source_item_count=len(source_items), progress=15)
             copy_result = drive.copy_folder_tree(
                 source_folder_id, source.parent_id, source.name, source_items=source_items,
+                idempotency_key=managed_copy_key,
             )
             copy_folder_id = copy_result.copy_root_id
             repo.update_session(
