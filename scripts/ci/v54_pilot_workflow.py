@@ -25,6 +25,7 @@ HEAD = "a54f001c0a18"
 DATABASES = (
     "puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime",
     "puw_mvp3_test_runtime",
+    "puw_mvp2_test_gmail_history",
 )
 PHASES: list[dict] = []
 CREATED: list[str] = []
@@ -227,6 +228,7 @@ def test_env() -> dict:
         "PUW_V54_INTEGRATION_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations"),
         "PUW_MVP3_TEST_DATABASE_URL": base_url("puw_mvp3_test_runtime"),
+        "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL": base_url("puw_mvp2_test_gmail_history"),
         "GMAIL_AUTO_SYNC_ENABLED": "false",
         "AI_SECRETARY_AUTOMATION_ENABLED": "false",
     })
@@ -285,12 +287,23 @@ def main() -> None:
             "backend/tests/test_mvp3_management_runtime_postgres.py",
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
+        run_phase("gmail_history_migration", [
+            sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", HEAD,
+        ], env=dict(env, DATABASE_URL=base_url("puw_mvp2_test_gmail_history")),
+            timeout=180, cwd=ROOT / "backend")
+        run_phase("postgres_gmail_history", [
+            sys.executable, "-m", "pytest",
+            "backend/tests/test_mvp2_gmail_history_cursor_postgres.py",
+            "backend/tests/test_mvp2_gmail_history_migration.py",
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=180)
         run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
                   env=dict(env, PUW_V54_TEST_DATABASE_URL="", PUW_V54_SOURCE_TEST_DATABASE_URL="",
                            PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_MAILBOX_TEST_DATABASE_URL="",
                            PUW_V54_INTEGRATION_DATABASE_URL="",
                            PUW_V54_PROVIDER_MIGRATION_DATABASE_URL="",
-                           PUW_MVP3_TEST_DATABASE_URL=""), timeout=900)
+                           PUW_MVP3_TEST_DATABASE_URL="",
+                           PUW_MVP2_GMAIL_HISTORY_DATABASE_URL=""), timeout=900)
         targets = [
             "backend/tests/test_v54_pilot_foundation.py",
             "backend/tests/test_v54_source_evidence_pilot.py", "backend/tests/test_v54_source_evidence_postgres.py",
