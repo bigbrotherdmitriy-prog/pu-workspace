@@ -38,6 +38,23 @@ bound local-chain facts and their explicit deadlines.
 Final shared-helper profile: **36 passed in 6.21s**, including 19 helper cases and
 existing materialization/local-upload lifecycle regressions.
 
+### Corrective review: pending ORM revocation
+
+Review found that `populate_existing` under `no_autoflush` could overwrite a
+caller's pending revocation with the persisted active value. Regression-first
+reproduced **7 failures / 1 passing control**. A pre-query guard now denies
+relevant new, dirty or deleted authority/lineage rows before any resolver or
+refresh query, without flush or rollback. It examines previous identity/scope
+values too, so moving a pending membership or original materialization cannot
+evade the guard. Unknown scope fails closed. Unrelated rows and new child
+evidence/materializations are not mistaken for original authority.
+
+The expanded controls preserve pending source deletion, mandate revocation,
+SourceCurrent, original materialization, member/project/user changes, identity,
+version, original evidence, newly added/deleted mandates and moved scope rows.
+Targeted helper + A05 + lifecycle result: **51 passed in 13.64s** (SQLite).
+This does not establish PostgreSQL concurrency behavior or production readiness.
+
 ## Required bridge boundaries (not yet implemented)
 
 1. Validate the entire extraction, exact original SHA-256, live source authority

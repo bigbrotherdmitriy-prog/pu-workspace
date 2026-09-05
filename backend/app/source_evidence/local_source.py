@@ -12,13 +12,18 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field, StrictInt, StrictStr
-from sqlalchemy import select
+from sqlalchemy import inspect, select
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.core.v54_authority import AuthorityResolver
 from app.core.v54_interfaces import RequestScope
 from app.core.v54_permissions import SourceEvidenceError, deny, utc, utcnow
 from app.core.v54_refs import ObjectRef, StrictDTO, VersionPin, require_same_tenant
 from app.models.materialization import Materialization
+from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.user import User
+from app.models.v54_authority import AuthorityState
 from app.models.v54_pilot import ConnectionIdentity, Evidence, SourceCurrent, SourceReference, SourceVersion
 from app.staging.lifecycle import MaterializationManifest, PurgeTombstone
 
@@ -62,6 +67,46 @@ class LocalSourceBinding:
     binding_epoch: int
 
 
+def _deny_pending_security_changes(db, *, tenant, project, owner, source_id, version_id):
+    """Do not let refresh replace caller-owned pending authorization state.
+
+    Inspect loaded values and their previous values without lazy loading. Unknown
+    scope is conservative denial. Child evidence/materializations are not the
+    original authority chain and may be pending in a publishing transaction.
+    """
+    from app.staging.local_upload import _stable_uuid
+
+    def may_match(state, field, expected):
+        values = []
+        if field in state.dict:
+            values.append(state.dict[field])
+        if state.identity is not None and field in state.committed_state:
+            values.append(state.committed_state[field])
+        for index, column in enumerate(state.mapper.primary_key):
+            if column.key == field and state.identity is not None:
+                values.append(state.identity[index])
+        return not values or any(value is NO_VALUE or value == expected for value in values)
+
+    for row in set(db.new) | set(db.dirty) | set(db.deleted):
+        state = inspect(row)
+        match = lambda field, value: may_match(state, field, value)
+        relevant = (
+            isinstance(row, Project) and match("id", project)
+            or isinstance(row, User) and match("id", owner)
+            or isinstance(row, ProjectMember) and match("project_id", project) and match("user_id", owner)
+            or isinstance(row, AuthorityState) and match("organization_id", tenant)
+                and match("project_id", project) and match("principal_kind", "user") and match("principal_id", str(owner))
+            or isinstance(row, SourceReference) and match("id", source_id)
+            or isinstance(row, SourceVersion) and match("id", version_id)
+            or isinstance(row, SourceCurrent) and match("source_id", source_id)
+            or isinstance(row, ConnectionIdentity) and match("id", _stable_uuid("identity", f"{tenant}:{owner}"))
+            or isinstance(row, Evidence) and match("id", _stable_uuid("evidence", source_id))
+            or isinstance(row, Materialization) and match("source_id", source_id) and match("parent_id", None)
+        )
+        if relevant:
+            deny()
+
+
 def require_local_upload_source(
     db, *, scope: RequestScope, source_ref: ObjectRef,
     source_version_pin: VersionPin, operation: str = "metadata", lock: bool = True,
@@ -99,6 +144,8 @@ def _require(db, *, scope, source_ref, source_version_pin, operation, lock, allo
         deny()
     require_same_tenant(scope.tenant, scope.actor, scope.project, source_ref, source_version_pin.ref)
     tenant, project, owner = int(scope.tenant.value), int(scope.project.id.value), int(scope.actor.id.value)
+    _deny_pending_security_changes(db, tenant=tenant, project=project, owner=owner,
+                                  source_id=source_ref.id.value, version_id=source_version_pin.ref.id.value)
 
     def load(model, *conditions):
         query = select(model).where(*conditions).execution_options(populate_existing=True)

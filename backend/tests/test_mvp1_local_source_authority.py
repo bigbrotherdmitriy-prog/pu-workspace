@@ -14,7 +14,7 @@ from app.local_upload_staging import UploadScope, configure_local_upload_runtime
 from app.models.materialization import Materialization
 from app.models.project_member import ProjectMember
 from app.models.v54_authority import AuthorityState
-from app.models.v54_pilot import ConnectionIdentity, Evidence, SourceReference, SourceVersion
+from app.models.v54_pilot import ConnectionIdentity, Evidence, SourceCurrent, SourceReference, SourceVersion
 from app.source_evidence.local_source import require_local_upload_source
 from test_v54_local_upload_a05_wiring import wired, _stage, _claimed  # noqa: F401
 
@@ -55,6 +55,75 @@ def test_real_local_chain_requires_no_mailbox_and_returns_only_metadata(local_so
         assert result.size == len(b"synthetic confidential body") and len(result.checksum_sha256) == 64
         assert result.authority_epoch == 1 and result.binding_epoch == 1
         assert not db.new and not db.dirty and not db.deleted
+
+
+@pytest.mark.parametrize("change", ["source", "mandate", "current", "original", "member", "project", "user", "deleted_mandate",
+                                    "new_mandate", "identity", "version", "original_evidence", "moved_member", "moved_original"])
+def test_pending_security_changes_deny_without_refresh_flush_or_rollback(local_source_world, monkeypatch, change):
+    from app.models.project import Project
+    from app.models.user import User
+    _, sessions, _, _, backend, _ = local_source_world
+    queued = _stage(sessions)
+    with sessions() as db:
+        args = binding_args(db, backend, queued.staging_id)
+        original = db.get(Materialization, str(UUID(hex=queued.staging_id)))
+        if change == "source":
+            row, field, value = db.get(SourceReference, original.source_id), "availability", "deleted"
+        elif change in {"mandate", "deleted_mandate"}:
+            row, field, value = db.scalar(select(AuthorityState)), "state", "revoked"
+        elif change == "current":
+            row, field, value = db.get(SourceCurrent, original.source_id), "version_id", "00000000-0000-0000-0000-000000000001"
+        elif change == "original":
+            row, field, value = original, "state", "EXPIRED"
+        elif change == "moved_original":
+            row, field, value = original, "parent_id", "00000000-0000-0000-0000-000000000001"
+        elif change == "identity":
+            source = db.get(SourceReference, original.source_id)
+            row, field, value = db.get(ConnectionIdentity, source.identity_id), "state", "revoked"
+        elif change == "version":
+            row, field, value = db.get(SourceVersion, original.source_version_id), "revision", 2
+        elif change == "original_evidence":
+            row, field, value = db.get(Evidence, original.evidence_id), "revision", 2
+        elif change == "new_mandate":
+            row = AuthorityState(organization_id=1, project_id=4, principal_kind="user", principal_id="2")
+            db.add(row)
+            field, value = "state", "revoked"
+        elif change == "moved_member":
+            row, field, value = db.scalar(select(ProjectMember)), "project_id", 999
+        elif change == "member":
+            row, field, value = db.scalar(select(ProjectMember)), "role", "viewer"
+        elif change == "project":
+            row, field, value = db.get(Project, 4), "archived_at", datetime.now(timezone.utc)
+        else:
+            row, field, value = db.get(User, 2), "is_admin", True
+        if change == "deleted_mandate":
+            db.delete(row)
+            value = getattr(row, field)
+        else:
+            setattr(row, field, value)
+        before = (set(db.new), set(db.dirty), set(db.deleted))
+        monkeypatch.setattr(db, "flush", lambda *_a, **_k: pytest.fail("read-only helper flushed"))
+        monkeypatch.setattr(db, "rollback", lambda *_a, **_k: pytest.fail("read-only helper rolled back"))
+        monkeypatch.setattr(db, "scalar", lambda *_a, **_k: pytest.fail("pending guard must precede refresh queries"))
+        with pytest.raises(SourceEvidenceError, match="^resource_unavailable$"):
+            require_local_upload_source(db, **args)
+        assert getattr(row, field) == value
+        assert (set(db.new), set(db.dirty), set(db.deleted)) == before
+
+
+def test_pending_child_rows_and_unrelated_project_are_not_original_authority(local_source_world):
+    from app.models.project import Project
+    _, sessions, _, _, backend, _ = local_source_world
+    queued = _stage(sessions)
+    with sessions() as db:
+        args = binding_args(db, backend, queued.staging_id)
+        original = db.get(Materialization, str(UUID(hex=queued.staging_id)))
+        db.add_all([Project(id=999, name="unrelated", organization_id=1),
+                    Materialization(id="00000000-0000-0000-0000-000000000001", source_id=original.source_id, parent_id=original.id),
+                    Evidence(id="00000000-0000-0000-0000-000000000002", source_id=original.source_id)])
+        pending = set(db.new)
+        require_local_upload_source(db, **args)
+        assert set(db.new) == pending and not db.dirty and not db.deleted
 
 
 @pytest.mark.parametrize("change", ["mandate_revoked", "membership_changed", "permission_missing", "expired",
