@@ -1,0 +1,68 @@
+# Standalone first-host primary stack. Do not merge this file with the legacy
+# production Compose file: isolation here is deliberate and validated before use.
+x-environment: &environment
+  DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:?set in private primary env}@db:5432/pu_workspace
+  PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?set candidate revision}
+  PU_BACKGROUND_EXECUTION: durable
+
+x-app: &app
+  image: ${PRIMARY_IMAGE:?set candidate image}
+  env_file:
+    - ${PRIMARY_ENV_FILE:?set private primary env path}
+  environment: *environment
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ${PRIMARY_CONTAINER_PREFIX:?set container prefix}-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pu_workspace
+      POSTGRES_USER: pu_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in private primary env}
+    volumes:
+      - data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pu_user -d pu_workspace"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  backend:
+    <<: *app
+    container_name: ${PRIMARY_CONTAINER_PREFIX:?set container prefix}-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic -c alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${API_WORKERS:-2}"]
+    ports:
+      - "127.0.0.1:${PRIMARY_PORT:?set candidate loopback port}:8000"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 5s
+      timeout: 6s
+      retries: 36
+
+  worker:
+    <<: *app
+    profiles: [cutover]
+    command: [python, -m, app.jobs.worker]
+    deploy:
+      replicas: 2
+    stop_grace_period: 15s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    profiles: [cutover]
+    command: [python, -m, app.jobs.scheduler]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  data:
+    name: ${PRIMARY_VOLUME_NAME:?set dedicated primary volume}

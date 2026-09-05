@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  checks: read
+  actions: read
 
 concurrency:
   group: pu-workspace-public-staging
@@ -58,16 +58,15 @@ jobs:
           python-version: '3.12'
       - name: Refuse unsafe or production settings
         run: python scripts/validate_staging_settings.py
-      - name: Require every protected release check for this exact SHA
+      - name: Require every protected release workflow for this exact SHA
         run: >-
           python scripts/wait_for_github_checks.py
           --repository "$GITHUB_REPOSITORY"
           --sha "${{ steps.revision.outputs.sha }}"
-          --check test-and-build
-          --check docker-smoke
-          --check package-and-secrets
-          --check python-dependencies
-          --check frontend-dependencies
+          --workflow .github/workflows/ci.yml
+          --workflow .github/workflows/docker-smoke.yml
+          --workflow .github/workflows/security.yml
+          --workflow .github/workflows/staging-preflight.yml
       - name: Require the revision to still be main HEAD
         run: |
           set -euo pipefail

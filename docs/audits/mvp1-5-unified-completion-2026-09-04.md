@@ -1,8 +1,11 @@
 # PU Workspace — единый кандидат MVP1–MVP5
 
-Дата: 2026-09-04  
-Ветка: `codex/mvp1-5-unified`  
-База production: `df665097517deb05e57a7f5ca66a6c05fea11ed6`  
+Дата актуализации: 2026-09-05
+
+Ветка: `codex/mvp1-5-unified`
+
+База production: `50c008e9ca4ba44bcb27ba936184597602165479`
+
 Alembic head: `d04e8a6c31f2`
 
 ## Решение
@@ -22,12 +25,12 @@ Alembic head: `d04e8a6c31f2`
 
 ## Текущие автоматические доказательства
 
-- полный backend: `1392 passed, 24 skipped`;
-- полный frontend unit: `182 passed` в `31` файле;
+- полный backend: `1447 passed, 26 skipped`;
+- полный frontend unit: `185 passed` в `33` файлах;
 - browser E2E: `20 passed`;
 - схемные и миграционные проверки: `100 passed, 5 skipped`;
 - целевые MVP3/MVP4: `29 passed, 2 skipped`;
-- workflow и release-контракты: `34 passed`;
+- полный набор локальных CI-контрактов: `138 passed`;
 - TypeScript application и E2E: PASS;
 - production frontend build: PASS;
 - Alembic: один head `d04e8a6c31f2`, offline PostgreSQL SQL generation PASS;

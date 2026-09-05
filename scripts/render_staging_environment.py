@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import os
 from pathlib import Path
 import re
@@ -16,6 +18,16 @@ REQUIRED_SECRETS = {
     "PU_SMOKE_PASSWORD": 20,
 }
 SAFE_SECRET = re.compile(r"^[A-Za-z0-9_.~+/=-]+$")
+
+
+def validate_fernet_key(value: str) -> None:
+    try:
+        decoded = base64.b64decode(value, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("TOKEN_ENCRYPTION_KEY must be a canonical Fernet key") from exc
+    canonical = base64.urlsafe_b64encode(decoded).decode("ascii")
+    if len(decoded) != 32 or value != canonical:
+        raise ValueError("TOKEN_ENCRYPTION_KEY must be a canonical Fernet key")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -43,6 +55,7 @@ def read_env(path: Path) -> dict[str, str]:
             or "change_me" in value.lower()
         ):
             raise ValueError(f"{key} is missing, too short, or a placeholder")
+    validate_fernet_key(values["TOKEN_ENCRYPTION_KEY"])
     return values
 
 

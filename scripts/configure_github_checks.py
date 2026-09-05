@@ -12,7 +12,14 @@ from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 REPO = 'bigbrotherdmitriy-prog/pu-workspace'
-CHECKS = {'test-and-build', 'docker-smoke', 'package-and-secrets', 'python-dependencies', 'frontend-dependencies'}
+CHECKS = {
+    'test-and-build',
+    'docker-smoke',
+    'staging-preflight',
+    'package-and-secrets',
+    'python-dependencies',
+    'frontend-dependencies',
+}
 
 
 class NoRedirect(HTTPRedirectHandler):

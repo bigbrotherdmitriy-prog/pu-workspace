@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Verify Linear issue linkage for pull requests
+        run: python scripts/check_pr_linear_link.py
       - run: python scripts/check_ci_security.py
       - run: python scripts/check_release_package.py
   python-dependencies:

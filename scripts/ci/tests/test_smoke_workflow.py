@@ -36,7 +36,7 @@ def test_smoke_covers_migration_runtime_browser_restart_and_restore():
     required = {
         "Verify migration head and runtime flow",
         "Verify v5.4 runtime composition",
-        "Browser login and navigation",
+        "Browser synthetic user journey",
         "Restart API, workers and scheduler; verify persistent data",
         "Restore backup into a second isolated database and compare data",
     }

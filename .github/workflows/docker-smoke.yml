@@ -74,11 +74,11 @@ jobs:
           python -m pytest
           tests/test_mvp3_hardening_postgres.py
           tests/test_mvp4_finance_postgres.py -q
-      - name: Browser login and navigation
+      - name: Browser synthetic user journey
         run: |
           pip install playwright==1.55.0
           python -m playwright install --with-deps chromium
-          python scripts/check_ci_browser.py
+          python scripts/check_ci_browser.py --env-file .env.ci --report-dir ci-reports
       - name: Restart API, workers and scheduler; verify persistent data
         run: |
           docker compose restart backend worker scheduler
