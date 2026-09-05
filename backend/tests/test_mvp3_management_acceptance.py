@@ -68,6 +68,7 @@ def world():
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         seed(db)
+        db.get(app.models.Message, 6).context_confirmed = True
         source = db.get(SourceReference, uid(13))
         source.availability = "available"
         source.freshness = "fresh"
@@ -118,10 +119,10 @@ def test_full_management_chain_is_reviewable_replay_safe_and_content_free(world)
     proposals = MeetingProposalService()
     lifecycle = ManagementLifecycle()
 
-    proposed = proposals.propose(
+    proposed = proposals.propose_message(
         world,
         project_id=4,
-        meeting_id=40,
+        message_id=6,
         actor_user_id=3,
         candidates=[task_candidate()],
     )[0]
@@ -133,10 +134,10 @@ def test_full_management_chain_is_reviewable_replay_safe_and_content_free(world)
 
     # Extraction replay points to the same durable proposal and does not create
     # another obligation or origin link.
-    replay = proposals.propose(
+    replay = proposals.propose_message(
         world,
         project_id=4,
-        meeting_id=40,
+        message_id=6,
         actor_user_id=3,
         candidates=[task_candidate()],
     )[0]
@@ -431,10 +432,10 @@ def test_contract_contact_search_and_saved_view_preserve_cas_and_history(world):
 def test_rbac_stale_versions_corrections_and_revoked_evidence_fail_closed(world):
     lifecycle = ManagementLifecycle()
     proposals = MeetingProposalService(lifecycle)
-    proposed = proposals.propose(
+    proposed = proposals.propose_message(
         world,
         project_id=4,
-        meeting_id=40,
+        message_id=6,
         actor_user_id=3,
         candidates=[task_candidate()],
     )[0]

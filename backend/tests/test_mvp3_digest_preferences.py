@@ -33,6 +33,7 @@ def world():
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         seed(db)
+        db.get(Message, 6).context_confirmed = True
         source = db.get(SourceReference, uid(13))
         source.availability = "available"
         source.freshness = "fresh"
@@ -204,12 +205,12 @@ def test_worker_rereads_exact_preference_and_rejects_stale_version(world):
 
 def test_proposals_are_reloadable_with_exact_evidence_and_manual_review(world):
     service = MeetingProposalService()
-    created = service.propose(
-        world, project_id=4, meeting_id=1, actor_user_id=3, candidates=[candidate()],
+    created = service.propose_message(
+        world, project_id=4, message_id=6, actor_user_id=3, candidates=[candidate()],
     )
     world.commit()
     listed = service.list_for_origin(
-        world, project_id=4, actor_user_id=2, origin_type="meeting", origin_id=1,
+        world, project_id=4, actor_user_id=2, origin_type="message", origin_id=6,
     )
     assert listed == [{
         **created[0], "evidence_pins": [evidence_pin()], "manual_review_required": True,
@@ -220,15 +221,15 @@ def test_proposals_are_reloadable_with_exact_evidence_and_manual_review(world):
 
 def test_proposal_read_and_confirmation_fail_closed_after_evidence_becomes_stale(world):
     service = MeetingProposalService()
-    created = service.propose(
-        world, project_id=4, meeting_id=1, actor_user_id=3, candidates=[candidate()],
+    created = service.propose_message(
+        world, project_id=4, message_id=6, actor_user_id=3, candidates=[candidate()],
     )[0]
     assessment = world.get(EvidenceAssessment, uid(16))
     assessment.freshness = "stale"
     world.flush()
     with pytest.raises(ManagementDenied, match="resource_unavailable"):
         service.list_for_origin(
-            world, project_id=4, actor_user_id=2, origin_type="meeting", origin_id=1,
+            world, project_id=4, actor_user_id=2, origin_type="message", origin_id=6,
         )
     with pytest.raises(ManagementDenied, match="resource_unavailable"):
         service.confirm(
@@ -261,8 +262,8 @@ def test_message_proposal_reload_rechecks_confirmed_origin_and_source_binding(wo
 
 
 def test_proposal_origin_is_append_only(world):
-    MeetingProposalService().propose(
-        world, project_id=4, meeting_id=1, actor_user_id=3, candidates=[candidate()],
+    MeetingProposalService().propose_message(
+        world, project_id=4, message_id=6, actor_user_id=3, candidates=[candidate()],
     )
     world.commit()
     link = world.scalar(select(ManagementProposalOrigin))

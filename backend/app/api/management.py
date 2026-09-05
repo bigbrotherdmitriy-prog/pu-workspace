@@ -161,7 +161,8 @@ def list_meeting_actions(meeting_id: int, project_id: int,
             db, project_id=project_id, actor_user_id=user.id,
             origin_type="meeting", origin_id=meeting_id,
         )
-        return {"proposals": result, "external_actions_created": False}
+        return {"proposals": result, "external_actions_created": False,
+                **_meeting_proposals.unbound_meeting_origin()}
     except (ManagementDenied, ManagementConflict) as exc:
         _lifecycle_error(exc)
 
@@ -287,6 +288,9 @@ def transition_evidence_obligation(obligation_id: int, payload: LifecycleTransit
     require_project_role(db, user, row.project_id, "editor")
     try:
         scope = _lifecycle.scope(db, project_id=row.project_id, actor_user_id=user.id)
+        if payload.status == "confirmed":
+            _meeting_proposals.require_bound_origin(db, project_id=row.project_id,
+                entity_type="obligation", entity_id=row.id)
         row = _lifecycle.transition_obligation(db, scope=scope, obligation_id=obligation_id,
                                                expected_version=payload.expected_version, status=payload.status,
                                                reason=payload.reason, result_note=payload.result_note)
@@ -321,6 +325,9 @@ def map_obligation_task(obligation_id: int, expected_version: int, db: Session =
     require_project_role(db, user, row.project_id, "editor")
     try:
         scope = _lifecycle.scope(db, project_id=row.project_id, actor_user_id=user.id)
+        if row.task_id is None:
+            _meeting_proposals.require_bound_origin(db, project_id=row.project_id,
+                entity_type="obligation", entity_id=row.id)
         task = _lifecycle.ensure_internal_task(db, scope=scope, obligation_id=row.id,
                                                expected_version=expected_version)
         db.commit(); db.refresh(task)
@@ -368,6 +375,9 @@ def transition_governance(entity_type: str, entity_id: int, payload: GovernanceT
     require_project_role(db, user, payload.project_id, "editor")
     try:
         scope = _lifecycle.scope(db, project_id=payload.project_id, actor_user_id=user.id)
+        if entity_type == "decisions" and payload.status == "confirmed":
+            _meeting_proposals.require_bound_origin(db, project_id=payload.project_id,
+                entity_type="decision", entity_id=entity_id)
         row = _lifecycle.transition_governance(db, scope=scope, entity_type=entity_type[:-1], entity_id=entity_id,
                                                expected_version=payload.expected_version, status=payload.status,
                                                reason=payload.reason, action_note=payload.action_note,
@@ -427,6 +437,12 @@ def update_obligation(obligation_id: int, payload: ObligationUpdate, db: Session
     if item is None:
         raise HTTPException(404, "Obligation not found")
     require_project_role(db, user, item.project_id, "editor")
+    if item.status not in {"confirmed", "in_progress", "fulfilled", "breached"} and payload.status != "dismissed":
+        try:
+            _meeting_proposals.require_bound_origin(db, project_id=item.project_id,
+                entity_type="obligation", entity_id=item.id)
+        except ManagementDenied as exc:
+            _lifecycle_error(exc)
     if payload.status in {"fulfilled", "breached"} and not (payload.result_note or item.result_note or "").strip():
         raise HTTPException(422, "Укажите подтверждаемый результат или основание нарушения")
     item.status = payload.status
@@ -467,13 +483,14 @@ def finish_meeting(meeting_id: int, payload: MeetingUpdate, db: Session = Depend
     require_project_role(db, user, item.project_id, "editor")
     item.minutes, item.status = payload.minutes.strip(), payload.status
     db.commit(); db.refresh(item)
-    proposal_state = "awaiting_evidence" if payload.status == "completed" else "not_required"
+    proposal_state = "invalid_source" if payload.status == "completed" else "not_required"
     db.add(AuditLog(action="meeting_minutes_recorded", entity_type="meeting", entity_id=item.id,
                     details=f"status={item.status}; proposal_state={proposal_state}; user={user.id}"))
     db.commit()
-    # Minutes alone are not immutable evidence. Structured candidates must be
-    # submitted through the v2 evidence proposal endpoint and confirmed there.
+    # Minutes remain editable legacy records. Meeting extraction cannot resume
+    # until an authoritative protocol source/version binding is persisted.
     return {"id": item.id, "status": item.status, "proposal_state": proposal_state,
+            **_meeting_proposals.unbound_meeting_origin(),
             "tasks": 0, "risks": 0, "decisions": 0}
 
 

@@ -94,7 +94,8 @@ def test_finishing_meeting_does_not_create_unverified_business_entities():
             meeting.id, MeetingUpdate(minutes="Sensitive synthetic minutes", status="completed"), db, user,
         )
 
-        assert result["proposal_state"] == "awaiting_evidence"
+        assert result["proposal_state"] == "invalid_source"
+        assert result["origin_reason"] == "meeting_source_binding_required"
         assert result["tasks"] == result["risks"] == result["decisions"] == 0
         assert db.scalars(select(Task)).all() == []
         assert db.scalars(select(Risk)).all() == []

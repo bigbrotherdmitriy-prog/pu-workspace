@@ -101,12 +101,14 @@ class MeetingProposalService:
 
     def propose(self, db: Session, *, project_id: int, meeting_id: int, actor_user_id: int,
                 candidates: list[MeetingActionCandidate]) -> list[dict]:
-        scope = self.lifecycle.scope(db, project_id=project_id, actor_user_id=actor_user_id)
+        self.lifecycle.scope(db, project_id=project_id, actor_user_id=actor_user_id)
         meeting = db.get(Meeting, meeting_id)
         if meeting is None or meeting.project_id != project_id or meeting.status != "completed":
             raise ManagementDenied("resource_unavailable")
-        return self._propose(db, scope=scope, origin_type="meeting", origin_id=meeting.id,
-                             candidates=candidates)
+        # Meeting.minutes is mutable and has no authoritative source/version pin.
+        # Candidate Evidence proves its own source, not a relation to this meeting.
+        # Do not manufacture that relation from title, text hash or updated_at.
+        raise ManagementDenied("invalid_meeting_source")
 
     def propose_message(self, db: Session, *, project_id: int, message_id: int, actor_user_id: int,
                         candidates: list[MeetingActionCandidate]) -> list[dict]:
@@ -122,6 +124,8 @@ class MeetingProposalService:
 
     def _propose(self, db: Session, *, scope, origin_type: str, origin_id: int,
                  candidates: list[MeetingActionCandidate]) -> list[dict]:
+        if origin_type == "meeting":
+            raise ManagementDenied("invalid_meeting_source")
         if not candidates or len(candidates) > 100:
             raise ManagementDenied("invalid_input")
 
@@ -193,7 +197,8 @@ class MeetingProposalService:
         )
         if origin_type == "meeting":
             origin = db.get(Meeting, origin_id)
-            valid = origin is not None and origin.project_id == project_id and origin.status == "completed"
+            # Historical links remain readable after minutes/status changes.
+            valid = origin is not None and origin.project_id == project_id
         else:
             origin = db.get(Message, origin_id)
             valid = (origin is not None and origin.project_id == project_id
@@ -213,18 +218,40 @@ class MeetingProposalService:
             if (row is None or row.project_id != project_id or not row.evidence_pins
                     or row.evidence_pins != link.evidence_pins):
                 raise ManagementDenied("resource_unavailable")
-            # Re-resolve exact current evidence on every read. Revocation or a
-            # changed SourceCurrent makes the entire origin unavailable.
-            self.lifecycle.evidence(db, scope, link.evidence_pins)
+            # Message proposals re-resolve their exact current evidence. Meeting
+            # links below are historical records with explicitly invalid origins.
             if origin_type == "message":
+                self.lifecycle.evidence(db, scope, link.evidence_pins)
                 self._require_message_evidence(db, origin, link.evidence_pins)
             item = self._proposal(link.proposal_kind, link.entity_type, row)
             item.update({
                 "evidence_pins": link.evidence_pins,
                 "manual_review_required": row.status == "needs_confirmation" or row.review_state == "needs_review",
             })
+            if origin_type == "meeting":
+                # Preserve the historical business status without presenting an
+                # unbound protocol as validated or authorizing a new confirmation.
+                item.update(self.unbound_meeting_origin())
             result.append(item)
         return result
+
+    @staticmethod
+    def unbound_meeting_origin() -> dict:
+        return {"origin_status": "invalid_source", "origin_reason": "meeting_source_binding_required",
+                "confirmation_available": False}
+
+    @staticmethod
+    def require_bound_origin(db: Session, *, project_id: int, entity_type: str, entity_id: int) -> None:
+        # Existing origin links are append-only. They contain candidate evidence,
+        # but none can prove an immutable version of a meeting protocol today.
+        linked = db.scalar(select(ManagementProposalOrigin.id).where(
+            ManagementProposalOrigin.project_id == project_id,
+            ManagementProposalOrigin.entity_type == entity_type,
+            ManagementProposalOrigin.entity_id == entity_id,
+            ManagementProposalOrigin.origin_type == "meeting",
+        ).limit(1))
+        if linked is not None:
+            raise ManagementDenied("invalid_meeting_source")
 
     @staticmethod
     def _require_message_evidence(db: Session, message: Message, raw_pins: list[dict]) -> None:
@@ -246,6 +273,7 @@ class MeetingProposalService:
             row = db.get(Obligation, entity_id)
             if row is None or row.project_id != project_id:
                 raise ManagementDenied("resource_unavailable")
+            self.require_bound_origin(db, project_id=project_id, entity_type="obligation", entity_id=row.id)
             self.lifecycle.evidence(db, scope, row.evidence_pins or [])
             if row.status == "needs_confirmation":
                 row = self.lifecycle.transition_obligation(
@@ -264,6 +292,7 @@ class MeetingProposalService:
             row = db.get(Decision, entity_id)
             if row is None or row.project_id != project_id:
                 raise ManagementDenied("resource_unavailable")
+            self.require_bound_origin(db, project_id=project_id, entity_type="decision", entity_id=row.id)
             self.lifecycle.evidence(db, scope, row.evidence_pins or [])
             if row.status == "needs_confirmation":
                 row = self.lifecycle.transition_governance(

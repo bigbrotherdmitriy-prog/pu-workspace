@@ -7,6 +7,8 @@ from app.database import get_db
 from app.models.governance import Decision, Risk
 from app.models.task import Task
 from app.models.user import User
+from app.mvp3.lifecycle import ManagementDenied
+from app.mvp3.meeting_digest import MeetingProposalService
 
 router = APIRouter(prefix="/governance", tags=["governance"])
 
@@ -78,6 +80,12 @@ def update_decision(decision_id: int, payload: DecisionUpdate, db: Session = Dep
     item = db.get(Decision, decision_id)
     if not item: raise HTTPException(404, "Decision not found")
     require_project_role(db, user, item.project_id, "manager")
+    if item.status not in {"confirmed", "decided", "executed"} and payload.status != "dismissed":
+        try:
+            MeetingProposalService.require_bound_origin(db, project_id=item.project_id,
+                entity_type="decision", entity_id=item.id)
+        except ManagementDenied as exc:
+            raise HTTPException(422, str(exc)) from exc
     if payload.status in {"decided", "executed"} and not (payload.decision_text or item.decision_text or "").strip():
         raise HTTPException(422, "Зафиксируйте принятое решение")
     item.status = payload.status

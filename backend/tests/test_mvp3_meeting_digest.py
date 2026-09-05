@@ -59,9 +59,15 @@ def candidate(kind="task", **changes):
     return MeetingActionCandidate(**values)
 
 
-def test_meeting_extraction_creates_only_reviewable_evidence_backed_proposals(world):
+def _propose_bound_message(world, service, *, actor_user_id, candidates):
+    world.get(Message, 6).context_confirmed = True
+    return service.propose_message(world, project_id=4, message_id=6,
+                                   actor_user_id=actor_user_id, candidates=candidates)
+
+
+def test_bound_message_extraction_creates_only_reviewable_evidence_backed_proposals(world):
     service = MeetingProposalService(ManagementLifecycle())
-    result = service.propose(world, project_id=4, meeting_id=1, actor_user_id=3,
+    result = _propose_bound_message(world, service, actor_user_id=3,
                              candidates=[candidate()])
 
     obligation = world.get(Obligation, result[0]["entity_id"])
@@ -75,7 +81,7 @@ def test_meeting_extraction_creates_only_reviewable_evidence_backed_proposals(wo
 
 def test_manager_confirmation_is_required_before_internal_task(world):
     service = MeetingProposalService(ManagementLifecycle())
-    result = service.propose(world, project_id=4, meeting_id=1, actor_user_id=3,
+    result = _propose_bound_message(world, service, actor_user_id=3,
                              candidates=[candidate()])[0]
     with pytest.raises(ManagementDenied, match="resource_unavailable"):
         service.confirm(world, project_id=4, actor_user_id=3, entity_type="obligation",
@@ -94,7 +100,7 @@ def test_manager_confirmation_is_required_before_internal_task(world):
 
 def test_decision_remains_proposed_until_manager_confirmation(world):
     service = MeetingProposalService(ManagementLifecycle())
-    result = service.propose(world, project_id=4, meeting_id=1, actor_user_id=3,
+    result = _propose_bound_message(world, service, actor_user_id=3,
                              candidates=[candidate("decision", title="Утвердить новый срок?")])[0]
     row = world.get(Decision, result["entity_id"])
     assert row.status == "needs_confirmation" and row.evidence_pins == [evidence_pin()]
@@ -118,16 +124,16 @@ def test_proposal_requires_completed_same_project_meeting_and_exact_current_evid
 
 def test_extraction_is_idempotent_and_conflicting_reuse_fails_closed(world):
     service = MeetingProposalService(ManagementLifecycle())
-    first = service.propose(world, project_id=4, meeting_id=1, actor_user_id=2,
+    first = _propose_bound_message(world, service, actor_user_id=2,
                             candidates=[candidate()])
-    second = service.propose(world, project_id=4, meeting_id=1, actor_user_id=2,
+    second = _propose_bound_message(world, service, actor_user_id=2,
                              candidates=[candidate()])
     assert first == second
     assert len(world.scalars(select(Obligation)).all()) == 1
     audits = world.scalars(select(AuditLog).where(AuditLog.action == "mvp3_proposal_created")).all()
     assert len(audits) == 1 and "Передать" not in (audits[0].details or "")
     with pytest.raises(ManagementDenied, match="evidence_already_bound"):
-        service.propose(world, project_id=4, meeting_id=1, actor_user_id=2,
+        _propose_bound_message(world, service, actor_user_id=2,
                         candidates=[candidate(title="Другое действие")])
 
 
@@ -135,7 +141,7 @@ def test_extractor_does_not_accept_or_store_raw_protocol(world):
     fields = MeetingActionCandidate.model_fields
     assert "minutes" not in fields and "content" not in fields and "message" not in fields
     service = MeetingProposalService(ManagementLifecycle())
-    service.propose(world, project_id=4, meeting_id=1, actor_user_id=2, candidates=[candidate()])
+    _propose_bound_message(world, service, actor_user_id=2, candidates=[candidate()])
     assert all("Передать" not in (job.payload if isinstance(job.payload, str) else repr(job.payload))
                for job in world.scalars(select(BackgroundJob)).all())
 
@@ -158,7 +164,7 @@ def test_confirmed_message_can_propose_but_unconfirmed_or_unrelated_source_canno
 
 def _confirmed_obligation(world):
     service = MeetingProposalService(ManagementLifecycle())
-    proposal = service.propose(world, project_id=4, meeting_id=1, actor_user_id=2,
+    proposal = _propose_bound_message(world, service, actor_user_id=2,
                                candidates=[candidate()])[0]
     service.confirm(world, project_id=4, actor_user_id=2, entity_type="obligation",
                     entity_id=proposal["entity_id"], expected_version=1)
