@@ -43,6 +43,12 @@ class DriveClient:
     """
 
     provider = "google_drive"
+    # Drive API v3 exposes an output-only monotonically increasing ``version``,
+    # but files.update does not accept that value (or a resource ETag) as an
+    # atomic mutation precondition.  Read-before-write is not sufficient for
+    # rename/move, so the exact-mutation wrapper must reject this client.
+    supports_exact_mutation_preconditions = False
+    exact_mutation_blocker = "drive_v3_update_has_no_exact_revision_precondition"
 
     def __init__(self, service: Any):
         self.service = service
