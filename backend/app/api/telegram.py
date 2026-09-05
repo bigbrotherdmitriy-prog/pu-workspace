@@ -27,7 +27,7 @@ from app.document_engine import index_documents
 from app.gemini_analysis import format_gemini_analysis, format_message_replies
 from app.integrations.ai import configured_ai_provider
 from app.api.ai_secretary import _contract_candidate
-from app.ai_policy import ExternalAIBlocked, policy_for_project, prepare_external_ai_text
+from app.ai_policy import ExternalAIBlocked, policy_for_project, prepare_external_ai_document, prepare_external_ai_text
 from app.ai_cache import cached_ai_result
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
@@ -352,14 +352,16 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             ai_provider = configured_ai_provider()
             if ai_provider.health().ready:
                 try:
-                    ai_content, ai_mode = prepare_external_ai_text(db, link.project_id, content)
+                    ai_content, ai_filename, ai_mode = prepare_external_ai_document(
+                        db, link.project_id, content, source_name,
+                    )
                     policy = policy_for_project(db, link.project_id)
                     prompt_version = policy.prompt_version if policy else "v1"
                     semantic, cache_hit = cached_ai_result(
                         db, provider=ai_provider.provider, model=ai_provider.model,
                         operation="document_analysis", prompt_version=prompt_version,
-                        policy_mode=ai_mode, text=ai_content, context=source_name,
-                        compute=lambda: ai_provider.analyze_document(ai_content, source_name),
+                        policy_mode=ai_mode, text=ai_content, context=ai_filename,
+                        compute=lambda: ai_provider.analyze_document(ai_content, ai_filename),
                     )
                     summary = format_gemini_analysis(semantic, source_name)
                     inbox_message.summary = summary

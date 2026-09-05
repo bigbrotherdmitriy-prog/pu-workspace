@@ -30,7 +30,29 @@ def prepare_external_ai_text(db: Session, project_id: int, text: str) -> tuple[s
         return f"Метаданные: длина текста {len(text)} символов. Содержимое политикой не передаётся.", mode
     if mode != "redacted":
         return text, mode
+    return _redact_sensitive(text), mode
+
+
+def _redact_sensitive(text: str) -> str:
     result = text
     for kind, pattern in SENSITIVE:
         result = pattern.sub(lambda match: f"[{kind}_{hashlib.sha256(match.group().encode()).hexdigest()[:8]}]", result)
-    return result, mode
+    return result
+
+
+def prepare_external_ai_document(
+    db: Session, project_id: int, text: str, filename: str,
+) -> tuple[str, str, str]:
+    """Apply the same project policy to every document prompt field.
+
+    The caller retains the original filename locally and uses the prepared
+    filename both as provider context and as the cache context.
+    """
+    prepared_text, mode = prepare_external_ai_text(db, project_id, text)
+    if mode == "metadata_only":
+        prepared_filename = "document"
+    elif mode == "redacted":
+        prepared_filename = _redact_sensitive(filename)
+    else:
+        prepared_filename = filename
+    return prepared_text, prepared_filename, mode
