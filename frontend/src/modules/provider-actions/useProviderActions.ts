@@ -4,6 +4,7 @@ import {
   canRequestReconciliation,
   parseProviderActionList,
   parseReconciliationResult,
+  shouldPollProviderActions,
   type ProviderActionStatus,
   type ReconciliationResult,
 } from "./providerActionReadModel";
@@ -15,7 +16,7 @@ function safeLoadError(): string {
   return "Не удалось получить безопасные статусы действий. Обновите данные или обратитесь к администратору.";
 }
 
-export function useProviderActions(projectId: number | null, enabled = true) {
+export function useProviderActions(projectId: number | null, enabled = true, pollIntervalMs = 3_000) {
   const [loadState, setLoadState] = useState<ProviderActionLoadState>("idle");
   const [items, setItems] = useState<ProviderActionStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +55,12 @@ export function useProviderActions(projectId: number | null, enabled = true) {
     void reload();
     return () => { generation.current += 1; };
   }, [reload]);
+
+  useEffect(() => {
+    if (!enabled || !projectId || !shouldPollProviderActions(items)) return;
+    const timer = window.setTimeout(() => { void reload(); }, Math.max(250, pollIntervalMs));
+    return () => window.clearTimeout(timer);
+  }, [enabled, items, pollIntervalMs, projectId, reload]);
 
   const reconcile = useCallback(async (action: ProviderActionStatus): Promise<ReconciliationResult | null> => {
     if (!projectId || action.projectId !== projectId || !canRequestReconciliation(action)) return null;

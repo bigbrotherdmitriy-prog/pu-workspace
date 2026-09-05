@@ -204,7 +204,13 @@ export function canRequestReconciliation(action: ProviderActionStatus): boolean 
     && action.isCurrentRevision
     && action.businessStatus === "requires_reconciliation"
     && action.receiptOutcome === "UNKNOWN"
-    && (["required", "failed", "dead_letter", "cancelled"] as const).includes(
-      action.reconciliationStatus as "required" | "failed" | "dead_letter" | "cancelled",
-    );
+    && action.reconciliationStatus === "required";
+}
+
+export function shouldPollProviderActions(actions: readonly ProviderActionStatus[]): boolean {
+  return actions.some((action) => action.businessStatus === "queued"
+    || action.businessStatus === "running"
+    || (["queued", "running", "retrying"] as const).includes(
+      action.reconciliationStatus as "queued" | "running" | "retrying",
+    ));
 }

@@ -264,6 +264,19 @@ class ProviderActionRuntime:
                             external_ref=receipt.external_ref)
 
     def reconcile(self, action_id: str, revision: int, *, actor_id: str, correlation_id: str):
+        return self._reconcile_with_job(
+            action_id, revision, actor_id=actor_id, correlation_id=correlation_id, job_id=None,
+        )
+
+    def _reconcile_with_job(
+        self,
+        action_id: str,
+        revision: int,
+        *,
+        actor_id: str,
+        correlation_id: str,
+        job_id: int | None,
+    ):
         with self.sessions.begin() as db:
             row = self._action(db, action_id, revision, lock=True)
             attempt = db.get(ProviderExecutionAttempt, (action_id, revision))
@@ -273,7 +286,9 @@ class ProviderActionRuntime:
             request = self._request(row)
             self._audit(db, "reconciliation_requested", action_id, revision,
                         actor_id, correlation_id)
-        return self._reconcile_request(action_id, revision, request, source="RECONCILE", job_id=None)
+        return self._reconcile_request(
+            action_id, revision, request, source="RECONCILE", job_id=job_id,
+        )
 
     def record_late_receipt(self, action_id: str, revision: int, receipt: ProviderReceipt, *,
                             actor_id: str, correlation_id: str):

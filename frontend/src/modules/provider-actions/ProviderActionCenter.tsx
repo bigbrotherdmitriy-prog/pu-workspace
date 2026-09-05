@@ -2,7 +2,7 @@ import { canRequestReconciliation, type ProviderActionStatus } from "./providerA
 import { useProviderActions } from "./useProviderActions";
 import "./provider-actions.css";
 
-type Props = { projectId: number | null; enabled?: boolean };
+type Props = { projectId: number | null; enabled?: boolean; pollIntervalMs?: number };
 
 const businessLabels: Record<ProviderActionStatus["businessStatus"], string> = {
   awaiting_approval: "Ожидает подтверждения",
@@ -74,13 +74,13 @@ function ActionCard({ action, busy, onReconcile }: {
       {busy ? "Ставлю в очередь…" : "Проверить результат"}
     </button>}
     {!canReconcile && action.businessStatus === "requires_reconciliation" && <p className="provider-action-note">
-      Проверка уже выполняется либо доступна только для текущей ревизии.
+      Проверка уже выполняется, требует оператора очереди либо доступна только для текущей ревизии.
     </p>}
   </article>;
 }
 
-export function ProviderActionCenter({ projectId, enabled = true }: Props) {
-  const controller = useProviderActions(projectId, enabled);
+export function ProviderActionCenter({ projectId, enabled = true, pollIntervalMs }: Props) {
+  const controller = useProviderActions(projectId, enabled, pollIntervalMs);
   return <section className="provider-action-center management-card" aria-label="Контроль внешних действий">
     <header>
       <div>

@@ -5,6 +5,7 @@ import {
   canRequestReconciliation,
   parseProviderActionList,
   parseReconciliationResult,
+  shouldPollProviderActions,
 } from "./providerActionReadModel";
 
 const action = {
@@ -73,6 +74,9 @@ describe("provider action read model", () => {
     expect(canRequestReconciliation({ ...parsed, isCurrentRevision: false })).toBe(false);
     expect(canRequestReconciliation({ ...parsed, provider: "synthetic" })).toBe(false);
     expect(canRequestReconciliation({ ...parsed, reconciliationStatus: "running" })).toBe(false);
+    expect(canRequestReconciliation({ ...parsed, reconciliationStatus: "dead_letter" })).toBe(false);
+    expect(shouldPollProviderActions([{ ...parsed, reconciliationStatus: "running" }])).toBe(true);
+    expect(shouldPollProviderActions([parsed])).toBe(false);
   });
 });
 
@@ -101,7 +105,7 @@ describe("ProviderActionCenter", () => {
     expect(await screen.findByText("Результат требует проверки")).toBeInTheDocument();
     expect(screen.getAllByText("retrying", { selector: "dd" })).toHaveLength(2);
     expect(screen.getByText("№ 41: UNKNOWN")).toBeInTheDocument();
-    expect(screen.getByText("Проверка уже выполняется либо доступна только для текущей ревизии.")).toBeInTheDocument();
+    expect(screen.getByText("Проверка уже выполняется, требует оператора очереди либо доступна только для текущей ревизии.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Проверить результат" })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("payload");
     expect(document.body.textContent).not.toContain("provider_response");
@@ -181,5 +185,28 @@ describe("ProviderActionCenter", () => {
     expect(await screen.findByText("project-8")).toBeInTheDocument();
     finishPost?.(response({ action_id: "google-task-101", revision: 2, job_id: 55, already_queued: false }));
     await waitFor(() => expect(screen.queryByText(/задание № 55/)).not.toBeInTheDocument());
+  });
+
+  it("follows the durable reconciliation from queued to its safe resolved receipt", async () => {
+    let listCalls = 0;
+    const queued = { ...action, reconciliation_status: "queued", retry_state: "none",
+      reconciliation: { job_id: 55, status: "queued", progress: 0, attempts: 0, max_attempts: 3, duration_ms: null } };
+    const resolved = { ...action, business_status: "completed", reconciliation_status: "resolved",
+      reconciliation: { job_id: 55, status: "completed", progress: 100, attempts: 1, max_attempts: 3, duration_ms: 80 },
+      receipt_id: 42, receipt_outcome: "APPLIED", receipt_late: true, safe_reason: null };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, options?: RequestInit) => {
+      if (options?.method === "POST") return response({ action_id: action.action_id, revision: 2,
+        job_id: 55, already_queued: false });
+      listCalls += 1;
+      return response(list([listCalls === 1 ? action : listCalls === 2 ? queued : resolved]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProviderActionCenter projectId={7} pollIntervalMs={250} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить результат" }));
+    expect(await screen.findByText("queued", { selector: "dd" })).toBeInTheDocument();
+    expect(await screen.findByText("Выполнено", {}, { timeout: 1_500 })).toBeInTheDocument();
+    expect(screen.getByText("№ 42: APPLIED")).toBeInTheDocument();
+    expect(screen.getByText("Квитанция получена позднее и сохранена в истории.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
   });
 });

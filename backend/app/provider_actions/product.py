@@ -555,11 +555,14 @@ def queue_reconciliation(db, *, action_id: str, revision: int, actor: User) -> d
         raise ProviderActionError("outcome_not_reconcilable")
     payload = {"organization_id": row.organization_id, "action_id": action_id, "revision": revision}
     key = f"provider-reconcile:{row.organization_id}:{action_id}:{revision}:{latest.sequence}"
+    existing_job_id = db.scalar(select(BackgroundJob.id).where(
+        BackgroundJob.idempotency_key == key,
+    ))
     job = enqueue(db, RECONCILE_KIND, payload, idempotency_key=key, max_attempts=3)
     if job.kind != RECONCILE_KIND or job.payload != payload:
         raise ProviderActionError("dispatch_binding_mismatch")
     return {"action_id": action_id, "revision": revision, "job_id": job.id,
-            "already_queued": job.attempts > 0 or job.status != "queued"}
+            "already_queued": existing_job_id is not None or job.attempts > 0 or job.status != "queued"}
 
 
 def run_product_reconcile_job(payload: dict) -> dict:
@@ -589,9 +592,10 @@ def run_product_reconcile_job(payload: dict) -> dict:
         if row is None or approval is None:
             raise ProviderActionError("dispatch_binding_mismatch")
         actor_id = approval.approved_by
-    return runtime.reconcile(
+    return runtime.reconcile_claimed(
         payload["action_id"], payload["revision"], actor_id=actor_id,
         correlation_id=f"job-reconcile-{payload['action_id']}-{payload['revision']}",
+        job_id=job_id,
     )
 
 
@@ -629,6 +633,33 @@ class ProductProviderActionRuntime(ProviderActionRuntime):
         result = super().reconcile(
             action_id, revision, actor_id=actor_id, correlation_id=correlation_id,
         )
+        self._project_reconciliation(action_id, revision, result)
+        return result
+
+    def reconcile_claimed(
+        self,
+        action_id: str,
+        revision: int,
+        *,
+        actor_id: str,
+        correlation_id: str,
+        job_id: int,
+    ):
+        """Reconcile after the caller has validated the exact durable claim."""
+        claim = current_execution_claim()
+        if type(job_id) is not int or claim is None or claim[0] != job_id:
+            raise ProviderActionError("dispatch_binding_mismatch")
+        result = super()._reconcile_with_job(
+            action_id,
+            revision,
+            actor_id=actor_id,
+            correlation_id=correlation_id,
+            job_id=job_id,
+        )
+        self._project_reconciliation(action_id, revision, result)
+        return result
+
+    def _project_reconciliation(self, action_id: str, revision: int, result: dict) -> None:
         with self.sessions() as db:
             row = db.scalar(select(ProviderAction).where(
                 ProviderAction.action_id == action_id, ProviderAction.revision == revision,
@@ -638,4 +669,3 @@ class ProductProviderActionRuntime(ProviderActionRuntime):
             payload = {"organization_id": row.organization_id,
                        "action_id": action_id, "revision": revision}
         _project_outcome(self.sessions, payload, result)
-        return result
