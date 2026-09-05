@@ -333,7 +333,10 @@ def test_staging_deploy_script_has_lock_backup_rollback_and_public_smoke():
     assert "compose up -d --no-build --force-recreate --wait --wait-timeout 180 || true" not in deploy
 
 
-@pytest.mark.skipif(os.name == "nt", reason="requires POSIX staging path semantics")
+@pytest.mark.skipif(
+    os.name == "nt" or getattr(os, "geteuid", lambda: 0)() == 0,
+    reason="requires non-root POSIX staging path semantics",
+)
 def test_first_staging_deploy_without_current_uses_seed_path(tmp_path):
     root = tmp_path / "staging"
     shared = root / "shared"
