@@ -104,6 +104,7 @@ class MaterializedUpload:
     size: int
     descriptor: StagingDescriptor
     job_id: int
+    source_version_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,7 +285,15 @@ class LocalUploadBusinessProcessor:
             content_text=text,
         )
         files = [item]
-        documents = index_documents(session, record.scope.project_id, files, "local_upload")
+        documents = index_documents(
+            session,
+            record.scope.project_id,
+            files,
+            "local_upload",
+            exact_source_versions=(
+                {item.id: record.source_version_id} if record.source_version_id else None
+            ),
+        )
         tasks = create_tasks_from_files(
             session, record.scope.project_id, None, files, source_type="local_upload",
         )

@@ -445,6 +445,7 @@ class A05LocalUploadLifecycle:
                 display_name=metadata["display_name"], mime_type=metadata["media_type"],
                 checksum=version.integrity[0]["value"], size=metadata["size"],
                 descriptor=descriptor, job_id=job_id,
+                source_version_id=version.id,
             )
         if row.state == "EXPIRED":
             retired = RetiredMaterializationManifest.model_validate(row.manifest)

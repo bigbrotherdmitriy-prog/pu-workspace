@@ -564,7 +564,13 @@ class A05GmailAttachmentLifecycle:
         from app.response_engine import create_response_drafts
         from app.task_engine import create_tasks_from_files
 
-        documents = index_documents(guarded_db, binding.project_id, [item], "gmail")
+        documents = index_documents(
+            guarded_db,
+            binding.project_id,
+            [item],
+            "gmail",
+            exact_source_versions={item.id: version.id},
+        )
         tasks = (create_tasks_from_files(
             guarded_db, binding.project_id, None, [item], source_type="email_attachment",
         ) if "task" in decision.derive_classes else [])

@@ -19,7 +19,14 @@ def _parse_time(value: str | None) -> datetime | None:
         return None
 
 
-def index_documents(db: Session, project_id: int, files: list[StorageObject], source: str) -> list[Document]:
+def index_documents(
+    db: Session,
+    project_id: int,
+    files: list[StorageObject],
+    source: str,
+    *,
+    exact_source_versions: dict[str, str] | None = None,
+) -> list[Document]:
     indexed: list[Document] = []
     for file in files:
         if file.is_folder:
@@ -31,12 +38,15 @@ def index_documents(db: Session, project_id: int, files: list[StorageObject], so
             Document.source == source,
             Document.external_id == file.id,
         ))
+        document_version = None
         if document is None:
             document = Document(project_id=project_id, external_id=file.id, name=file.name, mime_type=file.mime_type, parent_external_id=file.parent_id, source=source, status="analyzed" if content else "discovered", content_hash=content_hash, source_modified_at=_parse_time(file.modified_time), summary=content[:700] or None, current_version=1)
             db.add(document)
             db.flush()
             if content:
-                db.add(DocumentVersion(document_id=document.id, version_number=1, content=content))
+                document_version = DocumentVersion(document_id=document.id, version_number=1, content=content)
+                db.add(document_version)
+                db.flush()
         else:
             changed = bool(content and content_hash != document.content_hash)
             document.name = file.name
@@ -49,7 +59,29 @@ def index_documents(db: Session, project_id: int, files: list[StorageObject], so
                 document.content_hash = content_hash
                 document.summary = content[:700]
                 document.status = "analyzed"
-                db.add(DocumentVersion(document_id=document.id, version_number=document.current_version, content=content))
+                document_version = DocumentVersion(
+                    document_id=document.id,
+                    version_number=document.current_version,
+                    content=content,
+                )
+                db.add(document_version)
+                db.flush()
+            elif content:
+                document_version = db.scalar(select(DocumentVersion).where(
+                    DocumentVersion.document_id == document.id,
+                    DocumentVersion.version_number == document.current_version,
+                ))
+        if content and document_version is not None:
+            from app.source_evidence.legacy_ingestion import bind_legacy_document_version
+            bind_legacy_document_version(
+                db,
+                project_id=project_id,
+                document=document,
+                document_version=document_version,
+                item=file,
+                source=source,
+                exact_source_version_id=(exact_source_versions or {}).get(file.id),
+            )
         indexed.append(document)
     db.commit()
     return indexed
