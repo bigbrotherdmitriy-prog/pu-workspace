@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +18,12 @@ from app.organizer_engine.types import DriveFile
 from app.task_engine import create_tasks_from_files
 from app.mvp3.attention import attention_page
 from app.mvp3.lifecycle import ManagementConflict, ManagementDenied, ManagementLifecycle, normalized_task_state
+from app.mvp3.meeting_digest import (
+    DigestPreference,
+    MeetingActionCandidate,
+    MeetingProposalService,
+    enqueue_digest,
+)
 
 router = APIRouter(prefix="/management", tags=["management"])
 
@@ -65,7 +72,28 @@ class GovernanceTransition(BaseModel):
     decision_text: str | None = Field(default=None, max_length=5000)
 
 
+class EvidenceProposalCreate(BaseModel):
+    project_id: int = Field(gt=0)
+    candidates: list[MeetingActionCandidate] = Field(min_length=1, max_length=100)
+
+
+class EvidenceProposalConfirm(BaseModel):
+    project_id: int = Field(gt=0)
+    expected_version: int = Field(ge=1)
+    create_internal_task: bool = False
+
+
+class DigestEnqueueRequest(BaseModel):
+    project_id: int = Field(gt=0)
+    timezone: str = Field(min_length=1, max_length=100)
+    quiet_start: time
+    quiet_end: time
+    channel: Literal["in_app", "disabled"] = "in_app"
+    local_date: date
+
+
 _lifecycle = ManagementLifecycle()
+_meeting_proposals = MeetingProposalService(_lifecycle)
 
 
 def _lifecycle_error(exc):
@@ -96,7 +124,73 @@ def _obligation_payload(item: Obligation) -> dict:
             "source_excerpt": item.source_excerpt, "confidence": item.confidence,
             "record_version": item.record_version, "due_time": item.due_time,
             "timezone": item.timezone, "evidence_pins": item.evidence_pins or [],
-            "review_state": item.review_state, "escalation_level": item.escalation_level}
+            "review_state": item.review_state, "escalation_level": item.escalation_level,
+            "deadline_policy": item.deadline_policy or {}}
+
+
+@router.post("/v2/meetings/{meeting_id}/proposals")
+def propose_meeting_actions(meeting_id: int, payload: EvidenceProposalCreate,
+                            db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    try:
+        result = _meeting_proposals.propose(
+            db, project_id=payload.project_id, meeting_id=meeting_id,
+            actor_user_id=user.id, candidates=payload.candidates,
+        )
+        db.commit()
+        return {"proposals": result, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.post("/v2/messages/{message_id}/proposals")
+def propose_message_actions(message_id: int, payload: EvidenceProposalCreate,
+                            db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    try:
+        result = _meeting_proposals.propose_message(
+            db, project_id=payload.project_id, message_id=message_id,
+            actor_user_id=user.id, candidates=payload.candidates,
+        )
+        db.commit()
+        return {"proposals": result, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.post("/v2/proposals/{entity_type}/{entity_id}/confirm")
+def confirm_evidence_proposal(entity_type: str, entity_id: int, payload: EvidenceProposalConfirm,
+                              db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
+    try:
+        result = _meeting_proposals.confirm(
+            db, project_id=payload.project_id, actor_user_id=user.id,
+            entity_type=entity_type, entity_id=entity_id,
+            expected_version=payload.expected_version,
+            create_internal_task=payload.create_internal_task,
+        )
+        db.commit()
+        return {"proposal": result, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.post("/v2/digests")
+def enqueue_management_digest(payload: DigestEnqueueRequest, db: Session = Depends(get_db),
+                              user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "viewer")
+    try:
+        preference = DigestPreference(
+            timezone=payload.timezone, quiet_start=payload.quiet_start,
+            quiet_end=payload.quiet_end, channel=payload.channel,
+        )
+        job = enqueue_digest(
+            db, project_id=payload.project_id, user_id=user.id,
+            actor_user_id=user.id, preference=preference, local_date=payload.local_date,
+        )
+        return {"job_id": job.id, "status": job.status, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict, ValueError) as exc:
+        db.rollback(); _lifecycle_error(exc)
 
 
 @router.post("/v2/obligations")
