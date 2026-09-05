@@ -24,6 +24,9 @@ from app.models.user import User
 
 MAX_HISTORY_PAGES = 20
 MAX_HISTORY_MESSAGES = 100
+RESYNC_PAGE_SIZE = 100
+MAX_RESYNC_PAGES = 100
+MAX_RESYNC_MESSAGES = 10_000
 
 
 class GmailHistoryUnavailable(RuntimeError):
@@ -317,6 +320,7 @@ def run_history_sync(
     process_refs: Callable[[list[dict[str, str]]], dict],
     full_resync: Callable[[], tuple[str, dict]],
     execution_guard: Callable[[], None] | None = None,
+    bind_guard: Callable[[Callable[[], None]], None] | None = None,
 ) -> dict:
     """Claim, read and CAS-advance one checkpoint; safe for lease replay."""
     checkpoint = db.get(GmailHistoryCheckpoint, checkpoint_id)
@@ -381,6 +385,10 @@ def run_history_sync(
         _runtime(db, current)
 
     try:
+        # Worker callbacks must use this exact claim/epoch fence, including the
+        # updated epoch when an expired incremental cursor enters resync.
+        if bind_guard is not None:
+            bind_guard(current_guard)
         if mode == "incremental":
             try:
                 refs, history_id = _incremental(
@@ -519,17 +527,16 @@ def run_gmail_history_job(payload: dict) -> dict:
             runtime.google_token_id, db,
         ).service("gmail", "v1")
 
+        checkpoint_guard = None
+
+        def bind_guard(guard):
+            nonlocal checkpoint_guard
+            checkpoint_guard = guard
+
         def provider_guard():
-            execution_guard()
-            db.expire_all()
-            current = db.get(GmailHistoryCheckpoint, checkpoint_id)
-            if (
-                current is None
-                or current.status != "syncing"
-                or current.active_job_id != job_id
-            ):
+            if checkpoint_guard is None:
                 raise GmailHistoryBusy("history_checkpoint_busy")
-            _runtime(db, current)
+            checkpoint_guard()
 
         def process_refs(refs):
             return sync_gmail_project(
@@ -549,6 +556,7 @@ def run_gmail_history_job(payload: dict) -> dict:
             process_refs=process_refs,
             full_resync=full_resync,
             execution_guard=execution_guard,
+            bind_guard=bind_guard,
         )
 
 
@@ -568,8 +576,13 @@ def require_history_execution_claim(db: Session, claim: tuple) -> None:
 
 
 def bounded_history_resync(service, process_refs, before_read):
-    """Pin before listing so concurrent arrivals remain in the next history delta."""
-    from app.api.gmail import _gmail_message_refs
+    """Ingest one bounded page at a time; restart failures from the first page.
+
+    The pre-scan history pin is returned only on complete ingestion. No provider
+    continuation is persisted: existing mailbox message identity deduplicates
+    successfully committed rows on replay, without needing another schema.
+    """
+    from app.api.gmail import _gmail_resync_pages
 
     profile = execute_google_read(
         lambda: service.users().getProfile(userId="me"), before_attempt=before_read,
@@ -577,9 +590,19 @@ def bounded_history_resync(service, process_refs, before_read):
     history_id = profile.get("historyId") if isinstance(profile, dict) else None
     if not _valid_history_id(history_id):
         raise GmailHistoryUnavailable("history_cursor_unavailable")
-    refs = list(_gmail_message_refs(
-        service, query="is:inbox newer_than:30d", max_results=MAX_HISTORY_MESSAGES,
-        before_attempt=before_read, require_complete=True,
-    ))
+    totals = {}
+    for refs in _gmail_resync_pages(
+        service, query="is:inbox newer_than:30d", page_size=RESYNC_PAGE_SIZE,
+        max_pages=MAX_RESYNC_PAGES, max_messages=MAX_RESYNC_MESSAGES,
+        before_attempt=before_read,
+    ):
+        before_read()
+        result = process_refs(refs) if refs else {"processed": 0}
+        if not _accepted_result(result):
+            raise GmailHistoryUnavailable("history_ingest_incomplete")
+        for key, count in _safe_result(result, "resync").items():
+            if type(count) in (int, bool):
+                totals[key] = totals.get(key, 0) + int(count)
+        before_read()
     before_read()
-    return history_id, process_refs(refs)
+    return history_id, totals

@@ -162,6 +162,61 @@ def _gmail_message_refs(
         page_token = next_token
 
 
+def _gmail_resync_pages(
+    service, *, query: str, page_size: int, max_pages: int, max_messages: int,
+    before_attempt: Callable[[], None],
+):
+    """Complete-or-fail listing with bounded page buffers and request budgets.
+
+    Empty pages can continue. Repeated tokens and oversized/malformed pages
+    fail before ingestion of that page. The budget counts provider references,
+    including duplicates, so duplication cannot bypass the run limit.
+    """
+    if any(type(value) is not int or value <= 0
+           for value in (page_size, max_pages, max_messages)):
+        raise ValueError("gmail_resync_policy_unavailable")
+    remaining = max_messages
+    page_token = None
+    seen_tokens: set[str] = set()
+    for _ in range(max_pages):
+        limit = min(page_size, remaining)
+        request = {"userId": "me", "q": query, "maxResults": limit}
+        if page_token is not None:
+            request["pageToken"] = page_token
+        page = execute_google_read(
+            lambda request=request: service.users().messages().list(**request),
+            before_attempt=before_attempt,
+        )
+        if not isinstance(page, dict):
+            raise ValueError("gmail_page_unavailable")
+        refs = page.get("messages", [])
+        if not isinstance(refs, list) or len(refs) > limit:
+            raise ValueError("gmail_page_unavailable")
+        batch = []
+        page_ids: set[str] = set()
+        for ref in refs:
+            message_id = ref.get("id") if isinstance(ref, dict) else None
+            if not isinstance(message_id, str) or not 0 < len(message_id) <= 500:
+                raise ValueError("gmail_page_unavailable")
+            if message_id not in page_ids:
+                page_ids.add(message_id)
+                batch.append({"id": message_id})
+        next_token = page.get("nextPageToken")
+        if next_token is not None:
+            if (not isinstance(next_token, str) or not next_token
+                    or len(next_token) > 2000 or next_token in seen_tokens):
+                raise ValueError("gmail_page_unavailable")
+            seen_tokens.add(next_token)
+        remaining -= len(refs)
+        yield batch
+        if next_token is None:
+            return
+        if remaining == 0:
+            raise ValueError("gmail_resync_incomplete")
+        page_token = next_token
+    raise ValueError("gmail_resync_incomplete")
+
+
 def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
     tasks = len(result.get("tasks", []))
     drafts = len(result.get("drafts", []))
@@ -268,6 +323,10 @@ def sync_gmail_project(
     ).service("gmail", "v1")
     def before_provider_read():
         if _before_read is not None:
+            # The checkpoint guard expires cached authority rows. Flush pending
+            # backfills first so that refresh cannot discard accepted changes;
+            # a rejected guard still rolls the transaction back.
+            db.flush()
             _before_read()
         if mailbox_runtime is None:
             return
@@ -290,10 +349,14 @@ def sync_gmail_project(
         before_attempt=before_provider_read,
     )
     for ref in refs:
+        before_provider_read()
         try:
             item = execute_google_read(lambda: service.users().messages().get(
                 userId="me", id=ref["id"], format="full",
             ), before_attempt=before_provider_read)
+            # A lease or credential can change while the provider request is
+            # in flight. Recheck before any ingestion or dedup/backfill write.
+            before_provider_read()
             headers = _headers(item.get("payload", {}))
             content = _message_text(item.get("payload", {})) or item.get("snippet", "")
             subject = headers.get("subject") or "Письмо без темы"
@@ -384,6 +447,7 @@ def sync_gmail_project(
             else:
                 routing_evidence = semantic_evidence
             ingress_origin = None
+            before_provider_read()
             if mailbox_write:
                 source_ref, _observation = observe_gmail_message(
                     db, runtime=mailbox_runtime, project_id=target_project_id,
@@ -398,6 +462,7 @@ def sync_gmail_project(
                     "source": source_ref,
                     "source_version": _observation,
                 })()
+            before_provider_read()
             result = ingest_message(IncomingMessage(
                 project_id=target_project_id, source_type=source_type, source_external_id=item["id"],
                 source_name=(f"Исходящее: {recipient} — {subject}" if is_outgoing else f"{sender} — {subject}"),
@@ -420,8 +485,12 @@ def sync_gmail_project(
                 notify_telegram(_gmail_telegram_notice(sender, subject, result))
         except Exception as exc:
             db.rollback()
+            # Scope/lease rejection is terminal for this page, not a skippable
+            # individual message error followed by writes under a stale claim.
+            before_provider_read()
             failed += 1
             errors.append({"item_index": processed + skipped + failed, "error": exc.__class__.__name__})
+    before_provider_read()
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
                     details=f"processed={processed}; skipped={skipped}; failed={failed}"))
     db.commit()

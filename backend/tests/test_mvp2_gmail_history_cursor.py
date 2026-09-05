@@ -340,7 +340,7 @@ def test_resync_pins_profile_before_listing_and_ingest():
     assert observed == ["profile", "listing", "ingest"]
 
 
-def test_bounded_resync_rejects_unprocessed_next_page():
+def test_bounded_resync_rejects_repeated_next_page():
     from app.gmail_history import bounded_history_resync
     users = SimpleNamespace(
         getProfile=lambda **kwargs: SimpleNamespace(execute=lambda: {"historyId": "201"}),
@@ -348,9 +348,11 @@ def test_bounded_resync_rejects_unprocessed_next_page():
             "messages": [{"id": str(i)} for i in range(100)], "nextPageToken": "more",
         })),
     )
-    with pytest.raises(ValueError, match="gmail_resync_incomplete"):
+    processed = []
+    with pytest.raises(ValueError, match="gmail_page_unavailable"):
         bounded_history_resync(SimpleNamespace(users=lambda: users),
-            lambda refs: pytest.fail("partial listing must not ingest or advance"), lambda: None)
+            lambda refs: processed.extend(refs) or {"processed": len(refs)}, lambda: None)
+    assert len(processed) == 100
 
 
 def test_worker_attempt_and_expired_lease_cannot_continue(db_session):
