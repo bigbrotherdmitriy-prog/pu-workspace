@@ -80,6 +80,7 @@ def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
     assert triggers["push"]["branches"] == [
         "codex/v54-final-integration", "codex/v54-wave2-integration",
         "codex/v54-wave3-integration", "codex/v54-wave4-integration",
+        "codex/mvp3-postgres-runtime-gate",
     ]
     assert "workflow_dispatch:" in text and "pull_request:" not in text
     assert "persist-credentials: false" in text

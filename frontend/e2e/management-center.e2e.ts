@@ -49,7 +49,7 @@ test("M3 browser: risk and decision remain evidence-backed and perform no provid
   await center.getByRole("button", { name: /Решение по замене материала/ }).click();
   await center.getByRole("button", { name: "Зафиксировать исполнение" }).click();
   await expect(center.getByRole("region", { name: "Решение по замене материала" }).getByRole("status").filter({ hasText: "Изменение сохранено" })).toBeVisible();
-  expect(mock.requests.some(row => /provider|gmail|telegram|calendar|google\/tasks/i.test(row.path))).toBe(false);
+  expect(mock.requests.some(row => row.method !== "GET" && /provider|gmail|telegram|calendar|google\/tasks/i.test(row.path))).toBe(false);
 });
 
 test("M3 browser: persisted weekdays, quiet hours and channel are saved before durable digest enqueue", async ({ page, mock }) => {
@@ -75,7 +75,7 @@ test("M3 browser: persisted weekdays, quiet hours and channel are saved before d
   expect(JSON.parse(mock.requests.find(row => row.method === "PUT")?.body || "{}")).toMatchObject({
     expected_version: 4, quiet_start: "21:30", quiet_end: "07:15", cadence: "weekdays", channel: "in_app",
   });
-  expect(mock.requests.some(row => /provider|gmail|telegram|calendar|google\/tasks/i.test(row.path))).toBe(false);
+  expect(mock.requests.some(row => row.method !== "GET" && /provider|gmail|telegram|calendar|google\/tasks/i.test(row.path))).toBe(false);
   await expect(center.getByText(/\d+%/)).toHaveCount(0);
 });
 

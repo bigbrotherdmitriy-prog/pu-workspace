@@ -22,7 +22,10 @@ from psycopg import sql
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
 HEAD = "a54f001c0a17"
-DATABASES = ("puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime")
+DATABASES = (
+    "puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime",
+    "puw_mvp3_test_runtime",
+)
 PHASES: list[dict] = []
 CREATED: list[str] = []
 PYTEST_FAILURE = re.compile(
@@ -223,6 +226,7 @@ def test_env() -> dict:
         "PUW_V54_MAILBOX_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_INTEGRATION_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations"),
+        "PUW_MVP3_TEST_DATABASE_URL": base_url("puw_mvp3_test_runtime"),
         "GMAIL_AUTO_SYNC_ENABLED": "false",
         "AI_SECRETARY_AUTOMATION_ENABLED": "false",
     })
@@ -275,11 +279,18 @@ def main() -> None:
         with psycopg.connect(base_url("puw_v54_test_migrations").replace("postgresql+psycopg://", "postgresql://"), connect_timeout=5) as db:
             if db.execute("SELECT version_num FROM alembic_version").fetchone()[0] != HEAD:
                 raise RuntimeError("migration_head_mismatch")
+        run_phase("postgres_mvp3_runtime", [
+            sys.executable, "-m", "pytest",
+            "backend/tests/test_mvp3_management_acceptance_postgres.py",
+            "backend/tests/test_mvp3_management_runtime_postgres.py",
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
         run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
                   env=dict(env, PUW_V54_TEST_DATABASE_URL="", PUW_V54_SOURCE_TEST_DATABASE_URL="",
                            PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_MAILBOX_TEST_DATABASE_URL="",
                            PUW_V54_INTEGRATION_DATABASE_URL="",
-                           PUW_V54_PROVIDER_MIGRATION_DATABASE_URL=""), timeout=900)
+                           PUW_V54_PROVIDER_MIGRATION_DATABASE_URL="",
+                           PUW_MVP3_TEST_DATABASE_URL=""), timeout=900)
         targets = [
             "backend/tests/test_v54_pilot_foundation.py",
             "backend/tests/test_v54_source_evidence_pilot.py", "backend/tests/test_v54_source_evidence_postgres.py",

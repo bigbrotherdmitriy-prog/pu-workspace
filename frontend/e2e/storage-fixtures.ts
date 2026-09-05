@@ -146,6 +146,7 @@ export class StorageApi {
       "/api/readiness": { ready: true, google_drive_ready: true, telegram_ready: false, checks: {} },
       "/history/audit": { logs: [] },
       "/tasks": { tasks: [] }, "/governance/risks": { risks: [] }, "/governance/decisions": { decisions: [] },
+      "/provider-actions": { items: [], count: 0 },
       "/response-drafts": { drafts: [] }, "/ai-secretary/inbox": { messages: this.inboxByProject.get(projectId) || [] }, "/organizer/proposals": { proposals: [] },
       "/ai-secretary/automations": { rules: [] }, "/project-contacts": { contacts: [] },
       "/ai-secretary/daily-briefing": { project_id: projectId, date: "2026-09-03", summary: {
