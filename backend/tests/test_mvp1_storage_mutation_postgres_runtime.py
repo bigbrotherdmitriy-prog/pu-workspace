@@ -29,7 +29,9 @@ def isolated_postgres_engine():
     url = os.environ["TEST_POSTGRES_DSN"]
     parsed = make_url(url)
     assert parsed.get_backend_name() == "postgresql"
-    assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"}
+    assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"} or (
+        parsed.host == "postgres" and os.getenv("GITHUB_ACTIONS") == "true"
+    )
     assert parsed.database == "puw_storage_ci" or (parsed.database or "").startswith("puw_v54_test_")
     assert not parsed.query
     schema = "storage_mutation_test_" + uuid4().hex
