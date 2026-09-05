@@ -475,7 +475,7 @@ export function App() {
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment,
+    addFinanceItem, confirmFinance, confirmCashPayment, correctCashPayment,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
 
@@ -2628,6 +2628,9 @@ export function App() {
               }
               onConfirmPayment={(id, amount) =>
                 void confirmCashPayment(id, amount)
+              }
+              onCorrectPayment={(id, amount, date) =>
+                void correctCashPayment(id, amount, date)
               }
             />
           </div>

@@ -199,6 +199,32 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
+  async function correctCashPayment(id: number, actualAmount: number, actualDate: string) {
+    const rawAmount = window.prompt("Исправленная фактическая сумма, ₽", String(actualAmount));
+    if (rawAmount === null) return;
+    const correctedAmount = Number(rawAmount);
+    if (!Number.isFinite(correctedAmount) || correctedAmount <= 0) { setError("Введите корректную сумму оплаты"); return; }
+    const correctedDate = window.prompt("Исправленная дата оплаты, ГГГГ-ММ-ДД", actualDate);
+    if (!correctedDate) return;
+    const reason = window.prompt("Причина корректировки", "Исправление подтверждённого факта пользователем");
+    if (!reason || reason.trim().length < 3) { setError("Укажите причину корректировки"); return; }
+    if (!window.confirm(`Исправить факт оплаты на ${money(correctedAmount)} от ${correctedDate}? Предыдущее значение останется в аудите.`)) return;
+    try {
+      await api(`/execution/cash-flow/${id}/correct-payment`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_actual_amount: actualAmount,
+          expected_actual_date: actualDate,
+          actual_amount: correctedAmount,
+          actual_date: correctedDate,
+          reason: reason.trim(),
+        }),
+      });
+      setNotice("Факт оплаты исправлен отдельным событием; предыдущее значение сохранено в аудите");
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
   async function updateScheduleActual(id: number) {
     const value = window.prompt("Фактическая готовность, %", "100");
     if (value === null) return;
@@ -237,6 +263,6 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmCashPayment, updateScheduleActual, recordFinanceActual,
+    addFinanceItem, confirmFinance, confirmCashPayment, correctCashPayment, updateScheduleActual, recordFinanceActual,
   };
 }

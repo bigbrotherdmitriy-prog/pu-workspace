@@ -21,6 +21,7 @@ def test_finance_operations_are_extracted_from_app_shell() -> None:
     assert "finance-grid" in operations
     assert "Создать пакет предложений" in operations
     assert "Подтвердить оплату" in operations
+    assert "Исправить факт оплаты" in operations
 
 
 def test_finance_operations_preserve_human_approval_boundary() -> None:
@@ -29,4 +30,6 @@ def test_finance_operations_preserve_human_approval_boundary() -> None:
     assert "Новая запись создаётся как предложение" in operations
     assert "не влияет на подтверждённый прогноз" in operations
     assert "onConfirmPayment" in operations
+    assert "onCorrectPayment" in operations
+    assert "/correct-payment" in (ROOT / "frontend" / "src" / "modules" / "finance" / "useFinanceController.ts").read_text(encoding="utf-8")
     assert "google_workspace" not in operations.lower()

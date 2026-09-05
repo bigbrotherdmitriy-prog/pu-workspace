@@ -72,6 +72,14 @@ class PaymentConfirmation(BaseModel):
     actual_date: date | None = None
 
 
+class PaymentCorrection(BaseModel):
+    expected_actual_amount: Decimal = Field(gt=0)
+    expected_actual_date: date
+    actual_amount: Decimal = Field(gt=0)
+    actual_date: date
+    reason: str = Field(min_length=3, max_length=1000)
+
+
 class ProcurementCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
@@ -456,12 +464,25 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
 
 @router.post("/cash-flow/{item_id}/confirm-payment")
 def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    item = db.get(CashFlowEntry, item_id)
+    item = db.scalar(select(CashFlowEntry).where(CashFlowEntry.id == item_id).with_for_update())
     if item is None:
         raise HTTPException(404, "Запись ДДС не найдена")
     require_project_role(db, user, item.project_id, "manager")
     paid_status = "received" if item.direction == "inflow" else "paid"
     if item.status in {"paid", "received"}:
+        amount_conflicts = (
+            payload.actual_amount is not None
+            and item.actual_amount != payload.actual_amount
+        )
+        date_conflicts = (
+            payload.actual_date is not None
+            and item.actual_date != payload.actual_date
+        )
+        if amount_conflicts or date_conflicts:
+            raise HTTPException(
+                409,
+                "Оплата уже подтверждена с другими значениями; создайте отдельную корректировку",
+            )
         return {"id": item.id, "status": item.status, "already_confirmed": True}
     if item.status not in {"proposed", "approved"}:
         raise HTTPException(409, "Эту запись нельзя подтвердить как оплаченную")
@@ -475,6 +496,46 @@ def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = De
     db.commit()
     return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
             "actual_date": item.actual_date, "already_confirmed": False}
+
+
+@router.post("/cash-flow/{item_id}/correct-payment")
+def correct_payment(item_id: int, payload: PaymentCorrection, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.scalar(select(CashFlowEntry).where(CashFlowEntry.id == item_id).with_for_update())
+    if item is None:
+        raise HTTPException(404, "Запись ДДС не найдена")
+    require_project_role(db, user, item.project_id, "manager")
+    if item.status not in {"paid", "received"} or item.actual_amount is None or item.actual_date is None:
+        raise HTTPException(409, "Корректировать можно только подтверждённую оплату")
+    if item.actual_amount != payload.expected_actual_amount or item.actual_date != payload.expected_actual_date:
+        raise HTTPException(409, "Подтверждённая оплата уже изменена; обновите данные и повторите")
+    if item.actual_amount == payload.actual_amount and item.actual_date == payload.actual_date:
+        raise HTTPException(422, "Корректировка не изменяет сумму или дату оплаты")
+
+    old_amount = item.actual_amount
+    old_date = item.actual_date
+    item.actual_amount = payload.actual_amount
+    item.actual_date = payload.actual_date
+    _refresh_budget_from_cash_flow(db, item.budget_line_id)
+    _audit(
+        db,
+        "cash_flow_payment_corrected",
+        "cash_flow",
+        item.id,
+        user.id,
+        (
+            f"old_amount={old_amount}; old_date={old_date}; "
+            f"new_amount={payload.actual_amount}; new_date={payload.actual_date}; "
+            "reason_supplied=true"
+        ),
+    )
+    db.commit()
+    return {
+        "id": item.id,
+        "status": item.status,
+        "actual_amount": item.actual_amount,
+        "actual_date": item.actual_date,
+        "corrected": True,
+    }
 
 
 @router.post("/procurement")

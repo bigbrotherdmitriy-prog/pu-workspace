@@ -52,6 +52,7 @@ export type FinanceOverview = {
     direction: string;
     title: string;
     planned_date: string;
+    actual_date?: string;
     planned_amount: number;
     actual_amount: number;
     status: string;
