@@ -20,12 +20,12 @@ from app.models.task import Task, TaskDueDateHistory, TaskHistory
 from app.models.response_draft import ResponseDraft
 from app.models.automation_rule import AutomationRule, AutomationRun
 from app.models.telegram_chat import TelegramChatLink
-from app.models.governance import Decision, Risk
+from app.models.governance import Decision, GovernanceHistory, Risk
 from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
 from app.models.organization_contract import Contract, Organization
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
-from app.models.management import Meeting, Notification, Obligation
+from app.models.management import Meeting, Notification, Obligation, ObligationHistory
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.external_resource import ExternalResourceLink
 from app.models.project_contact import ProjectContact
@@ -73,6 +73,8 @@ __all__ = [
     "TelegramChatLink",
     "Risk",
     "Decision",
+    "GovernanceHistory",
+    "GovernanceHistory",
     "SourceFolder",
     "WorkspaceSnapshot",
     "VirtualNode",
@@ -82,6 +84,8 @@ __all__ = [
     "Message",
     "ProjectAIPolicy",
     "Obligation",
+    "ObligationHistory",
+    "ObligationHistory",
     "Meeting",
     "Notification",
     "ScheduleBaseline",

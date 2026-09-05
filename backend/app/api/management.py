@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -9,12 +9,14 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.governance_engine import create_governance_items
 from app.models.audit_log import AuditLog
-from app.models.governance import Decision, Risk
-from app.models.management import Meeting, Notification, Obligation
+from app.models.governance import Decision, GovernanceHistory, Risk
+from app.models.management import Meeting, Notification, Obligation, ObligationHistory
 from app.models.organization_contract import Contract
 from app.models.user import User
 from app.organizer_engine.types import DriveFile
 from app.task_engine import create_tasks_from_files
+from app.mvp3.attention import attention_page
+from app.mvp3.lifecycle import ManagementConflict, ManagementDenied, ManagementLifecycle, normalized_task_state
 
 router = APIRouter(prefix="/management", tags=["management"])
 
@@ -22,6 +24,54 @@ router = APIRouter(prefix="/management", tags=["management"])
 class ObligationUpdate(BaseModel):
     status: str = Field(pattern="^(confirmed|in_progress|fulfilled|breached|dismissed)$")
     result_note: str | None = Field(default=None, max_length=5000)
+
+
+class EvidenceObligationCreate(BaseModel):
+    project_id: int
+    owner_user_id: int
+    title: str = Field(min_length=2, max_length=500)
+    contract_id: int | None = None
+    due_date: date | None = None
+    due_time: time | None = None
+    timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=100)
+    evidence_pins: list[dict] = Field(min_length=1, max_length=20)
+    deadline_policy: dict | None = None
+
+
+class LifecycleTransition(BaseModel):
+    expected_version: int = Field(ge=1)
+    status: str = Field(min_length=2, max_length=50)
+    reason: str | None = Field(default=None, max_length=2000)
+    result_note: str | None = Field(default=None, max_length=5000)
+
+
+class GovernanceCreate(BaseModel):
+    project_id: int
+    owner_user_id: int
+    title: str = Field(min_length=2, max_length=5000)
+    evidence_pins: list[dict] = Field(min_length=1, max_length=20)
+    criticality: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    obligation_id: int | None = None
+    task_id: int | None = None
+    risk_id: int | None = None
+
+
+class GovernanceTransition(BaseModel):
+    project_id: int
+    expected_version: int = Field(ge=1)
+    status: str = Field(min_length=2, max_length=50)
+    reason: str | None = Field(default=None, max_length=2000)
+    action_note: str | None = Field(default=None, max_length=5000)
+    decision_text: str | None = Field(default=None, max_length=5000)
+
+
+_lifecycle = ManagementLifecycle()
+
+
+def _lifecycle_error(exc):
+    if isinstance(exc, ManagementConflict):
+        raise HTTPException(409, "version_conflict") from exc
+    raise HTTPException(422, str(exc)) from exc
 
 
 class MeetingCreate(BaseModel):
@@ -43,7 +93,158 @@ def _obligation_payload(item: Obligation) -> dict:
             "task_id": item.task_id, "title": item.title, "status": item.status,
             "due_date": item.due_date, "result_note": item.result_note,
             "source_type": item.source_type, "source_name": item.source_name,
-            "source_excerpt": item.source_excerpt, "confidence": item.confidence}
+            "source_excerpt": item.source_excerpt, "confidence": item.confidence,
+            "record_version": item.record_version, "due_time": item.due_time,
+            "timezone": item.timezone, "evidence_pins": item.evidence_pins or [],
+            "review_state": item.review_state, "escalation_level": item.escalation_level}
+
+
+@router.post("/v2/obligations")
+def create_evidence_obligation(payload: EvidenceObligationCreate, db: Session = Depends(get_db),
+                               user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    try:
+        scope = _lifecycle.scope(db, project_id=payload.project_id, actor_user_id=user.id)
+        row = _lifecycle.create_obligation(
+            db, scope=scope, title=payload.title, owner_user_id=payload.owner_user_id,
+            evidence_pins=payload.evidence_pins, due_date=payload.due_date,
+            due_time=payload.due_time, timezone_name=payload.timezone,
+            contract_id=payload.contract_id, deadline_policy=payload.deadline_policy,
+        )
+        db.commit(); db.refresh(row)
+        return _obligation_payload(row)
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.patch("/v2/obligations/{obligation_id}")
+def transition_evidence_obligation(obligation_id: int, payload: LifecycleTransition,
+                                   db: Session = Depends(get_db), user: User = Depends(require_user)):
+    row = db.get(Obligation, obligation_id)
+    if row is None:
+        raise HTTPException(404, "Obligation not found")
+    require_project_role(db, user, row.project_id, "editor")
+    try:
+        scope = _lifecycle.scope(db, project_id=row.project_id, actor_user_id=user.id)
+        row = _lifecycle.transition_obligation(db, scope=scope, obligation_id=obligation_id,
+                                               expected_version=payload.expected_version, status=payload.status,
+                                               reason=payload.reason, result_note=payload.result_note)
+        db.commit(); db.refresh(row)
+        return _obligation_payload(row)
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.get("/v2/obligations/{obligation_id}/history")
+def evidence_obligation_history(obligation_id: int, db: Session = Depends(get_db),
+                                user: User = Depends(require_user)):
+    row = db.get(Obligation, obligation_id)
+    if row is None:
+        raise HTTPException(404, "Obligation not found")
+    require_project_role(db, user, row.project_id, "viewer")
+    events = db.scalars(select(ObligationHistory).where(ObligationHistory.obligation_id == row.id)
+                        .order_by(ObligationHistory.sequence)).all()
+    return {"history": [{"sequence": event.sequence, "event": event.event,
+                          "from_status": event.from_status, "to_status": event.to_status,
+                          "record_version": event.resulting_version, "reason": event.reason,
+                          "evidence_pins": event.evidence_pins or [], "occurred_at": event.occurred_at}
+                         for event in events]}
+
+
+@router.post("/v2/obligations/{obligation_id}/internal-task")
+def map_obligation_task(obligation_id: int, expected_version: int, db: Session = Depends(get_db),
+                        user: User = Depends(require_user)):
+    row = db.get(Obligation, obligation_id)
+    if row is None:
+        raise HTTPException(404, "Obligation not found")
+    require_project_role(db, user, row.project_id, "editor")
+    try:
+        scope = _lifecycle.scope(db, project_id=row.project_id, actor_user_id=user.id)
+        task = _lifecycle.ensure_internal_task(db, scope=scope, obligation_id=row.id,
+                                               expected_version=expected_version)
+        db.commit(); db.refresh(task)
+        return {"id": task.id, "status": task.status, "normalized_state": normalized_task_state(task.status),
+                "external_action_status": task.external_action_status}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.post("/v2/risks")
+def create_evidence_risk(payload: GovernanceCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    try:
+        scope = _lifecycle.scope(db, project_id=payload.project_id, actor_user_id=user.id)
+        row = _lifecycle.create_risk(db, scope=scope, title=payload.title, owner_user_id=payload.owner_user_id,
+                                     evidence_pins=payload.evidence_pins, criticality=payload.criticality,
+                                     obligation_id=payload.obligation_id, task_id=payload.task_id)
+        db.commit(); db.refresh(row)
+        return {"id": row.id, "status": row.status, "record_version": row.record_version,
+                "review_state": row.review_state, "evidence_pins": row.evidence_pins}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.post("/v2/decisions")
+def create_evidence_decision(payload: GovernanceCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    try:
+        scope = _lifecycle.scope(db, project_id=payload.project_id, actor_user_id=user.id)
+        row = _lifecycle.create_decision(db, scope=scope, question=payload.title, owner_user_id=payload.owner_user_id,
+                                         evidence_pins=payload.evidence_pins, obligation_id=payload.obligation_id,
+                                         task_id=payload.task_id, risk_id=payload.risk_id)
+        db.commit(); db.refresh(row)
+        return {"id": row.id, "status": row.status, "record_version": row.record_version,
+                "review_state": row.review_state, "evidence_pins": row.evidence_pins}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.patch("/v2/{entity_type}/{entity_id}")
+def transition_governance(entity_type: str, entity_id: int, payload: GovernanceTransition,
+                          db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if entity_type not in {"risks", "decisions"}:
+        raise HTTPException(404, "Unsupported entity")
+    require_project_role(db, user, payload.project_id, "editor")
+    try:
+        scope = _lifecycle.scope(db, project_id=payload.project_id, actor_user_id=user.id)
+        row = _lifecycle.transition_governance(db, scope=scope, entity_type=entity_type[:-1], entity_id=entity_id,
+                                               expected_version=payload.expected_version, status=payload.status,
+                                               reason=payload.reason, action_note=payload.action_note,
+                                               decision_text=payload.decision_text)
+        db.commit(); db.refresh(row)
+        return {"id": row.id, "status": row.status, "record_version": row.record_version,
+                "review_state": row.review_state}
+    except (ManagementDenied, ManagementConflict) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.get("/v2/{entity_type}/{entity_id}/history")
+def evidence_governance_history(entity_type: str, entity_id: int, project_id: int,
+                                db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if entity_type not in {"risks", "decisions"}:
+        raise HTTPException(404, "Unsupported entity")
+    require_project_role(db, user, project_id, "viewer")
+    kind = entity_type[:-1]
+    events = db.scalars(select(GovernanceHistory).where(
+        GovernanceHistory.project_id == project_id, GovernanceHistory.entity_type == kind,
+        GovernanceHistory.entity_id == entity_id).order_by(GovernanceHistory.sequence)).all()
+    if not events:
+        raise HTTPException(404, "Entity not found")
+    return {"history": [{"sequence": event.sequence, "event": event.event,
+                          "from_status": event.from_status, "to_status": event.to_status,
+                          "record_version": event.resulting_version, "reason": event.reason,
+                          "evidence_pins": event.evidence_pins or [], "occurred_at": event.occurred_at}
+                         for event in events]}
+
+
+@router.get("/v2/attention")
+def evidence_attention(project_id: int, offset: int = 0, limit: int = 50, kinds: str | None = None,
+                       db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    if offset < 0 or limit < 1 or limit > 100:
+        raise HTTPException(422, "Invalid pagination")
+    return attention_page(db, project_id=project_id, kinds=set(kinds.split(",")) if kinds else None,
+                          offset=offset, limit=limit)
 
 
 @router.get("/obligations")
