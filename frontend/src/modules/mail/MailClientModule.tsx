@@ -164,6 +164,7 @@ export function MailClientModule({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [safeError, setSafeError] = useState("");
+  const [providerWarning, setProviderWarning] = useState("");
   const [composer, setComposer] = useState<ComposerState | null>(null);
   const [showCopy, setShowCopy] = useState(false);
   const [busy, setBusy] = useState("");
@@ -191,6 +192,11 @@ export function MailClientModule({
       if (requestId !== requestRef.current) return;
       setCapabilities(capabilityResult);
       setFolders(folderResult.folders);
+      setProviderWarning(folderResult.provider_available === false
+        ? (folderResult.provider_error === "not_connected"
+          ? "Почта не подключена. Показаны ранее сохранённые письма; подключите аккаунт для получения и отправки."
+          : "Gmail временно недоступен. Показаны сохранённые письма; получение новых и отправка могут не работать.")
+        : "");
       const nextThreads = threadResult.items;
       setThreads(nextThreads);
       setSelectedThreadId((current) => nextThreads.some((row) => row.id === current)
@@ -199,6 +205,7 @@ export function MailClientModule({
       if (requestId !== requestRef.current) return;
       const message = (error as Error).message;
       setSafeError(message);
+      setProviderWarning("");
       setThreads([]);
     } finally {
       if (requestId === requestRef.current) setLoading(false);
@@ -513,6 +520,7 @@ export function MailClientModule({
         </div>
       </header>
       {syncStatus && <p className="mail-sync-status" aria-live="polite">{syncStatus}</p>}
+      {providerWarning && <p className="mail-provider-warning" role="status"><AlertTriangle />{providerWarning}</p>}
     </div>
     {safeError && <div className="mail-safe-error" role="alert">
       <AlertTriangle /><div><strong>Почтовый интерфейс пока недоступен</strong><p>{safeError}</p><button onClick={() => void loadMailbox()}>Повторить</button></div>

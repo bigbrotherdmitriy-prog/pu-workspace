@@ -98,7 +98,13 @@ export const mailClientApi = {
     } satisfies MailCapabilities));
   },
   folders(projectId: number) {
-    return api<{ folders: Array<{ id: string; name: string; count?: number }> }>(`/mail/projects/${projectId}/folders`).then((raw) => ({
+    return api<{
+      provider_available?: boolean;
+      provider_error?: string | null;
+      folders: Array<{ id: string; name: string; count?: number }>;
+    }>(`/mail/projects/${projectId}/folders`).then((raw) => ({
+      provider_available: raw.provider_available !== false,
+      provider_error: raw.provider_error || null,
       folders: raw.folders
         .filter((item): item is { id: MailFolderKind; name: string; count?: number } => ["inbox", "attention", "drafts", "sent", "archive", "spam", "trash", "all"].includes(item.id))
         .map((item) => ({ kind: item.id, label: item.name, count: item.count } satisfies MailFolder)),

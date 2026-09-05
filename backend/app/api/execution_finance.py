@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +23,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.structured_import import parse_structured_rows
 from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
+from app.schedule_import.mspdi import build_mspdi
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
@@ -115,6 +116,7 @@ class MppImportRequest(BaseModel):
     contract_id: int | None = None
     filename: str = Field(min_length=5, max_length=500)
     content_base64: str
+    baseline_id: int | None = None
 
 
 MAX_MPP_BYTES = 25 * 1024 * 1024
@@ -150,6 +152,11 @@ def _mpp_lag_suffix(value: object) -> str:
         return ""
     days = round(float(match.group(1)))
     return f"{days:+d}d" if days else ""
+
+
+def _mpp_uid(item: ScheduleItem) -> str | None:
+    match = re.fullmatch(r"MPP task UID (.+)", item.source_excerpt or "")
+    return match.group(1) if match else None
 
 
 class BudgetCreate(BaseModel):
@@ -1007,6 +1014,19 @@ def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: 
     data, digest = _decode_mpp(payload)
     tasks = _mpp_tasks(data)
     dated = [row for row in tasks if row.planned_start or row.planned_finish]
+    existing_by_uid: dict[str, ScheduleItem] = {}
+    if payload.baseline_id:
+        baseline = db.get(ScheduleBaseline, payload.baseline_id)
+        if baseline is None or baseline.project_id != payload.project_id:
+            raise HTTPException(404, "Версия ГПР не найдена")
+        existing_rows = list(db.scalars(select(ScheduleItem).where(ScheduleItem.baseline_id == baseline.id)))
+        existing_by_uid = {uid: item for item in existing_rows if (uid := _mpp_uid(item))}
+    incoming_uids = {row.external_uid for row in tasks}
+    changed = sum(
+        1 for row in tasks if (old := existing_by_uid.get(row.external_uid)) and (
+            old.title != row.title[:500] or old.planned_start != row.planned_start or old.planned_finish != row.planned_finish
+        )
+    )
     return {
         "filename": payload.filename, "sha256": digest, "task_count": len(tasks),
         "relation_count": sum(len(row.predecessors) for row in tasks),
@@ -1015,6 +1035,10 @@ def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: 
         "critical_count": sum(row.is_critical for row in tasks),
         "planned_start": min((row.planned_start for row in dated if row.planned_start), default=None),
         "planned_finish": max((row.planned_finish for row in dated if row.planned_finish), default=None),
+        "added_count": sum(row.external_uid not in existing_by_uid for row in tasks),
+        "changed_count": changed,
+        "removed_count": sum(uid not in incoming_uids for uid in existing_by_uid),
+        "preserved_actual_count": sum(row.external_uid in existing_by_uid for row in tasks),
     }
 
 
@@ -1033,6 +1057,16 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
         return {"baseline_id": existing.id, "version": existing.version, "created": count, "duplicate": True}
 
     tasks = _mpp_tasks(data)
+    source_baseline = None
+    previous_by_uid: dict[str, ScheduleItem] = {}
+    if payload.baseline_id:
+        source_baseline = db.get(ScheduleBaseline, payload.baseline_id)
+        if source_baseline is None or source_baseline.project_id != payload.project_id:
+            raise HTTPException(404, "Версия ГПР не найдена")
+        if source_baseline.contract_id != payload.contract_id:
+            raise HTTPException(409, "Договор выбранной версии ГПР не совпадает")
+        previous_rows = list(db.scalars(select(ScheduleItem).where(ScheduleItem.baseline_id == source_baseline.id)))
+        previous_by_uid = {uid: item for item in previous_rows if (uid := _mpp_uid(item))}
     version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == payload.project_id)) or 0) + 1
     baseline = ScheduleBaseline(
         project_id=payload.project_id, contract_id=payload.contract_id, created_by_user_id=user.id,
@@ -1045,12 +1079,15 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
     imported: dict[str, ScheduleItem] = {}
     imported_rows = []
     for order, row in enumerate(tasks):
+        previous = previous_by_uid.get(row.external_uid)
         duration = max(0, (row.planned_finish - row.planned_start).days + 1) if row.planned_start and row.planned_finish else 0
         item = ScheduleItem(
             project_id=payload.project_id, baseline_id=baseline.id, title=row.title[:500], sort_order=order,
             duration_days=duration, is_milestone=row.is_milestone, planned_start=row.planned_start,
-            planned_finish=row.planned_finish, planned_progress=row.progress, actual_progress=row.progress,
-            status="completed" if row.progress >= 100 else "in_progress" if row.progress > 0 else "planned",
+            planned_finish=row.planned_finish, planned_progress=row.progress,
+            actual_progress=previous.actual_progress if previous else row.progress,
+            actual_start=previous.actual_start if previous else None, actual_finish=previous.actual_finish if previous else None,
+            status=previous.status if previous else "completed" if row.progress >= 100 else "in_progress" if row.progress > 0 else "planned",
             source_name=payload.filename, source_excerpt=f"MPP task UID {row.external_uid}",
         )
         db.add(item); imported[row.external_uid] = item; imported_rows.append((row, item))
@@ -1068,7 +1105,28 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
     _audit(db, "mpp_schedule_imported", "schedule_baseline", baseline.id, user.id,
            f"tasks={len(tasks)}; sha256={digest[:12]}")
     db.commit()
-    return {"baseline_id": baseline.id, "version": baseline.version, "created": len(tasks), "duplicate": False}
+    return {"baseline_id": baseline.id, "version": baseline.version, "created": len(tasks), "duplicate": False,
+            "preserved_actual": sum(row.external_uid in previous_by_uid for row in tasks)}
+
+
+@router.get("/mpp/export/{baseline_id}")
+def export_mpp_xml(baseline_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    baseline = db.get(ScheduleBaseline, baseline_id)
+    if baseline is None:
+        raise HTTPException(404, "Версия ГПР не найдена")
+    require_project_role(db, user, baseline.project_id, "viewer")
+    rows = list(db.scalars(select(ScheduleItem).where(
+        ScheduleItem.baseline_id == baseline.id,
+    ).order_by(ScheduleItem.sort_order, ScheduleItem.id)))
+    content = build_mspdi(baseline.name, [{
+        "id": item.id, "parent_id": item.parent_id, "title": item.title, "is_milestone": item.is_milestone,
+        "planned_start": item.planned_start, "planned_finish": item.planned_finish,
+        "duration_days": item.duration_days, "actual_progress": item.actual_progress,
+        "predecessor_ids": item.predecessor_ids,
+    } for item in rows])
+    return Response(content, media_type="application/xml", headers={
+        "Content-Disposition": f'attachment; filename="schedule-v{baseline.version}.xml"',
+    })
 
 
 @router.post("/baselines/{baseline_id}/clone")

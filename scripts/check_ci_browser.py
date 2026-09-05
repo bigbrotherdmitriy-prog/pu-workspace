@@ -111,7 +111,9 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
         selected_id = selector.input_value()
 
         # Integrations: inspect status but deliberately never invoke Google/Gmail.
-        page.get_by_text("Интеграции", exact=True).first.click()
+        page.locator("aside nav").get_by_role(
+            "button", name="Интеграции", exact=True,
+        ).click()
         expect(page.get_by_role("heading", name="Интеграции", level=1)).to_be_visible()
         expect(page.get_by_role("heading", name="Google Drive", level=2)).to_be_visible()
         expect(page.get_by_role("heading", name="Gmail", level=2)).to_be_visible()
@@ -148,7 +150,9 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
             page.reload(wait_until="networkidle")
 
         # Documents: verify the uploaded file appears and its detail can open.
-        page.get_by_text("Документы", exact=True).first.click()
+        page.locator("aside nav").get_by_role(
+            "button", name="Документы", exact=True,
+        ).click()
         expect(page.get_by_role("heading", name="Реестр документов")).to_be_visible()
         uploaded_document = page.get_by_text(SYNTHETIC_DOCUMENT, exact=True).first
         expect(uploaded_document).to_be_visible(timeout=20_000)
@@ -156,7 +160,9 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
         expect(page.get_by_role("heading", name=SYNTHETIC_DOCUMENT, level=2)).to_be_visible()
 
         # Tasks: the same synthetic upload must create a source-linked task.
-        page.get_by_text("Задачи", exact=True).first.click()
+        page.locator("aside nav").get_by_role(
+            "button", name="Задачи", exact=True,
+        ).click()
         expect(page.get_by_role("heading", name="Реестр задач")).to_be_visible()
         page.get_by_role("button", name="Все", exact=True).click()
         expect(page.get_by_text(SYNTHETIC_DOCUMENT, exact=False).first).to_be_visible()
@@ -164,7 +170,9 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
 
         # Project isolation and persisted project choice remain covered.
         selector.select_option(label="CI project B")
-        page.get_by_text("Документы", exact=True).first.click()
+        page.locator("aside nav").get_by_role(
+            "button", name="Документы", exact=True,
+        ).click()
         expect(page.get_by_text("Документы не найдены", exact=True)).to_be_visible()
         expect(page.get_by_text(SYNTHETIC_DOCUMENT, exact=True)).not_to_be_visible()
         selector.select_option(label="CI project A")
@@ -173,7 +181,9 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
         expect(page.locator("header select")).to_have_value(selected_id)
 
         # Re-open Integrations after the mutation to catch navigation/state regressions.
-        page.get_by_text("Интеграции", exact=True).first.click()
+        page.locator("aside nav").get_by_role(
+            "button", name="Интеграции", exact=True,
+        ).click()
         expect(page.get_by_role("heading", name="Локальная рабочая папка", level=2)).to_be_visible()
 
         assert not failures, f"Browser JavaScript exceptions occurred: {failures}"

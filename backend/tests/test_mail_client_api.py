@@ -190,15 +190,34 @@ def test_single_message_fallback_thread_can_be_opened(mail_context):
 def test_folder_adapter_errors_are_safe(monkeypatch, mail_context):
     adapter = FakeMailbox()
     monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
-    result = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
+    result = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user, True)
     assert result["provider"] == "fake_mail"
     assert any(item["id"] == "TEAM" for item in result["folders"])
 
     monkeypatch.setattr(adapter, "list_folders", lambda: (_ for _ in ()).throw(RuntimeError("token=secret")))
-    with pytest.raises(HTTPException) as error:
-        mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
-    assert error.value.detail == "mail_provider_unavailable"
-    assert "secret" not in str(error.value)
+    degraded = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user, True)
+    assert degraded["provider_available"] is False
+    assert degraded["provider_error"] == "temporarily_unavailable"
+    assert any(item["id"] == "inbox" for item in degraded["folders"])
+    assert all(item["id"] != "TEAM" for item in degraded["folders"])
+    assert "secret" not in str(degraded)
+
+
+def test_core_folder_view_does_not_spend_provider_quota(monkeypatch, mail_context):
+    adapter = FakeMailbox()
+    monkeypatch.setattr(
+        adapter,
+        "list_folders",
+        lambda: (_ for _ in ()).throw(AssertionError("live provider must not be called")),
+    )
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
+
+    result = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
+
+    assert result["provider_available"] is True
+    assert result["provider_folders_loaded"] is False
+    assert any(item["id"] == "inbox" for item in result["folders"])
+    assert all(item["id"] != "TEAM" for item in result["folders"])
 
 
 def test_edit_invalidates_approval_and_revision_conflicts(mail_context):

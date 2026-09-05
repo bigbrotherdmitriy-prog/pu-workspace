@@ -1,5 +1,7 @@
 from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, router
 from app.schedule_import.mpp import map_mpxj_task
+from app.schedule_import.mspdi import build_mspdi
+from xml.etree import ElementTree
 
 
 class Value:
@@ -52,6 +54,7 @@ def test_mpp_routes_and_binary_validation_are_explicit():
     paths = {route.path for route in router.routes}
     assert "/execution/mpp/preview" in paths
     assert "/execution/mpp/import" in paths
+    assert "/execution/mpp/export/{baseline_id}" in paths
     data, digest = _decode_mpp(MppImportRequest(project_id=1, filename="plan.mpp", content_base64="TVBQ"))
     assert data == b"MPP"
     assert len(digest) == 64
@@ -62,3 +65,18 @@ def test_mpp_lag_is_normalized_for_native_gpr_dependencies():
     assert _mpp_lag_suffix("2.0d") == "+2d"
     assert _mpp_lag_suffix("-1.0d") == "-1d"
     assert _mpp_lag_suffix("2.5h") == ""
+
+
+def test_mspdi_export_preserves_hierarchy_progress_and_dependency():
+    data = build_mspdi("ГПР", [
+        {"id": 10, "parent_id": None, "title": "Этап", "duration_days": 5, "actual_progress": 40},
+        {"id": 20, "parent_id": 10, "title": "Работа", "duration_days": 2, "actual_progress": 20,
+         "planned_start": __import__("datetime").date(2026, 9, 1), "planned_finish": __import__("datetime").date(2026, 9, 2),
+         "predecessor_ids": "10FS+2d"},
+    ])
+    root = ElementTree.fromstring(data)
+    ns = {"p": "http://schemas.microsoft.com/project"}
+    tasks = root.findall("p:Tasks/p:Task", ns)
+    assert [task.findtext("p:OutlineLevel", namespaces=ns) for task in tasks] == ["1", "2"]
+    assert tasks[1].findtext("p:PercentComplete", namespaces=ns) == "20"
+    assert tasks[1].findtext("p:PredecessorLink/p:PredecessorUID", namespaces=ns) == "1"
