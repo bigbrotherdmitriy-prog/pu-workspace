@@ -28,6 +28,9 @@ DATABASES = (
     "puw_mvp3_test_runtime",
     "puw_mvp2_test_gmail_history",
     "puw_v54_test_storage", "puw_mvp4_test_runtime",
+    "puw_v54_test_authority", "puw_v54_test_authority_migration",
+    "puw_v54_test_materialization", "puw_v54_test_materialization_migration",
+    "puw_v54_test_local_upload", "puw_v54_test_schema_test",
 )
 PHASES: list[dict] = []
 CREATED: list[str] = []
@@ -61,8 +64,42 @@ MVP_TESTS = {
         "test_postgres_concurrent_payment_confirmation_creates_one_fact",
         "test_postgres_competing_payment_corrections_are_cas_serialized",
     ),
+    "postgres_mvp4_supply": test_nodes(
+        "backend/tests/test_mvp4_supply_postgres_runtime.py",
+        *(f"test_postgres_duplicate_supply_commands_create_one_effect[{case}]"
+          for case in ("request", "request_approval", "order_approval", "act", "dds")),
+        *(f"test_postgres_stale_supply_updates_preserve_one_effect[{case}]"
+          for case in ("order", "delivery", "act", "dds")),
+    ),
 }
-MANDATORY_POSTGRES = (*MVP_TESTS, "postgres_abc_integration")
+REMAINING_POSTGRES_TESTS = {
+    "postgres_authority_migration": test_nodes(
+        "backend/tests/test_v54_authority_postgres.py",
+        "test_postgres_migration_upgrade_and_single_head",
+    ),
+    "postgres_authority_runtime": test_nodes(
+        "backend/tests/test_v54_authority_postgres.py",
+        "test_postgres_role_change_linearizes_before_dispatch_check",
+    ),
+    "postgres_materialization_migration": test_nodes(
+        "backend/tests/test_v54_materialization_postgres.py",
+        "test_postgres_materialization_migration_on_explicit_empty_database",
+    ),
+    "postgres_materialization_runtime": test_nodes(
+        "backend/tests/test_v54_materialization_postgres.py",
+        "test_postgres_materialization_cas_has_one_winner",
+    ),
+    "postgres_local_upload_runtime": test_nodes(
+        "backend/tests/test_v54_local_upload_a05_postgres.py",
+        "test_postgres_only_current_lease_can_authorize_materialization_read",
+    ),
+    "postgres_schema_fixture": test_nodes(
+        "backend/tests/integration/test_postgres_schema.py",
+        "test_postgres_has_latest_schema_and_transactional_factories",
+    ),
+}
+PINNED_POSTGRES_TESTS = {**MVP_TESTS, **REMAINING_POSTGRES_TESTS}
+MANDATORY_POSTGRES = (*PINNED_POSTGRES_TESTS, "postgres_abc_integration")
 TEST_DATABASE_KEYS = (
     "TEST_POSTGRES_DSN", "PUW_MVP4_TEST_DATABASE_URL",
     "PUW_V54_TEST_DATABASE_URL", "PUW_V54_SOURCE_TEST_DATABASE_URL",
@@ -227,7 +264,7 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
         record["passed"] = counts.get("passed", 0)
         record["skipped"] = counts.get("skipped", 0)
     if name in MANDATORY_POSTGRES:
-        required = len(MVP_TESTS[name]) if name in MVP_TESTS else None
+        required = len(PINNED_POSTGRES_TESTS[name]) if name in PINNED_POSTGRES_TESTS else None
         if required is not None:
             record["required"] = required
         if not result.returncode:
@@ -319,6 +356,10 @@ def test_env() -> dict:
         "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations"),
         "PUW_MVP3_TEST_DATABASE_URL": base_url("puw_mvp3_test_runtime"),
         "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL": base_url("puw_mvp2_test_gmail_history"),
+        "PUW_V54_AUTHORITY_DATABASE_URL": base_url("puw_v54_test_authority"),
+        "PUW_V54_AUTHORITY_MIGRATION_DATABASE_URL": base_url("puw_v54_test_authority_migration"),
+        "PUW_V54_MATERIALIZATION_DATABASE_URL": base_url("puw_v54_test_materialization"),
+        "PUW_V54_LOCAL_UPLOAD_DATABASE_URL": base_url("puw_v54_test_local_upload"),
         "GMAIL_AUTO_SYNC_ENABLED": "false",
         "AI_SECRETARY_AUTOMATION_ENABLED": "false",
     })
@@ -341,7 +382,11 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
             "mvp1": "synthetic adapter and simulated crash; no live provider or process kill",
             "mvp2": "Gmail cursor CAS and migrated schema; no live mailbox or full worker recovery",
             "mvp3": "obligation CAS and digest restart/replay; no live channel",
-            "mvp4": "manual payment and correction concurrency; no supply concurrency or backup restore",
+            "mvp4": "manual finance and supply command concurrency; no backup restore or live payment",
+            "authority": "role revocation serialization and schema upgrade/downgrade; synthetic principals",
+            "materialization": "migration and UUID-schema CAS; no external storage effect",
+            "local_upload": "UUID-schema lease authorization with local synthetic ciphertext",
+            "generic_schema": "migrated schema and transactional factories; no backup restore",
         },
         "corpus": {
             "structural": "PASS" if any(p["name"] == "corpus" and p["exit"] == 0 for p in PHASES) else "FAIL",
@@ -369,6 +414,12 @@ def migrate_database(phase: str, database: str, env: dict) -> None:
         raise RuntimeError("migration_database_not_owned")
     run_phase(phase, [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", HEAD],
               env=dict(env, DATABASE_URL=base_url(database)), timeout=180, cwd=ROOT / "backend")
+    verify_database_head(phase, database)
+
+
+def verify_database_head(phase: str, database: str) -> None:
+    if database not in CREATED:
+        raise RuntimeError("migration_database_not_owned")
     with psycopg.connect(base_url(database).replace("postgresql+psycopg://", "postgresql://"),
                           connect_timeout=5) as db:
         if db.execute("SELECT version_num FROM alembic_version").fetchone()[0] != HEAD:
@@ -378,6 +429,33 @@ def migrate_database(phase: str, database: str, env: dict) -> None:
                     record["schema_verified"] = False
                     break
             raise RuntimeError("migration_head_mismatch")
+
+
+def run_remaining_postgres(env: dict) -> None:
+    # These fixtures perform their own upgrade and require initially empty databases.
+    # The runtime proofs use separate databases and create/drop their own UUID schemas.
+    for phase, phase_env, migrated_database in (
+        ("postgres_authority_migration", env, "puw_v54_test_authority_migration"),
+        ("postgres_authority_runtime", env, None),
+        ("postgres_materialization_migration", dict(env,
+            PUW_V54_MATERIALIZATION_DATABASE_URL=base_url("puw_v54_test_materialization_migration")),
+            "puw_v54_test_materialization_migration"),
+        ("postgres_materialization_runtime", env, None),
+        ("postgres_local_upload_runtime", env, None),
+    ):
+        run_phase(phase, [sys.executable, "-m", "pytest", *REMAINING_POSTGRES_TESTS[phase],
+                         "-q", "--tb=short", "-rfsE"], env=phase_env, timeout=300)
+        if migrated_database is not None:
+            verify_database_head(phase, migrated_database)
+
+    # Generic fixtures read DATABASE_URL directly and require a _test suffix.
+    # Never propagate their opt-in to the application/offline/MVP subprocesses.
+    migrate_database("schema_fixture_migration", "puw_v54_test_schema_test", env)
+    run_phase("postgres_schema_fixture", [
+        sys.executable, "-m", "pytest", *REMAINING_POSTGRES_TESTS["postgres_schema_fixture"],
+        "-q", "--tb=short", "-rfsE",
+    ], env=dict(env, PU_TEST_POSTGRES="1", DATABASE_URL=base_url("puw_v54_test_schema_test")),
+        timeout=180)
 
 
 def main() -> None:
@@ -412,6 +490,11 @@ def main() -> None:
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp4_finance"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
+        run_phase("postgres_mvp4_supply", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp4_supply"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
+        run_remaining_postgres(env)
         run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
                   env=dict(env, **{key: "" for key in TEST_DATABASE_KEYS}), timeout=900)
         targets = [

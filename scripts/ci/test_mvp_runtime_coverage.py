@@ -191,6 +191,7 @@ def test_main_wires_exact_mandatory_nodes_after_owned_head_migrations(monkeypatc
         ("postgres_gmail_history", "puw_mvp2_test_gmail_history", "gmail_history_migration"),
         ("postgres_mvp3_runtime", "puw_mvp3_test_runtime", "mvp3_migration"),
         ("postgres_mvp4_finance", "puw_mvp4_test_runtime", "mvp4_migration"),
+        ("postgres_mvp4_supply", "puw_mvp4_test_runtime", "mvp4_migration"),
     ):
         assert names.index(migration) < names.index(phase)
         _, migration_args, options = phases[names.index(migration)]
