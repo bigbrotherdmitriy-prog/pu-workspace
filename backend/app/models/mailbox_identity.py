@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, JSON, String, UniqueConstraint, Uuid, event, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Integer, JSON, String, UniqueConstraint, Uuid, event, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -148,9 +148,97 @@ class MailboxCutoverFlags(Base):
     record_version: Mapped[int] = mapped_column(server_default="1")
 
 
+class GmailHistoryCheckpoint(Base):
+    """Mutable CAS pointer for one exact mailbox generation."""
+
+    __tablename__ = "v54_gmail_history_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id", name="uq_v54_gmail_history_checkpoint_scope"),
+        UniqueConstraint("organization_id", "mail_connection_id", name="uq_v54_gmail_history_checkpoint_mailbox"),
+        ForeignKeyConstraint(
+            ["organization_id", "identity_id"],
+            ["v54_connection_identities.organization_id", "v54_connection_identities.id"],
+            ondelete="RESTRICT", name="fk_v54_gmail_history_checkpoint_identity",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "mail_connection_id"],
+            ["v54_mail_connections.organization_id", "v54_mail_connections.id"],
+            ondelete="RESTRICT", name="fk_v54_gmail_history_checkpoint_mail",
+        ),
+        CheckConstraint(
+            "credential_generation > 0 AND binding_epoch > 0 AND checkpoint_epoch > 0",
+            name="ck_v54_gmail_history_checkpoint_epochs",
+        ),
+        CheckConstraint(
+            "status IN ('active','syncing','resync_required','blocked')",
+            name="ck_v54_gmail_history_checkpoint_status",
+        ),
+        CheckConstraint(
+            "sync_mode IS NULL OR sync_mode IN ('incremental','resync')",
+            name="ck_v54_gmail_history_checkpoint_mode",
+        ),
+        CheckConstraint(
+            "(status = 'syncing' AND active_job_id IS NOT NULL AND sync_mode IS NOT NULL) OR "
+            "(status != 'syncing' AND active_job_id IS NULL AND sync_mode IS NULL)",
+            name="ck_v54_gmail_history_checkpoint_claim",
+        ),
+    )
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_id)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"))
+    identity_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    mail_connection_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    credential_generation: Mapped[int] = mapped_column()
+    binding_epoch: Mapped[int] = mapped_column()
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    last_history_id: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(24), server_default="resync_required")
+    sync_mode: Mapped[str | None] = mapped_column(String(16))
+    active_job_id: Mapped[int | None] = mapped_column(ForeignKey("background_jobs.id", ondelete="RESTRICT"))
+    last_job_id: Mapped[int | None] = mapped_column(Integer)
+    last_result: Mapped[dict | None] = mapped_column(JSON)
+    checkpoint_epoch: Mapped[int] = mapped_column(server_default="1")
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GmailHistoryCheckpointEvent(Base):
+    """Content-free append-only transition evidence."""
+
+    __tablename__ = "v54_gmail_history_checkpoint_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "checkpoint_id"],
+            ["v54_gmail_history_checkpoints.organization_id", "v54_gmail_history_checkpoints.id"],
+            ondelete="RESTRICT", name="fk_v54_gmail_history_event_checkpoint",
+        ),
+        CheckConstraint(
+            "from_epoch > 0 AND to_epoch >= from_epoch",
+            name="ck_v54_gmail_history_event_epochs",
+        ),
+        CheckConstraint(
+            "outcome_code IN ('sync_claimed','sync_completed','cursor_expired',"
+            "'resync_completed','sync_failed','generation_rejected','generation_rotated')",
+            name="ck_v54_gmail_history_event_outcome",
+        ),
+    )
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_id)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))
+    checkpoint_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    from_epoch: Mapped[int] = mapped_column()
+    to_epoch: Mapped[int] = mapped_column()
+    outcome_code: Mapped[str] = mapped_column(String(32))
+    job_id: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 def _deny_change(*_args, **_kwargs): raise ValueError("append_only_record")
 
 
-for _model in (MailboxCredentialGeneration, MailboxOriginDecision, MailboxOriginBinding):
+for _model in (
+    MailboxCredentialGeneration, MailboxOriginDecision, MailboxOriginBinding,
+    GmailHistoryCheckpointEvent,
+):
     event.listen(_model, "before_update", _deny_change)
     event.listen(_model, "before_delete", _deny_change)

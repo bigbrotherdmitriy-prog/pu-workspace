@@ -50,6 +50,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "gmail.sync":
         from app.automations.gmail import sync_authorized_projects_once
         return sync_authorized_projects_once()
+    if kind == "gmail.history.sync":
+        from app.gmail_history import run_gmail_history_job
+        return run_gmail_history_job(payload)
     if kind == "gmail.attachment.materialize":
         from app.staging.gmail import run_gmail_attachment_job
         return run_gmail_attachment_job(payload)

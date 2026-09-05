@@ -10,10 +10,11 @@ from typing import Any
 class GoogleReadError(RuntimeError):
     """A content-free provider-read failure safe for logs and API boundaries."""
 
-    def __init__(self, code: str, *, retryable: bool):
+    def __init__(self, code: str, *, retryable: bool, status: int | None = None):
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+        self.status = status
 
 
 def _status(error: BaseException) -> int | None:
@@ -71,9 +72,13 @@ def execute_google_read(
         except Exception as error:
             retryable = _retryable(error)
             if not retryable:
-                raise GoogleReadError("provider_read_rejected", retryable=False) from None
+                raise GoogleReadError(
+                    "provider_read_rejected", retryable=False, status=_status(error),
+                ) from None
             if attempt + 1 >= max_attempts:
-                raise GoogleReadError("provider_read_unavailable", retryable=True) from None
+                raise GoogleReadError(
+                    "provider_read_unavailable", retryable=True, status=_status(error),
+                ) from None
             delay = _retry_after(error)
             if delay is None:
                 delay = min(5.0, float(base_delay_seconds) * (2 ** attempt))

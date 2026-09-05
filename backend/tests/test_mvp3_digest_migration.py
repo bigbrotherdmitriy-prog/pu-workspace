@@ -19,7 +19,7 @@ def _config(output=None):
 
 def test_digest_schema_is_single_sequential_head():
     script = ScriptDirectory.from_config(_config())
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a17"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a18"]
     assert script.get_revision("a54f001c0a17").down_revision == "a54f001c0a16"
 
 

@@ -39,6 +39,7 @@ from app.models.v54_pilot import (  # additive, inactive pilot foundation
 )
 from app.models.v54_authority import AuthorityState
 from app.models.mailbox_identity import (
+    GmailHistoryCheckpoint, GmailHistoryCheckpointEvent,
     MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
 )
@@ -107,6 +108,7 @@ __all__ = [
     "BackgroundJob",
     "ServiceHeartbeat",
     "AuthorityState",
+    "GmailHistoryCheckpoint", "GmailHistoryCheckpointEvent",
     "MailboxAuthorityState", "MailboxCredentialGeneration", "MailboxCutoverFlags",
     "MailboxOriginBinding", "MailboxOriginCurrent", "MailboxOriginDecision",
     "Materialization",

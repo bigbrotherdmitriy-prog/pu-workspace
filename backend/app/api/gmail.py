@@ -56,6 +56,12 @@ class GmailSyncRequest(BaseModel):
     max_results: int = Field(default=25, ge=1, le=100)
 
 
+class GmailHistorySyncResponse(BaseModel):
+    checkpoint_id: str
+    job_id: int
+    status: str
+
+
 def _decode(value: str | None) -> str:
     if not value:
         return ""
@@ -114,6 +120,7 @@ def _gmail_message_refs(
     query: str,
     max_results: int,
     before_attempt: Callable[[], None] | None = None,
+    require_complete: bool = False,
 ):
     """Yield a bounded Gmail listing across opaque provider pages.
 
@@ -142,6 +149,8 @@ def _gmail_message_refs(
         yield from batch
         remaining -= len(batch)
         next_token = page.get("nextPageToken")
+        if require_complete and (len(refs) > len(batch) or (next_token is not None and remaining == 0)):
+            raise ValueError("gmail_resync_incomplete")
         if next_token is None or remaining == 0:
             return
         if not batch:
@@ -205,7 +214,44 @@ def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends
         raise HTTPException(503, "Gmail synchronization is temporarily unavailable") from exc
 
 
-def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:
+@router.post(
+    "/projects/{project_id}/gmail/history/sync",
+    response_model=GmailHistorySyncResponse,
+)
+def sync_gmail_history(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    from app.gmail_history import (
+        GmailHistoryUnavailable,
+        enqueue_history_sync,
+        ensure_history_checkpoint,
+    )
+
+    try:
+        checkpoint = ensure_history_checkpoint(db, project_id=project_id, actor=user)
+        job = enqueue_history_sync(db, checkpoint.id)
+    except GmailHistoryUnavailable as exc:
+        raise HTTPException(409, "Gmail history synchronization is unavailable") from exc
+    return GmailHistorySyncResponse(
+        checkpoint_id=checkpoint.id,
+        job_id=job.id,
+        status=job.status,
+    )
+
+
+def sync_gmail_project(
+    project_id: int,
+    db: Session,
+    user: User,
+    *,
+    query: str,
+    max_results: int,
+    _service=None,
+    _refs: list[dict[str, str]] | None = None,
+    _before_read: Callable[[], None] | None = None,
+) -> dict:
     require_project_role(db, user, project_id, "editor")
     sync_project = db.get(Project, project_id)
     if sync_project is None:
@@ -216,9 +262,13 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
         raise HTTPException(409, "Mailbox identity is unavailable") from exc
     if mailbox_runtime and mailbox_runtime.mailbox_cohort and not mailbox_runtime.flags.pilot_write:
         raise HTTPException(409, "Mailbox cohort requires an explicit current-generation write flag")
-    service = (google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
-               if mailbox_runtime else google_workspace_for_project(project_id, db)).service("gmail", "v1")
+    service = _service or (
+        google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
+        if mailbox_runtime else google_workspace_for_project(project_id, db)
+    ).service("gmail", "v1")
     def before_provider_read():
+        if _before_read is not None:
+            _before_read()
         if mailbox_runtime is None:
             return
         try:
@@ -235,10 +285,11 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             raise GoogleReadError("mailbox_generation_changed", retryable=False)
     processed = skipped = failed = 0
     errors: list[dict] = []
-    for ref in _gmail_message_refs(
+    refs = _refs if _refs is not None else _gmail_message_refs(
         service, query=query, max_results=max_results,
         before_attempt=before_provider_read,
-    ):
+    )
+    for ref in refs:
         try:
             item = execute_google_read(lambda: service.users().messages().get(
                 userId="me", id=ref["id"], format="full",
