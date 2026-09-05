@@ -146,6 +146,7 @@ def load_forecast_input(db: Session, project_id: int, as_of: date | None = None)
     ))
     document_ids = {
         value for value in (
+            *(row.source_document_id for row in budget),
             *(row.source_document_id for row in cash_flow),
             *(row.source_document_id for row in contracts),
         ) if value is not None
@@ -184,7 +185,7 @@ def load_forecast_input(db: Session, project_id: int, as_of: date | None = None)
             source=_source(
                 "budget_line", row.id,
                 ("planned_amount", "committed_amount", "actual_amount", "forecast_amount"),
-                row.status, evidence,
+                row.status, evidence, row.source_document_id,
             ),
         ) for row in budget),
         cash_flow=tuple(CashFlowFact(

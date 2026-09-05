@@ -69,8 +69,8 @@ class BudgetCreate(BaseModel):
     confidence: Decimal | None = Field(default=None, ge=0, le=1)
     category: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=2, max_length=1000)
-    planned_amount: Decimal = Field(ge=0)
-    forecast_amount: Decimal | None = Field(default=None, ge=0)
+    planned_amount: Decimal = Field(ge=0, max_digits=18, decimal_places=2)
+    forecast_amount: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
     currency: str = Field(default="RUB", pattern="^[A-Z]{3}$")
 
 
@@ -88,7 +88,7 @@ class CashFlowCreate(BaseModel):
     direction: str = Field(pattern="^(inflow|outflow)$")
     title: str = Field(min_length=2, max_length=500)
     planned_date: date
-    planned_amount: Decimal = Field(gt=0)
+    planned_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     counterparty: str | None = Field(default=None, max_length=500)
 
 
@@ -98,15 +98,15 @@ class InvoiceProposalCreate(CashFlowCreate):
 
 class PaymentConfirmation(BaseModel):
     expected_record_version: int = Field(default=1, ge=1)
-    actual_amount: Decimal | None = Field(default=None, gt=0)
+    actual_amount: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
     actual_date: date | None = None
 
 
 class PaymentCorrection(BaseModel):
     expected_record_version: int = Field(default=1, ge=1)
-    expected_actual_amount: Decimal = Field(gt=0)
+    expected_actual_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     expected_actual_date: date
-    actual_amount: Decimal = Field(gt=0)
+    actual_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     actual_date: date
     reason: str = Field(min_length=3, max_length=1000)
 
@@ -117,7 +117,7 @@ class ProcurementCreate(BaseModel):
     title: str = Field(min_length=2, max_length=500)
     supplier: str | None = Field(default=None, max_length=500)
     planned_delivery: date | None = None
-    planned_amount: Decimal = Field(default=0, ge=0)
+    planned_amount: Decimal = Field(default=0, ge=0, max_digits=18, decimal_places=2)
 
 
 class ActCreate(BaseModel):
@@ -127,13 +127,13 @@ class ActCreate(BaseModel):
     number: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=2, max_length=500)
     act_date: date | None = None
-    amount: Decimal = Field(default=0, ge=0)
+    amount: Decimal = Field(default=0, ge=0, max_digits=18, decimal_places=2)
 
 
 class StatusUpdate(BaseModel):
     status: str = Field(min_length=2, max_length=30)
     expected_status: str | None = Field(default=None, min_length=2, max_length=30)
-    actual_amount: Decimal | None = Field(default=None, ge=0)
+    actual_amount: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
     actual_date: date | None = None
 
 
@@ -1019,6 +1019,10 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         )
     if item.status == payload.status and kind in {"budget", "cash-flow"}:
         return {"id": item.id, "status": item.status, "already_confirmed": True, "record_version": item.record_version}
+    if item.status == payload.status:
+        return {"id": item.id, "status": item.status, "already_applied": True}
+    if payload.expected_status is not None and item.status != payload.expected_status:
+        raise HTTPException(409, "Статус уже изменён; обновите данные перед повтором")
     if kind in {"budget", "cash-flow"} and payload.status in {"approved", "active", "closed"}:
         if item.contract_id is None or (item.schedule_item_id is None and item.task_id is None) or item.source_document_version_id is None:
             raise HTTPException(409, "Перед подтверждением завершите связи с договором, ГПР/задачей и первичным документом")
@@ -1031,10 +1035,6 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     elif kind in {"budget", "cash-flow"} and payload.status in {"rejected", "cancelled"}:
         item.review_status = "rejected"
         item.record_version += 1
-    elif item.status == payload.status:
-        return {"id": item.id, "status": item.status, "already_applied": True}
-    if payload.expected_status is not None and item.status != payload.expected_status:
-        raise HTTPException(409, "Статус уже изменён; обновите данные перед повтором")
     superseded_id = None
     if kind == "baselines":
         if payload.expected_status is None:
