@@ -54,7 +54,14 @@ body {
     linear-gradient(135deg, var(--pu6-canvas-warm), var(--pu6-canvas) 48%, #e9efeb);
 }
 
-.pu-ambient { display: block !important; pointer-events: none; }
+.pu-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  display: block !important;
+  overflow: hidden;
+  pointer-events: none;
+}
 .pu-ambient-orb { display: none !important; }
 .pu-ambient-grid {
   display: block !important;
@@ -70,12 +77,29 @@ body {
 .shell { background: transparent; }
 .shell > aside {
   z-index: 20;
+  overflow-x: clip;
   color: #edf5f1;
   border-right: 1px solid rgba(109, 151, 132, .2);
   background:
     radial-gradient(360px 240px at 10% -4%, rgba(49, 202, 148, .18), transparent 72%),
     linear-gradient(180deg, #162720 0%, #101c17 55%, #0b1511 100%);
   box-shadow: 12px 0 38px rgba(19, 39, 29, .1);
+}
+.sidebar-brand-copy,
+.shell > aside nav,
+.shell > aside .nav-group {
+  min-width: 0;
+}
+.sidebar-brand-copy {
+  overflow: hidden;
+}
+.sidebar-brand-copy strong,
+.sidebar-brand-copy small,
+.shell > aside nav button,
+.shell > aside nav button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .brand-mark {
   border: 1px solid rgba(255, 255, 255, .3);
@@ -90,6 +114,8 @@ body {
 .nav-group::before { color: #6f8c7e; }
 .nav-group-label { color: #9fb5aa; }
 .shell > aside nav button {
+  width: 100%;
+  min-width: 0;
   border-radius: 10px;
   color: #b5c5bd;
 }
