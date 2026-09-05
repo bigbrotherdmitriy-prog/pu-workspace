@@ -4,12 +4,12 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
-from app.models.organization_contract import Contract, Organization
+from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.governance import Decision, Risk
@@ -99,6 +99,7 @@ class ContractCreate(BaseModel):
 
 
 class ContractLinkUpdate(BaseModel):
+    expected_record_version: int = Field(gt=0)
     number: str | None = Field(default=None, min_length=1, max_length=255)
     title: str | None = Field(default=None, min_length=1, max_length=500)
     counterparty: str | None = Field(default=None, max_length=500)
@@ -118,6 +119,70 @@ class ContractLinkUpdate(BaseModel):
 
 def _normalized(value: str | None) -> str:
     return re.sub(r"[^0-9a-zа-яё]+", " ", (value or "").casefold()).strip()
+
+
+_CONTRACT_SNAPSHOT_FIELDS = (
+    "number", "title", "counterparty", "counterparty_organization_id", "contract_kind",
+    "parent_contract_id", "amount", "advance_amount", "retention_percent", "warranty_until",
+    "signed_at", "status", "source_document_id", "notes",
+)
+
+
+def _json_value(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _contract_snapshot(row: Contract, db: Session) -> dict:
+    linked_ids = list(db.scalars(select(ContractDocumentLink.document_id).where(
+        ContractDocumentLink.project_id == row.project_id,
+        ContractDocumentLink.contract_id == row.id,
+    )))
+    return {
+        **{field: _json_value(getattr(row, field)) for field in _CONTRACT_SNAPSHOT_FIELDS},
+        "linked_document_ids": sorted(set(linked_ids)),
+    }
+
+
+def _record_contract_version(db: Session, row: Contract, *, event: str,
+                             changed_fields: set[str] | list[str], actor_user_id: int,
+                             resulting_record_version: int | None = None,
+                             snapshot_extra: dict | None = None) -> ContractVersion:
+    version = resulting_record_version or row.record_version
+    snapshot = _contract_snapshot(row, db)
+    if snapshot_extra:
+        snapshot.update(snapshot_extra)
+    history = ContractVersion(
+        contract_id=row.id, project_id=row.project_id, sequence=version,
+        event=event, resulting_record_version=version, snapshot=snapshot,
+        changed_fields=sorted(changed_fields), actor_user_id=actor_user_id,
+    )
+    db.add(history)
+    return history
+
+
+def _ensure_contract_baseline(db: Session, row: Contract, *, actor_user_id: int) -> None:
+    """Materialize the pre-migration state before its first post-migration mutation."""
+    exists = db.scalar(select(ContractVersion.id).where(
+        ContractVersion.contract_id == row.id,
+        ContractVersion.project_id == row.project_id,
+    ).limit(1))
+    if exists is None:
+        _record_contract_version(
+            db, row, event="baseline", changed_fields=[], actor_user_id=actor_user_id,
+        )
+
+
+def _contract_version(row: ContractVersion) -> dict:
+    return {
+        "id": row.id, "sequence": row.sequence, "event": row.event,
+        "record_version": row.resulting_record_version, "snapshot": row.snapshot,
+        "changed_fields": row.changed_fields, "actor_user_id": row.actor_user_id,
+        "occurred_at": row.occurred_at,
+    }
 
 
 _CONTRACT_TITLE_STOP_WORDS = {
@@ -259,6 +324,21 @@ def list_contracts(project_id: int, db: Session = Depends(get_db), user: User = 
     return {"contracts": [_contract(row, db) for row in rows]}
 
 
+@router.get("/projects/{project_id}/contracts/{contract_id}/versions")
+def list_contract_versions(project_id: int, contract_id: int,
+                           db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if row is None:
+        raise HTTPException(404, "Contract not found")
+    versions = list(db.scalars(select(ContractVersion).where(
+        ContractVersion.contract_id == contract_id,
+        ContractVersion.project_id == project_id,
+    ).order_by(ContractVersion.sequence)))
+    return {"contract_id": contract_id, "record_version": row.record_version,
+            "versions": [_contract_version(version) for version in versions]}
+
+
 @router.post("/projects/{project_id}/contracts")
 def create_contract(project_id: int, payload: ContractCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
@@ -276,13 +356,14 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
         raise HTTPException(422, "Для этой роли вышестоящий договор не используется")
     row = Contract(project_id=project_id, **payload.model_dump())
     db.add(row); db.flush()
-    if is_financial_contract(row.contract_kind):
+    if is_financial_contract(row.contract_kind) and row.status != "draft":
         version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == project_id)) or 0) + 1
         db.add(ScheduleBaseline(
             project_id=project_id, contract_id=row.id, created_by_user_id=user.id,
             name=f"ГПР по договору {row.number}", version=version,
             note="Автоматически создано при добавлении договора; заполните этапы и сроки.",
         ))
+    _record_contract_version(db, row, event="created", changed_fields=set(_CONTRACT_SNAPSHOT_FIELDS), actor_user_id=user.id)
     db.add(AuditLog(action="contract_created", entity_type="contract", entity_id=row.id,
                     details=f"Contract: {row.number}; kind={row.contract_kind}"))
     db.commit(); db.refresh(row)
@@ -293,13 +374,18 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
 def update_contract_links(project_id: int, contract_id: int, payload: ContractLinkUpdate,
                           db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
-    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    row = db.scalar(select(Contract).where(
+        Contract.id == contract_id, Contract.project_id == project_id,
+    ).with_for_update())
     if row is None:
         raise HTTPException(404, "Contract not found")
+    if row.record_version != payload.expected_record_version:
+        raise HTTPException(409, "Договор уже изменён другим пользователем. Обновите карточку и повторите действие")
     if "source_document_id" in payload.model_fields_set and payload.source_document_id is not None and not db.scalar(select(Document.id).where(
         Document.id == payload.source_document_id, Document.project_id == project_id,
     )):
         raise HTTPException(422, "Документ не принадлежит выбранному проекту")
+    changes: dict = {}
     structure_changed = bool({"parent_contract_id", "contract_kind"} & payload.model_fields_set)
     if structure_changed:
         target_kind = payload.contract_kind or row.contract_kind
@@ -321,14 +407,10 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
                 raise HTTPException(422, "Связь создаёт цикл в дереве договоров")
             seen.add(cursor.id)
             cursor = db.get(Contract, cursor.parent_contract_id) if cursor.parent_contract_id else None
-        row.contract_kind = target_kind
-        row.parent_contract_id = parent.id if parent else None
-        db.add(AuditLog(action="contract_parent_linked", entity_type="contract", entity_id=row.id,
-                        details=f"parent={row.parent_contract_id or 'none'}"))
+        changes["contract_kind"] = target_kind
+        changes["parent_contract_id"] = parent.id if parent else None
     if "source_document_id" in payload.model_fields_set:
-        row.source_document_id = payload.source_document_id
-        db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
-                        details=f"document={row.source_document_id or 'none'}"))
+        changes["source_document_id"] = payload.source_document_id
     editable_fields = {
         "number", "title", "counterparty", "amount", "advance_amount",
         "retention_percent", "signed_at", "status", "notes",
@@ -336,11 +418,36 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
     changed_fields = editable_fields & payload.model_fields_set
     for field in changed_fields:
         value = getattr(payload, field)
-        setattr(row, field, value.strip() if isinstance(value, str) else value)
-    if changed_fields:
+        changes[field] = value.strip() if isinstance(value, str) else value
+    effective_changes = {field: value for field, value in changes.items() if getattr(row, field) != value}
+    if not effective_changes:
+        return _contract(row, db)
+    _ensure_contract_baseline(db, row, actor_user_id=user.id)
+    next_version = row.record_version + 1
+    result = db.execute(update(Contract).where(
+        Contract.id == contract_id,
+        Contract.project_id == project_id,
+        Contract.record_version == payload.expected_record_version,
+    ).values(**effective_changes, record_version=next_version))
+    if result.rowcount != 1:
+        raise HTTPException(409, "Договор уже изменён другим пользователем. Обновите карточку и повторите действие")
+    db.flush(); db.expire(row); db.refresh(row)
+    event_name = "archived" if effective_changes.get("status") == "archived" else (
+        "linked" if {"parent_contract_id", "contract_kind", "source_document_id"} & effective_changes.keys() else "updated"
+    )
+    _record_contract_version(
+        db, row, event=event_name, changed_fields=set(effective_changes), actor_user_id=user.id,
+    )
+    if {"parent_contract_id", "contract_kind"} & effective_changes.keys():
+        db.add(AuditLog(action="contract_parent_linked", entity_type="contract", entity_id=row.id,
+                        details=f"parent={row.parent_contract_id or 'none'}; version={next_version}"))
+    if "source_document_id" in effective_changes:
+        db.add(AuditLog(action="contract_source_linked", entity_type="contract", entity_id=row.id,
+                        details=f"document={row.source_document_id or 'none'}; version={next_version}"))
+    if changed_fields & effective_changes.keys():
         db.add(AuditLog(
             action="contract_updated", entity_type="contract", entity_id=row.id,
-            details=f"fields={','.join(sorted(changed_fields))}; user={user.id}",
+            details=f"fields={','.join(sorted(changed_fields & effective_changes.keys()))}; user={user.id}; version={next_version}",
         ))
     db.commit(); db.refresh(row)
     return _contract(row, db)
@@ -348,6 +455,7 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
 
 class ContractDelete(BaseModel):
     confirmation: str
+    expected_record_version: int = Field(gt=0)
 
 
 def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> dict[str, int]:
@@ -367,6 +475,9 @@ def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> di
         ("automation_rules", AutomationRule, AutomationRule.contract_id),
     )
     result: dict[str, int] = {}
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    if contract is not None and contract.source_document_id is not None:
+        result["source_document"] = 1
     for name, model, contract_column in scoped:
         project_column = getattr(model, "project_id", None)
         filters = [contract_column == contract_id]
@@ -378,6 +489,14 @@ def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> di
     return result
 
 
+def _is_empty_contract_draft(row: Contract) -> bool:
+    return row.status == "draft" and all(getattr(row, field) is None for field in (
+        "counterparty", "counterparty_organization_id", "parent_contract_id", "amount",
+        "advance_amount", "retention_percent", "warranty_until", "signed_at",
+        "source_document_id", "notes",
+    ))
+
+
 @router.get("/projects/{project_id}/contracts/{contract_id}/deletion-preview")
 def contract_deletion_preview(project_id: int, contract_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "owner")
@@ -385,11 +504,13 @@ def contract_deletion_preview(project_id: int, contract_id: int, db: Session = D
     if row is None:
         raise HTTPException(404, "Contract not found")
     dependencies = _contract_dependencies(db, project_id, contract_id)
+    can_delete = _is_empty_contract_draft(row) and not dependencies
     return {
         "contract_id": contract_id,
-        "can_delete": not dependencies,
+        "can_delete": can_delete,
         "dependencies": dependencies,
-        "recommended_action": "delete" if not dependencies else "archive",
+        "recommended_action": "delete" if can_delete else "archive",
+        "reason": None if can_delete else "Только ошибочный пустой черновик можно удалить физически",
         "source_documents_affected": False,
     }
 
@@ -401,16 +522,25 @@ def delete_contract(project_id: int, contract_id: int, payload: ContractDelete,
     row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if row is None:
         raise HTTPException(404, "Contract not found")
+    if row.record_version != payload.expected_record_version:
+        raise HTTPException(409, "Договор уже изменён другим пользователем. Обновите карточку и повторите действие")
     if payload.confirmation.strip() != row.number.strip():
         raise HTTPException(422, "Введите точный номер договора для подтверждения")
     dependencies = _contract_dependencies(db, project_id, contract_id)
-    if dependencies:
+    if dependencies or not _is_empty_contract_draft(row):
         raise HTTPException(409, {
             "code": "contract_has_dependencies",
-            "message": "Договор связан с другими сущностями. Архивируйте его либо сначала снимите связи.",
+            "message": "Физически удалить можно только ошибочный пустой черновик. Архивируйте договор, чтобы сохранить историю.",
             "dependencies": dependencies,
         })
     number = row.number
+    _ensure_contract_baseline(db, row, actor_user_id=user.id)
+    deleted_version = row.record_version + 1
+    _record_contract_version(
+        db, row, event="deleted", changed_fields={"deleted"}, actor_user_id=user.id,
+        resulting_record_version=deleted_version, snapshot_extra={"deleted": True},
+    )
+    db.flush()
     db.delete(row)
     db.flush()
     db.add(AuditLog(
@@ -602,9 +732,13 @@ def analyze_contract(project_id: int, contract_id: int,
                      db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Extract proposed controls from the linked contract without changing its source document."""
     require_project_role(db, user, project_id, "editor")
-    row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    row = db.scalar(select(Contract).where(
+        Contract.id == contract_id, Contract.project_id == project_id,
+    ).with_for_update())
     if row is None:
         raise HTTPException(404, "Contract not found")
+    before_analysis = _contract_snapshot(row, db)
+    _ensure_contract_baseline(db, row, actor_user_id=user.id)
     automatically_linked = False
     if row.source_document_id is None:
         candidates = _rank_contract_documents(db, project_id, row)
@@ -684,6 +818,17 @@ def analyze_contract(project_id: int, contract_id: int,
     )))
     for obligation in linked_obligations:
         obligation.contract_id = row.id
+    after_analysis = _contract_snapshot(row, db)
+    analysis_changed = {
+        field for field in _CONTRACT_SNAPSHOT_FIELDS
+        if before_analysis.get(field) != after_analysis.get(field)
+    }
+    if analysis_changed:
+        row.record_version += 1
+        db.flush()
+        _record_contract_version(
+            db, row, event="analyzed", changed_fields=analysis_changed, actor_user_id=user.id,
+        )
     db.add(AuditLog(
         action="contract_analyzed", entity_type="contract", entity_id=row.id,
         details=(f"document={document.id}; tasks_created={len(created_tasks)}; "
@@ -750,6 +895,7 @@ def initialize_contract_control(project_id: int, contract_id: int,
 def _contract(row: Contract, db: Session | None = None) -> dict:
     result = {
         "id": row.id, "project_id": row.project_id, "number": row.number,
+        "record_version": row.record_version,
         "title": row.title, "counterparty": row.counterparty,
         "counterparty_organization_id": row.counterparty_organization_id,
         "contract_kind": row.contract_kind, "parent_contract_id": row.parent_contract_id,
@@ -759,6 +905,11 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
         "source_document_id": row.source_document_id, "notes": row.notes,
     }
     if db is not None:
+        versions = list(db.scalars(select(ContractVersion).where(
+            ContractVersion.contract_id == row.id,
+            ContractVersion.project_id == row.project_id,
+        ).order_by(ContractVersion.sequence)))
+        result["version_history"] = [_contract_version(version) for version in versions]
         document = db.get(Document, row.source_document_id) if row.source_document_id else None
         linked_document_ids = {row.source_document_id} if row.source_document_id else set()
         linked_document_ids.update(db.scalars(select(CashFlowEntry.source_document_id).where(

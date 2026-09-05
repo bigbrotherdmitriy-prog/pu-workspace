@@ -4,13 +4,15 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.api.organizations_contracts import (
     _contract_financial_terms,
     _contract_source_text,
     _create_payment_schedule_proposals,
+    _ensure_contract_baseline,
+    _record_contract_version,
 )
 from app.core.auth import require_project_role, require_user
 from app.core.contract_roles import cash_flow_direction
@@ -28,6 +30,7 @@ router = APIRouter(tags=["contracts"])
 
 
 class ContractApplicationsRequest(BaseModel):
+    expected_record_version: int = Field(gt=0)
     document_ids: list[int] = Field(min_length=1, max_length=200)
     role: str = Field(default="application", pattern="^(application|schedule|budget|cash_flow)$")
 
@@ -53,9 +56,12 @@ def attach_contract_applications(project_id: int, contract_id: int, payload: Con
     contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if contract is None:
         raise HTTPException(404, "Contract not found")
+    if contract.record_version != payload.expected_record_version:
+        raise HTTPException(409, "Договор уже изменён другим пользователем. Обновите карточку и повторите действие")
     documents = list(db.scalars(select(Document).where(Document.project_id == project_id, Document.id.in_(payload.document_ids))))
     if len(documents) != len(set(payload.document_ids)):
         raise HTTPException(404, "Один или несколько документов проекта не найдены")
+    _ensure_contract_baseline(db, contract, actor_user_id=user.id)
     created = 0
     for document in documents:
         existing = db.scalar(select(ContractDocumentLink.id).where(
@@ -65,8 +71,21 @@ def attach_contract_applications(project_id: int, contract_id: int, payload: Con
             db.add(ContractDocumentLink(project_id=project_id, contract_id=contract_id,
                                         document_id=document.id, role=payload.role))
             created += 1
+    if created:
+        next_version = contract.record_version + 1
+        result = db.execute(update(Contract).where(
+            Contract.id == contract_id,
+            Contract.project_id == project_id,
+            Contract.record_version == payload.expected_record_version,
+        ).values(record_version=next_version))
+        if result.rowcount != 1:
+            raise HTTPException(409, "Договор уже изменён другим пользователем. Обновите карточку и повторите действие")
+        db.flush(); db.expire(contract); db.refresh(contract)
+        _record_contract_version(
+            db, contract, event="linked", changed_fields={"linked_document_ids"}, actor_user_id=user.id,
+        )
     db.add(AuditLog(action="contract_documents_attached", entity_type="contract", entity_id=contract_id,
-                    details=f"role={payload.role}; documents={len(documents)}; created={created}; originals_changed=false"))
+                    details=f"role={payload.role}; documents={len(documents)}; created={created}; version={contract.record_version}; originals_changed=false"))
     db.commit()
     return {"contract_id": contract_id, "role": payload.role, "attached": created,
             "documents": len(documents), "originals_changed": False}

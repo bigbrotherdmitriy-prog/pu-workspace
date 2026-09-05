@@ -50,7 +50,7 @@ def test_document_contract_control_chain_is_safe_and_idempotent():
         linked = update_contract_links(
             project.id,
             contract_id,
-            ContractLinkUpdate(source_document_id=document.id),
+            ContractLinkUpdate(expected_record_version=1, source_document_id=document.id),
             db,
             user,
         )
@@ -82,11 +82,13 @@ def test_existing_contract_can_be_reclassified_and_linked_atomically():
         prime = create_contract(project.id, ContractCreate(number="ГК", title="Генподряд", contract_kind="prime_reference"), db, user)
         legacy = create_contract(project.id, ContractCreate(number="СП", title="Наш договор", contract_kind="customer"), db, user)
         linked = update_contract_links(project.id, legacy["id"], ContractLinkUpdate(
+            expected_record_version=1,
             contract_kind="revenue_subcontract", parent_contract_id=prime["id"],
         ), db, user)
         assert linked["contract_kind"] == "revenue_subcontract"
         assert linked["parent_contract_id"] == prime["id"]
         with pytest.raises(HTTPException, match="самим собой"):
             update_contract_links(project.id, legacy["id"], ContractLinkUpdate(
+                expected_record_version=2,
                 contract_kind="downstream_subcontract", parent_contract_id=legacy["id"],
             ), db, user)
