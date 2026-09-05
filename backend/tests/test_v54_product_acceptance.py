@@ -194,6 +194,7 @@ class _AcceptanceRuntime:
             state.record_version += 1
             state.updated_at = NOW + timedelta(seconds=1)
             state.updated_by_user_id = 2
+            db.flush()
             policy_now = NOW + timedelta(seconds=1)
             autonomy = AutonomyPolicyService(
                 authority=AuthorityResolver(clock=lambda: policy_now),

@@ -108,6 +108,21 @@ class AuthorityResolver:
 
     def require_principal(self, db, *, tenant_id: int, project_id: int, principal_kind: str,
                           principal_id: str, operation: str, now: datetime, lock=True):
+        # Refresh must not erase an unflushed revocation, and an authorization
+        # read must not persist it implicitly. The transaction owner must first
+        # explicitly flush or roll back pending security-row changes.
+        pending = set(db.new) | set(db.deleted) | {
+            row for row in db.dirty if db.is_modified(row, include_collections=False)
+        }
+        if any(isinstance(row, (Project, AuthorityState, ProjectMember, User)) for row in pending):
+            _deny()
+        with db.no_autoflush:
+            return self._require_principal(db, tenant_id=tenant_id, project_id=project_id,
+                principal_kind=principal_kind, principal_id=principal_id,
+                operation=operation, now=now, lock=lock)
+
+    def _require_principal(self, db, *, tenant_id, project_id, principal_kind,
+                           principal_id, operation, now, lock):
         if not db.in_transaction() or now.tzinfo is None or operation not in PILOT_OPERATIONS:
             _deny()
         self._project(db, tenant_id, project_id, lock=lock)
@@ -123,7 +138,7 @@ class AuthorityResolver:
             member = db.scalar(select(ProjectMember).where(
                 ProjectMember.project_id == project_id,
                 ProjectMember.user_id == int(principal_id),
-            ))
+            ).execution_options(populate_existing=True))
             if member is None or not row.membership_role or member.role != row.membership_role:
                 _deny()
         elif principal_kind != "service" or row.membership_role is not None:
