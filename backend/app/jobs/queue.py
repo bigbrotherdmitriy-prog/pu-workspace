@@ -113,7 +113,9 @@ def claim(db: Session, worker_id: str, lease_seconds: int = 300) -> BackgroundJo
             FROM candidate WHERE job.id=candidate.id RETURNING job.id
         """), {"worker_id": worker_id, "lease_until": lease_until}).scalar()
         db.commit()
-        return db.get(BackgroundJob, job_id) if job_id is not None else None
+        # Raw SQL bypasses the identity map, including sessions that deliberately
+        # retain objects across commits. Return the newly acquired ownership fence.
+        return db.get(BackgroundJob, job_id, populate_existing=True) if job_id is not None else None
     job = db.scalar(select(BackgroundJob).where(BackgroundJob.status.in_(READY_STATUSES), BackgroundJob.available_at <= now).with_for_update().order_by(BackgroundJob.priority, BackgroundJob.id).limit(1))
     if job is None:
         return None

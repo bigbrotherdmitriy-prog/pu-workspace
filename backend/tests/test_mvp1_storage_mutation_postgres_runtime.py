@@ -109,7 +109,7 @@ def test_postgres_worker_crash_reconciles_without_double_provider_effect(isolate
             second = claim(db, "storage-worker-two", lease_seconds=60)
             assert second and second.id == job_id and second.worker_id == "storage-worker-two"
             owner = (second.id, second.worker_id, second.attempts, second.locked_at)
-        with execution_owner(*owner):
+        with execution_owner(owner[0], owner[1], attempt=owner[2], locked_at=owner[3]):
             result = run("workspace.storage_mutation", payload)
         with sessions() as db:
             assert succeed(db, job_id, "storage-worker-two", result)
