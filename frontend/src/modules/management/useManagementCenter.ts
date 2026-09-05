@@ -4,6 +4,7 @@ import {
   parseAttentionResponse,
   parseHistoryResponse,
   parseDigestEnqueueResult,
+  parseDigestPreference,
   parseMeetingProposalConfirmation,
   parseMeetingProposalEnvelope,
   parseNotificationsResponse,
@@ -11,6 +12,7 @@ import {
   type AttentionItem,
   type DigestNotification,
   type DigestEnqueueResult,
+  type DigestPreference,
   type HistoryEvent,
   type MeetingActionCandidate,
   type MeetingProposal,
@@ -36,6 +38,7 @@ export type ManagementCenterState = {
   proposalState: LoadState;
   proposals: MeetingProposal[];
   digestJob: DigestEnqueueResult | null;
+  digestPreference: DigestPreference | null;
 };
 
 const initialState: ManagementCenterState = {
@@ -54,6 +57,7 @@ const initialState: ManagementCenterState = {
   proposalState: "idle",
   proposals: [],
   digestJob: null,
+  digestPreference: null,
 };
 
 function safeError(error: unknown): string {
@@ -71,14 +75,16 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
     }
     setState((current) => ({ ...current, loadState: "loading", error: null }));
     try {
-      const [attentionRaw, obligationsRaw, notificationsRaw] = await Promise.all([
+      const [attentionRaw, obligationsRaw, notificationsRaw, preferenceRaw] = await Promise.all([
         api<unknown>(`/management/v2/attention?project_id=${projectId}`),
         api<unknown>(`/management/obligations?project_id=${projectId}`),
         api<unknown>(`/management/notifications?project_id=${projectId}`),
+        api<unknown>(`/management/v2/projects/${projectId}/digest-preference`),
       ]);
       const attention = parseAttentionResponse(attentionRaw);
       const obligations = parseObligationsResponse(obligationsRaw);
       const notifications = parseNotificationsResponse(notificationsRaw);
+      const digestPreference = parseDigestPreference(preferenceRaw);
       setState((current) => ({
         ...current,
         loadState: attention.items.length || obligations.length || notifications.length ? "ready" : "empty",
@@ -87,6 +93,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
         generatedAt: attention.generatedAt,
         obligations,
         notifications,
+        digestPreference,
         error: null,
       }));
     } catch (error) {
@@ -198,6 +205,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
     quietStart: string;
     quietEnd: string;
     channel: "in_app" | "disabled";
+    cadence: "daily" | "weekdays";
     localDate: string;
   }) => {
     if (!projectId) return;
@@ -207,7 +215,7 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, timezone: preference.timezone,
           quiet_start: preference.quietStart, quiet_end: preference.quietEnd,
-          channel: preference.channel, local_date: preference.localDate }),
+          channel: preference.channel, cadence: preference.cadence, local_date: preference.localDate }),
       }));
       setState((current) => ({ ...current, digestJob, mutationState: "saved",
         mutationMessage: "Сводка поставлена в надёжную очередь." }));
@@ -216,6 +224,28 @@ export function useManagementCenter(projectId: number | null, enabled = true) {
     }
   }, [projectId]);
 
+  const saveDigestPreference = useCallback(async (preference: Omit<DigestPreference,
+    "projectId" | "userId" | "persisted" | "externalActionsEnabled">) => {
+    if (!projectId) return;
+    setState((current) => ({ ...current, mutationState: "saving", mutationMessage: null }));
+    try {
+      const saved = parseDigestPreference(await api<unknown>(`/management/v2/projects/${projectId}/digest-preference`, {
+        method: "PUT",
+        body: JSON.stringify({ expected_version: preference.recordVersion, timezone: preference.timezone,
+          quiet_start: preference.quietStart, quiet_end: preference.quietEnd,
+          channel: preference.channel, cadence: preference.cadence }),
+      }));
+      setState((current) => ({ ...current, digestPreference: saved, mutationState: "saved",
+        mutationMessage: "Настройки сводки сохранены." }));
+    } catch (error) {
+      const conflict = error instanceof ApiError && error.status === 409;
+      setState((current) => ({ ...current, mutationState: conflict ? "conflict" : "error",
+        mutationMessage: conflict
+          ? "Настройки уже изменены. Обновите данные перед повторным сохранением."
+          : safeError(error) }));
+    }
+  }, [projectId]);
+
   return { state, reload, loadHistory, transitionObligation, transitionGovernance,
-    proposeMeetingActions, confirmMeetingProposal, enqueueDigest };
+    proposeMeetingActions, confirmMeetingProposal, enqueueDigest, saveDigestPreference };
 }

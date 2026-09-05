@@ -97,6 +97,19 @@ export type DigestEnqueueResult = {
   externalActionsCreated: false;
 };
 
+export type DigestPreference = {
+  projectId: number;
+  userId: number;
+  timezone: string;
+  quietStart: string;
+  quietEnd: string;
+  channel: "in_app" | "disabled";
+  cadence: "daily" | "weekdays";
+  recordVersion: number;
+  persisted: boolean;
+  externalActionsEnabled: false;
+};
+
 export type DigestState = {
   status: "created" | "already_created" | "empty" | "disabled" | "deferred_quiet_hours" | "stale";
   localDate: string;
@@ -325,6 +338,26 @@ export function parseDigestEnqueueResult(value: unknown): DigestEnqueueResult {
     throw new Error("invalid_digest_enqueue_response");
   }
   return { jobId, status, externalActionsCreated: false };
+}
+
+export function parseDigestPreference(value: unknown): DigestPreference {
+  const item = dictionary(value);
+  const projectId = item && integer(item.project_id);
+  const userId = item && integer(item.user_id);
+  const timezone = item && text(item.timezone);
+  const quietStart = item && text(item.quiet_start);
+  const quietEnd = item && text(item.quiet_end);
+  const recordVersion = item && integer(item.record_version, 0);
+  if (!item || !projectId || !userId || !timezone || !quietStart || !quietEnd || recordVersion === null
+    || !/^\d{2}:\d{2}(?::\d{2})?$/.test(quietStart) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(quietEnd)
+    || !["in_app", "disabled"].includes(String(item.channel))
+    || !["daily", "weekdays"].includes(String(item.cadence))
+    || typeof item.persisted !== "boolean" || item.external_actions_enabled !== false) {
+    throw new Error("invalid_digest_preference");
+  }
+  return { projectId, userId, timezone, quietStart, quietEnd,
+    channel: item.channel as DigestPreference["channel"], cadence: item.cadence as DigestPreference["cadence"],
+    recordVersion, persisted: item.persisted, externalActionsEnabled: false };
 }
 
 export function parseDigestState(value: unknown): DigestState {

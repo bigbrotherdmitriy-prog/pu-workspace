@@ -103,4 +103,17 @@ describe("MVP3 management panels", () => {
     expect(screen.getByText("Состояние очереди: queued")).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
+
+  it("edits persisted digest cadence and keeps external actions disabled", () => {
+    const save = vi.fn();
+    const enqueue = vi.fn();
+    render(<DeadlineDigestPanel deadlinePolicy={null} digestState={null} notifications={[]} configurationAvailable
+      preference={{ projectId: 3, userId: 2, timezone: "Europe/Moscow", quietStart: "20:00:00",
+        quietEnd: "08:00:00", channel: "in_app", cadence: "daily", recordVersion: 2,
+        persisted: true, externalActionsEnabled: false }} onSave={save} onEnqueue={enqueue} />);
+    fireEvent.change(screen.getByLabelText("Расписание"), { target: { value: "weekdays" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить настройки" }));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ cadence: "weekdays", recordVersion: 2 }));
+    expect(screen.getByText(/Внешние действия отключены/)).toBeInTheDocument();
+  });
 });

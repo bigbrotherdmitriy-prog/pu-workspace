@@ -76,11 +76,20 @@
 .proposal-list > li { border-top: 1px solid var(--management-line); padding: 12px 0; }
 .proposal-list > li > div { display: grid; gap: 4px; }
 .management-digest-state { display: grid; gap: 4px; border-radius: 12px; background: #eef5ef; padding: 12px; }
+.management-digest-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border: 1px solid var(--management-line); border-radius: 14px; padding: 14px; }
+.management-digest-settings label { display: grid; gap: 6px; color: var(--management-muted); font-size: 0.78rem; font-weight: 650; }
+.management-digest-settings input,
+.management-digest-settings select { width: 100%; min-width: 0; border: 1px solid #b9cbbb; border-radius: 9px; background: #fff; color: var(--management-ink); padding: 8px 10px; font: inherit; }
+.management-digest-settings .management-actions,
+.management-digest-settings > p { grid-column: 1 / -1; margin-block: 0; }
 
 @media (max-width: 620px) {
   .management-center { grid-template-columns: 1fr; }
   .management-card { padding: 15px; border-radius: 14px; }
   .management-card > header { align-items: center; }
   .management-facts { grid-template-columns: 1fr; }
+  .management-digest-settings { grid-template-columns: 1fr; }
+  .management-digest-settings .management-actions,
+  .management-digest-settings > p { grid-column: auto; }
   .proposal-list > li { align-items: stretch; flex-direction: column; }
 }

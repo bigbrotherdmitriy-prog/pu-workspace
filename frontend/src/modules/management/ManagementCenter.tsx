@@ -68,7 +68,12 @@ export function ManagementCenter({ projectId, enabled = true }: Props) {
       digestState={null}
       digestJob={controller.state.digestJob}
       notifications={controller.state.notifications}
-      configurationAvailable={false}
+      configurationAvailable={controller.state.digestPreference !== null}
+      preference={controller.state.digestPreference}
+      mutationState={controller.state.mutationState}
+      mutationMessage={controller.state.mutationMessage}
+      onSave={(preference) => void controller.saveDigestPreference(preference)}
+      onEnqueue={(preference) => void controller.enqueueDigest(preference)}
     />
   </section>;
 }

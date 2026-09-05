@@ -20,7 +20,10 @@ function initialFetch() {
     .mockResolvedValueOnce(response({ items: [attentionItem], total: 1, offset: 0, limit: 50,
       generated_at: "2026-09-05T10:00:00Z", external_actions_created: false }))
     .mockResolvedValueOnce(response({ obligations: [obligation], count: 1 }))
-    .mockResolvedValueOnce(response({ notifications: [], unread: 0 }));
+    .mockResolvedValueOnce(response({ notifications: [], unread: 0 }))
+    .mockResolvedValueOnce(response({ project_id: 3, user_id: 2, timezone: "Europe/Moscow",
+      quiet_start: "20:00:00", quiet_end: "08:00:00", channel: "in_app", cadence: "daily",
+      record_version: 0, persisted: false, external_actions_enabled: false }));
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -37,6 +40,7 @@ describe("useManagementCenter", () => {
       "/management/v2/attention?project_id=3",
       "/management/obligations?project_id=3",
       "/management/notifications?project_id=3",
+      "/management/v2/projects/3/digest-preference",
     ]);
   });
 
@@ -52,7 +56,10 @@ describe("useManagementCenter", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ items: [], total: 0, generated_at: "bad", external_actions_created: false }))
       .mockResolvedValueOnce(response({ obligations: [], count: 0 }))
-      .mockResolvedValueOnce(response({ notifications: [], unread: 0 }));
+      .mockResolvedValueOnce(response({ notifications: [], unread: 0 }))
+      .mockResolvedValueOnce(response({ project_id: 3, user_id: 2, timezone: "Europe/Moscow",
+        quiet_start: "20:00:00", quiet_end: "08:00:00", channel: "in_app", cadence: "daily",
+        record_version: 0, persisted: false, external_actions_enabled: false }));
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useManagementCenter(3));
     await waitFor(() => expect(result.current.state.loadState).toBe("error"));
@@ -69,7 +76,7 @@ describe("useManagementCenter", () => {
     await waitFor(() => expect(result.current.state.loadState).toBe("ready"));
     await act(async () => result.current.loadHistory("obligation", 7));
     expect(result.current.state.history[0]).toMatchObject({ sequence: 1, recordVersion: 1 });
-    expect(String(fetchMock.mock.calls[3][0])).toBe("/management/v2/obligations/7/history");
+    expect(String(fetchMock.mock.calls[4][0])).toBe("/management/v2/obligations/7/history");
   });
 
   it("surfaces a CAS conflict and does not silently retry a mutation", async () => {
@@ -81,8 +88,8 @@ describe("useManagementCenter", () => {
     await act(async () => result.current.transitionObligation(result.current.state.obligations[0], "confirmed"));
     expect(result.current.state.mutationState).toBe("conflict");
     expect(result.current.state.mutationMessage).toContain("изменена другим пользователем");
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    const options = fetchMock.mock.calls[3][1] as RequestInit;
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    const options = fetchMock.mock.calls[4][1] as RequestInit;
     expect(JSON.parse(String(options.body))).toMatchObject({ expected_version: 3, status: "confirmed" });
   });
 
@@ -104,10 +111,26 @@ describe("useManagementCenter", () => {
     await act(async () => result.current.confirmMeetingProposal(result.current.state.proposals[0], true));
     expect(result.current.state.proposals[0]).toMatchObject({ status: "confirmed", recordVersion: 4, taskId: 12 });
     await act(async () => result.current.enqueueDigest({ timezone: "Europe/Moscow", quietStart: "20:00",
-      quietEnd: "08:00", channel: "in_app", localDate: "2026-09-05" }));
+      quietEnd: "08:00", channel: "in_app", cadence: "daily", localDate: "2026-09-05" }));
     expect(result.current.state.digestJob).toEqual({ jobId: 41, status: "queued", externalActionsCreated: false });
-    expect(String(fetchMock.mock.calls[3][0])).toBe("/management/v2/meetings/5/proposals");
-    expect(String(fetchMock.mock.calls[4][0])).toBe("/management/v2/proposals/obligation/9/confirm");
-    expect(String(fetchMock.mock.calls[5][0])).toBe("/management/v2/digests");
+    expect(String(fetchMock.mock.calls[4][0])).toBe("/management/v2/meetings/5/proposals");
+    expect(String(fetchMock.mock.calls[5][0])).toBe("/management/v2/proposals/obligation/9/confirm");
+    expect(String(fetchMock.mock.calls[6][0])).toBe("/management/v2/digests");
+  });
+
+  it("saves the exact digest preference version without retrying conflicts", async () => {
+    const fetchMock = initialFetch();
+    fetchMock.mockResolvedValueOnce(response({ project_id: 3, user_id: 2, timezone: "Europe/Moscow",
+      quiet_start: "21:00:00", quiet_end: "07:00:00", channel: "in_app", cadence: "weekdays",
+      record_version: 1, persisted: true, external_actions_enabled: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useManagementCenter(3));
+    await waitFor(() => expect(result.current.state.loadState).toBe("ready"));
+    await act(async () => result.current.saveDigestPreference({ timezone: "Europe/Moscow", quietStart: "21:00",
+      quietEnd: "07:00", channel: "in_app", cadence: "weekdays", recordVersion: 0 }));
+    expect(result.current.state.digestPreference).toMatchObject({ recordVersion: 1, cadence: "weekdays", persisted: true });
+    const request = fetchMock.mock.calls[4];
+    expect(String(request[0])).toBe("/management/v2/projects/3/digest-preference");
+    expect(JSON.parse(String((request[1] as RequestInit).body))).toMatchObject({ expected_version: 0, cadence: "weekdays" });
   });
 });

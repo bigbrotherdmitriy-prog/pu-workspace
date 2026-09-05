@@ -4,6 +4,7 @@ import {
   parseAttentionResponse,
   parseDigestState,
   parseDigestEnqueueResult,
+  parseDigestPreference,
   parseHistoryResponse,
   parseMeetingProposals,
   parseMeetingProposalConfirmation,
@@ -101,6 +102,17 @@ describe("management runtime validation", () => {
     expect(parseDigestEnqueueResult({ job_id: 41, status: "queued", external_actions_created: false }))
       .toEqual({ jobId: 41, status: "queued", externalActionsCreated: false });
     expect(() => parseDigestEnqueueResult({ job_id: 41, status: "queued" })).toThrow();
+  });
+
+  it("validates persisted digest preferences and rejects external actions", () => {
+    expect(parseDigestPreference({ project_id: 3, user_id: 2, timezone: "Europe/Moscow",
+      quiet_start: "20:00:00", quiet_end: "08:00:00", channel: "in_app", cadence: "weekdays",
+      record_version: 2, persisted: true, external_actions_enabled: false })).toMatchObject({
+      projectId: 3, recordVersion: 2, cadence: "weekdays", externalActionsEnabled: false,
+    });
+    expect(() => parseDigestPreference({ project_id: 3, user_id: 2, timezone: "Europe/Moscow",
+      quiet_start: "20:00:00", quiet_end: "08:00:00", channel: "in_app", cadence: "daily",
+      record_version: 2, persisted: true, external_actions_enabled: true })).toThrow("invalid_digest_preference");
   });
 
   it("fails closed for an unknown digest status or external effect", () => {
