@@ -14,7 +14,7 @@ from app.integrations.contracts import MutableStorageAdapter
 
 
 Provider = Literal["google_drive", "yandex_disk"]
-Outcome = Literal["applied", "compensated", "partial_failure", "rolled_back"]
+Outcome = Literal["applied", "compensated", "partial_failure", "rolled_back", "unknown"]
 
 
 class MutationConflict(ValueError):
@@ -78,6 +78,11 @@ def _hash(command: MutationCommand) -> str:
         "operations": [item.__dict__ for item in command.operations],
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def command_hash(command: MutationCommand) -> str:
+    """Stable, content-free digest used by durable attempt/receipt ledgers."""
+    return _hash(command)
 
 
 def _validate_scope(command: MutationCommand, store: MutationReceiptStore) -> str:
