@@ -100,22 +100,33 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
             "next_step": "Добавить или импортировать этапы ГПР",
         })
 
-    unlinked_budget = [row for row in budget_lines if row.contract_id is None]
+    unlinked_budget = [
+        row for row in budget_lines
+        if row.contract_id is None
+        or (row.schedule_item_id is None and row.task_id is None)
+        or row.source_document_version_id is None
+    ]
     for row in unlinked_budget:
         attention.append({
             "kind": "unlinked_budget", "entity_id": row.id, "priority": "normal",
-            "title": f"Строка бюджета «{row.description}» без договора", "due_date": None,
-            "source_name": row.source_name or row.category, "evidence": "Не определён договор финансового обязательства",
-            "next_step": "Связать строку бюджета с договором",
+            "title": f"Строка бюджета «{row.description}» связана не полностью", "due_date": None,
+            "source_name": row.source_name or row.category, "evidence": "Требуются договор, ГПР/задача и версия первичного документа",
+            "next_step": "Заполнить контрольные связи бюджета и подтвердить их человеком",
         })
 
-    unlinked_cash_flow = [row for row in cash_flow if row.contract_id is None or row.schedule_item_id is None or row.budget_line_id is None]
+    unlinked_cash_flow = [
+        row for row in cash_flow
+        if row.contract_id is None
+        or (row.schedule_item_id is None and row.task_id is None)
+        or row.budget_line_id is None
+        or row.source_document_version_id is None
+    ]
     for row in unlinked_cash_flow:
         attention.append({
             "kind": "unlinked_cash_flow", "entity_id": row.id, "priority": "high",
             "title": f"Запись ДДС «{row.title}» связана не полностью", "due_date": row.planned_date,
             "source_name": row.source_name or row.counterparty or "ДДС",
-            "evidence": "Требуются договор, этап ГПР и строка бюджета",
+            "evidence": "Требуются договор, ГПР/задача, строка бюджета и версия первичного документа",
             "next_step": "Проверить и заполнить связи ДДС перед подтверждением оплаты",
         })
 
@@ -124,8 +135,10 @@ def build_daily_briefing(db: Session, project_id: int, *, today: date | None = N
         if row.status == "approved"
         and row.actual_date is None
         and row.contract_id is not None
-        and row.schedule_item_id is not None
+        and (row.schedule_item_id is not None or row.task_id is not None)
         and row.budget_line_id is not None
+        and row.source_document_version_id is not None
+        and row.review_status == "confirmed"
     ]
     for row in payment_confirmations:
         overdue = row.planned_date < current

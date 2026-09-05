@@ -37,7 +37,17 @@ export type FinanceOverview = {
   }[];
   budget: {
     id: number;
+    record_version: number;
     contract_id?: number;
+    schedule_item_id?: number;
+    task_id?: number;
+    source_document_id?: number;
+    source_document_version_id?: number;
+    evidence_id?: string;
+    evidence_revision?: number;
+    evidence_assessment_version?: number;
+    confidence?: number;
+    review_status: "pending_confirmation" | "required" | "confirmed" | "rejected";
     category: string;
     description: string;
     planned_amount: number;
@@ -49,10 +59,18 @@ export type FinanceOverview = {
   }[];
   cash_flow: {
     id: number;
+    record_version: number;
     contract_id?: number;
     schedule_item_id?: number;
     budget_line_id?: number;
+    task_id?: number;
     source_document_id?: number;
+    source_document_version_id?: number;
+    evidence_id?: string;
+    evidence_revision?: number;
+    evidence_assessment_version?: number;
+    confidence?: number;
+    review_status: "pending_confirmation" | "required" | "confirmed" | "rejected";
     direction: string;
     title: string;
     planned_date: string;

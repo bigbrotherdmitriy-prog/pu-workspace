@@ -71,3 +71,70 @@ describe("GPR baseline plan/fact register", () => {
     expect(onCloneBaseline).toHaveBeenCalledWith(1, 1);
   });
 });
+
+const summary = {
+  budget_planned: 0, budget_committed: 0, budget_actual: 0, budget_forecast: 0,
+  budget_variance: 0, cash_balance_forecast: 0, cash_gap: 0,
+  delayed_schedule: 0, late_procurement: 0, acts_pending: 0,
+  pending_payments: 1, unlinked_invoices: 0,
+};
+
+function cashFinance(status: string): FinanceOverview {
+  return {
+    summary,
+    baselines: [], schedule: [], budget: [], procurement: [], acts: [],
+    cash_flow: [{
+      id: 17,
+      record_version: 4,
+      contract_id: 2,
+      schedule_item_id: 3,
+      budget_line_id: 5,
+      source_document_id: 7,
+      source_document_version_id: 8,
+      direction: "inflow",
+      title: "Synthetic customer receipt",
+      planned_date: "2026-09-10",
+      actual_date: status === "received" ? "2026-09-11" : undefined,
+      planned_amount: 75000,
+      actual_amount: status === "received" ? 74250 : 0,
+      status,
+      review_status: "confirmed",
+    }],
+  };
+}
+
+function props(status: string) {
+  return {
+    finance: cashFinance(status), preview: null, selectedRows: [], setSelectedRows: vi.fn(),
+    selectedContractId: 2, kind: "cash-in", title: "", amount: "", date: "", extra: "",
+    sourceDocumentId: 0, scheduleItemId: 0, budgetLineId: 0,
+    setKind: vi.fn(), setTitle: vi.fn(), setAmount: vi.fn(), setDate: vi.fn(), setExtra: vi.fn(),
+    setScheduleItemId: vi.fn(), setBudgetLineId: vi.fn(), onClosePreview: vi.fn(), onImport: vi.fn(),
+    onAdd: vi.fn(), onConfirm: vi.fn(), onConfirmPayment: vi.fn(), onCorrectPayment: vi.fn(),
+    onCloneBaseline: vi.fn(), onUpdateSchedule: vi.fn(),
+    includeEditor: false,
+  };
+}
+
+afterEach(cleanup);
+
+describe("FinanceOperations human confirmation boundary", () => {
+  it("shows customer receipt and passes the record version to explicit confirmation", () => {
+    const input = props("approved");
+    render(<FinanceOperations {...input} />);
+
+    expect(screen.getByText(/Поступление заказчика/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить оплату — факт пользователем" }));
+
+    expect(input.onConfirmPayment).toHaveBeenCalledWith(17, 75000, 4);
+  });
+
+  it("passes the current record version to a separate correction action", () => {
+    const input = props("received");
+    render(<FinanceOperations {...input} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Исправить факт оплаты" }));
+
+    expect(input.onCorrectPayment).toHaveBeenCalledWith(17, 74250, "2026-09-11", 4);
+  });
+});

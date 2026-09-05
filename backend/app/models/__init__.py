@@ -26,7 +26,7 @@ from app.models.organization_contract import Contract, ContractVersion, Organiza
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import Meeting, Notification, Obligation, ObligationHistory
-from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowFactHistory, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.external_resource import ExternalResourceLink
 from app.models.project_contact import ProjectContact, ProjectContactHistory
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
@@ -94,6 +94,7 @@ __all__ = [
     "ScheduleItem",
     "BudgetLine",
     "CashFlowEntry",
+    "CashFlowFactHistory",
     "ProcurementItem",
     "AcceptanceAct",
     "ExternalResourceLink",

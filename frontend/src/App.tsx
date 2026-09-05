@@ -2639,11 +2639,11 @@ export function App() {
               }
               onCloneBaseline={(id, version) => void cloneBaseline(id, version)}
               onUpdateSchedule={(id, currentProgress) => void updateScheduleActual(id, currentProgress)}
-              onConfirmPayment={(id, amount) =>
-                void confirmCashPayment(id, amount)
+              onConfirmPayment={(id, amount, recordVersion) =>
+                void confirmCashPayment(id, amount, recordVersion)
               }
-              onCorrectPayment={(id, amount, date) =>
-                void correctCashPayment(id, amount, date)
+              onCorrectPayment={(id, amount, date, recordVersion) =>
+                void correctCashPayment(id, amount, date, recordVersion)
               }
             />
           </div>

@@ -116,6 +116,8 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           kind: financeStructuredPreview.kind,
           baseline_id: baseline?.id || null,
           expected_baseline_version: baseline?.version || null,
+          schedule_item_id: financeScheduleItemId || null,
+          budget_line_id: financeBudgetLineId || null,
           direction: "outflow",
           source_rows: financeStructuredRows,
         }),
@@ -135,10 +137,19 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     try {
       let path = "/execution/budget";
       let body: Record<string, unknown> = { project_id: projectId, contract_id: selectedFinanceContractId || null };
-      if (financeKind === "budget") body = { ...body, category: financeExtra.trim() || "Прочее", description: financeTitle.trim(), planned_amount: amount };
+      if (financeKind === "budget") {
+        if (!selectedFinanceContractId) throw new Error("Сначала выберите договор для бюджета");
+        if (!financeScheduleItemId) throw new Error("Свяжите бюджет с этапом ГПР");
+        if (!financeSourceDocumentId) throw new Error("Выберите первичный документ бюджета");
+        body = { ...body, category: financeExtra.trim() || "Прочее", description: financeTitle.trim(), planned_amount: amount, schedule_item_id: financeScheduleItemId, source_document_id: financeSourceDocumentId };
+      }
       if (financeKind === "cash-in" || financeKind === "cash-out") {
+        if (!selectedFinanceContractId) throw new Error("Сначала выберите договор для ДДС");
+        if (!financeScheduleItemId) throw new Error("Свяжите ДДС с этапом ГПР");
+        if (!financeBudgetLineId) throw new Error("Свяжите ДДС со строкой бюджета");
+        if (!financeSourceDocumentId) throw new Error("Выберите первичный документ ДДС");
         path = "/execution/cash-flow";
-        body = { ...body, direction: financeKind === "cash-in" ? "inflow" : "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null };
+        body = { ...body, direction: financeKind === "cash-in" ? "inflow" : "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null, schedule_item_id: financeScheduleItemId, budget_line_id: financeBudgetLineId, source_document_id: financeSourceDocumentId };
       }
       if (financeKind === "invoice") {
         if (!selectedFinanceContractId) throw new Error("Сначала выберите договор для счёта");
@@ -202,7 +213,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
-  async function confirmCashPayment(id: number, amount: number) {
+  async function confirmCashPayment(id: number, amount: number, recordVersion: number) {
     const rawAmount = window.prompt("Фактически оплаченная сумма, ₽", String(amount));
     if (rawAmount === null) return;
     const actualAmount = Number(rawAmount);
@@ -211,13 +222,13 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     if (!actualDate) return;
     if (!window.confirm(`Подтвердить оплату ${money(actualAmount)} от ${actualDate}?`)) return;
     try {
-      await api(`/execution/cash-flow/${id}/confirm-payment`, { method: "POST", body: JSON.stringify({ actual_amount: actualAmount, actual_date: actualDate }) });
+      await api(`/execution/cash-flow/${id}/confirm-payment`, { method: "POST", body: JSON.stringify({ expected_record_version: recordVersion, actual_amount: actualAmount, actual_date: actualDate }) });
       setNotice("Оплата подтверждена пользователем, факт записан в ДДС и бюджет");
       await loadFinance();
     } catch (error) { setError((error as Error).message); }
   }
 
-  async function correctCashPayment(id: number, actualAmount: number, actualDate: string) {
+  async function correctCashPayment(id: number, actualAmount: number, actualDate: string, recordVersion: number) {
     const rawAmount = window.prompt("Исправленная фактическая сумма, ₽", String(actualAmount));
     if (rawAmount === null) return;
     const correctedAmount = Number(rawAmount);
@@ -231,6 +242,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       await api(`/execution/cash-flow/${id}/correct-payment`, {
         method: "POST",
         body: JSON.stringify({
+          expected_record_version: recordVersion,
           expected_actual_amount: actualAmount,
           expected_actual_date: actualDate,
           actual_amount: correctedAmount,

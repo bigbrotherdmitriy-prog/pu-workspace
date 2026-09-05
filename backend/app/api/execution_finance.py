@@ -12,9 +12,12 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowFactHistory, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract
+from app.models.project import Project
+from app.models.task import Task
 from app.models.user import User
+from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceCurrent, SourceReference, SourceVersion
 from app.structured_import import parse_structured_rows
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
@@ -57,6 +60,13 @@ class ScheduleProgress(BaseModel):
 class BudgetCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
+    schedule_item_id: int | None = None
+    task_id: int | None = None
+    source_document_id: int | None = None
+    evidence_id: str | None = Field(default=None, pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    evidence_revision: int | None = Field(default=None, ge=1)
+    evidence_assessment_version: int | None = Field(default=None, ge=1)
+    confidence: Decimal | None = Field(default=None, ge=0, le=1)
     category: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=2, max_length=1000)
     planned_amount: Decimal = Field(ge=0)
@@ -67,6 +77,14 @@ class BudgetCreate(BaseModel):
 class CashFlowCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
+    schedule_item_id: int | None = None
+    task_id: int | None = None
+    budget_line_id: int | None = None
+    source_document_id: int | None = None
+    evidence_id: str | None = Field(default=None, pattern="^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    evidence_revision: int | None = Field(default=None, ge=1)
+    evidence_assessment_version: int | None = Field(default=None, ge=1)
+    confidence: Decimal | None = Field(default=None, ge=0, le=1)
     direction: str = Field(pattern="^(inflow|outflow)$")
     title: str = Field(min_length=2, max_length=500)
     planned_date: date
@@ -75,17 +93,17 @@ class CashFlowCreate(BaseModel):
 
 
 class InvoiceProposalCreate(CashFlowCreate):
-    schedule_item_id: int | None = None
-    budget_line_id: int | None = None
-    source_document_id: int | None = None
+    pass
 
 
 class PaymentConfirmation(BaseModel):
+    expected_record_version: int = Field(default=1, ge=1)
     actual_amount: Decimal | None = Field(default=None, gt=0)
     actual_date: date | None = None
 
 
 class PaymentCorrection(BaseModel):
+    expected_record_version: int = Field(default=1, ge=1)
     expected_actual_amount: Decimal = Field(gt=0)
     expected_actual_date: date
     actual_amount: Decimal = Field(gt=0)
@@ -125,6 +143,9 @@ class StructuredImportRequest(BaseModel):
     kind: str = Field(pattern="^(schedule|budget|cash-flow)$")
     baseline_id: int | None = None
     expected_baseline_version: int | None = Field(default=None, ge=1)
+    schedule_item_id: int | None = None
+    task_id: int | None = None
+    budget_line_id: int | None = None
     direction: str = Field(default="outflow", pattern="^(inflow|outflow)$")
     source_rows: list[int] = Field(min_length=1, max_length=500)
 
@@ -181,6 +202,143 @@ def _finance_document_hints(name: str, content: str) -> dict:
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
     if contract_id is not None and not db.scalar(select(Contract.id).where(Contract.id == contract_id, Contract.project_id == project_id)):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
+
+
+def _validate_control_links(
+    db: Session,
+    *,
+    project_id: int,
+    contract_id: int | None,
+    schedule_item_id: int | None,
+    task_id: int | None,
+    budget_line_id: int | None,
+    source_document_id: int | None,
+    evidence_id: str | None,
+    evidence_revision: int | None,
+    evidence_assessment_version: int | None,
+    confidence: Decimal | None,
+) -> tuple[int | None, float | None, str]:
+    """Validate scoped links and return exact legacy version plus review state."""
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Проект не найден")
+    _check_contract(db, project_id, contract_id)
+
+    if schedule_item_id is not None:
+        stage = db.get(ScheduleItem, schedule_item_id)
+        baseline = db.get(ScheduleBaseline, stage.baseline_id) if stage else None
+        if stage is None or stage.project_id != project_id or baseline is None:
+            raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
+        if contract_id is not None and baseline.contract_id not in {None, contract_id}:
+            raise HTTPException(422, "Этап ГПР связан с другим договором")
+    if task_id is not None:
+        task = db.get(Task, task_id)
+        if task is None or task.project_id != project_id:
+            raise HTTPException(422, "Задача не принадлежит выбранному проекту")
+    if budget_line_id is not None:
+        budget = db.get(BudgetLine, budget_line_id)
+        if budget is None or budget.project_id != project_id:
+            raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+        if contract_id is not None and budget.contract_id not in {None, contract_id}:
+            raise HTTPException(422, "Строка бюджета связана с другим договором")
+
+    document_version = None
+    if source_document_id is not None:
+        document = db.get(Document, source_document_id)
+        if document is None or document.project_id != project_id:
+            raise HTTPException(422, "Первичный документ не принадлежит выбранному проекту")
+        document_version = db.scalar(
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.version_number.desc(), DocumentVersion.id.desc())
+        )
+        if document_version is None:
+            raise HTTPException(409, "У первичного документа нет зафиксированной версии")
+
+    review_status = "required" if confidence is not None and confidence < Decimal("0.90") else "pending_confirmation"
+    resolved_confidence = float(confidence) if confidence is not None else None
+    pins = (evidence_id, evidence_revision, evidence_assessment_version)
+    if any(value is not None for value in pins):
+        if not all(value is not None for value in pins) or document_version is None:
+            raise HTTPException(422, "Evidence требует точного первичного документа, revision и assessment version")
+        evidence = db.scalar(select(Evidence).where(
+            Evidence.id == evidence_id,
+            Evidence.organization_id == project.organization_id,
+            Evidence.revision == evidence_revision,
+        ))
+        assessment = db.scalar(select(EvidenceAssessment).where(
+            EvidenceAssessment.evidence_id == evidence_id,
+            EvidenceAssessment.organization_id == project.organization_id,
+        ))
+        version = db.get(SourceVersion, evidence.source_version_id) if evidence else None
+        source = db.get(SourceReference, evidence.source_id) if evidence else None
+        current = db.get(SourceCurrent, evidence.source_id) if evidence else None
+        if (
+            evidence is None
+            or assessment is None
+            or version is None
+            or source is None
+            or current is None
+            or assessment.record_version != evidence_assessment_version
+            or version.legacy_document_version_id != document_version.id
+            or source.origin_project_id != project_id
+            or current.organization_id != project.organization_id
+            or current.version_id != version.id
+            or source.availability != "available"
+        ):
+            raise HTTPException(409, "Evidence не подтверждает текущую версию первичного документа")
+        resolved_confidence = evidence.confidence
+        if (
+            evidence.confidence is None
+            or evidence.confidence < 0.90
+            or assessment.verification != "verified"
+            or assessment.availability != "available"
+            or assessment.freshness == "stale"
+        ):
+            review_status = "required"
+    return document_version.id if document_version else None, resolved_confidence, review_status
+
+
+def _cash_flow_missing_links(item: CashFlowEntry) -> list[str]:
+    missing = []
+    if item.contract_id is None:
+        missing.append("contract")
+    if item.schedule_item_id is None and item.task_id is None:
+        missing.append("gpr_stage_or_task")
+    if item.budget_line_id is None:
+        missing.append("budget")
+    if item.source_document_id is None or item.source_document_version_id is None:
+        missing.append("primary_document")
+    return missing
+
+
+def _next_fact_sequence(db: Session, item_id: int) -> int:
+    return int(db.scalar(select(func.max(CashFlowFactHistory.sequence)).where(
+        CashFlowFactHistory.cash_flow_entry_id == item_id,
+    )) or 0) + 1
+
+
+def _append_fact_history(
+    db: Session,
+    *,
+    item: CashFlowEntry,
+    event: str,
+    user_id: int,
+    previous_amount: Decimal | None,
+    previous_date: date | None,
+) -> None:
+    db.add(CashFlowFactHistory(
+        cash_flow_entry_id=item.id,
+        project_id=item.project_id,
+        sequence=_next_fact_sequence(db, item.id),
+        event=event,
+        previous_actual_amount=previous_amount,
+        previous_actual_date=previous_date,
+        resulting_actual_amount=item.actual_amount,
+        resulting_actual_date=item.actual_date,
+        resulting_record_version=item.record_version,
+        changed_by_user_id=user_id,
+    ))
 
 
 def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, details: str):
@@ -263,7 +421,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "cash_gap": minimum, "cash_gap_date": gap_date, "delayed_schedule": len(delayed),
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
-                    "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
+                    "unlinked_invoices": len([x for x in cash if _cash_flow_missing_links(x)])},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version,
                        "status": x.status, "note": x.note,
                        "is_current": current_by_contract.get(x.contract_id) == x.id} for x in baselines],
@@ -271,10 +429,19 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status} for x in schedule],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "category": x.category, "description": x.description,
+                    "record_version": x.record_version, "schedule_item_id": x.schedule_item_id, "task_id": x.task_id,
+                    "source_document_id": x.source_document_id, "source_document_version_id": x.source_document_version_id,
+                    "evidence_id": x.evidence_id, "evidence_revision": x.evidence_revision,
+                    "evidence_assessment_version": x.evidence_assessment_version, "confidence": x.confidence,
+                    "review_status": x.review_status,
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
-                       "budget_line_id": x.budget_line_id, "source_document_id": x.source_document_id,
+                       "budget_line_id": x.budget_line_id, "task_id": x.task_id,
+                       "source_document_id": x.source_document_id, "source_document_version_id": x.source_document_version_id,
+                       "evidence_id": x.evidence_id, "evidence_revision": x.evidence_revision,
+                       "evidence_assessment_version": x.evidence_assessment_version, "confidence": x.confidence,
+                       "review_status": x.review_status, "record_version": x.record_version,
                        "direction": x.direction, "title": x.title,
                        "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
                        "actual_amount": x.actual_amount, "counterparty": x.counterparty, "status": x.status} for x in cash],
@@ -335,7 +502,7 @@ def document_candidates(project_id: int, contract_id: int | None = None,
             "requires_confirmation": True, "originals_changed": False}
 
 
-def _document_content(db: Session, project_id: int, document_id: int) -> tuple[Document, str]:
+def _document_content(db: Session, project_id: int, document_id: int) -> tuple[Document, DocumentVersion, str]:
     document = db.scalar(select(Document).where(Document.id == document_id, Document.project_id == project_id))
     if document is None:
         raise HTTPException(404, "Документ не найден в выбранном проекте")
@@ -345,7 +512,7 @@ def _document_content(db: Session, project_id: int, document_id: int) -> tuple[D
     content = version.content if version and version.content else ""
     if not content.strip():
         raise HTTPException(409, "У документа ещё нет извлечённого табличного текста")
-    return document, content
+    return document, version, content
 
 
 def _import_date(value: str | None) -> date | None:
@@ -359,7 +526,7 @@ def structured_preview(document_id: int, project_id: int, kind: str,
     require_project_role(db, user, project_id, "viewer")
     if kind not in {"schedule", "budget", "cash-flow"}:
         raise HTTPException(422, "Поддерживаются ГПР, бюджет и ДДС")
-    document, content = _document_content(db, project_id, document_id)
+    document, _version, content = _document_content(db, project_id, document_id)
     preview = parse_structured_rows(content, kind)
     return {"document_id": document.id, "name": document.name, "kind": kind, **preview,
             "requires_confirmation": True, "originals_changed": False}
@@ -370,7 +537,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                       db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
-    document, content = _document_content(db, payload.project_id, document_id)
+    document, document_version, content = _document_content(db, payload.project_id, document_id)
     preview = parse_structured_rows(content, payload.kind)
     if len(payload.source_rows) != len(set(payload.source_rows)):
         raise HTTPException(422, "Строки источника не должны повторяться")
@@ -420,20 +587,52 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                 source_name=source_name, source_excerpt=row["excerpt"], status="planned",
             )
         elif payload.kind == "budget":
+            _validate_control_links(
+                db,
+                project_id=payload.project_id,
+                contract_id=payload.contract_id,
+                schedule_item_id=payload.schedule_item_id,
+                task_id=payload.task_id,
+                budget_line_id=None,
+                source_document_id=document.id,
+                evidence_id=None,
+                evidence_revision=None,
+                evidence_assessment_version=None,
+                confidence=None,
+            )
             amount = Decimal(row["amount"])
             item = BudgetLine(
                 project_id=payload.project_id, contract_id=payload.contract_id,
+                schedule_item_id=payload.schedule_item_id, task_id=payload.task_id,
+                source_document_id=document.id, source_document_version_id=document_version.id,
                 category=row["category"], description=row["title"], planned_amount=amount,
                 forecast_amount=amount, status="proposed", source_name=source_name,
-                source_excerpt=row["excerpt"],
+                source_excerpt=row["excerpt"], review_status="required",
             )
         else:
+            _validate_control_links(
+                db,
+                project_id=payload.project_id,
+                contract_id=payload.contract_id,
+                schedule_item_id=payload.schedule_item_id,
+                task_id=payload.task_id,
+                budget_line_id=payload.budget_line_id,
+                source_document_id=document.id,
+                evidence_id=None,
+                evidence_revision=None,
+                evidence_assessment_version=None,
+                confidence=None,
+            )
             item = CashFlowEntry(
                 project_id=payload.project_id, contract_id=payload.contract_id,
-                source_document_id=document.id, direction=row["direction"] or payload.direction,
+                schedule_item_id=payload.schedule_item_id, task_id=payload.task_id,
+                budget_line_id=payload.budget_line_id,
+                source_document_id=document.id, source_document_version_id=document_version.id,
+                direction=row["direction"] or payload.direction,
                 title=row["title"], planned_date=_import_date(row["planned_date"]),
                 planned_amount=Decimal(row["amount"]), counterparty=row["counterparty"],
                 status="proposed", source_name=source_name, source_excerpt=row["excerpt"],
+                review_status="required",
             )
         db.add(item)
         db.flush()
@@ -595,15 +794,51 @@ def update_schedule(item_id: int, payload: ScheduleProgress, db: Session = Depen
 
 @router.post("/budget")
 def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
-    data = payload.model_dump(); data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
+    require_project_role(db, user, payload.project_id, "editor")
+    source_version_id, confidence, review_status = _validate_control_links(
+        db,
+        project_id=payload.project_id,
+        contract_id=payload.contract_id,
+        schedule_item_id=payload.schedule_item_id,
+        task_id=payload.task_id,
+        budget_line_id=None,
+        source_document_id=payload.source_document_id,
+        evidence_id=payload.evidence_id,
+        evidence_revision=payload.evidence_revision,
+        evidence_assessment_version=payload.evidence_assessment_version,
+        confidence=payload.confidence,
+    )
+    data = payload.model_dump()
+    data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
+    data["source_document_version_id"] = source_version_id
+    data["confidence"] = confidence
+    data["review_status"] = review_status
     item = BudgetLine(**data); db.add(item); db.flush(); _audit(db, "budget_proposed", "budget_line", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
 
 
 @router.post("/cash-flow")
 def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
-    item = CashFlowEntry(**payload.model_dump()); db.add(item); db.flush(); _audit(db, "cash_flow_proposed", "cash_flow", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
+    require_project_role(db, user, payload.project_id, "editor")
+    source_version_id, confidence, review_status = _validate_control_links(
+        db,
+        project_id=payload.project_id,
+        contract_id=payload.contract_id,
+        schedule_item_id=payload.schedule_item_id,
+        task_id=payload.task_id,
+        budget_line_id=payload.budget_line_id,
+        source_document_id=payload.source_document_id,
+        evidence_id=payload.evidence_id,
+        evidence_revision=payload.evidence_revision,
+        evidence_assessment_version=payload.evidence_assessment_version,
+        confidence=payload.confidence,
+    )
+    data = payload.model_dump()
+    data["source_document_version_id"] = source_version_id
+    data["confidence"] = confidence
+    data["review_status"] = review_status
+    item = CashFlowEntry(**data)
+    db.add(item); db.flush(); _audit(db, "cash_flow_proposed", "cash_flow", item.id, user.id, f"status=proposed; review={review_status}"); db.commit()
+    return {"id": item.id, "status": item.status, "review_status": item.review_status}
 
 
 @router.post("/invoice-proposals")
@@ -612,26 +847,34 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
     _check_contract(db, payload.project_id, payload.contract_id)
     if payload.direction != "outflow":
         raise HTTPException(422, "Счёт на оплату должен быть расходом ДДС")
-    if payload.contract_id is None or payload.schedule_item_id is None or payload.budget_line_id is None:
-        raise HTTPException(422, "Для счёта обязательны договор, этап ГПР и строка бюджета")
-    if payload.schedule_item_id is not None:
-        stage = db.get(ScheduleItem, payload.schedule_item_id)
-        if stage is None or stage.project_id != payload.project_id:
-            raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
-        baseline = db.get(ScheduleBaseline, stage.baseline_id)
-        if payload.contract_id and baseline and baseline.contract_id not in {None, payload.contract_id}:
-            raise HTTPException(422, "Этап ГПР связан с другим договором")
-    if payload.budget_line_id is not None:
-        budget = db.get(BudgetLine, payload.budget_line_id)
-        if budget is None or budget.project_id != payload.project_id:
-            raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
-        if payload.contract_id and budget.contract_id not in {None, payload.contract_id}:
-            raise HTTPException(422, "Строка бюджета связана с другим договором")
-    if payload.source_document_id is not None:
-        document = db.get(Document, payload.source_document_id)
-        if document is None or document.project_id != payload.project_id:
-            raise HTTPException(422, "Счёт не принадлежит выбранному проекту")
-    item = CashFlowEntry(**payload.model_dump(), status="proposed")
+    if (
+        payload.contract_id is None
+        or (payload.schedule_item_id is None and payload.task_id is None)
+        or payload.budget_line_id is None
+        or payload.source_document_id is None
+    ):
+        raise HTTPException(
+            422,
+            "Для счёта обязательны договор, ГПР/задача, строка бюджета и первичный документ",
+        )
+    source_version_id, confidence, review_status = _validate_control_links(
+        db,
+        project_id=payload.project_id,
+        contract_id=payload.contract_id,
+        schedule_item_id=payload.schedule_item_id,
+        task_id=payload.task_id,
+        budget_line_id=payload.budget_line_id,
+        source_document_id=payload.source_document_id,
+        evidence_id=payload.evidence_id,
+        evidence_revision=payload.evidence_revision,
+        evidence_assessment_version=payload.evidence_assessment_version,
+        confidence=payload.confidence,
+    )
+    data = payload.model_dump()
+    data["source_document_version_id"] = source_version_id
+    data["confidence"] = confidence
+    data["review_status"] = review_status
+    item = CashFlowEntry(**data, status="proposed")
     db.add(item); db.flush()
     _audit(db, "invoice_cash_flow_proposed", "cash_flow", item.id, user.id,
            f"contract={payload.contract_id}; schedule={payload.schedule_item_id}; budget={payload.budget_line_id}; document={payload.source_document_id}")
@@ -661,18 +904,31 @@ def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = De
                 "Оплата уже подтверждена с другими значениями; создайте отдельную корректировку",
             )
         return {"id": item.id, "status": item.status, "already_confirmed": True}
-    if item.status not in {"proposed", "approved"}:
+    if item.status == "proposed":
+        raise HTTPException(409, "Сначала подтвердите плановую запись ДДС")
+    if item.status != "approved":
         raise HTTPException(409, "Эту запись нельзя подтвердить как оплаченную")
+    if item.record_version != payload.expected_record_version:
+        raise HTTPException(409, "Запись ДДС уже изменена; обновите данные и повторите")
+    missing_links = _cash_flow_missing_links(item)
+    if missing_links:
+        raise HTTPException(409, "Перед подтверждением оплаты завершите связи ДДС")
+    if item.review_status != "confirmed":
+        raise HTTPException(409, "Запись ДДС требует ручной проверки")
     actual_amount = payload.actual_amount or item.planned_amount
     item.actual_amount = actual_amount
     item.actual_date = payload.actual_date or date.today()
     item.status = paid_status
+    item.record_version += 1
+    item.confirmed_by_user_id = user.id
+    item.confirmed_at = datetime.now(timezone.utc)
     _refresh_budget_from_cash_flow(db, item.budget_line_id)
+    _append_fact_history(db, item=item, event="confirmed", user_id=user.id, previous_amount=None, previous_date=None)
     _audit(db, "cash_flow_payment_confirmed", "cash_flow", item.id, user.id,
            f"status={paid_status}; amount={actual_amount}; date={item.actual_date}; budget={item.budget_line_id}")
     db.commit()
     return {"id": item.id, "status": item.status, "actual_amount": item.actual_amount,
-            "actual_date": item.actual_date, "already_confirmed": False}
+            "actual_date": item.actual_date, "record_version": item.record_version, "already_confirmed": False}
 
 
 @router.post("/cash-flow/{item_id}/correct-payment")
@@ -683,6 +939,8 @@ def correct_payment(item_id: int, payload: PaymentCorrection, db: Session = Depe
     require_project_role(db, user, item.project_id, "manager")
     if item.status not in {"paid", "received"} or item.actual_amount is None or item.actual_date is None:
         raise HTTPException(409, "Корректировать можно только подтверждённую оплату")
+    if item.record_version != payload.expected_record_version:
+        raise HTTPException(409, "Подтверждённая оплата уже изменена; обновите данные и повторите")
     if item.actual_amount != payload.expected_actual_amount or item.actual_date != payload.expected_actual_date:
         raise HTTPException(409, "Подтверждённая оплата уже изменена; обновите данные и повторите")
     if item.actual_amount == payload.actual_amount and item.actual_date == payload.actual_date:
@@ -692,7 +950,16 @@ def correct_payment(item_id: int, payload: PaymentCorrection, db: Session = Depe
     old_date = item.actual_date
     item.actual_amount = payload.actual_amount
     item.actual_date = payload.actual_date
+    item.record_version += 1
     _refresh_budget_from_cash_flow(db, item.budget_line_id)
+    _append_fact_history(
+        db,
+        item=item,
+        event="corrected",
+        user_id=user.id,
+        previous_amount=old_amount,
+        previous_date=old_date,
+    )
     _audit(
         db,
         "cash_flow_payment_corrected",
@@ -711,6 +978,7 @@ def correct_payment(item_id: int, payload: PaymentCorrection, db: Session = Depe
         "status": item.status,
         "actual_amount": item.actual_amount,
         "actual_date": item.actual_date,
+        "record_version": item.record_version,
         "corrected": True,
     }
 
@@ -732,7 +1000,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "procurement": ProcurementItem, "acts": AcceptanceAct, "baselines": ScheduleBaseline}
     model = models.get(kind)
     if model is None: raise HTTPException(404, "Unsupported register")
-    item = db.get(model, item_id)
+    item = db.scalar(select(model).where(model.id == item_id).with_for_update())
     if item is None: raise HTTPException(404, "Item not found")
     require_project_role(db, user, item.project_id, "manager")
     if kind == "baselines":
@@ -742,7 +1010,28 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
-    if item.status == payload.status:
+    if kind in {"budget", "cash-flow"} and (
+        payload.actual_amount is not None or payload.actual_date is not None
+    ):
+        raise HTTPException(
+            422,
+            "Факт бюджета/ДДС нельзя передать вместе со статусом; используйте отдельное подтверждение оплаты",
+        )
+    if item.status == payload.status and kind in {"budget", "cash-flow"}:
+        return {"id": item.id, "status": item.status, "already_confirmed": True, "record_version": item.record_version}
+    if kind in {"budget", "cash-flow"} and payload.status in {"approved", "active", "closed"}:
+        if item.contract_id is None or (item.schedule_item_id is None and item.task_id is None) or item.source_document_version_id is None:
+            raise HTTPException(409, "Перед подтверждением завершите связи с договором, ГПР/задачей и первичным документом")
+        if kind == "cash-flow" and item.budget_line_id is None:
+            raise HTTPException(409, "Перед подтверждением ДДС свяжите строку бюджета")
+        item.review_status = "confirmed"
+        item.confirmed_by_user_id = user.id
+        item.confirmed_at = datetime.now(timezone.utc)
+        item.record_version += 1
+    elif kind in {"budget", "cash-flow"} and payload.status in {"rejected", "cancelled"}:
+        item.review_status = "rejected"
+        item.record_version += 1
+    elif item.status == payload.status:
         return {"id": item.id, "status": item.status, "already_applied": True}
     if payload.expected_status is not None and item.status != payload.expected_status:
         raise HTTPException(409, "Статус уже изменён; обновите данные перед повтором")
@@ -767,7 +1056,12 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     if kind == "cash-flow":
         _refresh_budget_from_cash_flow(db, item.budget_line_id)
     _audit(db, f"{kind}_status_updated", kind, item.id, user.id, f"status={payload.status}"); db.commit()
-    result = {"id": item.id, "status": item.status, "already_applied": False}
+    result = {
+        "id": item.id,
+        "status": item.status,
+        "already_applied": False,
+        "record_version": getattr(item, "record_version", None),
+    }
     if kind == "baselines":
         result["superseded_id"] = superseded_id
     return result

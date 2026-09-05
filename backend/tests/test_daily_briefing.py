@@ -66,7 +66,8 @@ def test_daily_briefing_requires_explicit_user_confirmation_for_due_payment():
             project_id=9, contract_id=contract.id, schedule_item_id=stage.id,
             budget_line_id=budget.id, direction="outflow", title="Счёт поставщика",
             planned_date=date(2026, 8, 29), planned_amount=Decimal("125000"),
-            actual_amount=Decimal("0"), status="approved",
+            actual_amount=Decimal("0"), status="approved", source_document_id=91,
+            source_document_version_id=92, review_status="confirmed",
         ))
         db.commit()
 
