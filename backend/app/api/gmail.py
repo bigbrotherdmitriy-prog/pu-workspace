@@ -107,6 +107,42 @@ def _attachments(payload: dict, message_external_id: str | None = None) -> list[
     return result[:100]
 
 
+def _gmail_message_refs(service, *, query: str, max_results: int):
+    """Yield a bounded Gmail listing across opaque provider pages.
+
+    Gmail may return fewer rows than ``maxResults`` while still providing a
+    ``nextPageToken``.  The API contract treats ``max_results`` as a total
+    synchronization budget, not as a per-page value.  Repeated or malformed
+    cursors fail closed instead of allowing an unbounded provider loop.
+    """
+    remaining = max_results
+    page_token: str | None = None
+    seen_tokens: set[str] = set()
+    while remaining > 0:
+        request = {"userId": "me", "q": query, "maxResults": remaining}
+        if page_token is not None:
+            request["pageToken"] = page_token
+        page = service.users().messages().list(**request).execute()
+        if not isinstance(page, dict):
+            raise ValueError("gmail_page_unavailable")
+        refs = page.get("messages") or []
+        if not isinstance(refs, list):
+            raise ValueError("gmail_page_unavailable")
+        batch = refs[:remaining]
+        yield from batch
+        remaining -= len(batch)
+        next_token = page.get("nextPageToken")
+        if next_token is None or remaining == 0:
+            return
+        if not batch:
+            raise ValueError("gmail_page_unavailable")
+        if (not isinstance(next_token, str) or not next_token
+                or len(next_token) > 2000 or next_token in seen_tokens):
+            raise ValueError("gmail_page_unavailable")
+        seen_tokens.add(next_token)
+        page_token = next_token
+
+
 def _gmail_telegram_notice(sender: str, subject: str, result: dict) -> str:
     tasks = len(result.get("tasks", []))
     drafts = len(result.get("drafts", []))
@@ -166,10 +202,9 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
         raise HTTPException(409, "Mailbox cohort requires an explicit current-generation write flag")
     service = (google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
                if mailbox_runtime else google_workspace_for_project(project_id, db)).service("gmail", "v1")
-    page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
-    for ref in page.get("messages", []):
+    for ref in _gmail_message_refs(service, query=query, max_results=max_results):
         try:
             item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
             headers = _headers(item.get("payload", {}))
@@ -219,9 +254,12 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 # Older messages may have been synchronized before email fallback
                 # drafts existed. Backfill a reviewable draft without sending it
                 # and without changing the message's confirmed project context.
-                if existing.source_type == "email" and not bulk_reason and existing.status != "filtered" and not db.scalar(select(ResponseDraft.id).where(
+                if (existing.source_type == "email"
+                        and not bulk_reason and existing.status != "filtered"
+                        and existing.context_confirmed
+                        and not db.scalar(select(ResponseDraft.id).where(
                     ResponseDraft.message_id == existing.id,
-                )):
+                ))):
                     synthetic = StorageObject(
                         id=f"message:{existing.id}", name=existing.source_name,
                         mime_type="text/plain", parent_id="ai-secretary", content_text=existing.content,
