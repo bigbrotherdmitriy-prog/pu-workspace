@@ -17,6 +17,8 @@ log = logging.getLogger("pu.jobs.worker")
 
 
 def main() -> None:
+    from app.staging.ci_local_upload import install_ci_local_upload_runtime
+    install_ci_local_upload_runtime()
     # A configured label must not let a restarted process inherit an old lease.
     worker_id = f"{os.getenv('PU_WORKER_ID') or socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:12]}"
     poll_seconds = max(0.2, float(os.getenv("PU_JOB_POLL_SECONDS", "1")))

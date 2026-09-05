@@ -62,14 +62,20 @@ APP_VERSION = "1.0.3"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app.staging.ci_local_upload import install_ci_local_upload_runtime
+    install_ci_local_upload_runtime()
     db = SessionLocal()
     try:
         cleanup_expired_sessions(db)
     finally:
         db.close()
-    # Background work is executed by durable worker/scheduler services. Keeping
-    # API startup side-effect free allows multiple API processes to run safely.
-    yield
+    # Background work is executed by durable worker/scheduler services. The only
+    # startup composition here is guarded to the disposable Docker CI stack.
+    try:
+        yield
+    finally:
+        from app.local_upload_staging import configure_local_upload_runtime
+        configure_local_upload_runtime(None)
 
 
 app = FastAPI(
