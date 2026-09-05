@@ -28,6 +28,7 @@ def test_browser_smoke_uses_synthetic_input_and_blocks_external_integrations():
     assert "external_requests" in source
     assert 'route.abort("blockedbyclient")' in source
     assert "local-upload/analyze" in source
-    assert 'page.get_by_text("Документы"' in source
-    assert 'page.get_by_text("Задачи"' in source
-    assert 'page.get_by_text("Интеграции"' in source
+    assert 'page.locator("aside nav").get_by_role(' in source
+    for label in ("Документы", "Задачи", "Интеграции"):
+        assert f'"button", name="{label}", exact=True' in source
+        assert f'page.get_by_text("{label}", exact=True).first.click()' not in source
