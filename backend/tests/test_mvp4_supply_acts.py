@@ -23,6 +23,7 @@ from app.models.v54_pilot import (
     ConnectionIdentity,
     Evidence,
     EvidenceAssessment,
+    SourceCurrent,
     SourceReference,
     SourceVersion,
 )
@@ -161,6 +162,12 @@ def world():
             legacy_document_version_id=document_version.id,
         )
         db.add(source_version)
+        db.flush()
+        db.add(SourceCurrent(
+            organization_id=organization.id,
+            source_id=source.id,
+            version_id=source_version.id,
+        ))
         db.flush()
         evidence = Evidence(
             id=uid(4),
@@ -329,6 +336,7 @@ def test_router_exposes_complete_internal_supply_chain_without_mounting_main():
         "/api/mvp4/supply/{supply_case_id}/resolve-discrepancy",
         "/api/mvp4/supply/{supply_case_id}/acceptance-acts",
         "/api/mvp4/supply/{supply_case_id}/approve-acceptance-act",
+        "/api/mvp4/supply/{supply_case_id}/dds-proposals",
         "/api/mvp4/supply/{supply_case_id}/history",
     }
 
