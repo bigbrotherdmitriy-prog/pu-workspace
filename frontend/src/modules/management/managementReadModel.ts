@@ -369,6 +369,7 @@ export function parseMeetingProposalConfirmation(value: unknown): MeetingProposa
   const root = dictionary(value);
   if (!root || root.external_actions_created !== false) throw new Error("invalid_meeting_proposals");
   const proposals = parseMeetingProposalEnvelope({ ...root, proposals: [root.proposal] });
+  if (meetingProposalBlockReason(proposals[0])) throw new Error("invalid_meeting_confirmation");
   return proposals[0];
 }
 

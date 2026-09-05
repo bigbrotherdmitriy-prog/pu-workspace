@@ -67,3 +67,22 @@ Tests: [read model](../../frontend/src/modules/management/managementReadModel.te
 [panel](../../frontend/src/modules/management/ManagementPanels.test.tsx),
 [hook](../../frontend/src/modules/management/useManagementCenter.test.tsx),
 [real App render](../../frontend/src/modules/management/MeetingMinutesApp.test.tsx).
+
+## Corrective review: HTTP 200 is not confirmation authority
+
+Independent review found that a legacy-allowed proposal could POST successfully
+at the HTTP layer while its response envelope/row carried an explicit origin
+denial. The hook then incorrectly displayed success and replaced local proposal
+state. Four regression cases reproduced `saved` instead of `error`: envelope
+false, row false, unknown envelope origin, and invalid row origin even with true.
+
+`parseMeetingProposalConfirmation` now rejects a parsed blocked response with
+fixed `invalid_meeting_confirmation` before the hook's success branch. The hook
+retains the original proposal state, shows its existing safe format-error notice,
+and never displays raw origin reason or success. Legacy positive confirmation
+remains covered by the unchanged positive contract test. No retries or extra
+POSTs were added. Targeted read-model/hook run: **48 passed**; TypeScript check
+passed. Final full frontend: **26 files, 236 passed** (30.38 seconds).
+`git diff --check` passed. Build was not
+repeated for this one-line parser-only correction; prior build and fresh typecheck
+are recorded separately rather than claiming a fresh post-correction build.

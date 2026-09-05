@@ -80,6 +80,30 @@ describe("useManagementCenter", () => {
     expect(result.current.state.mutationState).toBe("error");
   });
 
+  it.each([
+    [{ confirmation_available: false }, {}],
+    [{}, { confirmation_available: false }],
+    [{ origin_status: "unknown_future", confirmation_available: true }, {}],
+    [{}, { origin_status: "invalid_source", confirmation_available: true }],
+  ])("does not claim success for a denied HTTP 200 confirmation %j %j", async (envelopeFlags, rowFlags) => {
+    const original = { kind: "task", entity_type: "obligation", entity_id: 9, record_version: 2,
+      status: "needs_confirmation", review_state: "needs_review", task_id: null };
+    const fetchMock = initialFetch()
+      .mockResolvedValueOnce(response({ proposals: [original], external_actions_created: false }))
+      .mockResolvedValueOnce(response({ proposal: { ...original, status: "confirmed", record_version: 3,
+        task_id: 12, ...rowFlags }, external_actions_created: false, ...envelopeFlags }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useManagementCenter(3));
+    await waitFor(() => expect(result.current.state.loadState).toBe("ready"));
+    await act(async () => result.current.proposeMeetingActions(5, []));
+    const before = result.current.state.proposals;
+    await act(async () => result.current.confirmMeetingProposal(before[0], true));
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(result.current.state.mutationState).toBe("error");
+    expect(result.current.state.mutationMessage).not.toContain("Предложение подтверждено");
+    expect(result.current.state.proposals).toEqual(before);
+  });
+
   it("fails closed when the server shape is incomplete", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ items: [], total: 0, generated_at: "bad", external_actions_created: false }))
