@@ -49,6 +49,9 @@ def run(kind: str, payload: dict) -> dict:
         from app.database import SessionLocal
         with SessionLocal() as db:
             return run_due_rules(db)
+    if kind == "mvp3.management_digest":
+        from app.mvp3.meeting_digest import run_digest_job
+        return run_digest_job(payload)
     raise ValueError(f"Unknown background job kind: {kind}")
 
 
