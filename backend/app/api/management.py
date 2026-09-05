@@ -8,14 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
-from app.governance_engine import create_governance_items
 from app.models.audit_log import AuditLog
 from app.models.governance import Decision, GovernanceHistory, Risk
 from app.models.management import Meeting, Notification, Obligation, ObligationHistory
 from app.models.organization_contract import Contract
 from app.models.user import User
-from app.organizer_engine.types import DriveFile
-from app.task_engine import create_tasks_from_files
 from app.mvp3.attention import attention_page
 from app.mvp3.lifecycle import ManagementConflict, ManagementDenied, ManagementLifecycle, normalized_task_state
 from app.mvp3.meeting_digest import (
@@ -394,16 +391,14 @@ def finish_meeting(meeting_id: int, payload: MeetingUpdate, db: Session = Depend
     require_project_role(db, user, item.project_id, "editor")
     item.minutes, item.status = payload.minutes.strip(), payload.status
     db.commit(); db.refresh(item)
-    tasks = []; risks = []; decisions = []
-    if payload.status == "completed":
-        source = DriveFile(id=f"meeting:{item.id}", name=f"Протокол: {item.title}", mime_type="text/plain",
-                           parent_id="meetings", content_text=item.minutes)
-        tasks = create_tasks_from_files(db, item.project_id, None, [source], source_type="meeting")
-        risks, decisions = create_governance_items(db, item.project_id, [source], source_type="meeting")
+    proposal_state = "awaiting_evidence" if payload.status == "completed" else "not_required"
     db.add(AuditLog(action="meeting_minutes_recorded", entity_type="meeting", entity_id=item.id,
-                    details=f"status={item.status}; tasks={len(tasks)}; risks={len(risks)}; decisions={len(decisions)}"))
+                    details=f"status={item.status}; proposal_state={proposal_state}; user={user.id}"))
     db.commit()
-    return {"id": item.id, "status": item.status, "tasks": len(tasks), "risks": len(risks), "decisions": len(decisions)}
+    # Minutes alone are not immutable evidence. Structured candidates must be
+    # submitted through the v2 evidence proposal endpoint and confirmed there.
+    return {"id": item.id, "status": item.status, "proposal_state": proposal_state,
+            "tasks": 0, "risks": 0, "decisions": 0}
 
 
 def _ensure_notification(db: Session, user_id: int, project_id: int, kind: str, title: str, body: str,

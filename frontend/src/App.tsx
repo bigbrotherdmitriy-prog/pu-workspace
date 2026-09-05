@@ -1919,7 +1919,9 @@ export function App() {
         body: JSON.stringify({ minutes, status: "completed" }),
       });
       setNotice(
-        `Протокол обработан: задач ${result.tasks}, рисков ${result.risks}, решений ${result.decisions}`,
+        result.proposal_state === "awaiting_evidence"
+          ? "Протокол сохранён. Проверьте предложения и доказательства перед созданием задач и решений."
+          : "Протокол сохранён.",
       );
       await Promise.all([load(), loadManagement()]);
     } catch (e) {
