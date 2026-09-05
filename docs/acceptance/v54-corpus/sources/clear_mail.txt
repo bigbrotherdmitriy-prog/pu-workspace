@@ -1,0 +1,8 @@
+From: lada@example.test
+To: intake@example.test
+Date: 2030-04-01T09:00:00+03:00
+Message-ID: <clear-001@example.test>
+Subject: Альфа-Макет — договор TEST-A-42
+
+По проекту «Альфа-Макет», договор TEST-A-42, просим передать комплект актов до 17 апреля 2030 года включительно.
+Приложение: specification.md.

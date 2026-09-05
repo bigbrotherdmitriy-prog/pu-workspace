@@ -1,7 +1,43 @@
 from datetime import timedelta
 
-from app.jobs.queue import claim, enqueue, fail, recover_expired, succeed, utcnow
+from app.jobs.queue import cancel, claim, enqueue, fail, metrics, recover_expired, request_cancel, retry, safe_error, succeed, update_cooperative_progress, utcnow
 from app.models.job import BackgroundJob
+from app.jobs.queue import execution_owner, heartbeat, set_progress
+import pytest
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "progress", "succeed", "fail"])
+def test_expired_owner_cannot_mutate_before_recovery(db_session, operation):
+    job = enqueue(db_session, "example", {})
+    claim(db_session, "stale")
+    job.lease_expires_at = utcnow() - timedelta(seconds=1)
+    db_session.commit()
+    actions = {
+        "heartbeat": lambda: heartbeat(db_session, job.id, "stale"),
+        "progress": lambda: set_progress(db_session, job.id, "stale", 90),
+        "succeed": lambda: succeed(db_session, job.id, "stale"),
+        "fail": lambda: fail(db_session, job.id, "stale", RuntimeError()),
+    }
+    result = actions[operation]()
+    assert result == "lost" if operation == "fail" else result is False
+
+
+def test_safe_error_never_persists_document_or_unlabelled_secret():
+    for error in (ValueError("PRIVATE DOCUMENT 9182"), TimeoutError("unlabelled-secret"), "PRIVATE DOCUMENT"):
+        assert safe_error(error) in {"ValueError", "TimeoutError", "JobError"}
+
+
+def test_stale_cooperative_handler_cannot_update_new_owners_progress(db_session):
+    job = enqueue(db_session, "example", {})
+    claim(db_session, "old")
+    job.lease_expires_at = utcnow() - timedelta(seconds=1)
+    db_session.commit()
+    recover_expired(db_session)
+    claim(db_session, "new")
+    with execution_owner(job.id, "old"):
+        assert update_cooperative_progress(db_session, job.id, 90) == (False, True)
+    with execution_owner(job.id, "new"):
+        assert update_cooperative_progress(db_session, job.id, 30) == (True, False)
 
 
 def test_job_is_durable_idempotent_and_claimed(db_session):
@@ -13,13 +49,16 @@ def test_job_is_durable_idempotent_and_claimed(db_session):
     assert job.status == "running"
     assert job.attempts == 1
     assert succeed(db_session, job.id, "worker-1", {"ok": True})
-    assert db_session.get(BackgroundJob, job.id).status == "succeeded"
+    completed = db_session.get(BackgroundJob, job.id)
+    assert completed.status == "completed"
+    assert completed.progress == 100
+    assert completed.duration_ms is not None
 
 
 def test_failed_job_retries_then_enters_dead_letter(db_session):
     job = enqueue(db_session, "example", {}, max_attempts=2)
     claimed = claim(db_session, "worker-1")
-    assert fail(db_session, claimed.id, "worker-1", "temporary") == "queued"
+    assert fail(db_session, claimed.id, "worker-1", "temporary") == "retrying"
     claimed = db_session.get(BackgroundJob, job.id)
     claimed.available_at = utcnow() - timedelta(seconds=1)
     db_session.commit()
@@ -33,4 +72,50 @@ def test_expired_lease_is_recovered(db_session):
     claimed.lease_expires_at = utcnow() - timedelta(seconds=1)
     db_session.commit()
     assert recover_expired(db_session) == 1
-    assert db_session.get(BackgroundJob, job.id).status == "queued"
+    assert db_session.get(BackgroundJob, job.id).status == "retrying"
+
+
+def test_operator_cancel_retry_and_redrive(db_session):
+    queued = enqueue(db_session, "example", {})
+    assert cancel(db_session, queued.id)
+    assert claim(db_session, "worker") is None
+
+    failed = enqueue(db_session, "example", {})
+    claimed = claim(db_session, "worker")
+    assert fail(db_session, claimed.id, "worker", ValueError("invalid"), retryable=False) == "failed"
+    assert retry(db_session, failed.id)
+
+    dead = enqueue(db_session, "example", {}, max_attempts=1)
+    # The retried failed job is older and is claimed first.
+    claimed = claim(db_session, "worker")
+    assert succeed(db_session, claimed.id, "worker")
+    claimed = claim(db_session, "worker")
+    assert claimed.id == dead.id
+    assert fail(db_session, dead.id, "worker", RuntimeError("boom")) == "dead_letter"
+    assert retry(db_session, dead.id, redrive=True)
+    assert db_session.get(BackgroundJob, dead.id).attempts == 0
+
+
+def test_metrics_and_error_redaction(db_session):
+    enqueue(db_session, "example", {})
+    snapshot = metrics(db_session)
+    assert snapshot["queue_length"] == 1
+    assert snapshot["oldest_job_age_seconds"] >= 0
+    redacted = safe_error(ValueError("token=abc https://private.example/document"))
+    assert "abc" not in redacted
+    assert "private.example" not in redacted
+
+
+def test_running_job_cooperative_cancel_uses_queue_contract(db_session):
+    job = enqueue(db_session, "documents.ocr", {"project_id": 1})
+    claimed = claim(db_session, "ocr-worker")
+    assert request_cancel(db_session, job.id, allow_running=True) == "cancellation_requested"
+    updated, requested = update_cooperative_progress(
+        db_session, job.id, 40, {"completed": 2, "total": 5, "percent": 40},
+    )
+    assert updated and requested
+    assert succeed(db_session, claimed.id, "ocr-worker", {"cancelled": True})
+    cancelled = db_session.get(BackgroundJob, job.id)
+    assert cancelled.status == "cancelled"
+    assert cancelled.cancelled_at is not None
+    assert cancelled.progress < 100

@@ -13,11 +13,13 @@ from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.integrations.external_resources import external_id_for
 from app.integrations.actions import configured_action_adapter, publish_actions
+from app.api.management import _locked_versioned, append_management_history
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 class TaskUpdate(BaseModel):
+    expected_record_version: int = Field(default=1, ge=1)
     status: str | None = Field(default=None, pattern="^(assigned|in_progress|completed|cancelled)$")
     due_date: date | None = None
     due_change_reason: str | None = Field(default=None, max_length=2000)
@@ -27,6 +29,7 @@ class TaskUpdate(BaseModel):
 
 
 class ExternalActionApproval(BaseModel):
+    expected_record_version: int = Field(default=1, ge=1)
     publish_task: bool = Field(
         default=True,
         validation_alias=AliasChoices("publish_task", "create_google_task"),
@@ -38,13 +41,20 @@ class ExternalActionApproval(BaseModel):
 
 
 @router.get("")
-def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+               status: str | None = None, cursor: int | None = None, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
+    if not 1 <= limit <= 200:
+        raise HTTPException(422, "limit must be between 1 and 200")
     action_provider = configured_action_adapter(project_id, db).provider
-    rows = db.execute(
+    query = (
         select(Task, User).join(User, User.id == Task.assignee_user_id)
-        .where(Task.project_id == project_id).order_by(Task.created_at.desc(), Task.id.desc())
-    ).all()
+        .where(Task.project_id == project_id)
+    )
+    if status: query = query.where(Task.status == status)
+    if cursor is not None: query = query.where(Task.id < cursor)
+    rows = db.execute(query.order_by(Task.id.desc()).limit(limit + 1)).all()
+    has_more = len(rows) > limit; rows = rows[:limit]
     result = []
     for task, assignee in rows:
         external_task_id = external_id_for(
@@ -56,7 +66,7 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
             resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
         )
         result.append({
-            "id": task.id, "title": task.title, "status": task.status, "priority": task.priority,
+            "id": task.id, "record_version": task.record_version, "title": task.title, "status": task.status, "priority": task.priority,
             "description": task.description,
             "due_date": task.due_date, "assignee_user_id": task.assignee_user_id,
             "assignee_name": assignee.name, "assignee_email": assignee.email,
@@ -74,15 +84,17 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
             "completion_document_id": task.completion_document_id,
             "completion_document_name": db.get(Document, task.completion_document_id).name if task.completion_document_id and db.get(Document, task.completion_document_id) else None,
         })
-    return {"tasks": result, "count": len(rows)}
+    return {"tasks": result, "count": len(rows),
+            "next_cursor": rows[-1][0].id if has_more and rows else None}
 
 
 @router.patch("/{task_id}")
 def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    task = db.get(Task, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
+    task = _locked_versioned(db, Task, task_id, payload.expected_record_version, "Task")
     require_project_role(db, user, task.project_id, "editor")
+    old_snapshot = {"status": task.status, "due_date": task.due_date,
+                    "assignee_user_id": task.assignee_user_id, "result_note": task.result_note,
+                    "completion_document_id": task.completion_document_id}
     old_status = task.status
     old_due_date = task.due_date
     old_assignee_user_id = task.assignee_user_id
@@ -121,6 +133,7 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
         changed = changed or payload.completion_document_id != task.completion_document_id
         task.completion_document_id = payload.completion_document_id
     if changed:
+        task.record_version += 1
         details = []
         if old_due_date != task.due_date:
             details.append(f"Срок: {old_due_date or 'не задан'} → {task.due_date or 'не задан'}")
@@ -139,10 +152,22 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
         ))
         db.add(AuditLog(action="task_updated", entity_type="task", entity_id=task.id,
                         details=f"user={user.id}; status={old_status}->{task.status}; completion_document_id={task.completion_document_id}"))
+        append_management_history(
+            db, project_id=task.project_id, entity_type="task", entity_id=task.id,
+            record_version=task.record_version, action="updated", actor_user_id=user.id,
+            old_values=old_snapshot,
+            new_values={"status": task.status, "due_date": task.due_date,
+                        "assignee_user_id": task.assignee_user_id, "result_note": task.result_note,
+                        "completion_document_id": task.completion_document_id},
+            evidence={"source_file_id": task.source_file_id,
+                      "source_excerpt_hash": task.source_excerpt_hash,
+                      "completion_document_id": task.completion_document_id},
+            reason=payload.due_change_reason or task.result_note,
+        )
     db.commit(); db.refresh(task)
     if task.external_action_status == "executed":
         publish_actions(configured_action_adapter(task.project_id, db), [task], force_update=True)
-    return {"id": task.id, "status": task.status, "due_date": task.due_date, "result_note": task.result_note,
+    return {"id": task.id, "record_version": task.record_version, "status": task.status, "due_date": task.due_date, "result_note": task.result_note,
             "completion_document_id": task.completion_document_id, "completed_at": task.completed_at,
             "assignee_user_id": task.assignee_user_id}
 
@@ -203,15 +228,23 @@ def sync_google(project_id: int, db: Session = Depends(get_db), user: User = Dep
 
 @router.post("/{task_id}/approve-external")
 def approve_external(task_id: int, payload: ExternalActionApproval, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    task = db.get(Task, task_id)
-    if task is None:
-        raise HTTPException(404, "Task not found")
+    task = _locked_versioned(db, Task, task_id, payload.expected_record_version, "Task")
     require_project_role(db, user, task.project_id, "manager")
     if not payload.publish_task and not payload.publish_calendar:
         raise HTTPException(422, "Select at least one external action")
+    old_external_status = task.external_action_status
     if task.message_id is not None and task.needs_review:
         task.needs_review = False
     task.external_action_status = "approved"
+    task.record_version += 1
+    append_management_history(
+        db, project_id=task.project_id, entity_type="task", entity_id=task.id,
+        record_version=task.record_version, action="external_action_approved", actor_user_id=user.id,
+        old_values={"external_action_status": old_external_status},
+        new_values={"external_action_status": task.external_action_status},
+        evidence={"source_file_id": task.source_file_id, "source_excerpt_hash": task.source_excerpt_hash},
+        reason="Пользователь подтвердил внешнее действие",
+    )
     db.commit()
     adapter = configured_action_adapter(task.project_id, db)
     result = publish_actions(
@@ -232,11 +265,22 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
     success = (not payload.publish_task or task_synced == 1 or bool(external_task_id)) and (
         not payload.publish_calendar or not task.due_date or calendar_synced == 1 or bool(external_calendar_id)
     )
+    previous_external_status = task.external_action_status
     task.external_action_status = "executed" if success else "failed"
+    task.record_version += 1
+    append_management_history(
+        db, project_id=task.project_id, entity_type="task", entity_id=task.id,
+        record_version=task.record_version, action="external_action_finished", actor_user_id=user.id,
+        old_values={"external_action_status": previous_external_status},
+        new_values={"external_action_status": task.external_action_status},
+        evidence={"provider": adapter.provider, "external_task_id": external_task_id,
+                  "external_calendar_id": external_calendar_id},
+        reason="Внешнее действие выполнено" if success else "Ошибка внешнего действия",
+    )
     db.add(AuditLog(action="external_task_action", entity_type="task", entity_id=task.id,
                     details=f"provider={adapter.provider}; task={task_synced}; calendar={calendar_synced}; success={success}"))
     db.commit(); db.refresh(task)
-    return {"id": task.id, "provider": adapter.provider,
+    return {"id": task.id, "record_version": task.record_version, "provider": adapter.provider,
             "external_action_status": task.external_action_status,
             "google_task_id": external_task_id, "google_calendar_event_id": external_calendar_id,
             "external_resources": [

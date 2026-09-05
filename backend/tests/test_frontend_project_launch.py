@@ -12,7 +12,7 @@ def test_project_launch_is_a_separate_frontend_module():
     assert '[Route, "Запуск проекта"]' in app
     assert 'active === "Запуск проекта"' in app
     assert 'active === "Рабочий центр" || showSources ? (' in app
-    assert 'onSelectFolder={() => void openSources("root")}' in app
+    assert 'onSelectFolder={(provider) => void openProviderSources(provider)}' in app
     assert 'setActive("Рабочий центр"); void openSources("root")' not in app
     assert "openSources(sourceFolderId);" in app
     assert "Проект и рабочая папка" in wizard
@@ -22,7 +22,8 @@ def test_project_launch_is_a_separate_frontend_module():
     assert 'target: "source"' in wizard
     assert 'target === "contacts"' in app
     assert 'target === "source"' in app
-    assert 'openSources("root")' in app
+    assert 'if (target === "source") void openSources();' in app
+    assert 'openSources("root")' not in app  # Restore the saved folder, not account root.
     assert 'setMailView("companies")' in app
     assert "Создать или импортировать ГПР для договора" in wizard
     assert "Добавить бюджет и связать его с договором" in wizard

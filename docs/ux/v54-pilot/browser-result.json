@@ -1,0 +1,19 @@
+{
+  "browser": "Chromium",
+  "desktop": "1440x1100",
+  "mobile": "390x844",
+  "checks": [
+    "separate decisions",
+    "create/receipt/cancel",
+    "reload running",
+    "late context reply",
+    "reload selected project",
+    "four evidence denials",
+    "unknown != completed",
+    "revoke/expiry/409",
+    "Escape/focus/Tab",
+    "mobile overflow"
+  ],
+  "pageErrors": [],
+  "externalRequests": []
+}

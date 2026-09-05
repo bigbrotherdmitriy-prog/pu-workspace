@@ -26,11 +26,16 @@ from app.api.analytics import router as analytics_router
 from app.api.integrations import router as integrations_router
 from app.api.project_contacts import router as project_contacts_router
 from app.api.mail import router as mail_router
+from app.api.jobs import router as jobs_router
+from app.api.evidence import router as evidence_router
+from app.api.autonomy_policy import router as autonomy_policy_router
+from app.api.v54_sandbox_acceptance import router as v54_sandbox_acceptance_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
 from app.api.drive import router as drive_router
 from app.api.google_drive import router as google_drive_router
+from app.api.yandex_disk import router as yandex_disk_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
 from app.models import (
@@ -46,6 +51,10 @@ from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
 from app.core.observability import observe_request
+from app.integrations.contracts import (
+    StorageAccessDenied, StorageCredentialsExpired, StorageQuotaExceeded,
+    StorageRateLimited, StorageUnavailable,
+)
 
 
 APP_VERSION = "1.0.3"
@@ -53,14 +62,20 @@ APP_VERSION = "1.0.3"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app.staging.ci_local_upload import install_ci_local_upload_runtime
+    install_ci_local_upload_runtime()
     db = SessionLocal()
     try:
         cleanup_expired_sessions(db)
     finally:
         db.close()
-    # Background work is executed by durable worker/scheduler services. Keeping
-    # API startup side-effect free allows multiple API processes to run safely.
-    yield
+    # Background work is executed by durable worker/scheduler services. The only
+    # startup composition here is guarded to the disposable Docker CI stack.
+    try:
+        yield
+    finally:
+        from app.local_upload_staging import configure_local_upload_runtime
+        configure_local_upload_runtime(None)
 
 
 app = FastAPI(
@@ -70,6 +85,31 @@ app = FastAPI(
 )
 
 app.middleware("http")(observe_request)
+
+
+@app.exception_handler(StorageCredentialsExpired)
+async def storage_credentials_expired_handler(_: Request, exc: StorageCredentialsExpired):
+    return JSONResponse({"detail": str(exc)}, status_code=401)
+
+
+@app.exception_handler(StorageAccessDenied)
+async def storage_access_denied_handler(_: Request, exc: StorageAccessDenied):
+    return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
+@app.exception_handler(StorageRateLimited)
+async def storage_rate_limited_handler(_: Request, exc: StorageRateLimited):
+    return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": "30"})
+
+
+@app.exception_handler(StorageQuotaExceeded)
+async def storage_quota_handler(_: Request, exc: StorageQuotaExceeded):
+    return JSONResponse({"detail": str(exc)}, status_code=507)
+
+
+@app.exception_handler(StorageUnavailable)
+async def storage_unavailable_handler(_: Request, exc: StorageUnavailable):
+    return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
 @app.middleware("http")
@@ -109,7 +149,12 @@ app.include_router(analytics_router)
 app.include_router(integrations_router)
 app.include_router(project_contacts_router)
 app.include_router(mail_router)
+app.include_router(jobs_router)
+app.include_router(evidence_router)
+app.include_router(autonomy_policy_router)
+app.include_router(v54_sandbox_acceptance_router)
 app.include_router(google_drive_router)
+app.include_router(yandex_disk_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)
 app.include_router(telegram_router)

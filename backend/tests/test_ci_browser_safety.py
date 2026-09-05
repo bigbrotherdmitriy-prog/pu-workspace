@@ -28,6 +28,8 @@ def test_browser_smoke_uses_synthetic_input_and_blocks_external_integrations():
     assert "external_requests" in source
     assert 'route.abort("blockedbyclient")' in source
     assert "local-upload/analyze" in source
+    assert "wait_for_jobs(page, base, job_ids)" in source
+    assert "/admin/jobs?limit=100" in source
     assert 'page.get_by_text("Документы"' in source
     assert 'page.get_by_text("Задачи"' in source
     assert 'page.get_by_text("Интеграции"' in source

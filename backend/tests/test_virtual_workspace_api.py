@@ -12,11 +12,11 @@ from app.api.workspace import (
 
 def test_virtual_snapshot_routes_are_exposed():
     paths = {route.path for route in router.routes}
-    assert "/projects/{project_id}/source-folders/{external_id}/snapshots" in paths
+    assert "/projects/{project_id}/source-folders/{external_id:path}/snapshots" in paths
     assert "/projects/{project_id}/source-folders/discover" in paths
-    assert "/projects/{project_id}/source-folders/{external_id}/snapshot-queue" in paths
+    assert "/projects/{project_id}/source-folders/{external_id:path}/snapshot-queue" in paths
     assert "/projects/{project_id}/source-folders/snapshot-queue-all" in paths
-    assert "/projects/{project_id}/source-folders/{external_id}/primary" in paths
+    assert "/projects/{project_id}/source-folders/{external_id:path}/primary" in paths
     assert "/projects/{project_id}/snapshots/{snapshot_id}/analyze" in paths
     assert "/projects/{project_id}/snapshots/{snapshot_id}/standardize" in paths
     assert "/projects/{project_id}/managed-workspace" in paths
@@ -34,11 +34,11 @@ def test_snapshot_analysis_is_explicitly_read_only_in_contract():
     assert "no Drive copy or mutation" in (route.endpoint.__doc__ or "")
 
 
-def test_connected_folder_automatically_starts_safe_copy_pipeline():
+def test_connected_folder_snapshot_does_not_automatically_create_safe_copy():
     source = inspect.getsource(_build_snapshot)
-    assert "_start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)" in source
-    pipeline = inspect.getsource(_run_safe_copy_pipeline)
-    assert "auto_apply=True" in pipeline
+    assert "_start_safe_copy_pipeline(snapshot_id, project_id, external_id, source_name)" not in source
+    standardize = next(route.endpoint for route in router.routes if route.path.endswith("/snapshots/{snapshot_id}/standardize"))
+    assert "Create and organize a safe Drive copy" in (standardize.__doc__ or "")
 
 
 def test_safe_copy_recovery_is_not_started_by_legacy_virtual_analyzer():

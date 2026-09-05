@@ -2,6 +2,7 @@ import { Bell } from "lucide-react";
 
 export type NotificationItem = {
   id: number;
+  record_version: number;
   kind: string;
   title: string;
   body: string;

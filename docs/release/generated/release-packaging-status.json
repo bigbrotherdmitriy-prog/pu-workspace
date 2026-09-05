@@ -1,0 +1,56 @@
+{
+  "schema": "pu-workspace-release-packaging-status/v1",
+  "candidate_commit": "8ccc194bc834328e51a73225981f74d81775789a",
+  "candidate_tree": "c5b5a3c4fa7898c49ca54474de62b83308925575",
+  "dependency_inputs": {
+    "hash_mode": "UTF-8 with LF normalization",
+    "backend_requirements_canonical_lf_sha256": "8409d1f7417fa926c79099349267e47f55fb3cd9904b8f409147b6dd7dc83242",
+    "frontend_lock_canonical_lf_sha256": "e674989d943685fb171b36f1d8a0b005a98e089f23dd68cfc58e1e9190445b1e",
+    "compose_canonical_lf_sha256": "07c9b347a6497d8a33eb08ca8a59c9c1a69c6d592eb9e4a32a175ac063546ea3",
+    "backend_dockerfile_canonical_lf_sha256": "757bdeaac3de692c68df7aa9a62561e2a92bb0b9d3541952ee79806e800aaf9f"
+  },
+  "evidence": {
+    "hash_mode": "UTF-8 with LF normalization",
+    "license_evidence_canonical_lf_sha256": "999e8481932c35fdb43f69789010d4975091378920c1cd1892cfc700062f436c",
+    "package_notice_index_canonical_lf_sha256": "5c5bf4eb54582d6015f08bc5d8027e926eea5c2ce8ac9b39a15e7c0841f9dbea"
+  },
+  "gates": [
+    {
+      "id": "registry-license-metadata",
+      "status": "PASS_WITH_UNRESOLVED",
+      "detail": "229 of 239 declarations evidenced; 10 remain explicitly unresolved"
+    },
+    {
+      "id": "source-secret-pii-scan",
+      "status": "BLOCKED",
+      "detail": "client-like example remains in frontend/src/modules/contracts/ContractDocumentPicker.tsx"
+    },
+    {
+      "id": "python-transitive-lock",
+      "status": "REQUIRES_LINUX_RUNTIME",
+      "detail": "generator and fail-closed contract ready; accepted Linux report not yet produced"
+    },
+    {
+      "id": "container-digest-layer-apt",
+      "status": "REQUIRES_RUNTIME_CAPTURE",
+      "detail": "capture/validation contract ready; exact built image evidence not yet produced"
+    },
+    {
+      "id": "package-license-texts",
+      "status": "PARTIAL",
+      "detail": "package-specific metadata provenance index exists; upstream text bundle is not complete"
+    },
+    {
+      "id": "right-holder",
+      "status": "REQUIRES_OWNER",
+      "detail": "name, year and distribution model are unresolved"
+    },
+    {
+      "id": "legal-conclusion",
+      "status": "REQUIRES_COUNSEL",
+      "detail": "licenseConcluded and distribution obligations are unresolved"
+    }
+  ],
+  "overall_status": "BLOCKED",
+  "legal_effect": "technical evidence only; not a legal conclusion"
+}

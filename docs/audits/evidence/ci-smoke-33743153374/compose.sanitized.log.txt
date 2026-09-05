@@ -1,0 +1,85 @@
+Allowlisted log events only; unrecognized text omitted.
+line=33 database system is ready to accept connections
+line=95 Application startup complete
+line=98 http_status=200
+line=100 http_status=200
+line=102 http_status=200
+line=104 http_status=200
+line=106 http_status=401
+line=129 database system is ready to accept connections
+line=131 http_status=200
+line=133 http_status=200
+line=135 http_status=200
+line=137 http_status=200
+line=139 http_status=200
+line=141 http_status=200
+line=143 http_status=200
+line=145 http_status=401
+line=147 http_status=200
+line=149 http_status=200
+line=151 http_status=200
+line=153 http_status=401
+line=155 http_status=409
+line=1116 Running upgrade
+line=1117 Running upgrade
+line=1118 Running upgrade
+line=1119 Running upgrade
+line=1120 Running upgrade
+line=1121 Running upgrade
+line=1122 Running upgrade
+line=1123 Running upgrade
+line=1124 Running upgrade
+line=1125 Running upgrade
+line=1126 Running upgrade
+line=1127 Running upgrade
+line=1128 Running upgrade
+line=1129 Running upgrade
+line=1130 Running upgrade
+line=1131 Running upgrade
+line=1132 Running upgrade
+line=1133 Running upgrade
+line=1134 Running upgrade
+line=1135 Running upgrade
+line=1136 Running upgrade
+line=1137 Running upgrade
+line=1138 Running upgrade
+line=1139 Running upgrade
+line=1140 Running upgrade
+line=1141 Running upgrade
+line=1142 Running upgrade
+line=1143 Running upgrade
+line=1144 Running upgrade
+line=1145 Running upgrade
+line=1146 Running upgrade
+line=1147 Running upgrade
+line=1148 Running upgrade
+line=1149 Running upgrade
+line=1150 Running upgrade
+line=1151 Running upgrade
+line=1152 Running upgrade
+line=1153 Running upgrade
+line=1154 Running upgrade
+line=1155 Running upgrade
+line=1156 Running upgrade
+line=1157 Running upgrade
+line=1158 Running upgrade
+line=1159 Running upgrade
+line=1164 CI_READINESS_OK
+line=1165 PASS step=health http=200
+line=1166 PASS step=release http=200
+line=1167 PASS step=readiness http=200
+line=1168 PASS step=anonymous http=401
+line=1169 PASS step=bootstrap http=200
+line=1170 PASS step=authenticated http=200
+line=1171 PASS step=organization-create http=200
+line=1172 PASS step=project-create http=200
+line=1173 PASS step=project-read http=200
+line=1174 PASS step=project-list http=200
+line=1175 PASS step=logout http=200
+line=1176 PASS step=after-logout http=401
+line=1177 PASS smoke-api
+line=1178 PASS step=health http=200
+line=1179 PASS step=release http=200
+line=1180 PASS step=readiness http=200
+line=1181 PASS step=anonymous http=401
+line=1182 FAIL step=bootstrap http=409

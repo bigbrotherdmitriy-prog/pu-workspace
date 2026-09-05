@@ -1,0 +1,96 @@
+name: v5.4 isolated live-provider acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute_live_sandbox:
+        description: Run one sink-only effect in the protected ephemeral test environment
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v54-live-provider-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: v54-live-provider-sandbox
+    env:
+      PUW_V54_LIVE_PROVIDER_ENABLE: ${{ inputs.execute_live_sandbox && 'I_ACKNOWLEDGE_EPHEMERAL_SINK_ONLY_EFFECT' || 'DISABLED' }}
+      PUW_V54_LIVE_PROVIDER_BASE_URL: ${{ secrets.PUW_V54_LIVE_PROVIDER_BASE_URL }}
+      PUW_V54_LIVE_PROVIDER_TOKEN: ${{ secrets.PUW_V54_LIVE_PROVIDER_TOKEN }}
+      PUW_V54_LIVE_PROVIDER_ACCOUNT_FINGERPRINT: ${{ secrets.PUW_V54_LIVE_PROVIDER_ACCOUNT_FINGERPRINT }}
+      PUW_V54_LIVE_PROVIDER_EXPECTED_HOST_SHA256: ${{ secrets.PUW_V54_LIVE_PROVIDER_EXPECTED_HOST_SHA256 }}
+      PUW_V54_LIVE_PROVIDER_DISPATCH_TIMEOUT: '2'
+      PUW_V54_LIVE_PROVIDER_LOOKUP_ATTEMPTS: '8'
+      PUW_V54_LIVE_PROVIDER_LOOKUP_DELAY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run default-off sink acceptance gate
+        id: gate
+        continue-on-error: true
+        run: python scripts/ci/v54_live_provider_gate.py
+
+      - name: Verify safe result contract
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("v54-live-provider-artifacts/protocol.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          assert set(data) == {
+              "schema", "status", "reason_code", "provider_scope",
+              "dispatch_attempts", "lookup_attempts", "observed_effects",
+              "timeout_after_effect_observed", "reconciliation", "cleanup",
+              "raw_output_published",
+          }
+          assert data["schema"] == "puw.v54.live-provider.protocol.v1"
+          assert data["raw_output_published"] is False
+          encoded = json.dumps(data, sort_keys=True)
+          secret_names = (
+              "PUW_V54_LIVE_PROVIDER_BASE_URL",
+              "PUW_V54_LIVE_PROVIDER_TOKEN",
+              "PUW_V54_LIVE_PROVIDER_ACCOUNT_FINGERPRINT",
+              "PUW_V54_LIVE_PROVIDER_EXPECTED_HOST_SHA256",
+          )
+          for name in secret_names:
+              value = os.environ.get(name, "")
+              if value:
+                  assert value not in encoded
+          enabled = os.environ.get("PUW_V54_LIVE_PROVIDER_ENABLE", "") == (
+              "I_ACKNOWLEDGE_EPHEMERAL_SINK_ONLY_EFFECT"
+          )
+          configured = all(os.environ.get(name, "") for name in secret_names)
+          if enabled and configured:
+              assert data["status"] == "PASS"
+              assert data["observed_effects"] == 1
+              assert data["dispatch_attempts"] == 1
+              assert data["reconciliation"] == "PASS"
+              assert data["cleanup"] == "PASS"
+          else:
+              assert data["status"] == "NOT_RUN"
+              assert data["observed_effects"] == 0
+              assert data["cleanup"] == "NOT_RUN"
+          PY
+
+      - name: Publish content-free protocol
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v54-live-provider-${{ github.run_id }}-${{ github.run_attempt }}
+          path: v54-live-provider-artifacts/protocol.json
+          if-no-files-found: error
+          retention-days: 7

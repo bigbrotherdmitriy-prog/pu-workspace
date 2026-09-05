@@ -1,0 +1,326 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "comment": "License fields marked NOASSERTION must be resolved and reviewed before sale.",
+  "creationInfo": {
+    "created": "1970-01-01T00:00:00Z",
+    "creators": [
+      "Tool: scripts/legal_release_kit.py"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://pu-workspace.invalid/spdx/8409d1f7417fa926c79099349267e47f55fb3cd9904b8f409147b6dd7dc83242-backend",
+  "name": "PU Workspace backend",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-1",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/alembic/1.16.5/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/alembic@1.16.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "alembic",
+      "versionInfo": "1.16.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-2",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/cryptography/45.0.6/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/cryptography@45.0.6",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0 OR BSD-3-Clause",
+      "name": "cryptography",
+      "versionInfo": "45.0.6"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-3",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/fastapi/0.116.1/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/fastapi@0.116.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "fastapi",
+      "versionInfo": "0.116.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-4",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/google-api-python-client/2.179.0/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/google-api-python-client@2.179.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "google-api-python-client",
+      "versionInfo": "2.179.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-5",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/google-auth/2.40.3/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/google-auth@2.40.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "google-auth",
+      "versionInfo": "2.40.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-6",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/google-auth-oauthlib/1.2.2/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/google-auth-oauthlib@1.2.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "google-auth-oauthlib",
+      "versionInfo": "1.2.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-7",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/httpx/0.28.1/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/httpx@0.28.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "httpx",
+      "versionInfo": "0.28.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-8",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/Pillow/11.3.0/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/pillow@11.3.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT-CMU",
+      "name": "Pillow",
+      "versionInfo": "11.3.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-9",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/psycopg/3.2.9/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/psycopg@3.2.9",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "LGPL-3.0-only",
+      "name": "psycopg",
+      "versionInfo": "3.2.9"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-10",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/pypdf/6.0.0/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/pypdf@6.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "pypdf",
+      "versionInfo": "6.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-11",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/pytest/8.4.1/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/pytest@8.4.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "pytest",
+      "versionInfo": "8.4.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-12",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/SQLAlchemy/2.0.43/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/sqlalchemy@2.0.43",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "SQLAlchemy",
+      "versionInfo": "2.0.43"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-13",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://pypi.org/pypi/uvicorn/0.35.0/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/uvicorn@0.35.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "uvicorn",
+      "versionInfo": "0.35.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-14",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=unresolved; reason=PyPI metadata has no usable license expression/classifier; evidence=https://pypi.org/pypi/xlrd/2.0.2/json",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:pypi/xlrd@2.0.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "xlrd",
+      "versionInfo": "2.0.2"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-1",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-2",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-3",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-4",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-5",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-6",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-7",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-8",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-9",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-10",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-11",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-12",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-13",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-14",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

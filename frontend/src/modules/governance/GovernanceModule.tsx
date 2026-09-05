@@ -1,5 +1,6 @@
 export type RiskRow = {
   id: number;
+  record_version?: number;
   title: string;
   kind: string;
   criticality: string;
@@ -11,6 +12,7 @@ export type RiskRow = {
 
 export type DecisionRow = {
   id: number;
+  record_version?: number;
   question: string;
   status: string;
   decision_text?: string;

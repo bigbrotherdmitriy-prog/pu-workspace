@@ -28,6 +28,13 @@ policy, and AI use is governed by the project's `ProjectAIPolicy`.
 
 Google account credentials are resolved by `GoogleWorkspaceAdapter`, shared by
 Drive, Gmail, Tasks and Calendar. `DriveClient` is the first `StorageAdapter`.
+
+`YandexDiskStorageAdapter` is the second storage implementation. Project Core
+resolves the selected adapter through `storage_for_project`; it stores only the
+provider, connection reference, root locator/display name and synchronization
+settings. Legacy Google credentials remain in `google_oauth_tokens`, while new
+providers use encrypted `integration_credentials`. No provider branch is
+allowed in Project or Document Core.
 The old API credential function remains only as a compatibility facade.
 Telegram delivery is implemented by `TelegramChannelAdapter`; the old Core
 notification module only re-exports compatibility functions.

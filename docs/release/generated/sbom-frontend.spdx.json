@@ -1,0 +1,4770 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "comment": "License fields marked NOASSERTION must be resolved and reviewed before sale.",
+  "creationInfo": {
+    "created": "1970-01-01T00:00:00Z",
+    "creators": [
+      "Tool: scripts/legal_release_kit.py"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://pu-workspace.invalid/spdx/e674989d943685fb171b36f1d8a0b005a98e089f23dd68cfc58e1e9190445b1e-frontend",
+  "name": "PU Workspace frontend",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-1",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40adobe%2Fcss-tools/4.5.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40adobe/css-tools@4.5.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@adobe/css-tools",
+      "versionInfo": "4.5.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-2",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40asamuzakjp%2Fcss-color/3.2.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40asamuzakjp/css-color@3.2.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@asamuzakjp/css-color",
+      "versionInfo": "3.2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-3",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fcode-frame/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/code-frame@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/code-frame",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-4",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fcompat-data/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/compat-data@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/compat-data",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-5",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fcore/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/core@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/core",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-6",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fgenerator/7.29.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/generator@7.29.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/generator",
+      "versionInfo": "7.29.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-7",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-compilation-targets/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-compilation-targets@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-compilation-targets",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-8",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-globals/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-globals@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-globals",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-9",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-module-imports/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-module-imports@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-module-imports",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-10",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-module-transforms/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-module-transforms@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-module-transforms",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-11",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-plugin-utils/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-plugin-utils@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-plugin-utils",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-12",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-string-parser/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-string-parser@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-string-parser",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-13",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-validator-identifier/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-validator-identifier@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-validator-identifier",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-14",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelper-validator-option/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helper-validator-option@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helper-validator-option",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-15",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fhelpers/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/helpers@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/helpers",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-16",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fparser/7.29.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/parser@7.29.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/parser",
+      "versionInfo": "7.29.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-17",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fplugin-transform-react-jsx-self/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/plugin-transform-react-jsx-self@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/plugin-transform-react-jsx-self",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-18",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fplugin-transform-react-jsx-source/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/plugin-transform-react-jsx-source@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/plugin-transform-react-jsx-source",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-19",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Fruntime/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/runtime@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/runtime",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-20",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Ftemplate/7.29.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/template@7.29.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/template",
+      "versionInfo": "7.29.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-21",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Ftraverse/7.29.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/traverse@7.29.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/traverse",
+      "versionInfo": "7.29.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-22",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40babel%2Ftypes/7.29.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40babel/types@7.29.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@babel/types",
+      "versionInfo": "7.29.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-23",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40csstools%2Fcolor-helpers/5.1.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40csstools/color-helpers@5.1.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT-0",
+      "name": "@csstools/color-helpers",
+      "versionInfo": "5.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-24",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40csstools%2Fcss-calc/2.1.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40csstools/css-calc@2.1.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@csstools/css-calc",
+      "versionInfo": "2.1.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-25",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40csstools%2Fcss-color-parser/3.1.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40csstools/css-color-parser@3.1.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@csstools/css-color-parser",
+      "versionInfo": "3.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-26",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40csstools%2Fcss-parser-algorithms/3.0.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40csstools/css-parser-algorithms@3.0.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@csstools/css-parser-algorithms",
+      "versionInfo": "3.0.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-27",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40csstools%2Fcss-tokenizer/3.0.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40csstools/css-tokenizer@3.0.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@csstools/css-tokenizer",
+      "versionInfo": "3.0.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-28",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Faix-ppc64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/aix-ppc64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/aix-ppc64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-29",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fandroid-arm/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/android-arm@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/android-arm",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-30",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fandroid-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/android-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/android-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-31",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fandroid-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/android-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/android-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-32",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fdarwin-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/darwin-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/darwin-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-33",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fdarwin-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/darwin-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/darwin-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-34",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Ffreebsd-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/freebsd-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/freebsd-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-35",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Ffreebsd-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/freebsd-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/freebsd-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-36",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-arm/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-arm@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-arm",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-37",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-38",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-ia32/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-ia32@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-ia32",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-39",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-loong64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-loong64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-loong64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-40",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-mips64el/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-mips64el@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-mips64el",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-41",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-ppc64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-ppc64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-ppc64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-42",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-riscv64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-riscv64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-riscv64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-43",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-s390x/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-s390x@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-s390x",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-44",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Flinux-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/linux-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/linux-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-45",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fnetbsd-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/netbsd-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/netbsd-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-46",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fnetbsd-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/netbsd-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/netbsd-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-47",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fopenbsd-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/openbsd-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/openbsd-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-48",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fopenbsd-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/openbsd-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/openbsd-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-49",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fopenharmony-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/openharmony-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/openharmony-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-50",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fsunos-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/sunos-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/sunos-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-51",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fwin32-arm64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/win32-arm64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/win32-arm64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-52",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fwin32-ia32/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/win32-ia32@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/win32-ia32",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-53",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40esbuild%2Fwin32-x64/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40esbuild/win32-x64@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@esbuild/win32-x64",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-54",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40jridgewell%2Fgen-mapping/0.3.13",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40jridgewell/gen-mapping@0.3.13",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@jridgewell/gen-mapping",
+      "versionInfo": "0.3.13"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-55",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40jridgewell%2Fremapping/2.3.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40jridgewell/remapping@2.3.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@jridgewell/remapping",
+      "versionInfo": "2.3.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-56",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40jridgewell%2Fresolve-uri/3.1.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40jridgewell/resolve-uri@3.1.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@jridgewell/resolve-uri",
+      "versionInfo": "3.1.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-57",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40jridgewell%2Fsourcemap-codec/1.5.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40jridgewell/sourcemap-codec@1.5.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@jridgewell/sourcemap-codec",
+      "versionInfo": "1.5.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-58",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40jridgewell%2Ftrace-mapping/0.3.31",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40jridgewell/trace-mapping@0.3.31",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@jridgewell/trace-mapping",
+      "versionInfo": "0.3.31"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-59",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40napi-rs%2Flzma-linux-x64-gnu/1.5.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40napi-rs/lzma-linux-x64-gnu@1.5.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@napi-rs/lzma-linux-x64-gnu",
+      "versionInfo": "1.5.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-60",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40playwright%2Ftest/1.58.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40playwright/test@1.58.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "@playwright/test",
+      "versionInfo": "1.58.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-61",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rolldown%2Fpluginutils/1.0.0-rc.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rolldown/pluginutils@1.0.0-rc.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rolldown/pluginutils",
+      "versionInfo": "1.0.0-rc.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-62",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-android-arm-eabi/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-android-arm-eabi@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-android-arm-eabi",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-63",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-android-arm64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-android-arm64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-android-arm64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-64",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-darwin-arm64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-darwin-arm64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-darwin-arm64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-65",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-darwin-x64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-darwin-x64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-darwin-x64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-66",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-freebsd-arm64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-freebsd-arm64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-freebsd-arm64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-67",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-freebsd-x64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-freebsd-x64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-freebsd-x64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-68",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-arm-gnueabihf/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-arm-gnueabihf@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-arm-gnueabihf",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-69",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-arm-musleabihf/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-arm-musleabihf@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-arm-musleabihf",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-70",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-arm64-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-arm64-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-arm64-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-71",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-arm64-musl/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-arm64-musl@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-arm64-musl",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-72",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-loong64-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-loong64-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-loong64-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-73",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-loong64-musl/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-loong64-musl@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-loong64-musl",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-74",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-ppc64-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-ppc64-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-ppc64-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-75",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-ppc64-musl/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-ppc64-musl@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-ppc64-musl",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-76",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-riscv64-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-riscv64-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-riscv64-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-77",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-riscv64-musl/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-riscv64-musl@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-riscv64-musl",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-78",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-s390x-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-s390x-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-s390x-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-79",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-x64-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-x64-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-x64-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-80",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-linux-x64-musl/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-linux-x64-musl@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-linux-x64-musl",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-81",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-openbsd-x64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-openbsd-x64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-openbsd-x64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-82",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-openharmony-arm64/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-openharmony-arm64@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-openharmony-arm64",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-83",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-win32-arm64-msvc/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-win32-arm64-msvc@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-win32-arm64-msvc",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-84",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-win32-ia32-msvc/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-win32-ia32-msvc@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-win32-ia32-msvc",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-85",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-win32-x64-gnu/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-win32-x64-gnu@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-win32-x64-gnu",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-86",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40rollup%2Frollup-win32-x64-msvc/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40rollup/rollup-win32-x64-msvc@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@rollup/rollup-win32-x64-msvc",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-87",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40testing-library%2Fdom/10.4.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40testing-library/dom@10.4.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@testing-library/dom",
+      "versionInfo": "10.4.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-88",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40testing-library%2Fjest-dom/6.9.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40testing-library/jest-dom@6.9.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@testing-library/jest-dom",
+      "versionInfo": "6.9.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-89",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40testing-library%2Freact/16.3.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40testing-library/react@16.3.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@testing-library/react",
+      "versionInfo": "16.3.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-90",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Faria-query/5.0.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/aria-query@5.0.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/aria-query",
+      "versionInfo": "5.0.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-91",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Fbabel__core/7.20.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/babel__core@7.20.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/babel__core",
+      "versionInfo": "7.20.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-92",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Fbabel__generator/7.27.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/babel__generator@7.27.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/babel__generator",
+      "versionInfo": "7.27.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-93",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Fbabel__template/7.4.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/babel__template@7.4.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/babel__template",
+      "versionInfo": "7.4.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-94",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Fbabel__traverse/7.28.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/babel__traverse@7.28.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/babel__traverse",
+      "versionInfo": "7.28.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-95",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Fchai/5.2.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/chai@5.2.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/chai",
+      "versionInfo": "5.2.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-96",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Fdeep-eql/4.0.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/deep-eql@4.0.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/deep-eql",
+      "versionInfo": "4.0.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-97",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Festree/1.0.9",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/estree@1.0.9",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/estree",
+      "versionInfo": "1.0.9"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-98",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Freact/19.2.18",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/react@19.2.18",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/react",
+      "versionInfo": "19.2.18"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-99",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40types%2Freact-dom/19.2.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40types/react-dom@19.2.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@types/react-dom",
+      "versionInfo": "19.2.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-100",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitejs%2Fplugin-react/5.2.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitejs/plugin-react@5.2.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitejs/plugin-react",
+      "versionInfo": "5.2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-101",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Fexpect/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/expect@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/expect",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-102",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Fmocker/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/mocker@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/mocker",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-103",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Fpretty-format/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/pretty-format@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/pretty-format",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-104",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Frunner/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/runner@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/runner",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-105",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Fsnapshot/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/snapshot@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/snapshot",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-106",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Fspy/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/spy@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/spy",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-107",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/%40vitest%2Futils/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/%40vitest/utils@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "@vitest/utils",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-108",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/agent-base/7.1.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/agent-base@7.1.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "agent-base",
+      "versionInfo": "7.1.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-109",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/ansi-regex/5.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/ansi-regex@5.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "ansi-regex",
+      "versionInfo": "5.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-110",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/ansi-styles/5.2.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/ansi-styles@5.2.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "ansi-styles",
+      "versionInfo": "5.2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-111",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/aria-query/5.3.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/aria-query@5.3.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "aria-query",
+      "versionInfo": "5.3.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-112",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/aria-query/5.3.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/aria-query@5.3.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "aria-query",
+      "versionInfo": "5.3.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-113",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/assertion-error/2.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/assertion-error@2.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "assertion-error",
+      "versionInfo": "2.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-114",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/baseline-browser-mapping/2.11.19",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/baseline-browser-mapping@2.11.19",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "baseline-browser-mapping",
+      "versionInfo": "2.11.19"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-115",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/browserslist/4.28.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/browserslist@4.28.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "browserslist",
+      "versionInfo": "4.28.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-116",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/cac/6.7.14",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/cac@6.7.14",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "cac",
+      "versionInfo": "6.7.14"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-117",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/caniuse-lite/1.0.30001810",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/caniuse-lite@1.0.30001810",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "CC-BY-4.0",
+      "name": "caniuse-lite",
+      "versionInfo": "1.0.30001810"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-118",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/chai/5.3.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/chai@5.3.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "chai",
+      "versionInfo": "5.3.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-119",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/check-error/2.1.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/check-error@2.1.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "check-error",
+      "versionInfo": "2.1.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-120",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/convert-source-map/2.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/convert-source-map@2.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "convert-source-map",
+      "versionInfo": "2.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-121",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/css.escape/1.5.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/css.escape@1.5.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "css.escape",
+      "versionInfo": "1.5.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-122",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/cssstyle/4.6.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/cssstyle@4.6.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "cssstyle",
+      "versionInfo": "4.6.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-123",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/csstype/3.2.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/csstype@3.2.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "csstype",
+      "versionInfo": "3.2.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-124",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/data-urls/5.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/data-urls@5.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "data-urls",
+      "versionInfo": "5.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-125",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/debug/4.4.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/debug@4.4.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "debug",
+      "versionInfo": "4.4.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-126",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/decimal.js/10.6.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/decimal.js@10.6.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "decimal.js",
+      "versionInfo": "10.6.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-127",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/deep-eql/5.0.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/deep-eql@5.0.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "deep-eql",
+      "versionInfo": "5.0.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-128",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/dequal/2.0.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/dequal@2.0.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "dequal",
+      "versionInfo": "2.0.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-129",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/dom-accessibility-api/0.5.16",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/dom-accessibility-api@0.5.16",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "dom-accessibility-api",
+      "versionInfo": "0.5.16"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-130",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/dom-accessibility-api/0.6.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/dom-accessibility-api@0.6.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "dom-accessibility-api",
+      "versionInfo": "0.6.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-131",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/electron-to-chromium/1.5.414",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/electron-to-chromium@1.5.414",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "electron-to-chromium",
+      "versionInfo": "1.5.414"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-132",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/entities/6.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/entities@6.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-2-Clause",
+      "name": "entities",
+      "versionInfo": "6.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-133",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/es-module-lexer/1.7.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/es-module-lexer@1.7.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "es-module-lexer",
+      "versionInfo": "1.7.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-134",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/esbuild/0.28.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/esbuild@0.28.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "esbuild",
+      "versionInfo": "0.28.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-135",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/escalade/3.2.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/escalade@3.2.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "escalade",
+      "versionInfo": "3.2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-136",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/estree-walker/3.0.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/estree-walker@3.0.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "estree-walker",
+      "versionInfo": "3.0.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-137",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/expect-type/1.4.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/expect-type@1.4.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "expect-type",
+      "versionInfo": "1.4.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-138",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/fdir/6.5.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/fdir@6.5.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "fdir",
+      "versionInfo": "6.5.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-139",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/fsevents/2.3.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/fsevents@2.3.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "fsevents",
+      "versionInfo": "2.3.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-140",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/fsevents/2.3.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/fsevents@2.3.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "fsevents",
+      "versionInfo": "2.3.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-141",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/gensync/1.0.0-beta.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/gensync@1.0.0-beta.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "gensync",
+      "versionInfo": "1.0.0-beta.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-142",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/html-encoding-sniffer/4.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/html-encoding-sniffer@4.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "html-encoding-sniffer",
+      "versionInfo": "4.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-143",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/http-proxy-agent/7.0.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/http-proxy-agent@7.0.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "http-proxy-agent",
+      "versionInfo": "7.0.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-144",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/https-proxy-agent/7.0.6",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/https-proxy-agent@7.0.6",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "https-proxy-agent",
+      "versionInfo": "7.0.6"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-145",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/iconv-lite/0.6.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/iconv-lite@0.6.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "iconv-lite",
+      "versionInfo": "0.6.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-146",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/indent-string/4.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/indent-string@4.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "indent-string",
+      "versionInfo": "4.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-147",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/is-potential-custom-element-name/1.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/is-potential-custom-element-name@1.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "is-potential-custom-element-name",
+      "versionInfo": "1.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-148",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/js-tokens/4.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/js-tokens@4.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "js-tokens",
+      "versionInfo": "4.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-149",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/js-tokens/9.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/js-tokens@9.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "js-tokens",
+      "versionInfo": "9.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-150",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/jsdom/26.1.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/jsdom@26.1.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "jsdom",
+      "versionInfo": "26.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-151",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/jsesc/3.1.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/jsesc@3.1.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "jsesc",
+      "versionInfo": "3.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-152",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/json5/2.2.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/json5@2.2.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "json5",
+      "versionInfo": "2.2.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-153",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/loupe/3.2.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/loupe@3.2.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "loupe",
+      "versionInfo": "3.2.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-154",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/lru-cache/10.4.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/lru-cache@10.4.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "lru-cache",
+      "versionInfo": "10.4.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-155",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/lru-cache/5.1.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/lru-cache@5.1.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "lru-cache",
+      "versionInfo": "5.1.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-156",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/lucide-react/0.453.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/lucide-react@0.453.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "lucide-react",
+      "versionInfo": "0.453.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-157",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/lz-string/1.5.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/lz-string@1.5.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "lz-string",
+      "versionInfo": "1.5.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-158",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/magic-string/0.30.21",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/magic-string@0.30.21",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "magic-string",
+      "versionInfo": "0.30.21"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-159",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/min-indent/1.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/min-indent@1.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "min-indent",
+      "versionInfo": "1.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-160",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/ms/2.1.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/ms@2.1.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "ms",
+      "versionInfo": "2.1.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-161",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/nanoid/3.3.18",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/nanoid@3.3.18",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "nanoid",
+      "versionInfo": "3.3.18"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-162",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/node-releases/2.0.53",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/node-releases@2.0.53",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "node-releases",
+      "versionInfo": "2.0.53"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-163",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/nwsapi/2.2.26",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/nwsapi@2.2.26",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "nwsapi",
+      "versionInfo": "2.2.26"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-164",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/parse5/7.3.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/parse5@7.3.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "parse5",
+      "versionInfo": "7.3.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-165",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/pathe/2.0.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/pathe@2.0.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "pathe",
+      "versionInfo": "2.0.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-166",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/pathval/2.0.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/pathval@2.0.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "pathval",
+      "versionInfo": "2.0.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-167",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/picocolors/1.1.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/picocolors@1.1.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "picocolors",
+      "versionInfo": "1.1.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-168",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/picomatch/4.0.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/picomatch@4.0.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "picomatch",
+      "versionInfo": "4.0.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-169",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/playwright/1.58.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/playwright@1.58.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "playwright",
+      "versionInfo": "1.58.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-170",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/playwright-core/1.58.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/playwright-core@1.58.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "playwright-core",
+      "versionInfo": "1.58.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-171",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/postcss/8.5.26",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/postcss@8.5.26",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "postcss",
+      "versionInfo": "8.5.26"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-172",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/pretty-format/27.5.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/pretty-format@27.5.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "pretty-format",
+      "versionInfo": "27.5.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-173",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/punycode/2.3.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/punycode@2.3.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "punycode",
+      "versionInfo": "2.3.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-174",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/react/19.2.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/react@19.2.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "react",
+      "versionInfo": "19.2.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-175",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/react-dom/19.2.8",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/react-dom@19.2.8",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "react-dom",
+      "versionInfo": "19.2.8"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-176",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/react-is/17.0.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/react-is@17.0.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "react-is",
+      "versionInfo": "17.0.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-177",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/react-refresh/0.18.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/react-refresh@0.18.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "react-refresh",
+      "versionInfo": "0.18.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-178",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/redent/3.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/redent@3.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "redent",
+      "versionInfo": "3.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-179",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/rollup/4.62.5",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/rollup@4.62.5",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "rollup",
+      "versionInfo": "4.62.5"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-180",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/rrweb-cssom/0.8.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/rrweb-cssom@0.8.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "rrweb-cssom",
+      "versionInfo": "0.8.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-181",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/safer-buffer/2.1.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/safer-buffer@2.1.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "safer-buffer",
+      "versionInfo": "2.1.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-182",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/saxes/6.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/saxes@6.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "saxes",
+      "versionInfo": "6.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-183",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/scheduler/0.27.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/scheduler@0.27.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "scheduler",
+      "versionInfo": "0.27.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-184",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/semver/6.3.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/semver@6.3.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "semver",
+      "versionInfo": "6.3.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-185",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/siginfo/2.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/siginfo@2.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "siginfo",
+      "versionInfo": "2.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-186",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/source-map-js/1.2.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/source-map-js@1.2.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "source-map-js",
+      "versionInfo": "1.2.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-187",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/stackback/0.0.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/stackback@0.0.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "stackback",
+      "versionInfo": "0.0.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-188",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/std-env/3.10.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/std-env@3.10.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "std-env",
+      "versionInfo": "3.10.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-189",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/strip-indent/3.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/strip-indent@3.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "strip-indent",
+      "versionInfo": "3.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-190",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/strip-literal/3.1.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/strip-literal@3.1.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "strip-literal",
+      "versionInfo": "3.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-191",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/symbol-tree/3.2.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/symbol-tree@3.2.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "symbol-tree",
+      "versionInfo": "3.2.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-192",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tinybench/2.9.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tinybench@2.9.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tinybench",
+      "versionInfo": "2.9.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-193",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tinyexec/0.3.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tinyexec@0.3.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tinyexec",
+      "versionInfo": "0.3.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-194",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tinyglobby/0.2.17",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tinyglobby@0.2.17",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tinyglobby",
+      "versionInfo": "0.2.17"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-195",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tinypool/1.1.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tinypool@1.1.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tinypool",
+      "versionInfo": "1.1.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-196",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tinyrainbow/2.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tinyrainbow@2.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tinyrainbow",
+      "versionInfo": "2.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-197",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tinyspy/4.0.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tinyspy@4.0.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tinyspy",
+      "versionInfo": "4.0.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-198",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tldts/6.1.86",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tldts@6.1.86",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tldts",
+      "versionInfo": "6.1.86"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-199",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tldts-core/6.1.86",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tldts-core@6.1.86",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tldts-core",
+      "versionInfo": "6.1.86"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-200",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tough-cookie/5.1.2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tough-cookie@5.1.2",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "tough-cookie",
+      "versionInfo": "5.1.2"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-201",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/tr46/5.1.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/tr46@5.1.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "tr46",
+      "versionInfo": "5.1.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-202",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/typescript/5.9.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/typescript@5.9.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "typescript",
+      "versionInfo": "5.9.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-203",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/update-browserslist-db/1.3.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/update-browserslist-db@1.3.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "update-browserslist-db",
+      "versionInfo": "1.3.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-204",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/vite/7.3.6",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/vite@7.3.6",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "vite",
+      "versionInfo": "7.3.6"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-205",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/vite-node/3.2.4",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/vite-node@3.2.4",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "vite-node",
+      "versionInfo": "3.2.4"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-206",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/vitest/3.2.7",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/vitest@3.2.7",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "vitest",
+      "versionInfo": "3.2.7"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-207",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/w3c-xmlserializer/5.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/w3c-xmlserializer@5.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "w3c-xmlserializer",
+      "versionInfo": "5.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-208",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/webidl-conversions/7.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/webidl-conversions@7.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-2-Clause",
+      "name": "webidl-conversions",
+      "versionInfo": "7.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-209",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/whatwg-encoding/3.1.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/whatwg-encoding@3.1.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "whatwg-encoding",
+      "versionInfo": "3.1.1"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-210",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/whatwg-mimetype/4.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/whatwg-mimetype@4.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "whatwg-mimetype",
+      "versionInfo": "4.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-211",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/whatwg-url/14.2.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/whatwg-url@14.2.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "whatwg-url",
+      "versionInfo": "14.2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-212",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/why-is-node-running/2.3.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/why-is-node-running@2.3.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "why-is-node-running",
+      "versionInfo": "2.3.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-213",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/ws/8.21.3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/ws@8.21.3",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "ws",
+      "versionInfo": "8.21.3"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-214",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/xml-name-validator/5.0.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/xml-name-validator@5.0.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "name": "xml-name-validator",
+      "versionInfo": "5.0.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-215",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/xmlchars/2.2.0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/xmlchars@2.2.0",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "xmlchars",
+      "versionInfo": "2.2.0"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-216",
+      "comment": "licenseConcluded is NOASSERTION pending legal review; status=resolved-registry-declaration; reason=package registry declaration recorded; evidence=https://registry.npmjs.org/yallist/3.1.1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:npm/yallist@3.1.1",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "name": "yallist",
+      "versionInfo": "3.1.1"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-1",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-2",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-3",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-4",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-5",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-6",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-7",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-8",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-9",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-10",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-11",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-12",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-13",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-14",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-15",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-16",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-17",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-18",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-19",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-20",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-21",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-22",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-23",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-24",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-25",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-26",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-27",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-28",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-29",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-30",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-31",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-32",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-33",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-34",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-35",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-36",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-37",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-38",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-39",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-40",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-41",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-42",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-43",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-44",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-45",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-46",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-47",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-48",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-49",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-50",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-51",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-52",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-53",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-54",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-55",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-56",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-57",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-58",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-59",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-60",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-61",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-62",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-63",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-64",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-65",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-66",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-67",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-68",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-69",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-70",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-71",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-72",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-73",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-74",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-75",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-76",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-77",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-78",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-79",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-80",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-81",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-82",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-83",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-84",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-85",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-86",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-87",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-88",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-89",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-90",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-91",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-92",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-93",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-94",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-95",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-96",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-97",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-98",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-99",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-100",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-101",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-102",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-103",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-104",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-105",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-106",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-107",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-108",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-109",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-110",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-111",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-112",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-113",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-114",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-115",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-116",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-117",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-118",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-119",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-120",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-121",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-122",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-123",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-124",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-125",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-126",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-127",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-128",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-129",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-130",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-131",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-132",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-133",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-134",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-135",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-136",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-137",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-138",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-139",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-140",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-141",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-142",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-143",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-144",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-145",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-146",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-147",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-148",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-149",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-150",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-151",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-152",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-153",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-154",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-155",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-156",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-157",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-158",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-159",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-160",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-161",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-162",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-163",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-164",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-165",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-166",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-167",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-168",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-169",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-170",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-171",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-172",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-173",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-174",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-175",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-176",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-177",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-178",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-179",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-180",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-181",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-182",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-183",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-184",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-185",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-186",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-187",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-188",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-189",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-190",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-191",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-192",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-193",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-194",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-195",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-196",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-197",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-198",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-199",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-200",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-201",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-202",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-203",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-204",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-205",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-206",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-207",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-208",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-209",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-210",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-211",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-212",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-213",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-214",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-215",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-216",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}
