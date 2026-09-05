@@ -36,6 +36,7 @@ import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./mo
 import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { ManagementCenter } from "./modules/management";
+import { ForecastPanel, useForecast } from "./modules/forecast";
 import { formatMoney } from "./utils/numberFormat";
 import {
   Activity,
@@ -481,6 +482,8 @@ export function App() {
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, confirmFinance, cloneBaseline, confirmCashPayment, correctCashPayment, updateScheduleActual,
   } = useFinanceController({ ready, projectId, setNotice, setError });
+  const forecast = useForecast(projectId || null, ready && active === "Исполнение и финансы");
+  const [acknowledgedForecastId, setAcknowledgedForecastId] = useState<string | null>(null);
   const loadSequenceRef = useRef(0);
 
   async function activateProject(id: number) {
@@ -2647,6 +2650,14 @@ export function App() {
               onCorrectPayment={(id, amount, date, recordVersion) =>
                 void correctCashPayment(id, amount, date, recordVersion)
               }
+            />
+            <ForecastPanel
+              report={forecast.report}
+              state={forecast.state}
+              error={forecast.error}
+              acknowledgedForecastId={acknowledgedForecastId}
+              onReload={() => void forecast.reload()}
+              onAcknowledge={setAcknowledgedForecastId}
             />
           </div>
         </section>
