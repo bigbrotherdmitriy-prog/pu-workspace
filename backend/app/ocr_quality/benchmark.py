@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 import random
 import re
@@ -20,7 +21,6 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 from app.organizer_engine.content import (
     OCR_REVIEW_CONFIDENCE,
     PageExtraction,
-    _extract_fields,
     _page_from_tokens,
     _parse_tsv,
     _preprocess_image,
@@ -177,6 +177,26 @@ def _field_sets(fields: dict[str, list[Any]]) -> dict[str, set[str]]:
     }
 
 
+def _public_evidence_is_located(evidence: Any, pages: list[PageExtraction]) -> bool:
+    # Each corpus page is submitted as a separate image: its public page is 1,
+    # not the page ordinal of the synthetic multi-page corpus document.
+    if type(evidence.page) is not int or evidence.page != 1:
+        return False
+    matching = [page for page in pages if page.page == evidence.page]
+    bbox = evidence.bbox
+    if len(matching) != 1 or not isinstance(bbox, (tuple, list)) or len(bbox) != 4:
+        return False
+    if any(type(value) not in (int, float) or not math.isfinite(value) for value in bbox):
+        return False
+    x, y, width, height = bbox
+    page = matching[0]
+    if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+           for value in (page.width, page.height)):
+        return False
+    return (x >= 0 and y >= 0 and width > 0 and height > 0
+            and x + width <= page.width and y + height <= page.height)
+
+
 def _metric(counter: dict[str, int]) -> dict[str, float | int]:
     tp, fp, fn = counter["tp"], counter["fp"], counter["fn"]
     precision = tp / (tp + fp) if tp + fp else 1.0
@@ -213,6 +233,13 @@ def run_benchmark(corpus_path: Path, *, font_path: str | None = None) -> dict[st
     with tempfile.TemporaryDirectory(prefix="puw-ocr-benchmark-") as temp:
         temp_dir = Path(temp)
         for case in cases:
+            expected_fields = {
+                name: {_normalize(value) for value in case.expected[name]}
+                for name in FIELD_NAMES
+            }
+            # Failed pages must contribute false negatives, not disappear from recall.
+            for name, wanted in expected_fields.items():
+                counters[name]["fn"] += len(wanted)
             started = time.perf_counter()
             source = temp_dir / f"{case.case_id}.png"
             processed = temp_dir / f"{case.case_id}-processed.png"
@@ -223,7 +250,6 @@ def run_benchmark(corpus_path: Path, *, font_path: str | None = None) -> dict[st
                 _, _, actions = _preprocess_image(source, processed, 120)
                 processed_page = _run_tsv(command, processed, case.page)
                 processed_page.preprocessing = actions
-                fields = _extract_fields([processed_page])
                 expected_text = " ".join((
                     "СИНТЕТИЧЕСКИЙ ДОКУМЕНТ",
                     *case.lines,
@@ -240,27 +266,23 @@ def run_benchmark(corpus_path: Path, *, font_path: str | None = None) -> dict[st
                 extraction_started = time.perf_counter()
                 result = extract_text_result(buffer.getvalue(), "image/png", f"{case.case_id}.png")
                 elapsed_ms.append((time.perf_counter() - extraction_started) * 1000)
-                technical_successes += 1
+                technical_successes += int(result.method == "ocr" and result.ocr_pages == 1)
                 recognized_pages += int(bool(result.text.strip()))
                 review_pages += int(result.needs_review)
                 if result.confidence < OCR_REVIEW_CONFIDENCE and not result.needs_review:
                     low_confidence_policy_violations += 1
 
+                fields = result.fields
                 actual = _field_sets(fields)
                 for name in FIELD_NAMES:
-                    wanted = {_normalize(value) for value in case.expected[name]}
+                    wanted = expected_fields[name]
                     counters[name]["tp"] += len(actual[name] & wanted)
                     counters[name]["fp"] += len(actual[name] - wanted)
-                    counters[name]["fn"] += len(wanted - actual[name])
+                    counters[name]["fn"] -= len(actual[name] & wanted)
                 for values in fields.values():
                     for evidence in values:
                         evidence_total += 1
-                        evidence_with_coordinates += int(
-                            evidence.page == case.page
-                            and evidence.bbox is not None
-                            and evidence.bbox[2] > 0
-                            and evidence.bbox[3] > 0
-                        )
+                        evidence_with_coordinates += int(_public_evidence_is_located(evidence, result.pages))
             except Exception as exc:
                 failures.append({"case_id": case.case_id, "reason": exc.__class__.__name__})
             benchmark_elapsed_ms.append((time.perf_counter() - started) * 1000)
@@ -313,6 +335,7 @@ def run_benchmark(corpus_path: Path, *, font_path: str | None = None) -> dict[st
             "technical_success_target": 0.95,
             "field_precision_recall_target": 0.8,
             "pass": technical_successes / pages >= .95
+                    and recognized_pages / pages >= .95
                     and low_confidence_policy_violations == 0
                     and evidence_total > 0
                     and evidence_with_coordinates == evidence_total

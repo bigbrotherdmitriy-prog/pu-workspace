@@ -33,6 +33,7 @@ pu-workspace-*.tar
 
 # Logs
 *.log
+/local-engine-artifacts/
 
 # Frontend dependencies and compiler cache
 frontend/node_modules/

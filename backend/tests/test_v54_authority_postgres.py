@@ -28,7 +28,9 @@ def safe_url(name):
         pytest.skip(f"CONDITIONAL: {name} is not configured")
     parsed = make_url(value)
     assert parsed.get_backend_name() == "postgresql"
-    assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"}
+    assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"} or (
+        parsed.host == "postgres" and os.getenv("GITHUB_ACTIONS") == "true"
+    )
     assert (parsed.database or "").startswith("puw_v54_test_") and not parsed.query
     return value
 

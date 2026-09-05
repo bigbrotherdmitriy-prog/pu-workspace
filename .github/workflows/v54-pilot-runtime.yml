@@ -15,6 +15,31 @@ permissions:
   contents: read
 
 jobs:
+  local-engines:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install local OCR and synthetic corpus font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng tesseract-ocr-osd fonts-dejavu-core
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+      - name: Require actual OCR and POSIX symlink acceptance
+        run: python scripts/ci/local_engine_acceptance.py
+      - name: Publish safe local engine protocol only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-engine-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: local-engine-artifacts/protocol.json
+          if-no-files-found: error
+          retention-days: 7
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 8
