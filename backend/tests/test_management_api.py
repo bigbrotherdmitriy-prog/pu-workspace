@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 import app.models  # noqa: F401
 from app.api.management import (
     DigestEnqueueRequest,
+    DigestPreferenceUpdate,
     EvidenceProposalConfirm,
     EvidenceProposalCreate,
     MeetingCreate,
@@ -28,6 +29,7 @@ from app.models.user import User
 
 def test_mvp3_routes_are_registered():
     paths = {route.path for route in router.routes}
+    methods = {(route.path, method) for route in router.routes for method in route.methods}
     assert "/management/obligations" in paths
     assert "/management/meetings" in paths
     assert "/management/notifications/refresh" in paths
@@ -36,6 +38,10 @@ def test_mvp3_routes_are_registered():
     assert "/management/v2/messages/{message_id}/proposals" in paths
     assert "/management/v2/proposals/{entity_type}/{entity_id}/confirm" in paths
     assert "/management/v2/digests" in paths
+    assert ("/management/v2/meetings/{meeting_id}/proposals", "GET") in methods
+    assert ("/management/v2/messages/{message_id}/proposals", "GET") in methods
+    assert ("/management/v2/projects/{project_id}/digest-preference", "GET") in methods
+    assert ("/management/v2/projects/{project_id}/digest-preference", "PUT") in methods
 
 
 def test_meeting_and_obligation_contracts():
@@ -59,6 +65,10 @@ def test_evidence_proposal_and_digest_contracts_are_fail_closed():
         channel="in_app", local_date=date(2026, 9, 5),
     )
     assert digest.channel == "in_app"
+    stored = DigestPreferenceUpdate(
+        expected_version=0, timezone="UTC", quiet_start=time(22), quiet_end=time(7),
+    )
+    assert stored.cadence == "daily" and stored.channel == "in_app"
     with pytest.raises(ValueError):
         DigestEnqueueRequest(
             project_id=4, timezone="Europe/Moscow", quiet_start=time(20), quiet_end=time(8),

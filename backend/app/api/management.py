@@ -17,6 +17,7 @@ from app.mvp3.attention import attention_page
 from app.mvp3.lifecycle import ManagementConflict, ManagementDenied, ManagementLifecycle, normalized_task_state
 from app.mvp3.meeting_digest import (
     DigestPreference,
+    DigestPreferenceService,
     MeetingActionCandidate,
     MeetingProposalService,
     enqueue_digest,
@@ -86,11 +87,22 @@ class DigestEnqueueRequest(BaseModel):
     quiet_start: time
     quiet_end: time
     channel: Literal["in_app", "disabled"] = "in_app"
+    cadence: Literal["daily", "weekdays"] = "daily"
     local_date: date
+
+
+class DigestPreferenceUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    timezone: str = Field(min_length=1, max_length=100)
+    quiet_start: time
+    quiet_end: time
+    channel: Literal["in_app", "disabled"] = "in_app"
+    cadence: Literal["daily", "weekdays"] = "daily"
 
 
 _lifecycle = ManagementLifecycle()
 _meeting_proposals = MeetingProposalService(_lifecycle)
+_digest_preferences = DigestPreferenceService(_lifecycle)
 
 
 def _lifecycle_error(exc):
@@ -140,6 +152,20 @@ def propose_meeting_actions(meeting_id: int, payload: EvidenceProposalCreate,
         db.rollback(); _lifecycle_error(exc)
 
 
+@router.get("/v2/meetings/{meeting_id}/proposals")
+def list_meeting_actions(meeting_id: int, project_id: int,
+                         db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    try:
+        result = _meeting_proposals.list_for_origin(
+            db, project_id=project_id, actor_user_id=user.id,
+            origin_type="meeting", origin_id=meeting_id,
+        )
+        return {"proposals": result, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict) as exc:
+        _lifecycle_error(exc)
+
+
 @router.post("/v2/messages/{message_id}/proposals")
 def propose_message_actions(message_id: int, payload: EvidenceProposalCreate,
                             db: Session = Depends(get_db), user: User = Depends(require_user)):
@@ -153,6 +179,20 @@ def propose_message_actions(message_id: int, payload: EvidenceProposalCreate,
         return {"proposals": result, "external_actions_created": False}
     except (ManagementDenied, ManagementConflict) as exc:
         db.rollback(); _lifecycle_error(exc)
+
+
+@router.get("/v2/messages/{message_id}/proposals")
+def list_message_actions(message_id: int, project_id: int,
+                         db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    try:
+        result = _meeting_proposals.list_for_origin(
+            db, project_id=project_id, actor_user_id=user.id,
+            origin_type="message", origin_id=message_id,
+        )
+        return {"proposals": result, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict) as exc:
+        _lifecycle_error(exc)
 
 
 @router.post("/v2/proposals/{entity_type}/{entity_id}/confirm")
@@ -179,13 +219,43 @@ def enqueue_management_digest(payload: DigestEnqueueRequest, db: Session = Depen
     try:
         preference = DigestPreference(
             timezone=payload.timezone, quiet_start=payload.quiet_start,
-            quiet_end=payload.quiet_end, channel=payload.channel,
+            quiet_end=payload.quiet_end, channel=payload.channel, cadence=payload.cadence,
         )
         job = enqueue_digest(
             db, project_id=payload.project_id, user_id=user.id,
             actor_user_id=user.id, preference=preference, local_date=payload.local_date,
         )
         return {"job_id": job.id, "status": job.status, "external_actions_created": False}
+    except (ManagementDenied, ManagementConflict, ValueError) as exc:
+        db.rollback(); _lifecycle_error(exc)
+
+
+@router.get("/v2/projects/{project_id}/digest-preference")
+def get_digest_preference(project_id: int, db: Session = Depends(get_db),
+                          user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    try:
+        return _digest_preferences.get(db, project_id=project_id, user_id=user.id)
+    except (ManagementDenied, ManagementConflict, ValueError) as exc:
+        _lifecycle_error(exc)
+
+
+@router.put("/v2/projects/{project_id}/digest-preference")
+def put_digest_preference(project_id: int, payload: DigestPreferenceUpdate,
+                          db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    try:
+        preference = DigestPreference(
+            timezone=payload.timezone, quiet_start=payload.quiet_start,
+            quiet_end=payload.quiet_end, channel=payload.channel, cadence=payload.cadence,
+        )
+        row = _digest_preferences.put(
+            db, project_id=project_id, user_id=user.id,
+            expected_version=payload.expected_version, preference=preference,
+        )
+        db.commit()
+        db.refresh(row)
+        return _digest_preferences.serialize(row)
     except (ManagementDenied, ManagementConflict, ValueError) as exc:
         db.rollback(); _lifecycle_error(exc)
 
