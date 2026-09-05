@@ -137,3 +137,21 @@ provider/live claim follows. `git diff --check` also passed.
 4. Owner-approved representative files and runtime acceptance remain separate;
    synthetic tests do not demonstrate real-provider, deployment or production
    readiness. Full-backend integration regression belongs to the parent task.
+
+## TSV cap CPU regression — 2026-09-05
+
+Independent review found that sparse rows still expanded up to 16,384 empty-column
+slots after TSV had reached its 50,000-character cap. A 1,229-byte, 100-row fixture
+produced only three text rows but expanded 1,638,400 slots. The permitted 20,000
+cells could therefore cause 327,680,000 projection lookups despite the cap.
+
+The new regression failed first: after truncation it observed a third dense-row
+expansion (`[1, 16384, 16384]` instead of `[1, 16384]`). The minimal fix moves the
+truncation guard before line construction. Cell/formula/cache/locator metadata
+continues to be parsed and retained for subsequent rows; only discarded TSV work
+stops. Existing limit warnings and output text are unchanged.
+
+Validation: targeted parser/content/structured-import/document/OCR/fragment-reader
+suite **166 passed in 21.81 seconds**, including 54 XLSX cases. `git diff --check`
+passed. No full suite,
+provider calls, production access, push, merge or deployment was performed here.

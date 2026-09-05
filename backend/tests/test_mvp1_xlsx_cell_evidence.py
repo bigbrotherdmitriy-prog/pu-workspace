@@ -243,6 +243,26 @@ def test_tsv_truncation_is_reported_and_never_appends_later_rows(monkeypatch):
     assert len(result.metadata()["spreadsheet_cells"]) == 3
 
 
+def test_tsv_cap_stops_dense_sparse_row_work_but_keeps_cell_metadata(monkeypatch):
+    from app.ocr_quality import xlsx_cells
+    monkeypatch.setattr(xlsx_cells, "MAX_TSV_CHARS", 3)
+    expansions = []
+    def measured_range(start, stop):
+        expansions.append(stop - start)
+        return range(start, stop)
+    monkeypatch.setattr(xlsx_cells, "range", measured_range, raising=False)
+    result = extract(workbook([("Plan", 1, "s.xml",
+        '<row r="1"><c r="A1"><v>1</v></c></row>'
+        '<row r="2"><c r="XFD2"><v>2</v></c></row>'
+        '<row r="3"><c r="XFD3"><f>1+2</f><v>3</v></c></row>')]))
+    assert result.text == "1" and "xlsx_text_limit" in result.warnings
+    assert expansions == [1, 16384], "Do not expand later sparse rows after the TSV cap"
+    cells = result.metadata()["spreadsheet_cells"]
+    assert [cell["cell_ref"] for cell in cells] == ["A1", "XFD2", "XFD3"]
+    assert cells[2]["formula"] == "1+2" and cells[2]["cached_value"] == "3"
+    assert {locator["value_kind"] for locator in cells[2]["locators"]} == {"formula", "cached_value"}
+
+
 @pytest.mark.parametrize("limit,value", [("MAX_COMPRESSION_RATIO", 1), ("MAX_SHEETS", 1),
                                         ("MAX_SHARED_STRINGS", 1), ("MAX_VALUE_CHARS", 1)])
 def test_remaining_resource_limits_are_enforced(monkeypatch, limit, value):

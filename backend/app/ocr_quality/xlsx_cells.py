@@ -354,9 +354,9 @@ def _parse(data):
                         "needs_review": bool(warnings) or not exact, "warnings": warnings,
                     })
                     row_values[column] = (value or "").replace("\t", " ").replace("\n", " ").replace("\r", " ").strip()
-                if any(row_values.values()):
+                if not text_truncated and any(row_values.values()):
                     line = "\t".join(row_values.get(col, "") for col in range(1, last_column + 1))
-                    if not text_truncated and text_size + len(line) + bool(lines) <= MAX_TSV_CHARS:
+                    if text_size + len(line) + bool(lines) <= MAX_TSV_CHARS:
                         lines.append(line)
                         text_size += len(line) + (len(lines) > 1)
                     else:
