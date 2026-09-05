@@ -13,6 +13,7 @@ const item: SupplyCaseView = {
   scheduleBaselineVersion: 2, scheduleItemId: 10, taskId: 11, documentVersionId: 12,
   evidenceId: "00000000-0000-4000-8000-000000000013", evidenceRevision: 1,
   sourceVersionId: "00000000-0000-4000-8000-000000000014", externalActionStatus: "not_created",
+  decisionRequirements: [], automaticConversion: false, paymentCreated: false,
 };
 
 const exact: SupplyEvidenceOption = {

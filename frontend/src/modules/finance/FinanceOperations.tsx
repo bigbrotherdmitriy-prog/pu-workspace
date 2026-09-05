@@ -31,6 +31,14 @@ export function FinanceOperations(props: Props) {
   const visibleBaselineIds = new Set(visibleBaselines.map((item) => item.id));
   const visibleSchedule = finance?.schedule.filter((item) => visibleBaselineIds.has(item.baseline_id)) || [];
   return <>
+    {!!finance?.decision_requirements?.length && <section className="card finance-decision-notice" role="status">
+      <h2>Нужны финансовые решения</h2>
+      <p>PU Workspace не выбирает ставку НДС, правила удержаний, валютный курс и источник курса автоматически.</p>
+      <ul>{finance.decision_requirements.map((requirement) => <li key={requirement.code}>
+        <strong>{requirement.decision_by}</strong>: {requirement.message}
+      </li>)}</ul>
+      <small>Автоматическая оплата, банковская проводка и конвертация не выполняются.</small>
+    </section>}
     {includeEditor && preview && <section className="card structured-import" id="structured-import">
       <div className="card-head"><div><span className="eyebrow">ПАКЕТНОЕ ПРЕДЛОЖЕНИЕ</span><h2>{preview.name}</h2><p>Сопоставлено колонок: {Object.keys(preview.mapping).length}. Выберите строки; импорт создаст предложения со ссылкой на строку источника.</p></div><button className="secondary" onClick={onClosePreview}>Закрыть</button></div>
       {preview.issues.map((issue) => <p className="finance-warning" key={issue}>{issue}</p>)}

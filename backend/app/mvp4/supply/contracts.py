@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.mvp4.finance_guards import exact_decimal
+
 
 COMMAND_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,119}$"
 
@@ -50,6 +52,16 @@ class CreateSupplyRequest(StrictCommand):
             raise ValueError("blank value")
         return stripped
 
+    @field_validator("requested_quantity")
+    @classmethod
+    def exact_quantity(cls, value: Decimal) -> Decimal:
+        return exact_decimal(value, 3, reason="quantity_precision")
+
+    @field_validator("unit_price")
+    @classmethod
+    def exact_money(cls, value: Decimal) -> Decimal:
+        return exact_decimal(value, 2, reason="money_precision")
+
 
 class VersionedCommand(StrictCommand):
     expected_version: int = Field(gt=0)
@@ -61,6 +73,16 @@ class ReviewSupplyRequest(VersionedCommand):
     corrected_supplier: str | None = Field(default=None, min_length=2, max_length=500)
     corrected_quantity: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=3)
     corrected_unit_price: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+
+    @field_validator("corrected_quantity")
+    @classmethod
+    def exact_quantity(cls, value: Decimal | None):
+        return exact_decimal(value, 3, reason="quantity_precision") if value is not None else None
+
+    @field_validator("corrected_unit_price")
+    @classmethod
+    def exact_money(cls, value: Decimal | None):
+        return exact_decimal(value, 2, reason="money_precision") if value is not None else None
 
     @model_validator(mode="after")
     def reject_has_no_corrections(self):
@@ -81,6 +103,11 @@ class PrepareOrder(VersionedCommand):
     ordered_quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
     order_reference: str = Field(min_length=2, max_length=200)
 
+    @field_validator("ordered_quantity")
+    @classmethod
+    def exact_quantity(cls, value: Decimal) -> Decimal:
+        return exact_decimal(value, 3, reason="quantity_precision")
+
 
 class RecordOrder(VersionedCommand):
     evidence: EvidenceLink
@@ -91,6 +118,11 @@ class RecordDelivery(VersionedCommand):
     evidence: EvidenceLink
     discrepancy_code: Literal["quantity", "quality", "damage", "documents", "other"] | None = None
     discrepancy_note: str | None = Field(default=None, min_length=3, max_length=1000)
+
+    @field_validator("delivered_quantity")
+    @classmethod
+    def exact_quantity(cls, value: Decimal) -> Decimal:
+        return exact_decimal(value, 3, reason="quantity_precision")
 
     @model_validator(mode="after")
     def discrepancy_is_explicit(self):
@@ -103,6 +135,11 @@ class ProposeAcceptanceAct(VersionedCommand):
     accepted_quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
     act_number: str = Field(min_length=1, max_length=200)
     evidence: EvidenceLink
+
+    @field_validator("accepted_quantity")
+    @classmethod
+    def exact_quantity(cls, value: Decimal) -> Decimal:
+        return exact_decimal(value, 3, reason="quantity_precision")
 
 
 class ResolveDiscrepancy(VersionedCommand):
@@ -120,6 +157,11 @@ class CreateDdsProposal(VersionedCommand):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     evidence_assessment_version: int = Field(gt=0)
     evidence: EvidenceLink
+
+    @field_validator("amount")
+    @classmethod
+    def exact_money(cls, value: Decimal) -> Decimal:
+        return exact_decimal(value, 2, reason="money_precision")
 
 
 class DdsProposalResult(BaseModel):

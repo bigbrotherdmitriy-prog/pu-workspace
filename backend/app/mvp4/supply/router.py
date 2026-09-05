@@ -24,6 +24,7 @@ from app.mvp4.supply.contracts import (
 )
 from app.mvp4.supply.service import SupplyConflict, SupplyDenied, SupplyService
 from app.mvp4.supply.models import SupplyCase
+from app.mvp4.finance_guards import finance_decision_requirements
 
 
 router = APIRouter(prefix="/api/mvp4/supply", tags=["mvp4-supply"])
@@ -36,6 +37,9 @@ def _require_idempotency(command_key: str, idempotency_key: str) -> None:
 
 
 def _view(row: SupplyCase) -> dict:
+    decisions = finance_decision_requirements(
+        [row.currency], has_implicit_currency_rows=False, has_financial_rows=True,
+    )
     return {
         "id": row.id,
         "recordVersion": row.record_version,
@@ -62,6 +66,9 @@ def _view(row: SupplyCase) -> dict:
         "sourceVersionId": row.source_version_id,
         "discrepancyCode": row.discrepancy_code,
         "externalActionStatus": row.external_action_status,
+        "decisionRequirements": decisions,
+        "automaticConversion": False,
+        "paymentCreated": False,
     }
 
 

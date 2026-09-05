@@ -1,4 +1,15 @@
 export type FinanceOverview = {
+  decision_requirements?: {
+    code: "unknown_currency" | "mixed_currency" | "currency_conversion_policy" |
+      "exchange_rate_source" | "vat_treatment" | "retention_treatment";
+    decision_by: "OWNER" | "LEGAL";
+    message: string;
+  }[];
+  external_effects?: {
+    payment_created: false;
+    posting_created: false;
+    automatic_conversion: false;
+  };
   summary: {
     budget_planned: number;
     budget_committed: number;
@@ -13,6 +24,8 @@ export type FinanceOverview = {
     acts_pending: number;
     pending_payments: number;
     unlinked_invoices: number;
+    excluded_currency_rows?: number;
+    financial_totals_reliable?: boolean;
   };
   baselines: {
     id: number;

@@ -13,6 +13,7 @@ const base: SupplyCaseView = {
   scheduleItemId: 7, taskId: 8, documentVersionId: 9,
   evidenceId: "00000000-0000-4000-8000-000000000010", evidenceRevision: 1,
   sourceVersionId: "00000000-0000-4000-8000-000000000011", externalActionStatus: "not_created",
+  decisionRequirements: [], automaticConversion: false, paymentCreated: false,
 };
 
 describe("SupplyChainPanel", () => {

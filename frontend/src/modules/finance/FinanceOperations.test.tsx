@@ -119,6 +119,24 @@ function props(status: string) {
 afterEach(cleanup);
 
 describe("FinanceOperations human confirmation boundary", () => {
+  it("shows unresolved owner/legal decisions and does not claim an automatic financial effect", () => {
+    const input = props("approved");
+    input.finance = {
+      ...input.finance,
+      decision_requirements: [
+        { code: "unknown_currency", decision_by: "OWNER", message: "Нужно выбрать поддерживаемую валюту." },
+        { code: "vat_treatment", decision_by: "LEGAL", message: "Нужно подтвердить правило НДС." },
+      ],
+      external_effects: { payment_created: false, posting_created: false, automatic_conversion: false },
+    };
+    render(<FinanceOperations {...input} />);
+
+    expect(screen.getByText("Нужны финансовые решения")).toBeInTheDocument();
+    expect(screen.getByText(/OWNER/)).toBeInTheDocument();
+    expect(screen.getByText(/LEGAL/)).toBeInTheDocument();
+    expect(screen.getByText(/Автоматическая оплата, банковская проводка и конвертация не выполняются/)).toBeInTheDocument();
+  });
+
   it("shows customer receipt and passes the record version to explicit confirmation", () => {
     const input = props("approved");
     render(<FinanceOperations {...input} />);

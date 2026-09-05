@@ -29,6 +29,12 @@ const supplyItem = {
   sourceVersionId: "00000000-0000-4000-8000-000000000011",
   discrepancyCode: null,
   externalActionStatus: "not_created",
+  decisionRequirements: [
+    { code: "vat_treatment", decision_by: "LEGAL", message: "Требуется юридически подтверждённое правило НДС." },
+    { code: "retention_treatment", decision_by: "LEGAL", message: "Требуется юридически подтверждённое правило удержаний." },
+  ],
+  automaticConversion: false,
+  paymentCreated: false,
 };
 
 const evidenceOption = {
@@ -82,6 +88,8 @@ describe("supply read model", () => {
       projectId: 7,
       evidenceRevision: 1,
       externalActionStatus: "not_created",
+      automaticConversion: false,
+      paymentCreated: false,
     });
     expect(() => parseSupplyList({ items: [{ ...supplyItem, projectId: 8 }], total: 1 }, 7)).toThrow("scope mismatch");
     expect(() => parseSupplyList({ items: [{ ...supplyItem, externalActionStatus: "created" }], total: 1 }, 7)).toThrow("unsafe");
@@ -97,6 +105,8 @@ describe("SupplyCenter", () => {
     render(<SupplyCenter projectId={7} canEdit canManage />);
     expect(screen.getByRole("status")).toHaveTextContent("Загружаю");
     expect(await screen.findByText("Синтетическое оборудование")).toBeInTheDocument();
+    expect(screen.getByText(/Требуются решения владельца или юриста/)).toBeInTheDocument();
+    expect(screen.getByText(/Автоматическая конвертация и оплата не выполняются/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Согласовать заявку" })).toBeInTheDocument();
   });
 

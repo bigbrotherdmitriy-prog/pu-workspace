@@ -13,7 +13,7 @@ from app.database import Base
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import CashFlowEntry, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -28,6 +28,7 @@ from app.models.v54_pilot import (
     SourceVersion,
 )
 from app.mvp4.supply.contracts import (
+    CreateDdsProposal,
     CreateSupplyRequest,
     EvidenceLink,
     PrepareOrder,
@@ -320,6 +321,37 @@ def advance_to_recorded_order(world) -> tuple[SupplyService, SupplyCase]:
     )
     world["db"].flush()
     return service, row
+
+
+def test_non_rub_supply_never_loses_currency_in_an_implicit_rub_dds(world):
+    service, row = advance_to_recorded_order(world)
+    row.currency = "EUR"
+    world["db"].flush()
+
+    with pytest.raises(SupplyConflict, match="decision_required:unknown_currency"):
+        service.create_dds_proposal(
+            world["db"],
+            organization_id=row.organization_id,
+            project_id=row.project_id,
+            supply_case_id=row.id,
+            actor_user_id=world["editor"].id,
+            command=CreateDdsProposal(
+                command_key="dds:foreign-currency:0001",
+                expected_version=row.record_version,
+                contract_id=row.contract_id,
+                schedule_item_id=row.schedule_item_id,
+                budget_line_id=1,
+                planned_date=date(2026, 9, 5),
+                amount=Decimal("10.00"),
+                currency="EUR",
+                evidence_assessment_version=1,
+                evidence=evidence_link(world),
+            ),
+        )
+
+    assert world["db"].scalar(select(CashFlowEntry).where(
+        CashFlowEntry.project_id == row.project_id,
+    )) is None
 
 
 def test_router_exposes_complete_internal_supply_chain_without_mounting_main():

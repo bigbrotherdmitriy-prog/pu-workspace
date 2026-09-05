@@ -52,6 +52,9 @@ export interface SupplyCaseView {
   sourceVersionId: string;
   discrepancyCode?: string | null;
   externalActionStatus: "not_created";
+  decisionRequirements: { code: string; decisionBy: "OWNER" | "LEGAL"; message: string }[];
+  automaticConversion: false;
+  paymentCreated: false;
 }
 
 export interface SupplyEvidenceOption {
@@ -106,6 +109,17 @@ export function parseSupplyList(value: unknown, projectId: number): SupplyCaseVi
     if (item.evidenceRevision !== 1 || item.externalActionStatus !== "not_created") {
       throw new Error("supply item: unsafe evidence or external action state");
     }
+    if (!Array.isArray(item.decisionRequirements) || item.automaticConversion !== false
+      || item.paymentCreated !== false) {
+      throw new Error("supply item: missing finance guard");
+    }
+    const decisionRequirements = item.decisionRequirements.map((rawDecision) => {
+      const decision = record(rawDecision, "decision requirement");
+      const decisionBy = text(decision.decision_by, "decision owner");
+      if (!['OWNER', 'LEGAL'].includes(decisionBy)) throw new Error("decision owner: unsupported value");
+      return { code: text(decision.code, "decision code"),
+        decisionBy: decisionBy as "OWNER" | "LEGAL", message: text(decision.message, "decision message") };
+    });
     return {
       id: positiveInteger(item.id, "id"),
       recordVersion: positiveInteger(item.recordVersion, "recordVersion"),
@@ -133,6 +147,9 @@ export function parseSupplyList(value: unknown, projectId: number): SupplyCaseVi
       discrepancyCode: item.discrepancyCode === null || typeof item.discrepancyCode === "undefined"
         ? null : text(item.discrepancyCode, "discrepancyCode"),
       externalActionStatus: "not_created",
+      decisionRequirements,
+      automaticConversion: false,
+      paymentCreated: false,
     };
   });
   if (envelope.total !== items.length) throw new Error("supply response: total mismatch");

@@ -3,7 +3,7 @@ from decimal import Decimal
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,12 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
 from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceCurrent, SourceReference, SourceVersion
+from app.mvp4.finance_guards import (
+    IMPLICIT_LEDGER_CURRENCY,
+    blocking_currency_detail,
+    exact_decimal,
+    finance_decision_requirements,
+)
 from app.structured_import import parse_structured_rows
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
@@ -73,6 +79,11 @@ class BudgetCreate(BaseModel):
     forecast_amount: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
     currency: str = Field(default="RUB", pattern="^[A-Z]{3}$")
 
+    @field_validator("planned_amount", "forecast_amount")
+    @classmethod
+    def exact_money(cls, value: Decimal | None):
+        return exact_decimal(value, 2, reason="money_precision") if value is not None else None
+
 
 class CashFlowCreate(BaseModel):
     project_id: int
@@ -91,6 +102,11 @@ class CashFlowCreate(BaseModel):
     planned_amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     counterparty: str | None = Field(default=None, max_length=500)
 
+    @field_validator("planned_amount")
+    @classmethod
+    def exact_money(cls, value: Decimal):
+        return exact_decimal(value, 2, reason="money_precision")
+
 
 class InvoiceProposalCreate(CashFlowCreate):
     pass
@@ -101,6 +117,11 @@ class PaymentConfirmation(BaseModel):
     actual_amount: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
     actual_date: date | None = None
 
+    @field_validator("actual_amount")
+    @classmethod
+    def exact_money(cls, value: Decimal | None):
+        return exact_decimal(value, 2, reason="money_precision") if value is not None else None
+
 
 class PaymentCorrection(BaseModel):
     expected_record_version: int = Field(default=1, ge=1)
@@ -110,6 +131,11 @@ class PaymentCorrection(BaseModel):
     actual_date: date
     reason: str = Field(min_length=3, max_length=1000)
 
+    @field_validator("expected_actual_amount", "actual_amount")
+    @classmethod
+    def exact_money(cls, value: Decimal):
+        return exact_decimal(value, 2, reason="money_precision")
+
 
 class ProcurementCreate(BaseModel):
     project_id: int
@@ -118,6 +144,11 @@ class ProcurementCreate(BaseModel):
     supplier: str | None = Field(default=None, max_length=500)
     planned_delivery: date | None = None
     planned_amount: Decimal = Field(default=0, ge=0, max_digits=18, decimal_places=2)
+
+    @field_validator("planned_amount")
+    @classmethod
+    def exact_money(cls, value: Decimal):
+        return exact_decimal(value, 2, reason="money_precision")
 
 
 class ActCreate(BaseModel):
@@ -129,12 +160,22 @@ class ActCreate(BaseModel):
     act_date: date | None = None
     amount: Decimal = Field(default=0, ge=0, max_digits=18, decimal_places=2)
 
+    @field_validator("amount")
+    @classmethod
+    def exact_money(cls, value: Decimal):
+        return exact_decimal(value, 2, reason="money_precision")
+
 
 class StatusUpdate(BaseModel):
     status: str = Field(min_length=2, max_length=30)
     expected_status: str | None = Field(default=None, min_length=2, max_length=30)
     actual_amount: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
     actual_date: date | None = None
+
+    @field_validator("actual_amount")
+    @classmethod
+    def exact_money(cls, value: Decimal | None):
+        return exact_decimal(value, 2, reason="money_precision") if value is not None else None
 
 
 class StructuredImportRequest(BaseModel):
@@ -241,6 +282,10 @@ def _validate_control_links(
             raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
         if contract_id is not None and budget.contract_id not in {None, contract_id}:
             raise HTTPException(422, "Строка бюджета связана с другим договором")
+        if budget.currency != IMPLICIT_LEDGER_CURRENCY:
+            raise HTTPException(409, blocking_currency_detail(
+                budget.currency, linked_currency=IMPLICIT_LEDGER_CURRENCY,
+            ))
 
     document_version = None
     if source_document_id is not None:
@@ -401,7 +446,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
     acts = list(db.scalars(select(AcceptanceAct).where(AcceptanceAct.project_id == project_id).order_by(AcceptanceAct.act_date.desc(), AcceptanceAct.id.desc())))
-    confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}]
+    confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}
+                        and x.currency == IMPLICIT_LEDGER_CURRENCY]
     planned = sum((x.planned_amount for x in confirmed_budget), Decimal("0"))
     actual = sum((x.actual_amount for x in confirmed_budget), Decimal("0"))
     forecast = sum(((x.forecast_amount or x.planned_amount) for x in confirmed_budget), Decimal("0"))
@@ -414,6 +460,11 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     today = date.today()
     delayed = [x for x in schedule if x.baseline_id in current_baseline_ids and x.planned_finish and x.planned_finish < today and x.actual_progress < 100]
     late_procurement = [x for x in procurement if x.planned_delivery and x.planned_delivery < today and x.stage not in {"delivered", "accepted", "cancelled"}]
+    decision_requirements = finance_decision_requirements(
+        (row.currency for row in budget),
+        has_implicit_currency_rows=bool(cash or procurement or acts),
+        has_financial_rows=bool(budget or cash or procurement or acts),
+    )
     return {
         "summary": {"budget_planned": planned, "budget_committed": sum((x.committed_amount for x in confirmed_budget), Decimal("0")),
                     "budget_actual": actual, "budget_forecast": forecast,
@@ -421,7 +472,15 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "cash_gap": minimum, "cash_gap_date": gap_date, "delayed_schedule": len(delayed),
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
-                    "unlinked_invoices": len([x for x in cash if _cash_flow_missing_links(x)])},
+                    "unlinked_invoices": len([x for x in cash if _cash_flow_missing_links(x)]),
+                    "excluded_currency_rows": len([x for x in budget if x.currency != IMPLICIT_LEDGER_CURRENCY]),
+                    "financial_totals_reliable": not any(
+                        requirement["code"] in {"unknown_currency", "mixed_currency"}
+                        for requirement in decision_requirements
+                    )},
+        "decision_requirements": decision_requirements,
+        "external_effects": {"payment_created": False, "posting_created": False,
+                             "automatic_conversion": False},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version,
                        "status": x.status, "note": x.note,
                        "is_current": current_by_contract.get(x.contract_id) == x.id} for x in baselines],
@@ -812,8 +871,15 @@ def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: Us
     data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
     data["source_document_version_id"] = source_version_id
     data["confidence"] = confidence
-    data["review_status"] = review_status
-    item = BudgetLine(**data); db.add(item); db.flush(); _audit(db, "budget_proposed", "budget_line", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
+    currency_decisions = list(blocking_currency_detail(payload.currency)["decision_codes"])
+    data["review_status"] = "required" if currency_decisions else review_status
+    item = BudgetLine(**data)
+    db.add(item)
+    db.flush()
+    _audit(db, "budget_proposed", "budget_line", item.id, user.id, "status=proposed")
+    db.commit()
+    return {"id": item.id, "status": item.status, "review_status": item.review_status,
+            "decision_required": currency_decisions, "automatic_conversion": False}
 
 
 @router.post("/cash-flow")
@@ -1024,6 +1090,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     if payload.expected_status is not None and item.status != payload.expected_status:
         raise HTTPException(409, "Статус уже изменён; обновите данные перед повтором")
     if kind in {"budget", "cash-flow"} and payload.status in {"approved", "active", "closed"}:
+        if kind == "budget" and item.currency != IMPLICIT_LEDGER_CURRENCY:
+            raise HTTPException(409, blocking_currency_detail(item.currency))
         if item.contract_id is None or (item.schedule_item_id is None and item.task_id is None) or item.source_document_version_id is None:
             raise HTTPException(409, "Перед подтверждением завершите связи с договором, ГПР/задачей и первичным документом")
         if kind == "cash-flow" and item.budget_line_id is None:

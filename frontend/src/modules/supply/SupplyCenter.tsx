@@ -55,6 +55,12 @@ export function SupplyCenter({ projectId, enabled = true, canEdit, canManage }: 
       <strong>Цепочек снабжения пока нет</strong>
       <p>Они появятся после подтверждения заявки, связанной с договором, этапом ГПР, задачей и точным доказательством.</p>
     </div>}
+    {controller.items.some((item) => item.decisionRequirements.length > 0) && <div
+      className="supply-center__message" role="note">
+      <strong>Требуются решения владельца или юриста</strong>
+      <p>НДС, удержания, неизвестная валюта и источник курса не определяются автоматически.</p>
+      <p>Автоматическая конвертация и оплата не выполняются.</p>
+    </div>}
     {controller.mutationMessage && <p role={controller.mutationState === "saved" ? "status" : "alert"}
       className={`supply-center__message supply-center__message--${controller.mutationState}`}>
       {controller.mutationMessage}

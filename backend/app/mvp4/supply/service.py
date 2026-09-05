@@ -19,6 +19,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceCurrent, SourceReference, SourceVersion
+from app.mvp4.finance_guards import IMPLICIT_LEDGER_CURRENCY
 from app.mvp4.supply.contracts import (
     CreateSupplyRequest,
     CreateDdsProposal,
@@ -517,6 +518,10 @@ class SupplyService:
             )
         if row.record_version != command.expected_version:
             raise SupplyConflict("record_version_conflict")
+        # CashFlowEntry has no currency column today. Never erase a supply
+        # currency or invent a conversion while creating its DDS proposal.
+        if row.currency != IMPLICIT_LEDGER_CURRENCY:
+            raise SupplyConflict("decision_required:unknown_currency")
         if (
             row.review_state != "verified"
             or row.status not in {
