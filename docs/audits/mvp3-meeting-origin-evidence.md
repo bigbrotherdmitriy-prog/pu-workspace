@@ -48,8 +48,11 @@ denials; it does not implement evidence-backed meeting extraction.
 - Meeting CRUD and editable minutes remain supported. Saving completed minutes
   returns `proposal_state=invalid_source` and the reason
   `meeting_source_binding_required`; it never claims proposals were extracted.
-- Historical meeting-origin lists remain project-scoped and readable, including
-  after a meeting status change. Both the response and each historical proposal
+- Historical meeting-origin lists remain project-scoped and readable while their
+  candidate Evidence remains accessible and current, including after a meeting
+  status change or minutes replacement. Revoked/unavailable sources, stale
+  assessments or changed SourceCurrent deny the read without removing history.
+  Both the response and each historical proposal
   expose `origin_status=invalid_source`,
   `origin_reason=meeting_source_binding_required`, and
   `confirmation_available=false`. Stored business status and Evidence pins are
@@ -109,6 +112,25 @@ python -X utf8 -m pytest tests/test_mvp3_meeting_origin_evidence.py tests/test_m
 ```
 
 Result: **57 passed**, no skips, in 10.11 seconds. `git diff --check` passed.
+
+### Review correction: retain Evidence read authority
+
+Review identified that the initial historical meeting-read branch skipped the
+existing `lifecycle.evidence` check. `invalid_source` describes missing protocol
+attribution; it does not authorize disclosure after Evidence access/freshness is
+lost. A separate corrective commit restores that check for both origin branches;
+message origins additionally retain their specific source-binding check. No
+stripped-history endpoint or new read contract was introduced.
+
+Regression first against `7926421196fa458ff26d15ef595534333d7da312`:
+the revoked-source meeting-history read incorrectly succeeded (**1 failed,
+21 deselected**). Added tests cover source revocation, stale assessment and changed
+SourceCurrent, with DB history retained. The positive historical-read cases now
+explicitly overwrite minutes while keeping candidate Evidence current.
+
+Corrective targeted run: the same six test modules above with
+`--basetemp=.pytest-meeting-readguard-final-20260905`: **60 passed**, no skips,
+in 9.00 seconds. `git diff --check` passed.
 
 No full backend suite, production operations, push, merge or deployment were
 performed in this branch. The parent integration worktree owns full verification.

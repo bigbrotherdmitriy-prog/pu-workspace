@@ -10,9 +10,11 @@ from app.models.management import Meeting, Obligation
 from app.models.management_digest import ManagementProposalOrigin
 from app.models.task import Task
 from app.models.user import User
+from app.models.v54_pilot import EvidenceAssessment, SourceCurrent, SourceReference, SourceVersion
 from app.mvp3.lifecycle import ManagementDenied, ManagementLifecycle
 from app.mvp3.meeting_digest import MeetingProposalService
 from test_mvp3_meeting_digest import candidate, evidence_pin, world  # noqa: F401
+from v54_pilot_fixture import uid
 
 
 @pytest.mark.parametrize("kind", ["obligation", "task", "decision"])
@@ -72,6 +74,7 @@ def test_overwritten_protocol_cannot_authorize_existing_proposal_confirmation(wo
 def test_legacy_meeting_history_is_visible_with_explicit_invalid_origin(world, confirmed, meeting_status):
     row = _legacy_proposal(world, confirmed=confirmed)
     world.get(Meeting, 1).status = meeting_status
+    world.get(Meeting, 1).minutes = "Replaced protocol; candidate Evidence remains current"
     world.commit()
     before = row.record_version
     listed = MeetingProposalService().list_for_origin(world, project_id=4,
@@ -82,6 +85,31 @@ def test_legacy_meeting_history_is_visible_with_explicit_invalid_origin(world, c
     assert listed[0]["confirmation_available"] is False
     assert row.record_version == before
     assert row.status == ("confirmed" if confirmed else "needs_confirmation")
+
+
+@pytest.mark.parametrize("change", ["source_revoked", "stale", "current_changed"])
+def test_meeting_history_rechecks_current_evidence_authority(world, change):
+    row = _legacy_proposal(world, confirmed=True)
+    row_id, row_version = row.id, row.record_version
+    if change == "source_revoked":
+        world.get(SourceReference, uid(13)).availability = "revoked"
+    elif change == "stale":
+        world.get(EvidenceAssessment, uid(16)).freshness = "stale"
+    else:
+        previous = world.get(SourceVersion, uid(15))
+        world.add(SourceVersion(id=uid(901), organization_id=1, source_id=uid(13),
+            observation_key="synthetic-replacement", provider_revision="replacement-v2",
+            consistency="revision_bound", locator_at_observation=previous.locator_at_observation,
+            integrity=[], observed_at=previous.observed_at))
+        world.flush()
+        world.get(SourceCurrent, uid(13)).version_id = uid(901)
+    world.commit()
+    with pytest.raises(ManagementDenied, match="resource_unavailable"):
+        MeetingProposalService().list_for_origin(world, project_id=4,
+            actor_user_id=2, origin_type="meeting", origin_id=1)
+    assert world.get(Obligation, row_id).record_version == row_version
+    assert world.get(Obligation, row_id).status == "confirmed"
+    assert len(world.scalars(select(ManagementProposalOrigin)).all()) == 1
 
 
 def test_api_denies_unbound_candidates_but_still_saves_minutes(world):

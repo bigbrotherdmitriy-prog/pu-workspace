@@ -218,10 +218,10 @@ class MeetingProposalService:
             if (row is None or row.project_id != project_id or not row.evidence_pins
                     or row.evidence_pins != link.evidence_pins):
                 raise ManagementDenied("resource_unavailable")
-            # Message proposals re-resolve their exact current evidence. Meeting
-            # links below are historical records with explicitly invalid origins.
+            # Invalid meeting attribution does not waive current Evidence access
+            # or freshness checks. Historical rows remain stored on read denial.
+            self.lifecycle.evidence(db, scope, link.evidence_pins)
             if origin_type == "message":
-                self.lifecycle.evidence(db, scope, link.evidence_pins)
                 self._require_message_evidence(db, origin, link.evidence_pins)
             item = self._proposal(link.proposal_kind, link.entity_type, row)
             item.update({
