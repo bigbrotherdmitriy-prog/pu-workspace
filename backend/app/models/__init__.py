@@ -48,6 +48,7 @@ from app.models.v54_provider_action import (
     ProviderExecutionAttempt, ProviderOutcomeObservation,
 )
 from app.models.search import SavedSearchView, SavedSearchViewHistory
+from app.mvp4.supply.models import SupplyCase, SupplyCaseVersion, SupplyCommandReceipt
 
 __all__ = [
     "Project",
@@ -111,4 +112,5 @@ __all__ = [
     "ProviderAction", "ProviderActionApproval", "ProviderDispatchOutbox",
     "ProviderExecutionAttempt", "ProviderOutcomeObservation",
     "SavedSearchView", "SavedSearchViewHistory",
+    "SupplyCase", "SupplyCaseVersion", "SupplyCommandReceipt",
 ]

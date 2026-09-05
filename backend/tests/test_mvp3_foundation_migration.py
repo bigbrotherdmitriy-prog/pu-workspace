@@ -19,7 +19,7 @@ def config(output=None):
 
 def test_mvp3_foundation_is_single_sequential_head():
     script = ScriptDirectory.from_config(config())
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a15"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a16"]
     finance_revision = script.get_revision(CURRENT_SCHEMA_REVISION)
     assert finance_revision.down_revision == "a54f001c0a13"
     search_revision = script.get_revision("a54f001c0a13")

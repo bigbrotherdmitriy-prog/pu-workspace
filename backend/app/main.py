@@ -21,6 +21,7 @@ from app.api.ai_secretary import router as ai_secretary_router
 from app.api.management import router as management_router
 from app.api.execution_finance import router as execution_finance_router
 from app.execution_forecast.api import router as execution_forecast_router
+from app.mvp4.supply.router import router as supply_router
 from app.api.gmail import router as gmail_router
 from app.api.ai_policy import router as ai_policy_router
 from app.api.analytics import router as analytics_router
@@ -140,6 +141,7 @@ app.include_router(ai_secretary_router)
 app.include_router(management_router)
 app.include_router(execution_finance_router)
 app.include_router(execution_forecast_router)
+app.include_router(supply_router)
 app.include_router(gmail_router)
 app.include_router(ai_policy_router)
 app.include_router(analytics_router)

@@ -318,6 +318,7 @@ def advance_to_recorded_order(world) -> tuple[SupplyService, SupplyCase]:
 def test_router_exposes_complete_internal_supply_chain_without_mounting_main():
     paths = {route.path for route in router.routes}
     assert paths == {
+        "/api/mvp4/supply",
         "/api/mvp4/supply/requests",
         "/api/mvp4/supply/{supply_case_id}/review",
         "/api/mvp4/supply/{supply_case_id}/approve-request",

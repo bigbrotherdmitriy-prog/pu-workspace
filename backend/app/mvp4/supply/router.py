@@ -5,6 +5,7 @@ owner lands the documented sequential migration.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -21,10 +22,50 @@ from app.mvp4.supply.contracts import (
     VersionedCommand,
 )
 from app.mvp4.supply.service import SupplyConflict, SupplyDenied, SupplyService
+from app.mvp4.supply.models import SupplyCase
 
 
 router = APIRouter(prefix="/api/mvp4/supply", tags=["mvp4-supply"])
 service = SupplyService()
+
+
+def _view(row: SupplyCase) -> dict:
+    return {
+        "id": row.id,
+        "recordVersion": row.record_version,
+        "title": row.title,
+        "supplier": row.supplier,
+        "status": row.status,
+        "reviewState": row.review_state,
+        "requestedQuantity": str(row.requested_quantity),
+        "orderedQuantity": str(row.ordered_quantity),
+        "deliveredQuantity": str(row.delivered_quantity),
+        "acceptedQuantity": str(row.accepted_quantity),
+        "unit": row.unit,
+        "currency": row.currency,
+        "projectId": row.project_id,
+        "contractId": row.contract_id,
+        "scheduleBaselineId": row.schedule_baseline_id,
+        "scheduleBaselineVersion": row.schedule_baseline_version,
+        "scheduleItemId": row.schedule_item_id,
+        "taskId": row.task_id,
+        "documentVersionId": row.document_version_id,
+        "evidenceId": row.evidence_id,
+        "evidenceRevision": row.evidence_revision,
+        "sourceVersionId": row.source_version_id,
+        "discrepancyCode": row.discrepancy_code,
+        "externalActionStatus": row.external_action_status,
+    }
+
+
+@router.get("")
+def list_supply_cases(project_id: int, db: Session = Depends(get_db),
+                      user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    rows = db.scalars(
+        select(SupplyCase).where(SupplyCase.project_id == project_id).order_by(SupplyCase.id.desc())
+    ).all()
+    return {"items": [_view(row) for row in rows], "total": len(rows)}
 
 
 def _fail(exc: Exception):

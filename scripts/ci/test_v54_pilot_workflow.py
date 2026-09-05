@@ -99,7 +99,7 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert "capture_output=True" in source
     assert "print(result.stdout" not in source and "print(result.stderr" not in source
     assert "DROP DATABASE {}" in source and "pg_terminate_backend" in source
-    assert 'HEAD = "a54f001c0a15"' in source
+    assert 'HEAD = "a54f001c0a16"' in source
     assert '"PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations")' in source
     assert '"backend/tests/test_v54_provider_action_migration.py"' in source
     assert '"backend/tests/test_v54_product_acceptance.py"' in source
