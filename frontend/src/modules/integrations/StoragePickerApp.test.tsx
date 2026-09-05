@@ -45,6 +45,25 @@ it.each(["ready", "retrying"])("uses actual standardize status %s, not a fictiti
   expect(mockApi.mock.calls.filter(([path]) => path.endsWith("/standardize"))).toHaveLength(1);
 });
 
+it("refreshes a ready folder through an explicit immutable snapshot", async () => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.includes("/source-folders/discover")) return { project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "root", breadcrumbs: [], folders: [{ id: "opaque-C", name: "Папка", registered: true,
+        is_primary: true, snapshot_status: "ready", snapshot_id: 31 }] };
+    if (path.includes("/snapshot-queue")) return { project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "opaque-C", source_folder: "Папка", id: 32, job_id: 43, status: "building" };
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Обновить изменения с диска" }));
+  await screen.findByText(/Создан новый снимок «Папка»/);
+  const refreshCalls = mockApi.mock.calls.filter(([path]) => path.includes("/snapshot-queue"));
+  expect(refreshCalls).toHaveLength(1);
+  expect(new URL(refreshCalls[0][0], "https://local.test").searchParams.get("refresh")).toBe("true");
+});
+
 it("shows a non-looping active-job conflict when preparing source analysis", async () => {
   const previous = mockApi.getMockImplementation()!;
   mockApi.mockImplementation(async (path, options) => {
