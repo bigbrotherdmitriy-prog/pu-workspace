@@ -2942,6 +2942,7 @@ export function App() {
       )}
       {active === "Предложения" && (
         <ProposalsModule
+          projectId={projectId}
           collapsed={collapsed}
           proposals={proposals}
           busyProposal={busyProposal}
