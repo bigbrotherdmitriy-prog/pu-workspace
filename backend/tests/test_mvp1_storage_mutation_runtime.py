@@ -94,8 +94,3 @@ def test_db_runtime_persists_attempt_receipt_and_replays_without_second_effect(d
     assert first == replay
     assert first["outcome"] == "applied"
     assert adapter.calls == 1
-
-
-@pytest.mark.skipif(not __import__("os").getenv("TEST_POSTGRES_DSN"), reason="TEST_POSTGRES_DSN unavailable")
-def test_postgresql_crash_replay_requires_external_runtime_fixture():
-    assert True

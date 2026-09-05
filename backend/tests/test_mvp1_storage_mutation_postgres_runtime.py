@@ -1,11 +1,15 @@
 from datetime import timedelta
 import os
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.jobs.handlers import run
+from app.database import Base
 from app.jobs.queue import claim, enqueue, execution_owner, recover_expired, succeed, utcnow
 from app.models.job import BackgroundJob
 from app.models.organizer import OrganizerOperation
@@ -19,8 +23,59 @@ from test_mvp1_storage_mutation_runtime import SyntheticAdapter
 pytestmark = pytest.mark.skipif(not os.getenv("TEST_POSTGRES_DSN"), reason="TEST_POSTGRES_DSN unavailable")
 
 
-def test_postgres_worker_crash_reconciles_without_double_provider_effect():
-    engine = create_engine(os.environ["TEST_POSTGRES_DSN"], hide_parameters=True)
+@pytest.fixture
+def isolated_postgres_engine():
+    """Model-level runtime proof in an owned schema, never a production database."""
+    url = os.environ["TEST_POSTGRES_DSN"]
+    parsed = make_url(url)
+    assert parsed.get_backend_name() == "postgresql"
+    assert parsed.host in {"localhost", "127.0.0.1", "::1", "db"}
+    assert parsed.database == "puw_storage_ci" or (parsed.database or "").startswith("puw_v54_test_")
+    assert not parsed.query
+    schema = "storage_mutation_test_" + uuid4().hex
+    admin = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
+    engine = None
+    created = False
+    try:
+        with admin.begin() as db:
+            db.execute(text(f'CREATE SCHEMA "{schema}"'))
+        created = True
+        engine = create_engine(url, hide_parameters=True, connect_args={
+            "connect_timeout": 5,
+            "options": f"-csearch_path={schema} -clock_timeout=5000 -cstatement_timeout=15000",
+        })
+        Base.metadata.create_all(engine)
+        yield engine
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if created:
+            with admin.begin() as db:
+                db.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
+
+
+def test_postgres_resolver_serializes_overlapping_transactions(isolated_postgres_engine):
+    sessions = sessionmaker(isolated_postgres_engine, expire_on_commit=False)
+    with sessions.begin() as db:
+        project, _connection, _snapshot, action = world(db)
+        payload = {"project_id": project.id, "proposal_id": action.proposal_id,
+                   "action_id": action.id, "command_key": "storage-pg-lock-01",
+                   "expected_record_version": 1}
+    with sessions() as first, sessions() as second:
+        command = StorageMutationResolver(first).resolve(payload)
+        second.execute(text("SET LOCAL lock_timeout = '200ms'"))
+        with pytest.raises(OperationalError) as blocked:
+            StorageMutationResolver(second).resolve(payload)
+        assert getattr(blocked.value.orig, "sqlstate", None) == "55P03"
+        second.rollback()
+        first.rollback()
+        replay = StorageMutationResolver(second).resolve(payload)
+        assert replay == command
+
+
+def test_postgres_worker_crash_reconciles_without_double_provider_effect(isolated_postgres_engine):
+    engine = isolated_postgres_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
     adapter = SyntheticAdapter()
     try:
@@ -64,4 +119,3 @@ def test_postgres_worker_crash_reconciles_without_double_provider_effect():
         assert adapter.calls == 1
     finally:
         install_runtime(None)
-        engine.dispose()

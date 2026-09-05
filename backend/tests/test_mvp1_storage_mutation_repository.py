@@ -66,8 +66,3 @@ def test_resolver_rejects_stale_connection_and_cross_project(db_session):
     with pytest.raises(MutationConflict):
         StorageMutationResolver(db_session).resolve({"project_id": project.id + 1, "proposal_id": action.proposal_id,
             "action_id": action.id, "command_key": "mutation:exact:03", "expected_record_version": 1})
-
-
-@pytest.mark.skipif(not __import__("os").getenv("TEST_POSTGRES_DSN"), reason="TEST_POSTGRES_DSN unavailable")
-def test_postgresql_concurrent_resolve_requires_external_runtime_fixture():
-    assert True

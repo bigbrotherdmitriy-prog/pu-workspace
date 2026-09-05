@@ -40,7 +40,7 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           cd backend
           alembic -c alembic.ini upgrade head
-      - name: Two-worker crash/replay acceptance
+      - name: Transaction locking and simulated worker lease/replay acceptance
         working-directory: backend
         run: pytest -q tests/test_mvp1_storage_mutation_postgres_runtime.py tests/test_mvp1_storage_mutation_api.py
       - uses: actions/setup-node@v4
