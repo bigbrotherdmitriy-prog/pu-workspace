@@ -1,11 +1,13 @@
 import importlib.util
 from pathlib import Path
+import re
 import sys
 
 import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_ci_browser.py"
+WORKSPACE_THEME = SCRIPT.parents[1] / "frontend" / "src" / "interface-v6-workspace.css"
 sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("check_ci_browser", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -32,3 +34,10 @@ def test_browser_smoke_uses_synthetic_input_and_blocks_external_integrations():
     for label in ("Документы", "Задачи", "Интеграции"):
         assert f'"button", name="{label}", exact=True' in source
         assert f'page.get_by_text("{label}", exact=True).first.click()' not in source
+
+
+def test_primary_navigation_stays_above_fixed_module_workspaces():
+    source = WORKSPACE_THEME.read_text(encoding="utf-8")
+    sidebar_rule = re.search(r"\.shell\s*>\s*aside\s*\{(?P<body>[^}]*)\}", source, re.DOTALL)
+    assert sidebar_rule is not None
+    assert re.search(r"\bz-index\s*:\s*20\s*;", sidebar_rule.group("body"))
