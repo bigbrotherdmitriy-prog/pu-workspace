@@ -52,7 +52,9 @@ def test_cleanup_is_unconditional_and_scoped_to_the_disposable_compose_project()
     assert cleanup["if"] == "always()"
     assert "down --volumes --remove-orphans" in cleanup["run"]
     assert JOB["env"]["COMPOSE_PROJECT_NAME"].startswith("puw-ci-")
-    assert JOB["env"]["COMPOSE_FILE"] == "docker-compose.ci.yml"
+    assert JOB["env"]["COMPOSE_FILE"] == (
+        "docker-compose.ci.yml:docker-compose.ci-upload.yml"
+    )
     assert JOB["env"]["COMPOSE_ENV_FILES"] == ".env.ci"
 
 

@@ -26,9 +26,12 @@ def main():
         'PU_SMOKE_PASSWORD': secrets.token_urlsafe(24),
         'PU_RELEASE_REVISION': revision,
         'PU_TEST_PORT': str(args.port),
-        'PU_LOCAL_UPLOAD_CI_RUNTIME': 'true',
-        'PU_LOCAL_UPLOAD_STAGING_ROOT': '/var/lib/pu-workspace-ci-staging',
     }
+    if target.name == '.env.ci':
+        values.update({
+            'PU_LOCAL_UPLOAD_CI_RUNTIME': 'true',
+            'PU_LOCAL_UPLOAD_STAGING_ROOT': '/var/lib/pu-workspace-ci-staging',
+        })
     with target.open('x', encoding='utf-8') as output:
         output.write(''.join(f'{key}={value}\n' for key, value in values.items()))
     if os.name != 'nt':

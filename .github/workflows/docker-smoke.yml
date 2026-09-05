@@ -22,7 +22,7 @@ jobs:
         shell: bash
     env:
       COMPOSE_PROJECT_NAME: puw-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      COMPOSE_FILE: docker-compose.ci.yml
+      COMPOSE_FILE: docker-compose.ci.yml:docker-compose.ci-upload.yml
       COMPOSE_ENV_FILES: .env.ci
     steps:
       - uses: actions/checkout@v6

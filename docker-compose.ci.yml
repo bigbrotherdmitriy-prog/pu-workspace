@@ -7,8 +7,6 @@ x-environment: &environment
   PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?set tested commit}
   PU_BACKGROUND_EXECUTION: durable
   PU_V54_SYNTHETIC_ACCEPTANCE: "false"
-  PU_LOCAL_UPLOAD_CI_RUNTIME: ${PU_LOCAL_UPLOAD_CI_RUNTIME:-false}
-  PU_LOCAL_UPLOAD_STAGING_ROOT: ${PU_LOCAL_UPLOAD_STAGING_ROOT:-}
   GMAIL_AUTO_SYNC_ENABLED: "false"
   AI_SECRETARY_AUTOMATION_ENABLED: "false"
   GOOGLE_CLIENT_ID: ""
@@ -25,8 +23,6 @@ x-app: &app
     context: .
     dockerfile: Dockerfile.ci
   environment: *environment
-  volumes:
-    - staging:/var/lib/pu-workspace-ci-staging
 
 services:
   db:
@@ -86,7 +82,6 @@ services:
 
 volumes:
   data:
-  staging:
 
 networks:
   default:

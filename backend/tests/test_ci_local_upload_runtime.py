@@ -37,15 +37,26 @@ def test_ci_key_requires_exact_256_bits(monkeypatch):
 
 
 def test_ci_compose_explicitly_uses_private_shared_staging_volume():
-    compose = (Path(__file__).resolve().parents[2] / "docker-compose.ci.yml").read_text(
+    root = Path(__file__).resolve().parents[2]
+    compose = (root / "docker-compose.ci.yml").read_text(
         encoding="utf-8",
     )
-    assert "PU_LOCAL_UPLOAD_CI_RUNTIME: ${PU_LOCAL_UPLOAD_CI_RUNTIME:-false}" in compose
-    assert "PU_LOCAL_UPLOAD_STAGING_ROOT: ${PU_LOCAL_UPLOAD_STAGING_ROOT:-}" in compose
-    assert "staging:/var/lib/pu-workspace-ci-staging" in compose
+    assert "PU_LOCAL_UPLOAD_CI_RUNTIME" not in compose
+    assert "pu-workspace-ci-staging" not in compose
 
-    generator = (Path(__file__).resolve().parents[2] / "scripts" / "prepare_test_environment.py").read_text(
+    override = (root / "docker-compose.ci-upload.yml").read_text(encoding="utf-8")
+    assert "PU_LOCAL_UPLOAD_CI_RUNTIME: ${PU_LOCAL_UPLOAD_CI_RUNTIME:?generate CI environment}" in override
+    assert "PU_LOCAL_UPLOAD_STAGING_ROOT: ${PU_LOCAL_UPLOAD_STAGING_ROOT:?generate CI environment}" in override
+    assert "staging:/var/lib/pu-workspace-ci-staging" in override
+
+    workflow = (root / ".github" / "workflows" / "docker-smoke.yml").read_text(
         encoding="utf-8",
     )
+    assert "COMPOSE_FILE: docker-compose.ci.yml:docker-compose.ci-upload.yml" in workflow
+
+    generator = (root / "scripts" / "prepare_test_environment.py").read_text(
+        encoding="utf-8",
+    )
+    assert "if target.name == '.env.ci':" in generator
     assert "'PU_LOCAL_UPLOAD_CI_RUNTIME': 'true'" in generator
     assert "'PU_LOCAL_UPLOAD_STAGING_ROOT': '/var/lib/pu-workspace-ci-staging'" in generator
