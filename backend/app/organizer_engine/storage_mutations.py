@@ -21,6 +21,14 @@ class MutationConflict(ValueError):
     pass
 
 
+class MutationOutcomeUnknown(RuntimeError):
+    """The provider effect cannot be proved applied or absent.
+
+    Callers must persist an UNKNOWN receipt and reconcile it; retrying the
+    provider mutation would risk a duplicate external effect.
+    """
+
+
 @dataclass(frozen=True)
 class StorageBindingPin:
     project_id: int
@@ -132,7 +140,8 @@ def execute_mutation(
             else:
                 adapter.move_file(item.object_id, item.new_parent_id, item.old_parent_id, command.pin.folder_id)
             applied.append(item)
-    except Exception:
+    except Exception as exc:
+        outcome_unknown = isinstance(exc, MutationOutcomeUnknown)
         compensation_failed = False
         for item in reversed(applied):
             try:
@@ -147,7 +156,11 @@ def execute_mutation(
             payload_hash=payload_hash,
             pin=command.pin,
             resulting_record_version=command.expected_record_version + 1,
-            outcome="partial_failure" if compensation_failed else "compensated",
+            outcome=(
+                "unknown"
+                if outcome_unknown
+                else ("partial_failure" if compensation_failed else "compensated")
+            ),
             applied_operations=tuple(applied),
         )
         store.append(receipt)
