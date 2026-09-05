@@ -211,7 +211,11 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 if not existing_attachments or any(not value.get("document_external_id") for value in existing_attachments):
                     existing.attachments_json = json.dumps(_attachments(item.get("payload", {}), item["id"]), ensure_ascii=False)
                 if existing.source_sender and not bulk_reason and existing.context_confirmed:
-                    discover_contact_from_message(db, existing.project_id, existing.source_sender, existing.content, user)
+                    discover_contact_from_message(
+                        db, existing.project_id, existing.source_sender, existing.content, user,
+                        mail_connection_id=(mailbox_runtime.mail_connection_id if mailbox_write else None),
+                        source_message_id=existing.id,
+                    )
                 # Older messages may have been synchronized before email fallback
                 # drafts existed. Backfill a reviewable draft without sending it
                 # and without changing the message's confirmed project context.
@@ -236,7 +240,10 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             target_project_id, routing_confidence, semantic_evidence = project_candidate(
                 db, project_id, f"{subject}\n{content}", user,
             )
-            contact = contact_for_sender(db, project_id, correspondent, user)
+            contact = contact_for_sender(
+                db, project_id, correspondent, user,
+                mail_connection_id=(mailbox_runtime.mail_connection_id if mailbox_write else None),
+            )
             routing_evidence = None
             routing_contract_id = None
             if contact is not None and (routing_confidence == 0.40 or
@@ -279,7 +286,11 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             ), db, user, mailbox_origin=ingress_origin)
             processed += 1 if result["status"] else 0
             if not bulk_reason and result.get("context_confirmed"):
-                discover_contact_from_message(db, target_project_id, correspondent, content, user)
+                discover_contact_from_message(
+                    db, target_project_id, correspondent, content, user,
+                    mail_connection_id=(mailbox_runtime.mail_connection_id if mailbox_write else None),
+                    source_message_id=result.get("id"),
+                )
             if not is_outgoing and not bulk_reason:
                 notify_telegram(_gmail_telegram_notice(sender, subject, result))
         except Exception as exc:

@@ -26,3 +26,12 @@ def test_contacts_module_keeps_provider_neutral_core_boundary():
     assert "google_workspace" not in module.casefold()
     assert "original" not in module.casefold()
     assert "busy" in module
+
+
+def test_contact_confirmation_uses_versioned_resolution_endpoint():
+    module = (ROOT / "frontend" / "src" / "modules" / "contacts" / "ContactsModule.tsx").read_text(encoding="utf-8")
+
+    assert "project-contacts/${contact.id}/resolve" in module
+    assert "expected_record_version: contact.record_version" in module
+    assert 'decision: "confirm"' in module
+    assert "crypto.randomUUID()" in module

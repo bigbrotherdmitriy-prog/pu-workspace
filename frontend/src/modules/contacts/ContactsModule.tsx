@@ -5,6 +5,8 @@ import { api } from "../../api/client";
 export type ProjectContact = {
   id: number; project_id: number; contract_id?: number; name: string; company?: string;
   email: string; active: boolean; confirmed: boolean; source: string; company_activity?: string;
+  record_version: number; resolution_state: "proposed" | "conflict" | "confirmed" | "corrected" | "rejected";
+  resolution_reason_code: string; phone?: string;
 };
 export type ContactContract = { id: number; number: string; title: string };
 export type ContactDraft = {
@@ -56,7 +58,12 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
     if (busy) return;
     setBusy(true);
     try {
-      await api(`/project-contacts/${contact.id}`, { method: "PATCH", body: JSON.stringify({ confirmed: true }) });
+      await api(`/project-contacts/${contact.id}/resolve`, { method: "POST", body: JSON.stringify({
+        decision_key: `contact:${contact.id}:${contact.record_version}:${crypto.randomUUID()}`,
+        expected_record_version: contact.record_version,
+        decision: "confirm",
+        reason_code: "reviewed_by_operator",
+      }) });
       onNotice(`Контакт ${contact.email} подтверждён. Следующие письма будут направляться в этот проект.`);
       await reload();
     } catch (reason) { onError((reason as Error).message); }
@@ -89,7 +96,7 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
       </div>
     </section>
     <section className="company-grid">
-      {groups.map(([group, items]) => <article className="card company-card" key={group}><div className="company-card-head"><div><span className="eyebrow">КОМПАНИЯ</span><h2>{group}</h2></div><b>{items.length} контакт(а)</b></div>{items.map((contact) => <div className="company-contact" key={contact.id}><div><strong>{contact.name}</strong><a href={`mailto:${contact.email}`}>{contact.email}</a><small>{contact.contract_id ? "Связан с договором" : "Без договора"} · {contact.source === "gmail" ? "найден во входящих" : "добавлен вручную"}</small>{contact.company_activity && <p><b>О чём переписка:</b> {contact.company_activity}</p>}</div><div>{!contact.confirmed && <button className="secondary" disabled={busy} onClick={() => confirmContact(contact)}>Подтвердить проект</button>}<button disabled={busy || !contact.confirmed} onClick={() => prepareEmail(contact)}>Подготовить письмо</button></div></div>)}</article>)}
+      {groups.map(([group, items]) => <article className="card company-card" key={group}><div className="company-card-head"><div><span className="eyebrow">КОМПАНИЯ</span><h2>{group}</h2></div><b>{items.length} контакт(а)</b></div>{items.map((contact) => <div className="company-contact" key={contact.id}><div><strong>{contact.name}</strong><a href={`mailto:${contact.email}`}>{contact.email}</a><small>{contact.contract_id ? "Связан с договором" : "Без договора"} · {contact.source === "gmail" ? "найден во входящих" : "добавлен вручную"}</small>{!contact.confirmed && <small>Предложение: отправитель письма · требуется проверка человеком</small>}{contact.company_activity && <p><b>О чём переписка:</b> {contact.company_activity}</p>}</div><div>{!contact.confirmed && <button className="secondary" disabled={busy} onClick={() => confirmContact(contact)}>Подтвердить проект</button>}<button disabled={busy || !contact.confirmed} onClick={() => prepareEmail(contact)}>Подготовить письмо</button></div></div>)}</article>)}
       {!groups.length && <div className="card empty"><Users /><p>Контактов пока нет. Получите письма из Gmail или добавьте клиента выше.</p></div>}
     </section>
     {!!clientDrafts.length && <section className="card company-drafts"><h2>Исходящие клиентам</h2><p>Отправка возможна только после отдельного подтверждения.</p>{clientDrafts.map((draft) => <article key={draft.id}><div><strong>{draft.subject}</strong><small>{draft.recipient_to} · {draft.status}</small><p>{draft.body}</p></div><div>{draft.status === "draft" && <><button className="secondary" onClick={() => onUpdateDraft(draft, "rejected")}>Отклонить</button><button onClick={() => onUpdateDraft(draft, "approved")}>Подтвердить</button></>}{draft.status === "approved" && <button onClick={() => onSendDraft(draft)}>Отправить через Gmail</button>}{draft.status === "sent" && <span className="draft-status ready">Отправлено</span>}</div></article>)}</section>}
