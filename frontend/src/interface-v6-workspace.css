@@ -69,6 +69,7 @@ body {
 /* Graphite is reserved for navigation, so the work surface remains calm. */
 .shell { background: transparent; }
 .shell > aside {
+  z-index: 20;
   color: #edf5f1;
   border-right: 1px solid rgba(109, 151, 132, .2);
   background:
