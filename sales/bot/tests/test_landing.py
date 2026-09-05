@@ -38,6 +38,21 @@ class SalesLandingTest(unittest.TestCase):
         self.assertIsNotNone(structured)
         self.assertEqual(json.loads(structured.group(1))["@context"], "https://schema.org")
 
+    def test_home_immersive_layer_is_local_accessible_and_value_led(self) -> None:
+        source = (LANDING / "index.html").read_text(encoding="utf-8")
+        styles = (LANDING / "home.css").read_text(encoding="utf-8")
+        experience = (LANDING / "experience.js").read_text(encoding="utf-8")
+
+        self.assertIn('src="experience.js?', source)
+        self.assertIn('class="immersive-field"', source)
+        self.assertIn('class="values"', source)
+        self.assertIn("Ответственность остаётся у человека", source)
+        self.assertIn("prefers-reduced-motion", styles)
+        self.assertIn("IntersectionObserver", experience)
+        self.assertIn("requestAnimationFrame", experience)
+        self.assertNotIn("fetch(", experience)
+        self.assertNotRegex(experience, r"https?://")
+
     def test_tracking_redirect_is_first_party_and_validates_source(self) -> None:
         source = (LANDING / "go.html").read_text(encoding="utf-8")
         self.assertIn("URLSearchParams", source)

@@ -21,6 +21,7 @@
   <link rel="icon" href="assets/logo.jpg">
   <link rel="stylesheet" href="home.css?v=20260829-2">
   <link rel="stylesheet" href="conversion.css?v=20260830-1">
+  <script src="experience.js?v=20260905-1" defer></script>
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -56,6 +57,7 @@
 </head>
 <body>
   <div class="noise" aria-hidden="true"></div>
+  <div class="scroll-feedback" aria-hidden="true"><i></i></div>
   <header class="header"><div class="shell nav">
     <a class="brand" href="#top"><span>[PU]</span><b>WORKSPACE</b></a>
     <nav class="desktop-nav" aria-label="Основная навигация"><a href="#product">Продукт</a><a href="#scenarios">Для кого</a><a href="#compare">Результат</a><a href="#purchase">Покупка</a><a href="#faq">Вопросы</a></nav>
@@ -64,6 +66,13 @@
 
   <main id="top">
     <section class="hero">
+      <div class="immersive-field" aria-hidden="true">
+        <i class="field-orbit field-orbit-a" data-depth="0.18"></i>
+        <i class="field-orbit field-orbit-b" data-depth="0.32"></i>
+        <i class="field-node field-node-a" data-depth="0.46"></i>
+        <i class="field-node field-node-b" data-depth="0.24"></i>
+        <i class="field-beam" data-depth="0.12"></i>
+      </div>
       <div class="shell hero-grid">
         <div class="hero-copy">
           <div class="kicker"><span></span> ГОТОВАЯ САМОСТОЯТЕЛЬНАЯ ВЕРСИЯ · 2026</div>
@@ -110,8 +119,17 @@
       </div>
     </section>
 
+    <section class="values" id="values"><div class="shell">
+      <div class="values-heading"><div><div class="section-no">02 / ПРИНЦИПЫ</div><h2>Технология помогает.<br><em>Ответственность остаётся у человека.</em></h2></div><p>PU Workspace не прячет решения внутри алгоритма. Источник, предложение AI и действие пользователя разделены и остаются проверяемыми.</p></div>
+      <div class="values-deck">
+        <article><span class="value-icon" aria-hidden="true">◎</span><small>01 · ЧЕЛОВЕК</small><h3>Никаких действий исподтишка</h3><p>Отправка письма, изменение документа и финансовое подтверждение выполняются только после явного решения пользователя.</p><b>Подтверждение видно</b></article>
+        <article><span class="value-icon" aria-hidden="true">◇</span><small>02 · ИСТОЧНИК</small><h3>Оригинал остаётся оригиналом</h3><p>Анализ работает с разрешённой копией. Источник, версия и найденный фрагмент сохраняются рядом с выводом.</p><b>Доказательство рядом</b></article>
+        <article><span class="value-icon" aria-hidden="true">∷</span><small>03 · КОНТРОЛЬ</small><h3>Инфраструктура принадлежит вам</h3><p>Самостоятельная поставка разворачивается в выбранной инфраструктуре, а границы AI и интеграций задаются политикой проекта.</p><b>Правила определяет владелец</b></article>
+      </div>
+    </div></section>
+
     <section class="story" id="how"><div class="shell">
-      <div class="story-head"><div><div class="section-no">02 / ОДИН РАБОЧИЙ СЦЕНАРИЙ</div><h2>От входящего письма<br>до <em>контролируемого решения.</em></h2></div><p>Без ручного переноса информации между сервисами. Без потери источника. Без автоматических действий за спиной пользователя.</p></div>
+      <div class="story-head"><div><div class="section-no">03 / ОДИН РАБОЧИЙ СЦЕНАРИЙ</div><h2>От входящего письма<br>до <em>контролируемого решения.</em></h2></div><p>Без ручного переноса информации между сервисами. Без потери источника. Без автоматических действий за спиной пользователя.</p></div>
       <div class="timeline">
         <article><div class="timeline-number">01</div><div class="timeline-icon">↙</div><h3>Получает</h3><p>Письмо, документ или сообщение из подключённого источника.</p></article>
         <article><div class="timeline-number">02</div><div class="timeline-icon">◎</div><h3>Понимает</h3><p>Определяет проект, договор, контрагента и связанный контекст.</p></article>
@@ -121,7 +139,7 @@
     </div></section>
 
     <section class="comparison" id="compare"><div class="shell">
-      <div class="comparison-head"><div><div class="section-no">03 / ДО И ПОСЛЕ</div><h2>Не заменяет вашу работу.<br><em>Убирает слепые зоны.</em></h2></div><p>Core хранит связи между сущностями проекта. Подключённые сервисы остаются адаптерами, а значимые действия — под контролем пользователя.</p></div>
+      <div class="comparison-head"><div><div class="section-no">04 / ДО И ПОСЛЕ</div><h2>Не заменяет вашу работу.<br><em>Убирает слепые зоны.</em></h2></div><p>Core хранит связи между сущностями проекта. Подключённые сервисы остаются адаптерами, а значимые действия — под контролем пользователя.</p></div>
       <div class="comparison-table" role="table" aria-label="Сравнение рабочего процесса">
         <div class="comparison-row comparison-title" role="row"><b>Рабочая ситуация</b><span>Без PU Workspace</span><strong>С PU Workspace</strong></div>
         <div class="comparison-row" role="row"><b>Новое письмо клиента</b><span>Ручной поиск проекта и договора</span><strong>Предлагается контекст, задача и ответ</strong></div>
@@ -132,12 +150,12 @@
     </div></section>
 
     <section class="film" id="film"><div class="shell film-grid">
-      <div class="film-copy"><div class="section-no">03 / ДЕМОНСТРАЦИЯ</div><h2>Увидеть продукт<br><em>за одну минуту.</em></h2><p>Коротко о том, как PU Workspace превращает поток писем, документов и сообщений в управляемую картину бизнеса.</p><a class="text-link" href="materials.html">Все материалы проекта <span>→</span></a></div>
+      <div class="film-copy"><div class="section-no">05 / ДЕМОНСТРАЦИЯ</div><h2>Увидеть продукт<br><em>за одну минуту.</em></h2><p>Коротко о том, как PU Workspace превращает поток писем, документов и сообщений в управляемую картину бизнеса.</p><a class="text-link" href="materials.html">Все материалы проекта <span>→</span></a></div>
       <div class="cinema"><video controls preload="metadata" poster="assets/product.jpg"><source src="assets/demo.mp4" type="video/mp4">Ваш браузер не поддерживает видео.</video><div class="cinema-label"><span>PU / FILM 01</span><b>Бизнес, который понимает сам себя</b></div></div>
     </div></section>
 
     <section class="scenarios" id="scenarios"><div class="shell">
-      <div class="scenario-intro"><div><div class="section-no">04 / ДЛЯ БИЗНЕСА</div><h2>Не ещё одна система.<br><em>Новый уровень контроля.</em></h2></div><p>PU Workspace полезен там, где цена потерянного письма, пропущенного срока или несвязанного документа выше стоимости внедрения.</p></div>
+      <div class="scenario-intro"><div><div class="section-no">06 / ДЛЯ БИЗНЕСА</div><h2>Не ещё одна система.<br><em>Новый уровень контроля.</em></h2></div><p>PU Workspace полезен там, где цена потерянного письма, пропущенного срока или несвязанного документа выше стоимости внедрения.</p></div>
       <div class="scenario-list">
         <a href="solutions.html"><span>01</span><div><h3>Строительство и подряд</h3><p>Акты, договоры, закупки, переписка и исполнение.</p></div><b>→</b></a>
         <a href="solutions.html"><span>02</span><div><h3>Проектные организации</h3><p>Версии, согласования, замечания и обязательства.</p></div><b>→</b></a>
@@ -147,7 +165,7 @@
     </div></section>
 
     <section class="result"><div class="shell result-grid">
-      <div class="result-title"><div class="section-no">05 / РЕЗУЛЬТАТ</div><h2>Руководитель видит<br><em>только важное.</em></h2></div>
+      <div class="result-title"><div class="section-no">07 / РЕЗУЛЬТАТ</div><h2>Руководитель видит<br><em>только важное.</em></h2></div>
       <div class="metric"><strong>01</strong><span>Сроки и обязательства<br>под контролем</span></div><div class="metric"><strong>02</strong><span>Задачи не теряются<br>между каналами</span></div><div class="metric"><strong>03</strong><span>Меньше рутины,<br>больше решений</span></div>
     </div></section>
 
@@ -157,7 +175,7 @@
     </div></section>
 
     <section class="purchase" id="purchase"><div class="shell">
-      <div class="purchase-head"><div><div class="section-no">06 / ВАРИАНТЫ ПОКУПКИ</div><h2>Начните с проверки.<br><em>Покупайте понятный результат.</em></h2></div><p>Без скрытой привязки к обязательному обслуживанию. Состав, права, инфраструктура и критерии приёмки фиксируются в договоре.</p></div>
+      <div class="purchase-head"><div><div class="section-no">08 / ВАРИАНТЫ ПОКУПКИ</div><h2>Начните с проверки.<br><em>Покупайте понятный результат.</em></h2></div><p>Без скрытой привязки к обязательному обслуживанию. Состав, права, инфраструктура и критерии приёмки фиксируются в договоре.</p></div>
       <div class="purchase-grid">
         <article><span>01</span><h3>Диагностика и демо</h3><p>Разбираем один процесс и показываем, где продукт снижает риск потери сроков, документов и решений.</p><ul><li>30 минут</li><li>Без переноса production-данных</li><li>Результат: карта сценария</li></ul><a href="/go.html?source=package_diagnostic" target="_blank" rel="noopener">Запросить диагностику →</a></article>
         <article class="featured"><span>02 · ОСНОВНОЙ</span><h3>Самостоятельная лицензия</h3><p>Зафиксированный релиз для развёртывания в инфраструктуре покупателя.</p><ul><li>Исходный код и Docker Compose</li><li>Миграции, тесты и документация</li><li>Без обязательного обслуживания</li></ul><a href="/go.html?source=package_license" target="_blank" rel="noopener">Получить состав поставки →</a></article>
@@ -165,7 +183,7 @@
       </div>
     </div></section>
 
-    <section class="faq" id="faq"><div class="shell faq-grid"><div><div class="section-no">07 / ВОПРОСЫ ПОКУПАТЕЛЯ</div><h2>До демонстрации<br><em>всё важное.</em></h2></div><div class="faq-list">
+    <section class="faq" id="faq"><div class="shell faq-grid"><div><div class="section-no">09 / ВОПРОСЫ ПОКУПАТЕЛЯ</div><h2>До демонстрации<br><em>всё важное.</em></h2></div><div class="faq-list">
       <details><summary>PU Workspace изменяет оригиналы документов?</summary><p>Нет. Анализ и стандартизация выполняются через безопасную копию. Изменение оригинала возможно только отдельным явным действием пользователя.</p></details>
       <details><summary>Продукт зависит от Google Workspace?</summary><p>Нет. Gmail и Google Drive — текущие адаптеры. Project, Document, Contract, Task, Approval и Audit Core проектируются независимо от поставщика.</p></details>
       <details><summary>AI самостоятельно отправляет письма и проводит оплату?</summary><p>Нет. AI готовит предложения. Отправку письма, закрытие задачи и подтверждение оплаты выполняет пользователь.</p></details>
