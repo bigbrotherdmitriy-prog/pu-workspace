@@ -30,9 +30,10 @@ def test_history_database_is_owned_scoped_and_migrated_before_acceptance(monkeyp
     assert env["PUW_MVP2_GMAIL_HISTORY_DATABASE_URL"] == "synthetic-db:" + name
     assert env["GMAIL_AUTO_SYNC_ENABLED"] == "false"
     source = path.read_text(encoding="utf8")
-    assert source.index('run_phase("gmail_history_migration"') < source.index('run_phase("postgres_gmail_history"')
+    assert source.index('migrate_database("gmail_history_migration"') < source.index('run_phase("postgres_gmail_history"')
     assert '"backend/tests/test_mvp2_gmail_history_cursor_postgres.py"' in source
     assert '"backend/tests/test_mvp2_gmail_history_migration.py"' in source
-    assert 'PUW_MVP2_GMAIL_HISTORY_DATABASE_URL=""' in source
-    assert 'for name in reversed(CREATED)' in source
+    assert "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL" in module.TEST_DATABASE_KEYS
+    assert 'env=dict(env, **{key: "" for key in TEST_DATABASE_KEYS})' in source
+    assert 'for name in reversed(tuple(CREATED))' in source
     assert '"raw_output_published": False' in source

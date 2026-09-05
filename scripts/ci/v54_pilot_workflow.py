@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+from urllib.parse import quote
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -26,9 +27,56 @@ DATABASES = (
     "puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime",
     "puw_mvp3_test_runtime",
     "puw_mvp2_test_gmail_history",
+    "puw_v54_test_storage", "puw_mvp4_test_runtime",
 )
 PHASES: list[dict] = []
 CREATED: list[str] = []
+
+
+def test_nodes(path: str, *names: str) -> tuple[str, ...]:
+    return tuple(path + "::" + name for name in names)
+
+
+# Pin individual proofs: a removed/renamed test must fail collection, not reduce coverage.
+MVP_TESTS = {
+    "postgres_mvp1_storage": test_nodes(
+        "backend/tests/test_mvp1_storage_mutation_postgres_runtime.py",
+        "test_postgres_resolver_serializes_overlapping_transactions",
+        "test_postgres_worker_crash_reconciles_without_double_provider_effect",
+    ),
+    "postgres_gmail_history": (
+        *test_nodes("backend/tests/test_mvp2_gmail_history_cursor_postgres.py",
+                    "test_postgresql_concurrent_checkpoint_claim_has_one_winner"),
+        *test_nodes("backend/tests/test_mvp2_gmail_history_migration.py",
+                    "test_postgresql_history_schema_and_cas_constraints"),
+    ),
+    "postgres_mvp3_runtime": (
+        *test_nodes("backend/tests/test_mvp3_management_acceptance_postgres.py",
+                    "test_postgresql_obligation_cas_has_one_winner"),
+        *test_nodes("backend/tests/test_mvp3_management_runtime_postgres.py",
+                    "test_postgresql_digest_is_single_after_scheduler_race_restart_and_replay"),
+    ),
+    "postgres_mvp4_finance": test_nodes(
+        "backend/tests/test_mvp4_finance_postgres_runtime.py",
+        "test_postgres_concurrent_payment_confirmation_creates_one_fact",
+        "test_postgres_competing_payment_corrections_are_cas_serialized",
+    ),
+}
+MANDATORY_POSTGRES = (*MVP_TESTS, "postgres_abc_integration")
+TEST_DATABASE_KEYS = (
+    "TEST_POSTGRES_DSN", "PUW_MVP4_TEST_DATABASE_URL",
+    "PUW_V54_TEST_DATABASE_URL", "PUW_V54_SOURCE_TEST_DATABASE_URL",
+    "PUW_V54_CONTEXT_TEST_DATABASE_URL", "PUW_V54_MAILBOX_TEST_DATABASE_URL",
+    "PUW_V54_INTEGRATION_DATABASE_URL", "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL",
+    "PUW_MVP3_TEST_DATABASE_URL", "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL",
+    "PUW_V54_AUTHORITY_DATABASE_URL", "PUW_V54_AUTHORITY_MIGRATION_DATABASE_URL",
+    "PUW_V54_MATERIALIZATION_DATABASE_URL", "PUW_V54_LOCAL_UPLOAD_DATABASE_URL",
+)
+SUMMARY_LINE = re.compile(
+    r"^(?:=+ )?(?P<counts>\d+ (?:passed|failed|skipped|deselected|xfailed|xpassed|errors?|warnings?)"
+    r"(?:, \d+ (?:passed|failed|skipped|deselected|xfailed|xpassed|errors?|warnings?))*)"
+    r" in \d+(?:\.\d+)?s(?: \([^\n]*\))?(?: =+)?$"
+)
 PYTEST_FAILURE = re.compile(
     r"(?m)^(?:FAILED|ERROR) "
     r"(?P<nodeid>(?:backend|scripts)/[A-Za-z0-9_./-]+\.py"
@@ -142,9 +190,12 @@ def base_url(database: str) -> str:
     host = os.environ.get("POSTGRES_HOST", "postgres")
     user = os.environ.get("POSTGRES_USER", "puw_ci")
     password = os.environ["POSTGRES_PASSWORD"]
-    if not re.fullmatch(r"[a-z0-9_-]+", host) or not re.fullmatch(r"[a-z0-9_-]+", user):
+    if (host not in {"localhost", "127.0.0.1", "db"}
+            and not (host == "postgres" and os.environ.get("GITHUB_ACTIONS") == "true")):
+        raise RuntimeError("unsafe_database_host")
+    if database not in (*DATABASES, "postgres") or not re.fullmatch(r"[a-z0-9_-]+", user):
         raise RuntimeError("unsafe_database_identity")
-    return f"postgresql+psycopg://{user}:{password}@{host}:5432/{database}"
+    return f"postgresql+psycopg://{user}:{quote(password, safe='')}@{host}:5432/{database}"
 
 
 def admin_connect():
@@ -155,16 +206,38 @@ def admin_connect():
 def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: int = 600,
               cwd: Path = ROOT) -> str:
     started = time.monotonic()
-    result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True,
-                            timeout=timeout, errors="replace")
+    try:
+        result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True,
+                                timeout=timeout, errors="replace")
+    except (subprocess.TimeoutExpired, OSError):
+        PHASES.append({"name": name, "exit": None, "status": "ERROR",
+                       "seconds": round(time.monotonic() - started, 2), "raw_published": False})
+        raise RuntimeError(name + "_execution_failed") from None
     record = {"name": name, "exit": result.returncode,
+              "status": "FAIL" if result.returncode else "PASS",
               "seconds": round(time.monotonic() - started, 2),
               "stdout_bytes": len(result.stdout.encode("utf8")),
               "stderr_bytes": len(result.stderr.encode("utf8")), "raw_published": False}
-    summary = re.search(r"(?P<passed>\d+) passed(?:, (?P<skipped>\d+) skipped)?", result.stdout)
-    if summary:
-        record["passed"] = int(summary.group("passed"))
-        record["skipped"] = int(summary.group("skipped") or 0)
+    summaries = [match for line in result.stdout.splitlines()
+                 if (match := SUMMARY_LINE.fullmatch(line.strip()))]
+    counts = {}
+    if summaries:
+        counts = {label: int(count) for count, label in re.findall(
+            r"(\d+) ([a-z]+)", summaries[-1].group("counts"))}
+        record["passed"] = counts.get("passed", 0)
+        record["skipped"] = counts.get("skipped", 0)
+    if name in MANDATORY_POSTGRES:
+        required = len(MVP_TESTS[name]) if name in MVP_TESTS else None
+        if required is not None:
+            record["required"] = required
+        if not result.returncode:
+            if counts.get("skipped", 0):
+                record["status"] = "SKIPPED"
+            elif (not counts.get("passed")
+                  or (required is not None and counts.get("passed") != required)
+                  or any(counts.get(key, 0) for key in (
+                      "failed", "error", "errors", "xfailed", "xpassed", "deselected"))):
+                record["status"] = "INCOMPLETE"
     if result.returncode:
         failed_nodeids = list(dict.fromkeys(
             match.group("nodeid") for match in PYTEST_FAILURE.finditer(result.stdout)
@@ -184,7 +257,7 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
                     continue
                 checkpoint = probe.get("checkpoint") if isinstance(probe, dict) else None
                 error_type = probe.get("error_type") if isinstance(probe, dict) else None
-                if (probe.get("status") == "FAIL" and checkpoint in PROBE_CHECKPOINTS
+                if (isinstance(probe, dict) and probe.get("status") == "FAIL" and checkpoint in PROBE_CHECKPOINTS
                         and isinstance(error_type, str)
                         and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", error_type)):
                     record["failure_checkpoint"] = checkpoint
@@ -193,6 +266,8 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
     PHASES.append(record)
     if result.returncode:
         raise RuntimeError(name + "_failed")
+    if record["status"] != "PASS":
+        raise RuntimeError(name + "_mandatory_coverage_failed")
     return result.stdout
 
 
@@ -210,17 +285,32 @@ def create_databases() -> None:
 def cleanup_databases() -> None:
     if not CREATED:
         return
+    failed = False
     with admin_connect() as connection:
-        for name in reversed(CREATED):
-            connection.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
-            connection.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(name)))
+        for name in reversed(tuple(CREATED)):
+            try:
+                if name not in DATABASES:
+                    raise RuntimeError("cleanup_database_not_owned")
+                connection.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
+                connection.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(name)))
+                CREATED.remove(name)
+            except Exception:
+                failed = True
+    if failed:
+        raise RuntimeError("owned_database_cleanup_failed")
 
 
 def test_env() -> dict:
     env = dict(os.environ)
+    # Parent-shell flags must not activate unowned databases or suppress mandatory proofs.
+    for key in (*TEST_DATABASE_KEYS, "PYTEST_ADDOPTS", "PYTEST_PLUGINS"):
+        env.pop(key, None)
     env.update({
         "PYTHONPATH": str(ROOT / "backend"),
         "DATABASE_URL": "sqlite+pysqlite:///:memory:",
+        "PU_TEST_POSTGRES": "0",
+        "TEST_POSTGRES_DSN": base_url("puw_v54_test_storage"),
+        "PUW_MVP4_TEST_DATABASE_URL": base_url("puw_mvp4_test_runtime"),
         "PUW_V54_TEST_DATABASE_URL": base_url("puw_v54_test_foundation"),
         "PUW_V54_SOURCE_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
         "PUW_V54_CONTEXT_TEST_DATABASE_URL": base_url("puw_v54_test_runtime"),
@@ -236,14 +326,23 @@ def test_env() -> dict:
 
 
 def write_protocol(result: str, failure: BaseException | None, runtime: list[dict]) -> None:
-    if result == "PASS":
+    if result == "PASS" or runtime:
         runtime = validate_runtime_records(runtime)
-    elif runtime:
-        raise RuntimeError("runtime_protocol_schema_invalid")
+    coverage = {name: next((phase["status"] for phase in PHASES if phase["name"] == name),
+                           "NOT_RUN") for name in MANDATORY_POSTGRES}
+    if result == "PASS" and any(status != "PASS" for status in coverage.values()):
+        raise RuntimeError("mandatory_postgres_coverage_incomplete")
     protocol = {
         "schema": "puw.v54.runtime.protocol.v1", "result": result, "head": HEAD,
         "commit": os.environ.get("GITHUB_SHA", "local"), "phases": PHASES,
         "runtime": runtime,
+        "mandatory_postgres": coverage,
+        "coverage_limits": {
+            "mvp1": "synthetic adapter and simulated crash; no live provider or process kill",
+            "mvp2": "Gmail cursor CAS and migrated schema; no live mailbox or full worker recovery",
+            "mvp3": "obligation CAS and digest restart/replay; no live channel",
+            "mvp4": "manual payment and correction concurrency; no supply concurrency or backup restore",
+        },
         "corpus": {
             "structural": "PASS" if any(p["name"] == "corpus" and p["exit"] == 0 for p in PHASES) else "FAIL",
             "executed_cases": ["C01", "C07", "P02", "P06", "S02", "S06", "S07", "S08", "S09"],
@@ -265,6 +364,22 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
     OUT.write_text(encoded + "\n", encoding="utf8")
 
 
+def migrate_database(phase: str, database: str, env: dict) -> None:
+    if database not in CREATED:
+        raise RuntimeError("migration_database_not_owned")
+    run_phase(phase, [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", HEAD],
+              env=dict(env, DATABASE_URL=base_url(database)), timeout=180, cwd=ROOT / "backend")
+    with psycopg.connect(base_url(database).replace("postgresql+psycopg://", "postgresql://"),
+                          connect_timeout=5) as db:
+        if db.execute("SELECT version_num FROM alembic_version").fetchone()[0] != HEAD:
+            for record in reversed(PHASES):
+                if record["name"] == phase:
+                    record["status"] = "FAIL"
+                    record["schema_verified"] = False
+                    break
+            raise RuntimeError("migration_head_mismatch")
+
+
 def main() -> None:
     failure = None
     runtime: list[dict] = []
@@ -275,35 +390,30 @@ def main() -> None:
             raise RuntimeError("unexpected_alembic_head")
         create_databases()
         env = test_env()
-        migration_env = dict(env, DATABASE_URL=base_url("puw_v54_test_migrations"))
-        run_phase("migration", [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", HEAD],
-                  env=migration_env, timeout=180, cwd=ROOT / "backend")
-        with psycopg.connect(base_url("puw_v54_test_migrations").replace("postgresql+psycopg://", "postgresql://"), connect_timeout=5) as db:
-            if db.execute("SELECT version_num FROM alembic_version").fetchone()[0] != HEAD:
-                raise RuntimeError("migration_head_mismatch")
-        run_phase("postgres_mvp3_runtime", [
+        migrate_database("migration", "puw_v54_test_migrations", env)
+        migrate_database("storage_migration", "puw_v54_test_storage", env)
+        run_phase("postgres_mvp1_storage", [
             sys.executable, "-m", "pytest",
-            "backend/tests/test_mvp3_management_acceptance_postgres.py",
-            "backend/tests/test_mvp3_management_runtime_postgres.py",
+            *MVP_TESTS["postgres_mvp1_storage"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
-        run_phase("gmail_history_migration", [
-            sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", HEAD,
-        ], env=dict(env, DATABASE_URL=base_url("puw_mvp2_test_gmail_history")),
-            timeout=180, cwd=ROOT / "backend")
+        migrate_database("mvp3_migration", "puw_mvp3_test_runtime", env)
+        run_phase("postgres_mvp3_runtime", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp3_runtime"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
+        migrate_database("gmail_history_migration", "puw_mvp2_test_gmail_history", env)
         run_phase("postgres_gmail_history", [
-            sys.executable, "-m", "pytest",
-            "backend/tests/test_mvp2_gmail_history_cursor_postgres.py",
-            "backend/tests/test_mvp2_gmail_history_migration.py",
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_gmail_history"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=180)
+        migrate_database("mvp4_migration", "puw_mvp4_test_runtime", env)
+        run_phase("postgres_mvp4_finance", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp4_finance"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
         run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
-                  env=dict(env, PUW_V54_TEST_DATABASE_URL="", PUW_V54_SOURCE_TEST_DATABASE_URL="",
-                           PUW_V54_CONTEXT_TEST_DATABASE_URL="", PUW_V54_MAILBOX_TEST_DATABASE_URL="",
-                           PUW_V54_INTEGRATION_DATABASE_URL="",
-                           PUW_V54_PROVIDER_MIGRATION_DATABASE_URL="",
-                           PUW_MVP3_TEST_DATABASE_URL="",
-                           PUW_MVP2_GMAIL_HISTORY_DATABASE_URL=""), timeout=900)
+                  env=dict(env, **{key: "" for key in TEST_DATABASE_KEYS}), timeout=900)
         targets = [
             "backend/tests/test_v54_pilot_foundation.py",
             "backend/tests/test_v54_source_evidence_pilot.py", "backend/tests/test_v54_source_evidence_postgres.py",

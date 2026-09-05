@@ -322,3 +322,32 @@ def test_runtime_orchestrator_always_cleans_created_databases(monkeypatch, tmp_p
     assert module.CREATED == []
     assert written["result"] == "FAIL"
     assert isinstance(written["failure"], RuntimeError)
+
+
+def test_protocol_keeps_valid_child_records_when_database_cleanup_fails(monkeypatch, tmp_path):
+    path = ROOT / "scripts/ci/v54_pilot_workflow.py"
+    spec = importlib.util.spec_from_file_location("v54_cleanup_failure_protocol", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "OUT", tmp_path / "protocol.json")
+    module.CREATED.append(module.DATABASES[0])
+
+    module.write_protocol("FAIL", RuntimeError("raw-secret"), valid_runtime_records())
+
+    protocol = module.json.loads(module.OUT.read_text())
+    assert protocol["result"] == protocol["cleanup"] == "FAIL"
+    assert protocol["runtime"] == valid_runtime_records()
+    assert "raw-secret" not in module.OUT.read_text()
+
+
+def test_protocol_cannot_claim_pass_without_mandatory_postgres_phases(monkeypatch, tmp_path):
+    path = ROOT / "scripts/ci/v54_pilot_workflow.py"
+    spec = importlib.util.spec_from_file_location("v54_missing_mandatory_protocol", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "OUT", tmp_path / "protocol.json")
+
+    with pytest.raises(RuntimeError, match="mandatory_postgres_coverage_incomplete"):
+        module.write_protocol("PASS", None, valid_runtime_records())
+
+    assert not module.OUT.exists()
