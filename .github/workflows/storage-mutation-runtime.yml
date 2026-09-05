@@ -1,0 +1,70 @@
+name: MVP1 storage mutation synthetic runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/mvp1-storage-mutation-browser-runtime']
+    paths: ['backend/**', 'frontend/**', '.github/workflows/storage-mutation-runtime.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-worker-and-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: puw_storage_ci
+          POSTGRES_PASSWORD: storage-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: puw_storage_ci
+        options: >-
+          --health-cmd "pg_isready -U puw_storage_ci -d puw_storage_ci"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+        ports: ['5432/tcp']
+    env:
+      TEST_POSTGRES_DSN: postgresql+psycopg://puw_storage_ci:storage-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:${{ job.services.postgres.ports[5432] }}/puw_storage_ci
+      DATABASE_URL: postgresql+psycopg://puw_storage_ci:storage-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:${{ job.services.postgres.ports[5432] }}/puw_storage_ci
+      PU_STORAGE_MUTATION_SYNTHETIC_API_ENABLED: 'true'
+      GMAIL_AUTO_SYNC_ENABLED: 'false'
+      AI_SECRETARY_AUTOMATION_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install backend and migrate isolated PostgreSQL
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          cd backend
+          alembic -c alembic.ini upgrade head
+      - name: Two-worker crash/replay acceptance
+        working-directory: backend
+        run: pytest -q tests/test_mvp1_storage_mutation_postgres_runtime.py tests/test_mvp1_storage_mutation_api.py
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - uses: pnpm/action-setup@v4
+        with: { version: '11.19.0' }
+      - name: Install locked frontend and Chromium
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps --only-shell chromium
+      - name: Component and browser acceptance
+        working-directory: frontend
+        run: |
+          pnpm run check
+          pnpm test -- --run src/modules/proposals/StorageMutationPanel.test.tsx
+          pnpm exec playwright test e2e/storage-mutation.e2e.ts
+      - name: Publish browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-mutation-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/node_modules/.cache/storage-picker-e2e/results/
+            frontend/node_modules/.cache/storage-picker-e2e/report/
+          if-no-files-found: warn
+          retention-days: 7

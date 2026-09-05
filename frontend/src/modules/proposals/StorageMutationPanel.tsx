@@ -78,6 +78,10 @@ export function StorageMutationPanel({ projectId, proposalId, actionId }: { proj
     return () => window.clearTimeout(timer);
   }, [job, projectId]);
 
+  useEffect(() => {
+    if (job?.status === "completed" && job.record_version) void load();
+  }, [job?.status, job?.record_version]);
+
   async function submit(operation: "confirm" | "rollback") {
     if (!preview?.execution_allowed) return;
     setMessage("");
@@ -94,6 +98,7 @@ export function StorageMutationPanel({ projectId, proposalId, actionId }: { proj
   }
 
   if (!preview) return <div className="storage-mutation" role="status">{message || "Проверяю точную версию…"}</div>;
+  const busy = !!job && ["queued", "running", "retrying"].includes(job.status);
   return <section className="storage-mutation" aria-label="Безопасное изменение файла">
     <div><strong>{preview.kind === "rename" ? "Переименование" : "Перемещение"}</strong>
       <span>{preview.before_name} → {preview.after_name}</span></div>
@@ -101,8 +106,8 @@ export function StorageMutationPanel({ projectId, proposalId, actionId }: { proj
     {!preview.execution_allowed && <p>Исполнение выключено: доступен только синтетический тестовый контур.</p>}
     {message && <p role="alert">{message}</p>}
     {job && <p role="status">{job.status} · {job.progress}%{job.outcome ? ` · ${job.outcome}` : ""}</p>}
-    <div><button type="button" disabled={!preview.execution_allowed || !!job} onClick={() => void submit("confirm")}>Подтвердить точное изменение</button>
-      <button type="button" disabled={!preview.execution_allowed || !preview.can_rollback || !!job} onClick={() => void submit("rollback")}>Явно откатить</button>
+    <div><button type="button" disabled={!preview.execution_allowed || busy} onClick={() => void submit("confirm")}>Подтвердить точное изменение</button>
+      <button type="button" disabled={!preview.execution_allowed || !preview.can_rollback || busy} onClick={() => void submit("rollback")}>Явно откатить</button>
       <button type="button" onClick={() => void load()}>Обновить</button></div>
   </section>;
 }
