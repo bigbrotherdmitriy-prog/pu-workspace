@@ -6,6 +6,7 @@ import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
+import { FinanceForecastPanel } from "./modules/finance/FinanceForecastPanel";
 import { DraftReviewCard } from "./modules/draft-review/DraftReviewCard";
 import { ScheduleGraphEditor } from "./modules/schedule/ScheduleGraphEditor";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
@@ -2702,6 +2703,7 @@ export function App() {
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
               onReload={() => void loadFinance()}
             />
+            {finance && <FinanceForecastPanel overview={finance} projectId={projectId} />}
             <FinanceOperations
               onOpenGraph={(id) => {
                 if (projectScopeRef.current === projectScope && finance?.baselines.some((row) => row.id === id)) {

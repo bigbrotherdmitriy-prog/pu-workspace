@@ -42,6 +42,10 @@ export type FinanceOverview = {
     id: number;
     baseline_id: number;
     title: string;
+    wbs_parent_id?: number | null;
+    wbs_level?: number;
+    wbs_order?: number;
+    is_summary?: boolean;
     planned_start?: string;
     planned_finish?: string;
     planned_progress: number;
