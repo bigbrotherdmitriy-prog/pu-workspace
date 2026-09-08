@@ -100,6 +100,9 @@ jobs:
       - name: Install pinned backend dependencies
         run: python -m pip install --disable-pip-version-check -r backend/requirements.txt
       - name: Run isolated migration, A/B/C, corpus and process faults
+        # Inner runner: 21 minutes work + 1 minute cleanup. Job slack assumes
+        # setup finishes within 4 minutes; outer cancellation can still interrupt.
+        timeout-minutes: 24
         run: python scripts/ci/v54_pilot_workflow.py
       - name: Verify safe protocol contract
         if: always()

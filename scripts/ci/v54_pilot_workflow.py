@@ -34,6 +34,12 @@ DATABASES = (
 )
 PHASES: list[dict] = []
 CREATED: list[str] = []
+# Fixed ceilings, not operator-controlled environment values. This bounds failure;
+# it does not claim every serial phase can finish inside the available CI time.
+RUNTIME_BUDGET_SECONDS = 22 * 60
+CLEANUP_RESERVE_SECONDS = 60
+WORK_DEADLINE: float | None = None
+CLEANUP_DEADLINE: float | None = None
 
 
 def test_nodes(path: str, *names: str) -> tuple[str, ...]:
@@ -253,13 +259,18 @@ def base_url(database: str) -> str:
 
 def admin_connect():
     return psycopg.connect(base_url("postgres").replace("postgresql+psycopg://", "postgresql://"),
-                           autocommit=True, connect_timeout=5)
+                            autocommit=True, connect_timeout=5,
+                            options="-cstatement_timeout=5000 -clock_timeout=1000")
 
 
 def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: int = 600,
               cwd: Path = ROOT) -> str:
     started = time.monotonic()
     try:
+        if WORK_DEADLINE is not None:
+            timeout = min(timeout, WORK_DEADLINE - started)
+            if timeout <= 0:
+                raise subprocess.TimeoutExpired(args, 0)
         result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True,
                                 timeout=timeout, errors="replace")
     except (subprocess.TimeoutExpired, OSError):
@@ -340,8 +351,12 @@ def cleanup_databases() -> None:
         return
     failed = False
     with admin_connect() as connection:
+        # At most 15 owned databases, two statements each. Leave time for JSON.
+        connection.execute("SET statement_timeout = 1000")
         for name in reversed(tuple(CREATED)):
             try:
+                if CLEANUP_DEADLINE is not None and time.monotonic() >= CLEANUP_DEADLINE:
+                    raise RuntimeError("cleanup_budget_expired")
                 if name not in DATABASES:
                     raise RuntimeError("cleanup_database_not_owned")
                 connection.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
@@ -440,7 +455,7 @@ def verify_database_head(phase: str, database: str) -> None:
     if database not in CREATED:
         raise RuntimeError("migration_database_not_owned")
     with psycopg.connect(base_url(database).replace("postgresql+psycopg://", "postgresql://"),
-                          connect_timeout=5) as db:
+                          connect_timeout=5, options="-cstatement_timeout=1000 -clock_timeout=1000") as db:
         if db.execute("SELECT version_num FROM alembic_version").fetchone()[0] != HEAD:
             for record in reversed(PHASES):
                 if record["name"] == phase:
@@ -478,6 +493,11 @@ def run_remaining_postgres(env: dict) -> None:
 
 
 def main() -> None:
+    global WORK_DEADLINE, CLEANUP_DEADLINE
+    started = time.monotonic()
+    CLEANUP_DEADLINE = started + RUNTIME_BUDGET_SECONDS
+    WORK_DEADLINE = CLEANUP_DEADLINE - CLEANUP_RESERVE_SECONDS
+    PHASES.clear()
     failure = None
     runtime: list[dict] = []
     try:
@@ -558,7 +578,11 @@ def main() -> None:
             CREATED.clear()
         except BaseException as cleanup_error:
             failure = failure or cleanup_error
-        write_protocol("PASS" if failure is None else "FAIL", failure, runtime)
+        try:
+            write_protocol("PASS" if failure is None else "FAIL", failure, runtime)
+        finally:
+            WORK_DEADLINE = None
+            CLEANUP_DEADLINE = None
     if failure:
         print("v5.4 runtime failed; raw diagnostics withheld")
         raise SystemExit(1)
