@@ -3,6 +3,12 @@
 Date: 2026-09-08. Reviewed base: `4bcc94ab113f544a88ed9eaeb7ebd37b6133b410`.
 This is an implementation contract, not an installed migration or implemented API.
 
+Integration update: the bounded persistence subset was subsequently implemented
+in this branch; see [implementation results](../../audits/v7-schedule-persistence-wave2.md)
+and [integrated acceptance status](../../audits/v7-execution-wave2.md).
+The contract below records the design baseline, not a claim of completed runtime,
+browser, WBS or working-calendar acceptance.
+
 ## Source inspected and selective reuse decision
 
 Source branch `codex/gpr-dds-production-merge` resolves to

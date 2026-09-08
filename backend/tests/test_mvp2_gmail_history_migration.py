@@ -29,7 +29,7 @@ def config(output=None):
 
 def test_history_revision_is_single_sequential_head_and_offline_safe(monkeypatch):
     script = ScriptDirectory.from_config(config())
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a19"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a20"]
     assert script.get_revision("a54f001c0a18").down_revision == "a54f001c0a17"
     monkeypatch.setenv(
         "DATABASE_URL",

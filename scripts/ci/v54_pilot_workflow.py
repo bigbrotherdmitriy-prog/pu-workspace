@@ -22,7 +22,7 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
-HEAD = "a54f001c0a19"
+HEAD = "a54f001c0a20"
 DATABASES = (
     "puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime",
     "puw_mvp3_test_runtime",
@@ -82,6 +82,13 @@ MVP_TESTS = {
         "backend/tests/test_mvp4_finance_postgres_runtime.py",
         "test_postgres_concurrent_payment_confirmation_creates_one_fact",
         "test_postgres_competing_payment_corrections_are_cas_serialized",
+    ),
+    "postgres_v7_schedule_graph": test_nodes(
+        "backend/tests/test_v7_schedule_graph_postgres.py",
+        "test_postgres_graph_cas_allows_one_complete_winner",
+        "test_postgres_upgrade_legacy_and_safe_downgrade",
+        "test_postgres_downgrade_refuses_graph_intent[active_graph]",
+        "test_postgres_downgrade_refuses_graph_intent[legacy_intent]",
     ),
     "postgres_mvp4_supply": test_nodes(
         "backend/tests/test_mvp4_supply_postgres_runtime.py",
@@ -535,6 +542,10 @@ def main() -> None:
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
         migrate_database("mvp4_migration", "puw_mvp4_test_runtime", env)
+        run_phase("postgres_v7_schedule_graph", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_v7_schedule_graph"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
         run_phase("postgres_mvp4_finance", [
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp4_finance"],
             "-q", "--tb=short", "-rfsE",

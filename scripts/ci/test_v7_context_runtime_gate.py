@@ -67,3 +67,4 @@ def test_meeting_nodes_and_integration_branch_cannot_disappear():
     assert tuple(node for node in module.MVP_TESTS["postgres_mvp3_runtime"] if "meeting_binding" in node) == expected
     workflow = (module.ROOT / ".github/workflows/v54-pilot-runtime.yml").read_text(encoding="utf-8")
     assert "- 'codex/v7-execution-wave1'" in workflow
+    assert "- 'codex/v7-execution-wave2'" in workflow

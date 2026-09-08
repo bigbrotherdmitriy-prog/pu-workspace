@@ -10,6 +10,7 @@ on:
       - 'codex/mvp3-postgres-runtime-gate'
       - 'codex/mvp1234-wave2-integration'
       - 'codex/v7-execution-wave1'
+      - 'codex/v7-execution-wave2'
   workflow_dispatch:
 
 permissions:
