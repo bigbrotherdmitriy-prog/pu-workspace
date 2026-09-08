@@ -40,6 +40,14 @@ function renderOperations(overrides: Partial<Parameters<typeof FinanceOperations
 }
 
 describe("GPR baseline plan/fact register", () => {
+  it("opens the graph before approval when the integrated editor is available", () => {
+    const onOpenGraph = vi.fn();
+    const { props } = renderOperations({ onOpenGraph });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и утвердить" }));
+    expect(onOpenGraph).toHaveBeenCalledWith(2);
+    expect(props.onConfirm).not.toHaveBeenCalled();
+  });
+
   it("visibly separates current approved plan, draft revision and facts", () => {
     renderOperations();
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
 import type {
@@ -18,11 +18,22 @@ type FinanceControllerOptions = {
 const money = formatMoney;
 
 export function useFinanceController({ ready, projectId, setNotice, setError }: FinanceControllerOptions) {
-  const [finance, setFinance] = useState<FinanceOverview | null>(null);
-  const [financeCandidates, setFinanceCandidates] = useState<FinanceDocumentCandidate[]>([]);
+  const scopeRef = useRef({ projectId, ready });
+  if (scopeRef.current.projectId !== projectId || scopeRef.current.ready !== ready) {
+    scopeRef.current = { projectId, ready };
+  }
+  const scope = scopeRef.current;
+  const loadSequence = useRef(0);
+  const [loaded, setLoaded] = useState<{
+    scope: typeof scope; finance: FinanceOverview; candidates: FinanceDocumentCandidate[];
+  } | null>(null);
+  const finance = loaded?.scope === scope && ready ? loaded.finance : null;
+  const financeCandidates = loaded?.scope === scope && ready ? loaded.candidates : [];
   const [financeStructuredPreview, setFinanceStructuredPreview] = useState<FinanceStructuredPreview | null>(null);
   const [financeStructuredRows, setFinanceStructuredRows] = useState<number[]>([]);
-  const [selectedFinanceContractId, setSelectedFinanceContractId] = useState(0);
+  const [contractSelection, setContractSelection] = useState({ scope, id: 0 });
+  const selectedFinanceContractId = contractSelection.scope === scope ? contractSelection.id : 0;
+  function setSelectedFinanceContractId(id: number) { setContractSelection({ scope, id }); }
   const [financeKind, setFinanceKind] = useState("budget");
   const [financeTitle, setFinanceTitle] = useState("");
   const [financeAmount, setFinanceAmount] = useState("");
@@ -33,17 +44,18 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
 
   async function loadFinance() {
-    if (!projectId) return;
+    if (!projectId || !ready || scopeRef.current !== scope) return;
+    const sequence = ++loadSequence.current;
     try {
       const contractQuery = selectedFinanceContractId ? `&contract_id=${selectedFinanceContractId}` : "";
       const [overview, suggestions] = await Promise.all([
         api<FinanceOverview>(`/execution/overview?project_id=${projectId}`),
         api<{ candidates: FinanceDocumentCandidate[] }>(`/execution/document-candidates?project_id=${projectId}${contractQuery}`),
       ]);
-      setFinance(overview);
-      setFinanceCandidates(suggestions.candidates || []);
+      if (scopeRef.current !== scope || sequence !== loadSequence.current) return;
+      setLoaded({ scope, finance: overview, candidates: suggestions.candidates || [] });
     } catch (error) {
-      setError((error as Error).message);
+      if (scopeRef.current === scope && sequence === loadSequence.current) setError((error as Error).message);
     }
   }
 

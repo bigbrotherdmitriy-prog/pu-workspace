@@ -35,7 +35,7 @@ it.each([
       id: 5, status: "completed", tasks: 0, decisions: 0, ...flags,
     };
     if (path.startsWith("/management/meetings?")) return { meetings: [{ id: 5, project_id: 2,
-      title: "Synthetic meeting", status: "planned", scheduled_at: null, agenda: null, minutes: null }] };
+      record_version: 1, title: "Synthetic meeting", status: "planned", scheduled_at: null, agenda: null, minutes: null }] };
     return empty;
   });
   render(<App />);
@@ -45,5 +45,7 @@ it.each([
   expect(screen.queryByText("Протокол сохранён.")).not.toBeInTheDocument();
   expect(screen.queryByText(/raw-private-server-reason/)).not.toBeInTheDocument();
   expect(mockApi.mock.calls.filter(([path, options]) => path === "/management/meetings/5" && options?.method === "PATCH")).toHaveLength(1);
+  const update = mockApi.mock.calls.find(([path, options]) => path === "/management/meetings/5" && options?.method === "PATCH");
+  expect(JSON.parse(String(update?.[1]?.body))).toMatchObject({ expected_version: 1, status: "completed" });
   expect(mockApi.mock.calls.some(([path]) => path.endsWith("/confirm"))).toBe(false);
 });

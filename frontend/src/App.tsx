@@ -6,6 +6,7 @@ import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
+import { ScheduleGraphEditor } from "./modules/schedule/ScheduleGraphEditor";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState } from "./modules/ai-secretary/messageWorkflow";
@@ -388,6 +389,13 @@ export function App() {
     [online, setOnline] = useState(navigator.onLine),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
+  const projectScopeRef = useRef({ projectId });
+  if (projectScopeRef.current.projectId !== projectId) projectScopeRef.current = { projectId };
+  const projectScope = projectScopeRef.current;
+  const [graphSelection, setGraphSelection] = useState<{ scope: typeof projectScope; id: number } | null>(null);
+  const [managementScope, setManagementScope] = useState<typeof projectScope | null>(null);
+  const [membersScope, setMembersScope] = useState<typeof projectScope | null>(null);
+  const managementLoadSequence = useRef(0);
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("oauth") === "connected" ? "Запуск проекта" : "Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -597,6 +605,7 @@ export function App() {
         setProcessingQueue(queue);
         setSystemState(health);
         setMembers(team.members);
+        setMembersScope(projectScopeRef.current);
         setCurrentUser(me);
         setAuditLogs(audit.logs);
         setAnalytics(analyticsData);
@@ -1873,18 +1882,21 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [ready, projectId, active, query]);
   async function loadManagement() {
-    if (!projectId) return;
+    if (!projectId || projectScopeRef.current !== projectScope) return;
+    const sequence = ++managementLoadSequence.current;
     try {
       const [o, m, n] = await Promise.all([
         api(`/management/obligations?project_id=${projectId}`),
         api(`/management/meetings?project_id=${projectId}`),
         api(`/management/notifications?project_id=${projectId}`),
       ]);
+      if (projectScopeRef.current !== projectScope || sequence !== managementLoadSequence.current) return;
+      setManagementScope(projectScope);
       setObligations(o.obligations);
       setMeetings(m.meetings);
       setNotifications(n.notifications);
     } catch (e) {
-      setError((e as Error).message);
+      if (projectScopeRef.current === projectScope && sequence === managementLoadSequence.current) setError((e as Error).message);
     }
   }
   useEffect(() => {
@@ -1909,7 +1921,7 @@ export function App() {
       setNotice("Статус обязательства обновлён");
       await Promise.all([load(), loadManagement()]);
     } catch (e) {
-      setError((e as Error).message);
+      if (projectScopeRef.current === projectScope) setError((e as Error).message);
     }
   }
   async function createMeeting() {
@@ -1936,6 +1948,11 @@ export function App() {
     }
   }
   async function recordMinutes(item: MeetingRow) {
+    if (managementScope !== projectScope || projectScopeRef.current !== projectScope) return;
+    if (!Number.isSafeInteger(item.record_version) || (item.record_version || 0) < 1) {
+      setError("Обновите совещание перед сохранением протокола: версия записи неизвестна.");
+      return;
+    }
     const minutes =
       window.prompt("Вставьте протокол: решения, поручения, сроки и риски") ||
       "";
@@ -1943,12 +1960,13 @@ export function App() {
     try {
       const result = await api(`/management/meetings/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ minutes, status: "completed" }),
+        body: JSON.stringify({ minutes, status: "completed", expected_version: item.record_version }),
       });
+      if (projectScopeRef.current !== projectScope) return;
       setNotice(
         result.proposal_state === "invalid_source" || result.origin_status === "invalid_source"
           || result.origin_reason === "meeting_source_binding_required"
-          ? "Протокол сохранён. Требуется привязка протокола к источнику и его неизменяемой версии; эта привязка пока не реализована. Создание и подтверждение предложений по протоколу недоступны."
+          ? "Протокол сохранён. Требуется привязка протокола к источнику и его неизменяемой версии. Откройте «Выбрать источник протокола» в карточке совещания; до привязки подтверждение предложений недоступно."
           : result.confirmation_available === false || result.origin_status !== undefined || result.origin_reason !== undefined
           ? "Протокол сохранён. Подтверждение предложений недоступно: статус источника не подтверждён. Обновите данные или обратитесь к администратору."
           : result.proposal_state === "awaiting_evidence"
@@ -1957,7 +1975,7 @@ export function App() {
       );
       await Promise.all([load(), loadManagement()]);
     } catch (e) {
-      setError((e as Error).message);
+      if (projectScopeRef.current === projectScope) setError((e as Error).message);
     }
   }
   async function refreshNotifications() {
@@ -2067,10 +2085,11 @@ export function App() {
       setExpandedInboxId(hit.id);
     } else setActive("Рабочий центр");
   }
-  const currentProjectRole = members.find((member) => member.user_id === currentUser?.id)?.role || "";
+  const scopedMembers = membersScope === projectScope ? members : [];
+  const currentProjectRole = scopedMembers.find((member) => member.user_id === currentUser?.id)?.role || "";
   const currentProjectRoleLevel = PROJECT_ROLE_LEVEL[currentProjectRole] || 0;
-  const canEditSupply = Boolean(currentUser?.is_admin || currentProjectRoleLevel >= PROJECT_ROLE_LEVEL.editor);
-  const canManageSupply = Boolean(currentUser?.is_admin || currentProjectRoleLevel >= PROJECT_ROLE_LEVEL.manager);
+  const canEditSupply = membersScope === projectScope && Boolean(currentUser?.is_admin || currentProjectRoleLevel >= PROJECT_ROLE_LEVEL.editor);
+  const canManageSupply = membersScope === projectScope && Boolean(currentUser?.is_admin || currentProjectRoleLevel >= PROJECT_ROLE_LEVEL.manager);
   return (
     <div className="shell">
       <aside
@@ -2652,6 +2671,11 @@ export function App() {
               onReload={() => void loadFinance()}
             />
             <FinanceOperations
+              onOpenGraph={(id) => {
+                if (projectScopeRef.current === projectScope && finance?.baselines.some((row) => row.id === id)) {
+                  setGraphSelection({ scope: projectScope, id });
+                }
+              }}
               finance={finance}
               preview={financeStructuredPreview}
               selectedRows={financeStructuredRows}
@@ -2690,6 +2714,12 @@ export function App() {
                 void correctCashPayment(id, amount, date, recordVersion)
               }
             />
+            {graphSelection?.scope === projectScope && finance?.baselines.some((row) => row.id === graphSelection.id) && <section aria-label="Редактор выбранного ГПР">
+              <button className="secondary" onClick={() => setGraphSelection(null)}>Закрыть график</button>
+              <ScheduleGraphEditor key={`${projectId}:${graphSelection.id}`} projectId={projectId}
+                baselineId={graphSelection.id} api={api} canEdit={canEditSupply} canApprove={canManageSupply}
+                onSaved={() => { if (projectScopeRef.current === projectScope) void loadFinance(); }} />
+            </section>}
             <ForecastPanel
               report={forecast.report}
               state={forecast.state}
@@ -2716,8 +2746,16 @@ export function App() {
       )}
       {active === "Совещания" && (
         <MeetingsModule
+          key={projectId}
+          projectId={projectId}
+          members={scopedMembers}
+          onMeetingVersionChange={(meeting, version) => {
+            if (projectScopeRef.current !== projectScope || managementScope !== projectScope || !Number.isSafeInteger(version)) return;
+            setMeetings((current) => current.map((row) => row.id === meeting.id && row.record_version === meeting.record_version
+              && version > (row.record_version || 0) ? { ...row, record_version: version } : row));
+          }}
           collapsed={collapsed}
-          meetings={meetings}
+          meetings={managementScope === projectScope ? meetings : []}
           title={newMeetingTitle}
           date={newMeetingDate}
           agenda={newMeetingAgenda}

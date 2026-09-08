@@ -22,5 +22,12 @@ def test_meeting_minutes_remain_an_explicit_user_action() -> None:
 
     assert "Внести протокол и проанализировать" in module
     assert "onRecordMinutes(item)" in module
-    assert '["completed", "cancelled"]' in module
-    assert "риски и решения" in module
+    # Completed minutes can be corrected with an exact version; cancelled
+    # meetings still have no edit action. Binding/confirmation is separate.
+    assert 'item.status !== "cancelled"' in module
+    assert '<MeetingSourcePanel' in module
+    assert 'item.status === "completed" && item.minutes' in module
+    assert 'Number.isSafeInteger(item.record_version)' in module
+    app = APP.read_text(encoding="utf-8")
+    assert 'expected_version: item.record_version' in app
+    assert 'window.prompt("Вставьте протокол:' in app
