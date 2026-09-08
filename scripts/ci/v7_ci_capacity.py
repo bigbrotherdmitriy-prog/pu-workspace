@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import json
 import os
@@ -36,16 +37,63 @@ def offline_env() -> dict[str, str]:
     return env
 
 
+def repository_test_ids() -> set[str]:
+    """Derive names from local source without importing/executing test modules.
+
+    Arbitrary output identifiers, dynamic parameters and error text are never
+    admitted. Only the backend suite actually launched here is a valid source.
+    """
+    allowed = set()
+    for path in (ROOT / "backend/tests").rglob("test_*.py"):
+        if path.is_symlink() or not path.resolve().is_relative_to((ROOT / "backend/tests").resolve()):
+            continue
+        relative = path.relative_to(ROOT).as_posix()
+        if not re.fullmatch(r"backend/tests/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+\.py", relative):
+            continue
+        allowed.add(relative)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        except (OSError, SyntaxError, UnicodeError):
+            continue  # The collection file itself can still be identified.
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                allowed.add(relative + "::" + node.name)
+            elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+                for method in node.body:
+                    if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and method.name.startswith("test_"):
+                        allowed.add(relative + "::" + node.name + "::" + method.name)
+    return allowed
+
+
+def failure_ids(output: str) -> list[str]:
+    allowed = repository_test_ids()
+    found = set()
+    for line in output.splitlines():
+        match = re.match(r"^(?:FAILED|ERROR) ([A-Za-z0-9_./:]+)(?=\[|\s|$)", line)
+        if match and match[1] in allowed:
+            found.add(match[1])
+    return sorted(found)[:100]
+
+
 def evaluate_offline(code: int, output: str) -> dict:
     matches = [match for line in output.splitlines() if (match := SUMMARY.fullmatch(line.strip()))]
     counts = ({label: int(count) for count, label in re.findall(
         r"(\d+) ([a-z]+)", matches[-1].group("counts"))} if matches else {})
     success = code == 0 and counts.get("passed", 0) > 0 and not any(
         counts.get(key, 0) for key in ("failed", "error", "errors", "xfailed", "xpassed", "deselected"))
+    reason = ("NONE" if success else
+              {1: "TEST_FAILURE", 2: "COLLECTION_OR_INTERRUPTED", 3: "PYTEST_INTERNAL",
+               4: "PYTEST_USAGE", 5: "NO_TESTS_COLLECTED"}.get(code,
+                "SUMMARY_MISSING" if code == 0 and not counts else
+                "ACCEPTANCE_COUNTS_REJECTED" if code == 0 else "UNEXPECTED_EXIT"))
     return {
         "schema": "puw.v7.backend-offline.v1", "result": "PASS" if success else "FAIL",
         "scope": "full_backend_offline_regression", "passed": counts.get("passed", 0),
         "skipped": counts.get("skipped", 0), "postgres_runtime": "NOT_RUN",
+        "failed": counts.get("failed", 0), "errors": counts.get("error", 0) + counts.get("errors", 0),
+        "xfailed": counts.get("xfailed", 0), "xpassed": counts.get("xpassed", 0),
+        "deselected": counts.get("deselected", 0), "failure_code": reason,
+        "failed_test_ids": failure_ids(output) if not success else [],
         "skip_policy": "reported_not_acceptance; mandatory_postgres_and_local_engines_are_separate_jobs",
         "live_provider_validation": "NOT_RUN", "provider_credentials": "NOT_INHERITED",
         "raw_output_published": False,
@@ -82,17 +130,21 @@ def publish(protocol: dict, directory: str) -> int:
 
 def run_offline() -> int:
     protocol = evaluate_offline(1, "")
+    protocol["failure_code"] = "SETUP_FAILED"
     started = time.monotonic()
     try:
         with tempfile.TemporaryDirectory(prefix="puw-backend-offline-") as test_temp:
             result = subprocess.run(
-                [sys.executable, "-X", "utf8", "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs",
+                [sys.executable, "-X", "utf8", "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rfsE",
                  "-p", "no:cacheprovider", "--basetemp", test_temp],
                 cwd=ROOT, env=offline_env(), capture_output=True, text=True, errors="replace", timeout=900,
             )
         protocol = evaluate_offline(result.returncode, result.stdout)
+    except subprocess.TimeoutExpired:
+        protocol["failure_code"] = "TIMEOUT"
     except (OSError, subprocess.SubprocessError):
-        pass  # No exception text, stderr, traceback or partial timeout output.
+        protocol["failure_code"] = "RUN_OR_TEMP_CLEANUP_FAILED"
+        # No exception text, stderr, traceback or partial timeout output.
     protocol["seconds"] = round(time.monotonic() - started, 2)
     return publish(protocol, "v7-backend-offline-artifacts")
 
