@@ -52,6 +52,20 @@ def _amount(value: str) -> str | None:
         return None
 
 
+def _schedule_progress(value: str) -> float | None:
+    """Parse the entire percentage, never salvage digits from invalid input."""
+    raw = value.strip()
+    if not raw:
+        return 0.0
+    if not re.fullmatch(r"[+-]?(?:[0-9]+(?:[.,][0-9]*)?|[.,][0-9]+)\s*%?", raw):
+        return None
+    number = Decimal(raw.removesuffix("%").strip().replace(",", "."))
+    # Compare before float conversion, including for arbitrarily large inputs.
+    if not number.is_finite() or not Decimal(0) <= number <= Decimal(100):
+        return None
+    return float(number)
+
+
 def _direction(value: str) -> str | None:
     normalized = _normalized(value)
     if any(word in normalized for word in ("расход", "выплата", "списание", "исход")):
@@ -95,9 +109,23 @@ def parse_structured_rows(content: str, kind: str, limit: int = 500) -> dict:
         planned_date = _date(raw.get("planned_date", ""))
         planned_start = _date(raw.get("planned_start", ""))
         planned_finish = _date(raw.get("planned_finish", ""))
+        progress = (_schedule_progress(raw.get("progress", "")) if kind == "schedule"
+                    else float(_amount(raw.get("progress", "")) or 0))
         row_issues = []
         if not title:
             row_issues.append("нет наименования")
+        if kind == "schedule":
+            # Match ScheduleItemCreate; optional missing values remain valid for drafts.
+            if title and not 2 <= len(title) <= 500:
+                row_issues.append("наименование должно содержать от 2 до 500 символов")
+            if raw.get("planned_start") and planned_start is None:
+                row_issues.append("не распознана дата начала")
+            if raw.get("planned_finish") and planned_finish is None:
+                row_issues.append("не распознана дата окончания")
+            if planned_start and planned_finish and planned_finish < planned_start:
+                row_issues.append("дата окончания раньше даты начала")
+            if progress is None:
+                row_issues.append("прогресс должен быть числом от 0 до 100")
         if kind in {"budget", "cash-flow"} and amount is None:
             row_issues.append("не распознана сумма")
         if kind == "cash-flow" and planned_date is None:
@@ -112,7 +140,7 @@ def parse_structured_rows(content: str, kind: str, limit: int = 500) -> dict:
             "amount": amount,
             "counterparty": raw.get("counterparty"),
             "direction": _direction(raw.get("direction", "")),
-            "progress": float(_amount(raw.get("progress", "")) or 0),
+            "progress": progress if progress is not None else 0.0,
             "issues": row_issues,
             "importable": not row_issues,
             "excerpt": " | ".join(cells)[:2000],
