@@ -1,0 +1,14 @@
+.wbs-tree { display: grid; gap: 1rem; min-width: 0; }
+.wbs-tree header, .wbs-tree footer, .wbs-tree header > div { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.wbs-tree header h3, .wbs-tree header p { margin: 0; }
+.wbs-tree-list { list-style: none; display: grid; gap: .5rem; margin: 0; padding: 0; }
+.wbs-tree-list > li { margin-inline-start: calc(var(--wbs-level) * 1.5rem); border-inline-start: 3px solid #b7c4ce; padding: .6rem; min-width: 0; }
+.wbs-tree-list > li.wbs-summary { border-inline-start-color: #175dba; background: color-mix(in srgb, #175dba 7%, transparent); }
+.wbs-row { display: grid; grid-template-columns: minmax(7rem, .6fr) minmax(12rem, 2fr) minmax(11rem, 1fr) minmax(6rem, .6fr) auto auto; gap: .65rem; align-items: end; }
+.wbs-row label { display: grid; gap: .25rem; min-width: 0; }
+.wbs-row input:not([type=checkbox]), .wbs-row select { width: 100%; min-width: 0; }
+.wbs-code { font-weight: 700; align-self: center; }
+.wbs-order { display: flex; gap: .25rem; }
+.wbs-tree [role=alert] { color: #9b2019; }
+.wbs-tree button:focus-visible, .wbs-tree input:focus-visible, .wbs-tree select:focus-visible { outline: 3px solid #175dba; outline-offset: 2px; }
+@media (max-width: 850px) { .wbs-row { grid-template-columns: 1fr 1fr; } .wbs-tree-list > li { margin-inline-start: calc(var(--wbs-level) * .6rem); } }
