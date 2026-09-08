@@ -274,13 +274,38 @@ def _message_workflow_state(row: Message, *, tasks: list[Task], drafts: list[Res
     return "ready", "Автоматических предложений нет"
 
 
-def _analyze_confirmed_message(db: Session, row: Message) -> tuple[list[Task], list[ResponseDraft], list[Risk], list[TaskCompletionSuggestion]]:
-    """Materialize proposals once, and only after exact context confirmation.
+def _locked_context_message(db: Session, message_id: int) -> Message | None:
+    """Refresh under the write lock, never erase pending caller context edits."""
+    with db.no_autoflush:
+        cached = db.get(Message, message_id)
+        if cached is not None and (cached in db.deleted or db.is_modified(cached)):
+            raise HTTPException(409, "Pending message changes must be resolved before context confirmation")
+        return db.scalar(select(Message).where(Message.id == message_id)
+                         .with_for_update().execution_options(populate_existing=True))
 
-    The called engines are already idempotent by message/source digest. Keeping
-    ``analysis_required`` true until the final commit makes a crash retryable
-    without creating duplicate proposals.
+
+def _analyze_confirmed_message(db: Session, row: Message) -> tuple[list[Task], list[ResponseDraft], list[Risk], list[TaskCompletionSuggestion]]:
+    """Keep engine commits, references and checkpoint in the caller transaction.
+
+    Engines historically commit their own Session. A connection-bound Session
+    in rollback_only mode flushes those commits without releasing the outer
+    transaction/Message lock. Its close does not roll back that transaction.
+    No provider effects are dispatched by these local proposal engines.
     """
+    row = _locked_context_message(db, row.id)
+    if row is None or not row.context_confirmed or not row.analysis_required:
+        return [], [], [], []
+    db.flush()
+    with Session(bind=db.connection(), join_transaction_mode="rollback_only",
+                 expire_on_commit=False) as analysis_db:
+        analysis_row = analysis_db.get(Message, row.id)
+        result = _materialize_confirmed_message(analysis_db, analysis_row)
+        analysis_db.commit()  # flush only: the outer caller owns commit/rollback
+    db.refresh(row)
+    return result
+
+
+def _materialize_confirmed_message(db: Session, row: Message) -> tuple[list[Task], list[ResponseDraft], list[Risk], list[TaskCompletionSuggestion]]:
     if not row.context_confirmed or not row.analysis_required:
         return [], [], [], []
     synthetic = StorageObject(
@@ -507,7 +532,7 @@ def ingest(payload: IncomingMessage, db: Session = Depends(get_db), user: User =
 
 @router.post("/inbox/{message_id}/confirm-context")
 def confirm_context(message_id: int, payload: ContextConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    row = db.get(Message, message_id)
+    row = _locked_context_message(db, message_id)
     if row is None:
         raise HTTPException(404, "Message not found")
     require_project_role(db, user, row.project_id, "viewer")
@@ -539,7 +564,7 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
     row.status = "ready"
     db.add(AuditLog(action="message_context_confirmed", entity_type="message", entity_id=row.id,
                     details=f"project={row.project_id}; contract={row.contract_id or 'none'}"))
-    db.commit(); db.refresh(row)
+    db.flush()
     _analyze_confirmed_message(db, row)
     db.commit(); db.refresh(row)
     return _message_payload(db, row, actor=user)
@@ -549,8 +574,9 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
 def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Atomically move and confirm several messages in one user-approved action."""
     message_ids = list(dict.fromkeys(payload.message_ids))
-    rows = list(db.scalars(select(Message).where(Message.id.in_(message_ids)).order_by(Message.id)))
-    if len(rows) != len(message_ids):
+    # Ordered locks make overlapping bulk/single confirmations serialize too.
+    rows = [_locked_context_message(db, message_id) for message_id in sorted(message_ids)]
+    if any(row is None for row in rows):
         raise HTTPException(404, "One or more messages were not found")
     target_project_id = payload.project_id
     if target_project_id is None:
@@ -600,7 +626,7 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
         entity_id=target_project_id,
         details=f"messages={len(rows)}; moved={moved}; contract={contract.id if contract else 'none'}",
     ))
-    db.commit()
+    db.flush()
     for row in rows:
         _analyze_confirmed_message(db, row)
     db.commit()
