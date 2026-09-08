@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, event, func
+from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, event, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -9,13 +9,21 @@ from app.database import Base
 
 class ScheduleBaseline(Base):
     __tablename__ = "schedule_baselines"
-    __table_args__ = (UniqueConstraint("project_id", "version", name="uq_schedule_baseline_version"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_schedule_baseline_version"),
+        CheckConstraint("graph_revision > 0", name="ck_schedule_graph_revision"),
+        CheckConstraint("planning_mode IN ('dates_only','calendar_graph')", name="ck_schedule_graph_mode"),
+        CheckConstraint("planning_mode != 'calendar_graph' OR project_start IS NOT NULL", name="ck_schedule_graph_anchor"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     name: Mapped[str] = mapped_column(String(500))
     version: Mapped[int] = mapped_column(Integer)
+    graph_revision: Mapped[int] = mapped_column(BigInteger, default=1, server_default="1")
+    planning_mode: Mapped[str] = mapped_column(String(20), default="dates_only", server_default="dates_only")
+    project_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -24,10 +32,27 @@ class ScheduleBaseline(Base):
 
 class ScheduleItem(Base):
     __tablename__ = "schedule_items"
+    __table_args__ = (
+        CheckConstraint("(duration_days IS NULL AND is_milestone IS NULL) OR "
+                        "(duration_days IS NOT NULL AND is_milestone IS NOT NULL AND "
+                        "((is_milestone = true AND duration_days = 0) OR "
+                        "(is_milestone = false AND duration_days BETWEEN 1 AND 10000)))",
+                        name="ck_schedule_duration_intent"),
+        CheckConstraint("(constraint_type IS NULL AND constraint_date IS NULL) OR "
+                        "(constraint_type IS NOT NULL AND ((constraint_type = 'asap' AND constraint_date IS NULL) OR "
+                        "(constraint_type IN ('snet','fnet','snlt','fnlt','mso','mfo') AND constraint_date IS NOT NULL)))",
+                        name="ck_schedule_constraint_intent"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     baseline_id: Mapped[int] = mapped_column(ForeignKey("schedule_baselines.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(500))
+    duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_milestone: Mapped[bool | None] = mapped_column(nullable=True)
+    predecessor_ids: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    constraint_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    constraint_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    not_before_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     planned_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     planned_finish: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     actual_start: Mapped[date | None] = mapped_column(Date, nullable=True)

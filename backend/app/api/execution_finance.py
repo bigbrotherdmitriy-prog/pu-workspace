@@ -1,10 +1,11 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from dataclasses import asdict
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -15,6 +16,7 @@ from app.models.document_version import DocumentVersion
 from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowFactHistory, ProcurementItem, ScheduleBaseline, ScheduleItem
 from app.models.organization_contract import Contract
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.user import User
 from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceCurrent, SourceReference, SourceVersion
@@ -25,6 +27,7 @@ from app.mvp4.finance_guards import (
     finance_decision_requirements,
 )
 from app.structured_import import parse_structured_rows
+from app.mvp4.schedule_planner import PlannerError, ScheduleTask, parse_dependencies, plan_schedule
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
@@ -64,6 +67,24 @@ class ScheduleProgress(BaseModel):
         max_length=200,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$",
     )
+
+
+class ScheduleGraphItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: int = Field(strict=True, ge=1)
+    duration_days: int = Field(strict=True, ge=0, le=10000)
+    is_milestone: bool = Field(strict=True)
+    predecessor_ids: str | None = Field(default=None, max_length=2000)
+    constraint_type: str = Field(pattern="^(asap|snet|fnet|snlt|fnlt|mso|mfo)$")
+    constraint_date: date | None = None
+    not_before_date: date | None = None
+
+
+class ScheduleGraphPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_graph_revision: int = Field(strict=True, ge=1, le=9223372036854775806)
+    project_start: date
+    items: list[ScheduleGraphItem] = Field(max_length=500)
 
 
 class BudgetCreate(BaseModel):
@@ -172,6 +193,7 @@ class ActCreate(BaseModel):
 class StatusUpdate(BaseModel):
     status: str = Field(min_length=2, max_length=30)
     expected_status: str | None = Field(default=None, min_length=2, max_length=30)
+    expected_graph_revision: int | None = Field(default=None, strict=True, ge=1)
     actual_amount: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
     actual_date: date | None = None
 
@@ -416,7 +438,142 @@ def _current_approved_baseline(db: Session, baseline: ScheduleBaseline) -> Sched
         )
         .order_by(ScheduleBaseline.version.desc(), ScheduleBaseline.id.desc())
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
+
+
+def _locked_graph_baseline(db: Session, baseline_id: int, user: User, role: str) -> ScheduleBaseline:
+    # This endpoint owns its transaction: never flush uncommitted scope/graph
+    # changes before authorization or overwrite them with populate_existing.
+    guarded = (Project, ProjectMember, User, ScheduleBaseline, ScheduleItem)
+    if any(isinstance(row, guarded) for row in (*db.new, *db.dirty, *db.deleted)):
+        raise HTTPException(409, "schedule_pending_changes")
+    with db.no_autoflush:
+        project_id = db.scalar(select(ScheduleBaseline.project_id).where(ScheduleBaseline.id == baseline_id))
+        if project_id is None:
+            raise HTTPException(404, "Baseline not found")
+        require_project_role(db, user, project_id, role)
+        _lock_schedule_project(db, project_id)
+        project = db.scalar(select(Project).where(Project.id == project_id).with_for_update()
+                            .execution_options(populate_existing=True))
+        actor = db.scalar(select(User).where(User.id == user.id).with_for_update(read=True)
+                          .execution_options(populate_existing=True))
+        if project is None or project.archived_at is not None or actor is None:
+            raise HTTPException(403, "Insufficient project access")
+        list(db.scalars(select(ProjectMember).where(ProjectMember.project_id == project_id,
+                            ProjectMember.user_id == actor.id).with_for_update(read=True)
+                            .execution_options(populate_existing=True)))
+        require_project_role(db, actor, project_id, role)
+        baseline = db.scalar(select(ScheduleBaseline).where(ScheduleBaseline.id == baseline_id)
+                             .with_for_update().execution_options(populate_existing=True))
+        if baseline is None or baseline.project_id != project_id:
+            raise HTTPException(409, "schedule_scope_changed")
+        return baseline
+
+
+def _graph_rows(db: Session, baseline: ScheduleBaseline) -> list[ScheduleItem]:
+    rows = list(db.scalars(select(ScheduleItem).where(ScheduleItem.baseline_id == baseline.id)
+                          .order_by(ScheduleItem.id).with_for_update()
+                          .execution_options(populate_existing=True)))
+    if any(row.project_id != baseline.project_id for row in rows):
+        raise HTTPException(409, "schedule_scope_changed")
+    return rows
+
+
+def _canonical_dependencies(dependencies) -> str | None:
+    return "; ".join(f"{link.predecessor_id}{link.link_type}"
+                     + (f"{link.lag_days:+d}d" if link.lag_days else "") for link in dependencies) or None
+
+
+def _calculate_graph(items, project_start):
+    try:
+        tasks = tuple(ScheduleTask(
+            task_id=item.id, duration_days=item.duration_days, is_milestone=item.is_milestone,
+            dependencies=parse_dependencies(item.predecessor_ids), planned_start=item.not_before_date,
+            constraint_type=item.constraint_type, constraint_date=item.constraint_date,
+        ) for item in items)
+        plan = plan_schedule(tasks, project_start=project_start)
+        return plan, {task.task_id: _canonical_dependencies(task.dependencies) for task in tasks}
+    except PlannerError as error:
+        # The graph is scoped before calculation; no raw graph/text is returned.
+        raise HTTPException(422, {"code": error.code, "task_ids": error.task_ids}) from None
+
+
+def _graph_response(baseline, rows, plan=None):
+    fields = ("id", "title", "duration_days", "is_milestone", "predecessor_ids",
+              "constraint_type", "constraint_date", "not_before_date", "planned_start", "planned_finish")
+    return {"baseline_id": baseline.id, "version": baseline.version, "status": baseline.status,
+            "graph_revision": baseline.graph_revision, "planning_mode": baseline.planning_mode,
+            "project_start": baseline.project_start,
+            "items": [{name: getattr(row, name) for name in fields} for row in rows],
+            "plan": asdict(plan) if plan is not None else None}
+
+
+def _stored_graph_plan(baseline, rows):
+    if baseline.planning_mode != "calendar_graph":
+        if baseline.project_start is not None or any(
+            getattr(row, name) is not None for row in rows for name in (
+                "duration_days", "is_milestone", "predecessor_ids", "constraint_type", "constraint_date", "not_before_date")):
+            raise HTTPException(409, "schedule_legacy_intent_requires_review")
+        return None
+    plan = _calculate_graph(rows, baseline.project_start)[0]
+    dates = {item.task_id: item for item in plan.tasks}
+    if any((row.planned_start, row.planned_finish) !=
+           (dates[row.id].earliest_start, dates[row.id].earliest_finish) for row in rows):
+        raise HTTPException(409, "schedule_stored_plan_inconsistent")
+    return plan
+
+
+@router.get("/baselines/{baseline_id}/graph")
+def get_schedule_graph(baseline_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    baseline = _locked_graph_baseline(db, baseline_id, user, "viewer")
+    rows = _graph_rows(db, baseline)
+    plan = _stored_graph_plan(baseline, rows)
+    return _graph_response(baseline, rows, plan)
+
+
+@router.put("/baselines/{baseline_id}/graph")
+def put_schedule_graph(baseline_id: int, payload: ScheduleGraphPut,
+                       db: Session = Depends(get_db), user: User = Depends(require_user)):
+    baseline = _locked_graph_baseline(db, baseline_id, user, "editor")
+    if baseline.status != "draft":
+        raise HTTPException(409, "schedule_draft_required")
+    if baseline.graph_revision != payload.expected_graph_revision:
+        raise HTTPException(409, "schedule_graph_revision_changed")
+    rows = _graph_rows(db, baseline)
+    ids = [item.id for item in payload.items]
+    if len(ids) != len(set(ids)) or set(ids) != {row.id for row in rows}:
+        raise HTTPException(422, "schedule_complete_graph_required")
+    plan, canonical = _calculate_graph(payload.items, payload.project_start)
+    if any(value is not None and len(value) > 2000 for value in canonical.values()):
+        raise HTTPException(422, "schedule_dependency_limit")
+    revised = payload.expected_graph_revision + 1
+    result = db.execute(update(ScheduleBaseline).where(
+        ScheduleBaseline.id == baseline.id, ScheduleBaseline.project_id == baseline.project_id,
+        ScheduleBaseline.status == "draft", ScheduleBaseline.graph_revision == payload.expected_graph_revision,
+    ).values(graph_revision=revised, planning_mode="calendar_graph", project_start=payload.project_start)
+     .execution_options(synchronize_session="fetch"))
+    if result.rowcount != 1:
+        raise HTTPException(409, "schedule_graph_revision_changed")
+    intent = {item.id: item for item in payload.items}
+    dates = {item.task_id: item for item in plan.tasks}
+    try:
+        for row in rows:
+            item = intent[row.id]
+            for name in ("duration_days", "is_milestone", "constraint_type", "constraint_date", "not_before_date"):
+                setattr(row, name, getattr(item, name))
+            row.predecessor_ids = canonical[row.id]
+            row.planned_start = dates[row.id].earliest_start
+            row.planned_finish = dates[row.id].earliest_finish
+        _audit(db, "schedule_graph_saved", "schedule_baseline", baseline.id, user.id,
+               f"revision={revised}; count={len(rows)}")
+        db.flush()
+        response = _graph_response(baseline, rows, plan)
+        db.commit()
+        return response
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _linked_budget_totals(rows: list[CashFlowEntry]) -> tuple[Decimal, Decimal]:
@@ -611,14 +768,13 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
 
     baseline = None
     if payload.kind == "schedule":
-        _lock_schedule_project(db, payload.project_id)
-        baseline = db.scalar(select(ScheduleBaseline).where(
-            ScheduleBaseline.id == payload.baseline_id,
-        ).with_for_update()) if payload.baseline_id else None
+        baseline = _locked_graph_baseline(db, payload.baseline_id, user, "editor") if payload.baseline_id else None
         if baseline is None or baseline.project_id != payload.project_id:
             raise HTTPException(422, "Для импорта ГПР выберите черновик baseline проекта")
         if baseline.status != "draft":
             raise HTTPException(409, "Утверждённый baseline неизменяем")
+        if baseline.planning_mode == "calendar_graph":
+            raise HTTPException(409, "schedule_graph_batch_insert_required")
         if payload.expected_baseline_version is None:
             raise HTTPException(422, "Для импорта ГПР укажите ожидаемую версию baseline")
         if baseline.version != payload.expected_baseline_version:
@@ -700,6 +856,8 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
         db.flush()
         created.append(item.id)
         resolved.append(item.id)
+    if baseline is not None and created:
+        baseline.graph_revision += 1
     db.add(AuditLog(
         action="structured_document_imported", entity_type="document", entity_id=document.id,
         details=(f"user={user.id}; kind={payload.kind}; contract={payload.contract_id}; "
@@ -734,12 +892,7 @@ def create_baseline(payload: BaselineCreate, db: Session = Depends(get_db), user
 @router.post("/baselines/{baseline_id}/clone")
 def clone_baseline(baseline_id: int, payload: BaselineClone,
                    db: Session = Depends(get_db), user: User = Depends(require_user)):
-    source = db.get(ScheduleBaseline, baseline_id)
-    if source is None:
-        raise HTTPException(404, "Baseline not found")
-    require_project_role(db, user, source.project_id, "manager")
-    _lock_schedule_project(db, source.project_id)
-    source = db.scalar(select(ScheduleBaseline).where(ScheduleBaseline.id == baseline_id).with_for_update())
+    source = _locked_graph_baseline(db, baseline_id, user, "manager")
     if source.version != payload.expected_version:
         raise HTTPException(409, "Версия исходного baseline изменилась; обновите ГПР")
     if source.status != "approved":
@@ -754,6 +907,8 @@ def clone_baseline(baseline_id: int, payload: BaselineClone,
     ).order_by(ScheduleBaseline.version.desc()).with_for_update())
     if draft is not None:
         return {"id": draft.id, "version": draft.version, "status": draft.status, "already_created": True}
+    source_items = _graph_rows(db, source)
+    _stored_graph_plan(source, source_items)
     version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(
         ScheduleBaseline.project_id == source.project_id,
     )) or 0) + 1
@@ -765,14 +920,14 @@ def clone_baseline(baseline_id: int, payload: BaselineClone,
         version=version,
         status="draft",
         note=payload.note if payload.note is not None else source.note,
+        planning_mode=source.planning_mode,
+        project_start=source.project_start,
     )
     db.add(draft)
     db.flush()
-    source_items = list(db.scalars(select(ScheduleItem).where(
-        ScheduleItem.baseline_id == source.id,
-    ).order_by(ScheduleItem.id)))
+    copied = {}
     for source_item in source_items:
-        db.add(ScheduleItem(
+        clone_item = ScheduleItem(
             project_id=source.project_id,
             baseline_id=draft.id,
             title=source_item.title,
@@ -785,7 +940,21 @@ def clone_baseline(baseline_id: int, payload: BaselineClone,
             status="planned",
             source_name=source_item.source_name,
             source_excerpt=source_item.source_excerpt,
-        ))
+            duration_days=source_item.duration_days,
+            is_milestone=source_item.is_milestone,
+            constraint_type=source_item.constraint_type,
+            constraint_date=source_item.constraint_date,
+            not_before_date=source_item.not_before_date,
+        )
+        db.add(clone_item)
+        copied[source_item.id] = clone_item
+    db.flush()
+    for source_item in source_items:
+        links = parse_dependencies(source_item.predecessor_ids)
+        # Source was validated before cloning; no old-baseline IDs survive.
+        copied[source_item.id].predecessor_ids = "; ".join(
+            f"{copied[link.predecessor_id].id}{link.link_type}" + (f"{link.lag_days:+d}d" if link.lag_days else "")
+            for link in links) or None
     _audit(db, "baseline_cloned", "schedule_baseline", draft.id, user.id,
            f"source_baseline={source.id}; version={version}; facts_copied=false")
     db.commit()
@@ -795,14 +964,10 @@ def clone_baseline(baseline_id: int, payload: BaselineClone,
 
 @router.post("/schedule-items")
 def create_schedule_item(payload: ScheduleItemCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    baseline = db.get(ScheduleBaseline, payload.baseline_id)
-    if baseline is None: raise HTTPException(404, "Baseline not found")
-    require_project_role(db, user, baseline.project_id, "editor")
-    _lock_schedule_project(db, baseline.project_id)
-    baseline = db.scalar(select(ScheduleBaseline).where(
-        ScheduleBaseline.id == payload.baseline_id,
-    ).with_for_update())
+    baseline = _locked_graph_baseline(db, payload.baseline_id, user, "editor")
     if baseline.status != "draft": raise HTTPException(409, "Утверждённый или архивный baseline неизменяем; создайте новую версию")
+    if baseline.planning_mode == "calendar_graph":
+        raise HTTPException(409, "schedule_graph_batch_insert_required")
     if payload.expected_baseline_version is None:
         raise HTTPException(422, "Укажите ожидаемую версию baseline")
     if payload.expected_baseline_version != baseline.version:
@@ -818,6 +983,7 @@ def create_schedule_item(payload: ScheduleItemCreate, db: Session = Depends(get_
     if duplicate is not None:
         return {"id": duplicate.id, "status": duplicate.status, "already_created": True}
     item = ScheduleItem(project_id=baseline.project_id, **item_data)
+    baseline.graph_revision += 1
     db.add(item); db.flush(); _audit(db, "schedule_item_created", "schedule_item", item.id, user.id, "proposal"); db.commit(); db.refresh(item)
     return {"id": item.id, "status": item.status, "already_created": False}
 
@@ -1069,16 +1235,20 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "procurement": ProcurementItem, "acts": AcceptanceAct, "baselines": ScheduleBaseline}
     model = models.get(kind)
     if model is None: raise HTTPException(404, "Unsupported register")
-    item = db.scalar(select(model).where(model.id == item_id).with_for_update())
-    if item is None: raise HTTPException(404, "Item not found")
-    require_project_role(db, user, item.project_id, "manager")
     if kind == "baselines":
-        _lock_schedule_project(db, item.project_id)
-    item = db.scalar(select(model).where(model.id == item_id).with_for_update())
+        item = _locked_graph_baseline(db, item_id, user, "manager")
+    else:
+        item = db.scalar(select(model).where(model.id == item_id).with_for_update())
+        if item is None: raise HTTPException(404, "Item not found")
+        require_project_role(db, user, item.project_id, "manager")
+        item = db.scalar(select(model).where(model.id == item_id).with_for_update())
     allowed = {"budget": {"approved", "active", "closed", "rejected"}, "cash-flow": {"approved", "cancelled"},
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
+    if (kind == "baselines" and item.planning_mode == "calendar_graph"
+            and payload.expected_graph_revision != item.graph_revision):
+        raise HTTPException(409, "schedule_graph_revision_changed")
     if kind in {"budget", "cash-flow"} and (
         payload.actual_amount is not None or payload.actual_date is not None
     ):
@@ -1112,12 +1282,16 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             raise HTTPException(422, "Для утверждения baseline укажите ожидаемый статус")
         if item.status != "draft":
             raise HTTPException(409, "Утвердить можно только черновик baseline")
+        if item.planning_mode == "calendar_graph":
+            _stored_graph_plan(item, _graph_rows(db, item))
         current = _current_approved_baseline(db, item)
         if current is not None and current.id != item.id:
             current.status = "superseded"
+            current.graph_revision += 1
             superseded_id = current.id
             _audit(db, "baseline_superseded", "schedule_baseline", current.id, user.id,
                    f"replacement_baseline={item.id}; replacement_version={item.version}")
+        item.graph_revision += 1
     item.status = payload.status
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
