@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { FinanceOverview, FinanceStructuredPreview } from "./types";
 import { formatMoney } from "../../utils/numberFormat";
+import { CashFlowViews } from "./CashFlowViews";
 
 type Props = {
   finance: FinanceOverview | null; preview: FinanceStructuredPreview | null; selectedRows: number[];
@@ -32,6 +33,7 @@ export function FinanceOperations(props: Props) {
   const visibleBaselineIds = new Set(visibleBaselines.map((item) => item.id));
   const visibleSchedule = finance?.schedule.filter((item) => visibleBaselineIds.has(item.baseline_id)) || [];
   return <>
+    {includeRegisters && finance?.readonly_view_scope && <CashFlowViews projectId={finance.readonly_view_scope.project_id} contractId={selectedContractId||null}/>}
     {!!finance?.decision_requirements?.length && <section className="card finance-decision-notice" role="status">
       <h2>Нужны финансовые решения</h2>
       <p>PU Workspace не выбирает ставку НДС, правила удержаний, валютный курс и источник курса автоматически.</p>

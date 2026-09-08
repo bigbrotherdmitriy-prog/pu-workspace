@@ -53,7 +53,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         api<{ candidates: FinanceDocumentCandidate[] }>(`/execution/document-candidates?project_id=${projectId}${contractQuery}`),
       ]);
       if (scopeRef.current !== scope || sequence !== loadSequence.current) return;
-      setLoaded({ scope, finance: overview, candidates: suggestions.candidates || [] });
+      setLoaded({ scope, finance: {...overview,readonly_view_scope:{project_id:projectId}}, candidates: suggestions.candidates || [] });
     } catch (error) {
       if (scopeRef.current === scope && sequence === loadSequence.current) setError((error as Error).message);
     }

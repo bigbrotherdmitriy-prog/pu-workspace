@@ -1,4 +1,6 @@
 export type FinanceOverview = {
+  /** Local controller scope only; never a server authorization assertion. */
+  readonly_view_scope?: {project_id:number};
   decision_requirements?: {
     code: "unknown_currency" | "mixed_currency" | "currency_conversion_policy" |
       "exchange_rate_source" | "vat_treatment" | "retention_treatment";
