@@ -1,0 +1,13 @@
+.schedule-graph { display: grid; gap: 1rem; min-width: 0; }
+.schedule-graph header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.schedule-graph fieldset { min-width: 0; border: 1px solid #b7c4ce; border-radius: .5rem; padding: 1rem; }
+.schedule-graph label { display: grid; gap: .35rem; max-width: 20rem; }
+.schedule-graph-scroll { overflow-x: auto; margin-block: 1rem; }
+.schedule-graph table { border-collapse: collapse; width: 100%; }
+.schedule-graph td, .schedule-graph th { text-align: left; vertical-align: top; padding: .6rem; border-bottom: 1px solid #b7c4ce; }
+.schedule-graph td input:not([type=checkbox]), .schedule-graph td select { min-width: 9rem; width: 100%; }
+.schedule-graph small { display: block; }
+.schedule-graph aside { padding: 1rem; border: 2px solid #966200; border-radius: .5rem; }
+.schedule-graph aside button { margin: .35rem; }
+.schedule-graph [role=alert] { color: #9b2019; }
+.schedule-graph button:focus-visible, .schedule-graph input:focus-visible, .schedule-graph select:focus-visible { outline: 3px solid #175dba; outline-offset: 2px; }
