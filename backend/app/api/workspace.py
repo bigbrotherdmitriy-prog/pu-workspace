@@ -271,20 +271,58 @@ def _start_safe_copy_pipeline(snapshot_id: int, project_id: int, source_folder_i
     return session_id
 
 
+def _snapshot_write_fence(db, snapshot_id, project_id, external_id):
+    """Short DB-only fence: Project -> exact live job delivery -> snapshot.
+
+    There is no unfenced synchronous fallback. The only production caller is the
+    durable handler; use its captured claim, never reconstruct a newer DB owner.
+    """
+    from app.jobs import queue
+    with db.no_autoflush:
+        if db.scalar(select(Project.id).where(Project.id == project_id).with_for_update()) is None:
+            raise HTTPException(409, "Snapshot project is unavailable")
+        owner = queue._execution_owner.get()
+        claim = queue.current_execution_claim()
+        if owner is None or claim is None or claim[:2] != owner:
+            raise HTTPException(409, "Snapshot delivery is unavailable")
+        job_id, worker_id, attempt, locked_at = claim
+        job = db.scalar(select(BackgroundJob).where(
+            *queue._live_owner(job_id, worker_id), BackgroundJob.attempts == attempt,
+            BackgroundJob.locked_at == locked_at,
+        ).with_for_update().execution_options(populate_existing=True))
+        if (job is None or job.kind != "workspace.snapshot" or
+                any((job.payload or {}).get(key) != value for key, value in {
+                    "snapshot_id": snapshot_id, "project_id": project_id, "external_id": external_id,
+                }.items())):
+            raise HTTPException(409, "Snapshot delivery is unavailable")
+        snapshot = db.scalar(select(WorkspaceSnapshot).where(WorkspaceSnapshot.id == snapshot_id)
+                             .with_for_update().execution_options(populate_existing=True))
+        _validate_snapshot_target(db, snapshot, project_id, external_id)
+        return snapshot, job
+
+
 def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_errors: bool = False) -> None:
     db = SessionLocal()
     target_valid = False
     try:
-        snapshot = db.get(WorkspaceSnapshot, snapshot_id)
-        # Reject a forged target before changing even the failure state of another project.
-        if snapshot is None or snapshot.project_id != project_id:
-            raise HTTPException(409, "Snapshot does not belong to the requested project")
+        snapshot, job = _snapshot_write_fence(db, snapshot_id, project_id, external_id)
         target_valid = True
-        source = _validate_snapshot_target(db, snapshot, project_id, external_id)
-        if snapshot.status != "ready":
+        ready = snapshot.status == "ready"
+        if job is not None:
+            job.progress = max(job.progress or 0, 10)
+        # No DB locks are held during metadata provider reads.
+        db.commit()
+        if not ready:
             drive = storage_for_project(project_id, db)
             source_meta = drive.get_object(external_id)
             items = drive.walk_tree(external_id)
+            # Drop pre-I/O ORM state and validate the exact delivery and binding
+            # again in the same short transaction that publishes the nodes.
+            db.rollback()
+            snapshot, job = _snapshot_write_fence(db, snapshot_id, project_id, external_id)
+            if snapshot.status == "ready":
+                db.commit()
+                return
             db.add(VirtualNode(
                 snapshot_id=snapshot.id, external_id=source_meta.id,
                 parent_external_id=source_meta.parent_id or None, name=source_meta.name,
@@ -300,14 +338,22 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
             snapshot.item_count = len(items) + 1
             snapshot.status = "ready"
             snapshot.completed_at = datetime.now(timezone.utc)
+            snapshot.error_message = None
+            if job is not None:
+                job.progress = max(job.progress or 0, 95)
             db.commit()
     except Exception as exc:
         db.rollback()
-        failed = db.get(WorkspaceSnapshot, snapshot_id)
-        if failed is not None and target_valid:
-            failed.status = "dead_letter" if failed.retry_count >= 2 else "failed"
-            failed.error_message = "Storage snapshot failed. Verify the selected project, connection and folder, then retry."
-            db.commit()
+        if target_valid:
+            try:
+                failed, _ = _snapshot_write_fence(db, snapshot_id, project_id, external_id)
+                if failed.status != "ready":
+                    failed.status = "dead_letter" if failed.retry_count >= 2 else "failed"
+                    failed.error_message = "Storage snapshot failed. Verify the selected project, connection and folder, then retry."
+                db.commit()
+            except Exception:
+                # A lost delivery or changed binding cannot overwrite recovery.
+                db.rollback()
         if raise_errors:
             raise
     finally:

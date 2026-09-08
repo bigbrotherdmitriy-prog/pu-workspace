@@ -133,6 +133,16 @@ def choose(bound, folder=None, **kwargs):
     return bound.client.post(f'/projects/{bound.new}/source-folders/{quote(folder, safe="")}/snapshot-queue', **kwargs)
 
 
+def run_snapshot_claimed(bound, snapshot_id, project_id, external_id):
+    """Execute existing snapshot assertions with the same claim fence as workers."""
+    with bound.db() as db:
+        job = queue.claim(db, 'synthetic-snapshot-worker')
+        assert job is not None and job.kind == 'workspace.snapshot'
+        assert job.payload['snapshot_id'] == snapshot_id
+    with queue.execution_owner(job.id, job.worker_id, attempt=job.attempts, locked_at=job.locked_at):
+        workspace._build_snapshot(snapshot_id, project_id, external_id, raise_errors=True)
+
+
 def test_confirm_persists_exact_binding_and_returns_job(bound):
     response = choose(bound)
     assert response.status_code == 200, response.text
@@ -429,7 +439,7 @@ def test_archived_project_cannot_enqueue_or_execute_new_managed_copy(bound):
 
 def test_explicit_refresh_invalidates_completed_snapshot_cache(bound):
     first = choose(bound).json()
-    workspace._build_snapshot(first['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    run_snapshot_claimed(bound, first['id'], bound.new, bound.adapter.ids[-1])
     with bound.db() as db:
         db.get(BackgroundJob, first['job_id']).status = 'completed'
         db.commit()
@@ -463,7 +473,7 @@ def test_explicit_refresh_invalidates_completed_snapshot_cache(bound):
         refreshed['id'], refreshed['job_id'], True,
     )
 
-    workspace._build_snapshot(refreshed['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    run_snapshot_claimed(bound, refreshed['id'], bound.new, bound.adapter.ids[-1])
     with bound.db() as db:
         db.get(BackgroundJob, refreshed['job_id']).status = 'completed'
         db.commit()
@@ -485,7 +495,7 @@ def test_explicit_refresh_invalidates_completed_snapshot_cache(bound):
         'connection_id': 'chosen-account',
         'refresh': 'true',
     }).json()
-    workspace._build_snapshot(second_refresh['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    run_snapshot_claimed(bound, second_refresh['id'], bound.new, bound.adapter.ids[-1])
     with bound.db() as db:
         changed = db.scalar(select(VirtualNode).where(
             VirtualNode.snapshot_id == second_refresh['id'],
@@ -511,7 +521,7 @@ def test_snapshot_analysis_reports_measured_progress_and_bound_result(bound):
         provider=bound.adapter.provider,
     )
     selected = choose(bound).json()
-    workspace._build_snapshot(selected['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    run_snapshot_claimed(bound, selected['id'], bound.new, bound.adapter.ids[-1])
     with bound.db() as db:
         db.get(BackgroundJob, selected['job_id']).status = 'completed'
         db.commit()
@@ -549,7 +559,7 @@ def test_snapshot_analysis_reports_measured_progress_and_bound_result(bound):
 def test_async_payload_cannot_target_another_project(bound):
     result = choose(bound).json()
     with pytest.raises(HTTPException):
-        workspace._build_snapshot(result['id'], bound.old, bound.adapter.ids[-1], raise_errors=True)
+        run_snapshot_claimed(bound, result['id'], bound.old, bound.adapter.ids[-1])
     with bound.db() as db:
         assert db.get(WorkspaceSnapshot, result['id']).status == 'building'
         assert not list(db.scalars(select(VirtualNode)))
@@ -635,7 +645,7 @@ def test_reconfirm_registered_folder_restores_selected_root(bound):
 
 def test_ready_snapshot_waits_for_explicit_safe_copy_request(bound):
     result = choose(bound).json()
-    workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    run_snapshot_claimed(bound, result['id'], bound.new, bound.adapter.ids[-1])
     with bound.db() as db:
         db.get(BackgroundJob, result['job_id']).status = 'completed'
         db.commit()
@@ -709,7 +719,7 @@ def test_connection_changed_before_worker_is_safe_failure(bound):
     with bound.db() as db:
         db.get(DriveConnection, bound.connection).connection_id = 'replacement'; db.commit()
     with pytest.raises(HTTPException):
-        workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+        run_snapshot_claimed(bound, result['id'], bound.new, bound.adapter.ids[-1])
     assert bound.adapter.calls == []
     assert bound.client.post(f'/projects/{bound.new}/snapshots/{result["id"]}/retry-build').status_code == 409
 
@@ -718,7 +728,7 @@ def test_safe_error_and_explicit_retry_keep_target(bound):
     result = choose(bound).json()
     bound.adapter.error = RuntimeError('synthetic secret=do-not-publish document-body')
     with pytest.raises(RuntimeError):
-        workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+        run_snapshot_claimed(bound, result['id'], bound.new, bound.adapter.ids[-1])
     with bound.db() as db:
         snap = db.get(WorkspaceSnapshot, result['id'])
         assert snap.status == 'failed'
@@ -746,7 +756,8 @@ def test_real_job_dispatch_and_explicit_safe_copy_keep_new_project(bound, monkey
         job = queue.claim(db, 'synthetic-worker')
         assert job.id == result['job_id'] and job.progress == 1
         payload = dict(job.payload)
-    dispatched = handlers.run('workspace.snapshot', payload)
+    with queue.execution_owner(job.id, job.worker_id, attempt=job.attempts, locked_at=job.locked_at):
+        dispatched = handlers.run('workspace.snapshot', payload)
     assert dispatched == {'snapshot_id': result['id']}
     with bound.db() as db:
         assert queue.succeed(db, result['job_id'], 'synthetic-worker', dispatched)

@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from test_storage_binding_validation import bound, choose
+from test_storage_binding_validation import bound, choose, run_snapshot_claimed
 from app.api import workspace
 from app.jobs import queue
 from app.models.job import BackgroundJob
@@ -96,8 +96,9 @@ def test_changed_source_provider_is_rejected_before_storage(bound):
         snap = db.get(WorkspaceSnapshot, first['id'])
         db.get(SourceFolder, snap.source_folder_id).provider = 'other-provider'
         db.commit()
-    with pytest.raises(HTTPException):
-        workspace._build_snapshot(first['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with pytest.raises(HTTPException) as rejected:
+        run_snapshot_claimed(bound, first['id'], bound.new, bound.adapter.ids[-1])
+    assert rejected.value.detail == 'Snapshot storage connection changed; reconnect the original connection'
     assert bound.adapter.calls == []
 
 
