@@ -95,6 +95,16 @@ MVP_TESTS = {
     ), *test_nodes("backend/tests/test_v7_schedule_graph_rows_postgres.py",
                   "test_pg_concurrent_complete_row_batches_have_one_winner",
                   "test_pg_existing_uncommitted_fk_link_blocks_then_protects_delete")),
+    "postgres_v7_schedule_wbs": test_nodes(
+        "backend/tests/test_v7_schedule_wbs_postgres.py",
+        "test_pg_wbs_clean_head_and_existing_flat_rows_upgrade",
+        "test_pg_wbs_order_constraint_rejects_negative_value",
+        "test_pg_wbs_summary_constraint_rejects_leaf_intent",
+        "test_pg_wbs_service_rejects_cross_baseline_parent",
+        "test_pg_wbs_concurrent_complete_graph_has_one_winner_and_persists_rollup",
+        "test_pg_wbs_clone_remaps_parent_and_dependency_ids",
+        "test_pg_wbs_downgrade_refuses_hierarchy_intent",
+    ),
     "postgres_mvp4_supply": test_nodes(
         "backend/tests/test_mvp4_supply_postgres_runtime.py",
         *(f"test_postgres_duplicate_supply_commands_create_one_effect[{case}]"
@@ -458,6 +468,7 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
             "mvp2": "Gmail cursor CAS and atomic context confirmation contention; no live mailbox or OS process kill",
             "mvp3": "obligation CAS, digest replay, binding contention and meeting business commit process kill/replay; no live channel or HTTP ACK proof",
             "mvp4": "manual finance and supply command concurrency; no backup restore or live payment",
+            "wbs": "a20-to-a21 migration, hierarchy guards, CAS, rollup and clone remap; synthetic rows only",
             "authority": "role revocation serialization and schema upgrade/downgrade; synthetic principals",
             "materialization": "migration and UUID-schema CAS; no external storage effect",
             "local_upload": "UUID-schema lease authorization and project-first retention locking with synthetic ciphertext",
@@ -580,6 +591,10 @@ def main() -> None:
         migrate_database("mvp4_migration", "puw_mvp4_test_runtime", env)
         run_phase("postgres_v7_schedule_graph", [
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_v7_schedule_graph"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
+        run_phase("postgres_v7_schedule_wbs", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_v7_schedule_wbs"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
         run_phase("postgres_mvp4_finance", [

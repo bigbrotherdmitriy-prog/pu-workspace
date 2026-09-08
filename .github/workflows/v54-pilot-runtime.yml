@@ -15,6 +15,7 @@ on:
       - 'codex/v7-execution-wave4'
       - 'codex/v7-execution-wave5'
       - 'codex/v7-execution-wave6'
+      - 'codex/v7-wbs-runtime-gate'
   workflow_dispatch:
 
 permissions:
