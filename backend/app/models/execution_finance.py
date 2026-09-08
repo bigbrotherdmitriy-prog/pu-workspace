@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, event, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, event, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -42,10 +42,17 @@ class ScheduleItem(Base):
                         "(constraint_type IS NOT NULL AND ((constraint_type = 'asap' AND constraint_date IS NULL) OR "
                         "(constraint_type IN ('snet','fnet','snlt','fnlt','mso','mfo') AND constraint_date IS NOT NULL)))",
                         name="ck_schedule_constraint_intent"),
+        CheckConstraint("wbs_order >= 0", name="ck_schedule_wbs_order"),
+        CheckConstraint("is_summary = false OR (duration_days IS NULL AND is_milestone IS NULL "
+                        "AND predecessor_ids IS NULL AND constraint_type IS NULL AND constraint_date IS NULL "
+                        "AND not_before_date IS NULL)", name="ck_schedule_summary_intent"),
     )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     baseline_id: Mapped[int] = mapped_column(ForeignKey("schedule_baselines.id", ondelete="CASCADE"), index=True)
+    wbs_parent_id: Mapped[int | None] = mapped_column(ForeignKey("schedule_items.id", ondelete="RESTRICT"), nullable=True, index=True)
+    wbs_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    is_summary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     title: Mapped[str] = mapped_column(String(500))
     duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_milestone: Mapped[bool | None] = mapped_column(nullable=True)

@@ -71,7 +71,7 @@ def pg_context(monkeypatch):
         engine = create_engine(isolated, hide_parameters=True, connect_args={"connect_timeout": 5})
         sessions = sessionmaker(engine, autoflush=False, expire_on_commit=False)
         with sessions.begin() as db:
-            assert list(db.scalars(text("SELECT version_num FROM alembic_version"))) == ["a54f001c0a20"]
+            assert list(db.scalars(text("SELECT version_num FROM alembic_version"))) == ["a54f001c0a21"]
             org = Organization(name="Owned context test")
             user = User(name="Context manager", email="context-manager@example.test", is_admin=False)
             db.add_all([org, user])

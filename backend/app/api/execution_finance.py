@@ -113,12 +113,16 @@ class ScheduleGraphRow(BaseModel):
     id: _ScheduleRowId | None = None
     client_ref: _ScheduleClientRef | None = None
     title: str = Field(min_length=2, max_length=500)
-    duration_days: int = Field(strict=True, ge=0, le=10000)
-    is_milestone: bool = Field(strict=True)
-    constraint_type: Literal["asap", "snet", "fnet", "snlt", "fnlt", "mso", "mfo"]
+    duration_days: int | None = Field(default=None, strict=True, ge=0, le=10000)
+    is_milestone: bool | None = Field(default=None, strict=True)
+    constraint_type: Literal["asap", "snet", "fnet", "snlt", "fnlt", "mso", "mfo"] | None = None
     constraint_date: date | None = None
     not_before_date: date | None = None
     dependencies: list[ScheduleRowDependency] = Field(default_factory=list, max_length=500)
+    parent_id: _ScheduleRowId | None = None
+    parent_ref: _ScheduleClientRef | None = None
+    wbs_order: int = Field(default=0, strict=True, ge=0, le=1000000)
+    is_summary: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def one_identity(self):
@@ -126,6 +130,15 @@ class ScheduleGraphRow(BaseModel):
             raise ValueError("exactly_one_row_identity_required")
         if len(self.title.strip()) < 2:
             raise ValueError("schedule_title_required")
+        if self.parent_id is not None and self.parent_ref is not None:
+            raise ValueError("at_most_one_parent_reference_allowed")
+        if self.is_summary:
+            if (self.duration_days is not None or self.is_milestone is not None
+                    or self.constraint_type is not None or self.constraint_date is not None
+                    or self.not_before_date is not None or self.dependencies):
+                raise ValueError("schedule_summary_intent_forbidden")
+        elif self.duration_days is None or self.is_milestone is None or self.constraint_type is None:
+            raise ValueError("schedule_leaf_intent_required")
         return self
 
 
@@ -345,6 +358,8 @@ def _validate_control_links(
         baseline = db.get(ScheduleBaseline, stage.baseline_id) if stage else None
         if stage is None or stage.project_id != project_id or baseline is None:
             raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
+        if stage.is_summary:
+            raise HTTPException(422, "schedule_summary_link_forbidden")
         if contract_id is not None and baseline.contract_id not in {None, contract_id}:
             raise HTTPException(422, "Этап ГПР связан с другим договором")
     if task_id is not None:
@@ -541,7 +556,7 @@ def _calculate_graph(items, project_start):
             task_id=item.id, duration_days=item.duration_days, is_milestone=item.is_milestone,
             dependencies=parse_dependencies(item.predecessor_ids), planned_start=item.not_before_date,
             constraint_type=item.constraint_type, constraint_date=item.constraint_date,
-        ) for item in items)
+        ) for item in items if not getattr(item, "is_summary", False))
         plan = plan_schedule(tasks, project_start=project_start)
         return plan, {task.task_id: _canonical_dependencies(task.dependencies) for task in tasks}
     except PlannerError as error:
@@ -549,13 +564,78 @@ def _calculate_graph(items, project_start):
         raise HTTPException(422, {"code": error.code, "task_ids": error.task_ids}) from None
 
 
+def _wbs_layout(rows):
+    by_id = {row.id: row for row in rows}
+    children = {None: []}
+    for row in rows:
+        if row.wbs_parent_id is not None and row.wbs_parent_id not in by_id:
+            raise HTTPException(409, "schedule_wbs_scope_changed")
+        children.setdefault(row.wbs_parent_id, []).append(row)
+        children.setdefault(row.id, [])
+    for group in children.values():
+        group.sort(key=lambda row: (row.wbs_order, row.id))
+    ordered, levels, visiting = [], {}, set()
+
+    def visit(row, level):
+        if row.id in visiting or level > 5:
+            raise HTTPException(409, "schedule_wbs_invalid")
+        visiting.add(row.id); levels[row.id] = level; ordered.append(row)
+        for child in children[row.id]:
+            visit(child, level + 1)
+        visiting.remove(row.id)
+
+    for root in children[None]:
+        visit(root, 1)
+    if len(ordered) != len(rows):
+        raise HTTPException(409, "schedule_wbs_invalid")
+    return ordered, levels
+
+
+def _summary_rollups(rows):
+    by_parent = {}
+    for row in rows:
+        by_parent.setdefault(row.wbs_parent_id, []).append(row)
+    values = {}
+
+    def calculate(row):
+        descendants = by_parent.get(row.id, [])
+        leaves = []
+        for child in descendants:
+            leaves.extend(calculate(child) if child.is_summary else [child])
+        if not row.is_summary:
+            return [row]
+        starts = [leaf.planned_start for leaf in leaves if leaf.planned_start is not None]
+        finishes = [leaf.planned_finish for leaf in leaves if leaf.planned_finish is not None]
+        weights = [max(1, leaf.duration_days or 0) for leaf in leaves]
+        total = sum(weights)
+        planned = sum(leaf.planned_progress * weight for leaf, weight in zip(leaves, weights)) / total if total else 0
+        actual = sum(leaf.actual_progress * weight for leaf, weight in zip(leaves, weights)) / total if total else 0
+        status = "completed" if leaves and actual == 100 else "in_progress" if actual > 0 else "planned"
+        values[row.id] = (min(starts) if starts else None, max(finishes) if finishes else None,
+                          planned, actual, status)
+        return leaves
+
+    for root in by_parent.get(None, []):
+        calculate(root)
+    return values
+
+
+def _apply_summary_rollups(rows):
+    rollups = _summary_rollups(rows)
+    for row in rows:
+        if row.id in rollups:
+            row.planned_start, row.planned_finish, row.planned_progress, row.actual_progress, row.status = rollups[row.id]
+
+
 def _graph_response(baseline, rows, plan=None):
     fields = ("id", "title", "duration_days", "is_milestone", "predecessor_ids",
-              "constraint_type", "constraint_date", "not_before_date", "planned_start", "planned_finish")
+              "constraint_type", "constraint_date", "not_before_date", "planned_start", "planned_finish",
+              "planned_progress", "actual_progress", "status", "wbs_parent_id", "wbs_order", "is_summary")
+    ordered, levels = _wbs_layout(rows)
     return {"baseline_id": baseline.id, "version": baseline.version, "status": baseline.status,
             "graph_revision": baseline.graph_revision, "planning_mode": baseline.planning_mode,
             "project_start": baseline.project_start,
-            "items": [{name: getattr(row, name) for name in fields} for row in rows],
+            "items": [{**{name: getattr(row, name) for name in fields}, "wbs_level": levels[row.id]} for row in ordered],
             "plan": asdict(plan) if plan is not None else None}
 
 
@@ -568,8 +648,10 @@ def _stored_graph_plan(baseline, rows):
         return None
     plan = _calculate_graph(rows, baseline.project_start)[0]
     dates = {item.task_id: item for item in plan.tasks}
-    if any((row.planned_start, row.planned_finish) !=
-           (dates[row.id].earliest_start, dates[row.id].earliest_finish) for row in rows):
+    rollups = _summary_rollups(rows)
+    if any((row.planned_start, row.planned_finish) != (
+            rollups[row.id][0:2] if row.is_summary else
+            (dates[row.id].earliest_start, dates[row.id].earliest_finish)) for row in rows):
         raise HTTPException(409, "schedule_stored_plan_inconsistent")
     return plan
 
@@ -630,6 +712,8 @@ def _row_graph_intent(items, references):
     """Resolve request-local names, then use the existing planner unchanged."""
     result = []
     for item in items:
+        if item.is_summary:
+            continue
         identifier = item.id if item.id is not None else references[item.client_ref]
         parts = []
         for dependency in item.dependencies:
@@ -648,6 +732,33 @@ def _row_graph_intent(items, references):
             constraint_type=item.constraint_type, constraint_date=item.constraint_date,
             not_before_date=item.not_before_date))
     return result
+
+
+def _wbs_intent(items, references):
+    identities = {item.id if item.id is not None else references[item.client_ref]: item for item in items}
+    parents = {}
+    for identifier, item in identities.items():
+        parent = item.parent_id
+        if item.parent_ref is not None:
+            parent = references.get(item.parent_ref)
+            if parent is None:
+                raise HTTPException(422, "schedule_unknown_parent")
+        if parent is not None and parent not in identities:
+            raise HTTPException(422, "schedule_unknown_parent")
+        if parent == identifier:
+            raise HTTPException(422, "schedule_wbs_cycle")
+        parents[identifier] = parent
+    for identifier, parent in parents.items():
+        if parent is not None and not identities[parent].is_summary:
+            raise HTTPException(422, "schedule_wbs_parent_must_be_summary")
+        seen, cursor, depth = {identifier}, parent, 1
+        while cursor is not None:
+            if cursor in seen:
+                raise HTTPException(422, "schedule_wbs_cycle")
+            seen.add(cursor); depth += 1; cursor = parents[cursor]
+        if depth > 5:
+            raise HTTPException(422, "schedule_wbs_depth_limit")
+    return parents
 
 
 @router.put("/baselines/{baseline_id}/graph/rows")
@@ -673,6 +784,8 @@ def put_schedule_graph_rows(baseline_id: int, payload: ScheduleGraphRowsPut,
         raise HTTPException(422, "schedule_complete_graph_required")
     for identifier in deleted:
         row = existing[identifier]
+        if any(child.wbs_parent_id == identifier and child.id not in deleted for child in rows):
+            raise HTTPException(409, "schedule_wbs_parent_delete_protected")
         if (row.source_name is not None or row.source_excerpt is not None
                 or row.actual_start is not None or row.actual_finish is not None
                 or row.actual_progress != 0 or row.status != "planned"):
@@ -692,6 +805,7 @@ def put_schedule_graph_rows(baseline_id: int, payload: ScheduleGraphRowsPut,
            for item in payload.items for link in item.dependencies):
         raise HTTPException(422, "schedule_unknown_predecessor")
     _calculate_graph(_row_graph_intent(payload.items, temporary), payload.project_start)
+    _wbs_intent(payload.items, temporary)
     try:
         mapping = {}
         for item in payload.items:
@@ -702,6 +816,7 @@ def put_schedule_graph_rows(baseline_id: int, payload: ScheduleGraphRowsPut,
                 mapping[item.client_ref] = row.id
                 existing[row.id] = row
         intent = _row_graph_intent(payload.items, mapping)
+        parents = _wbs_intent(payload.items, mapping)
         plan, canonical = _calculate_graph(intent, payload.project_start)
         revised = payload.expected_graph_revision + 1
         changed = db.execute(update(ScheduleBaseline).where(
@@ -713,21 +828,32 @@ def put_schedule_graph_rows(baseline_id: int, payload: ScheduleGraphRowsPut,
             raise HTTPException(409, "schedule_graph_revision_changed")
         dates = {task.task_id: task for task in plan.tasks}
         final_rows = []
-        for item, resolved in zip(payload.items, intent):
-            row = existing[resolved.id]
+        intent_by_id = {item.id: item for item in intent}
+        for item in payload.items:
+            identifier = item.id if item.id is not None else mapping[item.client_ref]
+            row = existing[identifier]
             row.title = item.title
-            for field in ("duration_days", "is_milestone", "constraint_type", "constraint_date", "not_before_date"):
-                setattr(row, field, getattr(item, field))
-            row.predecessor_ids = canonical[row.id]
-            row.planned_start = dates[row.id].earliest_start
-            row.planned_finish = dates[row.id].earliest_finish
+            row.wbs_parent_id = parents[identifier]
+            row.wbs_order = item.wbs_order
+            row.is_summary = item.is_summary
+            if item.is_summary:
+                row.duration_days = row.is_milestone = row.predecessor_ids = None
+                row.constraint_type = row.constraint_date = row.not_before_date = None
+            else:
+                resolved = intent_by_id[identifier]
+                for field in ("duration_days", "is_milestone", "constraint_type", "constraint_date", "not_before_date"):
+                    setattr(row, field, getattr(item, field))
+                row.predecessor_ids = canonical[row.id]
+                row.planned_start = dates[row.id].earliest_start
+                row.planned_finish = dates[row.id].earliest_finish
             final_rows.append(row)
+        _apply_summary_rollups(final_rows)
         for identifier in deleted:
             db.delete(existing[identifier])
         _audit(db, "schedule_graph_rows_saved", "schedule_baseline", baseline.id, user.id,
                f"revision={revised}; count={len(final_rows)}; added={len(mapping)}; deleted={len(deleted)}")
         db.flush()
-        response = _graph_response(baseline, sorted(final_rows, key=lambda row: row.id), plan)
+        response = _graph_response(baseline, final_rows, plan)
         response["client_ref_map"] = mapping
         db.commit()
         return response
@@ -1143,11 +1269,16 @@ def clone_baseline(baseline_id: int, payload: BaselineClone,
             constraint_type=source_item.constraint_type,
             constraint_date=source_item.constraint_date,
             not_before_date=source_item.not_before_date,
+            wbs_order=source_item.wbs_order,
+            is_summary=source_item.is_summary,
         )
         db.add(clone_item)
         copied[source_item.id] = clone_item
     db.flush()
     for source_item in source_items:
+        copied[source_item.id].wbs_parent_id = (
+            copied[source_item.wbs_parent_id].id if source_item.wbs_parent_id is not None else None
+        )
         links = parse_dependencies(source_item.predecessor_ids)
         # Source was validated before cloning; no old-baseline IDs survive.
         remapped = "; ".join(
@@ -1207,6 +1338,8 @@ def update_schedule(item_id: int, payload: ScheduleProgress, db: Session = Depen
     current = _current_approved_baseline(db, baseline)
     if current is None or current.id != baseline.id:
         raise HTTPException(409, "Факт нельзя вносить в историческую версию ГПР")
+    if item.is_summary:
+        raise HTTPException(409, "schedule_summary_is_derived")
     values = payload.model_dump(exclude_unset=True, exclude={"expected_actual_progress", "evidence_ref"})
     if all(getattr(item, name) == value for name, value in values.items()):
         return {"id": item.id, "status": item.status, "actual_progress": item.actual_progress,
@@ -1217,6 +1350,7 @@ def update_schedule(item_id: int, payload: ScheduleProgress, db: Session = Depen
         raise HTTPException(409, "Факт ГПР уже изменён; обновите данные перед повтором")
     for name, value in values.items(): setattr(item, name, value)
     item.status = "completed" if item.actual_progress == 100 else "in_progress"
+    _apply_summary_rollups(_graph_rows(db, baseline))
     evidence = payload.evidence_ref or "none"
     _audit(db, "schedule_actual_updated", "schedule_item", item.id, user.id,
            f"progress={item.actual_progress}; evidence_ref={evidence}"); db.commit()

@@ -58,7 +58,7 @@ def pg_graph(monkeypatch):
         config.set_main_option("script_location", str(root / "migrations"))
         config.set_main_option("sqlalchemy.url", scoped.render_as_string(hide_password=False).replace("%", "%%"))
         monkeypatch.delenv("DATABASE_URL", raising=False)
-        command.upgrade(config, "a54f001c0a20")
+        command.upgrade(config, "a54f001c0a21")
         engine = create_engine(scoped, hide_parameters=True, connect_args={"connect_timeout": 5})
         with Session(engine) as db:
             def factory():
@@ -116,13 +116,13 @@ def test_postgres_upgrade_legacy_and_safe_downgrade(pg_graph):
         db.execute(text("UPDATE schedule_items SET planned_finish='2026-09-17', actual_progress=35"))
         before = list(db.execute(text("SELECT id,baseline_id,title,planned_start,planned_finish,actual_progress FROM schedule_items ORDER BY id")))
     command.downgrade(config, "a54f001c0a19")
-    command.upgrade(config, "a54f001c0a20")
+    command.upgrade(config, "a54f001c0a21")
     with engine.connect() as db:
         after = list(db.execute(text("SELECT id,baseline_id,title,planned_start,planned_finish,actual_progress FROM schedule_items ORDER BY id")))
         assert before == after
         assert db.scalar(text("SELECT count(*) FROM schedule_items WHERE duration_days IS NOT NULL OR is_milestone IS NOT NULL")) == 0
         assert db.scalar(text("SELECT graph_revision FROM schedule_baselines WHERE id=:id"), {"id": baseline_id}) == 1
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a20"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a21"
 
 
 @pytest.mark.parametrize("intent", ["active_graph", "legacy_intent"])
@@ -143,7 +143,7 @@ def test_postgres_downgrade_refuses_graph_intent(pg_graph, intent):
     else:
         pytest.fail("downgrade_did_not_refuse_graph_intent")
     with engine.connect() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a20"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "a54f001c0a21"
         assert db.scalar(text("SELECT count(*) FROM schedule_items")) == 2
         if intent == "active_graph":
             assert db.scalar(text("SELECT planning_mode FROM schedule_baselines")) == "calendar_graph"
