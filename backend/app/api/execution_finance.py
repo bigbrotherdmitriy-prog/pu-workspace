@@ -3,7 +3,7 @@ from decimal import Decimal
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,9 @@ class BaselineClone(BaseModel):
 
 
 class ScheduleItemCreate(BaseModel):
+    # Planner intent cannot be acknowledged until its fields are persisted.
+    model_config = ConfigDict(extra="forbid")
+
     baseline_id: int
     expected_baseline_version: int | None = Field(default=None, ge=1)
     title: str = Field(min_length=2, max_length=500)
