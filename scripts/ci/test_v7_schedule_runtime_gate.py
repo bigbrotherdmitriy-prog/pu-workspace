@@ -16,11 +16,22 @@ def test_schedule_proofs_are_explicit_mandatory_and_owned(monkeypatch):
         "test_postgres_downgrade_refuses_graph_intent[legacy_intent]",
     )
     path = "backend/tests/test_v7_schedule_graph_postgres.py"
-    assert module.PINNED_POSTGRES_TESTS["postgres_v7_schedule_graph"] == tuple(path + "::" + name for name in names)
+    row_path = "backend/tests/test_v7_schedule_graph_rows_postgres.py"
+    row_names = (
+        "test_pg_concurrent_complete_row_batches_have_one_winner",
+        "test_pg_existing_uncommitted_fk_link_blocks_then_protects_delete",
+    )
+    assert module.PINNED_POSTGRES_TESTS["postgres_v7_schedule_graph"] == (
+        *tuple(path + "::" + name for name in names),
+        *tuple(row_path + "::" + name for name in row_names),
+    )
     assert "postgres_v7_schedule_graph" in module.MANDATORY_POSTGRES
     definitions = {node.name for node in ast.walk(ast.parse((module.ROOT / path).read_text(encoding="utf8")))
                    if isinstance(node, ast.FunctionDef)}
     assert all(name.split("[")[0] in definitions for name in names)
+    row_definitions = {node.name for node in ast.walk(ast.parse(
+        (module.ROOT / row_path).read_text(encoding="utf8"))) if isinstance(node, ast.FunctionDef)}
+    assert all(name in row_definitions for name in row_names)
     monkeypatch.setattr(module, "base_url", lambda name: "owned:" + name)
     assert module.test_env()["PUW_MVP4_TEST_DATABASE_URL"] == "owned:puw_mvp4_test_runtime"
     source = (module.ROOT / "scripts/ci/v54_pilot_workflow.py").read_text(encoding="utf8")
@@ -28,12 +39,14 @@ def test_schedule_proofs_are_explicit_mandatory_and_owned(monkeypatch):
 
 
 @pytest.mark.parametrize("output,expected", [
-    ("4 passed in 1.00s", "PASS"),
+    ("6 passed in 1.00s", "PASS"),
+    ("4 passed in 1.00s", "INCOMPLETE"),
     ("3 passed in 1.00s", "INCOMPLETE"),
     ("5 passed in 1.00s", "INCOMPLETE"),
+    ("7 passed in 1.00s", "INCOMPLETE"),
     ("3 passed, 1 skipped in 1.00s", "SKIPPED"),
     ("4 skipped in 1.00s", "SKIPPED"),
-    ("4 passed, 1 deselected in 1.00s", "INCOMPLETE"),
+    ("6 passed, 1 deselected in 1.00s", "INCOMPLETE"),
 ])
 def test_schedule_gate_rejects_partial_runtime(monkeypatch, output, expected):
     module = runner()
