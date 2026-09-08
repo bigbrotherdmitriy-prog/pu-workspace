@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.responses import DraftUpdate, router, update_draft
+from app.api.responses import DraftUpdate, list_drafts, router, update_draft
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -51,12 +51,17 @@ def _draft_world(db_session, user_factory, *, role="editor"):
     return user, draft
 
 
+def _review(db_session, user, draft):
+    return next(row["review_token"] for row in list_drafts(draft.project_id, db_session, user)["drafts"]
+                if row["id"] == draft.id)
+
+
 def test_editing_an_approved_draft_invalidates_previous_approval(db_session, user_factory):
     user, draft = _draft_world(db_session, user_factory)
 
     result = update_draft(
         draft.id,
-        DraftUpdate(body="Changed after approval"),
+        DraftUpdate(body="Changed after approval", expected_review_token=_review(db_session, user, draft)),
         db_session,
         user,
     )
@@ -70,7 +75,7 @@ def test_recipient_is_editable_but_change_requires_fresh_confirmation(db_session
 
     result = update_draft(
         draft.id,
-        DraftUpdate(recipient_to="new-recipient@example.test"),
+        DraftUpdate(recipient_to="new-recipient@example.test", expected_review_token=_review(db_session, user, draft)),
         db_session,
         user,
     )
@@ -84,7 +89,7 @@ def test_recipient_edit_rejects_ambiguous_or_invalid_addresses(db_session, user_
     user, draft = _draft_world(db_session, user_factory)
 
     with pytest.raises(HTTPException) as error:
-        update_draft(draft.id, DraftUpdate(recipient_to=recipient), db_session, user)
+        update_draft(draft.id, DraftUpdate(recipient_to=recipient, expected_review_token=_review(db_session, user, draft)), db_session, user)
 
     assert error.value.status_code == 422
     assert draft.recipient_to == "recipient@example.test"
