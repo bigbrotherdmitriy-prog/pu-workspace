@@ -1,0 +1,2024 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496",
+  "generated_on": "2026-09-08",
+  "authority": {
+    "primary": "docs/audits/tz-final-coverage-map.md",
+    "source_tz_sha256": "af7bfde75715345e4f32b9d7ca057812cdba7b8d8e0b6a1b105dfe20fc0d5df3",
+    "later_scopes": [
+      "docs/mvp6-document-control.md",
+      "docs/mvp7-ai-secretary-control.md",
+      "docs/audits/v7-next-acceptance-checkpoint.md"
+    ],
+    "numbering_note": "MVP6 in full v5.4 means federation; docs/mvp6-document-control.md is an earlier product increment and is supporting evidence, not a replacement definition."
+  },
+  "formula": {
+    "status_scores": {
+      "verified": 1,
+      "partial": 0.5,
+      "not_verified": 0,
+      "blocked": 0,
+      "not_applicable": "excluded"
+    },
+    "dimension_weights": {
+      "implemented": 0.3,
+      "tested_runtime": 0.25,
+      "live_provider": 0.15,
+      "canary": 0.15,
+      "production": 0.15
+    },
+    "pilot_dimensions": [
+      "implemented",
+      "tested_runtime"
+    ],
+    "aggregation": "sum(criterion_weight * dimension_weight * status_score) / sum(applicable criterion_weight * dimension_weight) * 100",
+    "criterion_weights": {
+      "1": "P2/optional provider expansion",
+      "3": "P1/medium-risk",
+      "5": "P0/high-risk or mandatory vertical"
+    }
+  },
+  "decisions": {
+    "limited_pilot": {
+      "status": "CONDITIONAL",
+      "allowed_scope": "synthetic or anonymized data; read-only analysis and internal confirmed actions; no live provider mutation and no production promotion",
+      "reason": "implementation is substantial, but the exact candidate SHA has no complete PostgreSQL/runtime, live-provider, canary or production evidence",
+      "required_next_evidence": [
+        "same-SHA PostgreSQL and process-fault CI",
+        "approved sandbox provider read/reconciliation",
+        "isolated canary with rollback and observation"
+      ]
+    },
+    "full_tz": {
+      "status": "NOT_READY",
+      "reason": "nine criteria still have no complete implementation and no criterion has same-SHA canary or production evidence"
+    }
+  },
+  "criteria": [
+    {
+      "id": "D01",
+      "mvp": 1,
+      "title": "OAuth, account/scopes и папки Google Drive любой глубины",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D02",
+      "mvp": 1,
+      "title": "Полный immutable snapshot metadata envelope и virtual tree",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D03",
+      "mvp": 1,
+      "title": "Incremental refresh, persistent progress и restart",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D04",
+      "mvp": 1,
+      "title": "Shared Drives, shortcuts, paging, retry и rate limits",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D05",
+      "mvp": 1,
+      "title": "Native Docs/Sheets/Slides export с revision/hash/cache",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D06",
+      "mvp": 1,
+      "title": "Детерминированная классификация и единый стандарт имён",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D07",
+      "mvp": 1,
+      "title": "Preview/dry-run/exact approval/source recheck/mutation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D08",
+      "mvp": 1,
+      "title": "Идемпотентные durable mutation outcomes и reconciliation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D09",
+      "mvp": 1,
+      "title": "Compensating rollback и immutable mutation history",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D10",
+      "mvp": 1,
+      "title": "Pagination/virtualization/bulk UX на 10k объектов",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D11",
+      "mvp": 1,
+      "title": "Managed copies и безопасный cleanup",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D12",
+      "mvp": 1,
+      "title": "DocumentVersion, dedup, comparison и retention",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D13",
+      "mvp": 1,
+      "title": "Безопасное извлечение поддержанных форматов",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D14",
+      "mvp": 1,
+      "title": "XLSX formula/cached value и точные cell locators",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp1-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "D15",
+      "mvp": 1,
+      "title": "PDF/OCR/vision routing и incomplete reason",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-ocr-benchmark-gate.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M201",
+      "mvp": 2,
+      "title": "Permitted mailbox ingress, origin identity и dedup",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M202",
+      "mvp": 2,
+      "title": "Project/contract/contact candidates и human correction",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M203",
+      "mvp": 2,
+      "title": "Structured extraction с exact evidence и lineage",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M204",
+      "mvp": 2,
+      "title": "Editable draft и invalidation approval при изменении",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M205",
+      "mvp": 2,
+      "title": "Task/event proposals с exact human confirmation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M206",
+      "mvp": 2,
+      "title": "Exactly-once external provider effect и UNKNOWN reconciliation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M207",
+      "mvp": 2,
+      "title": "Inbound Tasks/Calendar lifecycle reconciliation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M208",
+      "mvp": 2,
+      "title": "Source links и ручная работа при AI outage",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M209",
+      "mvp": 2,
+      "title": "Encrypted attachment staging, authority и recovery",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M210",
+      "mvp": 2,
+      "title": "Gmail history checkpoint, paging и full resync",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M211",
+      "mvp": 2,
+      "title": "Evidence-cited project Q&A и contradiction checks",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp2-completion.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M301",
+      "mvp": 3,
+      "title": "Obligation evidence/owner/deadline/status/CAS/history",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M302",
+      "mvp": 3,
+      "title": "Confirmed obligation to internal/external Task mapping",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M303",
+      "mvp": 3,
+      "title": "Durable deadline, reminder, quiet-hours и escalation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M304",
+      "mvp": 3,
+      "title": "Risk/Decision lifecycle с evidence и relations",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M305",
+      "mvp": 3,
+      "title": "Meeting/message proposals с exact origin evidence",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M306",
+      "mvp": 3,
+      "title": "Attention dashboard, filtering и explainability",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M307",
+      "mvp": 3,
+      "title": "Digest/preferences/idempotent scheduler delivery",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M308",
+      "mvp": 3,
+      "title": "Contract versions/amendments/archive/relations",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M309",
+      "mvp": 3,
+      "title": "Project search и saved views",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M310",
+      "mvp": 3,
+      "title": "Company/Person/Contact durable resolution lifecycle",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M311",
+      "mvp": 3,
+      "title": "Единый evidence/CAS путь legacy management mutations",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/mvp3-management-acceptance.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F01",
+      "mvp": 4,
+      "title": "Contract evidence и approved immutable GPR/WBS baseline",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F02",
+      "mvp": 4,
+      "title": "Plan/fact progress и immutable schedule history",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F03",
+      "mvp": 4,
+      "title": "Budget/DDS/calendar links и plan/fact views",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F04",
+      "mvp": 4,
+      "title": "Invoice не равен payment; human confirm/correction",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F05",
+      "mvp": 4,
+      "title": "Procurement, delivery, discrepancies и acts",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F06",
+      "mvp": 4,
+      "title": "Source-verified supply to DDS proposal",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F07",
+      "mvp": 4,
+      "title": "Explainable schedule/cash-gap forecast",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-finance-forecast-backend.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "F08",
+      "mvp": 4,
+      "title": "Currency/VAT/retention/partial/overpayment policy",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v7-execution-wave6.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "T01",
+      "mvp": 5,
+      "title": "Communication-to-Action end-to-end",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T02",
+      "mvp": 5,
+      "title": "Context Graph hypothesis/confirm/correct",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T03",
+      "mvp": 5,
+      "title": "Critical actions use exact CONFIRM and live authority",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T04",
+      "mvp": 5,
+      "title": "Append-oriented Action Ledger",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T05",
+      "mvp": 5,
+      "title": "Idempotency, dedup и UNKNOWN handling",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T06",
+      "mvp": 5,
+      "title": "Reversible/compensatable/irreversible classification",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T07",
+      "mvp": 5,
+      "title": "Deadline uses exact source/version or is unverified",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T08",
+      "mvp": 5,
+      "title": "Only low-risk internal Task may use narrow AUTO",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T09",
+      "mvp": 5,
+      "title": "Payload change invalidates approval",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T10",
+      "mvp": 5,
+      "title": "Task cancellation is a separate audited action",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T11",
+      "mvp": 5,
+      "title": "Email has no fake undo; corrective follow-up is separate",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T12",
+      "mvp": 5,
+      "title": "No-copy policy and encrypted materialization",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "T13",
+      "mvp": 5,
+      "title": "Stale/unavailable source fails closed",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "historical_runtime",
+          "sha": "8ccc194bc834328e51a73225981f74d81775789a"
+        }
+      ]
+    },
+    {
+      "id": "M6-01",
+      "mvp": 6,
+      "title": "Versioned Adapter Capability Contract",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-02",
+      "mvp": 6,
+      "title": "Яндекс 360 Disk/Mail/Calendar/Tasks conformance",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-03",
+      "mvp": 6,
+      "title": "Следующий mailbox/calendar/task provider",
+      "weight": 1,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-04",
+      "mvp": 6,
+      "title": "Enterprise storage adapter",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-05",
+      "mvp": 6,
+      "title": "AIProviderAdapter mode/lineage conformance",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-06",
+      "mvp": 6,
+      "title": "Corporate/local AI endpoint",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-07",
+      "mvp": 6,
+      "title": "Private/on-prem deployment profile",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-08",
+      "mvp": 6,
+      "title": "Executable data-residency/DLP policy",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-09",
+      "mvp": 6,
+      "title": "Federated sync/staleness/conflict semantics",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-10",
+      "mvp": 6,
+      "title": "Provider-independent two-family/local-only acceptance",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M6-11",
+      "mvp": 6,
+      "title": "Telegram ChannelAdapter conformance",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp6-document-control.md",
+          "kind": "legacy_scope"
+        },
+        {
+          "path": "docs/audits/v54-tz-coverage-2026-09-04.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-01",
+      "mvp": 7,
+      "title": "Monthly rule linked to project, contract and evidence",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-02",
+      "mvp": 7,
+      "title": "One idempotent Task and Draft per period",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-03",
+      "mvp": 7,
+      "title": "Versioned project/contract/month templates",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "partial",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-04",
+      "mvp": 7,
+      "title": "Last-run result and status visible",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-05",
+      "mvp": 7,
+      "title": "Task and Draft links are navigable",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-06",
+      "mvp": 7,
+      "title": "Pause and manual run preserve period semantics",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-07",
+      "mvp": 7,
+      "title": "External send requires reviewed exact draft",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_verified",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-08",
+      "mvp": 7,
+      "title": "Payment fact requires separate human confirmation",
+      "weight": 5,
+      "dimensions": {
+        "implemented": "verified",
+        "tested_runtime": "partial",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "implemented",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    },
+    {
+      "id": "M7-09",
+      "mvp": 7,
+      "title": "Weekly/event rules and evidence-cited Information Center",
+      "weight": 3,
+      "dimensions": {
+        "implemented": "not_verified",
+        "tested_runtime": "not_verified",
+        "live_provider": "not_applicable",
+        "canary": "not_verified",
+        "production": "not_verified"
+      },
+      "evidence": [
+        {
+          "path": "docs/audits/tz-final-coverage-map.md",
+          "kind": "assessment",
+          "sha": "28ebe5fa6d8165fb257fa6e77a3d37302625c496"
+        },
+        {
+          "path": "docs/mvp7-ai-secretary-control.md",
+          "kind": "implemented"
+        },
+        {
+          "path": "docs/audits/v7-automation-period-idempotency.md",
+          "kind": "report"
+        }
+      ]
+    }
+  ]
+}
