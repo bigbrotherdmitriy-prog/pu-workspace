@@ -275,6 +275,29 @@ def admin_connect():
                             options="-cstatement_timeout=5000 -clock_timeout=1000")
 
 
+def authority_failure_probe(output: str) -> dict | None:
+    """Only fixed synthetic checkpoint enums, never exception text or payload."""
+    phases = {"revoke_change", "revoke_staged", "revoke_commit", "revoke_committed",
+              "dispatch_waiting", "dispatch_require", "dispatch_denied", "dispatch_allowed",
+              "outcomes", "threads"}
+    errors = {"AssertionError", "AuthorityDenied", "OperationalError", "IntegrityError",
+              "DBAPIError", "TimeoutError", "ValueError", "UnexpectedError",
+              "ThreadTimeout", "UnexpectedOutcome"}
+    for line in output.splitlines():
+        if len(line) > 256:
+            continue
+        try:
+            probe = json.loads(line)
+        except ValueError:
+            continue
+        if (type(probe) is dict and set(probe) == {"probe", "status", "phase", "error_code"}
+                and all(type(value) is str for value in probe.values())
+                and probe["probe"] == "authority_concurrency" and probe["status"] == "FAIL"
+                and probe["phase"] in phases and probe["error_code"] in errors):
+            return probe
+    return None
+
+
 def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: int = 600,
               cwd: Path = ROOT) -> str:
     started = time.monotonic()
@@ -315,6 +338,10 @@ def run_phase(name: str, args: list[str], *, env: dict | None = None, timeout: i
                       "failed", "error", "errors", "xfailed", "xpassed", "deselected"))):
                 record["status"] = "INCOMPLETE"
     if result.returncode:
+        if name == "postgres_authority_runtime":
+            probe = authority_failure_probe(result.stdout)
+            if probe is not None:
+                record["authority_failure"] = probe
         failed_nodeids = list(dict.fromkeys(
             match.group("nodeid") for match in PYTEST_FAILURE.finditer(result.stdout)
         ))[:20]
