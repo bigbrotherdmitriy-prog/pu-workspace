@@ -9,11 +9,13 @@ import hashlib
 import hmac
 import json
 from io import BytesIO
+from threading import Lock
 from typing import Literal
 from uuid import UUID, uuid5
 
 from pydantic import Field, StrictBool, StrictStr
-from sqlalchemy import inspect, select
+from sqlalchemy import and_, func, inspect, or_, select, tuple_
+from sqlalchemy.orm import aliased
 
 from app.core.v54_permissions import SourceEvidenceError, deny, object_ref, utc
 from app.core.v54_authority import AuthorityResolver
@@ -108,6 +110,10 @@ class XlsxEvidenceIngestion:
         if not isinstance(lifecycle, A05LocalUploadLifecycle):
             deny()
         self.lifecycle = lifecycle
+        # Advisory traversal only: every deletion still requires locked, current
+        # DB capability/lineage checks. Restart safely begins another full sweep.
+        self._retention_cursor = None
+        self._retention_scan_lock = Lock()
 
     def _live(self, db, record):
         backend = self.lifecycle
@@ -239,20 +245,63 @@ class XlsxEvidenceIngestion:
         """Bounded parent-job recovery; no user mandate is minted for cleanup."""
         if type(limit) is not int or not 1 <= limit <= 500:
             deny()
+        # Avoid two same-process scans repeatedly claiming the same prefix.
+        # This lock is NOT cross-worker exclusion; database guards own safety.
+        if not self._retention_scan_lock.acquire(blocking=False):
+            return 0
+        try:
+            return self._recover_retention(session_factory, limit=limit)
+        finally:
+            self._retention_scan_lock.release()
+
+    def _recover_retention(self, session_factory, *, limit):
         backend = self.lifecycle
         authority = backend.retention_authority
         if not isinstance(authority, LocalUploadRetentionAuthority):
             deny()
         now = utc(backend.clock())
-        with session_factory() as db:
-            candidates = list(db.execute(select(Materialization.id, Materialization.parent_id).where(
-                Materialization.parent_id.is_not(None), Materialization.state != "PURGED",
+        parent = aliased(Materialization)
+        query = (select(Materialization.id, Materialization.parent_id, Materialization.retention_until)
+            .join(parent, parent.id == Materialization.parent_id)
+            .join(SourceReference, SourceReference.id == Materialization.source_id)
+            .join(ConnectionIdentity, ConnectionIdentity.id == SourceReference.identity_id)
+            .join(Evidence, Evidence.id == Materialization.evidence_id)
+            .join(BackgroundJob, BackgroundJob.idempotency_key == "local-upload:" + SourceReference.external_id)
+            .where(
+                tuple_(Materialization.organization_id, Materialization.project_id).in_(authority.scopes),
+                parent.parent_id.is_(None), parent.organization_id == Materialization.organization_id,
+                parent.project_id == Materialization.project_id, parent.source_id == Materialization.source_id,
+                SourceReference.namespace == "local-upload", SourceReference.object_kind == "file",
+                SourceReference.organization_id == Materialization.organization_id,
+                SourceReference.origin_project_id == Materialization.project_id,
+                ConnectionIdentity.provider == "local_upload",
+                ConnectionIdentity.organization_id == Materialization.organization_id,
+                Evidence.organization_id == Materialization.organization_id,
+                Evidence.extractor["name"].as_string() == _EXTRACTOR["name"],
+                Evidence.extractor["version"].as_string() == _EXTRACTOR["version"],
+                Evidence.extractor["configuration_digest"].as_string() == _CONFIG_DIGEST,
+                BackgroundJob.kind == "local_upload.process",
+                BackgroundJob.status.in_(("completed", "cancelled", "failed", "dead_letter")),
+                BackgroundJob.payload["staging_id"].as_string() == func.substr(SourceReference.external_id, 1, 32),
+                Materialization.state.in_(("ADMITTED", "WRITING", "SEALED", "DERIVED", "EXPIRED")),
                 Materialization.retention_until <= now,
-            ).order_by(Materialization.retention_until, Materialization.id).limit(limit * 4)))
+            ).order_by(Materialization.retention_until, Materialization.id))
+        with session_factory() as db:
+            after = self._retention_cursor
+            page = query if after is None else query.where(or_(
+                Materialization.retention_until > after[0],
+                and_(Materialization.retention_until == after[0], Materialization.id > after[1])))
+            candidates = list(db.execute(page.limit(limit * 4)))
+            if not candidates and after is not None:
+                self._retention_cursor = None
+                candidates = list(db.execute(query.limit(limit * 4)))
         purged = 0
-        for identity, parent_id in candidates:
+        for identity, parent_id, retention_until in candidates:
             if purged >= limit:
                 break
+            # Advance for attempted, not merely fetched rows: limit-based early
+            # exit must not skip untouched candidates. Denials cannot pin a sweep.
+            self._retention_cursor = (retention_until, identity)
             try:
                 with session_factory() as db:
                     # Retention capability locks the project before any parent

@@ -14,7 +14,7 @@ from io import BytesIO
 from typing import Any, Callable, Mapping
 from uuid import UUID, uuid5
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select, tuple_
 
 from app.core.v54_interfaces import RequestScope
 from app.core.v54_permissions import SourceEvidenceError, object_ref, utc
@@ -545,10 +545,33 @@ class A05LocalUploadLifecycle:
         authority = self.retention_authority
         if authority is None:
             raise SourceEvidenceError("resource_unavailable")
+        # Read only the candidate scope before locking. Never take a child/root
+        # materialization lock before the shared project retention guard.
+        with db.no_autoflush:
+            for pending in set(db.new) | set(db.dirty) | set(db.deleted):
+                if isinstance(pending, Materialization) and (
+                    inspect(pending).identity == (materialization_id,)
+                    or inspect(pending).dict.get("id") == materialization_id
+                ):
+                    raise SourceEvidenceError("resource_unavailable")
+            candidate = db.execute(select(
+                Materialization.organization_id, Materialization.project_id,
+                Materialization.owner_id, Materialization.residency,
+                Materialization.kek_reference, Materialization.kek_version,
+            ).where(Materialization.id == materialization_id,
+                    Materialization.parent_id.is_(None),
+                    Materialization.state.in_(("DERIVED", "EXPIRED")))).one_or_none()
+            if candidate is None:
+                raise SourceEvidenceError("resource_unavailable")
+            authority.require(db, candidate)
         row = db.scalar(select(Materialization).where(
             Materialization.id == materialization_id,
+            Materialization.parent_id.is_(None),
+            Materialization.organization_id == candidate.organization_id,
+            Materialization.project_id == candidate.project_id,
+            Materialization.owner_id == candidate.owner_id,
             Materialization.state.in_(("DERIVED", "EXPIRED")),
-        ).with_for_update())
+        ).with_for_update().execution_options(populate_existing=True))
         if row is None:
             raise SourceEvidenceError("resource_unavailable")
         authority.require(db, row)
@@ -586,8 +609,14 @@ class A05LocalUploadLifecycle:
                 SourceReference,
                 (SourceReference.id == Materialization.source_id)
                 & (SourceReference.organization_id == Materialization.organization_id),
+            ).join(BackgroundJob,
+                BackgroundJob.idempotency_key == "local-upload:" + SourceReference.external_id,
             ).where(
                 SourceReference.namespace == "local-upload",
+                Materialization.parent_id.is_(None),
+                tuple_(Materialization.organization_id, Materialization.project_id).in_(self.retention_authority.scopes),
+                BackgroundJob.kind == "local_upload.process",
+                BackgroundJob.status.in_(("failed", "dead_letter")),
                 Materialization.state.in_(("DERIVED", "EXPIRED")),
                 Materialization.retention_until <= now,
             ).order_by(Materialization.retention_until, Materialization.id).limit(limit * 4)))
