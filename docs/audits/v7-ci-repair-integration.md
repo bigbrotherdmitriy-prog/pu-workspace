@@ -105,6 +105,19 @@ small factory tested without provider access. Early phases are split into
 Snapshot/durable targeted tests: **26 passed**. No real mailbox, provider or
 document is used.
 
+The remaining `a2891e6` workflows completed after the local fixture fix was
+prepared:
+
+- Main CI `34212914582`: PASS (backend, frontend and aggregate).
+- v54 PostgreSQL runtime `34212914610`: PASS (runtime, backend-offline, local
+  engines, lint and fail-closed acceptance gate).
+- Docker smoke `34212914501`: PASS.
+- Snapshot `34212914676`: FAIL at the now-fixed synthetic fixture setup.
+
+Therefore the only red workflow for that published SHA is the isolated snapshot
+fixture. The new local HEAD still needs its own GitHub execution before the
+overall status can become PASS.
+
 Push only after separate authorization of the resulting HEAD:
 
 ```powershell
