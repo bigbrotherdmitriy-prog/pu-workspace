@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import base64
 from uuid import UUID
 
 import pytest
@@ -10,7 +11,8 @@ from sqlalchemy import null, select, update
 
 from app.jobs.queue import execution_owner, recover_expired
 from app.local_upload_staging import (LocalUploadBusinessProcessor, UploadCandidate, UploadScope,
-    LocalUploadUnavailable, configure_local_upload_runtime, stage_and_enqueue, run_local_upload_job)
+    LocalUploadLifecycleAdapter, LocalUploadUnavailable, configure_local_upload_runtime,
+    get_local_upload_runtime, stage_and_enqueue, run_local_upload_job)
 from app.models.materialization import Materialization
 from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceVersion, SourceReference
 from app.models.job import BackgroundJob
@@ -35,11 +37,90 @@ def xlsx_world(local_source_world):
     backend.retention_authority = LocalUploadRetentionAuthority(
         service_principal="xlsx-retention", scopes=frozenset({(1, 4)}),
         allowed_residencies=frozenset({backend.residency}), allowed_keks=frozenset({backend.kek}))
-    processor = LocalUploadBusinessProcessor(xlsx_ingestion=XlsxEvidenceIngestion(backend))
+    processor = LocalUploadBusinessProcessor()
     runtime = replace(runtime, processor=processor, max_file_bytes=backend.max_file_bytes,
                       allowed_mime_types=runtime.allowed_mime_types | {MIME})
     configure_local_upload_runtime(runtime)
     return sessions, runtime, backend, path
+
+
+def test_configure_default_processor_api_to_queued_handler_and_retained_read(xlsx_world):
+    from app.api.local_upload import LocalBatch, LocalFile, analyze_local_folder
+    from app.jobs.handlers import run
+    from app.models.user import User
+
+    sessions, runtime, backend, _ = xlsx_world
+    assert runtime.processor.xlsx_ingestion.lifecycle is backend
+    data = workbook([("Plan", 7, "actual.xml",
+        '<row r="2"><c r="A2"><f>1+1</f><v>2</v></c></row>')])
+    # Exercise the actual API function and its real DB role check; HTTP login
+    # and production startup are outside this synthetic same-thread fixture.
+    with sessions() as db:
+        response = analyze_local_folder(LocalBatch(project_id=4, files=[LocalFile(
+            path="synthetic.xlsx", mime_type=MIME,
+            content_base64=base64.b64encode(data).decode("ascii"))]),
+            db=db, user=db.get(User, 2), idempotency_key="configured-api-xlsx")
+    assert response["status"] == "queued"
+    claim = _claimed(sessions, "configured-api-worker")
+    with sessions() as db:
+        job = db.get(BackgroundJob, claim[0])
+        assert job.payload == {"staging_id": response["jobs"][0]["staging_id"]}
+        kind, payload = job.kind, dict(job.payload)
+    with execution_owner(claim[0], claim[1], attempt=claim[2], locked_at=claim[3]):
+        assert run(kind, payload)["processed"] == 1
+    with sessions() as db:
+        rows = cells(db)
+        assert len(rows) == 2
+        assert {json.loads(read_cell(db, backend, row).fragment)["value"] for row in rows} == {"1+1", "2"}
+        assert db.get(Materialization, str(UUID(hex=payload["staging_id"]))).state == "PURGED"
+
+
+@pytest.mark.parametrize("mismatch", ["missing_backend", "other_backend", "invalid_ingestion", "storage", "kek", "budget"])
+def test_configure_business_processor_rejects_mismatch_before_install(xlsx_world, mismatch):
+    from app.staging import KekRef
+    from copy import copy
+
+    _, runtime, backend, _ = xlsx_world
+    processor = LocalUploadBusinessProcessor()
+    candidate = replace(runtime, processor=processor)
+    if mismatch == "missing_backend":
+        candidate = replace(candidate, lifecycle=LocalUploadLifecycleAdapter(None))
+    elif mismatch == "other_backend":
+        processor.xlsx_ingestion = XlsxEvidenceIngestion(copy(backend))
+    elif mismatch == "invalid_ingestion":
+        processor.xlsx_ingestion = object()
+    elif mismatch == "storage":
+        candidate = replace(candidate, storage=copy(runtime.storage))
+    elif mismatch == "kek":
+        candidate = replace(candidate, kek=KekRef("different", "v1"))
+    else:
+        candidate = replace(candidate, max_file_bytes=runtime.max_file_bytes + 1)
+    previous = get_local_upload_runtime()
+    original_ingestion = processor.xlsx_ingestion
+    with pytest.raises(LocalUploadUnavailable, match="^local_upload_composition_unavailable$"):
+        configure_local_upload_runtime(candidate)
+    assert get_local_upload_runtime() is previous
+    assert processor.xlsx_ingestion is original_ingestion
+
+
+def test_configure_is_idempotent_and_none_still_disables(xlsx_world):
+    runtime = xlsx_world[1]
+    ingestion = runtime.processor.xlsx_ingestion
+    configure_local_upload_runtime(runtime)
+    assert get_local_upload_runtime() is runtime
+    assert runtime.processor.xlsx_ingestion is ingestion
+    configure_local_upload_runtime(None)
+    with pytest.raises(LocalUploadUnavailable, match="^local_upload_staging_unavailable$"):
+        get_local_upload_runtime()
+
+
+def test_configure_custom_processor_port_is_not_replaced(wired):
+    _, _, runtime, processor, _, _ = wired
+    # This is the pre-existing custom processor seam, not XLSX acceptance.
+    configure_local_upload_runtime(runtime)
+    assert get_local_upload_runtime() is runtime
+    assert runtime.processor is processor
+    assert not hasattr(processor, "xlsx_ingestion")
 
 
 def stage_xlsx(world, *, data=None, key="xlsx-synthetic"):

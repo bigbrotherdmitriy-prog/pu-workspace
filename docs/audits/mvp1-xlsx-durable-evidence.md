@@ -67,8 +67,9 @@ This does not establish PostgreSQL concurrency behavior or production readiness.
 
 [xlsx_ingestion.py](../../backend/app/source_evidence/xlsx_ingestion.py) is called
 by the existing `LocalUploadBusinessProcessor` in
-[local_upload_staging.py](../../backend/app/local_upload_staging.py). An explicitly
-configured `XlsxEvidenceIngestion(A05LocalUploadLifecycle)` is required for XLSX;
+[local_upload_staging.py](../../backend/app/local_upload_staging.py). The explicit
+`configure_local_upload_runtime` callback now binds the built-in processor to
+`XlsxEvidenceIngestion` using the adapter's exact existing A05 backend;
 it does not manufacture grants or create a second queue. The existing staging
 job contains only `staging_id`. No provider, external AI or formula evaluation is
 introduced. Legacy TSV text still feeds the existing document/import helpers.
@@ -181,3 +182,40 @@ purged with a non-completed outcome, before ciphertext reads. An initial test
 fixture tried to persist SourceVersion revision 2 and was correctly rejected by
 the existing immutable-revision DB constraint; the final test instead exercises
 the meaningful forged representation-pin boundary. No schema guard was weakened.
+
+## Corrective composition slice (2026-09-08)
+
+Base: `521a2d75762db42a0978da3e891f2133c1586124`. Review identified that this
+commit required manual XLSX injection, while the repository had no production
+configuration caller. Configuring a bare `LocalUploadBusinessProcessor()` would
+therefore deny XLSX jobs. Six regression-first configuration tests failed before
+the correction and passed after it.
+
+The existing explicit configure callback now validates the adapter's A05 backend,
+identical storage instance, KEK and file-size budget before installing the built-in
+processor. Missing XLSX ingestion is constructed from that same backend; an
+existing ingestion must already reference it. Missing/wrong lifecycle, foreign
+ingestion, malformed ingestion, storage, KEK and budget mismatches fail closed
+without replacing the currently installed runtime or mutating the candidate's
+ingestion. Repeated valid configuration reuses ingestion; `None` still disables
+the runtime. Custom processor ports retain their existing contract and are not
+replaced; their acceptance does not establish XLSX evidence support.
+
+The D14 fixture now configures a bare built-in processor, without manually
+constructing ingestion. A new synthetic test invokes the actual local-upload API
+function with its real DB role check, verifies the IDs-only queued payload, runs
+the existing job dispatcher under a real queue claim, and reads independently
+authorized cells after original purge. This is same-thread API-function coverage,
+not an HTTP authentication or deployment smoke test.
+
+Scoped result: **115 passed, 2 skipped in 25.08s** across D14 (43 controls), local
+source authority, local staging, A05 wiring, staging safety and conditional A05
+PostgreSQL tests. The conditional PostgreSQL tests remain unexecuted; three
+existing Alembic configuration deprecation warnings were emitted. No full suite,
+real data/provider, credentials, deployment or production runtime was used.
+
+**Startup wiring remains NOT_ENABLED.** No `main.py`, environment flag, default
+authority, key provisioning or startup caller was added. An authorized deployment
+must explicitly supply its independently configured backend and install runtime
+in both API and worker processes. This correction closes the local composition
+dependency, not that deployment/owner acceptance gate.

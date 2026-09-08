@@ -182,6 +182,13 @@ class LocalUploadLifecycleAdapter:
     def __init__(self, backend: Any | None) -> None:
         self.__backend = backend
 
+    def _require_a05_backend(self):
+        # Configuration-only type check; never create authority, keys or storage.
+        from app.staging.local_upload import A05LocalUploadLifecycle
+        if not isinstance(self.__backend, A05LocalUploadLifecycle):
+            raise LocalUploadUnavailable("local_upload_composition_unavailable")
+        return self.__backend
+
     def _call(self, method: str, expected: type, *args: Any, **kwargs: Any) -> Any:
         function = getattr(self.__backend, method, None)
         if not callable(function):
@@ -355,9 +362,26 @@ _runtime_lock = RLock()
 
 
 def configure_local_upload_runtime(runtime: LocalUploadRuntime | None) -> None:
-    """Install identical explicit wiring in API and worker processes."""
+    """Explicitly install API/worker wiring; no startup enablement or grants.
+
+    The built-in processor must share the adapter's exact A05 backend, storage,
+    KEK and file budget. Custom processor ports retain their existing contract.
+    Invalid replacement configuration leaves the installed runtime untouched.
+    """
     global _runtime
     with _runtime_lock:
+        if runtime is not None and isinstance(runtime.processor, LocalUploadBusinessProcessor):
+            from app.source_evidence.xlsx_ingestion import XlsxEvidenceIngestion
+            backend = runtime.lifecycle._require_a05_backend()
+            ingestion = runtime.processor.xlsx_ingestion
+            if (backend.storage is not runtime.storage or backend.kek != runtime.kek
+                    or backend.max_file_bytes != runtime.max_file_bytes
+                    or (ingestion is not None and (
+                        not isinstance(ingestion, XlsxEvidenceIngestion)
+                        or ingestion.lifecycle is not backend))):
+                raise LocalUploadUnavailable("local_upload_composition_unavailable")
+            if ingestion is None:
+                runtime.processor.xlsx_ingestion = XlsxEvidenceIngestion(backend)
         _runtime = runtime
 
 
