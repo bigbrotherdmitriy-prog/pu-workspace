@@ -8,6 +8,8 @@ export type GraphItem = {
   predecessor_ids: string | null; constraint_type: Constraint | null;
   constraint_date: string | null; not_before_date: string | null;
   planned_start: string | null; planned_finish: string | null;
+  planned_progress?: number; actual_progress?: number; status?: string;
+  wbs_parent_id: number | null; wbs_order: number; is_summary: boolean; wbs_level: number;
 };
 export type TaskPlan = { task_id: number; earliest_start: string; earliest_finish: string;
   latest_start: string; latest_finish: string; total_float_days: number; free_float_days: number };
@@ -41,11 +43,12 @@ function parsePlan(raw: unknown, items: GraphItem[], anchor: string | null, mode
   if (raw == null) return null; // Explicitly unavailable, never a made-up zero-slack plan.
   if (!object(raw) || mode !== "calendar_graph" || !validDate(raw.project_start) || raw.project_start !== anchor
     || !exactKeys(raw, ["project_start", "project_finish", "tasks", "topological_order", "critical_ids", "critical_edges"])
-    || !Array.isArray(raw.tasks) || raw.tasks.length !== items.length || !Array.isArray(raw.critical_edges)
-    || raw.critical_edges.length > items.length * items.length) throw new Error("invalid_schedule_plan");
-  const byId = new Map(items.map(item => [item.id, item]));
+    || !Array.isArray(raw.tasks) || !Array.isArray(raw.critical_edges)) throw new Error("invalid_schedule_plan");
+  const leaves = items.filter(item => !item.is_summary);
+  if (raw.tasks.length !== leaves.length || raw.critical_edges.length > leaves.length * leaves.length) throw new Error("invalid_schedule_plan");
+  const byId = new Map(leaves.map(item => [item.id, item]));
   function ids(value: unknown, complete: boolean): number[] {
-    if (!Array.isArray(value) || (complete && value.length !== items.length) || value.length > items.length
+    if (!Array.isArray(value) || (complete && value.length !== leaves.length) || value.length > leaves.length
       || value.some(id => !integer(id) || !byId.has(id)) || new Set(value).size !== value.length) throw new Error("invalid_plan_ids");
     return [...value] as number[];
   }
@@ -68,7 +71,7 @@ function parsePlan(raw: unknown, items: GraphItem[], anchor: string | null, mode
     return { task_id: v.task_id, earliest_start: v.earliest_start, earliest_finish: v.earliest_finish,
       latest_start: v.latest_start, latest_finish: v.latest_finish, total_float_days: v.total_float_days, free_float_days: v.free_float_days };
   });
-  if (items.length ? !validDate(raw.project_finish) || raw.project_finish !== tasks.map(t => t.earliest_finish).sort().at(-1)
+  if (leaves.length ? !validDate(raw.project_finish) || raw.project_finish !== tasks.map(t => t.earliest_finish).sort().at(-1)
       : raw.project_finish !== null) throw new Error("invalid_plan_horizon");
   const declared = new Set<string>();
   for (const item of items) {
@@ -105,22 +108,29 @@ export function parseGraph(value: unknown, baselineId: number): Graph {
         !(v.predecessor_ids === null || typeof v.predecessor_ids === "string" && v.predecessor_ids.length <= 2000) ||
         !(v.constraint_type === null || constraints.includes(v.constraint_type as Constraint)) ||
         !nullableDate(v.constraint_date) || !nullableDate(v.not_before_date) ||
-        !nullableDate(v.planned_start) || !nullableDate(v.planned_finish)) throw new Error("invalid_graph_item");
+        !nullableDate(v.planned_start) || !nullableDate(v.planned_finish) ||
+        !(v.wbs_parent_id === undefined || v.wbs_parent_id === null || integer(v.wbs_parent_id)) ||
+        !(v.wbs_order === undefined || typeof v.wbs_order === "number" && Number.isSafeInteger(v.wbs_order) && v.wbs_order >= 0) ||
+        !(v.is_summary === undefined || typeof v.is_summary === "boolean") ||
+        !(v.wbs_level === undefined || typeof v.wbs_level === "number" && Number.isSafeInteger(v.wbs_level) && v.wbs_level >= 0 && v.wbs_level <= 4)) throw new Error("invalid_graph_item");
     seen.add(v.id);
-    return v as GraphItem;
+    return { ...v, wbs_parent_id: (v.wbs_parent_id ?? null) as number | null,
+      wbs_order: (v.wbs_order ?? 0) as number, is_summary: (v.is_summary ?? false) as boolean,
+      wbs_level: (v.wbs_level ?? 0) as number } as GraphItem;
   });
   return { baseline_id: baselineId, version: value.version, graph_revision: value.graph_revision,
     status: value.status, planning_mode: value.planning_mode, project_start: value.project_start as string | null, items,
     plan: parsePlan(value.plan, items, value.project_start as string | null, value.planning_mode) };
 }
 export function toDraft(graph: Graph): Draft {
-  return { anchor: graph.project_start ?? "", items: graph.items.map(v => ({ id: v.id,
+  return { anchor: graph.project_start ?? "", items: graph.items.filter(v => !v.is_summary).map(v => ({ id: v.id,
     duration: v.duration_days === null ? "" : String(v.duration_days), milestone: v.is_milestone === true,
     dependencies: v.predecessor_ids ?? "", constraint: v.constraint_type ?? "asap",
     constraintDate: v.constraint_date ?? "", notBefore: v.not_before_date ?? "" })) };
 }
 export function sameItems(draft: Draft, graph: Graph): boolean {
-  return draft.items.length === graph.items.length && draft.items.every(item => graph.items.some(v => v.id === item.id));
+  const leaves = graph.items.filter(item => !item.is_summary);
+  return draft.items.length === leaves.length && draft.items.every(item => leaves.some(v => v.id === item.id));
 }
 export function putPayload(draft: Draft, graph: Graph): GraphPut {
   if (graph.status !== "draft" || !validDate(draft.anchor) || !sameItems(draft, graph) ||

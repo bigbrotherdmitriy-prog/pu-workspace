@@ -14,13 +14,13 @@ from test_v7_schedule_graph_rows import body_for, invoke, row_body
 def summary(ref: str, title: str, parent_ref: str | None = None, order: int = 0):
     return dict(client_ref=ref, title=title, duration_days=None, is_milestone=None,
                 constraint_type=None, constraint_date=None, not_before_date=None,
-                dependencies=[], parent_ref=parent_ref, parent_id=None,
+                dependencies=[], wbs_parent_ref=parent_ref, wbs_parent_id=None,
                 wbs_order=order, is_summary=True)
 
 
 def leaf(ref: str, title: str, parent_ref: str, duration: int, order: int):
     return row_body(client_ref=ref, title=title, duration_days=duration,
-                    parent_ref=parent_ref, parent_id=None, wbs_order=order,
+                    wbs_parent_ref=parent_ref, wbs_parent_id=None, wbs_order=order,
                     is_summary=False)
 
 
@@ -38,9 +38,9 @@ def test_wbs_hierarchy_order_and_rollup_are_persisted(db_session, user_factory):
     mapping = result["client_ref_map"]
     assert [row["title"] for row in result["items"]] == ["Phase", "Work", "Early subwork", "Late subwork"]
     by_title = {row["title"]: row for row in result["items"]}
-    assert by_title["Phase"]["wbs_level"] == 1
+    assert by_title["Phase"]["wbs_level"] == 0
     assert by_title["Work"]["wbs_parent_id"] == mapping["phase"]
-    assert by_title["Early subwork"]["wbs_level"] == 3
+    assert by_title["Early subwork"]["wbs_level"] == 2
     assert by_title["Work"]["planned_start"] == date(2026, 9, 1)
     assert by_title["Work"]["planned_finish"] == date(2026, 9, 5)
     assert by_title["Phase"]["planned_finish"] == date(2026, 9, 5)
@@ -52,12 +52,12 @@ def test_invalid_wbs_is_atomic(db_session, user_factory, fault):
     actor, baseline, rows = world(db_session, user_factory)
     payload = body_for([], deleted_ids=[row.id for row in rows])
     payload["items"] = [summary("p", "Phase"), summary("w", "Work", "p"), leaf("x", "Subwork", "w", 1, 0)]
-    if fault == "cycle": payload["items"][0]["parent_ref"] = "w"
+    if fault == "cycle": payload["items"][0]["wbs_parent_ref"] = "w"
     if fault == "leaf_parent": payload["items"].append(leaf("y", "Child", "x", 1, 0))
     if fault == "too_deep":
         payload["items"] = [summary("a", "A1"), summary("b", "B2", "a"), summary("c", "C3", "b"),
                             summary("d", "D4", "c"), summary("e", "E5", "d"), leaf("f", "F6", "e", 1, 0)]
-    if fault == "missing_parent": payload["items"][2]["parent_ref"] = "absent"
+    if fault == "missing_parent": payload["items"][2]["wbs_parent_ref"] = "absent"
     if fault == "summary_dependency": payload["items"][0]["dependencies"] = [dict(predecessor_ref="x")]
     with pytest.raises((HTTPException, ValueError)):
         invoke(db_session, actor, baseline, payload)
@@ -91,6 +91,20 @@ def test_deleting_parent_without_children_is_required(db_session, user_factory):
     rows[0].duration_days = rows[0].is_milestone = None
     db_session.commit()
     payload = body_for(rows[1:], deleted_ids=[rows[0].id])
+    payload["items"][0].update(wbs_parent_id=rows[0].id, wbs_parent_ref=None)
     with pytest.raises(HTTPException) as caught:
         invoke(db_session, actor, baseline, payload)
     assert caught.value.detail == "schedule_wbs_parent_delete_protected"
+
+
+def test_parent_can_be_deleted_when_child_is_reparented_atomically(db_session, user_factory):
+    actor, baseline, rows = world(db_session, user_factory)
+    rows[1].wbs_parent_id = rows[0].id
+    rows[0].is_summary = True
+    rows[0].duration_days = rows[0].is_milestone = None
+    db_session.commit()
+    payload = body_for(rows[1:], deleted_ids=[rows[0].id])
+    payload["items"][0].update(wbs_parent_id=None, wbs_parent_ref=None)
+    result = invoke(db_session, actor, baseline, payload)
+    assert [item["id"] for item in result["items"]] == [rows[1].id]
+    assert result["items"][0]["wbs_parent_id"] is None

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { flattenWbs, moveWbsRow, parseWbsGraph, wbsDraft, wbsPayload, wbsResponse, type WbsGraph, type WbsRow } from './wbsReadModel';
 import './wbsTree.css';
 
@@ -7,21 +7,24 @@ export type WbsTreeEditorProps = {
   baselineId: number;
   disabled?: boolean;
   save: (payload: ReturnType<typeof wbsPayload>) => Promise<unknown>;
-  onSaved?: (graph: WbsGraph) => void;
+  onSaved?: (graph: WbsGraph, raw: unknown) => void;
+  onStateChange?: (dirty: boolean, busy: boolean) => void;
 };
 
-export function WbsTreeEditor({ graph: raw, baselineId, disabled = false, save, onSaved }: WbsTreeEditorProps) {
+export function WbsTreeEditor({ graph: raw, baselineId, disabled = false, save, onSaved, onStateChange }: WbsTreeEditorProps) {
   let graph: WbsGraph;
   try { graph = parseWbsGraph(raw, baselineId); } catch { return <p role="alert">Структура ГПР недоступна: получен неподтверждённый WBS-ответ.</p>; }
-  return <WbsSession key={`${graph.baseline_id}:${graph.graph_revision}`} graph={graph} disabled={disabled} save={save} onSaved={onSaved} />;
+  return <WbsSession key={`${graph.baseline_id}:${graph.graph_revision}`} graph={graph} disabled={disabled} save={save} onSaved={onSaved} onStateChange={onStateChange} />;
 }
 
-function WbsSession({ graph, disabled, save, onSaved }: { graph: WbsGraph; disabled: boolean; save: WbsTreeEditorProps['save']; onSaved?: WbsTreeEditorProps['onSaved'] }) {
+function WbsSession({ graph, disabled, save, onSaved, onStateChange }: { graph: WbsGraph; disabled: boolean; save: WbsTreeEditorProps['save']; onSaved?: WbsTreeEditorProps['onSaved']; onStateChange?: WbsTreeEditorProps['onStateChange'] }) {
   const [rows, setRows] = useState(() => wbsDraft(graph));
+  const [projectStart, setProjectStart] = useState(graph.project_start ?? '');
   const [busy, setBusy] = useState(false); const [blocked, setBlocked] = useState(false); const [error, setError] = useState('');
   const counter = useRef(0); const lock = useRef(false);
   const flat = useMemo(() => { try { return flattenWbs(rows); } catch { return []; } }, [rows]);
-  const dirty = JSON.stringify(rows) !== JSON.stringify(wbsDraft(graph));
+  const dirty = JSON.stringify(rows) !== JSON.stringify(wbsDraft(graph)) || projectStart !== (graph.project_start ?? '');
+  useEffect(() => onStateChange?.(dirty || blocked, busy), [dirty, blocked, busy, onStateChange]);
   const editable = !disabled && !busy && !blocked && graph.status === 'draft';
   const summaries = rows.filter(row => row.summary);
   function add(summary: boolean) {
@@ -42,11 +45,11 @@ function WbsSession({ graph, disabled, save, onSaved }: { graph: WbsGraph; disab
   async function submit() {
     if (!editable || !dirty || lock.current) return;
     let payload: ReturnType<typeof wbsPayload>;
-    try { payload = wbsPayload(graph, rows); } catch { setError('Проверьте иерархию, названия, длительности и ссылки работ.'); return; }
+    try { payload = wbsPayload(graph, rows, projectStart); } catch { setError('Проверьте начало проекта, иерархию, названия, длительности и ссылки работ.'); return; }
     lock.current = true; setBusy(true); setError('');
     try {
-      const result = wbsResponse(await save(payload), graph, payload);
-      onSaved?.(result);
+      const raw = await save(payload); const result = wbsResponse(raw, graph, payload);
+      onSaved?.(result, raw);
     } catch { setBlocked(true); setError('Сохранение WBS не подтверждено. Автоматический повтор заблокирован; обновите серверную ревизию.'); }
     finally { lock.current = false; setBusy(false); }
   }
@@ -56,6 +59,7 @@ function WbsSession({ graph, disabled, save, onSaved }: { graph: WbsGraph; disab
         <button type="button" disabled={!editable || rows.length >= 500} onClick={() => add(false)}>Добавить работу</button></div></header>
     {error && <p role="alert">{error}</p>}
     {!flat.length && rows.length > 0 && <p role="alert">Дерево содержит недопустимую связь.</p>}
+    <label>Начало проекта<input type="date" required disabled={!editable} value={projectStart} onChange={event => setProjectStart(event.target.value)} /></label>
     <ol className="wbs-tree-list">{flat.map(({ row, level }) => {
       const siblings = rows.filter(item => item.parentKey === row.parentKey).sort((a, b) => a.order - b.order);
       const index = siblings.findIndex(item => item.key === row.key);
@@ -72,6 +76,6 @@ function WbsSession({ graph, disabled, save, onSaved }: { graph: WbsGraph; disab
       </li>;
     })}</ol>
     <footer><button type="button" disabled={!editable || !dirty} onClick={() => void submit()}>Сохранить структуру и пересчитать</button>
-      <button type="button" className="secondary" disabled={busy} onClick={() => { setRows(wbsDraft(graph)); setBlocked(false); setError(''); }}>Отбросить изменения</button></footer>
+      <button type="button" className="secondary" disabled={busy} onClick={() => { setRows(wbsDraft(graph)); setProjectStart(graph.project_start ?? ''); setBlocked(false); setError(''); }}>Отбросить изменения</button></footer>
   </section>;
 }

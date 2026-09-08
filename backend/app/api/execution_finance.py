@@ -29,6 +29,7 @@ from app.mvp4.finance_guards import (
 )
 from app.structured_import import parse_structured_rows
 from app.mvp4.schedule_planner import PlannerError, ScheduleTask, parse_dependencies, plan_schedule
+from app.mvp4.wbs_import import WbsImportError, parse_wbs_csv
 from app.mvp4.cash_flow_views import project_cash_flow_views, valid_period
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
@@ -119,8 +120,8 @@ class ScheduleGraphRow(BaseModel):
     constraint_date: date | None = None
     not_before_date: date | None = None
     dependencies: list[ScheduleRowDependency] = Field(default_factory=list, max_length=500)
-    parent_id: _ScheduleRowId | None = None
-    parent_ref: _ScheduleClientRef | None = None
+    wbs_parent_id: _ScheduleRowId | None = None
+    wbs_parent_ref: _ScheduleClientRef | None = None
     wbs_order: int = Field(default=0, strict=True, ge=0, le=1000000)
     is_summary: bool = Field(default=False, strict=True)
 
@@ -130,7 +131,7 @@ class ScheduleGraphRow(BaseModel):
             raise ValueError("exactly_one_row_identity_required")
         if len(self.title.strip()) < 2:
             raise ValueError("schedule_title_required")
-        if self.parent_id is not None and self.parent_ref is not None:
+        if self.wbs_parent_id is not None and self.wbs_parent_ref is not None:
             raise ValueError("at_most_one_parent_reference_allowed")
         if self.is_summary:
             if (self.duration_days is not None or self.is_milestone is not None
@@ -577,7 +578,7 @@ def _wbs_layout(rows):
     ordered, levels, visiting = [], {}, set()
 
     def visit(row, level):
-        if row.id in visiting or level > 5:
+        if row.id in visiting or level > 4:
             raise HTTPException(409, "schedule_wbs_invalid")
         visiting.add(row.id); levels[row.id] = level; ordered.append(row)
         for child in children[row.id]:
@@ -585,7 +586,7 @@ def _wbs_layout(rows):
         visiting.remove(row.id)
 
     for root in children[None]:
-        visit(root, 1)
+        visit(root, 0)
     if len(ordered) != len(rows):
         raise HTTPException(409, "schedule_wbs_invalid")
     return ordered, levels
@@ -738,9 +739,9 @@ def _wbs_intent(items, references):
     identities = {item.id if item.id is not None else references[item.client_ref]: item for item in items}
     parents = {}
     for identifier, item in identities.items():
-        parent = item.parent_id
-        if item.parent_ref is not None:
-            parent = references.get(item.parent_ref)
+        parent = item.wbs_parent_id
+        if item.wbs_parent_ref is not None:
+            parent = references.get(item.wbs_parent_ref)
             if parent is None:
                 raise HTTPException(422, "schedule_unknown_parent")
         if parent is not None and parent not in identities:
@@ -782,9 +783,11 @@ def put_schedule_graph_rows(baseline_id: int, payload: ScheduleGraphRowsPut,
             or len(deleted) != len(payload.deleted_ids) or deleted.intersection(kept)
             or set(kept).union(deleted) != set(existing)):
         raise HTTPException(422, "schedule_complete_graph_required")
+    prospective_existing = {item.id: item for item in payload.items if item.id is not None}
     for identifier in deleted:
         row = existing[identifier]
-        if any(child.wbs_parent_id == identifier and child.id not in deleted for child in rows):
+        if any(child.wbs_parent_id == identifier and child.id not in deleted
+               and prospective_existing[child.id].wbs_parent_id == identifier for child in rows):
             raise HTTPException(409, "schedule_wbs_parent_delete_protected")
         if (row.source_name is not None or row.source_excerpt is not None
                 or row.actual_start is not None or row.actual_finish is not None
@@ -1067,9 +1070,15 @@ def _import_date(value: str | None) -> date | None:
 def structured_preview(document_id: int, project_id: int, kind: str,
                        db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
-    if kind not in {"schedule", "budget", "cash-flow"}:
+    if kind not in {"schedule", "schedule-wbs", "budget", "cash-flow"}:
         raise HTTPException(422, "Поддерживаются ГПР, бюджет и ДДС")
     document, _version, content = _document_content(db, project_id, document_id)
+    if kind == "schedule-wbs":
+        try:
+            preview = parse_wbs_csv(content).as_dict()
+        except WbsImportError as error:
+            raise HTTPException(422, {"code": error.code, "source_rows": error.source_rows}) from None
+        return {"document_id": document.id, "name": document.name, "kind": kind, **preview}
     preview = parse_structured_rows(content, kind)
     return {"document_id": document.id, "name": document.name, "kind": kind, **preview,
             "requires_confirmation": True, "originals_changed": False}

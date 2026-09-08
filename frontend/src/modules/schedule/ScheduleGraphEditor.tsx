@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { constraints, parseGraph, putPayload, sameItems, toDraft, type Constraint, type Draft, type DraftItem, type Graph } from "./graphReadModel";
 import "./scheduleGraph.css";
 import { SchedulePlanSummary } from "./SchedulePlanSummary";
+import { WbsTreeEditor } from "./WbsTreeEditor";
 import { ScheduleRowsEditor } from "./ScheduleRowsEditor";
 
 export type GraphApi = (path: string, options?: RequestInit) => Promise<unknown>;
@@ -34,6 +35,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
   const [rowsDirty, setRowsDirty] = useState(false);
   const [rowsBusy, setRowsBusy] = useState(false);
   const [rowsGeneration, setRowsGeneration] = useState(0);
+  const [editorMode, setEditorMode] = useState<"flat" | "wbs">("flat");
   const alive = useRef(true);
   const request = useRef(0);
   const lock = useRef(false);
@@ -128,9 +130,26 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
       {!canEdit && <p>Доступ только для просмотра.</p>}
       <p>Календарные дни, включая день начала. Веха — 0 дней. Рабочие календари не поддерживаются. Даты ниже — последний сохранённый расчёт, не прогноз локальных правок.</p>
       <SchedulePlanSummary graph={graph} stale={conflict || busy} hasLocalEdits={dirty || rowsDirty} />
+      <div role="group" aria-label="Режим редактора состава ГПР">
+        <button type="button" disabled={rowsDirty || rowsBusy || graph.items.some(item => item.is_summary)} aria-pressed={editorMode === "flat" && !graph.items.some(item => item.is_summary)}
+          onClick={() => setEditorMode("flat")}>Обычный список</button>
+        <button type="button" disabled={rowsDirty || rowsBusy} aria-pressed={editorMode === "wbs" || graph.items.some(item => item.is_summary)}
+          onClick={() => setEditorMode("wbs")}>Дерево WBS</button>
+      </div>
+      {editorMode === "flat" && !graph.items.some(item => item.is_summary) ? (
       <ScheduleRowsEditor key={`${graph.graph_revision}:${rowsGeneration}`} graph={graph} api={api} disabled={!canEdit || dirty || busy || conflict || denied} onDirty={setRowsDirty} onBusy={setRowsBusy} onSaved={result=>{
         setGraph(result);setDraft(toDraft(result));setRowsDirty(false);setRowsBusy(false);setApprovalReview(false);setNotice("Состав сохранён. Проверьте расчёт перед отдельным утверждением.");onSaved?.(baselineId,result.graph_revision);
-      }}/>
+      }}/>) : (
+      <WbsTreeEditor key={`${graph.graph_revision}:${rowsGeneration}`} graph={graph} baselineId={baselineId}
+        disabled={!canEdit || dirty || busy || conflict || denied}
+        save={payload => api(`/execution/baselines/${baselineId}/graph/rows`, { method: "PUT", body: JSON.stringify(payload) })}
+        onStateChange={(changed, saving) => { setRowsDirty(changed); setRowsBusy(saving); }}
+        onSaved={(_wbs, raw) => {
+          const result = parseGraph(raw, baselineId);
+          setGraph(result); setDraft(toDraft(result)); setRowsDirty(false); setRowsBusy(false);
+          setApprovalReview(false); setNotice("Структура WBS сохранена. Проверьте расчёт перед отдельным утверждением.");
+          onSaved?.(baselineId, result.graph_revision);
+        }}/>) }
       {conflict && <aside aria-label="Конфликт версий">
         <p>Автоматическая перезапись отключена. Локальные изменения остаются в форме.</p>
         {latest && <>

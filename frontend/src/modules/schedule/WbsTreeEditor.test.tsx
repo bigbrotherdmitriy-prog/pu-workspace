@@ -6,7 +6,7 @@ const item = (id: number, title: string, parent: number | null, order: number, l
   id, title, wbs_parent_id: parent, wbs_order: order, wbs_level: level, is_summary: summary,
   duration_days: summary ? null : 2, is_milestone: summary ? null : false, predecessor_ids: null,
 });
-const graph = () => ({ baseline_id: 8, version: 2, status: 'draft', graph_revision: 3,
+const graph = () => ({ baseline_id: 8, version: 2, status: 'draft', graph_revision: 3, project_start: '2026-09-01',
   items: [item(1, 'Design phase', null, 0, 0, true), item(10, 'Prepare drawings', 1, 0, 1), item(20, 'Independent work', null, 1, 0)],
   plan: { tasks: [{ task_id: 10 }, { task_id: 20 }], topological_order: [10, 20] },
 });

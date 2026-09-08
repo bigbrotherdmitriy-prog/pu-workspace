@@ -197,6 +197,20 @@ def test_valid_real_import_and_replay_preserve_exact_dates_and_progress(db_sessi
     assert document.name == "synthetic-schedule.csv"
 
 
+def test_wbs_document_preview_is_read_only_and_requires_confirmation(db_session, user_factory):
+    content = "WBS;Наименование;Тип;Длительность\n1;Подготовка;раздел;\n1.1;Монтаж;работа;3\n"
+    user, project, document, version, _baseline = _world(db_session, user_factory, content)
+    with _writes(db_session) as writes:
+        result = structured_preview(document.id, project.id, "schedule-wbs", db_session, user)
+    assert writes == []
+    assert result["requires_confirmation"] is True
+    assert result["commit_allowed"] is False
+    assert result["originals_changed"] is False
+    assert [row["kind"] for row in result["rows"]] == ["summary", "work"]
+    assert result["rows"][1]["parent_ref"] == result["rows"][0]["client_ref"]
+    assert version.content == content and document.name == "synthetic-schedule.csv"
+
+
 def test_unselected_invalid_row_does_not_block_valid_selected_draft_row(db_session, user_factory):
     content = _table(("Valid stage", "", "", "50"), ("Invalid stage", "bad date", "", ""))
     user, project, document, version, baseline = _world(db_session, user_factory, content)

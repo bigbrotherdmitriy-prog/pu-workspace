@@ -15,6 +15,7 @@ export type WbsGraph = {
   version: number;
   status: string;
   graph_revision: number;
+  project_start: string | null;
   items: WbsItem[];
   plan: { tasks: { task_id: number }[]; topological_order: number[] } | null;
 };
@@ -40,7 +41,10 @@ export type WbsPutItem = {
   is_summary: boolean;
   duration_days: number | null;
   is_milestone: boolean | null;
-  predecessor_ids: string | null;
+  constraint_type: 'asap' | null;
+  constraint_date: null;
+  not_before_date: null;
+  dependencies: { predecessor_id?: number; predecessor_ref?: string; link_type: 'FS' | 'SS' | 'FF' | 'SF'; lag_days: number }[];
 };
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -74,7 +78,9 @@ function assertHierarchy(items: WbsItem[]): void {
 export function parseWbsGraph(value: unknown, baselineId: number): WbsGraph {
   if (!object(value) || value.baseline_id !== baselineId || !positiveInteger(value.baseline_id)
     || !positiveInteger(value.version) || !positiveInteger(value.graph_revision)
-    || typeof value.status !== 'string' || !Array.isArray(value.items) || value.items.length > 500)
+    || typeof value.status !== 'string'
+    || !(value.project_start === null || typeof value.project_start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.project_start))
+    || !Array.isArray(value.items) || value.items.length > 500)
     throw new Error('invalid_wbs_graph');
   const seen = new Set<number>();
   const items = value.items.map((raw): WbsItem => {
@@ -107,6 +113,7 @@ export function parseWbsGraph(value: unknown, baselineId: number): WbsGraph {
     plan = { tasks: value.plan.tasks as { task_id: number }[], topological_order: order as number[] };
   }
   return { baseline_id: baselineId, version: value.version, status: value.status,
+    project_start: value.project_start,
     graph_revision: value.graph_revision, items, plan };
 }
 
@@ -159,8 +166,9 @@ export function moveWbsRow(rows: WbsRow[], key: string, parentKey: string | null
   return result;
 }
 
-export function wbsPayload(graph: WbsGraph, rows: WbsRow[]) {
+export function wbsPayload(graph: WbsGraph, rows: WbsRow[], projectStart = graph.project_start) {
   if (graph.status !== 'draft' || rows.length > 500 || new Set(rows.map(row => row.key)).size !== rows.length) throw new Error('invalid_wbs_draft');
+  if (typeof projectStart !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(projectStart)) throw new Error('invalid_wbs_project_start');
   const flattened = flattenWbs(rows);
   const levels = new Map(flattened.map(entry => [entry.row.key, entry.level]));
   const keys = new Set(rows.map(row => row.key));
@@ -169,18 +177,29 @@ export function wbsPayload(graph: WbsGraph, rows: WbsRow[]) {
     if (!existing && !/^new[1-9]\d*$/.test(row.key) || row.title.trim().length < 2 || row.title.length > 500) throw new Error('invalid_wbs_identity');
     if (row.parentKey !== null && !keys.has(row.parentKey) || (levels.get(row.key) ?? 5) > 4) throw new Error('invalid_wbs_parent');
     let duration: number | null = null; let milestone: boolean | null = null;
+    let dependencies: WbsPutItem['dependencies'] = [];
     if (!row.summary) {
       duration = Number(row.duration); milestone = row.milestone;
       if (!/^\d+$/.test(row.duration) || !Number.isSafeInteger(duration) || duration > 10000
         || (milestone ? duration !== 0 : duration < 1) || row.dependencies.length > 2000) throw new Error('invalid_wbs_leaf');
+      const seen = new Set<string>();
+      dependencies = row.dependencies.trim() ? row.dependencies.split(/[,;]/).map(token => {
+        const match = /^\s*(new[1-9]\d*|[1-9]\d*)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+)\s*[dд])?\s*$/i.exec(token);
+        if (!match || !keys.has(match[1]) || match[1] === row.key || seen.has(match[1])) throw new Error('invalid_wbs_dependency');
+        seen.add(match[1]); const lag = Number(match[4] ?? 0) * (match[3] === '-' ? -1 : 1);
+        if (!Number.isSafeInteger(lag) || Math.abs(lag) > 10000) throw new Error('invalid_wbs_dependency');
+        return { ...(match[1].startsWith('new') ? { predecessor_ref: match[1] } : { predecessor_id: Number(match[1]) }),
+          link_type: (match[2] ?? 'FS').toUpperCase() as 'FS' | 'SS' | 'FF' | 'SF', lag_days: lag };
+      }) : [];
     } else if (row.dependencies) throw new Error('summary_has_dependencies');
     return { ...(existing ? { id: Number(row.key) } : { client_ref: row.key }), title: row.title.trim(),
       ...(row.parentKey === null ? { wbs_parent_id: null } : row.parentKey.startsWith('new')
         ? { wbs_parent_ref: row.parentKey } : { wbs_parent_id: Number(row.parentKey) }),
       wbs_order: row.order, is_summary: row.summary, duration_days: duration,
-      is_milestone: milestone, predecessor_ids: row.summary ? null : row.dependencies.trim() || null };
+      is_milestone: milestone, constraint_type: row.summary ? null : 'asap', constraint_date: null,
+      not_before_date: null, dependencies };
   });
-  return { expected_graph_revision: graph.graph_revision,
+  return { expected_graph_revision: graph.graph_revision, project_start: projectStart,
     deleted_ids: graph.items.filter(item => !keys.has(String(item.id))).map(item => item.id), items };
 }
 
@@ -201,9 +220,13 @@ export function wbsResponse(raw: unknown, previous: WbsGraph, payload: ReturnTyp
     const id = intent.id ?? mapping.get(intent.client_ref!);
     const item = result.items.find(candidate => candidate.id === id);
     const parentId = intent.wbs_parent_ref ? mapping.get(intent.wbs_parent_ref) : intent.wbs_parent_id;
+    const expectedDependencies = intent.dependencies.map(dependency =>
+      `${dependency.predecessor_id ?? mapping.get(dependency.predecessor_ref!)}${dependency.link_type}`
+      + (dependency.lag_days ? `${dependency.lag_days > 0 ? '+' : ''}${dependency.lag_days}d` : '')).sort();
+    const actualDependencies = (item?.predecessor_ids?.split(/[,;]/).map(value => value.trim()).sort() ?? []);
     if (!item || item.title !== intent.title || item.wbs_parent_id !== parentId || item.wbs_order !== intent.wbs_order
       || item.is_summary !== intent.is_summary || item.duration_days !== intent.duration_days
-      || item.is_milestone !== intent.is_milestone || item.predecessor_ids !== intent.predecessor_ids)
+      || item.is_milestone !== intent.is_milestone || actualDependencies.join() !== expectedDependencies.join())
       throw new Error('invalid_wbs_result');
   }
   return result;

@@ -20,6 +20,12 @@ Direct facts, budget and cash-flow links to summary nodes are denied. Parent
 deletion requires its children to be deleted or re-parented in the same complete
 request. Clone remaps both dependency IDs and WBS parent IDs.
 
+The existing schedule screen now exposes an explicit `Обычный список / Дерево
+WBS` mode switch under one edit lock. A validated document can be inspected with
+`kind=schedule-wbs`; this preview is read-only, requires human confirmation and
+does not claim commit. The standalone import normalizer and acceptance gate from
+the parallel streams are included in this branch.
+
 ## Migration
 
 `a54f001c0a21` is the single sequential child of `a54f001c0a20`. Downgrade locks
@@ -30,6 +36,8 @@ were not rewritten.
 ## Verification
 
 - WBS/graph/schema target: 69 passed.
+- Integrated WBS API/import target: 111 passed; complete schedule UI: 95 passed.
+- Frontend TypeScript check and production build: PASS.
 - Previous full backend run before pin updates: 2415 passed, 57 skipped; its 14
   deterministic failures were stale `a20` assertions and were rerun successfully.
 - One performance smoke exceeded its ten-second budget during the loaded full run

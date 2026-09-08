@@ -6,7 +6,7 @@ const item = (id: number, title: string, parent: number | null, order: number, l
   duration_days: summary ? null : 2, is_milestone: summary ? null : false,
   predecessor_ids: null,
 });
-const fixture = () => ({ baseline_id: 8, version: 2, status: 'draft', graph_revision: 3,
+const fixture = () => ({ baseline_id: 8, version: 2, status: 'draft', graph_revision: 3, project_start: '2026-09-01',
   items: [item(10, 'Preparation', 1, 0, 1), item(1, 'Phase one', null, 0, 0, true),
     item(20, 'Installation', 2, 0, 1), item(2, 'Phase two', null, 1, 0, true)],
   plan: { tasks: [{ task_id: 10 }, { task_id: 20 }], topological_order: [10, 20] },
@@ -63,8 +63,11 @@ describe('WBS local editing', () => {
     rows.push({ key: 'new1', title: 'New phase', parentKey: null, order: 2, summary: true, duration: '', milestone: false, dependencies: '' });
     rows.push({ key: 'new2', title: 'New task', parentKey: 'new1', order: 0, summary: false, duration: '3', milestone: false, dependencies: '10FS' });
     expect(wbsPayload(graph, rows).items.slice(-2)).toEqual([
-      { client_ref: 'new1', title: 'New phase', wbs_parent_id: null, wbs_order: 2, is_summary: true, duration_days: null, is_milestone: null, predecessor_ids: null },
-      { client_ref: 'new2', title: 'New task', wbs_parent_ref: 'new1', wbs_order: 0, is_summary: false, duration_days: 3, is_milestone: false, predecessor_ids: '10FS' },
+      { client_ref: 'new1', title: 'New phase', wbs_parent_id: null, wbs_order: 2, is_summary: true, duration_days: null, is_milestone: null,
+        constraint_type: null, constraint_date: null, not_before_date: null, dependencies: [] },
+      { client_ref: 'new2', title: 'New task', wbs_parent_ref: 'new1', wbs_order: 0, is_summary: false, duration_days: 3, is_milestone: false,
+        constraint_type: 'asap', constraint_date: null, not_before_date: null,
+        dependencies: [{ predecessor_id: 10, link_type: 'FS', lag_days: 0 }] },
     ]);
   });
   it('rejects summary dependencies and a fifth nesting level', () => {
