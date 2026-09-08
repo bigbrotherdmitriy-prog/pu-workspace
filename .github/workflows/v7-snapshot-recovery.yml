@@ -2,7 +2,7 @@ name: v7 isolated snapshot recovery
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/v7-execution-wave4', 'codex/v7-execution-wave5']
+    branches: ['codex/v7-execution-wave4', 'codex/v7-execution-wave5', 'codex/v7-execution-wave6']
 permissions:
   contents: read
 jobs:
