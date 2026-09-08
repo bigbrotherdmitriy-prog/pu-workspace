@@ -3,10 +3,10 @@ from decimal import Decimal
 from dataclasses import asdict
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Annotated, Literal
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -29,8 +29,10 @@ from app.mvp4.finance_guards import (
 )
 from app.structured_import import parse_structured_rows
 from app.mvp4.schedule_planner import PlannerError, ScheduleTask, parse_dependencies, plan_schedule
+from app.mvp4.cash_flow_views import project_cash_flow_views, valid_period
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
+CASH_FLOW_VIEW_ROW_LIMIT = 5000
 
 
 class BaselineCreate(BaseModel):
@@ -828,6 +830,44 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         "acts": [{"id": x.id, "contract_id": x.contract_id, "document_id": x.document_id, "number": x.number,
                   "title": x.title, "act_date": x.act_date, "amount": x.amount, "status": x.status} for x in acts],
     }
+
+
+@router.get("/cash-flow/views")
+def cash_flow_views(project_id: Annotated[int, Query(ge=1)], date_from: date, date_to: date,
+                    contract_id: Annotated[int | None, Query(ge=1)] = None,
+                    db: Session = Depends(get_db), user: User = Depends(require_user)):
+    # Read-only means no accidental autoflush and no rewriting a caller's pending
+    # data. Refresh retained identity before the existing project-role check.
+    if db.new or db.dirty or db.deleted:
+        raise HTTPException(409, "cash_flow_view_pending_changes")
+    if not valid_period(date_from, date_to):
+        raise HTTPException(422, "cash_flow_view_period_invalid")
+    with db.no_autoflush:
+        actor = db.scalar(select(User).where(User.id == user.id).execution_options(populate_existing=True))
+        if actor is None:
+            raise HTTPException(403, "Insufficient project access")
+        require_project_role(db, actor, project_id, "viewer")
+        project = db.scalar(select(Project).where(Project.id == project_id).execution_options(populate_existing=True))
+        if project is None or project.archived_at is not None:
+            raise HTTPException(403, "Insufficient project access")
+        _check_contract(db, project_id, contract_id)
+        fields = ("id", "project_id", "contract_id", "record_version", "schedule_item_id", "budget_line_id", "task_id",
+                  "source_document_id", "source_document_version_id", "evidence_id", "evidence_revision",
+                  "evidence_assessment_version", "confidence", "review_status", "direction", "title", "counterparty",
+                  "planned_date", "actual_date", "planned_amount", "actual_amount", "status")
+        statement = select(*(getattr(CashFlowEntry, name) for name in fields)).where(
+            CashFlowEntry.project_id == project_id,
+            or_(CashFlowEntry.planned_date.between(date_from, date_to),
+                CashFlowEntry.actual_date.between(date_from, date_to)),
+        )
+        if contract_id is not None:
+            statement = statement.where(CashFlowEntry.contract_id == contract_id)
+        rows = list(db.execute(statement.order_by(CashFlowEntry.planned_date, CashFlowEntry.id)
+                               .limit(CASH_FLOW_VIEW_ROW_LIMIT + 1)).mappings())
+        if len(rows) > CASH_FLOW_VIEW_ROW_LIMIT:
+            raise HTTPException(413, "cash_flow_view_row_limit")
+        return project_cash_flow_views(rows, project_id=project_id, contract_id=contract_id,
+                                       date_from=date_from, date_to=date_to)
 
 
 @router.get("/document-candidates")
