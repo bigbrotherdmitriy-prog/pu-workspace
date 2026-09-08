@@ -77,11 +77,16 @@ def test_all_37_pg_proofs_and_a20_are_preserved():
     module = runner()
     proofs = [node for nodes in module.PINNED_POSTGRES_TESTS.values() for node in nodes]
     prefix = "backend/tests/test_v7_meeting_commit_fault_postgres.py::test_pg_meeting_commit_fault"
-    assert len([node for node in proofs if not node.startswith(prefix)]) == 37
+    rows = "backend/tests/test_v7_schedule_graph_rows_postgres.py::"
+    assert len([node for node in proofs if not node.startswith((prefix, rows))]) == 37
     assert {node for node in proofs if node.startswith(prefix)} == {
         f"{prefix}[{case}]" for case in ("before_commit", "after_commit", "revoked_authority", "stale_binding", "revoked_child")
     }
-    assert len(proofs) == 42
+    assert {node for node in proofs if node.startswith(rows)} == {
+        rows + "test_pg_concurrent_complete_row_batches_have_one_winner",
+        rows + "test_pg_existing_uncommitted_fk_link_blocks_then_protects_delete",
+    }
+    assert len(proofs) == 44
     assert module.HEAD == "a54f001c0a20"
     assert module.RUNTIME_BUDGET_SECONDS == 1320
     assert module.CLEANUP_RESERVE_SECONDS == 60

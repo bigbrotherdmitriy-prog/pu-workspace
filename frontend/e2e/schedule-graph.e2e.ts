@@ -4,6 +4,7 @@ import type { Graph } from "../src/modules/schedule/graphReadModel";
 const graph = (id = 8): Graph => ({
   baseline_id: id, version: 2, status: "draft", graph_revision: 3,
   planning_mode: "calendar_graph", project_start: "2026-09-01",
+  plan: null,
   items: [{ id: 12, title: "Synthetic preparation", duration_days: 2, is_milestone: false,
     predecessor_ids: null, constraint_type: "asap", constraint_date: null,
     not_before_date: null, planned_start: "2026-09-01", planned_finish: "2026-09-02" }],
@@ -23,6 +24,62 @@ function register(mock: StorageApi, projectId: number, current: () => Graph) {
   mock.reply("GET", `/execution/baselines/${current().baseline_id}/graph`, () => ({ body: current() }));
 }
 const writes = (mock: StorageApi) => mock.requests.filter(r => ["PUT", "PATCH", "POST", "DELETE"].includes(r.method));
+
+test("GPR: actual App adds a dependent draft row atomically and exposes the saved critical plan", async ({ page, mock }) => {
+  mock.currentUser = { id: 900, name: "Synthetic Operator", is_admin: false };
+  mock.membersByProject.set(2, [{ membership_id: 1, user_id: 900, name: "Synthetic Operator", role: "manager" }]);
+  let current = graph(); register(mock, 2, () => current);
+  mock.reply("PUT", "/execution/baselines/8/graph/rows", request => {
+    const input = request.postDataJSON();
+    expect(input.expected_graph_revision).toBe(3); expect(input.deleted_ids).toEqual([]);
+    expect(input.items).toHaveLength(2);
+    expect(input.items[1]).toMatchObject({ client_ref: "new1", title: "Synthetic dependent work",
+      dependencies: [{ predecessor_id: 12, link_type: "FS", lag_days: 0 }] });
+    current = { ...current, graph_revision: 4, items: [...current.items, { ...current.items[0], id: 13,
+      title: "Synthetic dependent work", duration_days: 1, predecessor_ids: "12FS",
+      planned_start: "2026-09-03", planned_finish: "2026-09-03" }], plan: {
+      project_start: "2026-09-01", project_finish: "2026-09-03", topological_order: [12, 13], critical_ids: [12, 13],
+      critical_edges: [[12, 13]], tasks: [
+        { task_id: 12, earliest_start: "2026-09-01", earliest_finish: "2026-09-02", latest_start: "2026-09-01", latest_finish: "2026-09-02", total_float_days: 0, free_float_days: 0 },
+        { task_id: 13, earliest_start: "2026-09-03", earliest_finish: "2026-09-03", latest_start: "2026-09-03", latest_finish: "2026-09-03", total_float_days: 0, free_float_days: 0 },
+      ],
+    } };
+    return { body: { ...current, client_ref_map: { new1: 13 } } };
+  });
+  await start(page); await page.getByRole("button", { name: "Исполнение и финансы", exact: true }).click();
+  await page.getByRole("button", { name: "Проверить и утвердить", exact: true }).click();
+  const editor = page.getByRole("region", { name: "Редактор графа ГПР", exact: true });
+  await editor.getByRole("button", { name: "Добавить этап", exact: true }).click();
+  await editor.getByLabel("Название new1", { exact: true }).fill("Synthetic dependent work");
+  await editor.getByLabel("Связи new1", { exact: true }).fill("12FS");
+  await expect(editor.getByRole("button", { name: "Проверить перед утверждением" })).toBeDisabled();
+  await expect(editor.getByRole("button", { name: "Сохранить и рассчитать", exact: true })).toBeDisabled();
+  expect(writes(mock)).toHaveLength(0);
+  await editor.getByRole("button", { name: "Сохранить состав и рассчитать", exact: true }).click();
+  await expect(editor.getByLabel("Название 13", { exact: true })).toHaveValue("Synthetic dependent work");
+  await expect(editor.getByText("2026-09-03 → 2026-09-03", { exact: true })).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Проверить перед утверждением" })).toBeEnabled();
+  expect(writes(mock).map(r => `${r.method} ${r.path}`)).toEqual(["PUT /execution/baselines/8/graph/rows"]);
+});
+
+test("GPR: protected delete conflict retains the local removal without retry", async ({ page, mock }) => {
+  mock.currentUser = { id: 900, name: "Synthetic Operator", is_admin: false };
+  mock.membersByProject.set(2, [{ membership_id: 1, user_id: 900, name: "Synthetic Operator", role: "manager" }]);
+  register(mock, 2, () => graph());
+  mock.reply("PUT", "/execution/baselines/8/graph/rows", request => {
+    expect(request.postDataJSON()).toMatchObject({ expected_graph_revision: 3, deleted_ids: [12], items: [] });
+    return { status: 409, body: { detail: "schedule_row_delete_protected" } };
+  });
+  await start(page); await page.getByRole("button", { name: "Исполнение и финансы", exact: true }).click();
+  await page.getByRole("button", { name: "Проверить и утвердить", exact: true }).click();
+  const editor = page.getByRole("region", { name: "Редактор графа ГПР", exact: true });
+  await editor.getByRole("button", { name: "Пометить удаление 12", exact: true }).click();
+  await editor.getByRole("button", { name: "Сохранить состав и рассчитать", exact: true }).click();
+  await expect(editor.getByText(/Сохранение не подтверждено\. Правки сохранены локально/)).toBeVisible();
+  await expect(editor.getByLabel("Название 12", { exact: true })).toHaveCount(0);
+  await expect(editor.getByRole("button", { name: "Сохранить состав и рассчитать", exact: true })).toBeDisabled();
+  expect(writes(mock)).toHaveLength(1);
+});
 
 test("GPR: actual App opens register, saves exact graph revision then explicitly approves it", async ({ page, mock }) => {
   mock.currentUser = { id: 900, name: "Synthetic Operator", is_admin: false };

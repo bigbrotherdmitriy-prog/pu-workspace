@@ -86,6 +86,7 @@ def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
         "codex/v7-execution-wave2",
         "codex/v7-execution-wave3",
         "codex/v7-execution-wave4",
+        "codex/v7-execution-wave5",
     ]
     assert "workflow_dispatch:" in text and "pull_request:" not in text
     assert "persist-credentials: false" in text

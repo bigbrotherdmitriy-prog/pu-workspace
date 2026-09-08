@@ -86,13 +86,15 @@ MVP_TESTS = {
         "test_postgres_concurrent_payment_confirmation_creates_one_fact",
         "test_postgres_competing_payment_corrections_are_cas_serialized",
     ),
-    "postgres_v7_schedule_graph": test_nodes(
+    "postgres_v7_schedule_graph": (*test_nodes(
         "backend/tests/test_v7_schedule_graph_postgres.py",
         "test_postgres_graph_cas_allows_one_complete_winner",
         "test_postgres_upgrade_legacy_and_safe_downgrade",
         "test_postgres_downgrade_refuses_graph_intent[active_graph]",
         "test_postgres_downgrade_refuses_graph_intent[legacy_intent]",
-    ),
+    ), *test_nodes("backend/tests/test_v7_schedule_graph_rows_postgres.py",
+                  "test_pg_concurrent_complete_row_batches_have_one_winner",
+                  "test_pg_existing_uncommitted_fk_link_blocks_then_protects_delete")),
     "postgres_mvp4_supply": test_nodes(
         "backend/tests/test_mvp4_supply_postgres_runtime.py",
         *(f"test_postgres_duplicate_supply_commands_create_one_effect[{case}]"
