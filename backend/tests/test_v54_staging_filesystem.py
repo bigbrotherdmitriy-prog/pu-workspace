@@ -232,15 +232,15 @@ def test_zero_length_chunk_frame_is_rejected_before_decryption(store):
         read(store, descriptor)
 
 
-def test_tampered_wrapped_key_and_cross_object_substitution_are_rejected(store):
-    descriptor = write(store, b"classified")
+@pytest.mark.parametrize("other", ["ab" + "1" * 30, "cd" + "1" * 30], ids=["same-shard", "different-shard"])
+def test_tampered_wrapped_key_and_cross_object_substitution_are_rejected(store, other):
+    descriptor = write(store, b"classified", object_id="ab" + "0" * 30)
     changed = "A" if descriptor.wrapped_dek[-2] != "A" else "B"
     with pytest.raises(StagingIntegrityError):
         read(store, replace(descriptor, wrapped_dek=descriptor.wrapped_dek[:-2] + changed + descriptor.wrapped_dek[-1]))
 
-    other = new_object_id()
     other_path = store._root / other[:2]
-    other_path.mkdir(mode=0o700)
+    other_path.mkdir(mode=0o700, exist_ok=True)
     (other_path / f"{other}.enc").write_bytes(path_for(store, descriptor).read_bytes())
     with pytest.raises(StagingIntegrityError):
         read(store, replace(descriptor, object_id=other))
