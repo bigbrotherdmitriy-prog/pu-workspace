@@ -23,6 +23,32 @@ class ContainmentFailure(RuntimeError):
     pass
 
 
+class ChildProofFailure(RuntimeError):
+    def __init__(self, phase):
+        super().__init__("child_proof_failed")
+        self.phase = phase
+
+
+def child_failure_phase(output):
+    allowed = {"guard", "seed_http", "first_walk", "second_worker", "kill",
+               "lease_expiry", "recovered", "replay"}
+    for line in output.splitlines():
+        if len(line) > 160:
+            continue
+        try:
+            value = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if (type(value) is dict
+                and set(value) == {"status", "phase", "raw_diagnostics_published"}
+                and value["status"] == "FAIL"
+                and value["raw_diagnostics_published"] is False
+                and type(value["phase"]) is str
+                and value["phase"] in allowed):
+            return value["phase"]
+    return None
+
+
 def environment():
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("POSTGRES_HOST") != "db":
         raise ValueError("isolated_ci_required")
@@ -57,6 +83,9 @@ def execute(args, env, deadline, cwd=ROOT):
     try:
         stdout, _ = child.communicate(timeout=remaining)
         if child.returncode:
+            safe_phase = child_failure_phase(stdout)
+            if safe_phase is not None:
+                raise ChildProofFailure(safe_phase)
             raise RuntimeError("child_failed")
         return stdout
     finally:
@@ -117,6 +146,9 @@ def main():
                          env, started + WORK_SECONDS)
         result["proof"] = validate_result(json.loads(output))
         result.update(status="PASS", runtime="PASS")
+    except ChildProofFailure as error:
+        result["child_phase"] = error.phase
+        result["status"] = "FAIL"
     except ContainmentFailure:
         contained = False
         result["status"] = "FAIL"

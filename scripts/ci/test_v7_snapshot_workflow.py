@@ -31,6 +31,32 @@ def test_valid_proof(m):
     assert m.validate_result(proof()) == proof()
 
 
+def test_child_failure_phase_accepts_only_exact_safe_protocol(m):
+    expected = {"status": "FAIL", "phase": "seed_http", "raw_diagnostics_published": False}
+    assert m.child_failure_phase(json.dumps(expected)) == "seed_http"
+    for unsafe in (
+        {**expected, "detail": "secret"},
+        {**expected, "phase": "secret"},
+        {**expected, "raw_diagnostics_published": True},
+        {**expected, "phase": []},
+    ):
+        assert m.child_failure_phase(json.dumps(unsafe)) is None
+
+
+def test_execute_raises_only_allowlisted_child_failure(m, monkeypatch):
+    child = Mock(pid=987, returncode=1)
+    child.communicate.return_value = (
+        json.dumps({"status": "FAIL", "phase": "first_walk", "raw_diagnostics_published": False}),
+        "synthetic secret",
+    )
+    monkeypatch.setattr(m.subprocess, "Popen", Mock(return_value=child))
+    monkeypatch.setattr(m, "stop_group", Mock())
+    with pytest.raises(m.ChildProofFailure) as error:
+        m.execute(["synthetic"], {}, m.time.monotonic() + 10)
+    assert error.value.phase == "first_walk"
+    assert "secret" not in str(error.value)
+
+
 def test_timeout_kills_owned_group(m, monkeypatch):
     child = Mock(pid=987, returncode=None)
     child.communicate.side_effect = subprocess.TimeoutExpired("synthetic", 1)

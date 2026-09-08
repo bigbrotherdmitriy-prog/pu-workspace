@@ -50,6 +50,21 @@ review; fail-closed guards were not changed. Actual speed improvement has not
 been measured; parallel jobs remove serial dependency but depend on runner
 availability. Offline failure still requires the next diagnostic result.
 
+### First rerun after `2a0bf78`
+
+The authorized fast-forward push triggered four isolated workflows. Docker
+Compose smoke `34209315435` passed. Snapshot run `34209315403` now initialized
+its PostgreSQL service, checked out the repository, installed dependencies,
+migrated the owned database and cleaned it up, but the child fault harness
+failed. Its safe artifact reported only `phase=snapshot_fault`,
+`runtime=NOT_RUN`, `cleanup=PASS`; the outer coordinator discarded the child's
+already allowlisted subphase.
+
+The follow-up adds a strict exact-key/enum parser for that child subphase.
+Untrusted keys, values and types are rejected, stderr remains unpublished, and
+no raw child output is retained in the protocol. Targeted snapshot tests:
+**29 passed**. This is diagnostic only and requires a separate authorized push.
+
 Push only after separate authorization of the resulting HEAD:
 
 ```powershell
