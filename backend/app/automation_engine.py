@@ -67,11 +67,26 @@ def _render(template: str, project: Project, contract: Contract | None, schedule
 
 
 def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | None = None) -> AutomationRun:
+    # Capture the requested occurrence before refreshing a possibly stale rule.
+    # The scheduled date still controls rendering, due dates and next_run_on.
     run_date = scheduled_for or rule.next_run_on
-    existing = db.scalar(select(AutomationRun).where(
-        AutomationRun.rule_id == rule.id,
-        AutomationRun.scheduled_for == run_date,
-    ))
+    # Serialize upgraded PostgreSQL callers, including reuse of legacy runs
+    # whose scheduled_for was an arbitrary manual day rather than a period key.
+    rule = db.scalar(select(AutomationRule).where(AutomationRule.id == rule.id)
+        .with_for_update().execution_options(populate_existing=True))
+    if rule is None:
+        raise ValueError("Automation rule no longer exists")
+    period_key = run_date.replace(day=1) if rule.kind == "monthly_email" else run_date
+    lookup = select(AutomationRun).where(AutomationRun.rule_id == rule.id)
+    if rule.kind == "monthly_email":
+        # Include old noncanonical rows without rewriting their identity or
+        # creating a second pair. Existing duplicates require separate review.
+        period_end = monthly_date(run_date.year, run_date.month, 31)
+        lookup = lookup.where(AutomationRun.scheduled_for >= period_key,
+                              AutomationRun.scheduled_for <= period_end)
+    else:
+        lookup = lookup.where(AutomationRun.scheduled_for == run_date)
+    existing = db.scalar(lookup.order_by(AutomationRun.scheduled_for, AutomationRun.id).limit(1))
     if existing:
         return existing
     project = db.get(Project, rule.project_id)
@@ -82,7 +97,7 @@ def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | No
     subject = _render(rule.subject_template, project, contract, run_date)
     body = _render(rule.body_template, project, contract, run_date)
     task_title = _render(rule.task_title_template, project, contract, run_date)
-    source_id = f"automation:{rule.id}:{run_date.isoformat()}"
+    source_id = f"automation:{rule.id}:{period_key.isoformat()}"
     digest = hashlib.sha256(source_id.encode()).hexdigest()
     task = Task(
         project_id=rule.project_id, assignee_user_id=actor.id, created_by_user_id=actor.id,
@@ -99,7 +114,7 @@ def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | No
     )
     db.add_all([task, draft]); db.flush()
     run = AutomationRun(
-        rule_id=rule.id, scheduled_for=run_date,
+        rule_id=rule.id, scheduled_for=period_key,
         task_id=task.id, response_draft_id=draft.id, status="prepared",
     )
     db.add(run)
@@ -111,13 +126,15 @@ def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | No
 
 def run_due_rules(db: Session, today: date | None = None) -> dict[str, int]:
     current = today or date.today()
-    rules = list(db.scalars(select(AutomationRule).where(
+    # Keep the due-date snapshot even if another scheduler advances a cached
+    # rule while prepare_rule_run waits for its row lock.
+    rules = list(db.execute(select(AutomationRule, AutomationRule.next_run_on).where(
         AutomationRule.active.is_(True), AutomationRule.next_run_on <= current,
     ).order_by(AutomationRule.next_run_on, AutomationRule.id)))
     prepared = failed = 0
-    for rule in rules:
+    for rule, scheduled_for in rules:
         try:
-            prepare_rule_run(db, rule)
+            prepare_rule_run(db, rule, scheduled_for)
             prepared += 1
         except Exception:
             db.rollback()
