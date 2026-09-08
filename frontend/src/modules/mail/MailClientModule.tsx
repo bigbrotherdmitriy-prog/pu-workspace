@@ -21,7 +21,7 @@ type Props = {
   contracts: MailContract[];
   syncing: boolean;
   syncStatus?: string;
-  onSync: () => Promise<void> | void;
+  onSync: (folder: MailFolderKind) => Promise<void> | void;
   onOpenContacts: () => void;
   onNotice: (message: string) => void;
   onError: (message: string) => void;
@@ -165,6 +165,7 @@ export function MailClientModule({
   const [loading, setLoading] = useState(true);
   const [safeError, setSafeError] = useState("");
   const [providerWarning, setProviderWarning] = useState("");
+  const [moveError, setMoveError] = useState("");
   const [composer, setComposer] = useState<ComposerState | null>(null);
   const [showCopy, setShowCopy] = useState(false);
   const [busy, setBusy] = useState("");
@@ -472,6 +473,7 @@ export function MailClientModule({
   async function moveMessage(message: MailMessage, destination: "archive" | "spam" | "trash" | "inbox") {
     if (destination === "trash" && !window.confirm("Переместить письмо в корзину Gmail?")) return;
     if (destination === "spam" && !window.confirm("Пометить письмо как спам в Gmail?")) return;
+    setMoveError("");
     try {
       await client.moveMessage(message.id, destination);
       const labels = { archive: "Письмо перемещено в архив", spam: "Письмо помечено как спам", trash: "Письмо перемещено в корзину", inbox: "Письмо возвращено во входящие" };
@@ -479,9 +481,13 @@ export function MailClientModule({
       await loadMailbox(folder, query);
     } catch (error) {
       const detail = (error as Error).message;
-      onError(detail.includes("outcome_unknown")
+      const explanation = detail.includes("mail_modify_permission_required")
+        ? "Google не предоставил право изменять письма. Переподключите Google в разделе «Интеграции» и разрешите управление почтой. Письмо не перемещено."
+        : detail.includes("outcome_unknown")
         ? "Результат операции в Gmail неизвестен. Обновите почту перед повтором."
-        : detail);
+        : detail;
+      setMoveError(explanation);
+      onError(explanation);
     }
   }
 
@@ -492,7 +498,7 @@ export function MailClientModule({
   }
 
   async function syncAndReload() {
-    await onSync();
+    await onSync(folder);
     await loadMailbox(folder, query);
   }
 
@@ -521,6 +527,7 @@ export function MailClientModule({
       </header>
       {syncStatus && <p className="mail-sync-status" aria-live="polite">{syncStatus}</p>}
       {providerWarning && <p className="mail-provider-warning" role="status"><AlertTriangle />{providerWarning}</p>}
+      {moveError && <p className="mail-provider-warning" role="alert"><AlertTriangle />{moveError}</p>}
     </div>
     {safeError && <div className="mail-safe-error" role="alert">
       <AlertTriangle /><div><strong>Почтовый интерфейс пока недоступен</strong><p>{safeError}</p><button onClick={() => void loadMailbox()}>Повторить</button></div>
@@ -553,7 +560,7 @@ export function MailClientModule({
             {thread.unread_count > 0 && <span className="mail-unread">{thread.unread_count}</span>}
             {thread.needs_attention && <AlertTriangle className="mail-attention" aria-label="Требует внимания" />}
           </button>;
-        }) : <div className="mail-empty"><MailOpen /><strong>В этой папке писем нет</strong><span>Смените папку или получите новые письма.</span></div>}
+        }) : <div className="mail-empty"><MailOpen /><strong>Загруженных писем в этой папке нет</strong><span>Это не означает, что папка Gmail пуста. Нажмите «Получить новые», чтобы загрузить до 25 последних писем выбранной папки.</span></div>}
       </section>
       <section className="mail-reading-pane" aria-label="Просмотр переписки">
         {selectedThread && selectedMessage ? <>

@@ -69,8 +69,11 @@ class GmailMailboxAdapter:
         )
 
     def move_message(self, external_message_id: str, destination: str) -> MailMoveReceipt:
-        service = self._service().users().messages()
         try:
+            scopes = self._workspace.authorized_scopes()
+            if not scopes.intersection({"https://www.googleapis.com/auth/gmail.modify", "https://mail.google.com/"}):
+                raise MailNotAppliedError("mail_modify_permission_required")
+            service = self._service().users().messages()
             if destination == "trash":
                 request = service.trash(userId="me", id=external_message_id)
             else:

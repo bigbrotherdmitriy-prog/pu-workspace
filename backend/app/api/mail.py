@@ -534,6 +534,8 @@ def move_mail_message(message_id: int, payload: MailMoveRequest,
     try:
         adapter.move_message(external_id, payload.destination)
     except MailNotAppliedError as exc:
+        if str(exc) == "mail_modify_permission_required":
+            raise HTTPException(403, "mail_modify_permission_required") from None
         raise HTTPException(502, "mail_move_not_applied") from exc
     except Exception as exc:
         raise HTTPException(502, "mail_move_outcome_unknown_refresh_required") from exc

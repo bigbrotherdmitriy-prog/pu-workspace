@@ -24,6 +24,8 @@ import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
 import { MailClientModule } from "./modules/mail/MailClientModule";
+import { mailSyncRequest } from "./modules/mail/mailSyncRequest";
+import type { MailFolderKind } from "./modules/mail/types";
 import { EmailCompensationCard, type EmailCompensationOffer } from "./modules/inbox/EmailCompensationCard";
 import { EvidencePanel, type EvidenceRef } from "./modules/evidence/EvidencePanel";
 import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
@@ -41,6 +43,7 @@ import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
 import { OverdueMetric } from "./modules/dashboard/OverdueMetric";
+import { ComfortControls } from "./modules/settings/ComfortControls";
 import {
   Activity,
   AlertTriangle,
@@ -713,15 +716,17 @@ export function App() {
   async function openProviderSources(provider: string) {
     await picker.open(provider);
   }
-  async function syncGmail(options: { silent?: boolean } = {}) {
+  async function syncGmail(options: { silent?: boolean; folder?: MailFolderKind } = {}) {
     if (gmailSyncing || !projectId) return;
     try {
       if (!options.silent) setError("");
       setGmailSyncing(true);
-      if (!options.silent) setGmailSyncStatus("Получаю последние письма за 7 дней…");
+      if (!options.silent) setGmailSyncStatus(options.folder
+        ? "Получаю до 25 последних писем выбранной папки…"
+        : "Получаю последние письма за 7 дней…");
       const result = await api(`/projects/${projectId}/gmail/sync`, {
         method: "POST",
-        body: JSON.stringify({ query: "newer_than:7d", max_results: 25 }),
+        body: JSON.stringify(mailSyncRequest(options.folder)),
       });
       const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const reclassified = Number(result.reclassified || 0);
@@ -2256,6 +2261,7 @@ export function App() {
           </div>
         </header>
         <section className="content">
+          <ComfortControls />
           {error && <div className="error">{error}</div>}
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
@@ -3134,7 +3140,7 @@ export function App() {
               }))}
               syncing={gmailSyncing}
               syncStatus={gmailSyncStatus}
-              onSync={() => syncGmail()}
+              onSync={(folder) => syncGmail({ folder })}
               onOpenContacts={() => setMailView("companies")}
               onNotice={setNotice}
               onError={setError}
