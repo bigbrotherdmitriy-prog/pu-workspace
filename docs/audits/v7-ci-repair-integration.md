@@ -115,6 +115,12 @@ to be empty. The fixture now accepts exactly that migration-owned row and
 refuses zero, multiple or differently named rows. It does not accept customer
 or production data. Targeted snapshot/durable tests: **27 passed**.
 
+All other workflows for `b1c6882` completed successfully: main CI
+`34214357247`, Docker smoke `34214357156`, and the complete v54 PostgreSQL
+runtime `34214357228` (runtime, backend-offline, local engines, lint and
+fail-closed acceptance gate). Only snapshot requires the local bootstrap fix
+above and one further isolated rerun.
+
 The remaining `a2891e6` workflows completed after the local fixture fix was
 prepared:
 
