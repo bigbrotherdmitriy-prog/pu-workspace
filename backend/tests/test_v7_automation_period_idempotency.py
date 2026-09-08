@@ -147,9 +147,10 @@ def test_scheduler_passes_original_due_snapshot_when_rule_changes(sessions, monk
     import app.automation_engine as engine
     identifier = rule_id(sessions)
     prepare = engine.prepare_rule_run
-    def advanced_elsewhere(db, rule, scheduled_for=None):
-        rule.next_run_on = date(2028, 3, 31)
-        return prepare(db, rule, scheduled_for)
+    def advanced_elsewhere(db, rule, scheduled_for=None, **kwargs):
+        with sessions.begin() as other:
+            other.get(AutomationRule, identifier).next_run_on = date(2028, 3, 31)
+        return prepare(db, rule, scheduled_for, **kwargs)
     monkeypatch.setattr(engine, "prepare_rule_run", advanced_elsewhere)
     with sessions() as db:
         assert engine.run_due_rules(db, date(2028, 2, 29))["prepared"] == 1
@@ -157,6 +158,59 @@ def test_scheduler_passes_original_due_snapshot_when_rule_changes(sessions, monk
         assert row.scheduled_for == date(2028, 2, 1)
         assert db.get(Task, row.task_id).due_date == date(2028, 2, 29)
         assert db.get(AutomationRule, identifier).next_run_on == date(2028, 3, 31)
+
+
+def test_scheduler_rechecks_pause_after_due_snapshot(sessions, monkeypatch):
+    import app.automation_engine as engine
+    identifier = rule_id(sessions)
+    prepare = engine.prepare_rule_run
+    def paused_elsewhere(db, rule, scheduled_for=None, **kwargs):
+        with sessions.begin() as other:
+            other.get(AutomationRule, identifier).active = False
+        return prepare(db, rule, scheduled_for, **kwargs)
+    monkeypatch.setattr(engine, "prepare_rule_run", paused_elsewhere)
+    with sessions() as db:
+        assert engine.run_due_rules(db, date(2028, 2, 29)) == {"due": 1, "prepared": 0, "failed": 0}
+        assert db.get(AutomationRule, identifier).next_run_on == date(2028, 2, 29)
+    assert counts(sessions) == (0, 0, 0)
+
+
+def test_paused_rule_still_allows_explicit_manual_preparation(sessions):
+    identifier = rule_id(sessions)
+    with sessions.begin() as db:
+        db.get(AutomationRule, identifier).active = False
+    assert run(sessions, identifier, date(2028, 2, 10))[0]
+    assert counts(sessions) == (1, 1, 1)
+
+
+@pytest.mark.parametrize("change", ["active", "name", "day_of_month", "deleted", "expired"])
+def test_pending_rule_change_is_preserved_without_implicit_flush_or_refresh(sessions, change):
+    identifier = rule_id(sessions)
+    with sessions() as db:
+        rule = db.get(AutomationRule, identifier)
+        if change == "deleted":
+            db.delete(rule)
+        elif change == "expired":
+            db.expire(rule, ["next_run_on"])
+            rule.active = False
+        else:
+            setattr(rule, change, {"active": False, "name": "Pending edit", "day_of_month": 15}[change])
+        pending = set(db.dirty), set(db.deleted)
+        statements = []
+        def capture(_conn, _cursor, statement, *_args):
+            statements.append(statement)
+        event.listen(db.get_bind(), "before_cursor_execute", capture)
+        try:
+            with pytest.raises(ValueError, match="^automation_rule_pending_changes$"):
+                prepare_rule_run(db, rule)
+            assert not statements
+            assert (set(db.dirty), set(db.deleted)) == pending
+            if change in {"active", "expired"}:
+                assert rule.active is False
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+        db.rollback()
+    assert counts(sessions) == (0, 0, 0)
 
 
 def test_existing_legacy_duplicates_are_not_rewritten_or_expanded(sessions):

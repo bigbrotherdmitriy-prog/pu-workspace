@@ -32,6 +32,19 @@ explicitly. Refreshing a rule while waiting for a concurrent worker must not
 accidentally prepare its newly advanced, future next_run_on. The scheduling
 selection, following-month calculation and counters otherwise remain unchanged.
 
+Review correction: scheduler preparation now sets `require_active=True` and
+checks the refreshed active flag under that same rule lock. A pause committed
+after the initial due snapshot skips the pair without incrementing prepared or
+failed (`due` remains the original snapshot count). The unchanged manual API
+historically allows explicit preparation of a paused rule; the default remains
+`require_active=False`, preserving that contract without enabling automatic sends.
+
+`prepare_rule_run` rejects pending new/dirty/deleted changes to its input rule
+before reading potentially expired attributes or issuing a refresh query. The
+owner must explicitly flush or roll back the edit and retry. This is a narrow
+preparation boundary, not a replacement for global authority checks or a change
+to the scheduler's existing transaction ownership.
+
 ## Transactions and rollout boundary
 
 The existing transaction includes Task, Draft, Run and next-run update with one
@@ -61,7 +74,7 @@ automation controls. The first corrected profile was **20 passed**. Additional
 controls exercise the real due scheduler, captured due snapshot, legacy duplicates,
 nonmonthly compatibility and explicit leap/short-month dates.
 
-Final scoped profile: **33 passed, 1 conditional PostgreSQL test skipped in
+Pre-review scoped profile: **33 passed, 1 conditional PostgreSQL test skipped in
 32.07s**, running `test_ai_secretary_automation.py`,
 `test_v7_automation_period_idempotency.py` and `test_v7_automation_period_postgres.py`.
 No owned PostgreSQL URL was configured locally, so the concurrent database test
@@ -80,6 +93,17 @@ and URL query overrides are rejected. The test creates and removes only its own
 random `v7_automation_period_<uuid>` schema. Guard regressions verify CI service
 admission, rejection outside CI, remote/prod/query targets and malformed URLs;
 errors contain a fixed code, not the DSN.
+
+The review correction reproduced **6 failing / 1 passing** pause/pending controls
+before the fix: a separately committed pause between snapshot and preparation,
+pending active/name/day edits, pending deletion, and an expired next-run attribute
+with pending pause. Manual paused preparation remained passing. The scheduler
+snapshot advancement test now also changes the row in a separate committed
+session, rather than simulating an unflushed caller edit.
+
+Final corrected scoped profile: **40 passed, 1 conditional PostgreSQL test skipped
+in 41.67s**, using the same three test files. PostgreSQL execution remains delegated
+to the separately owned integration/CI runtime; no local concurrency PASS is claimed.
 
 No live mail, external provider, production database or real user data is used.
 This is only M7-02's engine slice, not MVP7 completion. Template edit/approval

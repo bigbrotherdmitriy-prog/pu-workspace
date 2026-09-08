@@ -22,6 +22,10 @@ MONTHS_RU = (
 )
 
 
+class _PausedAutomationRule(Exception):
+    """A scheduler snapshot became inactive before acquiring the rule lock."""
+
+
 def monthly_date(year: int, month: int, day_of_month: int) -> date:
     return date(year, month, min(day_of_month, calendar.monthrange(year, month)[1]))
 
@@ -66,7 +70,14 @@ def _render(template: str, project: Project, contract: Contract | None, schedule
     return result
 
 
-def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | None = None) -> AutomationRun:
+def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | None = None,
+                     *, require_active: bool = False) -> AutomationRun:
+    # Do not flush or overwrite a caller's uncommitted rule edit/revocation.
+    # Check before reading potentially expired attributes. The owner may
+    # explicitly flush or roll back, then retry this preparation transaction.
+    if (rule in db.new or rule in db.deleted
+            or (rule in db.dirty and db.is_modified(rule, include_collections=False))):
+        raise ValueError("automation_rule_pending_changes")
     # Capture the requested occurrence before refreshing a possibly stale rule.
     # The scheduled date still controls rendering, due dates and next_run_on.
     run_date = scheduled_for or rule.next_run_on
@@ -76,6 +87,8 @@ def prepare_rule_run(db: Session, rule: AutomationRule, scheduled_for: date | No
         .with_for_update().execution_options(populate_existing=True))
     if rule is None:
         raise ValueError("Automation rule no longer exists")
+    if require_active and not rule.active:
+        raise _PausedAutomationRule()
     period_key = run_date.replace(day=1) if rule.kind == "monthly_email" else run_date
     lookup = select(AutomationRun).where(AutomationRun.rule_id == rule.id)
     if rule.kind == "monthly_email":
@@ -134,8 +147,10 @@ def run_due_rules(db: Session, today: date | None = None) -> dict[str, int]:
     prepared = failed = 0
     for rule, scheduled_for in rules:
         try:
-            prepare_rule_run(db, rule, scheduled_for)
+            prepare_rule_run(db, rule, scheduled_for, require_active=True)
             prepared += 1
+        except _PausedAutomationRule:
+            db.rollback()
         except Exception:
             db.rollback()
             failed += 1
