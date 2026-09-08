@@ -50,7 +50,7 @@ def project_cash_flow_views(rows: Sequence[Mapping], *, project_id: int,
                                 "planned_entry_ids": [], "actual_entry_ids": []}
         months.setdefault(day.isoformat()[:7], {"month": day.isoformat()[:7], "planned": _zero(), "actual": _zero()})
     totals = {"planned": _zero(), "actual": _zero()}
-    excluded = dict.fromkeys(("proposed", "cancelled", "unsupported_status", "invalid_actual", "invalid_plan", "invalid_direction"), 0)
+    excluded = dict.fromkeys(("proposed", "cancelled", "unsupported_status", "unconfirmed_plan", "invalid_actual", "invalid_plan", "invalid_direction"), 0)
     details = []
     for source in rows:
         row = dict(source)
@@ -61,6 +61,9 @@ def project_cash_flow_views(rows: Sequence[Mapping], *, project_id: int,
         active = status in {"approved", "paid", "received"}
         if not active:
             reasons.append(status if status in {"proposed", "cancelled"} else "unsupported_status")
+        reviewed = row["review_status"] == "confirmed"
+        if active and not reviewed:
+            reasons.append("unconfirmed_plan")
         valid_direction = direction in {"inflow", "outflow"}
         if not valid_direction:
             reasons.append("invalid_direction")
@@ -68,12 +71,12 @@ def project_cash_flow_views(rows: Sequence[Mapping], *, project_id: int,
         if active and not plan_valid:
             reasons.append("invalid_plan")
         is_fact = status in {"paid", "received"}
-        fact_valid = (type(actual_date) is date and actual_amount is not None
-                      and row["review_status"] == "confirmed"
+        fact_valid = (type(actual_date) is date and actual_amount is not None and actual_amount > 0
+                      and reviewed
                       and status == ("received" if direction == "inflow" else "paid"))
         if is_fact and not fact_valid:
             reasons.append("invalid_actual")
-        plan_in = active and valid_direction and plan_valid and date_from <= planned_date <= date_to
+        plan_in = active and reviewed and valid_direction and plan_valid and date_from <= planned_date <= date_to
         actual_in = is_fact and valid_direction and fact_valid and date_from <= actual_date <= date_to
         for reason in reasons:
             excluded[reason] += 1

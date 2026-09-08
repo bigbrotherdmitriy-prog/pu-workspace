@@ -73,17 +73,37 @@ def test_excluded_status_never_contributes_money(db_session, user_factory, statu
     assert result["excluded"][key] == 1
 
 
-@pytest.mark.parametrize("changes", [{"actual_date":None}, {"actual_amount":Decimal("-1")}, {"review_status":"required"}])
+@pytest.mark.parametrize("changes", [{"actual_date":None}, {"actual_amount":Decimal("-1")}, {"actual_amount":Decimal("0")}, {"review_status":"required"}])
 def test_invalid_actual_flagged_not_counted(db_session, user_factory, changes):
     actor, baseline, _ = world(db_session, user_factory)
     values = dict(status="paid", actual_date=date(2026,2,2), actual_amount=Decimal("70")); values.update(changes)
     entry(db_session, baseline.project_id, **values)
     result = views(db_session, actor, baseline.project_id)
     assert result["excluded"]["invalid_actual"] == 1
-    assert result["details"][0]["exclusion_reasons"] == ["invalid_actual"]
+    expected_reasons = ["unconfirmed_plan", "invalid_actual"] if changes.get("review_status") == "required" else ["invalid_actual"]
+    assert result["details"][0]["exclusion_reasons"] == expected_reasons
     assert result["summary"]["actual"]["outflow"] == "0.00"
-    assert result["summary"]["planned"]["outflow"] == "100.10"
+    assert result["summary"]["planned"]["outflow"] == ("0.00" if changes.get("review_status") == "required" else "100.10")
     assert_consistent(result)
+
+
+@pytest.mark.parametrize("status", ["approved", "paid", "received"])
+@pytest.mark.parametrize("review", ["pending_confirmation", "required", "rejected"])
+def test_unreviewed_active_rows_never_enter_confirmed_plan(db_session, user_factory, status, review):
+    actor, baseline, _ = world(db_session, user_factory)
+    row = entry(db_session, baseline.project_id, status=status, review_status=review,
+                direction="inflow" if status == "received" else "outflow",
+                actual_date=date(2026,2,2) if status != "approved" else None,
+                actual_amount=Decimal("90.05") if status != "approved" else Decimal("0"))
+    result = views(db_session, actor, baseline.project_id)
+    assert result["excluded"]["unconfirmed_plan"] == 1
+    assert "unconfirmed_plan" in result["details"][0]["exclusion_reasons"]
+    assert not result["details"][0]["plan_in_period"]
+    assert not result["details"][0]["actual_in_period"]
+    assert_consistent(result)
+    assert result["summary"]["planned"] == dict(inflow="0.00",outflow="0.00",net="0.00")
+    db_session.refresh(row)
+    assert row.review_status == review and row.status == status  # no implicit backfill
 
 
 def test_period_uses_both_independent_dates_and_empty_leap_day(db_session, user_factory):

@@ -52,7 +52,7 @@ months: [{month: "YYYY-MM", planned: {inflow,outflow,net}, actual: {inflow,outfl
 calendar: [{date: "YYYY-MM-DD", planned: {inflow,outflow,net}, actual: {inflow,outflow,net},
             planned_entry_ids: number[], actual_entry_ids: number[]}]
 summary: {planned: {inflow,outflow,net}, actual: {inflow,outflow,net}}
-excluded: {proposed,cancelled,unsupported_status,invalid_actual,invalid_plan,invalid_direction}
+excluded: {proposed,cancelled,unsupported_status,unconfirmed_plan,invalid_actual,invalid_plan,invalid_direction}
 decision_requirements: [{code,decision_by,message}]
 external_effects: {payment_created:false,posting_created:false,automatic_conversion:false}
 ```
@@ -69,11 +69,15 @@ The exclusion counts refer to period-relevant selected rows, not the entire proj
 
 ## Basis and existing financial boundaries
 
-- Confirmed plan: approved/paid/received, valid planned amount/date, planned_date.
-- Fact: paid/received consistent with direction, actual amount/date, and confirmed
+- Confirmed plan: approved/paid/received **and review_status=confirmed**, valid
+  planned amount/date, planned_date. Legacy active status alone is not review.
+- Active rows whose review is pending_confirmation/required/rejected stay visible
+  with `unconfirmed_plan`, but contribute no confirmed plan money. No backfill.
+- Fact: paid/received consistent with direction, strictly positive actual amount/date, and confirmed
   review status. This preserves the existing payment handler's human-review guard.
-- A malformed/unreviewed fact is flagged `invalid_actual` and excluded from fact;
-  a valid original confirmed plan remains independently visible/countable.
+- A malformed/unreviewed/zero-default fact is flagged `invalid_actual` and excluded
+  from fact. A valid original plan remains countable only with confirmed review;
+  required/pending/rejected review excludes both bases. Plan zero remains supported.
 - Proposed and cancelled rows are visible as excluded details and contribute no
   money. Unsupported states are likewise excluded explicitly.
 - Corrections change the fact month/date/amount, never replace the planned basis.
@@ -135,6 +139,28 @@ browser, frontend suite or full backend suite was run by this bounded stream.
 Those remain root integration responsibilities, not silently counted as PASS.
 
 ## Remaining scope / status
+
+### Blocking-review correction (separate commit above initial package)
+
+Review found that legacy active statuses with a14's pending review default could
+enter planned totals, and a paid zero-default amount could be presented as a fact.
+Both were reproduced before correction. Expanded target RED:
+
+```powershell
+python -X utf8 -m pytest tests/test_v7_cash_flow_views.py -q --basetemp=D:/PU-Workspace/tmp/dds-unconfirmed-zero-red --tb=short
+```
+
+**11 failed, 18 passed in 8.09s**: all nine combinations of approved/paid/received
+with pending_confirmation/required/rejected review, plus required-review basis
+expectation and zero actual. Fixed only read-only projection/tests/report; no
+financial handlers, migrations or existing records changed. Valid reviewed plan
+with malformed fact is still preserved. Unknown/unconfirmed review fails closed.
+
+Same final targeted+related suite with
+`--basetemp=D:/PU-Workspace/tmp/dds-confirmed-final`: **57 passed, no skips,
+2 existing Alembic warnings, 5.66s**. UI integrator notified about the mandatory
+additional `unconfirmed_plan` reason/counter. This corrected contract supersedes
+the initial package's broader active-status-only plan admission.
 
 **Backend projection contract PASS; M4-05 full product acceptance NOT COMPLETE.**
 UI must consume this response without recomputing money, display excluded states,
