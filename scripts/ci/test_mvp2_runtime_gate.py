@@ -34,6 +34,13 @@ def test_history_database_is_owned_scoped_and_migrated_before_acceptance(monkeyp
     assert '"backend/tests/test_mvp2_gmail_history_cursor_postgres.py"' in source
     assert '"backend/tests/test_mvp2_gmail_history_migration.py"' in source
     assert "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL" in module.TEST_DATABASE_KEYS
-    assert 'env=dict(env, **{key: "" for key in TEST_DATABASE_KEYS})' in source
+    offline_spec = importlib.util.spec_from_file_location("mvp2_offline_contract", ROOT / "scripts/ci/v7_ci_capacity.py")
+    offline = importlib.util.module_from_spec(offline_spec)
+    offline_spec.loader.exec_module(offline)
+    monkeypatch.setenv("PUW_MVP2_GMAIL_HISTORY_DATABASE_URL", "unowned-must-not-inherit")
+    child = offline.offline_env()
+    assert "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL" not in child
+    assert child["DATABASE_URL"] == "sqlite+pysqlite:///:memory:"
+    assert child["PU_TEST_POSTGRES"] == "0"
     assert 'for name in reversed(tuple(CREATED))' in source
     assert '"raw_output_published": False' in source

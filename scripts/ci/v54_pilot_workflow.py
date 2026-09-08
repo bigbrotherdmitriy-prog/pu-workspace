@@ -417,6 +417,8 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "schema": "puw.v54.runtime.protocol.v1", "result": result, "head": HEAD,
         "commit": os.environ.get("GITHUB_SHA", "local"), "phases": PHASES,
         "runtime": runtime,
+        "scope": "isolated_postgres_runtime_corpus_and_harness",
+        "offline_backend": "SEPARATE_JOB_NOT_ASSERTED_HERE",
         "mandatory_postgres": coverage,
         "coverage_limits": {
             "mvp1": "synthetic adapter and simulated crash; no live provider or process kill",
@@ -555,8 +557,6 @@ def main() -> None:
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
         run_remaining_postgres(env)
-        run_phase("backend_full", [sys.executable, "-m", "pytest", "backend/tests", "-q", "--tb=short", "-rs"],
-                  env=dict(env, **{key: "" for key in TEST_DATABASE_KEYS}), timeout=900)
         targets = [
             "backend/tests/test_v54_pilot_foundation.py",
             "backend/tests/test_v54_source_evidence_pilot.py", "backend/tests/test_v54_source_evidence_postgres.py",

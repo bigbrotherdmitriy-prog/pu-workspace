@@ -202,8 +202,7 @@ def test_main_wires_exact_mandatory_nodes_after_owned_head_migrations(monkeypatc
         assert options["cwd"] == module.ROOT / "backend"
         _, test_args, _ = phases[names.index(phase)]
         assert test_args[3:-3] == list(module.MVP_TESTS[phase])
-    _, _, offline_options = phases[names.index("backend_full")]
-    assert all(offline_options["env"][key] == "" for key in module.TEST_DATABASE_KEYS)
+    assert "backend_full" not in names  # Separate fail-closed workflow job.
     assert cleanups == [module.DATABASES]
 
 

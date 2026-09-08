@@ -11,12 +11,58 @@ on:
       - 'codex/mvp1234-wave2-integration'
       - 'codex/v7-execution-wave1'
       - 'codex/v7-execution-wave2'
+      - 'codex/v7-execution-wave3'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  backend-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    container: python:3.12-bookworm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned backend dependencies
+        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt
+      - name: Full offline backend regression with safe protocol
+        timeout-minutes: 17
+        run: python scripts/ci/v7_ci_capacity.py offline
+      - name: Publish safe offline counters only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-backend-offline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: v7-backend-offline-artifacts/protocol.json
+          if-no-files-found: error
+          retention-days: 7
+  acceptance-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [backend-offline, runtime, local-engines, lint]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require every isolated check and its artifact publication
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python scripts/ci/v7_ci_capacity.py gate
+      - name: Publish aggregate status only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-ci-capacity-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: v7-ci-capacity-artifacts/protocol.json
+          if-no-files-found: error
+          retention-days: 7
   local-engines:
     runs-on: ubuntu-24.04
     timeout-minutes: 22
