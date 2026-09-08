@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  test-and-build:
+  backend:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -48,6 +48,21 @@ jobs:
         run: |
           set -o pipefail
           pytest tests -q 2>&1 | tee ../pytest.log
+      - name: Upload backend verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-verification-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pytest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -74,15 +89,51 @@ jobs:
         run: |
           set -o pipefail
           pnpm run build 2>&1 | tee ../frontend-build.log
-      - name: Upload verification logs
+      - name: Upload frontend verification logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verification-logs-${{ github.sha }}
+          name: frontend-verification-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            pytest.log
             frontend-check.log
             frontend-test.log
             frontend-build.log
           if-no-files-found: warn
           retention-days: 30
+
+  # Preserve the previous required-check identity for existing branch rules.
+  test-and-build:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require both complete verification jobs
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          try:
+              results = json.loads(os.environ.get("CI_NEEDS_JSON", ""))
+          except (ValueError, TypeError):
+              results = None
+          passed = (
+              isinstance(results, dict)
+              and set(results) == {"backend", "frontend"}
+              and all(
+                  isinstance(results[name], dict)
+                  and results[name].get("result") == "success"
+                  for name in ("backend", "frontend")
+              )
+          )
+          print("CI aggregate PASS" if passed else "CI aggregate FAIL")
+          sys.exit(0 if passed else 1)
+          PY
