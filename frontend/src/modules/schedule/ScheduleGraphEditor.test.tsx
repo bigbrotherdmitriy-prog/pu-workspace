@@ -76,7 +76,7 @@ describe("ScheduleGraphEditor real route contract with synthetic API", () => {
   it("ignores late GET from previous project/baseline", async () => {
     const pending = deferred(); const api = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValueOnce(fixture({ baseline_id: 9 }));
     const { rerender } = render(<ScheduleGraphEditor projectId={4} baselineId={8} api={api} canEdit />);
-    rerender(<ScheduleGraphEditor projectId={5} baselineId={9} api={api} canEdit />); await screen.findByRole("spinbutton");
+    rerender(<ScheduleGraphEditor projectId={5} baselineId={9} api={api} canEdit />); await screen.findByRole("spinbutton", {name:"Длительность #12"});
     await act(async () => pending.resolve(fixture({ items: [] }))); expect(duration()).toBeInTheDocument(); expect(api.mock.calls[1][0]).toBe("/execution/baselines/9/graph");
   });
   it("guards double submits and suppresses late PUT callback after unmount", async () => {

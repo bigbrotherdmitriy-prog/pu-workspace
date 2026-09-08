@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { constraints, parseGraph, putPayload, sameItems, toDraft, type Constraint, type Draft, type DraftItem, type Graph } from "./graphReadModel";
 import "./scheduleGraph.css";
 import { SchedulePlanSummary } from "./SchedulePlanSummary";
+import { ScheduleRowsEditor } from "./ScheduleRowsEditor";
 
 export type GraphApi = (path: string, options?: RequestInit) => Promise<unknown>;
 export type ScheduleGraphEditorProps = {
@@ -30,6 +31,9 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
   const [conflict, setConflict] = useState(false);
   const [denied, setDenied] = useState(false);
   const [approvalReview, setApprovalReview] = useState(false);
+  const [rowsDirty, setRowsDirty] = useState(false);
+  const [rowsBusy, setRowsBusy] = useState(false);
+  const [rowsGeneration, setRowsGeneration] = useState(0);
   const alive = useRef(true);
   const request = useRef(0);
   const lock = useRef(false);
@@ -48,7 +52,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
   }, [baselineId, endpoint]);
 
   async function reload() {
-    if (lock.current) return;
+    if (lock.current || rowsBusy) return;
     lock.current = true; setBusy(true); setError(""); setApprovalReview(false); const ticket = ++request.current;
     try {
       const result = parseGraph(await apiRef.current(endpoint), baselineId);
@@ -66,7 +70,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
     } finally { lock.current = false; if (alive.current && ticket === request.current) setBusy(false); }
   }
   async function save() {
-    if (!graph || !draft || lock.current || !canEdit || conflict || denied || graph.status !== "draft") return;
+    if (!graph || !draft || lock.current || rowsDirty || !canEdit || conflict || denied || graph.status !== "draft") return;
     let payload;
     try { payload = putPayload(draft, graph); } catch { setError("Проверьте начало проекта, длительности, вехи и даты ограничений."); return; }
     lock.current = true; setBusy(true); setError(""); setNotice(""); setApprovalReview(false); const ticket = ++request.current;
@@ -90,9 +94,9 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
     setDraft(current => current && ({ ...current, items: current.items.map(item => item.id === id ? { ...item, ...patch } : item) }));
     setNotice(""); setApprovalReview(false);
   }
-  const editable = canEdit && graph?.status === "draft" && !busy && !denied;
+  const editable = canEdit && graph?.status === "draft" && !busy && !denied && !rowsDirty;
   const dirty = !!graph && !!draft && JSON.stringify(draft) !== JSON.stringify(toDraft(graph));
-  const approvable = canApprove && graph?.status === "draft" && graph.planning_mode === "calendar_graph" && !dirty && !busy && !denied && !conflict;
+  const approvable = canApprove && graph?.status === "draft" && graph.planning_mode === "calendar_graph" && !dirty && !rowsDirty && !busy && !denied && !conflict;
   async function approve() {
     if (!approvable || !approvalReview || !graph || lock.current) return;
     lock.current = true; setBusy(true); setError(""); setApprovalReview(false); const ticket = ++request.current;
@@ -114,7 +118,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
     } finally { lock.current = false; if (alive.current && ticket === request.current) setBusy(false); }
   }
   return <section className="card schedule-graph" aria-label="Редактор графа ГПР" aria-busy={busy}>
-    <header><h2>Граф ГПР</h2><button type="button" className="secondary" disabled={busy} onClick={() => void reload()}>Обновить серверную версию</button></header>
+    <header><h2>Граф ГПР</h2><button type="button" className="secondary" disabled={busy || rowsBusy} onClick={() => void reload()}>Обновить серверную версию</button></header>
     {busy && <p role="status">Загрузка / сохранение ГПР…</p>}
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -123,17 +127,20 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
       <p>Версия {graph.version} · ревизия графа {graph.graph_revision} · {graph.status === "draft" ? "Черновик" : "Только чтение — создайте черновик в реестре ГПР"}</p>
       {!canEdit && <p>Доступ только для просмотра.</p>}
       <p>Календарные дни, включая день начала. Веха — 0 дней. Рабочие календари не поддерживаются. Даты ниже — последний сохранённый расчёт, не прогноз локальных правок.</p>
-      <SchedulePlanSummary graph={graph} stale={conflict || busy} hasLocalEdits={dirty} />
+      <SchedulePlanSummary graph={graph} stale={conflict || busy} hasLocalEdits={dirty || rowsDirty} />
+      <ScheduleRowsEditor key={`${graph.graph_revision}:${rowsGeneration}`} graph={graph} api={api} disabled={!canEdit || dirty || busy || conflict || denied} onDirty={setRowsDirty} onBusy={setRowsBusy} onSaved={result=>{
+        setGraph(result);setDraft(toDraft(result));setRowsDirty(false);setRowsBusy(false);setApprovalReview(false);setNotice("Состав сохранён. Проверьте расчёт перед отдельным утверждением.");onSaved?.(baselineId,result.graph_revision);
+      }}/>
       {conflict && <aside aria-label="Конфликт версий">
         <p>Автоматическая перезапись отключена. Локальные изменения остаются в форме.</p>
         {latest && <>
           <p>Сервер: версия {latest.version}, ревизия {latest.graph_revision}, статус {latest.status}, начало {latest.project_start || "не задано"}.</p>
           <div className="schedule-graph-scroll"><table><caption>Новая серверная версия для сравнения</caption><thead><tr><th>Этап</th><th>Длительность / веха</th><th>Зависимости</th><th>Ограничения</th><th>Расчётные даты</th></tr></thead><tbody>{latest.items.map(v => <tr key={v.id}><th>{v.title} (#{v.id})</th><td>{v.duration_days ?? "—"} / {v.is_milestone ? "да" : "нет"}</td><td>{v.predecessor_ids || "—"}</td><td>{v.constraint_type || "—"} {v.constraint_date} / не раньше {v.not_before_date || "—"}</td><td>{v.planned_start || "—"} → {v.planned_finish || "—"}</td></tr>)}</tbody></table></div>
-          <button type="button" disabled={busy || !canEdit || latest.status !== "draft" || !sameItems(draft, latest)} onClick={() => {
+          <button type="button" disabled={busy || rowsDirty || !canEdit || latest.status !== "draft" || !sameItems(draft, latest)} onClick={() => {
             setGraph(latest); setLatest(null); setConflict(false); setError(""); setNotice("Локальные правки оставлены. Проверьте их и отдельно нажмите «Сохранить и рассчитать».");
           }}>Оставить мои правки поверх новой ревизии</button>
           <button type="button" className="secondary" disabled={busy} onClick={() => {
-            setGraph(latest); setDraft(toDraft(latest)); setLatest(null); setConflict(false); setError(""); setNotice("Локальные правки заменены выбранной серверной версией.");
+            setGraph(latest); setDraft(toDraft(latest)); setRowsGeneration(v=>v+1);setRowsDirty(false); setLatest(null); setConflict(false); setError(""); setNotice("Локальные правки заменены выбранной серверной версией.");
           }}>Отбросить мои правки и принять серверную версию</button>
           {!sameItems(draft, latest) && <p>Состав этапов изменился. Перенос всех локальных правок заблокирован; сохраните нужные значения перед принятием серверной версии.</p>}
         </>}
@@ -141,7 +148,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
       <form onSubmit={event => { event.preventDefault(); void save(); }}>
         <fieldset disabled={!editable}><legend>Параметры расчёта</legend>
           <label>Начало проекта<input type="date" required value={draft.anchor} onChange={e => { setDraft({ ...draft, anchor: e.target.value }); setNotice(""); setApprovalReview(false); }} /></label>
-          {!draft.items.length && <p>Этапов пока нет. Добавьте этапы в существующем реестре ГПР, затем обновите эту версию.</p>}
+          {!draft.items.length && <p>Этапов пока нет. Добавьте их в редакторе состава выше и отдельно сохраните.</p>}
           <div className="schedule-graph-scroll"><table><caption>Полный граф существующих этапов</caption><thead><tr><th>Этап</th><th>Длительность</th><th>Веха</th><th>Зависимости</th><th>Ограничение</th><th>Не раньше</th><th>Сохранённый расчёт</th></tr></thead><tbody>{draft.items.map(v => {
             const row = graph.items.find(item => item.id === v.id)!;
             return <tr key={v.id}><th scope="row">{row.title}<small>#{v.id}</small></th>
