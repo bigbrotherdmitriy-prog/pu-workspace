@@ -57,6 +57,23 @@ def test_execute_raises_only_allowlisted_child_failure(m, monkeypatch):
     assert "secret" not in str(error.value)
 
 
+def test_snapshot_fixture_has_required_connection_identity(monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "backend"))
+    spec = importlib.util.spec_from_file_location(
+        "snapshot_checks_fixture",
+        root / "scripts/ci/durable_queue/workspace_snapshot_checks.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    connection = module.synthetic_drive_connection(17)
+    assert connection.project_id == 17
+    assert connection.provider == "google_drive"
+    assert connection.account_email == "snapshot-owner@example.invalid"
+    assert connection.root_folder_id == "synthetic-customer-project-nested"
+    assert connection.connection_id == "synthetic-no-credentials"
+
+
 def test_timeout_kills_owned_group(m, monkeypatch):
     child = Mock(pid=987, returncode=None)
     child.communicate.side_effect = subprocess.TimeoutExpired("synthetic", 1)

@@ -91,6 +91,20 @@ Final integrated CI contract suite after these follow-ups: **335 passed**, no
 skips / 144.90 seconds. This does not replace the required GitHub PostgreSQL and
 container rerun.
 
+### Second rerun after `a2891e6`
+
+Docker smoke `34212914501` passed. Snapshot `34212914676` passed service
+initialization and database cleanup, then reported `child_phase=guard`. Static
+inspection found that the synthetic `DriveConnection` fixture omitted the
+model's required non-null `account_email`. The coordinator kept its phase at
+`guard` through imports/schema/fixture setup, obscuring this distinction.
+
+The fixture now supplies an `.invalid` synthetic mailbox identity through a
+small factory tested without provider access. Early phases are split into
+`imports`, `schema` and `fixture_seed`, all enforced by the outer exact enum.
+Snapshot/durable targeted tests: **26 passed**. No real mailbox, provider or
+document is used.
+
 Push only after separate authorization of the resulting HEAD:
 
 ```powershell

@@ -16,7 +16,8 @@ from urllib.parse import quote
 
 from sqlalchemy.engine import make_url
 
-PHASES = ("guard", "seed_http", "first_walk", "second_worker", "kill", "lease_expiry", "recovered", "replay")
+PHASES = ("guard", "imports", "schema", "fixture_seed", "seed_http", "first_walk",
+          "second_worker", "kill", "lease_expiry", "recovered", "replay")
 _phase = "guard"
 
 
@@ -81,6 +82,17 @@ def install_provider(factory, *, hold=False):
     return provider
 
 
+def synthetic_drive_connection(project_id):
+    from app.models.drive_connection import DriveConnection
+    return DriveConnection(
+        project_id=project_id,
+        provider="google_drive",
+        account_email="snapshot-owner@example.invalid",
+        connection_id="synthetic-no-credentials",
+        root_folder_id="synthetic-customer-project-nested",
+    )
+
+
 def worker_mode():
     guard()
     from app.database import SessionLocal
@@ -101,6 +113,7 @@ def wait_for(predicate, seconds=20):
 def coordinator():
     global _phase
     guard()
+    _phase = "imports"
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from sqlalchemy import func, select, text
@@ -108,7 +121,6 @@ def coordinator():
     from app.core.auth import require_user
     from app.database import SessionLocal, get_db
     from app.models.audit_log import AuditLog
-    from app.models.drive_connection import DriveConnection
     from app.models.job import BackgroundJob, ServiceHeartbeat
     from app.models.organization_contract import Organization
     from app.models.project import Project
@@ -117,6 +129,7 @@ def coordinator():
     from app.models.workspace import VirtualNode, WorkspaceSnapshot
     from app.schema import CURRENT_SCHEMA_REVISION
 
+    _phase = "schema"
     with SessionLocal() as db:
         assert list(db.scalars(text("SELECT version_num FROM alembic_version"))) == [CURRENT_SCHEMA_REVISION]
         # Never let generic workers claim pre-existing user work.
@@ -124,14 +137,14 @@ def coordinator():
         assert db.scalar(select(func.count()).select_from(BackgroundJob)) == 0
         assert db.scalar(select(func.count()).select_from(User)) == 0
         assert db.scalar(select(func.count()).select_from(Organization)) == 0
+        _phase = "fixture_seed"
         org = Organization(name="Synthetic snapshot recovery")
         user = User(name="Synthetic owner", email="snapshot-owner@example.invalid")
         db.add_all([org, user]); db.flush()
         project = Project(name="Synthetic nested project", organization_id=org.id)
         db.add(project); db.flush()
         db.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner"))
-        db.add(DriveConnection(project_id=project.id, provider="google_drive", connection_id="synthetic-no-credentials",
-                               root_folder_id="synthetic-customer-project-nested"))
+        db.add(synthetic_drive_connection(project.id))
         db.commit(); pid, uid = project.id, user.id
     provider = install_provider(SessionLocal)
     app = FastAPI(); app.include_router(workspace.router)

@@ -30,8 +30,8 @@ class ChildProofFailure(RuntimeError):
 
 
 def child_failure_phase(output):
-    allowed = {"guard", "seed_http", "first_walk", "second_worker", "kill",
-               "lease_expiry", "recovered", "replay"}
+    allowed = {"guard", "imports", "schema", "fixture_seed", "seed_http", "first_walk",
+               "second_worker", "kill", "lease_expiry", "recovered", "replay"}
     for line in output.splitlines():
         if len(line) > 160:
             continue
