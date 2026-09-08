@@ -6,6 +6,7 @@ const graph = (id = 8): Graph => ({
   planning_mode: "calendar_graph", project_start: "2026-09-01",
   plan: null,
   items: [{ id: 12, title: "Synthetic preparation", duration_days: 2, is_milestone: false,
+    wbs_parent_id: null, wbs_order: 0, is_summary: false, wbs_level: 0,
     predecessor_ids: null, constraint_type: "asap", constraint_date: null,
     not_before_date: null, planned_start: "2026-09-01", planned_finish: "2026-09-02" }],
 });
