@@ -38,8 +38,7 @@ were not rewritten.
 - WBS/graph/schema target: 69 passed.
 - Integrated WBS API/import target: 111 passed; complete schedule UI: 95 passed.
 - Frontend TypeScript check and production build: PASS.
-- Previous full backend run before pin updates: 2415 passed, 57 skipped; its 14
-  deterministic failures were stale `a20` assertions and were rerun successfully.
+- Final full backend regression: 2476 passed, 57 skipped.
 - One performance smoke exceeded its ten-second budget during the loaded full run
   (22.48 s) and passed in the isolated retry; no timeout was increased.
 - PostgreSQL execution of `a20 -> a21` remains required in isolated CI.
