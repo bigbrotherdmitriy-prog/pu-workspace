@@ -6,6 +6,7 @@ import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
+import { DraftReviewCard } from "./modules/draft-review/DraftReviewCard";
 import { ScheduleGraphEditor } from "./modules/schedule/ScheduleGraphEditor";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
@@ -147,6 +148,7 @@ type ContractFinancialCheck = {
 };
 type ResponseDraft = {
   id: number;
+  review_token?: string;
   subject: string;
   body: string;
   status: string;
@@ -269,6 +271,7 @@ type InboxTask = {
 };
 type InboxDraft = {
   id: number;
+  review_token?: string;
   subject: string;
   body: string;
   status: string;
@@ -594,7 +597,12 @@ export function App() {
         setDecisions(g.decisions);
         setDocumentRows(docs.documents);
         setDrafts(responseDrafts.drafts);
-        setInbox(inboxData.messages);
+        setInbox(inboxData.messages.map((message: InboxMessage) => ({ ...message, drafts: message.drafts.map(draft => {
+          const current = (responseDrafts.drafts as ResponseDraft[]).find(row => row.id === draft.id);
+          const exact = current && current.subject === draft.subject && current.body === draft.body
+            && current.status === draft.status && (current.recipient_to || "") === (draft.recipient_to || "");
+          return { ...draft, review_token: exact ? current.review_token : undefined };
+        }) })));
         setProposals(proposalData.proposals);
         setContracts(contractData.contracts);
         setProjectStats(
@@ -1314,15 +1322,21 @@ export function App() {
     }
   }
   async function updateDraft(item: ResponseDraft, status: string) {
+    if (projectScopeRef.current !== projectScope || membersScope !== projectScope) return;
+    if (!item.review_token || !/^[a-f0-9]{64}$/.test(item.review_token)) {
+      setError("Перечитайте актуальную версию черновика перед подтверждением.");
+      return;
+    }
     try {
-      await api(`/response-drafts/${item.id}`, {
+      const result = await api(`/response-drafts/${item.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           status,
-          subject: item.subject,
-          body: item.body,
+          expected_review_token: item.review_token,
         }),
       });
+      if (projectScopeRef.current !== projectScope) return;
+      if (result.id !== item.id || result.status !== status) throw new Error("draft_review_unknown");
       setNotice(
         status === "approved"
           ? "Черновик подтверждён. Отправка остаётся под вашим контролем."
@@ -1330,7 +1344,7 @@ export function App() {
       );
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (projectScopeRef.current === projectScope) setError("Версия или результат проверки изменились. Перечитайте черновик; автоматического повтора не было.");
     }
   }
   async function ingestMessage() {
@@ -1544,6 +1558,12 @@ export function App() {
     draft: InboxDraft,
     status: string,
   ) {
+    if (projectScopeRef.current !== projectScope || !draft.review_token
+      || !/^[a-f0-9]{64}$/.test(draft.review_token)
+      || !inbox.some(row => row.id === messageId && row.project_id === projectId)) {
+      setError("Перечитайте актуальную версию черновика перед подтверждением.");
+      return;
+    }
     try {
       await api(`/response-drafts/${draft.id}`, {
         method: "PATCH",
@@ -1552,8 +1572,10 @@ export function App() {
           subject: draft.subject,
           body: draft.body,
           recipient_to: draft.recipient_to,
+          expected_review_token: draft.review_token,
         }),
       });
+      if (projectScopeRef.current !== projectScope) return;
       setNotice(
         status === "approved"
           ? "Черновик подтверждён, но не отправлен"
@@ -1561,23 +1583,32 @@ export function App() {
       );
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (projectScopeRef.current === projectScope) setError("Версия или результат проверки изменились. Перечитайте черновик; автоматического повтора не было.");
     }
   }
   async function sendGmailDraft(draft: InboxDraft) {
+    if (projectScopeRef.current !== projectScope || membersScope !== projectScope || !draft.review_token
+      || !/^[a-f0-9]{64}$/.test(draft.review_token)) {
+      setError("Перечитайте подтверждённую версию черновика перед отправкой.");
+      return;
+    }
     if (!window.confirm("Отправить подтверждённый ответ через Gmail?")) return;
     try {
       const result = await api(`/response-drafts/${draft.id}/send-gmail`, {
         method: "POST",
+        body: JSON.stringify({ expected_review_token: draft.review_token }),
       });
+      if (projectScopeRef.current !== projectScope) return;
       setNotice(
-        result.already_sent
+        result.id === draft.id && result.already_sent === true && result.status === "sent"
           ? "Это письмо уже было отправлено ранее"
-          : "Ответ отправлен через Gmail и записан в аудит",
+          : result.id === draft.id && result.status === "queued" && Number.isInteger(result.job_id) && result.job_id > 0
+            ? "Ответ поставлен в очередь. Отправка ещё не подтверждена."
+            : "Результат отправки пока не подтверждён. Обновите статус перед повторным действием.",
       );
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (projectScopeRef.current === projectScope) setError("Результат отправки неизвестен. Перечитайте статус черновика перед повторным действием.");
     }
   }
   async function proposeEmailCompensation(draft: InboxDraft, offer: EmailCompensationOffer) {
@@ -2059,6 +2090,7 @@ export function App() {
     drafts: inbox.filter((item) => item.drafts.some((draft) => draft.status !== "sent")).length,
   };
   const visibleInbox = inbox.filter((item) => {
+    if (item.project_id !== projectId || membersScope !== projectScope) return false;
     const matchesQuery = !query || `${item.source_name} ${item.source_sender || ""} ${item.summary}`
       .toLocaleLowerCase("ru-RU").includes(query.toLocaleLowerCase("ru-RU"));
     if (!matchesQuery) return false;
@@ -3411,7 +3443,18 @@ export function App() {
                         ))}
                       </div>
                     )}
-                    {message.drafts.map((draft) => (
+                    {message.drafts.map((draft) => draft.status === "draft" && !draft.is_corrective_follow_up ? (
+                      <DraftReviewCard key={`${projectId}:${draft.id}`} projectId={projectId} draftId={draft.id}
+                        title={draft.subject} api={api} canEdit={canEditSupply} canApprove={canManageSupply}
+                        onUpdated={(updated) => {
+                          if (projectScopeRef.current !== projectScope || message.project_id !== projectId) return;
+                          setInbox(rows => rows.map(row => row.id === message.id && row.project_id === projectId
+                            ? { ...row, drafts: row.drafts.map(item => item.id === updated.id
+                              ? { ...item, ...updated, recipient_to: updated.recipient_to || undefined } : item) } : row));
+                          setDrafts(rows => rows.map(item => item.id === updated.id
+                            ? { ...item, ...updated, recipient_to: updated.recipient_to || undefined } : item));
+                        }} />
+                    ) : (
                       <div className="inbox-draft" key={draft.id}>
                         {draft.status === "draft" ? (
                           <input
@@ -3460,6 +3503,8 @@ export function App() {
                         <span>
                           {draft.status === "sent"
                             ? "Отправлен через Gmail"
+                            : draft.status === "sending"
+                            ? "Передан на отправку — результат ещё не подтверждён"
                             : draft.status === "approved"
                             ? "Подтверждён — не отправлен"
                             : draft.status === "rejected"

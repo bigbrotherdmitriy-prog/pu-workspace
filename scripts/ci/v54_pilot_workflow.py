@@ -77,6 +77,9 @@ MVP_TESTS = {
                     *(f"test_pg_meeting_binding_serializes_actual_commands[{case}]" for case in
                       ("duplicate_bind", "duplicate_confirm", "bind_vs_stale_edit", "edit_vs_confirm")),
                     "test_pg_meeting_binding_append_only_is_enforced_by_database"),
+        *test_nodes("backend/tests/test_v7_meeting_commit_fault_postgres.py",
+                    *(f"test_pg_meeting_commit_fault[{case}]" for case in
+                      ("before_commit", "after_commit", "revoked_authority", "stale_binding", "revoked_child"))),
     ),
     "postgres_mvp4_finance": test_nodes(
         "backend/tests/test_mvp4_finance_postgres_runtime.py",
@@ -423,7 +426,7 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "coverage_limits": {
             "mvp1": "synthetic adapter and simulated crash; no live provider or process kill",
             "mvp2": "Gmail cursor CAS and atomic context confirmation contention; no live mailbox or OS process kill",
-            "mvp3": "obligation CAS, digest replay and meeting binding contention; no live channel or business process kill",
+            "mvp3": "obligation CAS, digest replay, binding contention and meeting business commit process kill/replay; no live channel or HTTP ACK proof",
             "mvp4": "manual finance and supply command concurrency; no backup restore or live payment",
             "authority": "role revocation serialization and schema upgrade/downgrade; synthetic principals",
             "materialization": "migration and UUID-schema CAS; no external storage effect",

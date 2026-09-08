@@ -75,7 +75,13 @@ def test_aggregate_missing_or_unsuccessful_job_fails(state):
 def test_all_37_pg_proofs_and_a20_are_preserved():
     from test_mvp_runtime_coverage import runner
     module = runner()
-    assert sum(map(len, module.PINNED_POSTGRES_TESTS.values())) == 37
+    proofs = [node for nodes in module.PINNED_POSTGRES_TESTS.values() for node in nodes]
+    prefix = "backend/tests/test_v7_meeting_commit_fault_postgres.py::test_pg_meeting_commit_fault"
+    assert len([node for node in proofs if not node.startswith(prefix)]) == 37
+    assert {node for node in proofs if node.startswith(prefix)} == {
+        f"{prefix}[{case}]" for case in ("before_commit", "after_commit", "revoked_authority", "stale_binding", "revoked_child")
+    }
+    assert len(proofs) == 42
     assert module.HEAD == "a54f001c0a20"
     assert module.RUNTIME_BUDGET_SECONDS == 1320
     assert module.CLEANUP_RESERVE_SECONDS == 60

@@ -12,6 +12,7 @@ on:
       - 'codex/v7-execution-wave1'
       - 'codex/v7-execution-wave2'
       - 'codex/v7-execution-wave3'
+      - 'codex/v7-execution-wave4'
   workflow_dispatch:
 
 permissions:

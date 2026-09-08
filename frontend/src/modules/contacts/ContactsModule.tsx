@@ -10,6 +10,7 @@ export type ProjectContact = {
 };
 export type ContactContract = { id: number; number: string; title: string };
 export type ContactDraft = {
+  review_token?: string;
   id: number; subject: string; body: string; status: string; source_file_name: string;
   source_excerpt: string; confidence: number; reviewer_name: string; recipient_to?: string;
 };

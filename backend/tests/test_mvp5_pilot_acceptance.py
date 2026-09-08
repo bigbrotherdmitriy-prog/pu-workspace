@@ -80,7 +80,9 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         assert draft.status == "draft"
 
         update_obligation(obligation.id, ObligationUpdate(status="confirmed"), db, user)
-        update_draft(draft.id, DraftUpdate(status="approved"), db, user)
+        from app.api.responses import list_drafts
+        current = next(row for row in list_drafts(project.id, db, user)["drafts"] if row["id"] == draft.id)
+        update_draft(draft.id, DraftUpdate(status="approved", expected_review_token=current["review_token"]), db, user)
 
         adapter = SimpleNamespace(provider="pilot_action_adapter")
         monkeypatch.setattr(tasks_api, "configured_action_adapter", lambda _project_id, _db: adapter)
