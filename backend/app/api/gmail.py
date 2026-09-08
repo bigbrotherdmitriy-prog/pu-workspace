@@ -6,6 +6,7 @@ import json
 import os
 import re
 from email.utils import parseaddr
+from hmac import compare_digest
 from typing import Callable, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.api.ai_secretary import IncomingMessage, ingest_message, project_candidate
 from app.api.project_contacts import contact_for_sender, discover_contact_from_message
+from app.api.responses import _locked_review, _review_token
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.google_workspace import google_workspace_for_mailbox
 from app.integrations.google_retry import GoogleReadError, execute_google_read
@@ -60,6 +62,10 @@ class GmailHistorySyncResponse(BaseModel):
     checkpoint_id: str
     job_id: int
     status: str
+
+
+class DraftSend(BaseModel):
+    expected_review_token: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
 
 
 def _decode(value: str | None) -> str:
@@ -584,13 +590,15 @@ def import_gmail_attachment(
 
 
 @router.post("/response-drafts/{draft_id}/send-gmail")
-def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    draft = db.get(ResponseDraft, draft_id)
-    if draft is None:
-        raise HTTPException(404, "Response draft not found")
-    require_project_role(db, user, draft.project_id, "manager")
+def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+               payload: DraftSend | None = None):
+    draft = _locked_review(db, draft_id, user, "manager")
     if draft.source_file_name == "corrective-follow-up":
         raise HTTPException(409, "Corrective follow-up requires separate CONFIRM provider action")
+    if payload is None or payload.expected_review_token is None:
+        raise HTTPException(409, "draft_review_required")
+    if not compare_digest(payload.expected_review_token, _review_token(db, draft)):
+        raise HTTPException(409, "draft_review_changed")
     source = db.get(Message, draft.message_id) if draft.message_id else None
     try:
         mailbox = runtime_for_message(db, source, actor=user, action=True) if source is not None else None
@@ -609,6 +617,9 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     # The provider call is deliberately absent from the API lifecycle.  The
     # worker reloads this row and verifies the exact approved content hash,
     # mailbox generation and human authority immediately before the effect.
+    # queue_confirmed_action commits internally. Include the sending state in
+    # that same transaction so no approved-token reuse window opens after enqueue.
+    draft.status = "sending"
     try:
         queued = queue_confirmed_action(
             db, action_kind="gmail.message.send", target_id=draft.id, actor=user,
@@ -616,9 +627,11 @@ def send_gmail(draft_id: int, db: Session = Depends(get_db), user: User = Depend
     except ProviderActionError as exc:
         db.rollback()
         raise HTTPException(409, f"Gmail action is unavailable ({exc.code})") from exc
+    except Exception:
+        db.rollback()
+        raise
     draft = db.get(ResponseDraft, draft.id)
-    if draft.status == "approved":
-        draft.status = "sending"
+    if db.in_transaction():
         db.commit()
     return {"id": draft.id, "status": "queued", "gmail_message_id": None,
             "already_sent": False, **queued}

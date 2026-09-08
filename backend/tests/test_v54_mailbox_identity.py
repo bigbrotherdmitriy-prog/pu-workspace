@@ -297,7 +297,11 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
     monkeypatch.setattr(gmail, "require_project_role", lambda *a, **k: None)
     monkeypatch.setattr(gmail, "google_workspace_for_project", lambda *a, **k: pytest.fail("project fallback"))
     monkeypatch.setattr(gmail, "google_workspace_for_mailbox", lambda token_id, db: SimpleNamespace(service=lambda *a: Service()))
-    result = gmail.send_gmail(draft.id, w.db, w.user)
+    from app.api.responses import list_drafts
+    w.db.commit()
+    reviewed = next(row for row in list_drafts(other.id, w.db, w.user)["drafts"] if row["id"] == draft.id)
+    result = gmail.send_gmail(draft.id, w.db, w.user,
+        payload=gmail.DraftSend(expected_review_token=reviewed["review_token"]))
     from app.models.job import BackgroundJob
     from app.models.v54_provider_action import ProviderAction
     action = w.db.get(ProviderAction, (result["action_id"], result["revision"]))

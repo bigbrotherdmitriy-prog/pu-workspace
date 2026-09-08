@@ -136,7 +136,11 @@ def owner(world, job_id: int, worker: str, attempt=1):
 
 def test_gmail_confirmation_only_queues_content_free_durable_action(world, monkeypatch):
     monkeypatch.setattr("app.api.gmail.require_project_role", lambda *args: "manager")
-    result = send_gmail(world.draft.id, db=world.db, user=world.user)
+    from app.api.gmail import DraftSend
+    from app.api.responses import list_drafts
+    reviewed = list_drafts(world.project.id, world.db, world.user)["drafts"][0]
+    result = send_gmail(world.draft.id, db=world.db, user=world.user,
+                        payload=DraftSend(expected_review_token=reviewed["review_token"]))
 
     job = world.db.get(BackgroundJob, result["job_id"])
     action = world.db.get(ProviderAction, (result["action_id"], result["revision"]))
