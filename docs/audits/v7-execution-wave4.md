@@ -58,8 +58,9 @@ worktrees. No models or migrations added; sole head and schema constant remain
 - TypeScript: PASS, including final scope/ABA additions.
 - Vite build to D:/PU-Workspace/tmp/wave4-build-final: PASS, 2.08 seconds; existing
   chunk >500 kB warning retained. Tracked react_dist untouched.
-- Full backend is running on the integrated backend snapshot; result is pending.
-  Do not infer PASS from the independent targeted suites.
+- Full integrated backend: **2352 passed, 55 skipped, 38 warnings**, 1233.54 seconds.
+  This uninterrupted local suite passed; skipped PostgreSQL checks are not runtime
+  evidence. Warnings are existing Alembic path_separator deprecations.
 - Alembic heads: one `a54f001c0a20`; CURRENT_SCHEMA_REVISION matches.
 - Docker CLI discovered locally but `docker version` returned exit 1; server
   availability was not established. No Docker containers or PostgreSQL were run.
