@@ -8,11 +8,14 @@ from alembic.script import ScriptDirectory
 from app.schema import CURRENT_SCHEMA_REVISION
 
 
-def test_meeting_binding_migration_is_sequential_and_preserves_unbound_legacy():
+def test_meeting_binding_migration_is_sequential_and_preserves_unbound_legacy(monkeypatch):
     backend = Path(__file__).resolve().parents[1]
     output = StringIO()
     config = Config(str(backend / "alembic.ini"), output_buffer=output)
     config.set_main_option("script_location", str(backend / "migrations"))
+    # This migration is PostgreSQL-specific. Generate its offline SQL using the
+    # production dialect even when the surrounding offline suite uses SQLite.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://ci:ci@db/puw_test")
     script = ScriptDirectory.from_config(config)
     assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a20"]
     assert script.get_revision("a54f001c0a19").down_revision == "a54f001c0a18"

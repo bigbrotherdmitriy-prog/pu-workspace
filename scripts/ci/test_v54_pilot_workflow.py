@@ -342,6 +342,7 @@ def test_protocol_keeps_valid_child_records_when_database_cleanup_fails(monkeypa
 
     protocol = module.json.loads(module.OUT.read_text())
     assert protocol["result"] == protocol["cleanup"] == "FAIL"
+    assert protocol["cleanup_failed_databases"] == [module.DATABASES[0]]
     assert protocol["runtime"] == valid_runtime_records()
     assert "raw-secret" not in module.OUT.read_text()
 

@@ -390,8 +390,9 @@ def cleanup_databases() -> None:
         return
     failed = False
     with admin_connect() as connection:
-        # At most 15 owned databases, two statements each. Leave time for JSON.
-        connection.execute("SET statement_timeout = 1000")
+        # At most 15 explicitly owned databases. FORCE closes a reconnect race;
+        # the fixed timeout and outer cleanup deadline still bound every drop.
+        connection.execute("SET statement_timeout = 3000")
         for name in reversed(tuple(CREATED)):
             try:
                 if CLEANUP_DEADLINE is not None and time.monotonic() >= CLEANUP_DEADLINE:
@@ -399,7 +400,7 @@ def cleanup_databases() -> None:
                 if name not in DATABASES:
                     raise RuntimeError("cleanup_database_not_owned")
                 connection.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
-                connection.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(name)))
+                connection.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
                 CREATED.remove(name)
             except Exception:
                 failed = True
@@ -472,6 +473,7 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
             },
         },
         "cleanup": "PASS" if not CREATED else "FAIL",
+        "cleanup_failed_databases": sorted(name for name in CREATED if name in DATABASES),
         "failure_type": type(failure).__name__ if failure else None,
         "raw_output_published": False,
     }

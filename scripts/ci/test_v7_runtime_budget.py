@@ -84,7 +84,7 @@ def test_cleanup_deadline_retains_unremoved_owned_ids(monkeypatch):
     with pytest.raises(RuntimeError, match="owned_database_cleanup_failed"):
         module.cleanup_databases()
     assert module.CREATED == list(module.DATABASES[:2])
-    assert calls == [("SET statement_timeout = 1000", None)]
+    assert calls == [("SET statement_timeout = 3000", None)]
 
 
 def test_admin_sql_waits_are_bounded(monkeypatch):

@@ -65,6 +65,32 @@ Untrusted keys, values and types are rejected, stderr remains unpublished, and
 no raw child output is retained in the protocol. Targeted snapshot tests:
 **29 passed**. This is diagnostic only and requires a separate authorized push.
 
+The other rerun results are now complete:
+
+- Main CI `34209315364`: PASS. Independent frontend, backend and preserved
+  `test-and-build` aggregate all passed.
+- Docker smoke `34209315435`: PASS.
+- v54 runtime `34209315402`: FAIL only at the final database cleanup. All 26
+  recorded phases passed, including 15 mandatory PostgreSQL groups, 302 A/B/C
+  integration tests and process-fault. The safe protocol recorded
+  `cleanup=FAIL`; it did not identify the remaining owned database.
+- Offline in the same runtime: 2421 passed, 1 failed, 55 skipped. The new safe
+  diagnostic identified
+  `test_mvp3_meeting_binding_migration.py::test_meeting_binding_migration_is_sequential_and_preserves_unbound_legacy`.
+
+That migration test inherited the offline suite's SQLite URL while generating
+PostgreSQL-specific DDL. It now pins the PostgreSQL dialect without connecting
+to a database. The failure reproduces locally before the correction and passes
+after it. Runtime cleanup now uses PostgreSQL 16 `DROP DATABASE ... WITH
+(FORCE)` after terminating sessions, raises its per-statement bound from one to
+three seconds, retains the outer deadline and exact owned-name allowlist, and
+reports only allowlisted database names still remaining. Targeted migration,
+runtime, cleanup and ownership tests: **46 passed**.
+
+Final integrated CI contract suite after these follow-ups: **335 passed**, no
+skips / 144.90 seconds. This does not replace the required GitHub PostgreSQL and
+container rerun.
+
 Push only after separate authorization of the resulting HEAD:
 
 ```powershell
