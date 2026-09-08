@@ -30,7 +30,7 @@ the new members response and verifies no inherited approval permission.
 - Chromium actual-App synthetic graph scenarios: **3/3 passed**, 26.3 seconds.
 - Full integrated scripts/ci suite: **261 passed**, 153.46 seconds; no skips.
 - Alembic: sole head `a54f001c0a20`; schema constant unchanged.
-- Full backend run: in progress at this checkpoint. One old static meeting UI test failed because it forbade editing completed minutes; the updated contract preserves explicit user action, cancelled-state denial and adds exact version/source guards. Its scoped rerun: **2 passed**. This is not a full-backend PASS.
+- Full backend invocation finished: **2270 passed, 1 failed, 50 skipped**, 967.25 seconds. Its one failure was the old static meeting UI test, collected before the integration correction, which forbade editing completed minutes. The updated contract preserves explicit user action, cancelled-state denial and adds exact version/source guards. Its scoped rerun: **2 passed**. This is not an uninterrupted full-backend PASS; the next combined candidate must rerun the suite.
 - Browser test TypeScript configuration has an existing unresolved `process` type (`@types/node`) under check:e2e. Browser runtime itself passed. Do not hide that limitation or claim check:e2e PASS.
 - Standalone actionlint and Docker/PostgreSQL runtime not executed locally. No Docker CLI detected. Missing runtime evidence remains CONDITIONAL.
 
