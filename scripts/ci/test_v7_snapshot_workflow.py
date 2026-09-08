@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -72,6 +73,21 @@ def test_snapshot_fixture_has_required_connection_identity(monkeypatch):
     assert connection.account_email == "snapshot-owner@example.invalid"
     assert connection.root_folder_id == "synthetic-customer-project-nested"
     assert connection.connection_id == "synthetic-no-credentials"
+
+
+def test_snapshot_accepts_only_exact_migrated_bootstrap_organization(monkeypatch):
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "snapshot_checks_bootstrap",
+        root / "scripts/ci/durable_queue/workspace_snapshot_checks.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    expected = SimpleNamespace(name="PU Workspace")
+    assert module.migrated_bootstrap_organization([expected]) is expected
+    for rows in ([], [expected, expected], [SimpleNamespace(name="Customer data")]):
+        with pytest.raises(AssertionError, match="unexpected_bootstrap_organization"):
+            module.migrated_bootstrap_organization(rows)
 
 
 def test_timeout_kills_owned_group(m, monkeypatch):

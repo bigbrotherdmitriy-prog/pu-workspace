@@ -105,6 +105,16 @@ small factory tested without provider access. Early phases are split into
 Snapshot/durable targeted tests: **26 passed**. No real mailbox, provider or
 document is used.
 
+### Third rerun after `b1c6882`
+
+Docker smoke `34214357156` passed. Snapshot `34214357229` reported
+`child_phase=schema`; the previous required-identity fix therefore passed.
+The fresh migration intentionally creates exactly one organization named
+`PU Workspace`, while the harness incorrectly required the organization table
+to be empty. The fixture now accepts exactly that migration-owned row and
+refuses zero, multiple or differently named rows. It does not accept customer
+or production data. Targeted snapshot/durable tests: **27 passed**.
+
 The remaining `a2891e6` workflows completed after the local fixture fix was
 prepared:
 

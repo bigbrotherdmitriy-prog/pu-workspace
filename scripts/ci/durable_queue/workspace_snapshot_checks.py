@@ -93,6 +93,13 @@ def synthetic_drive_connection(project_id):
     )
 
 
+def migrated_bootstrap_organization(rows):
+    rows = list(rows)
+    if len(rows) != 1 or rows[0].name != "PU Workspace":
+        raise AssertionError("unexpected_bootstrap_organization")
+    return rows[0]
+
+
 def worker_mode():
     guard()
     from app.database import SessionLocal
@@ -136,11 +143,10 @@ def coordinator():
         assert db.scalar(select(func.count()).select_from(Project)) == 0
         assert db.scalar(select(func.count()).select_from(BackgroundJob)) == 0
         assert db.scalar(select(func.count()).select_from(User)) == 0
-        assert db.scalar(select(func.count()).select_from(Organization)) == 0
+        org = migrated_bootstrap_organization(db.scalars(select(Organization)))
         _phase = "fixture_seed"
-        org = Organization(name="Synthetic snapshot recovery")
         user = User(name="Synthetic owner", email="snapshot-owner@example.invalid")
-        db.add_all([org, user]); db.flush()
+        db.add(user); db.flush()
         project = Project(name="Synthetic nested project", organization_id=org.id)
         db.add(project); db.flush()
         db.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner"))
