@@ -119,3 +119,14 @@ activation are unsupported. The package is not a production deployment.
 
 Changed files: execution_finance API and models; app/schema.py; one a20 migration;
 three new test files; this report. No finance/payment business rules were changed.
+
+## Follow-up: remapped clone link length
+
+Independent review identified that new item IDs can lengthen a canonical link
+string beyond VARCHAR(2000). Added a synthetic 302-item source graph with a
+separate high-ID project, producing genuinely longer clone IDs. Before the fix
+the regression failed (SQLite silently stored the oversized value). Clone now
+rejects with bounded `422 schedule_dependency_limit` and explicitly rolls back
+the entire clone, including already-flushed draft/items. Regression asserts
+unchanged baseline/item/audit counts and approved source status. Scoped follow-up:
+**40 passed, 4 PostgreSQL skipped, 3 existing warnings, 9.38 seconds**.

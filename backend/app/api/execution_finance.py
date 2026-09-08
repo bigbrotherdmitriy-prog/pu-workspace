@@ -952,9 +952,15 @@ def clone_baseline(baseline_id: int, payload: BaselineClone,
     for source_item in source_items:
         links = parse_dependencies(source_item.predecessor_ids)
         # Source was validated before cloning; no old-baseline IDs survive.
-        copied[source_item.id].predecessor_ids = "; ".join(
+        remapped = "; ".join(
             f"{copied[link.predecessor_id].id}{link.link_type}" + (f"{link.lag_days:+d}d" if link.lag_days else "")
             for link in links) or None
+        if remapped is not None and len(remapped) > 2000:
+            # New IDs can be longer. Undo even already-flushed clone rows;
+            # never rely on backend-specific VARCHAR truncation/rejection.
+            db.rollback()
+            raise HTTPException(422, "schedule_dependency_limit")
+        copied[source_item.id].predecessor_ids = remapped
     _audit(db, "baseline_cloned", "schedule_baseline", draft.id, user.id,
            f"source_baseline={source.id}; version={version}; facts_copied=false")
     db.commit()

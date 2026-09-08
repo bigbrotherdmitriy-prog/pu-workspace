@@ -278,3 +278,41 @@ def test_corrupt_computed_date_is_not_presented_as_validated_plan(db_session, us
     with pytest.raises(HTTPException) as caught:
         api.get_schedule_graph(baseline.id, db_session, user)
     assert caught.value.status_code == 409
+
+
+def test_clone_remapped_link_limit_rejects_and_rolls_back_entire_clone(db_session, user_factory):
+    user, baseline, rows = world(db_session, user_factory)
+    extra = [ScheduleItem(project_id=baseline.project_id, baseline_id=baseline.id,
+                          title=f"Synthetic prerequisite {number}") for number in range(300)]
+    db_session.add_all(extra); db_session.commit()
+    rows += extra
+    links = []
+    for row in rows[:-1]:
+        candidate = "; ".join([*links, f"{row.id}FS"])
+        if len(candidate) > 1990: break
+        links.append(f"{row.id}FS")
+    items = [dict(id=row.id, duration_days=1, is_milestone=False, constraint_type="asap") for row in rows]
+    items[-1]["predecessor_ids"] = "; ".join(links)
+    api.put_schedule_graph(baseline.id, api.ScheduleGraphPut(
+        expected_graph_revision=1, project_start="2026-09-01", items=items), db_session, user)
+    api.update_status("baselines", baseline.id, api.StatusUpdate(status="approved",
+        expected_status="draft", expected_graph_revision=2), db_session, user)
+    # A separate synthetic project's high ID causes genuine new clone IDs to
+    # lengthen without corrupting the approved source graph or mocking the DB.
+    _, _, other_rows = world(db_session, user_factory)
+    other_rows[-1].id = 999999
+    db_session.commit()
+    identifier = baseline.id
+    before = (db_session.scalar(select(func.count(ScheduleBaseline.id))),
+              db_session.scalar(select(func.count(ScheduleItem.id))),
+              db_session.scalar(select(func.count(AuditLog.id))))
+    with pytest.raises(HTTPException) as caught:
+        api.clone_baseline(identifier, api.BaselineClone(expected_version=1), db_session, user)
+    assert caught.value.status_code == 422
+    assert caught.value.detail == "schedule_dependency_limit"
+    db_session.expire_all()
+    after = (db_session.scalar(select(func.count(ScheduleBaseline.id))),
+             db_session.scalar(select(func.count(ScheduleItem.id))),
+             db_session.scalar(select(func.count(AuditLog.id))))
+    assert after == before
+    assert db_session.get(ScheduleBaseline, identifier).status == "approved"
