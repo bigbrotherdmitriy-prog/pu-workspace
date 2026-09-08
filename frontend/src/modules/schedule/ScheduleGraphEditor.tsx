@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { constraints, parseGraph, putPayload, sameItems, toDraft, type Constraint, type Draft, type DraftItem, type Graph } from "./graphReadModel";
 import "./scheduleGraph.css";
+import { SchedulePlanSummary } from "./SchedulePlanSummary";
 
 export type GraphApi = (path: string, options?: RequestInit) => Promise<unknown>;
 export type ScheduleGraphEditorProps = {
@@ -52,12 +53,14 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
     try {
       const result = parseGraph(await apiRef.current(endpoint), baselineId);
       if (!alive.current || ticket !== request.current) return;
+      if (graph && result.graph_revision < graph.graph_revision) throw new Error("stale_graph_response");
       if (draft) { setLatest(result); setConflict(true); setNotice("Серверная версия загружена отдельно. Локальные правки сохранены."); }
       else { setGraph(result); setDraft(toDraft(result)); }
       setDenied(false);
     } catch (e) {
       if (alive.current && ticket === request.current) {
         setError("Не удалось обновить ГПР. Локальные правки не отправлены.");
+        setConflict(true); setLatest(null);
         if ([401, 403, 404].includes(Number(statusOf(e)))) setDenied(true);
       }
     } finally { lock.current = false; if (alive.current && ticket === request.current) setBusy(false); }
@@ -70,6 +73,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
     try {
       const result = parseGraph(await apiRef.current(endpoint, { method: "PUT", body: JSON.stringify(payload) }), baselineId);
       if (!alive.current || ticket !== request.current) return;
+      if (result.graph_revision <= graph.graph_revision) throw new Error("stale_graph_response");
       setGraph(result); setDraft(toDraft(result)); setLatest(null); setNotice("Граф сохранён. Даты рассчитаны сервером.");
       onSaved?.(baselineId, result.graph_revision);
     } catch (e) {
@@ -99,6 +103,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
       if (!alive.current || ticket !== request.current) return;
       const result = parseGraph(await apiRef.current(endpoint), baselineId);
       if (!alive.current || ticket !== request.current) return;
+      if (result.graph_revision <= graph.graph_revision) throw new Error("stale_graph_response");
       setGraph(result); setDraft(toDraft(result)); setNotice("Статус версии повторно получен с сервера.");
       onSaved?.(baselineId, result.graph_revision);
     } catch (e) {
@@ -118,6 +123,7 @@ function GraphSession({ baselineId, api, canEdit, canApprove = false, onSaved }:
       <p>Версия {graph.version} · ревизия графа {graph.graph_revision} · {graph.status === "draft" ? "Черновик" : "Только чтение — создайте черновик в реестре ГПР"}</p>
       {!canEdit && <p>Доступ только для просмотра.</p>}
       <p>Календарные дни, включая день начала. Веха — 0 дней. Рабочие календари не поддерживаются. Даты ниже — последний сохранённый расчёт, не прогноз локальных правок.</p>
+      <SchedulePlanSummary graph={graph} stale={conflict || busy} hasLocalEdits={dirty} />
       {conflict && <aside aria-label="Конфликт версий">
         <p>Автоматическая перезапись отключена. Локальные изменения остаются в форме.</p>
         {latest && <>

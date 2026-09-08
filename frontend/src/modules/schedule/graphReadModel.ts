@@ -9,9 +9,13 @@ export type GraphItem = {
   constraint_date: string | null; not_before_date: string | null;
   planned_start: string | null; planned_finish: string | null;
 };
+export type TaskPlan = { task_id: number; earliest_start: string; earliest_finish: string;
+  latest_start: string; latest_finish: string; total_float_days: number; free_float_days: number };
+export type SchedulePlan = { project_start: string; project_finish: string | null; tasks: TaskPlan[];
+  topological_order: number[]; critical_ids: number[]; critical_edges: [number, number][] };
 export type Graph = {
   baseline_id: number; version: number; status: string; graph_revision: number;
-  planning_mode: string; project_start: string | null; items: GraphItem[];
+  planning_mode: string; project_start: string | null; items: GraphItem[]; plan: SchedulePlan | null;
 };
 export type DraftItem = {
   id: number; duration: string; milestone: boolean; dependencies: string;
@@ -31,6 +35,63 @@ export function validDate(v: unknown): v is string {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === v;
 }
 const nullableDate = (v: unknown) => v === null || validDate(v);
+const exactKeys = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).sort().join() === [...keys].sort().join();
+/** Validate wire identity/shape only. Dates, criticality and slack are not recalculated. */
+function parsePlan(raw: unknown, items: GraphItem[], anchor: string | null, mode: string): SchedulePlan | null {
+  if (raw == null) return null; // Explicitly unavailable, never a made-up zero-slack plan.
+  if (!object(raw) || mode !== "calendar_graph" || !validDate(raw.project_start) || raw.project_start !== anchor
+    || !exactKeys(raw, ["project_start", "project_finish", "tasks", "topological_order", "critical_ids", "critical_edges"])
+    || !Array.isArray(raw.tasks) || raw.tasks.length !== items.length || !Array.isArray(raw.critical_edges)
+    || raw.critical_edges.length > items.length * items.length) throw new Error("invalid_schedule_plan");
+  const byId = new Map(items.map(item => [item.id, item]));
+  function ids(value: unknown, complete: boolean): number[] {
+    if (!Array.isArray(value) || (complete && value.length !== items.length) || value.length > items.length
+      || value.some(id => !integer(id) || !byId.has(id)) || new Set(value).size !== value.length) throw new Error("invalid_plan_ids");
+    return [...value] as number[];
+  }
+  const order = ids(raw.topological_order, true), critical = ids(raw.critical_ids, false);
+  const positions = new Map(order.map((id, index) => [id, index]));
+  const seen = new Set<number>();
+  const tasks = raw.tasks.map((v): TaskPlan => {
+    if (!object(v) || !exactKeys(v, ["task_id", "earliest_start", "earliest_finish", "latest_start", "latest_finish", "total_float_days", "free_float_days"])
+      || !integer(v.task_id) || !byId.has(v.task_id) || seen.has(v.task_id)
+      || !validDate(v.earliest_start) || !validDate(v.earliest_finish) || !validDate(v.latest_start) || !validDate(v.latest_finish)
+      || v.earliest_start > v.earliest_finish || v.latest_start > v.latest_finish
+      || v.latest_start < v.earliest_start || v.latest_finish < v.earliest_finish
+      || typeof v.total_float_days !== "number" || !Number.isSafeInteger(v.total_float_days) || v.total_float_days < 0
+      || typeof v.free_float_days !== "number" || !Number.isSafeInteger(v.free_float_days) || v.free_float_days < 0
+      || v.free_float_days > v.total_float_days) throw new Error("invalid_task_plan");
+    const item = byId.get(v.task_id)!;
+    if (item.planned_start !== v.earliest_start || item.planned_finish !== v.earliest_finish
+      || critical.includes(v.task_id) !== (v.total_float_days === 0)) throw new Error("plan_item_mismatch");
+    seen.add(v.task_id);
+    return { task_id: v.task_id, earliest_start: v.earliest_start, earliest_finish: v.earliest_finish,
+      latest_start: v.latest_start, latest_finish: v.latest_finish, total_float_days: v.total_float_days, free_float_days: v.free_float_days };
+  });
+  if (items.length ? !validDate(raw.project_finish) || raw.project_finish !== tasks.map(t => t.earliest_finish).sort().at(-1)
+      : raw.project_finish !== null) throw new Error("invalid_plan_horizon");
+  const declared = new Set<string>();
+  for (const item of items) {
+    if (!item.predecessor_ids?.trim()) continue;
+    for (const token of item.predecessor_ids.split(/[,;]/)) {
+      const match = /^\s*([0-9]+)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*([0-9]+)\s*[dд])?\s*$/i.exec(token);
+      const predecessor = Number(match?.[1]);
+      const key = `${predecessor}:${item.id}`;
+      if (!match || !integer(predecessor) || !byId.has(predecessor) || declared.has(key)
+        || positions.get(predecessor)! >= positions.get(item.id)!) throw new Error("invalid_plan_dependency");
+      declared.add(key);
+    }
+  }
+  const edges = new Set<string>();
+  const criticalEdges = raw.critical_edges.map((pair): [number, number] => {
+    if (!Array.isArray(pair) || pair.length !== 2 || !integer(pair[0]) || !integer(pair[1])
+      || !critical.includes(pair[0]) || !critical.includes(pair[1]) || !declared.has(`${pair[0]}:${pair[1]}`)
+      || edges.has(`${pair[0]}:${pair[1]}`)) throw new Error("invalid_critical_edge");
+    edges.add(`${pair[0]}:${pair[1]}`); return [pair[0], pair[1]];
+  });
+  return { project_start: raw.project_start, project_finish: raw.project_finish as string | null,
+    tasks, topological_order: order, critical_ids: critical, critical_edges: criticalEdges };
+}
 export function parseGraph(value: unknown, baselineId: number): Graph {
   if (!object(value) || value.baseline_id !== baselineId || !integer(value.baseline_id) ||
       !integer(value.version) || !integer(value.graph_revision) || typeof value.status !== "string" ||
@@ -49,7 +110,8 @@ export function parseGraph(value: unknown, baselineId: number): Graph {
     return v as GraphItem;
   });
   return { baseline_id: baselineId, version: value.version, graph_revision: value.graph_revision,
-    status: value.status, planning_mode: value.planning_mode, project_start: value.project_start as string | null, items };
+    status: value.status, planning_mode: value.planning_mode, project_start: value.project_start as string | null, items,
+    plan: parsePlan(value.plan, items, value.project_start as string | null, value.planning_mode) };
 }
 export function toDraft(graph: Graph): Draft {
   return { anchor: graph.project_start ?? "", items: graph.items.map(v => ({ id: v.id,
