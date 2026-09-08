@@ -22,11 +22,11 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
-HEAD = "a54f001c0a18"
+HEAD = "a54f001c0a19"
 DATABASES = (
     "puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime",
     "puw_mvp3_test_runtime",
-    "puw_mvp2_test_gmail_history",
+    "puw_mvp2_test_gmail_history", "puw_mvp2_test_context", "puw_v7_test_automation_period",
     "puw_v54_test_storage", "puw_mvp4_test_runtime",
     "puw_v54_test_authority", "puw_v54_test_authority_migration",
     "puw_v54_test_materialization", "puw_v54_test_materialization_migration",
@@ -53,11 +53,24 @@ MVP_TESTS = {
         *test_nodes("backend/tests/test_mvp2_gmail_history_migration.py",
                     "test_postgresql_history_schema_and_cas_constraints"),
     ),
+    "postgres_mvp2_context": test_nodes(
+        "backend/tests/test_v7_context_confirm_postgres.py",
+        *(f"test_pg_context_confirmation_serializes_real_engines[{case}]"
+          for case in ("duplicate_single", "bulk_vs_single", "failure_then_waiter")),
+    ),
+    "postgres_v7_automation_period": test_nodes(
+        "backend/tests/test_v7_automation_period_postgres.py",
+        "test_postgres_two_manual_days_serialize_to_one_period_pair",
+    ),
     "postgres_mvp3_runtime": (
         *test_nodes("backend/tests/test_mvp3_management_acceptance_postgres.py",
                     "test_postgresql_obligation_cas_has_one_winner"),
         *test_nodes("backend/tests/test_mvp3_management_runtime_postgres.py",
                     "test_postgresql_digest_is_single_after_scheduler_race_restart_and_replay"),
+        *test_nodes("backend/tests/test_mvp3_meeting_binding_postgres.py",
+                    *(f"test_pg_meeting_binding_serializes_actual_commands[{case}]" for case in
+                      ("duplicate_bind", "duplicate_confirm", "bind_vs_stale_edit", "edit_vs_confirm")),
+                    "test_pg_meeting_binding_append_only_is_enforced_by_database"),
     ),
     "postgres_mvp4_finance": test_nodes(
         "backend/tests/test_mvp4_finance_postgres_runtime.py",
@@ -89,9 +102,11 @@ REMAINING_POSTGRES_TESTS = {
         "backend/tests/test_v54_materialization_postgres.py",
         "test_postgres_materialization_cas_has_one_winner",
     ),
-    "postgres_local_upload_runtime": test_nodes(
-        "backend/tests/test_v54_local_upload_a05_postgres.py",
-        "test_postgres_only_current_lease_can_authorize_materialization_read",
+    "postgres_local_upload_runtime": (
+        *test_nodes("backend/tests/test_v54_local_upload_a05_postgres.py",
+                    "test_postgres_only_current_lease_can_authorize_materialization_read"),
+        *test_nodes("backend/tests/test_v7_xlsx_retention_recovery.py",
+                    "test_pg_original_retention_waits_on_project_without_locking_materialization"),
     ),
     "postgres_schema_fixture": test_nodes(
         "backend/tests/integration/test_postgres_schema.py",
@@ -105,7 +120,8 @@ TEST_DATABASE_KEYS = (
     "PUW_V54_TEST_DATABASE_URL", "PUW_V54_SOURCE_TEST_DATABASE_URL",
     "PUW_V54_CONTEXT_TEST_DATABASE_URL", "PUW_V54_MAILBOX_TEST_DATABASE_URL",
     "PUW_V54_INTEGRATION_DATABASE_URL", "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL",
-    "PUW_MVP3_TEST_DATABASE_URL", "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL",
+    "PUW_MVP3_TEST_DATABASE_URL", "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL", "PUW_MVP2_TEST_DATABASE_URL",
+    "PUW_V7_AUTOMATION_DATABASE_URL",
     "PUW_V54_AUTHORITY_DATABASE_URL", "PUW_V54_AUTHORITY_MIGRATION_DATABASE_URL",
     "PUW_V54_MATERIALIZATION_DATABASE_URL", "PUW_V54_LOCAL_UPLOAD_DATABASE_URL",
 )
@@ -356,6 +372,8 @@ def test_env() -> dict:
         "PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations"),
         "PUW_MVP3_TEST_DATABASE_URL": base_url("puw_mvp3_test_runtime"),
         "PUW_MVP2_GMAIL_HISTORY_DATABASE_URL": base_url("puw_mvp2_test_gmail_history"),
+        "PUW_MVP2_TEST_DATABASE_URL": base_url("puw_mvp2_test_context"),
+        "PUW_V7_AUTOMATION_DATABASE_URL": base_url("puw_v7_test_automation_period"),
         "PUW_V54_AUTHORITY_DATABASE_URL": base_url("puw_v54_test_authority"),
         "PUW_V54_AUTHORITY_MIGRATION_DATABASE_URL": base_url("puw_v54_test_authority_migration"),
         "PUW_V54_MATERIALIZATION_DATABASE_URL": base_url("puw_v54_test_materialization"),
@@ -380,12 +398,13 @@ def write_protocol(result: str, failure: BaseException | None, runtime: list[dic
         "mandatory_postgres": coverage,
         "coverage_limits": {
             "mvp1": "synthetic adapter and simulated crash; no live provider or process kill",
-            "mvp2": "Gmail cursor CAS and migrated schema; no live mailbox or full worker recovery",
-            "mvp3": "obligation CAS and digest restart/replay; no live channel",
+            "mvp2": "Gmail cursor CAS and atomic context confirmation contention; no live mailbox or OS process kill",
+            "mvp3": "obligation CAS, digest replay and meeting binding contention; no live channel or business process kill",
             "mvp4": "manual finance and supply command concurrency; no backup restore or live payment",
             "authority": "role revocation serialization and schema upgrade/downgrade; synthetic principals",
             "materialization": "migration and UUID-schema CAS; no external storage effect",
-            "local_upload": "UUID-schema lease authorization with local synthetic ciphertext",
+            "local_upload": "UUID-schema lease authorization and project-first retention locking with synthetic ciphertext",
+            "automation": "monthly period database contention; no live email or scheduler process kill",
             "generic_schema": "migrated schema and transactional factories; no backup restore",
         },
         "corpus": {
@@ -475,6 +494,11 @@ def main() -> None:
             *MVP_TESTS["postgres_mvp1_storage"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
+        migrate_database("v7_automation_migration", "puw_v7_test_automation_period", env)
+        run_phase("postgres_v7_automation_period", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_v7_automation_period"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
         migrate_database("mvp3_migration", "puw_mvp3_test_runtime", env)
         run_phase("postgres_mvp3_runtime", [
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp3_runtime"],
@@ -485,6 +509,11 @@ def main() -> None:
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_gmail_history"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=180)
+        migrate_database("mvp2_context_migration", "puw_mvp2_test_context", env)
+        run_phase("postgres_mvp2_context", [
+            sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp2_context"],
+            "-q", "--tb=short", "-rfsE",
+        ], env=env, timeout=300)
         migrate_database("mvp4_migration", "puw_mvp4_test_runtime", env)
         run_phase("postgres_mvp4_finance", [
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_mvp4_finance"],

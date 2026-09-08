@@ -189,13 +189,15 @@ def test_main_wires_exact_mandatory_nodes_after_owned_head_migrations(monkeypatc
     for phase, database, migration in (
         ("postgres_mvp1_storage", "puw_v54_test_storage", "storage_migration"),
         ("postgres_gmail_history", "puw_mvp2_test_gmail_history", "gmail_history_migration"),
+        ("postgres_mvp2_context", "puw_mvp2_test_context", "mvp2_context_migration"),
+        ("postgres_v7_automation_period", "puw_v7_test_automation_period", "v7_automation_migration"),
         ("postgres_mvp3_runtime", "puw_mvp3_test_runtime", "mvp3_migration"),
         ("postgres_mvp4_finance", "puw_mvp4_test_runtime", "mvp4_migration"),
         ("postgres_mvp4_supply", "puw_mvp4_test_runtime", "mvp4_migration"),
     ):
         assert names.index(migration) < names.index(phase)
         _, migration_args, options = phases[names.index(migration)]
-        assert migration_args[-2:] == ["upgrade", "a54f001c0a18"]
+        assert migration_args[-2:] == ["upgrade", "a54f001c0a19"]
         assert options["env"]["DATABASE_URL"] == "owned:" + database
         assert options["cwd"] == module.ROOT / "backend"
         _, test_args, _ = phases[names.index(phase)]

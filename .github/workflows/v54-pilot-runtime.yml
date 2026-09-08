@@ -9,6 +9,7 @@ on:
       - 'codex/v54-wave4-integration'
       - 'codex/mvp3-postgres-runtime-gate'
       - 'codex/mvp1234-wave2-integration'
+      - 'codex/v7-execution-wave1'
   workflow_dispatch:
 
 permissions:

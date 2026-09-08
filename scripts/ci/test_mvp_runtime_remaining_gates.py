@@ -61,30 +61,48 @@ def test_supply_requires_all_nine_parameter_variants(monkeypatch, passed, status
     assert module.PHASES[-1]["required"] == 9
 
 
-@pytest.mark.parametrize("output,status", [
-    ("1 skipped in 0.01s\n", "SKIPPED"),
-    ("2 passed in 0.01s\n", "INCOMPLETE"),
-    ("no tests ran in 0.01s\n", "INCOMPLETE"),
+@pytest.mark.parametrize("case,status", [
+    ("skipped", "SKIPPED"),
+    ("too_many", "INCOMPLETE"),
+    ("none", "INCOMPLETE"),
 ])
-def test_each_remaining_phase_rejects_missing_or_skipped_proof(monkeypatch, output, status):
+def test_each_remaining_phase_rejects_missing_or_skipped_proof(monkeypatch, case, status):
     module = runner()
-    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout=output, stderr="synthetic-secret"))
     for phase in module.REMAINING_POSTGRES_TESTS:
+        expected = 2 if phase == "postgres_local_upload_runtime" else 1
+        output = {"skipped": "1 skipped in 0.01s\n",
+                  "too_many": f"{expected + 1} passed in 0.01s\n",
+                  "none": "no tests ran in 0.01s\n"}[case]
+        monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout=output, stderr="synthetic-secret"))
         with pytest.raises(RuntimeError, match="mandatory_coverage_failed"):
             module.run_phase(phase, ["pytest"])
         assert module.PHASES[-1]["status"] == status
-        assert module.PHASES[-1]["required"] == 1
+        assert module.PHASES[-1]["required"] == expected
     assert "synthetic-secret" not in json.dumps(module.PHASES)
 
 
 def test_remaining_pins_select_real_tests_without_unintended_collection():
     module = runner()
-    for nodes in module.REMAINING_POSTGRES_TESTS.values():
-        assert len(nodes) == 1
-        path, name = nodes[0].split("::")
-        tree = ast.parse((ROOT / path).read_text(encoding="utf8"))
-        assert name in {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    for phase, nodes in module.REMAINING_POSTGRES_TESTS.items():
+        assert len(nodes) == (2 if phase == "postgres_local_upload_runtime" else 1)
+        for target in nodes:
+            path, name = target.split("::")
+            tree = ast.parse((ROOT / path).read_text(encoding="utf8"))
+            assert name in {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+
+@pytest.mark.parametrize("passed", [1, 2, 3])
+def test_local_upload_requires_both_lease_and_retention_proofs(monkeypatch, passed):
+    module = runner()
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=f"{passed} passed in 0.01s\n", stderr=""))
+    if passed == 2:
+        module.run_phase("postgres_local_upload_runtime", ["pytest"])
+    else:
+        with pytest.raises(RuntimeError, match="mandatory_coverage_failed"):
+            module.run_phase("postgres_local_upload_runtime", ["pytest"])
+    assert module.PHASES[-1]["required"] == 2
 
 
 def test_new_gates_keep_empty_migration_databases_separate_and_opt_in_scoped(monkeypatch):

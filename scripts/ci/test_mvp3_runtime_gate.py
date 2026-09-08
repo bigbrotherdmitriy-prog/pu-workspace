@@ -24,12 +24,14 @@ def test_existing_postgres_workflow_runs_the_mvp3_runtime_phase():
     assert parsed["permissions"] == {"contents": "read"}
     assert "postgres:16-alpine" in text and "ports:" not in text
     runner = (ROOT / "scripts" / "ci" / "v54_pilot_workflow.py").read_text(encoding="utf8")
-    assert 'HEAD = "a54f001c0a18"' in runner
+    assert 'HEAD = "a54f001c0a19"' in runner
     assert '"puw_mvp3_test_runtime"' in runner
     assert '"PUW_MVP3_TEST_DATABASE_URL": base_url("puw_mvp3_test_runtime")' in runner
     assert 'run_phase("postgres_mvp3_runtime"' in runner
     assert '"backend/tests/test_mvp3_management_acceptance_postgres.py"' in runner
     assert '"backend/tests/test_mvp3_management_runtime_postgres.py"' in runner
+    assert '"backend/tests/test_mvp3_meeting_binding_postgres.py"' in runner
+    assert "test_pg_meeting_binding_append_only_is_enforced_by_database" in runner
     assert '"raw_output_published": False' in runner
 
 
