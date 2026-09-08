@@ -24,6 +24,9 @@ from app.models.task import Task
 from app.models.v54_pilot import Evidence, EvidenceAssessment, SourceReference, SourceVersion
 
 
+MAX_FORECAST_ROWS = 500
+
+
 def _decimal(value) -> Decimal:
     return Decimal(value or 0)
 
@@ -107,10 +110,106 @@ def _source(
     )
 
 
-def load_forecast_input(db: Session, project_id: int, as_of: date | None = None) -> ForecastInput:
+def _bounded(db: Session, statement, remaining: int, *, reason: str):
+    if remaining < 0:
+        raise LookupError(reason)
+    rows = list(db.scalars(statement.limit(remaining + 1)))
+    if len(rows) > remaining:
+        raise LookupError(reason)
+    return rows
+
+
+def _wbs_scope(
+    db: Session, project_id: int, schedule_item_id: int | None,
+) -> tuple[str, set[int] | None, ScheduleItem | None]:
+    if schedule_item_id is None:
+        return "project", None, None
+    selected = db.scalar(select(ScheduleItem).where(
+        ScheduleItem.id == schedule_item_id,
+        ScheduleItem.project_id == project_id,
+    ))
+    if selected is None:
+        raise LookupError("schedule_item_not_found")
+    baseline = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.id == selected.baseline_id,
+        ScheduleBaseline.project_id == project_id,
+        ScheduleBaseline.status == "approved",
+    ))
+    if baseline is None:
+        raise LookupError("schedule_scope_not_approved")
+    latest = db.scalar(select(ScheduleBaseline).where(
+        ScheduleBaseline.project_id == project_id,
+        ScheduleBaseline.contract_id == baseline.contract_id,
+        ScheduleBaseline.status == "approved",
+    ).order_by(ScheduleBaseline.version.desc(), ScheduleBaseline.id.desc()).limit(1))
+    if latest is None or latest.id != baseline.id:
+        raise LookupError("schedule_scope_not_current")
+    if not selected.is_summary:
+        child_exists = db.scalar(select(ScheduleItem.id).where(
+            ScheduleItem.project_id == project_id,
+            ScheduleItem.baseline_id == selected.baseline_id,
+            ScheduleItem.wbs_parent_id == selected.id,
+        ).limit(1))
+        if child_exists is not None:
+            raise LookupError("schedule_wbs_invalid")
+        return "wbs_leaf", {selected.id}, selected
+
+    rows = list(db.scalars(select(ScheduleItem).where(
+        ScheduleItem.project_id == project_id,
+        ScheduleItem.baseline_id == selected.baseline_id,
+    ).order_by(ScheduleItem.id)))
+    children: dict[int | None, list[ScheduleItem]] = {}
+    for row in rows:
+        children.setdefault(row.wbs_parent_id, []).append(row)
+    leaf_ids: set[int] = set()
+    stack = [selected.id]
+    visited: set[int] = set()
+    while stack:
+        parent_id = stack.pop()
+        if parent_id in visited:
+            raise LookupError("schedule_wbs_cycle")
+        visited.add(parent_id)
+        for child in children.get(parent_id, []):
+            if child.is_summary:
+                stack.append(child.id)
+            else:
+                if children.get(child.id):
+                    raise LookupError("schedule_wbs_invalid")
+                leaf_ids.add(child.id)
+    return "wbs_summary", leaf_ids, selected
+
+
+def load_forecast_input(
+    db: Session,
+    project_id: int,
+    as_of: date | None = None,
+    *,
+    contract_id: int | None = None,
+    schedule_item_id: int | None = None,
+    row_limit: int = 200,
+) -> ForecastInput:
+    if not 1 <= row_limit <= MAX_FORECAST_ROWS:
+        raise ValueError("invalid_forecast_row_limit")
     project = db.get(Project, project_id)
     if project is None:
         raise LookupError("project_not_found")
+
+    contract = None
+    if contract_id is not None:
+        contract = db.scalar(select(Contract).where(
+            Contract.id == contract_id,
+            Contract.project_id == project_id,
+        ))
+        if contract is None:
+            raise LookupError("contract_not_found")
+
+    scope_kind, schedule_ids, selected_schedule = _wbs_scope(db, project_id, schedule_item_id)
+    if contract_id is not None and selected_schedule is not None:
+        selected_baseline = db.get(ScheduleBaseline, selected_schedule.baseline_id)
+        if selected_baseline is None or selected_baseline.contract_id != contract_id:
+            raise LookupError("contract_schedule_scope_mismatch")
+    if contract_id is not None:
+        scope_kind = f"contract_{scope_kind}" if schedule_item_id is not None else "contract"
 
     baselines = list(db.scalars(
         select(ScheduleBaseline)
@@ -121,29 +220,74 @@ def load_forecast_input(db: Session, project_id: int, as_of: date | None = None)
     for baseline in baselines:
         current_baselines.setdefault(baseline.contract_id, baseline)
     baseline_ids = [row.id for row in current_baselines.values()]
-    schedule = list(db.scalars(
-        select(ScheduleItem)
-        .where(ScheduleItem.project_id == project_id, ScheduleItem.baseline_id.in_(baseline_ids))
-        .order_by(ScheduleItem.id)
-    )) if baseline_ids else []
-    budget = list(db.scalars(
-        select(BudgetLine)
-        .where(BudgetLine.project_id == project_id, BudgetLine.status.notin_({"rejected"}))
-        .order_by(BudgetLine.id)
-    ))
-    cash_flow = list(db.scalars(
-        select(CashFlowEntry)
-        .where(CashFlowEntry.project_id == project_id, CashFlowEntry.status != "cancelled")
-        .order_by(CashFlowEntry.planned_date, CashFlowEntry.id)
-    ))
-    contracts = list(db.scalars(
-        select(Contract).where(Contract.project_id == project_id).order_by(Contract.id)
-    ))
-    tasks = list(db.scalars(
-        select(Task)
-        .where(Task.project_id == project_id, Task.status.notin_({"completed", "cancelled"}))
-        .order_by(Task.id)
-    ))
+    if contract_id is not None:
+        baseline_ids = [row.id for row in current_baselines.values() if row.contract_id == contract_id]
+    schedule_statement = select(ScheduleItem).where(
+        ScheduleItem.project_id == project_id,
+        ScheduleItem.baseline_id.in_(baseline_ids),
+        ScheduleItem.is_summary.is_(False),
+    )
+    if schedule_ids is not None:
+        schedule_statement = schedule_statement.where(ScheduleItem.id.in_(schedule_ids))
+    schedule = _bounded(db, schedule_statement.order_by(ScheduleItem.id), row_limit,
+                        reason="forecast_row_limit_exceeded") if baseline_ids else []
+
+    budget_statement = select(BudgetLine).where(
+        BudgetLine.project_id == project_id,
+        BudgetLine.review_status == "confirmed",
+        BudgetLine.status.notin_({"rejected"}),
+    )
+    cash_statement = select(CashFlowEntry).where(
+        CashFlowEntry.project_id == project_id,
+        CashFlowEntry.review_status == "confirmed",
+        CashFlowEntry.status != "cancelled",
+    )
+    if contract_id is not None:
+        budget_statement = budget_statement.where(BudgetLine.contract_id == contract_id)
+        cash_statement = cash_statement.where(CashFlowEntry.contract_id == contract_id)
+    if schedule_ids is not None:
+        budget_statement = budget_statement.where(BudgetLine.schedule_item_id.in_(schedule_ids))
+        cash_statement = cash_statement.where(CashFlowEntry.schedule_item_id.in_(schedule_ids))
+
+    summary_ids = set(db.scalars(select(ScheduleItem.id).where(
+        ScheduleItem.project_id == project_id,
+        ScheduleItem.is_summary.is_(True),
+    )))
+    if summary_ids:
+        direct_budget = db.scalar(select(BudgetLine.id).where(
+            BudgetLine.project_id == project_id,
+            BudgetLine.review_status == "confirmed",
+            BudgetLine.schedule_item_id.in_(summary_ids),
+        ).limit(1))
+        direct_cash = db.scalar(select(CashFlowEntry.id).where(
+            CashFlowEntry.project_id == project_id,
+            CashFlowEntry.review_status == "confirmed",
+            CashFlowEntry.schedule_item_id.in_(summary_ids),
+        ).limit(1))
+        if direct_budget is not None or direct_cash is not None:
+            raise LookupError("schedule_summary_direct_finance_link")
+
+    budget = _bounded(db, budget_statement.order_by(BudgetLine.id), row_limit - len(schedule),
+                      reason="forecast_row_limit_exceeded")
+    cash_flow = _bounded(db, cash_statement.order_by(CashFlowEntry.planned_date, CashFlowEntry.id),
+                         row_limit - len(schedule) - len(budget), reason="forecast_row_limit_exceeded")
+
+    contract_statement = select(Contract).where(Contract.project_id == project_id)
+    if contract_id is not None:
+        contract_statement = contract_statement.where(Contract.id == contract_id)
+    contracts = _bounded(db, contract_statement.order_by(Contract.id),
+                         row_limit - len(schedule) - len(budget) - len(cash_flow),
+                         reason="forecast_row_limit_exceeded")
+
+    task_statement = select(Task).where(
+        Task.project_id == project_id,
+        Task.status.notin_({"completed", "cancelled"}),
+    )
+    tasks = [] if contract_id is not None or schedule_ids is not None else _bounded(
+        db, task_statement.order_by(Task.id),
+        row_limit - len(schedule) - len(budget) - len(cash_flow) - len(contracts),
+        reason="forecast_row_limit_exceeded",
+    )
     document_ids = {
         value for value in (
             *(row.source_document_id for row in budget),
@@ -157,6 +301,11 @@ def load_forecast_input(db: Session, project_id: int, as_of: date | None = None)
         project_id=project.id,
         organization_id=project.organization_id,
         as_of=as_of or date.today(),
+        scope_kind=scope_kind,
+        contract_id=contract_id,
+        schedule_item_id=schedule_item_id,
+        rows_included=len(schedule) + len(budget) + len(cash_flow) + len(contracts) + len(tasks),
+        row_limit=row_limit,
         schedule=tuple(ScheduleFact(
             id=row.id,
             title=row.title,

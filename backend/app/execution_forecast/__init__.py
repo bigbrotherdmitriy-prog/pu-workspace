@@ -1,7 +1,7 @@
 """Read-only, explainable MVP4 forecasting.
 
-The package deliberately has no persistence or provider side effects.  Its
-router is not registered globally: integration is an explicit later step.
+The package deliberately has no persistence or provider side effects.  The
+registered router exposes GET-only, project-authorized projections.
 """
 
 from app.execution_forecast.engine import build_forecast

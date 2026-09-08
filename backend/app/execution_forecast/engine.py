@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.execution_forecast.contracts import EntitySource, EvidencePin, ForecastInput, ScheduleFact
+from app.mvp4.finance_guards import IMPLICIT_LEDGER_CURRENCY, finance_decision_requirements
 
 
 LOW_CONFIDENCE = 0.70
@@ -96,6 +97,10 @@ def build_forecast(data: ForecastInput) -> dict:
     risks: list[dict] = []
     confidence_samples: list[float] = []
 
+    rows_included = sum(map(len, (data.schedule, data.budget, data.cash_flow, data.contracts, data.tasks)))
+    if rows_included > data.row_limit:
+        raise ValueError("forecast_row_limit_exceeded")
+
     for item in sorted(data.schedule, key=lambda row: row.id):
         predicted, method, base = _schedule_projection(item, data.as_of)
         confidence = _combine_confidence(base, item.source)
@@ -135,18 +140,35 @@ def build_forecast(data: ForecastInput) -> dict:
     balance = Decimal("0")
     minimum_balance = Decimal("0")
     gap_date: date | None = None
+    minimum_balance_date: date | None = None
     cash_events = sorted(
         data.cash_flow,
         key=lambda row: (row.actual_date or row.planned_date, row.id),
     )
+    planned_cash_inflow = Decimal("0")
+    planned_cash_outflow = Decimal("0")
+    actual_cash_inflow = Decimal("0")
+    actual_cash_outflow = Decimal("0")
     for item in cash_events:
+        if item.direction not in {"inflow", "outflow"}:
+            raise ValueError("unsupported_cash_flow_direction")
         is_actual = item.status in {"paid", "received"} and item.actual_date is not None
         event_date = item.actual_date if is_actual else item.planned_date
         amount = item.actual_amount if is_actual else item.planned_amount
         signed = amount if item.direction == "inflow" else -amount
         balance += signed
+        if is_actual and item.direction == "inflow":
+            actual_cash_inflow += amount
+        elif is_actual:
+            actual_cash_outflow += amount
+        elif item.direction == "inflow":
+            planned_cash_inflow += amount
+        else:
+            planned_cash_outflow += amount
         if balance < minimum_balance:
             minimum_balance = balance
+            minimum_balance_date = event_date
+        if balance < 0 and gap_date is None:
             gap_date = event_date
         base = 0.98 if is_actual else (0.82 if item.status in {"approved", "active"} else 0.46)
         confidence = _combine_confidence(base, item.source)
@@ -176,8 +198,7 @@ def build_forecast(data: ForecastInput) -> dict:
             [row["sources"][0] for row in cash_rows],
         ))
 
-    planned_total = Decimal("0")
-    forecast_total = Decimal("0")
+    budget_totals: dict[str, dict[str, Decimal]] = {}
     for item in sorted(data.budget, key=lambda row: row.id):
         # Conservative estimate-at-completion: never hide a known commitment,
         # actual spend or a larger declared forecast behind the original plan.
@@ -207,8 +228,12 @@ def build_forecast(data: ForecastInput) -> dict:
                 "budget_overrun", "high",
                 f"Строка бюджета #{item.id}: прогноз выше плана на {_money(variance)} {item.currency}.", [source],
             ))
-        planned_total += item.planned_amount
-        forecast_total += estimate
+        totals = budget_totals.setdefault(item.currency, {
+            "planned": Decimal("0"), "actual": Decimal("0"), "forecast": Decimal("0"),
+        })
+        totals["planned"] += item.planned_amount
+        totals["actual"] += item.actual_amount
+        totals["forecast"] += estimate
         confidence_samples.append(confidence)
 
     for task in sorted(data.tasks, key=lambda row: row.id):
@@ -227,11 +252,29 @@ def build_forecast(data: ForecastInput) -> dict:
                 [_source_payload(contract.source)],
             ))
 
+    currencies = sorted(budget_totals)
+    decisions = finance_decision_requirements(
+        currencies,
+        has_implicit_currency_rows=bool(data.cash_flow),
+        has_financial_rows=bool(data.budget or data.cash_flow),
+    )
+    budget_totals_payload = [{
+        "currency": currency,
+        "planned_amount": _money(budget_totals[currency]["planned"]),
+        "actual_amount": _money(budget_totals[currency]["actual"]),
+        "forecast_amount": _money(budget_totals[currency]["forecast"]),
+        "variance": _money(budget_totals[currency]["forecast"] - budget_totals[currency]["planned"]),
+    } for currency in currencies]
+    single_currency = budget_totals_payload[0] if len(budget_totals_payload) == 1 else None
+
     overall_confidence = round(sum(confidence_samples) / len(confidence_samples), 3) if confidence_samples else 0.0
     input_summary = {
         "project_id": data.project_id,
         "organization_id": data.organization_id,
         "as_of": data.as_of.isoformat(),
+        "scope_kind": data.scope_kind,
+        "contract_id": data.contract_id,
+        "schedule_item_id": data.schedule_item_id,
         "schedule": schedule_rows,
         "budget": budget_rows,
         "cash_flow": cash_rows,
@@ -242,10 +285,18 @@ def build_forecast(data: ForecastInput) -> dict:
         "forecast_id": forecast_id,
         "project_id": data.project_id,
         "as_of": data.as_of.isoformat(),
+        "scope": {
+            "kind": data.scope_kind,
+            "contract_id": data.contract_id,
+            "schedule_item_id": data.schedule_item_id,
+            "rows_included": rows_included,
+            "row_limit": data.row_limit,
+        },
         "publication_state": "draft",
         "advisory_only": True,
         "can_trigger_actions": False,
         "requires_human_confirmation": True,
+        "financial_input_policy": "human_confirmed_budget_and_cash_flow_only",
         "confidence": {
             "score": overall_confidence,
             "band": "high" if overall_confidence >= 0.85 else "medium" if overall_confidence >= LOW_CONFIDENCE else "low",
@@ -261,10 +312,14 @@ def build_forecast(data: ForecastInput) -> dict:
             "stages": schedule_rows,
         },
         "budget": {
-            "formula": "sum(max(plan, committed, actual, declared_forecast))",
-            "planned_total": _money(planned_total),
-            "forecast_total": _money(forecast_total),
-            "variance": _money(forecast_total - planned_total),
+            "formula": "per currency: sum(max(plan, committed, actual, declared_forecast))",
+            "planned_total": single_currency["planned_amount"] if single_currency else None,
+            "actual_total": single_currency["actual_amount"] if single_currency else None,
+            "forecast_total": single_currency["forecast_amount"] if single_currency else None,
+            "variance": single_currency["variance"] if single_currency else None,
+            "currency": single_currency["currency"] if single_currency else None,
+            "totals_by_currency": budget_totals_payload,
+            "automatic_conversion": False,
             "lines": budget_rows,
         },
         "cash_flow": {
@@ -272,9 +327,30 @@ def build_forecast(data: ForecastInput) -> dict:
             "opening_balance": "0.00",
             "closing_balance": _money(balance),
             "minimum_balance": _money(minimum_balance),
-            "cash_gap_date": gap_date.isoformat() if gap_date and minimum_balance < 0 else None,
+            "cash_gap_date": gap_date.isoformat() if gap_date else None,
+            "minimum_balance_date": minimum_balance_date.isoformat() if minimum_balance_date else None,
+            "currency": IMPLICIT_LEDGER_CURRENCY,
+            "planned": {
+                "inflow": _money(planned_cash_inflow),
+                "outflow": _money(planned_cash_outflow),
+                "net": _money(planned_cash_inflow - planned_cash_outflow),
+            },
+            "actual": {
+                "inflow": _money(actual_cash_inflow),
+                "outflow": _money(actual_cash_outflow),
+                "net": _money(actual_cash_inflow - actual_cash_outflow),
+            },
+            "forecast": {
+                "inflow": _money(planned_cash_inflow + actual_cash_inflow),
+                "outflow": _money(planned_cash_outflow + actual_cash_outflow),
+                "net": _money(
+                    planned_cash_inflow + actual_cash_inflow
+                    - planned_cash_outflow - actual_cash_outflow
+                ),
+            },
             "events": cash_rows,
         },
+        "decision_requirements": decisions,
         "risks": risks,
         "manual_confirmation": {
             "binding": forecast_id,

@@ -891,6 +891,12 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
             current_by_contract[row.contract_id] = row.id
     current_baseline_ids = set(current_by_contract.values())
     schedule = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id).order_by(ScheduleItem.planned_finish, ScheduleItem.id)))
+    schedule_levels: dict[int, int] = {}
+    for baseline in baselines:
+        baseline_rows = [row for row in schedule if row.baseline_id == baseline.id]
+        if baseline_rows:
+            _, levels = _wbs_layout(baseline_rows)
+            schedule_levels.update(levels)
     budget = list(db.scalars(select(BudgetLine).where(BudgetLine.project_id == project_id).order_by(BudgetLine.id.desc())))
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
@@ -933,7 +939,10 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version,
                        "status": x.status, "note": x.note,
                        "is_current": current_by_contract.get(x.contract_id) == x.id} for x in baselines],
-        "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "planned_start": x.planned_start,
+        "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title,
+                      "wbs_parent_id": x.wbs_parent_id, "wbs_level": schedule_levels[x.id],
+                      "wbs_order": x.wbs_order, "is_summary": x.is_summary,
+                      "planned_start": x.planned_start,
                       "planned_finish": x.planned_finish, "actual_start": x.actual_start, "actual_finish": x.actual_finish,
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status} for x in schedule],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "category": x.category, "description": x.description,

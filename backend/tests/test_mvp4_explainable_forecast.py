@@ -211,7 +211,8 @@ def test_repository_uses_only_latest_approved_gpr_and_project_scoped_rows(db_ses
         ScheduleItem(project_id=project.id, baseline_id=old.id, title="Historical", planned_progress=100),
         ScheduleItem(project_id=project.id, baseline_id=current.id, title="Current", planned_progress=80),
         ScheduleItem(project_id=project.id, baseline_id=draft.id, title="Draft", planned_progress=10),
-        BudgetLine(project_id=project.id, category="works", description="Included", planned_amount=10),
+        BudgetLine(project_id=project.id, category="works", description="Included", planned_amount=10,
+                   status="approved", review_status="confirmed"),
         BudgetLine(project_id=other_project.id, category="works", description="Excluded", planned_amount=999),
         CashFlowEntry(
             project_id=project.id, direction="outflow", title="Cancelled", planned_date=date(2026, 9, 2),

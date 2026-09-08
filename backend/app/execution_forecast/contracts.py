@@ -90,6 +90,11 @@ class ForecastInput:
     project_id: int
     organization_id: int
     as_of: date
+    scope_kind: str = "project"
+    contract_id: int | None = None
+    schedule_item_id: int | None = None
+    rows_included: int = 0
+    row_limit: int = 200
     schedule: tuple[ScheduleFact, ...] = field(default_factory=tuple)
     budget: tuple[BudgetFact, ...] = field(default_factory=tuple)
     cash_flow: tuple[CashFlowFact, ...] = field(default_factory=tuple)
