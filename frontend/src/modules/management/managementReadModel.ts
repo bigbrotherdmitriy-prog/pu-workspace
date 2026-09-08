@@ -1,3 +1,5 @@
+import { parseMeetingBinding, type MeetingBinding } from "../meetings/meetingSourceModel";
+
 export type EvidencePin = Readonly<Record<string, unknown>>;
 
 export type AttentionKind =
@@ -82,6 +84,7 @@ export type MeetingProposal = {
   originStatus?: string;
   originReason?: string;
   confirmationAvailable?: boolean;
+  binding?: MeetingBinding;
 };
 
 export type MeetingActionCandidate = {
@@ -299,7 +302,7 @@ export function parseNotificationsResponse(value: unknown): DigestNotification[]
   });
 }
 
-type ProposalOrigin = Pick<MeetingProposal, "originStatus" | "originReason" | "confirmationAvailable">;
+type ProposalOrigin = Pick<MeetingProposal, "originStatus" | "originReason" | "confirmationAvailable" | "binding">;
 
 function parseProposalOrigin(item: Dictionary): ProposalOrigin {
   const result: ProposalOrigin = {};
@@ -314,15 +317,17 @@ function parseProposalOrigin(item: Dictionary): ProposalOrigin {
     if (typeof item.confirmation_available !== "boolean") throw new Error("invalid_meeting_proposals");
     result.confirmationAvailable = item.confirmation_available;
   }
+  if (item.origin_status === "bound") result.binding = parseMeetingBinding(item);
   return result;
 }
 
 export function meetingProposalBlockReason(proposal: ProposalOrigin): string | null {
   if (proposal.originStatus === "invalid_source" || proposal.originReason === "meeting_source_binding_required") {
-    return "Подтверждение недоступно: требуется привязка протокола к источнику и его неизменяемой версии. Привязка пока не реализована.";
+    return "Подтверждение недоступно: привяжите протокол к доступному источнику и его неизменяемой версии в разделе «Совещания».";
   }
-  // No positive origin-status contract exists yet. Unknown supplied flags must
-  // not become authority, even alongside confirmation_available=true.
+  if (proposal.originStatus === "bound" && proposal.binding && proposal.confirmationAvailable === true
+    && proposal.originReason === undefined) return null;
+  // Unknown or incomplete supplied flags cannot become authority.
   if (proposal.originStatus !== undefined || proposal.originReason !== undefined) {
     return "Подтверждение недоступно: статус источника не распознан. Обновите данные или обратитесь к администратору.";
   }
@@ -357,12 +362,20 @@ export function parseMeetingProposalEnvelope(value: unknown): MeetingProposal[] 
   const root = dictionary(value);
   if (!root || root.external_actions_created !== false) throw new Error("invalid_meeting_proposals");
   const origin = parseProposalOrigin(root);
-  return parseMeetingProposals(root.proposals).map(proposal => ({
+  return parseMeetingProposals(root.proposals).map(proposal => {
+    if (origin.binding && proposal.binding && Object.keys(origin.binding).some(key =>
+      origin.binding![key as keyof MeetingBinding] !== proposal.binding![key as keyof MeetingBinding])) {
+      throw new Error("meeting_binding_mismatch");
+    }
+    // A historical denied row must not inherit today's bound origin/authority.
+    if (meetingProposalBlockReason(proposal)) return { ...proposal, confirmationAvailable: false };
+    return ({
     ...proposal, ...origin,
     // An envelope denial cannot be overridden by a row, or vice versa.
     ...(meetingProposalBlockReason(origin) || meetingProposalBlockReason(proposal)
       ? { confirmationAvailable: false } : {}),
-  }));
+    });
+  });
 }
 
 export function parseMeetingProposalConfirmation(value: unknown): MeetingProposal {
@@ -370,6 +383,9 @@ export function parseMeetingProposalConfirmation(value: unknown): MeetingProposa
   if (!root || root.external_actions_created !== false) throw new Error("invalid_meeting_proposals");
   const proposals = parseMeetingProposalEnvelope({ ...root, proposals: [root.proposal] });
   if (meetingProposalBlockReason(proposals[0])) throw new Error("invalid_meeting_confirmation");
+  if (proposals[0].binding && (proposals[0].status !== "confirmed" || proposals[0].reviewState !== "verified")) {
+    throw new Error("meeting_confirmation_not_completed");
+  }
   return proposals[0];
 }
 

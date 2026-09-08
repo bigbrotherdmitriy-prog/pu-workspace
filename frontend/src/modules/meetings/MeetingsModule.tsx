@@ -1,4 +1,5 @@
 import { Users } from "lucide-react";
+import { MeetingSourcePanel } from "./MeetingSourcePanel";
 
 export type MeetingRow = {
   id: number;
@@ -9,6 +10,7 @@ export type MeetingRow = {
   agenda?: string;
   minutes?: string;
   status: string;
+  record_version?: number;
 };
 
 type Props = {
@@ -22,6 +24,9 @@ type Props = {
   onAgendaChange: (value: string) => void;
   onCreate: () => void;
   onRecordMinutes: (meeting: MeetingRow) => void;
+  projectId?: number | null;
+  members?: { user_id: number; name: string }[];
+  onMeetingVersionChange?: (meeting: MeetingRow, version: number) => void;
 };
 
 export function MeetingsModule({
@@ -35,6 +40,9 @@ export function MeetingsModule({
   onAgendaChange,
   onCreate,
   onRecordMinutes,
+  projectId,
+  members = [],
+  onMeetingVersionChange,
 }: Props) {
   return (
     <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
@@ -43,8 +51,8 @@ export function MeetingsModule({
           <div>
             <h2>Новое совещание</h2>
             <p>
-              После встречи внесите протокол — система выделит поручения,
-              риски и решения.
+              Внесите протокол, привяжите подтверждённый источник и проверьте
+              предложения перед созданием поручений и решений.
             </p>
           </div>
           <div>
@@ -92,10 +100,15 @@ export function MeetingsModule({
                   <p>{item.minutes}</p>
                 </div>
               )}
-              {!["completed", "cancelled"].includes(item.status) && (
+              {item.status !== "cancelled" && (
                 <button onClick={() => onRecordMinutes(item)}>
                   Внести протокол и проанализировать
                 </button>
+              )}
+              {projectId && item.status === "completed" && item.minutes && Number.isSafeInteger(item.record_version) && item.record_version! > 0 && (
+                <MeetingSourcePanel key={`${projectId}:${item.id}`} projectId={projectId}
+                  meetingId={item.id} recordVersion={item.record_version!} members={members}
+                  onVersionChange={version => onMeetingVersionChange?.(item, version)} />
               )}
             </article>
           ))}
