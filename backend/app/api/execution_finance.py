@@ -4,7 +4,8 @@ from dataclasses import asdict
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing import Annotated, Literal
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
@@ -85,6 +86,53 @@ class ScheduleGraphPut(BaseModel):
     expected_graph_revision: int = Field(strict=True, ge=1, le=9223372036854775806)
     project_start: date
     items: list[ScheduleGraphItem] = Field(max_length=500)
+
+
+_ScheduleRowId = Annotated[int, Field(strict=True, ge=1)]
+_ScheduleClientRef = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")]
+
+
+class ScheduleRowDependency(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    predecessor_id: _ScheduleRowId | None = None
+    predecessor_ref: _ScheduleClientRef | None = None
+    link_type: Literal["FS", "SS", "FF", "SF"] = "FS"
+    lag_days: int = Field(default=0, strict=True, ge=-10000, le=10000)
+
+    @model_validator(mode="after")
+    def one_reference(self):
+        if (self.predecessor_id is None) == (self.predecessor_ref is None):
+            raise ValueError("exactly_one_predecessor_reference_required")
+        return self
+
+
+class ScheduleGraphRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: _ScheduleRowId | None = None
+    client_ref: _ScheduleClientRef | None = None
+    title: str = Field(min_length=2, max_length=500)
+    duration_days: int = Field(strict=True, ge=0, le=10000)
+    is_milestone: bool = Field(strict=True)
+    constraint_type: Literal["asap", "snet", "fnet", "snlt", "fnlt", "mso", "mfo"]
+    constraint_date: date | None = None
+    not_before_date: date | None = None
+    dependencies: list[ScheduleRowDependency] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="after")
+    def one_identity(self):
+        if (self.id is None) == (self.client_ref is None):
+            raise ValueError("exactly_one_row_identity_required")
+        if len(self.title.strip()) < 2:
+            raise ValueError("schedule_title_required")
+        return self
+
+
+class ScheduleGraphRowsPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_graph_revision: int = Field(strict=True, ge=1, le=9223372036854775806)
+    project_start: date
+    deleted_ids: list[_ScheduleRowId] = Field(default_factory=list, max_length=500)
+    items: list[ScheduleGraphRow] = Field(max_length=500)
 
 
 class BudgetCreate(BaseModel):
@@ -569,6 +617,116 @@ def put_schedule_graph(baseline_id: int, payload: ScheduleGraphPut,
                f"revision={revised}; count={len(rows)}")
         db.flush()
         response = _graph_response(baseline, rows, plan)
+        db.commit()
+        return response
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _row_graph_intent(items, references):
+    """Resolve request-local names, then use the existing planner unchanged."""
+    result = []
+    for item in items:
+        identifier = item.id if item.id is not None else references[item.client_ref]
+        parts = []
+        for dependency in item.dependencies:
+            predecessor = dependency.predecessor_id
+            if predecessor is None:
+                predecessor = references.get(dependency.predecessor_ref)
+                if predecessor is None:
+                    raise HTTPException(422, "schedule_unknown_client_reference")
+            parts.append(f"{predecessor}{dependency.link_type}"
+                         + (f"{dependency.lag_days:+d}d" if dependency.lag_days else ""))
+        predecessors = "; ".join(parts) or None
+        if predecessors is not None and len(predecessors) > 2000:
+            raise HTTPException(422, "schedule_dependency_limit")
+        result.append(ScheduleGraphItem(id=identifier, duration_days=item.duration_days,
+            is_milestone=item.is_milestone, predecessor_ids=predecessors,
+            constraint_type=item.constraint_type, constraint_date=item.constraint_date,
+            not_before_date=item.not_before_date))
+    return result
+
+
+@router.put("/baselines/{baseline_id}/graph/rows")
+def put_schedule_graph_rows(baseline_id: int, payload: ScheduleGraphRowsPut,
+                            db: Session = Depends(get_db), user: User = Depends(require_user)):
+    # Like graph PUT, this endpoint owns a clean transaction. In particular a
+    # caller must not autoflush a pending financial unlink ahead of our guard.
+    if db.new or db.dirty or db.deleted:
+        raise HTTPException(409, "schedule_pending_changes")
+    baseline = _locked_graph_baseline(db, baseline_id, user, "editor")
+    if baseline.status != "draft":
+        raise HTTPException(409, "schedule_draft_required")
+    if baseline.graph_revision != payload.expected_graph_revision:
+        raise HTTPException(409, "schedule_graph_revision_changed")
+    rows = _graph_rows(db, baseline)
+    existing = {row.id: row for row in rows}
+    kept = [item.id for item in payload.items if item.id is not None]
+    refs = [item.client_ref for item in payload.items if item.client_ref is not None]
+    deleted = set(payload.deleted_ids)
+    if (len(kept) != len(set(kept)) or len(refs) != len(set(refs))
+            or len(deleted) != len(payload.deleted_ids) or deleted.intersection(kept)
+            or set(kept).union(deleted) != set(existing)):
+        raise HTTPException(422, "schedule_complete_graph_required")
+    for identifier in deleted:
+        row = existing[identifier]
+        if (row.source_name is not None or row.source_excerpt is not None
+                or row.actual_start is not None or row.actual_finish is not None
+                or row.actual_progress != 0 or row.status != "planned"):
+            raise HTTPException(409, "schedule_row_delete_protected")
+    # Schedule rows are locked FOR UPDATE, so concurrent FK inserts cannot
+    # slip between this guard and DELETE on PostgreSQL. Never SET NULL links.
+    if deleted and any(db.scalar(select(model.id).where(model.schedule_item_id.in_(deleted)).limit(1))
+                       is not None for model in (BudgetLine, CashFlowEntry)):
+        raise HTTPException(409, "schedule_row_delete_protected")
+
+    # Validate the *complete* prospective graph before allocating DB rows.
+    # Temporary IDs are private to this calculation and never returned/stored.
+    offset = max(existing, default=0) + 1
+    temporary = {reference: offset + index for index, reference in enumerate(refs)}
+    allowed = set(kept)
+    if any(link.predecessor_id is not None and link.predecessor_id not in allowed
+           for item in payload.items for link in item.dependencies):
+        raise HTTPException(422, "schedule_unknown_predecessor")
+    _calculate_graph(_row_graph_intent(payload.items, temporary), payload.project_start)
+    try:
+        mapping = {}
+        for item in payload.items:
+            if item.id is None:
+                row = ScheduleItem(project_id=baseline.project_id, baseline_id=baseline.id, title=item.title)
+                db.add(row)
+                db.flush()
+                mapping[item.client_ref] = row.id
+                existing[row.id] = row
+        intent = _row_graph_intent(payload.items, mapping)
+        plan, canonical = _calculate_graph(intent, payload.project_start)
+        revised = payload.expected_graph_revision + 1
+        changed = db.execute(update(ScheduleBaseline).where(
+            ScheduleBaseline.id == baseline.id, ScheduleBaseline.project_id == baseline.project_id,
+            ScheduleBaseline.status == "draft", ScheduleBaseline.graph_revision == payload.expected_graph_revision,
+        ).values(graph_revision=revised, planning_mode="calendar_graph", project_start=payload.project_start)
+         .execution_options(synchronize_session="fetch"))
+        if changed.rowcount != 1:
+            raise HTTPException(409, "schedule_graph_revision_changed")
+        dates = {task.task_id: task for task in plan.tasks}
+        final_rows = []
+        for item, resolved in zip(payload.items, intent):
+            row = existing[resolved.id]
+            row.title = item.title
+            for field in ("duration_days", "is_milestone", "constraint_type", "constraint_date", "not_before_date"):
+                setattr(row, field, getattr(item, field))
+            row.predecessor_ids = canonical[row.id]
+            row.planned_start = dates[row.id].earliest_start
+            row.planned_finish = dates[row.id].earliest_finish
+            final_rows.append(row)
+        for identifier in deleted:
+            db.delete(existing[identifier])
+        _audit(db, "schedule_graph_rows_saved", "schedule_baseline", baseline.id, user.id,
+               f"revision={revised}; count={len(final_rows)}; added={len(mapping)}; deleted={len(deleted)}")
+        db.flush()
+        response = _graph_response(baseline, sorted(final_rows, key=lambda row: row.id), plan)
+        response["client_ref_map"] = mapping
         db.commit()
         return response
     except Exception:
