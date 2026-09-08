@@ -258,18 +258,32 @@ class LocalUploadBusinessProcessor:
     and task deduplication boundaries.
     """
 
+    def __init__(self, *, xlsx_ingestion=None):
+        self.xlsx_ingestion = xlsx_ingestion
+
+    def recover_retention(self, session_factory, *, limit):
+        if self.xlsx_ingestion is None:
+            return 0
+        return self.xlsx_ingestion.recover_retention(session_factory, limit=limit)
+
     def process(
         self, session: Any, *, record: MaterializedUpload, content: bytes,
         operation_key: str,
     ) -> Mapping[str, Any]:
         from app.document_engine import index_documents
         from app.governance_engine import create_governance_items
-        from app.organizer_engine.content import extract_text
+        from app.organizer_engine.content import extract_text_result
         from app.organizer_engine.types import DriveFile
         from app.response_engine import create_response_drafts
         from app.task_engine import create_tasks_from_files
 
-        text = extract_text(content, record.mime_type, record.display_name)
+        extraction = extract_text_result(content, record.mime_type, record.display_name)
+        if record.mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or record.display_name.lower().endswith(".xlsx"):
+            from app.source_evidence.xlsx_ingestion import XlsxEvidenceIngestion
+            if not isinstance(self.xlsx_ingestion, XlsxEvidenceIngestion):
+                raise LocalUploadUnavailable("xlsx_evidence_unavailable")
+            self.xlsx_ingestion.publish(session, record=record, content=content, extraction=extraction)
+        text = extraction.text
         if not text:
             return {
                 "processed": 0, "skipped": 1, "tasks": 0,
@@ -594,7 +608,10 @@ def recover_local_upload_retention(*, limit: int = 50) -> int:
         runtime = _runtime
     if runtime is None:
         return 0
-    return runtime.lifecycle.recover_retention(runtime.session_factory, limit=limit)
+    count = runtime.lifecycle.recover_retention(runtime.session_factory, limit=limit)
+    if count < limit and isinstance(runtime.processor, LocalUploadBusinessProcessor):
+        count += runtime.processor.recover_retention(runtime.session_factory, limit=limit - count)
+    return count
 
 
 def _validated_result(result: Mapping[str, Any]) -> dict[str, Any]:

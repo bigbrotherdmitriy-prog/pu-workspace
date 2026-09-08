@@ -448,7 +448,7 @@ def read_fragment(
                 ConnectionIdentity.id == SourceReference.identity_id,
                 ConnectionIdentity.organization_id == Evidence.organization_id,
             ))
-            .join(MailConnection, and_(
+            .outerjoin(MailConnection, and_(
                 MailConnection.identity_id == SourceReference.identity_id,
                 MailConnection.namespace == SourceReference.namespace,
                 MailConnection.organization_id == Evidence.organization_id,
@@ -467,6 +467,10 @@ def read_fragment(
         if lineage is None:
             deny()
         evidence, assessment, source, version, current, identity, mailbox, parent = lineage
+        local_upload = identity.provider == "local_upload" and source.namespace == "local-upload"
+        if not local_upload and (mailbox is None or mailbox.identity_id != identity.id
+                or mailbox.organization_id != tenant_id or mailbox.namespace != source.namespace):
+            deny()
         if (evidence.id != evidence_pin.ref.id.value
                 or evidence.organization_id != tenant_id
                 or evidence.revision != evidence_pin.value
@@ -482,9 +486,6 @@ def read_fragment(
                 or current.organization_id != tenant_id
                 or identity.id != source.identity_id
                 or identity.organization_id != tenant_id
-                or mailbox.identity_id != identity.id
-                or mailbox.organization_id != tenant_id
-                or mailbox.namespace != source.namespace
                 or source.parent_source_id is None and parent is not None
                 or source.parent_source_id is not None
                 and (parent is None or parent.id != source.parent_source_id
@@ -500,10 +501,11 @@ def read_fragment(
         reviewed_at = utc(assessment.reviewed_at)
         extracted_at = utc(evidence.extracted_at)
         policy_pins = source.policy_pins
-        if (not identity or not mailbox or identity.state != "verified" or mailbox.state != "active"
+        if (not identity or identity.state != "verified"
+                or not local_upload and (not mailbox or mailbox.state != "active" or mailbox.record_version <= 0)
                 or identity.binding_epoch <= 0 or identity.record_version <= 0
                 or identity.credential_generation is None or identity.credential_generation <= 0
-                or verified_at is None or verified_at > now or mailbox.record_version <= 0
+                or verified_at is None or verified_at > now
                 or version.revision != 1 or version.consistency not in {"revision_bound", "digest_observed"}
                 or (version.consistency == "revision_bound" and not version.provider_revision)
                 or (version.consistency == "digest_observed" and not version.integrity)
@@ -522,6 +524,12 @@ def read_fragment(
                 or set(policy_pins) != {"access", "retention", "residency"}
                 or not isinstance(source.residency, dict) or not source.residency):
             deny()
+
+        local_binding = None
+        if local_upload:
+            from app.source_evidence.xlsx_ingestion import require_local_xlsx_fragment
+            local_binding = require_local_xlsx_fragment(db, scope=scope, source=source, version=version,
+                evidence=evidence, descriptor=RepresentationDescriptor.model_validate(evidence.representation_ref), clock=clock)
 
         version_state = "current" if current.version_id == version.id else "historical"
         resolution = resolver.resolve(db, scope=scope, pin=evidence_pin,
@@ -598,6 +606,12 @@ def read_fragment(
         except UnicodeDecodeError:
             deny()
         if not fragment or "\x00" in fragment:
+            deny()
+        if local_binding is not None:
+            from app.source_evidence.xlsx_ingestion import validate_local_xlsx_payload
+            validate_local_xlsx_payload(payload.fragment, evidence=evidence, binding=local_binding)
+        finished_at = utc(clock())
+        if finished_at is None or finished_at < now or finished_at >= effective_valid_until:
             deny()
         return FragmentReadResult(
             evidence_pin=evidence_pin,
