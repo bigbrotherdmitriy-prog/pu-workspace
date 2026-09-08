@@ -2,7 +2,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.core.v54_interfaces import AuditAppend, RequestScope
 from app.core.v54_refs import ObjectRef, require_same_tenant
@@ -38,6 +39,26 @@ def _utc(value):
     if value is None:
         return None
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def _pending_may_match(state, field, expected):
+    """Inspect old/current scope without queries, refresh or implicit flush.
+
+    A moved row may revoke the OLD scope. Unknown old values therefore cannot
+    prove that a pending row is unrelated to the requested authority.
+    """
+    values = []
+    if field in state.dict:
+        values.append(state.dict[field])
+    # New rows have NO_VALUE history because they have never been persisted;
+    # their explicitly assigned scope is authoritative for relevance. For an
+    # existing row NO_VALUE can instead mean an expired/unknown previous scope.
+    if state.identity is not None and field in state.committed_state:
+        values.append(state.committed_state[field])
+    for index, column in enumerate(state.mapper.primary_key):
+        if column.key == field and state.identity is not None:
+            values.append(state.identity[index])
+    return not values or any(value is NO_VALUE or value == expected for value in values)
 
 
 @dataclass(frozen=True)
@@ -110,12 +131,30 @@ class AuthorityResolver:
                           principal_id: str, operation: str, now: datetime, lock=True):
         # Refresh must not erase an unflushed revocation, and an authorization
         # read must not persist it implicitly. The transaction owner must first
-        # explicitly flush or roll back pending security-row changes.
+        # explicitly flush or roll back relevant pending security-row changes.
         pending = set(db.new) | set(db.deleted) | {
             row for row in db.dirty if db.is_modified(row, include_collections=False)
         }
-        if any(isinstance(row, (Project, AuthorityState, ProjectMember, User)) for row in pending):
-            _deny()
+        user_id = int(principal_id) if principal_kind == "user" and str(principal_id).isdigit() else None
+        for row in pending:
+            state = inspect(row)
+            if isinstance(row, Project):
+                relevant = _pending_may_match(state, "id", project_id)
+            elif isinstance(row, User):
+                relevant = user_id is not None and _pending_may_match(state, "id", user_id)
+            elif isinstance(row, ProjectMember):
+                relevant = (user_id is not None
+                    and _pending_may_match(state, "project_id", project_id)
+                    and _pending_may_match(state, "user_id", user_id))
+            elif isinstance(row, AuthorityState):
+                relevant = all(_pending_may_match(state, field, expected) for field, expected in (
+                    ("organization_id", tenant_id), ("project_id", project_id),
+                    ("principal_kind", principal_kind), ("principal_id", str(principal_id)),
+                    ("scope", self.scope)))
+            else:
+                relevant = False
+            if relevant:
+                _deny()
         with db.no_autoflush:
             return self._require_principal(db, tenant_id=tenant_id, project_id=project_id,
                 principal_kind=principal_kind, principal_id=principal_id,
@@ -205,12 +244,24 @@ class AuthorityResolver:
         require_same_tenant(scope.tenant, subject)
         snapshot = self.require(db, scope, operation, self.clock(), lock=lock)
         if operation == "task.assign":
-            if subject.type != "user":
+            if subject.type != "user" or not str(subject.id.value).isdigit():
                 _deny()
-            member = db.scalar(select(ProjectMember.id).where(
-                ProjectMember.project_id == snapshot.project_id,
-                ProjectMember.user_id == int(subject.id.value),
-            ))
+            subject_id = int(subject.id.value)
+            pending = set(db.new) | set(db.deleted) | {
+                row for row in db.dirty if db.is_modified(row, include_collections=False)
+            }
+            for row in pending:
+                state = inspect(row)
+                if (isinstance(row, User) and _pending_may_match(state, "id", subject_id)
+                        or isinstance(row, ProjectMember)
+                        and _pending_may_match(state, "project_id", snapshot.project_id)
+                        and _pending_may_match(state, "user_id", subject_id)):
+                    _deny()
+            with db.no_autoflush:
+                member = db.scalar(select(ProjectMember.id).where(
+                    ProjectMember.project_id == snapshot.project_id,
+                    ProjectMember.user_id == subject_id,
+                ))
             if member is None:
                 _deny()
         return True
