@@ -81,7 +81,7 @@ def pg_meeting(tmp_path, monkeypatch):
         sessions = sessionmaker(engine, expire_on_commit=False)
         now = datetime.now(timezone.utc)
         with sessions.begin() as db:
-            assert list(db.scalars(text("SELECT version_num FROM alembic_version"))) == ["a54f001c0a21"]
+            assert list(db.scalars(text("SELECT version_num FROM alembic_version"))) == [CURRENT_SCHEMA_REVISION]
             seed(db)
             db.add(ProjectMember(project_id=4, user_id=2, role="owner"))
             db.add(AuthorityState(organization_id=1, project_id=4, principal_kind="user", principal_id="2",

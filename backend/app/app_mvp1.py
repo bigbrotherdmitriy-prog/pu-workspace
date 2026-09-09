@@ -19,6 +19,7 @@ from app.api.auth import router as auth_router
 from app.api.documents import router as documents_router
 from app.api.drive import router as drive_router
 from app.api.history import router as history_router
+from app.api.mvp1_google_oauth import router as mvp1_google_oauth_router
 from app.api.organizations_contracts import router as organizations_contracts_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
@@ -54,6 +55,7 @@ app.include_router(projects_router)
 app.include_router(users_router, dependencies=[Depends(require_user)])
 app.include_router(access_router, dependencies=[Depends(require_user)])
 app.include_router(drive_router, dependencies=[Depends(require_user)])
+app.include_router(mvp1_google_oauth_router)
 app.include_router(documents_router, dependencies=[Depends(require_user)])
 
 # The contracts module is shared with the legacy application.  Only its MVP-1

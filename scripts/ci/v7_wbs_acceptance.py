@@ -17,7 +17,8 @@ from typing import Any
 
 
 EXPECTED_PARENT = "a54f001c0a20"
-EXPECTED_HEAD = "a54f001c0a21"
+WBS_REVISION = "a54f001c0a21"
+CURRENT_SCHEMA_HEAD = "a54f001c0a22"
 KINDS = {"project", "phase", "work", "subwork", "milestone"}
 PARENTS = {
     "project": {None},
@@ -82,7 +83,7 @@ def _weight(row: dict[str, Any]) -> Decimal:
 
 def validate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Validate hierarchy plus exact derived fields and return safe counts."""
-    if snapshot.get("schema_revision") != EXPECTED_HEAD:
+    if snapshot.get("schema_revision") != CURRENT_SCHEMA_HEAD:
         _fail("schema_revision_mismatch")
     if not isinstance(snapshot.get("project_id"), int) or not isinstance(snapshot.get("baseline_id"), int):
         _fail("invalid_scope")
@@ -258,7 +259,7 @@ def validate_delete(snapshot: dict[str, Any], delete_ids: list[str]) -> dict[str
 
 
 def validate_migration(manifest: dict[str, Any]) -> dict[str, Any]:
-    if manifest.get("down_revision") != EXPECTED_PARENT or manifest.get("revision") != EXPECTED_HEAD:
+    if manifest.get("down_revision") != EXPECTED_PARENT or manifest.get("revision") != WBS_REVISION:
         _fail("migration_lineage_mismatch")
     columns = manifest.get("columns")
     expected = {"wbs_parent_id", "wbs_order", "is_summary"}
@@ -268,7 +269,7 @@ def validate_migration(manifest: dict[str, Any]) -> dict[str, Any]:
         _fail("historical_migration_rewrite")
     if manifest.get("flat_row_policy") != "preserve_as_ordered_root_children":
         _fail("flat_row_policy_missing")
-    return {"status": "PASS", "head": EXPECTED_HEAD, "postgres": "CONDITIONAL"}
+    return {"status": "PASS", "head": WBS_REVISION, "postgres": "CONDITIONAL"}
 
 
 def _fixture() -> dict[str, Any]:
@@ -279,7 +280,7 @@ def _fixture() -> dict[str, Any]:
         return {**common, "id": identifier, "kind": kind, "parent_id": parent, "order": order,
                 "title": title, "planned_start": start, "planned_finish": finish, "progress": progress,
                 "duration_days": duration, "finance_link_count": links}
-    return {"schema_revision": EXPECTED_HEAD, "project_id": 7, "baseline_id": 11, "graph_revision": 3,
+    return {"schema_revision": CURRENT_SCHEMA_HEAD, "project_id": 7, "baseline_id": 11, "graph_revision": 3,
             "items": [
                 row("p", "project", None, 0, "Synthetic project", "2026-09-01", "2026-09-05", "57.14"),
                 row("ph", "phase", "p", 0, "Synthetic phase", "2026-09-01", "2026-09-05", "57.14"),

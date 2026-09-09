@@ -24,6 +24,7 @@ from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, Wo
 from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.contract_document_link import ContractDocumentLink
 from app.models.job import BackgroundJob, ServiceHeartbeat
+from app.models.storage_oauth_state import StorageOAuthState
 
 _CORE_EXPORTS = [
     "Project", "User", "ProjectMember", "DriveConnection", "Document",
@@ -31,7 +32,7 @@ _CORE_EXPORTS = [
     "OrganizerSession", "OrganizerProposal", "OrganizerAction", "OrganizerOperation",
     "OrganizerRule", "AuthSession", "SourceFolder", "WorkspaceSnapshot", "VirtualNode",
     "ExtractionResult", "Organization", "Contract", "ContractVersion",
-    "ContractDocumentLink", "BackgroundJob", "ServiceHeartbeat",
+    "ContractDocumentLink", "BackgroundJob", "ServiceHeartbeat", "StorageOAuthState",
 ]
 
 MVP1_MODEL_SCOPE = os.getenv("PU_MODEL_SCOPE", "").strip().lower() == "mvp1"

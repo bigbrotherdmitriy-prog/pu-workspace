@@ -39,6 +39,7 @@ from app.api.access import router as access_router
 from app.api.documents import router as documents_router
 from app.api.drive import router as drive_router
 from app.api.google_drive import router as google_drive_router
+from app.api.mvp1_google_oauth import router as mvp1_google_oauth_router
 from app.api.yandex_disk import router as yandex_disk_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
@@ -156,6 +157,7 @@ app.include_router(search_router)
 app.include_router(provider_actions_router)
 app.include_router(storage_mutations_router)
 app.include_router(google_drive_router)
+app.include_router(mvp1_google_oauth_router)
 app.include_router(yandex_disk_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)

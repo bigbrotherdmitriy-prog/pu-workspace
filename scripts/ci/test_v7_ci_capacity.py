@@ -87,7 +87,7 @@ def test_all_51_pg_proofs_and_a21_are_preserved():
         rows + "test_pg_existing_uncommitted_fk_link_blocks_then_protects_delete",
     }
     assert len(proofs) == 51
-    assert module.HEAD == "a54f001c0a21"
+    assert module.HEAD == "a54f001c0a22"
     assert module.RUNTIME_BUDGET_SECONDS == 1320
     assert module.CLEANUP_RESERVE_SECONDS == 60
     env = capacity().offline_env()
