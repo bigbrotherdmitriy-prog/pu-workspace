@@ -8,13 +8,11 @@ from app.models.document import Document
 from app.models.project import Project
 from app.models.user import User
 from app.models.document_version import DocumentVersion
-from app.models.governance import Decision, Risk
-from app.models.response_draft import ResponseDraft
-from app.models.task import Task
 from app.models.job import BackgroundJob
 from app.jobs.queue import enqueue, request_cancel
 from app.core.auth import require_project_role, require_user
 from app.integrations.source_urls import source_object_url
+from app.mvp1_extensions import document_links
 
 
 router = APIRouter(
@@ -201,10 +199,7 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
     if item is None or item.project_id != project_id:
         raise HTTPException(404, "Document not found")
     versions = list(db.scalars(select(DocumentVersion).where(DocumentVersion.document_id == item.id).order_by(DocumentVersion.version_number.desc())).all())
-    tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.source_file_id == item.external_id)).all())
-    risks = list(db.scalars(select(Risk).where(Risk.project_id == project_id, Risk.source_id == item.external_id)).all())
-    decisions = list(db.scalars(select(Decision).where(Decision.project_id == project_id, Decision.source_id == item.external_id)).all())
-    drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.project_id == project_id, ResponseDraft.source_file_id == item.external_id)).all())
+    links = document_links(db, project_id, item.external_id)
     return {
         "id": item.id, "name": item.name, "external_id": item.external_id,
         "source_url": source_object_url(item.source, item.external_id),
@@ -219,7 +214,7 @@ def document_card(project_id: int, document_id: int, db: Session = Depends(get_d
         "ocr_metadata": item.ocr_metadata,
         "ocr_updated_at": item.ocr_updated_at,
         "versions": [{"version": x.version_number, "created_at": x.created_at} for x in versions],
-        "links": {"tasks": len(tasks), "risks": len(risks), "decisions": len(decisions), "drafts": len(drafts)},
+        "links": links,
     }
 
 

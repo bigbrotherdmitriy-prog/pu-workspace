@@ -15,13 +15,11 @@ from app.models.job import BackgroundJob
 from app.models.organizer import OrganizerSession
 from app.models.document import Document
 from app.models.organization_contract import Contract
-from app.models.execution_finance import BudgetLine, CashFlowEntry, ScheduleItem
-from app.models.project_contact import ProjectContact
-from app.models.ai_secretary import Message
 from app.models.workspace import SourceFolder
 from app.core.auth import require_project_role, require_user
 from app.organizer_engine.drive import DriveClient
 from app.organizer_engine.managed_copies import cleanup_version, managed_copies
+from app.mvp1_extensions import project_readiness_counts
 
 
 router = APIRouter(
@@ -150,18 +148,13 @@ def project_launch_readiness(
         Document.status.in_({"analyzed", "indexed", "ready"}),
     )) or 0
     contracts = list(db.scalars(select(Contract).where(Contract.project_id == project_id)))
-    schedule_rows = db.scalar(select(func.count(ScheduleItem.id)).where(ScheduleItem.project_id == project_id)) or 0
-    budget_rows = db.scalar(select(func.count(BudgetLine.id)).where(BudgetLine.project_id == project_id)) or 0
-    cash_flow_rows = db.scalar(select(func.count(CashFlowEntry.id)).where(CashFlowEntry.project_id == project_id)) or 0
-    contacts = db.scalar(select(func.count(ProjectContact.id)).where(
-        ProjectContact.project_id == project_id, ProjectContact.active.is_(True),
-    )) or 0
-    confirmed_contacts = db.scalar(select(func.count(ProjectContact.id)).where(
-        ProjectContact.project_id == project_id,
-        ProjectContact.active.is_(True),
-        ProjectContact.confirmed.is_(True),
-    )) or 0
-    inbox_messages = db.scalar(select(func.count(Message.id)).where(Message.project_id == project_id)) or 0
+    extension_counts = project_readiness_counts(db, project_id)
+    schedule_rows = extension_counts["schedule_rows"]
+    budget_rows = extension_counts["budget_rows"]
+    cash_flow_rows = extension_counts["cash_flow_rows"]
+    contacts = extension_counts["contacts"]
+    confirmed_contacts = extension_counts["confirmed_contacts"]
+    inbox_messages = extension_counts["inbox_messages"]
     sources = list(db.scalars(select(OrganizerSession).where(
         OrganizerSession.project_id == project_id,
     ).order_by(OrganizerSession.id.desc())))

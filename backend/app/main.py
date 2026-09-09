@@ -50,7 +50,7 @@ from app.models import (
     ProjectMember,
     User,
 )
-from app.organizer import router as organizer_router
+from app.organizer import resources_router as mvp1_resources_router, router as organizer_router
 from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
@@ -168,6 +168,7 @@ app.include_router(workspace_router)
 
 app.include_router(history_router, dependencies=[Depends(require_user)])
 app.include_router(organizer_router, dependencies=[Depends(require_user)])
+app.include_router(mvp1_resources_router, dependencies=[Depends(require_user)])
 
 
 @app.get("/")

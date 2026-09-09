@@ -21,9 +21,7 @@ from app.organizer_engine.planner import build_proposal
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.content import extract_text
 from app.document_engine import index_documents
-from app.task_engine import create_tasks_from_files
-from app.response_engine import create_response_drafts
-from app.governance_engine import create_governance_items
+from app.mvp1_extensions import run_post_analysis
 
 
 router = APIRouter(prefix="/projects", tags=["virtual-workspace"])
@@ -479,10 +477,11 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
         repo.update_session(session_id, copy_folder_id=f"virtual:{snapshot_id}", copy_folder_name=f"Виртуальный снимок #{snapshot_id}", source_item_count=len(files), copy_item_count=0, status="analyzing", progress=70)
         indexed = index_documents(db, project_id, files, f"{drive.provider}_snapshot")
         items = build_proposal(files, project_name=project.name if project else None, confirmed_rules=repo.confirmed_rules())
-        tasks = create_tasks_from_files(db, project_id, session_id, files)
+        extensions = run_post_analysis(db, project_id, session_id, files)
+        tasks = extensions.tasks
         google_synced = calendar_synced = 0
-        drafts = create_response_drafts(db, project_id, session_id, files)
-        risks, decisions = create_governance_items(db, project_id, files)
+        drafts = extensions.drafts
+        risks, decisions = extensions.risks, extensions.decisions
         proposal_id = repo.create_proposal(project_id, session_id, source.name, source.external_id, f"virtual:{snapshot_id}")
         repo.save_items(proposal_id, items)
         repo.update_session(session_id, status="proposed", progress=100)

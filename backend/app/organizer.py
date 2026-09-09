@@ -15,16 +15,23 @@ from app.organizer_engine.drive_factory import get_drive_service  # compatibilit
 from app.organizer_engine.types import DriveFile
 from app.organizer_engine.config import AUTO_APPLY_CONFIDENCE, AUTO_APPLY_ENABLED, FOLDER_STRUCTURE
 from app.core.auth import require_admin, require_project_role, require_user
-from app.integrations.telegram import notify_telegram
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.models.job import BackgroundJob
-from app.task_engine import create_tasks_from_files
-from app.response_engine import create_response_drafts
-from app.governance_engine import create_governance_items
+from app.mvp1_extensions import notify, run_post_analysis
 from app.document_engine import index_documents
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
+resources_router = APIRouter(tags=["mvp1-resources"])
+
+
+def notify_telegram(message: str) -> None:
+    """Compatibility seam retained for tests and legacy callers.
+
+    The implementation is the optional MVP-2/3 bridge, not a direct Telegram
+    dependency of the MVP-1 organizer flow.
+    """
+    notify(message)
 
 
 def _audit(
@@ -164,10 +171,11 @@ def _scan_worker(
         rules = repo.confirmed_rules()
         items = build_proposal(copy_items, project_name=project["name"], confirmed_rules=rules)
         repo.update_session(session_id, progress=95)
-        tasks = create_tasks_from_files(db, project_id, session_id, copy_items)
+        extensions = run_post_analysis(db, project_id, session_id, copy_items)
+        tasks = extensions.tasks
         google_synced = calendar_synced = 0
-        drafts = create_response_drafts(db, project_id, session_id, copy_items)
-        risks, decisions = create_governance_items(db, project_id, copy_items)
+        drafts = extensions.drafts
+        risks, decisions = extensions.risks, extensions.decisions
         proposal_id = repo.create_proposal(
             project_id, session_id, source_name, source_folder_id, copy_folder_id
         )
@@ -179,7 +187,7 @@ def _scan_worker(
                     raise ValueError("Automatic proposal could not be prepared")
                 OrganizerExecutor(repo, drive).apply(proposal_id)
                 repo.update_session(session_id, status="applied", progress=100)
-                notify_telegram(
+                notify(
                     f"PU Workspace: «{source_name}» обработана автоматически. "
                     f"Применено безопасных действий: {approved}. Оригиналы не изменялись. "
                     f"Задач: {len(tasks)}; Google Tasks: {google_synced}; Calendar: {calendar_synced}. "
@@ -187,7 +195,7 @@ def _scan_worker(
                 )
             else:
                 repo.update_session(session_id, status="proposed", progress=100)
-                notify_telegram(
+                notify(
                     f"PU Workspace: анализ «{source_name}» завершён. "
                     f"Безопасных автоматических действий нет; требуется проверка. "
                     f"Задач: {len(tasks)}; Google Tasks: {google_synced}; Calendar: {calendar_synced}. "
@@ -195,7 +203,7 @@ def _scan_worker(
                 )
         else:
             repo.update_session(session_id, status="proposed", progress=100)
-            notify_telegram(
+            notify(
                 f"PU Workspace: предложение для «{source_name}» готово к проверке. "
                 f"Задач: {len(tasks)}; Google Tasks: {google_synced}; Calendar: {calendar_synced}. "
                 f"Рисков: {len(risks)}; решений на подтверждение: {len(decisions)}; черновиков ответов: {len(drafts)}."
@@ -206,7 +214,7 @@ def _scan_worker(
             failed_session = repo.get_session(session_id)
             failed_status = "dead_letter" if failed_session and failed_session["retry_count"] >= 2 else "failed"
             repo.update_session(session_id, status=failed_status, error_message=str(exc), progress=100)
-            notify_telegram(f"PU Workspace: ошибка обработки сессии {session_id}: {str(exc)[:500]}")
+            notify(f"PU Workspace: ошибка обработки сессии {session_id}: {str(exc)[:500]}")
         except Exception:
             pass
         if raise_errors:
@@ -323,6 +331,8 @@ def compatibility_analyze(payload: AnalyzeRequest, db: Session = Depends(get_db)
     return _proposal_payload(repo, proposal_id)
 
 
+@resources_router.get("/proposals")
+@resources_router.get("/change-batches")
 @router.get("/proposals")
 def proposals(project_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -340,6 +350,8 @@ def proposals(project_id: int | None = None, db: Session = Depends(get_db), user
     return {"proposals": [_proposal_payload(repo, i) for i in ids], "count": len(ids)}
 
 
+@resources_router.get("/proposals/{proposal_id}")
+@resources_router.get("/change-batches/{proposal_id}")
 @router.get("/proposals/{proposal_id}")
 def proposal(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -392,6 +404,7 @@ def approve_safe(proposal_id: int, db: Session = Depends(get_db), user: User = D
     return {"approved": approved, "proposal": _proposal_payload(repo, proposal_id)}
 
 
+@resources_router.post("/change-batches/{proposal_id}/apply")
 @router.post("/proposals/{proposal_id}/apply")
 def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -423,6 +436,8 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
         raise HTTPException(500, str(exc)) from exc
 
 
+@resources_router.post("/rollbacks/{proposal_id}")
+@resources_router.post("/change-batches/{proposal_id}/rollback")
 @router.post("/proposals/{proposal_id}/rollback")
 def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -534,6 +549,7 @@ def proposal_operations(proposal_id: int, db: Session = Depends(get_db), user: U
     return {"operations": [dict(item) for item in repo.operations(proposal_id)]}
 
 
+@resources_router.post("/rules")
 @router.post("/rules")
 def create_rule(payload: RuleRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     repo = OrganizerRepository(db)

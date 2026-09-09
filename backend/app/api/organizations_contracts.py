@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -13,29 +15,31 @@ from app.database import get_db
 from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.governance import Decision, Risk
-from app.models.management import Meeting, Obligation
-from app.models.task import Task
-from app.models.execution_finance import (
-    AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem,
-)
-from app.models.ai_secretary import Message
-from app.models.automation_rule import AutomationRule
-from app.models.project_contact import ProjectContact
 from app.core.integration_types import StorageObject
 from app.core.contract_roles import allowed_parent_kinds, cash_flow_direction, is_financial_contract
-from app.governance_engine import create_governance_items
-from app.task_engine import create_tasks_from_files
+from app.mvp1_extensions import enabled as optional_extensions_enabled, run_post_analysis
 from sqlalchemy import func
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.models.contract_document_link import ContractDocumentLink
-from app.organization_requisites import remember_contract_organizations
-from app.contract_evidence import extract_contract_evidence, persist_contract_evidence
 
 router = APIRouter(tags=["organizations", "contracts"])
+
+# MVP-1 boundary: later-MVP models are imported only after an explicit opt-in.
+# TODO(MVP-2/3): replace the legacy model bundle with dedicated ports.
+OPTIONAL_EXTENSIONS_ENABLED = optional_extensions_enabled()
+if OPTIONAL_EXTENSIONS_ENABLED:
+    from app.models.governance import Decision, Risk
+    from app.models.management import Meeting, Obligation
+    from app.models.task import Task
+    from app.models.execution_finance import (
+        AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem,
+    )
+    from app.models.ai_secretary import Message
+    from app.models.automation_rule import AutomationRule
+    from app.models.project_contact import ProjectContact
 
 
 class OrganizationCreate(BaseModel):
@@ -363,7 +367,7 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
         raise HTTPException(422, "Для этой роли вышестоящий договор не используется")
     row = Contract(project_id=project_id, **payload.model_dump())
     db.add(row); db.flush()
-    if is_financial_contract(row.contract_kind) and row.status != "draft":
+    if OPTIONAL_EXTENSIONS_ENABLED and is_financial_contract(row.contract_kind) and row.status != "draft":
         version = (db.scalar(select(func.max(ScheduleBaseline.version)).where(ScheduleBaseline.project_id == project_id)) or 0) + 1
         db.add(ScheduleBaseline(
             project_id=project_id, contract_id=row.id, created_by_user_id=user.id,
@@ -467,20 +471,23 @@ class ContractDelete(BaseModel):
 
 def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> dict[str, int]:
     """Return links that would be destroyed or detached by a physical delete."""
-    scoped = (
+    scoped: tuple[tuple[str, object, object], ...] = (
         ("child_contracts", Contract, Contract.parent_contract_id),
         ("documents", ContractDocumentLink, ContractDocumentLink.contract_id),
-        ("schedule_baselines", ScheduleBaseline, ScheduleBaseline.contract_id),
-        ("budget_lines", BudgetLine, BudgetLine.contract_id),
-        ("cash_flow_entries", CashFlowEntry, CashFlowEntry.contract_id),
-        ("procurement_items", ProcurementItem, ProcurementItem.contract_id),
-        ("acceptance_acts", AcceptanceAct, AcceptanceAct.contract_id),
-        ("obligations", Obligation, Obligation.contract_id),
-        ("meetings", Meeting, Meeting.contract_id),
-        ("messages", Message, Message.contract_id),
-        ("contacts", ProjectContact, ProjectContact.contract_id),
-        ("automation_rules", AutomationRule, AutomationRule.contract_id),
     )
+    if OPTIONAL_EXTENSIONS_ENABLED:
+        scoped += (
+            ("schedule_baselines", ScheduleBaseline, ScheduleBaseline.contract_id),
+            ("budget_lines", BudgetLine, BudgetLine.contract_id),
+            ("cash_flow_entries", CashFlowEntry, CashFlowEntry.contract_id),
+            ("procurement_items", ProcurementItem, ProcurementItem.contract_id),
+            ("acceptance_acts", AcceptanceAct, AcceptanceAct.contract_id),
+            ("obligations", Obligation, Obligation.contract_id),
+            ("meetings", Meeting, Meeting.contract_id),
+            ("messages", Message, Message.contract_id),
+            ("contacts", ProjectContact, ProjectContact.contract_id),
+            ("automation_rules", AutomationRule, AutomationRule.contract_id),
+        )
     result: dict[str, int] = {}
     contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if contract is not None and contract.source_document_id is not None:
@@ -571,6 +578,8 @@ def _contract_source_text(document: Document, db: Session | None = None) -> str:
 
 def _contract_financial_terms(content: str) -> dict:
     """Compatibility entrypoint for exact local contract-term extraction."""
+    from app.contract_evidence import extract_contract_evidence
+
     return extract_contract_evidence(content)
 
 
@@ -680,6 +689,8 @@ def _payment_schedule_candidates(content: str) -> list[dict]:
 
 
 def _create_payment_schedule_proposals(db: Session, row: Contract, document: Document, content: str) -> list[CashFlowEntry]:
+    if not OPTIONAL_EXTENSIONS_ENABLED:
+        return []
     direction = cash_flow_direction(row.contract_kind)
     if direction is None:
         return []
@@ -738,6 +749,11 @@ def contract_source_candidates(project_id: int, contract_id: int,
 def analyze_contract(project_id: int, contract_id: int,
                      db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Extract proposed controls from the linked contract without changing its source document."""
+    if not OPTIONAL_EXTENSIONS_ENABLED:
+        raise HTTPException(404, "Optional MVP-2/3 contract analysis is disabled")
+    from app.contract_evidence import persist_contract_evidence
+    from app.organization_requisites import remember_contract_organizations
+
     require_project_role(db, user, project_id, "editor")
     row = db.scalar(select(Contract).where(
         Contract.id == contract_id, Contract.project_id == project_id,
@@ -811,18 +827,19 @@ def analyze_contract(project_id: int, contract_id: int,
         parent_id=document.parent_external_id or "contracts", content_text=content,
         object_type="file", provider=document.source,
     )
-    created_tasks = create_tasks_from_files(db, project_id, None, [source], source_type="contract_analysis")
-    created_risks, created_decisions = create_governance_items(
-        db, project_id, [source], source_type="contract_analysis",
+    extensions = run_post_analysis(
+        db, project_id, None, [source], source_type="contract_analysis",
     )
+    created_tasks = extensions.tasks
+    created_risks, created_decisions = extensions.risks, extensions.decisions
     payment_rows = _create_payment_schedule_proposals(db, row, document, content)
     remembered_organizations = remember_contract_organizations(db, row, content, document.id)
     task_ids = list(db.scalars(select(Task.id).where(
         Task.project_id == project_id, Task.source_file_id == source_id,
-    )))
+    ))) if OPTIONAL_EXTENSIONS_ENABLED else []
     linked_obligations = list(db.scalars(select(Obligation).where(
         Obligation.project_id == project_id, Obligation.task_id.in_(task_ids) if task_ids else False,
-    )))
+    ))) if OPTIONAL_EXTENSIONS_ENABLED else []
     for obligation in linked_obligations:
         obligation.contract_id = row.id
     after_analysis = _contract_snapshot(row, db)
@@ -863,6 +880,8 @@ def analyze_contract(project_id: int, contract_id: int,
 def initialize_contract_control(project_id: int, contract_id: int,
                                 db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Create the missing GPR anchor after an explicit user action; safe to repeat."""
+    if not OPTIONAL_EXTENSIONS_ENABLED:
+        raise HTTPException(404, "Optional MVP-2 finance capability is disabled")
     require_project_role(db, user, project_id, "editor")
     row = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
     if row is None:
@@ -917,14 +936,15 @@ def _contract_list_payloads(rows: list[Contract], db: Session) -> list[dict]:
     document_ids_by_contract: dict[int, set[int]] = {
         row.id: ({row.source_document_id} if row.source_document_id else set()) for row in rows
     }
-    for contract_id, document_id in db.execute(select(
-        CashFlowEntry.contract_id, CashFlowEntry.source_document_id,
-    ).where(
-        CashFlowEntry.project_id == project_id,
-        CashFlowEntry.contract_id.in_(contract_ids),
-        CashFlowEntry.source_document_id.is_not(None),
-    )):
-        document_ids_by_contract[contract_id].add(document_id)
+    if OPTIONAL_EXTENSIONS_ENABLED:
+        for contract_id, document_id in db.execute(select(
+            CashFlowEntry.contract_id, CashFlowEntry.source_document_id,
+        ).where(
+            CashFlowEntry.project_id == project_id,
+            CashFlowEntry.contract_id.in_(contract_ids),
+            CashFlowEntry.source_document_id.is_not(None),
+        )):
+            document_ids_by_contract[contract_id].add(document_id)
     for contract_id, document_id in db.execute(select(
         ContractDocumentLink.contract_id, ContractDocumentLink.document_id,
     ).where(
@@ -948,22 +968,27 @@ def _contract_list_payloads(rows: list[Contract], db: Session) -> list[dict]:
         for row in rows for source in [source_documents.get(row.id)]
     }
     source_file_ids = [value for value in source_ids.values() if value]
-    task_counts = dict(db.execute(select(Task.source_file_id, func.count(Task.id)).where(
-        Task.project_id == project_id,
-        Task.source_file_id.in_(source_file_ids),
-    ).group_by(Task.source_file_id)).all()) if source_file_ids else {}
-    obligation_counts = dict(db.execute(select(Obligation.contract_id, func.count(Obligation.id)).where(
-        Obligation.project_id == project_id,
-        Obligation.contract_id.in_(contract_ids),
-    ).group_by(Obligation.contract_id)).all())
-    risk_counts = dict(db.execute(select(Risk.source_id, func.count(Risk.id)).where(
-        Risk.project_id == project_id,
-        Risk.source_id.in_(source_file_ids),
-    ).group_by(Risk.source_id)).all()) if source_file_ids else {}
-    decision_counts = dict(db.execute(select(Decision.source_id, func.count(Decision.id)).where(
-        Decision.project_id == project_id,
-        Decision.source_id.in_(source_file_ids),
-    ).group_by(Decision.source_id)).all()) if source_file_ids else {}
+    task_counts: dict[str, int] = {}
+    obligation_counts: dict[int, int] = {}
+    risk_counts: dict[str, int] = {}
+    decision_counts: dict[str, int] = {}
+    if OPTIONAL_EXTENSIONS_ENABLED:
+        task_counts = dict(db.execute(select(Task.source_file_id, func.count(Task.id)).where(
+            Task.project_id == project_id,
+            Task.source_file_id.in_(source_file_ids),
+        ).group_by(Task.source_file_id)).all()) if source_file_ids else {}
+        obligation_counts = dict(db.execute(select(Obligation.contract_id, func.count(Obligation.id)).where(
+            Obligation.project_id == project_id,
+            Obligation.contract_id.in_(contract_ids),
+        ).group_by(Obligation.contract_id)).all())
+        risk_counts = dict(db.execute(select(Risk.source_id, func.count(Risk.id)).where(
+            Risk.project_id == project_id,
+            Risk.source_id.in_(source_file_ids),
+        ).group_by(Risk.source_id)).all()) if source_file_ids else {}
+        decision_counts = dict(db.execute(select(Decision.source_id, func.count(Decision.id)).where(
+            Decision.project_id == project_id,
+            Decision.source_id.in_(source_file_ids),
+        ).group_by(Decision.source_id)).all()) if source_file_ids else {}
 
     version_has_content: set[int] = set()
     source_document_ids = [source.id for source in source_documents.values() if source]
@@ -1025,11 +1050,12 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
         result["version_history"] = [_contract_version(version) for version in versions]
         document = db.get(Document, row.source_document_id) if row.source_document_id else None
         linked_document_ids = {row.source_document_id} if row.source_document_id else set()
-        linked_document_ids.update(db.scalars(select(CashFlowEntry.source_document_id).where(
-            CashFlowEntry.project_id == row.project_id,
-            CashFlowEntry.contract_id == row.id,
-            CashFlowEntry.source_document_id.is_not(None),
-        )))
+        if OPTIONAL_EXTENSIONS_ENABLED:
+            linked_document_ids.update(db.scalars(select(CashFlowEntry.source_document_id).where(
+                CashFlowEntry.project_id == row.project_id,
+                CashFlowEntry.contract_id == row.id,
+                CashFlowEntry.source_document_id.is_not(None),
+            )))
         linked_document_ids.update(db.scalars(select(ContractDocumentLink.document_id).where(
             ContractDocumentLink.project_id == row.project_id,
             ContractDocumentLink.contract_id == row.id,
@@ -1047,18 +1073,18 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
         source_id = (document.external_id or f"document:{document.id}") if document else None
         task_ids = list(db.scalars(select(Task.id).where(
             Task.project_id == row.project_id, Task.source_file_id == source_id,
-        ))) if source_id else []
+        ))) if OPTIONAL_EXTENSIONS_ENABLED and source_id else []
         result["analysis"] = {
             "source_ready": bool(document and _contract_source_text(document, db)),
             "tasks": len(task_ids),
             "obligations": db.scalar(select(func.count(Obligation.id)).where(
                 Obligation.project_id == row.project_id, Obligation.contract_id == row.id,
-            )) or 0,
+            )) or 0 if OPTIONAL_EXTENSIONS_ENABLED else 0,
             "risks": db.scalar(select(func.count(Risk.id)).where(
                 Risk.project_id == row.project_id, Risk.source_id == source_id,
-            )) or 0 if source_id else 0,
+            )) or 0 if OPTIONAL_EXTENSIONS_ENABLED and source_id else 0,
             "decisions": db.scalar(select(func.count(Decision.id)).where(
                 Decision.project_id == row.project_id, Decision.source_id == source_id,
-            )) or 0 if source_id else 0,
+            )) or 0 if OPTIONAL_EXTENSIONS_ENABLED and source_id else 0,
         }
     return result
