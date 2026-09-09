@@ -17,9 +17,9 @@ def test_meeting_binding_migration_is_sequential_and_preserves_unbound_legacy(mo
     # production dialect even when the surrounding offline suite uses SQLite.
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://ci:ci@db/puw_test")
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a22"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a24"]
     assert script.get_revision("a54f001c0a19").down_revision == "a54f001c0a18"
-    assert script.get_revision(CURRENT_SCHEMA_REVISION).down_revision == "a54f001c0a21"
+    assert script.get_revision("a54f001c0a22").down_revision == "a54f001c0a21"
     command.upgrade(config, "a54f001c0a18:a54f001c0a19", sql=True)
     sql = output.getvalue().lower()
     for token in ("meeting_source_bindings", "fk_meeting_binding_observation", "fk_meeting_binding_meeting",

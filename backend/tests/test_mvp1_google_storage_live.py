@@ -7,6 +7,8 @@ import pytest
 
 from app.core.token_crypto import encrypt_token
 from app.integrations.google_storage_credentials import google_storage_service
+from app.integrations.google_storage_mutation import GoogleDriveConditionalMutationClient
+from app.integrations.storage_mutation_live import ExactPreconditionUnavailable
 from app.integrations.storage_credentials import (
     DatabaseStorageCredentialPort, StorageCredentialScopeMismatch,
 )
@@ -68,11 +70,32 @@ def test_live_google_copy_rename_includes_tenant_and_project_ownership(db_sessio
             fileId=copy_id, fields="id,name,parents", supportsAllDrives=True,
         ).execute()
         assert metadata["id"] == copy_id and folder_id in metadata.get("parents", [])
-        renamed = service.files().update(
-            fileId=copy_id, body={"name": "PU MVP1 OAuth smoke renamed"},
+        client = GoogleDriveConditionalMutationClient(service)
+        original = client.get_exact_state(copy_id)
+        renamed = client.rename_if_revision(
+            copy_id, "PU MVP1 OAuth smoke renamed",
+            expected_revision=original.revision, operation_key="live-smoke-rename",
+        )
+        assert renamed.name == "PU MVP1 OAuth smoke renamed"
+
+        # Simulate a concurrent actor on the designated copy only.  The stale
+        # revision must fail before our second mutation, then the compensating
+        # operation uses the newly observed exact revision.
+        service.files().update(
+            fileId=copy_id, body={"name": "PU MVP1 OAuth smoke concurrent"},
             fields="id,name", supportsAllDrives=True,
         ).execute()
-        assert renamed == {"id": copy_id, "name": "PU MVP1 OAuth smoke renamed"}
+        with pytest.raises(ExactPreconditionUnavailable, match="conflict_source_changed"):
+            client.rename_if_revision(
+                copy_id, "must not overwrite", expected_revision=renamed.revision,
+                operation_key="live-smoke-stale",
+            )
+        concurrent = client.get_exact_state(copy_id)
+        rolled_back = client.rename_if_revision(
+            copy_id, original.name, expected_revision=concurrent.revision,
+            operation_key="live-smoke-compensate",
+        )
+        assert rolled_back.name == original.name
     finally:
         service.files().update(
             fileId=copy_id, body={"trashed": True}, fields="id", supportsAllDrives=True,

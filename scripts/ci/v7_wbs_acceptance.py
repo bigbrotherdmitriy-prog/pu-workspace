@@ -18,7 +18,7 @@ from typing import Any
 
 EXPECTED_PARENT = "a54f001c0a20"
 WBS_REVISION = "a54f001c0a21"
-CURRENT_SCHEMA_HEAD = "a54f001c0a22"
+CURRENT_SCHEMA_HEAD = "a54f001c0a24"
 KINDS = {"project", "phase", "work", "subwork", "milestone"}
 PARENTS = {
     "project": {None},

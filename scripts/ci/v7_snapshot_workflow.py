@@ -14,7 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "snapshot-recovery-artifacts/protocol.json"
 DATABASE = "puw_v7_test_snapshot_recovery"
-HEAD = "a54f001c0a22"
+HEAD = "a54f001c0a24"
 WORK_SECONDS = 360
 TOTAL_SECONDS = 420
 

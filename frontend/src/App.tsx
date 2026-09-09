@@ -3,6 +3,7 @@ import { api, ApiError } from "./api/client";
 import { Login } from "./auth/Login";
 import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
 import { useStoragePicker } from "./modules/integrations/useStoragePicker";
+import { SnapshotVirtualTree } from "./modules/integrations/SnapshotVirtualTree";
 import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
@@ -2573,6 +2574,8 @@ export function App() {
                               {activeProgress !== null && <div className="source-progress-track"><i style={{ width: `${activeProgress}%` }} /></div>}
                               <small>{isQueued ? "Ожидает свободного обработчика" : session?.status || folder.job_status || "Создаётся снимок папки"}</small>
                             </div>}
+                            {folder.snapshot_status === "ready" && folder.snapshot_id &&
+                              <SnapshotVirtualTree projectId={projectId} snapshotId={folder.snapshot_id} />}
                           </div>
                           <div className="source-row-actions">
                             <button disabled={!!busyFolder} onClick={() => void openSources(folder.id)}>

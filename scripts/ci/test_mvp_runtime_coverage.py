@@ -198,7 +198,7 @@ def test_main_wires_exact_mandatory_nodes_after_owned_head_migrations(monkeypatc
     ):
         assert names.index(migration) < names.index(phase)
         _, migration_args, options = phases[names.index(migration)]
-        assert migration_args[-2:] == ["upgrade", "a54f001c0a22"]
+        assert migration_args[-2:] == ["upgrade", "a54f001c0a24"]
         assert options["env"]["DATABASE_URL"] == "owned:" + database
         assert options["cwd"] == module.ROOT / "backend"
         _, test_args, _ = phases[names.index(phase)]

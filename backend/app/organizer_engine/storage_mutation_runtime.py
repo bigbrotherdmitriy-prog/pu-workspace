@@ -1,7 +1,7 @@
-"""Synthetic-only durable runtime for exact storage mutations.
+"""Durable runtime for exact storage mutations.
 
-No runtime is installed automatically.  A test/acceptance composition must
-inject a session factory and an adapter explicitly marked as synthetic.
+Synthetic composition remains the default test path.  The Google composition
+is opt-in and resolves the exact Phase-1c credential/binding inside the worker.
 """
 from __future__ import annotations
 
@@ -174,14 +174,19 @@ class SyntheticStorageMutationRuntime:
         if getattr(adapter, "synthetic_storage_adapter", False) is not True:
             raise MutationConflict("live_storage_mutation_disabled")
 
+    def _adapter(self, pin: StorageBindingPin, db: Session) -> VersionedMutableStorageAdapter:
+        del db
+        adapter = self.adapter_factory(pin)
+        self._require_synthetic(adapter)
+        return adapter
+
     def execute(self, **payload) -> dict:
         if self.enabled is not True:
             raise MutationConflict("storage_mutation_runtime_disabled")
         with self.session_factory() as db:
             command = StorageMutationResolver(db).resolve(payload)
             ledger = DurableMutationLedger(db, payload, command)
-            adapter = self.adapter_factory(command.pin)
-            self._require_synthetic(adapter)
+            adapter = self._adapter(command.pin, db)
 
             prior = ledger.get(command.command_key)
             if prior is not None:
@@ -220,3 +225,45 @@ class SyntheticStorageMutationRuntime:
             db.commit()
             return {"receipt_id": ledger.receipt_id(receipt.command_key), "outcome": receipt.outcome,
                     "resulting_record_version": receipt.resulting_record_version}
+
+
+class GoogleStorageMutationRuntime(SyntheticStorageMutationRuntime):
+    """Exact Google worker composition; enabled only by explicit configuration."""
+
+    def __init__(self, session_factory: Callable[[], Session], *, enabled: bool = False):
+        super().__init__(session_factory, lambda _pin: None, enabled=enabled)
+
+    def _adapter(self, pin: StorageBindingPin, db: Session) -> VersionedMutableStorageAdapter:
+        from app.integrations.google_storage_credentials import google_storage_service
+        from app.integrations.google_storage_mutation import GoogleDriveConditionalMutationClient
+        from app.integrations.storage_credentials import DatabaseStorageCredentialPort, StorageCredentialError
+        from app.integrations.storage_mutation_live import GoogleDriveExactMutationAdapter
+        from app.models.project import Project
+
+        if pin.provider != "google_drive" or not pin.connection_id.startswith("storage-credential:"):
+            raise MutationConflict("live_storage_binding_unsupported")
+        project = db.get(Project, pin.project_id)
+        if project is None:
+            raise MutationConflict("resource_unavailable")
+        try:
+            resolved = DatabaseStorageCredentialPort().resolve(
+                db, connection_id=pin.connection_id, project_id=pin.project_id,
+                organization_id=project.organization_id, provider="google_drive",
+            )
+        except StorageCredentialError:
+            raise MutationConflict("live_storage_binding_changed") from None
+        adapter = GoogleDriveExactMutationAdapter(
+            GoogleDriveConditionalMutationClient(google_storage_service(resolved, db)), enabled=True,
+        )
+        if not adapter.health().ready:
+            raise MutationConflict("live_storage_mutation_unavailable")
+        return adapter
+
+
+def configured_storage_mutation_runtime():
+    """Build the single worker runtime without importing it into API startup."""
+    import os
+    if os.getenv("PU_MVP1_GOOGLE_LIVE_MUTATIONS", "false").strip().lower() not in {"1", "true", "yes"}:
+        return None
+    from app.database import SessionLocal
+    return GoogleStorageMutationRuntime(SessionLocal, enabled=True)

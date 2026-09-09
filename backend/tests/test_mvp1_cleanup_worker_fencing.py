@@ -62,14 +62,17 @@ def fenced(tmp_path, monkeypatch, request):
         claim = (claimed.id, claimed.worker_id, claimed.attempts, claimed.locked_at)
         ids = dict(project=project.id, user=user.id, member=member.id, source=source.id,
                    connection=connection.id, job=job.id, sessions=sessions)
-    state = SimpleNamespace(db=factory, payload=payload, claim=claim, ids=ids,
+    state = SimpleNamespace(db=factory, payload=payload, claim=claim, ids=ids, provider=request.param,
                             calls=[], effects=set(), callback=None, resolutions=[])
     def trash(copy_id):
         state.calls.append(copy_id)
         state.effects.add(copy_id)
         if state.callback:
             state.callback(copy_id)
-    state.adapter = SimpleNamespace(supports_managed_copy_cleanup=True, trash_safe_copy=trash)
+    state.adapter = SimpleNamespace(
+        supports_managed_copy_cleanup=True,
+        trash_managed_copy=lambda copy_id, ownership_key: trash(copy_id),
+    )
     def resolve(*args):
         state.resolutions.append(True)
         return state.adapter
@@ -197,11 +200,14 @@ def test_capability_deny_has_no_provider_effect(fenced):
     assert fenced.calls == []
 
 
-def test_real_adapter_capability_denies_before_client_or_token_resolution(fenced, monkeypatch):
+def test_real_adapter_capability_matches_implemented_provider(fenced, monkeypatch):
     monkeypatch.setattr(cleanup, "_require_cleanup_capability", fenced.capability_guard)
-    with pytest.raises(ValueError, match="managed_copy_cleanup_capability_unavailable"):
-        fenced.run()
-    assert fenced.calls == fenced.resolutions == []
+    if fenced.provider == "yandex_disk":
+        with pytest.raises(ValueError, match="managed_copy_cleanup_capability_unavailable"):
+            fenced.run()
+        assert fenced.calls == fenced.resolutions == []
+    else:
+        assert fenced.run()["trashed"] == 2
 
 
 def test_lease_expiring_during_last_inventory_read_has_no_effect(fenced, monkeypatch):

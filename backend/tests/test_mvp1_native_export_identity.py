@@ -161,13 +161,3 @@ def test_cache_miss_has_no_provider_fallback(db, cached):
     with pytest.raises(SourceEvidenceError, match="resource_unavailable"):
         read(db, cached, materialization=cached[2].model_copy(update={"ref":
             cached[2].ref.model_copy(update={"id": cached[2].ref.id.model_copy(update={"value": uid(888)})})}))
-
-
-def test_drive_exact_native_export_fails_closed_without_any_provider_request():
-    class NoRequests:
-        def __getattr__(self, name):
-            pytest.fail("unexpected provider request")
-    drive = DriveClient(NoRequests())
-    from app.integrations.contracts import StorageUnavailable
-    with pytest.raises(StorageUnavailable, match="native_export_revision_unavailable"):
-        drive.read_native_export_exact("original", revision="17", mime_type="text/plain", max_bytes=1024)

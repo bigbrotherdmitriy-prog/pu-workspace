@@ -271,8 +271,12 @@ class OrganizerRepository:
         self.db.execute(text("UPDATE organizer_operations SET rolled_back_at=now() WHERE id=:id"), {"id":op_id}); self.db.commit()
 
     def confirmed_rules(self):
-        rows = self.db.execute(text("SELECT id,pattern_json,action_json,exception_json FROM organizer_rules WHERE confirmed=true ORDER BY id" )).mappings().all()
-        return [{"id":r["id"],"pattern":r["pattern_json"],"action":r["action_json"],"exception":r["exception_json"]} for r in rows]
+        rows = self.db.execute(text(
+            "SELECT id,pattern_json,action_json,exception_json,source "
+            "FROM organizer_rules WHERE confirmed=true ORDER BY id"
+        )).mappings().all()
+        return [{"id": r["id"], "pattern": r["pattern_json"], "action": r["action_json"],
+                 "exception": r["exception_json"], "source": r["source"]} for r in rows]
 
     def add_rule(self, pattern: dict, action: dict, exception: dict | None, source: str, confirmed: bool):
         return int(self.db.execute(text("""

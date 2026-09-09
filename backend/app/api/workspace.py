@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,7 +21,6 @@ from app.organizer_engine.drive import DriveClient
 from app.organizer_engine.repository import OrganizerRepository
 from app.organizer_engine.planner import build_proposal
 from app.organizer_engine.types import DriveFile
-from app.organizer_engine.content import extract_text
 from app.document_engine import index_documents
 from app.mvp1_extensions import run_post_analysis
 
@@ -55,6 +56,70 @@ def _parse_time(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _snapshot_path(item: DriveFile, objects: dict[str, DriveFile], root_id: str) -> str:
+    if item.id == root_id:
+        return "/"
+    parts = [item.name]
+    current = item.parent_id
+    seen = {item.id}
+    while current and current != root_id and current not in seen:
+        seen.add(current)
+        parent = objects.get(current)
+        if parent is None:
+            return item.source_path or f"unknown:/{item.id}"
+        parts.append(parent.name)
+        current = parent.parent_id
+    if current != root_id:
+        return item.source_path or f"unknown:/{item.id}"
+    return "/" + "/".join(reversed(parts))
+
+
+def _virtual_node_values(item: DriveFile, *, snapshot_id: int, source_path: str) -> dict:
+    parent_ids = list(item.parent_ids or ((item.parent_id,) if item.parent_id else ()))
+    metadata = {
+        "source_file_id": item.id,
+        "parent_ids": parent_ids,
+        "name": item.name,
+        "mime_type": item.mime_type,
+        "size": item.size,
+        "modified_time": item.modified_time,
+        "checksum": item.md5_checksum,
+        "provider_revision": item.provider_revision,
+        "web_url": item.web_url,
+        "availability": item.availability or "unknown",
+        "acl_state": item.acl_state or "unknown",
+        "provider_metadata": item.provider_metadata or {},
+        "shortcut_target_id": item.shortcut_target_id,
+        "shortcut_target_mime_type": item.shortcut_target_mime_type,
+        "shortcut_target_resource_key": item.shortcut_target_resource_key,
+    }
+    metadata_hash = hashlib.sha256(json.dumps(
+        metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return {
+        "snapshot_id": snapshot_id,
+        "external_id": item.id,
+        "parent_external_id": item.parent_id or None,
+        "name": item.name,
+        "mime_type": item.mime_type,
+        "node_type": "folder" if item.is_folder else "file",
+        "size_bytes": item.size,
+        "checksum": item.md5_checksum,
+        "source_modified_at": _parse_time(item.modified_time),
+        "source_path": source_path,
+        "parent_external_ids": parent_ids,
+        "provider_revision": item.provider_revision,
+        "provider_metadata_hash": metadata_hash,
+        "web_url": item.web_url,
+        "availability": item.availability or "unknown",
+        "acl_state": item.acl_state or "unknown",
+        "analysis_state": "pending",
+        "shortcut_target_id": item.shortcut_target_id,
+        "shortcut_target_mime_type": item.shortcut_target_mime_type,
+        "shortcut_target_resource_key": item.shortcut_target_resource_key,
+    }
 
 
 def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
@@ -172,7 +237,14 @@ def _populate_content(adapter, items: list[DriveFile]) -> tuple[int, int]:
             continue
         try:
             raw, mime = adapter.read_bytes(item.id, 4 * 1024 * 1024)
-            item.content_text = extract_text(raw, mime, item.name)
+            from app.ocr_quality.routing import route_extraction
+            routed = route_extraction(raw, mime, item.name)
+            item.content_text = routed.result.text
+            metadata = dict(item.provider_metadata or {})
+            metadata["extraction_method"] = routed.result.method
+            if routed.incomplete_reason:
+                metadata["extraction_incomplete_reason"] = routed.incomplete_reason
+            item.provider_metadata = metadata
             extracted += int(bool(item.content_text))
         except Exception:
             failed += 1
@@ -321,18 +393,12 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
             if snapshot.status == "ready":
                 db.commit()
                 return
-            db.add(VirtualNode(
-                snapshot_id=snapshot.id, external_id=source_meta.id,
-                parent_external_id=source_meta.parent_id or None, name=source_meta.name,
-                mime_type=source_meta.mime_type, node_type="folder", size_bytes=source_meta.size,
-                checksum=source_meta.md5_checksum, source_modified_at=_parse_time(source_meta.modified_time),
-            ))
-            db.add_all(VirtualNode(
-                snapshot_id=snapshot.id, external_id=item.id,
-                parent_external_id=item.parent_id or None, name=item.name, mime_type=item.mime_type,
-                node_type="folder" if item.is_folder else "file", size_bytes=item.size,
-                checksum=item.md5_checksum, source_modified_at=_parse_time(item.modified_time),
-            ) for item in items)
+            objects = {item.id: item for item in [source_meta, *items]}
+            db.add_all(VirtualNode(**_virtual_node_values(
+                item,
+                snapshot_id=snapshot.id,
+                source_path=_snapshot_path(item, objects, source_meta.id),
+            )) for item in objects.values())
             snapshot.item_count = len(items) + 1
             snapshot.status = "ready"
             snapshot.completed_at = datetime.now(timezone.utc)
@@ -472,6 +538,11 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
         ) for node in nodes]
         drive = storage_for_project(project_id, db)
         extracted, extraction_failed = _populate_content(drive, files)
+        incomplete_reasons: dict[str, int] = {}
+        for item in files:
+            reason = (item.provider_metadata or {}).get("extraction_incomplete_reason")
+            if isinstance(reason, str):
+                incomplete_reasons[reason] = incomplete_reasons.get(reason, 0) + 1
         project = db.get(Project, project_id)
         session_id = repo.create_session(project_id, source.external_id, source.name)
         repo.update_session(session_id, copy_folder_id=f"virtual:{snapshot_id}", copy_folder_name=f"Виртуальный снимок #{snapshot_id}", source_item_count=len(files), copy_item_count=0, status="analyzing", progress=70)
@@ -489,6 +560,7 @@ def _analyze_snapshot_worker(snapshot_id: int, project_id: int, raise_errors: bo
             "storage_binding": (snapshot.analysis_result or {}).get("storage_binding"),
             "status": "ready", "documents": len(indexed), "text_extracted": extracted,
             "extraction_failed": extraction_failed, "tasks": len(tasks),
+            "extraction_incomplete": incomplete_reasons,
             "google_tasks_synced": google_synced, "calendar_synced": calendar_synced,
             "drafts": len(drafts), "risks": len(risks), "decisions": len(decisions),
         }
@@ -868,6 +940,9 @@ def list_virtual_nodes(
     project_id: int,
     snapshot_id: int,
     parent_external_id: str | None = None,
+    cursor: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
+    analysis_state: str | None = Query(default=None, max_length=32),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -875,10 +950,22 @@ def list_virtual_nodes(
     snapshot = db.get(WorkspaceSnapshot, snapshot_id)
     if snapshot is None or snapshot.project_id != project_id:
         raise HTTPException(404, "Snapshot not found")
-    query = select(VirtualNode).where(VirtualNode.snapshot_id == snapshot_id)
+    query = select(VirtualNode).where(
+        VirtualNode.snapshot_id == snapshot_id,
+        VirtualNode.id > cursor,
+    )
     if parent_external_id is not None:
         query = query.where(VirtualNode.parent_external_id == parent_external_id)
-    nodes = db.scalars(query.order_by(VirtualNode.node_type, VirtualNode.name).limit(5000)).all()
+    if analysis_state is not None:
+        if analysis_state == "changed":
+            query = query.where(VirtualNode.analysis_state != "unchanged")
+        elif analysis_state in {"pending", "unchanged", "conflict", "error", "analyzed"}:
+            query = query.where(VirtualNode.analysis_state == analysis_state)
+        else:
+            raise HTTPException(422, "Unsupported analysis state filter")
+    page = list(db.scalars(query.order_by(VirtualNode.id).limit(limit + 1)).all())
+    has_more = len(page) > limit
+    nodes = page[:limit]
     return {
         "snapshot_id": snapshot_id,
         "status": snapshot.status,
@@ -893,9 +980,23 @@ def list_virtual_nodes(
                 "size_bytes": node.size_bytes,
                 "checksum": node.checksum,
                 "source_modified_at": node.source_modified_at,
+                "source_path": node.source_path,
+                "parent_external_ids": node.parent_external_ids,
+                "provider_revision": node.provider_revision,
+                "provider_metadata_hash": node.provider_metadata_hash,
+                "web_url": node.web_url,
+                "availability": node.availability,
+                "acl_state": node.acl_state,
+                "analysis_state": node.analysis_state,
+                "shortcut_target_id": node.shortcut_target_id,
+                "shortcut_target_mime_type": node.shortcut_target_mime_type,
+                "shortcut_target_resource_key": node.shortcut_target_resource_key,
             }
             for node in nodes
         ],
+        "next_cursor": str(nodes[-1].id) if has_more and nodes else None,
+        "has_more": has_more,
+        "limit": limit,
     }
 
 

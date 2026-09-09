@@ -18,8 +18,8 @@ def _config(output=None):
 
 def test_storage_oauth_state_is_the_single_sequential_head():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a22"]
-    assert scripts.get_revision(CURRENT_SCHEMA_REVISION).down_revision == "a54f001c0a21"
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a24"]
+    assert scripts.get_revision("a54f001c0a22").down_revision == "a54f001c0a21"
 
 
 def test_storage_oauth_state_offline_sql_has_scoped_single_use_state():

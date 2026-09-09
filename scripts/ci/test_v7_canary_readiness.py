@@ -29,7 +29,7 @@ def test_all_daily_work_stages_pass_and_share_a_chained_scope():
     ticks = iter(range(0, 100))
     report = gate.run_gate(environment(), lambda nodeids: calls.append(tuple(nodeids)) or 0, lambda: next(ticks))
     assert report["status"] == "PASS"
-    assert report["schema_revision"] == "a54f001c0a22"
+    assert report["schema_revision"] == "a54f001c0a24"
     assert report["external_calls"] is False
     assert report["raw_output_included"] is False
     assert [row["stage"] for row in report["stages"]] == [name for name, _ in gate.PROBES]

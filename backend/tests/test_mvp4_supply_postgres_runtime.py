@@ -65,7 +65,7 @@ def pg_supply():
         with engine.connect() as db:
             assert db.scalar(text("SELECT current_database()")) == engine.url.database
             assert list(db.scalars(text("SELECT version_num FROM alembic_version"))) == [CURRENT_SCHEMA_REVISION]
-            assert CURRENT_SCHEMA_REVISION == "a54f001c0a22"
+            assert CURRENT_SCHEMA_REVISION == "a54f001c0a24"
             assert db.scalar(text("SHOW transaction_isolation")) == "read committed"
         yield engine
     finally:

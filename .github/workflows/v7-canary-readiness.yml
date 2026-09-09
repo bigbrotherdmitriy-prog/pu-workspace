@@ -47,7 +47,7 @@ jobs:
         run: alembic -c alembic.ini upgrade head
       - name: Verify exact schema head
         working-directory: backend
-        run: test "$(alembic -c alembic.ini heads | awk '{print $1}')" = "a54f001c0a22"
+        run: test "$(alembic -c alembic.ini heads | awk '{print $1}')" = "a54f001c0a24"
       - name: Execute synthetic daily-work canary
         run: python scripts/ci/v7_canary_readiness.py --output canary-readiness-artifacts/protocol.json
       - name: Publish safe protocol only

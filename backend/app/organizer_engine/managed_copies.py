@@ -335,7 +335,10 @@ def run_managed_copy_cleanup(payload: dict) -> dict:
                 raise ValueError("managed_copy_cleanup_version_conflict")
             # Inventory and authorization reads may themselves outlive the lease.
             _worker_guard(db, payload, claim)
-            drive.trash_safe_copy(item.copy_folder_id)
+            trash = getattr(drive, "trash_managed_copy", None)
+            if not callable(trash):
+                raise ValueError("managed_copy_cleanup_capability_unavailable")
+            trash(item.copy_folder_id, f"managed-{item.identity[:32]}")
             job, _, connection = _context_guard(db, payload, claim, project_binding)
             _inventory_guard(db, payload, job.id, connection)
             _commit_receipt(db, payload, claim, {"identity": item.identity,

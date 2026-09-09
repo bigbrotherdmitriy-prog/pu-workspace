@@ -76,6 +76,10 @@ class FakeStorage:
             self.crash_after_trash_once = False
             raise RuntimeError('synthetic crash after provider effect')
 
+    def trash_managed_copy(self, identifier, ownership_key):
+        assert ownership_key.startswith("managed-")
+        self.trash_safe_copy(identifier)
+
 
 @pytest.fixture(params=['google_drive', 'yandex_disk'])
 def bound(tmp_path, monkeypatch, request):

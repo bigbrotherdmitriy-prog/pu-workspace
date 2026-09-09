@@ -90,6 +90,13 @@ class YandexDiskStorageAdapter:
             modified_time=meta.get("modified"),
             object_type="folder" if meta.get("type") == "dir" else "file",
             provider="yandex_disk",
+            parent_ids=(parent_locator,) if parent_locator else (),
+            provider_revision=meta.get("revision") or meta.get("sha256") or meta.get("md5"),
+            web_url=meta.get("public_url") or meta.get("preview"),
+            source_path=path or None,
+            availability="available",
+            acl_state="unknown",
+            provider_metadata={"resource_id": meta.get("resource_id")},
         )
 
     def health(self) -> AdapterHealth:

@@ -223,22 +223,26 @@ def classify(
     context: str | None = None,
     content: str | None = None,
 ) -> Classification:
-    # Explicit user-confirmed rules remain the strongest signal.
+    # Persisted rules use the same versioned order as rule_precedence.py.
+    # Legacy/user_correction rows are manual rules; a low-id manual row must
+    # never override a later organization/project/policy rule.
+    layers = ("policy", "project", "organization", "manual")
+    grouped: dict[str, list[dict]] = {layer: [] for layer in layers}
     for rule in confirmed_rules or []:
-        pattern = rule.get("pattern") or {}
-        keyword = pattern.get("filename_contains")
-        folder = (rule.get("action") or {}).get("folder")
-
-        if (
-            keyword
-            and folder in _VALID_FOLDERS
-            and keyword.lower() in filename.lower()
-        ):
-            return Classification(
-                folder,
-                0.98,
-                f"Подтверждённое правило пользователя: содержит «{keyword}».",
-            )
+        source = str(rule.get("source") or "manual")
+        layer = source if source in grouped else "manual"
+        grouped[layer].append(rule)
+    for layer in layers:
+        for rule in grouped[layer]:
+            pattern = rule.get("pattern") or {}
+            keyword = pattern.get("filename_contains")
+            folder = (rule.get("action") or {}).get("folder")
+            if (isinstance(keyword, str) and keyword and folder in _VALID_FOLDERS
+                    and keyword.casefold() in filename.casefold()):
+                return Classification(
+                    folder, 0.98,
+                    f"Подтверждённое правило уровня {layer}: содержит «{keyword}».",
+                )
 
     for folder, pattern, confidence, reasoning in _COMPOUND_RULES:
         if pattern.search(filename):

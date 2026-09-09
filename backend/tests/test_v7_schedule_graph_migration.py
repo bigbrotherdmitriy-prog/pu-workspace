@@ -19,7 +19,7 @@ def config(output):
 
 def test_graph_migration_is_single_new_successor():
     scripts = ScriptDirectory.from_config(config(StringIO()))
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a22"]
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a24"]
     assert scripts.get_revision("a54f001c0a20").down_revision == "a54f001c0a19"
 
 

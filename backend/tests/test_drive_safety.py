@@ -15,7 +15,7 @@ class _Files:
         self.updates = []
         self.creates = []
 
-    def get(self, fileId, fields): return _Request(self.metadata[fileId])
+    def get(self, fileId, fields, **kwargs): return _Request(self.metadata[fileId])
     def update(self, **kwargs):
         self.updates.append(kwargs)
         return _Request({"id": kwargs["fileId"]})
@@ -23,10 +23,11 @@ class _Files:
         parent = kwargs["q"].split("'", 2)[1]
         rows = [value for value in self.metadata.values() if parent in (value.get("parents") or [])]
         return _Request({"files": rows})
-    def create(self, body, fields):
+    def create(self, body, fields, **kwargs):
         self.creates.append(body)
         file_id = f"created-{len(self.creates)}"
-        self.metadata[file_id] = {"id": file_id, "name": body["name"], "mimeType": body["mimeType"], "parents": body["parents"]}
+        self.metadata[file_id] = {"id": file_id, "name": body["name"], "mimeType": body["mimeType"],
+                                  "parents": body["parents"], "appProperties": body.get("appProperties", {})}
         return _Request({"id": file_id})
 
 

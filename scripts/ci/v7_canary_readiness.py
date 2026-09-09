@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 
 PROTOCOL_VERSION = 1
-EXPECTED_SCHEMA = "a54f001c0a22"
+EXPECTED_SCHEMA = "a54f001c0a24"
 SCOPE_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{5,63}")
 FORBIDDEN_ENV_MARKERS = (
     "AI_API_KEY",

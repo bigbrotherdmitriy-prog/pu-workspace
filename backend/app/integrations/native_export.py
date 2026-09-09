@@ -43,7 +43,8 @@ class NativeExportObservation(StrictDTO):
         if (self.export_mime_type not in {
                 "text/plain", "text/csv", "application/pdf",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
                 or not 0 < self.export_size <= 32 * 1024 * 1024):
             raise ValueError("resource_unavailable")
         return self

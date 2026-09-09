@@ -37,7 +37,11 @@ def validate_job_payload(payload: dict) -> dict:
 
 
 def run_storage_mutation_job(payload: dict) -> dict:
+    global _runtime
     safe = validate_job_payload(payload)
+    if _runtime is None:
+        from app.organizer_engine.storage_mutation_runtime import configured_storage_mutation_runtime
+        _runtime = configured_storage_mutation_runtime()
     if _runtime is None:
         raise RuntimeError("storage_mutation_runtime_unavailable")
     result = _runtime.execute(**safe)

@@ -18,8 +18,8 @@ def config(output=None):
 
 def test_wbs_is_single_sequential_head():
     scripts = ScriptDirectory.from_config(config())
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a22"]
-    assert scripts.get_revision(CURRENT_SCHEMA_REVISION).down_revision == "a54f001c0a21"
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a24"]
+    assert scripts.get_revision("a54f001c0a22").down_revision == "a54f001c0a21"
 
 
 def test_wbs_upgrade_and_fail_closed_downgrade_sql():
