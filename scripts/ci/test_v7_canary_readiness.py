@@ -52,7 +52,7 @@ def test_one_failed_stage_fails_whole_gate_but_keeps_safe_matrix():
 @pytest.mark.parametrize(("updates", "reason"), [
     ({"CI_CANARY_SYNTHETIC_ONLY": "false"}, "synthetic_mode_required"),
     ({"CI_CANARY_SCOPE": "production"}, "invalid_canary_scope"),
-    ({"DATABASE_URL": "postgresql://x:y@37.252.23.204/puw_canary_test"}, "isolated_database_host_required"),
+    ({"DATABASE_URL": "postgresql://x:y@203.0.113.10/puw_canary_test"}, "isolated_database_host_required"),
     ({"DATABASE_URL": "postgresql://x:y@localhost/pu_workspace"}, "isolated_database_name_required"),
     ({"DATABASE_URL": "sqlite:///canary.db"}, "postgresql_required"),
     ({"GOOGLE_ACCESS_TOKEN": "must-not-be-used"}, "provider_credentials_forbidden"),
