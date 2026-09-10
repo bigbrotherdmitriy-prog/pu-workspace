@@ -16,7 +16,7 @@ runtime выключен по умолчанию и требует явного
 `live_provider=verified`.
 
 Итоговый статус этапа: **IMPLEMENTATION CLOSED / LIVE PROVIDER OPEN /
-RUNTIME CONDITIONAL**.
+MVP-1 POSTGRES RUNTIME PASS / HISTORICAL SUITE HAS KNOWN MVP-4 FAILURE**.
 
 ## Implementation-closed
 
@@ -79,12 +79,23 @@ python -m pytest -q backend/tests/test_mvp1_google_storage_live.py
 - CI contract/harness: `384 passed`, `0 failed` из ASCII-only temp path.
 - `git diff --check`: PASS.
 - `actionlint`: локально недоступен.
-- PostgreSQL migration/runtime, Docker и live Google: NOT RUN.
+- MVP-1-specific PostgreSQL runtime: PASS в
+  [GitHub Actions run #36](https://github.com/bigbrotherdmitriy-prog/pu-workspace/actions/runs/34437416295):
+  `postgres_mvp1_storage` — `2/2`, миграции до `a54f001c0a24` применены
+  технически успешно.
+- Общий historical migration/runtime suite: один известный предсуществующий
+  MVP-4 WBS failure, не связанный с Phase 1b/1c/2; отслеживается отдельно в
+  [mvp4-wbs-known-defect-summary-transition.md](mvp4-wbs-known-defect-summary-transition.md).
+- Docker/process runtime выполнен в том же изолированном workflow; итог всего
+  workflow нельзя обозначать без уточнения как MVP-1 FAIL, поскольку красный
+  runtime обусловлен указанным MVP-4 WBS invariant test.
+- Live Google: NOT RUN.
 
 ## Ограничения
 
-- Реальная PostgreSQL migration/concurrency проверка должна пройти в CI/VPS;
-  SQLite и offline Alembic не заменяют её.
+- Повторный полный runtime workflow после изоляции offline-env тестов должен
+  подтвердить отсутствие новых MVP-1 regressions; известный MVP-4 WBS failure
+  учитывается отдельно и не исправляется в этой ветке.
 - Google API может не вернуть пригодный ETag для конкретного live transport;
   тогда conditional adapter корректно откажет с
   `exact_provider_etag_unavailable`, а не выполнит небезопасную мутацию.
