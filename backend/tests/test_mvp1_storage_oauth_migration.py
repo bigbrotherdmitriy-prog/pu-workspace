@@ -22,7 +22,11 @@ def test_storage_oauth_state_is_the_single_sequential_head():
     assert scripts.get_revision("a54f001c0a22").down_revision == "a54f001c0a21"
 
 
-def test_storage_oauth_state_offline_sql_has_scoped_single_use_state():
+def test_storage_oauth_state_offline_sql_has_scoped_single_use_state(monkeypatch):
+    # migrations/env.py intentionally lets DATABASE_URL override alembic.ini.
+    # This contract must render the explicit synthetic PostgreSQL URL from
+    # _config(), regardless of the SQLite URL used by the offline CI suite.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     output = StringIO()
     command.upgrade(_config(output), "a54f001c0a21:a54f001c0a22", sql=True)
     sql = output.getvalue().lower()

@@ -13,8 +13,14 @@ BACKEND = Path(__file__).resolve().parents[1]
 def _probe(code: str) -> dict:
     env = dict(os.environ)
     env["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
-    env.pop("PU_MODEL_SCOPE", None)
-    env.pop("PU_MVP1_OPTIONAL_EXTENSIONS", None)
+    for name in (
+        "APP_SECRET_KEY",
+        "BOOTSTRAP_TOKEN",
+        "TOKEN_ENCRYPTION_KEY",
+        "PU_MODEL_SCOPE",
+        "PU_MVP1_OPTIONAL_EXTENSIONS",
+    ):
+        env.pop(name, None)
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=BACKEND, env=env,
         check=True, capture_output=True, text=True, timeout=30,
