@@ -38,6 +38,7 @@ CREATED: list[str] = []
 # it does not claim every serial phase can finish inside the available CI time.
 RUNTIME_BUDGET_SECONDS = 22 * 60
 CLEANUP_RESERVE_SECONDS = 60
+CLEANUP_ATTEMPTS = 3
 WORK_DEADLINE: float | None = None
 CLEANUP_DEADLINE: float | None = None
 
@@ -417,16 +418,21 @@ def cleanup_databases() -> None:
         # the fixed timeout and outer cleanup deadline still bound every drop.
         connection.execute("SET statement_timeout = 3000")
         for name in reversed(tuple(CREATED)):
-            try:
-                if CLEANUP_DEADLINE is not None and time.monotonic() >= CLEANUP_DEADLINE:
-                    raise RuntimeError("cleanup_budget_expired")
-                if name not in DATABASES:
-                    raise RuntimeError("cleanup_database_not_owned")
-                connection.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
-                connection.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
-                CREATED.remove(name)
-            except Exception:
-                failed = True
+            for attempt in range(CLEANUP_ATTEMPTS):
+                try:
+                    if CLEANUP_DEADLINE is not None and time.monotonic() >= CLEANUP_DEADLINE:
+                        raise RuntimeError("cleanup_budget_expired")
+                    if name not in DATABASES:
+                        raise RuntimeError("cleanup_database_not_owned")
+                    connection.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
+                    connection.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+                    CREATED.remove(name)
+                    break
+                except Exception:
+                    if attempt + 1 == CLEANUP_ATTEMPTS:
+                        failed = True
+                    else:
+                        time.sleep(0.1 * (attempt + 1))
     if failed:
         raise RuntimeError("owned_database_cleanup_failed")
 

@@ -117,8 +117,34 @@ def test_cleanup_continues_after_one_owned_drop_fails(monkeypatch):
     monkeypatch.setattr(module, "admin_connect", Connection)
     with pytest.raises(RuntimeError, match="owned_database_cleanup_failed"):
         module.cleanup_databases()
-    assert attempted == [third, second, first]
+    assert attempted == [third, second, second, second, first]
     assert module.CREATED == [second]
+
+
+def test_cleanup_retries_one_transient_owned_drop_failure(monkeypatch):
+    module = runner()
+    first = module.DATABASES[0]
+    module.CREATED[:] = [first]
+    attempts = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, query, params=None):
+            if params is not None:
+                attempts.append(params[0])
+                if len(attempts) == 1:
+                    raise RuntimeError("synthetic-transient")
+
+    monkeypatch.setattr(module, "admin_connect", Connection)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    module.cleanup_databases()
+    assert attempts == [first, first]
+    assert module.CREATED == []
 
 
 def test_preexisting_database_is_never_claimed_or_removed(monkeypatch):
