@@ -1,8 +1,10 @@
 # MVP-1 Phase 2 — D02–D15
 
-Дата: 2026-09-09
+Дата реализации: 2026-09-09
 
-Ветка: `codex/v7-wbs-wave7`
+Дата PostgreSQL runtime-приёмки: 2026-09-10
+
+Ветка приёмки: `codex/mvp1-phase2-review`
 
 База: `e1bf2194bb9fc479dc802144659cb265254fbf12`
 
@@ -71,7 +73,13 @@ python -m pytest -q backend/tests/test_mvp1_google_storage_live.py
 
 ## Проверки
 
-- Полный backend: `2538 passed, 65 skipped`, `0 failed`.
+- Финальный изолированный PostgreSQL/CI run:
+  [GitHub Actions #41](https://github.com/bigbrotherdmitriy-prog/pu-workspace/actions/runs/34442787786),
+  commit `f2e0f37052a5e53c4bb737de202f2db28d6f14ae` — **PASS**.
+- Все job финального run: `lint`, `local-engines`, `backend-offline`,
+  `runtime`, `acceptance-gate` — **PASS**.
+- Полный offline backend в run #41: `2540 passed, 63 skipped`, `0 failed`,
+  `0 errors`, 403,28 с. PostgreSQL-проверки учитываются отдельным runtime-job.
 - Полный frontend: `405 passed`.
 - Frontend TypeScript check: PASS.
 - Frontend production build: PASS; сгенерированный `react_dist` исключён из diff.
@@ -79,23 +87,37 @@ python -m pytest -q backend/tests/test_mvp1_google_storage_live.py
 - CI contract/harness: `384 passed`, `0 failed` из ASCII-only temp path.
 - `git diff --check`: PASS.
 - `actionlint`: локально недоступен.
-- MVP-1-specific PostgreSQL runtime: PASS в
-  [GitHub Actions run #36](https://github.com/bigbrotherdmitriy-prog/pu-workspace/actions/runs/34437416295):
-  `postgres_mvp1_storage` — `2/2`, миграции до `a54f001c0a24` применены
-  технически успешно.
-- Общий historical migration/runtime suite: один известный предсуществующий
-  MVP-4 WBS failure, не связанный с Phase 1b/1c/2; отслеживается отдельно в
+- Миграции в run #41: базовая, storage, automation, MVP-2, MVP-3, MVP-4,
+  authority, materialization и schema fixture применены до единственной head
+  `a54f001c0a24` — **PASS**.
+- `postgres_mvp1_storage`: `2/2`, `0 skipped`, 6,39 с — **PASS**.
+- `postgres_process_fault`: четыре обязательных process-kill/recovery
+  сценария, `4 passed`, `0 failed`, `0 skipped`, 29,01 с — **PASS**:
+  reclaim после lease, S07 intent recovery, T2 pre-commit rollback и S08
+  receipt replay без повторного эффекта.
+- Точечная проверка исправления materialization:
+  [targeted PostgreSQL run #2](https://github.com/bigbrotherdmitriy-prog/pu-workspace/actions/runs/34441719589) —
+  `1 passed`, `0 failed`, `0 skipped`, 2,16 с.
+- Materialization в полном run #41:
+  `postgres_materialization_migration` — `1/1`, 3,02 с;
+  `postgres_materialization_runtime` — `1/1`, 3,83 с — **PASS**.
+- Все 16 записей `mandatory_postgres` в безопасном протоколе run #41 имеют
+  статус `PASS`; `postgres_abc_integration` — `302 passed`, `0 skipped`.
+- Acceptance corpus и durable gzip regression — **PASS**.
+- Очистка изолированной среды: `cleanup=PASS`, список неудалённых тестовых БД
+  пуст.
+- Известный WBS-дефект **не входит** в этот PASS. Только тест
+  `test_pg_wbs_summary_constraint_rejects_leaf_intent` временно исключён на
+  уровне CI-раннера со ссылкой на
   [mvp4-wbs-known-defect-summary-transition.md](mvp4-wbs-known-defect-summary-transition.md).
-- Docker/process runtime выполнен в том же изолированном workflow; итог всего
-  workflow нельзя обозначать без уточнения как MVP-1 FAIL, поскольку красный
-  runtime обусловлен указанным MVP-4 WBS invariant test.
+  Остальные шесть PostgreSQL WBS-проверок прошли. Constraint и WBS-логика в
+  этой ветке не исправлялись.
 - Live Google: NOT RUN.
 
 ## Ограничения
 
-- Повторный полный runtime workflow после изоляции offline-env тестов должен
-  подтвердить отсутствие новых MVP-1 regressions; известный MVP-4 WBS failure
-  учитывается отдельно и не исправляется в этой ветке.
+- PostgreSQL runtime gate относится к синтетическому MVP-1 контуру и не
+  заменяет отдельный live-provider Google smoke.
 - Google API может не вернуть пригодный ETag для конкретного live transport;
   тогда conditional adapter корректно откажет с
   `exact_provider_etag_unavailable`, а не выполнит небезопасную мутацию.
