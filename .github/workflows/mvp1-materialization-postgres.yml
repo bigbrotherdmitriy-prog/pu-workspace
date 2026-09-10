@@ -1,6 +1,9 @@
 name: MVP-1 materialization PostgreSQL regression
 
 on:
+  push:
+    branches:
+      - 'codex/mvp1-phase2-review'
   workflow_dispatch:
 
 permissions:
