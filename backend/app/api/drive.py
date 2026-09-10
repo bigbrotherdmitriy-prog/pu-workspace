@@ -10,6 +10,7 @@ from app.models.drive_connection import DriveConnection
 from app.models.project import Project
 from app.models.user import User
 from app.core.auth import require_project_role, require_user
+from app.integrations.storage_credentials import DatabaseStorageCredentialPort, StorageCredentialError
 
 
 router = APIRouter(
@@ -43,6 +44,22 @@ def connect_drive(
             detail="Project not found",
         )
 
+    verified_account_email = payload.account_email
+    if payload.provider == "google_drive" and payload.connection_id:
+        try:
+            resolved = DatabaseStorageCredentialPort().resolve(
+                db,
+                connection_id=payload.connection_id,
+                project_id=project_id,
+                organization_id=project.organization_id,
+                provider="google_drive",
+            )
+        except StorageCredentialError as exc:
+            raise HTTPException(
+                409, "Selected storage credential does not belong to this project"
+            ) from exc
+        verified_account_email = resolved.account_email or "verified-google-account"
+
     connection = db.scalar(
         select(DriveConnection).where(
             DriveConnection.project_id == project_id
@@ -52,14 +69,14 @@ def connect_drive(
     if connection is None:
         connection = DriveConnection(
             project_id=project_id,
-            account_email=payload.account_email,
+            account_email=verified_account_email,
             root_folder_id=payload.root_folder_id,
             provider=payload.provider,
             status="configured",
         )
         db.add(connection)
     else:
-        connection.account_email = payload.account_email
+        connection.account_email = verified_account_email
         connection.root_folder_id = payload.root_folder_id
         connection.provider = payload.provider
         connection.status = "configured"
