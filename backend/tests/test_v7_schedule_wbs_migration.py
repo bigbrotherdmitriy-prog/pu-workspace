@@ -22,7 +22,11 @@ def test_wbs_is_single_sequential_head():
     assert scripts.get_revision("a54f001c0a22").down_revision == "a54f001c0a21"
 
 
-def test_wbs_upgrade_and_fail_closed_downgrade_sql():
+def test_wbs_upgrade_and_fail_closed_downgrade_sql(monkeypatch):
+    # migrations/env.py gives DATABASE_URL precedence over the explicit
+    # synthetic URL. Keep this PostgreSQL DDL contract independent from the
+    # SQLite URL intentionally supplied by the offline CI suite.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     upgrade = StringIO(); command.upgrade(config(upgrade), "a54f001c0a20:a54f001c0a21", sql=True)
     sql = upgrade.getvalue()
     assert "ADD COLUMN wbs_parent_id INTEGER" in sql
