@@ -582,6 +582,16 @@ def main() -> None:
             *MVP_TESTS["postgres_mvp1_storage"],
             "-q", "--tb=short", "-rfsE",
         ], env=env, timeout=300)
+        # Keep the process-fault proof adjacent to the MVP-1 PostgreSQL gate.
+        # Later historical suites can contain independently tracked failures;
+        # they must not turn this proof into NOT_RUN again.
+        output = run_phase(
+            "postgres_process_fault",
+            [sys.executable, "scripts/ci/v54_pilot_runtime.py"],
+            env=env,
+            timeout=180,
+        )
+        runtime = parse_runtime_output(output)
         migrate_database("v7_automation_migration", "puw_v7_test_automation_period", env)
         run_phase("postgres_v7_automation_period", [
             sys.executable, "-m", "pytest", *MVP_TESTS["postgres_v7_automation_period"],
@@ -642,8 +652,6 @@ def main() -> None:
             raise RuntimeError("corpus_contract_failed")
         run_phase("durable_gzip_regression", [sys.executable, "-m", "pytest",
             "scripts/ci/durable_queue/test_contract.py", "scripts/ci/durable_queue/test_run.py", "-q", "--tb=short"], env=env, timeout=180)
-        output = run_phase("postgres_process_fault", [sys.executable, "scripts/ci/v54_pilot_runtime.py"], env=env, timeout=180)
-        runtime = parse_runtime_output(output)
     except BaseException as exc:
         failure = exc
     finally:
