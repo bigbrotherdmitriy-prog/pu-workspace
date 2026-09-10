@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models
 from app.database import Base
+from app.schema import CURRENT_SCHEMA_REVISION
 from app.core.v54_permissions import SourceEvidenceError
 from app.staging.contracts import KekRef
 from app.staging.lifecycle import LifecycleAuthority, MaterializationLifecycle
