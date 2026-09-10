@@ -27,6 +27,7 @@ jobs:
           --health-timeout 3s
           --health-retries 30
     env:
+      PYTHONPATH: backend
       POSTGRES_HOST: postgres
       POSTGRES_USER: puw_ci
       POSTGRES_PASSWORD: test-${{ github.run_id }}-${{ github.run_attempt }}
