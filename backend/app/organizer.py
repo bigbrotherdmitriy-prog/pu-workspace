@@ -137,6 +137,12 @@ def _scan_worker(
             repo.update_session(session_id, source_item_count=len(source_items), progress=15)
             copy_result = drive.copy_folder_tree(
                 source_folder_id, source.parent_id, source.name, source_items=source_items,
+                # session_id is stable for the whole life of this scan/copy
+                # attempt, including a crash-recovery retry via
+                # recover_incomplete_scans(): the same key lets
+                # copy_folder_tree recognise and resume a prior partial copy
+                # instead of creating a second, orphaned root.
+                idempotency_key=f"organizer-session-{session_id}",
             )
             copy_folder_id = copy_result.copy_root_id
             repo.update_session(

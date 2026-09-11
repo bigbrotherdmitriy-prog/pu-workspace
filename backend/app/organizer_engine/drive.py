@@ -50,6 +50,11 @@ class DriveClient:
     """
 
     provider = "google_drive"
+    # copy_folder_tree tags every created object with an opaque ownership
+    # marker (Drive appProperties) when given an idempotency_key, so a retry
+    # after a crash reconciles against what was actually created instead of
+    # trusting folder-name equality or re-copying from scratch.
+    supports_managed_copy_idempotency = True
 
     def __init__(self, service: Any, *, sleep: Callable[[float], None] = time.sleep):
         self.service = service
@@ -233,17 +238,20 @@ class DriveClient:
                     queue.append(item.id)
         return out
 
-    def create_folder(self, name: str, parent_id: str) -> str:
-        created = self.service.files().create(
-            body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]},
-            fields="id",
-        ).execute()
+    def create_folder(self, name: str, parent_id: str, *, app_properties: dict[str, str] | None = None) -> str:
+        body: dict[str, Any] = {"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]}
+        if app_properties:
+            body["appProperties"] = app_properties
+        created = self.service.files().create(body=body, fields="id").execute()
         return created["id"]
 
-    def copy_file(self, file_id: str, new_parent_id: str, new_name: str | None = None) -> str:
+    def copy_file(self, file_id: str, new_parent_id: str, new_name: str | None = None,
+                  *, app_properties: dict[str, str] | None = None) -> str:
         body: dict[str, Any] = {"parents": [new_parent_id]}
         if new_name:
             body["name"] = new_name
+        if app_properties:
+            body["appProperties"] = app_properties
         copied = self.service.files().copy(fileId=file_id, body=body, fields="id").execute()
         return copied["id"]
 
@@ -314,11 +322,26 @@ class DriveClient:
             children_by_parent.setdefault(item.parent_id, []).append(item)
         ts = idempotency_key or datetime.now(timezone.utc).strftime("%Y-%m-%d %H-%M-%S UTC")
         copy_name = source_name + SAFE_COPY_SUFFIX.format(ts=ts)
+        # An opaque ownership marker (Drive appProperties), not the folder
+        # name, is what proves "this is the copy from a prior attempt of the
+        # same idempotency_key" on retry. A name match alone (the pre-existing
+        # main behaviour) is not sufficient: it also cannot tell an in-progress
+        # copy from a finished one, so a crash between creating the root and
+        # persisting copy_folder_id previously produced a second, orphaned
+        # root on the next retry. Ownership-marker reconciliation below fixes
+        # both problems at once: existing children are reused, not re-copied.
+        root_copy_id = None
         if idempotency_key:
-            existing = next((item for item in self.list_children(new_parent_id or "root") if item.is_folder and item.name == copy_name), None)
-            if existing:
-                return CopyResult(existing.id, existing.name, {source_folder_id: existing.id}, len(source_items))
-        root_copy_id = self.create_folder(copy_name, new_parent_id or "root")
+            existing_root = next((
+                item for item in self.list_children(new_parent_id or "root")
+                if item.is_folder
+                and (item.provider_metadata.get("app_properties") or {}).get("puManagedCopyKey") == idempotency_key
+            ), None)
+            if existing_root:
+                root_copy_id, copy_name = existing_root.id, existing_root.name
+        if root_copy_id is None:
+            root_ownership = {"puManagedCopyKey": idempotency_key} if idempotency_key else None
+            root_copy_id = self.create_folder(copy_name, new_parent_id or "root", app_properties=root_ownership)
         id_map: dict[str, str] = {source_folder_id: root_copy_id}
         queue: deque[str] = deque([source_folder_id])
         try:
@@ -326,6 +349,13 @@ class DriveClient:
             while queue:
                 current_source = queue.popleft()
                 current_copy = id_map[current_source]
+                existing_by_source: dict[str | None, DriveFile] = {}
+                if idempotency_key:
+                    existing_by_source = {
+                        (child.provider_metadata.get("app_properties") or {}).get("puManagedSourceId"): child
+                        for child in self.list_children(current_copy)
+                        if (child.provider_metadata.get("app_properties") or {}).get("puManagedCopyKey") == idempotency_key
+                    }
 
                 for item in children_by_parent.get(current_source, []):
                     copied_count += 1
@@ -335,12 +365,22 @@ class DriveClient:
                             f"folders_pending={len(queue)}",
                             flush=True,
                         )
+                    prior = existing_by_source.get(item.id)
+                    if prior is not None:
+                        id_map[item.id] = prior.id
+                        if item.is_folder:
+                            queue.append(item.id)
+                        continue
+                    child_ownership = (
+                        {"puManagedCopyKey": idempotency_key, "puManagedSourceId": item.id}
+                        if idempotency_key else None
+                    )
                     if item.is_folder:
-                        new_id = self.create_folder(item.name, current_copy)
+                        new_id = self.create_folder(item.name, current_copy, app_properties=child_ownership)
                         id_map[item.id] = new_id
                         queue.append(item.id)
                     else:
-                        id_map[item.id] = self.copy_file(item.id, current_copy)
+                        id_map[item.id] = self.copy_file(item.id, current_copy, app_properties=child_ownership)
         except Exception:
             # We intentionally do not trash/delete the partial copy automatically:
             # retaining evidence is safer. The session is marked failed by service layer.

@@ -90,6 +90,18 @@ class YandexDiskStorageAdapter:
             modified_time=meta.get("modified"),
             object_type="folder" if meta.get("type") == "dir" else "file",
             provider="yandex_disk",
+            parent_ids=(parent_locator,) if parent_locator else (),
+            provider_revision=meta.get("revision") or meta.get("sha256") or meta.get("md5"),
+            # Yandex Disk's `public_url` is the closest analogue of Google's
+            # webViewLink; `preview` is a thumbnail URL, not a view page, so it
+            # is deliberately not used as a fallback here.
+            web_url=meta.get("public_url"),
+            source_path=path or None,
+            availability="available",
+            # Yandex Disk API does not expose permission/capability fields —
+            # unknown is the honest ceiling, not a bug.
+            acl_state="unknown",
+            provider_metadata={"resource_id": meta.get("resource_id")},
         )
 
     def health(self) -> AdapterHealth:
