@@ -3,6 +3,8 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
+from app.schema import CURRENT_SCHEMA_REVISION
+
 
 BACKEND = Path(__file__).resolve().parents[1]
 REVISION = "e16a1c2d3f40"
@@ -17,7 +19,9 @@ def test_storage_oauth_state_is_a_single_linear_migration():
 
     assert revision is not None
     assert revision.down_revision == "d04e8a6c31f2"
-    assert script.get_heads() == [REVISION]
+    # This revision is no longer the chain head after later Snapshot migrations;
+    # the single current head is asserted separately in test_schema_revision.py.
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION]
 
 
 def test_storage_oauth_state_migration_has_scoped_single_use_state():

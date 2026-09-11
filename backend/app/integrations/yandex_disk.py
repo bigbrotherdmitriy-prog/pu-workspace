@@ -28,6 +28,11 @@ class YandexDiskStorageAdapter:
     """Yandex Disk implementation of the provider-neutral storage boundary."""
 
     provider = "yandex_disk"
+    # REST resources/move accepts source, destination and overwrite only.  The
+    # public contract has no exact revision/ETag precondition, therefore a
+    # metadata read followed by move cannot close the TOCTOU window.
+    supports_exact_mutation_preconditions = False
+    exact_mutation_blocker = "yandex_move_has_no_exact_revision_precondition"
 
     def __init__(self, access_token: str, *, client: httpx.Client | None = None):
         self._token = access_token

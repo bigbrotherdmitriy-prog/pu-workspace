@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -17,6 +18,16 @@ class StorageObject:
     content_text: str | None = None
     object_type: str | None = None
     provider: str | None = None
+    parent_ids: tuple[str, ...] = ()
+    provider_revision: str | None = None
+    web_url: str | None = None
+    source_path: str | None = None
+    availability: str = "unknown"
+    acl_state: str = "unknown"
+    provider_metadata: dict[str, Any] | None = None
+    shortcut_target_id: str | None = None
+    shortcut_target_mime_type: str | None = None
+    shortcut_target_resource_key: str | None = None
 
     @property
     def is_folder(self) -> bool:

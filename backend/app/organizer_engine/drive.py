@@ -4,11 +4,16 @@ from collections import deque
 from datetime import datetime, timezone
 import io
 import os
+import time
 from typing import Any, Callable
 
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
-from app.integrations.contracts import AdapterHealth, StorageCopyResult
+from app.integrations.contracts import (
+    AdapterHealth, StorageAccessDenied, StorageCopyResult, StorageCredentialsExpired,
+    StorageRateLimited, StorageUnavailable,
+)
 
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
 from .content import extract_text
@@ -21,6 +26,8 @@ GOOGLE_EXPORTS = {
     "application/vnd.google-apps.spreadsheet": "text/csv",
     "application/vnd.google-apps.presentation": "text/plain",
 }
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
+READ_RETRY_DELAYS = (0.1, 0.25)
 
 
 class UnsafeDriveMutation(RuntimeError):
@@ -44,14 +51,51 @@ class DriveClient:
 
     provider = "google_drive"
 
-    def __init__(self, service: Any):
+    def __init__(self, service: Any, *, sleep: Callable[[float], None] = time.sleep):
         self.service = service
+        self._sleep = sleep
+
+    def _execute_read(self, request):
+        """Retry only side-effect-free provider reads; never replay mutations."""
+        for attempt in range(len(READ_RETRY_DELAYS) + 1):
+            try:
+                return request.execute()
+            except HttpError as exc:
+                status = int(getattr(exc.resp, "status", 0) or 0)
+                content = getattr(exc, "content", b"") or b""
+                if isinstance(content, str):
+                    content = content.encode("utf-8", errors="ignore")
+                rate_limited = status == 429 or (
+                    status == 403
+                    and any(reason in content for reason in (
+                        b"rateLimitExceeded", b"userRateLimitExceeded",
+                    ))
+                )
+                retryable = rate_limited or status >= 500
+                if retryable and attempt < len(READ_RETRY_DELAYS):
+                    self._sleep(READ_RETRY_DELAYS[attempt])
+                    continue
+                if status == 401:
+                    raise StorageCredentialsExpired("Google Drive credentials expired or were revoked") from exc
+                if rate_limited:
+                    raise StorageRateLimited("Google Drive rate limit exceeded") from exc
+                if status == 403:
+                    raise StorageAccessDenied("Google Drive object access is denied") from exc
+                raise StorageUnavailable("Google Drive is temporarily unavailable") from exc
 
     def health(self) -> AdapterHealth:
         return AdapterHealth(ready=self.service is not None, detail="service configured")
 
     @staticmethod
     def _to_file(meta: dict, fallback_parent: str = "") -> DriveFile:
+        parent_ids = tuple(str(value) for value in (meta.get("parents") or ([fallback_parent] if fallback_parent else [])))
+        capabilities = meta.get("capabilities") or {}
+        acl_state = (
+            "write" if capabilities.get("canEdit") is True
+            else "read" if capabilities.get("canDownload") is True
+            else "unknown"
+        )
+        shortcut = meta.get("shortcutDetails") or {}
         return DriveFile(
             id=meta["id"],
             name=meta["name"],
@@ -60,18 +104,33 @@ class DriveClient:
             md5_checksum=meta.get("md5Checksum"),
             size=int(meta["size"]) if meta.get("size") else None,
             modified_time=meta.get("modifiedTime"),
-            object_type="folder" if meta["mimeType"] == FOLDER_MIME else "file",
+            object_type=("folder" if meta["mimeType"] == FOLDER_MIME
+                         else "shortcut" if meta["mimeType"] == SHORTCUT_MIME else "file"),
             provider="google_drive",
+            parent_ids=parent_ids,
+            provider_revision=str(meta["version"]) if meta.get("version") is not None else None,
+            web_url=meta.get("webViewLink"),
+            availability="available",
+            acl_state=acl_state,
+            provider_metadata={"drive_id": meta.get("driveId"), "resource_key": meta.get("resourceKey"),
+                               "app_properties": dict(meta.get("appProperties") or {})},
+            shortcut_target_id=shortcut.get("targetId"),
+            shortcut_target_mime_type=shortcut.get("targetMimeType"),
+            shortcut_target_resource_key=shortcut.get("targetResourceKey"),
         )
 
     def get_object(self, object_id: str) -> DriveFile:
         return self.get_file_meta(object_id)
 
     def get_file_meta(self, file_id: str) -> DriveFile:
-        meta = self.service.files().get(
+        request = self.service.files().get(
             fileId=file_id,
-            fields="id,name,mimeType,parents,md5Checksum,size,modifiedTime,trashed",
-        ).execute()
+            fields=("id,name,mimeType,parents,md5Checksum,size,modifiedTime,version,"
+                    "webViewLink,driveId,resourceKey,appProperties,capabilities(canDownload,canEdit),"
+                    "shortcutDetails(targetId,targetMimeType,targetResourceKey),trashed"),
+            supportsAllDrives=True,
+        )
+        meta = self._execute_read(request)
         if meta.get("trashed"):
             raise ValueError("Google Drive object is in trash")
         return self._to_file(meta)
@@ -80,12 +139,17 @@ class DriveClient:
         out: list[DriveFile] = []
         page_token = None
         while True:
-            resp = self.service.files().list(
+            request = self.service.files().list(
                 q=f"'{folder_id}' in parents and trashed=false",
-                fields="nextPageToken, files(id,name,mimeType,parents,md5Checksum,size,modifiedTime)",
+                fields=("nextPageToken, files(id,name,mimeType,parents,md5Checksum,size,modifiedTime,"
+                        "version,webViewLink,driveId,resourceKey,appProperties,capabilities(canDownload,canEdit),"
+                        "shortcutDetails(targetId,targetMimeType,targetResourceKey))"),
                 pageSize=1000,
                 pageToken=page_token,
-            ).execute()
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            resp = self._execute_read(request)
             out.extend(self._to_file(x, folder_id) for x in resp.get("files", []))
             page_token = resp.get("nextPageToken")
             if not page_token:

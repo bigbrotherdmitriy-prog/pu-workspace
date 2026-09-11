@@ -15,7 +15,7 @@ class _Files:
         self.updates = []
         self.creates = []
 
-    def get(self, fileId, fields): return _Request(self.metadata[fileId])
+    def get(self, fileId, fields, **kwargs): return _Request(self.metadata[fileId])
     def update(self, **kwargs):
         self.updates.append(kwargs)
         return _Request({"id": kwargs["fileId"]})
