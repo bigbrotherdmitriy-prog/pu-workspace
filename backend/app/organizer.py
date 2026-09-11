@@ -25,6 +25,11 @@ from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
 
 router = APIRouter(prefix="/organizer", tags=["organizer"])
+# Prefix-less aliases for the same handlers below, under the external
+# "change-batches" naming convention (see docs/audits/
+# mvp1-main-integration-app-composition-preflight.md section 3.5). Additive
+# only: no handler logic changes, no existing /organizer/... path removed.
+resources_router = APIRouter(tags=["mvp1-resources"])
 
 
 def _audit(
@@ -323,6 +328,8 @@ def compatibility_analyze(payload: AnalyzeRequest, db: Session = Depends(get_db)
     return _proposal_payload(repo, proposal_id)
 
 
+@resources_router.get("/proposals")
+@resources_router.get("/change-batches")
 @router.get("/proposals")
 def proposals(project_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -340,6 +347,8 @@ def proposals(project_id: int | None = None, db: Session = Depends(get_db), user
     return {"proposals": [_proposal_payload(repo, i) for i in ids], "count": len(ids)}
 
 
+@resources_router.get("/proposals/{proposal_id}")
+@resources_router.get("/change-batches/{proposal_id}")
 @router.get("/proposals/{proposal_id}")
 def proposal(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -415,6 +424,7 @@ def confirm_selected(proposal_id: int, db: Session = Depends(get_db), user: User
     return {"approved": selected, "proposal": _proposal_payload(repo, proposal_id)}
 
 
+@resources_router.post("/change-batches/{proposal_id}/apply")
 @router.post("/proposals/{proposal_id}/apply")
 def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -446,6 +456,8 @@ def apply(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(
         raise HTTPException(500, str(exc)) from exc
 
 
+@resources_router.post("/rollbacks/{proposal_id}")
+@resources_router.post("/change-batches/{proposal_id}/rollback")
 @router.post("/proposals/{proposal_id}/rollback")
 def rollback(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     repo = OrganizerRepository(db)
@@ -557,6 +569,7 @@ def proposal_operations(proposal_id: int, db: Session = Depends(get_db), user: U
     return {"operations": [dict(item) for item in repo.operations(proposal_id)]}
 
 
+@resources_router.post("/rules")
 @router.post("/rules")
 def create_rule(payload: RuleRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     repo = OrganizerRepository(db)
