@@ -142,5 +142,5 @@ def test_shortcut_metadata_migration_is_sequential_current_head():
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "migrations"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["201286e2acd0"]
-    assert scripts.get_revision("201286e2acd0").down_revision == "21d8f9354c18"
+    assert scripts.get_heads() == ["c13606d92787"]
+    assert scripts.get_revision("c13606d92787").down_revision == "201286e2acd0"

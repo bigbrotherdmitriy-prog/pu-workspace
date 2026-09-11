@@ -23,7 +23,7 @@ from app.models.automation_rule import AutomationRule, AutomationRun
 from app.models.telegram_chat import TelegramChatLink
 from app.models.governance import Decision, Risk
 from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
-from app.models.organization_contract import Contract, Organization
+from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import ManagementHistory, Meeting, Notification, NotificationPolicy, Obligation
@@ -82,6 +82,7 @@ __all__ = [
     "ExtractionResult",
     "Organization",
     "Contract",
+    "ContractVersion",
     "Message",
     "ProjectAIPolicy",
     "Obligation",
