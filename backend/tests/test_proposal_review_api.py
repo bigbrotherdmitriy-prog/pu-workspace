@@ -1,4 +1,4 @@
-from app.organizer import _audit, router
+from app.organizer import _audit, resources_router, router
 from app.organizer_engine.repository import OrganizerRepository
 
 
@@ -9,6 +9,47 @@ def test_safe_bulk_approval_route_is_registered():
     assert "/organizer/proposals/{proposal_id}/apply-source-one" in paths
     assert "/organizer/proposals/{proposal_id}/apply-source-approved" in paths
     assert "/organizer/proposals/{proposal_id}/standardize-copy" in paths
+
+
+def _endpoint(routes, path, method):
+    for route in routes:
+        if route.path == path and method in route.methods:
+            return route.endpoint
+    raise AssertionError(f"no route registered for {method} {path}")
+
+
+def test_resources_router_exposes_exactly_the_change_batches_aliases():
+    """docs/audits/mvp1-main-integration-app-composition-preflight.md 3.5:
+    prefix-less aliases for the canonical /organizer/... proposal/rule routes,
+    under the external "change-batches" naming — additive only.
+    """
+    paths = {route.path for route in resources_router.routes}
+    assert paths == {
+        "/proposals", "/change-batches",
+        "/proposals/{proposal_id}", "/change-batches/{proposal_id}",
+        "/change-batches/{proposal_id}/apply",
+        "/rollbacks/{proposal_id}", "/change-batches/{proposal_id}/rollback",
+        "/rules",
+    }
+
+
+def test_resources_router_aliases_are_the_same_handlers_as_organizer_router():
+    """Each alias is the identical Python function object as its canonical
+    /organizer/... route (decorator stacking, not a re-implementation) — so
+    the two can never drift in behaviour.
+    """
+    pairs = [
+        ("GET", "/proposals", "/organizer/proposals"),
+        ("GET", "/change-batches", "/organizer/proposals"),
+        ("GET", "/proposals/{proposal_id}", "/organizer/proposals/{proposal_id}"),
+        ("GET", "/change-batches/{proposal_id}", "/organizer/proposals/{proposal_id}"),
+        ("POST", "/change-batches/{proposal_id}/apply", "/organizer/proposals/{proposal_id}/apply"),
+        ("POST", "/rollbacks/{proposal_id}", "/organizer/proposals/{proposal_id}/rollback"),
+        ("POST", "/change-batches/{proposal_id}/rollback", "/organizer/proposals/{proposal_id}/rollback"),
+        ("POST", "/rules", "/organizer/rules"),
+    ]
+    for method, alias_path, canonical_path in pairs:
+        assert _endpoint(resources_router.routes, alias_path, method) is _endpoint(router.routes, canonical_path, method)
 
 
 def test_manual_confirmation_skips_untouched_rows_instead_of_approving_them():

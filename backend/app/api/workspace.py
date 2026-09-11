@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -57,6 +59,76 @@ def _parse_time(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _snapshot_path(item: DriveFile, objects: dict[str, DriveFile], root_id: str) -> str:
+    """Build the root-to-item path from already-fetched snapshot metadata only."""
+    if item.id == root_id:
+        return "/"
+    parts = [item.name]
+    current = item.parent_id
+    seen = {item.id}
+    while current and current != root_id and current not in seen:
+        seen.add(current)
+        parent = objects.get(current)
+        if parent is None:
+            return item.source_path or f"unknown:/{item.id}"
+        parts.append(parent.name)
+        current = parent.parent_id
+    if current != root_id:
+        return item.source_path or f"unknown:/{item.id}"
+    return "/" + "/".join(reversed(parts))
+
+
+def _virtual_node_values(item: DriveFile, *, snapshot_id: int, source_path: str) -> dict:
+    """Single point that assembles the immutable VirtualNode envelope.
+
+    Missing provider fields stay explicitly "unknown"/None rather than being
+    invented, so the persisted envelope never claims more than the provider gave.
+    """
+    parent_ids = list(item.parent_ids or ((item.parent_id,) if item.parent_id else ()))
+    metadata = {
+        "source_file_id": item.id,
+        "parent_ids": parent_ids,
+        "name": item.name,
+        "mime_type": item.mime_type,
+        "size": item.size,
+        "modified_time": item.modified_time,
+        "checksum": item.md5_checksum,
+        "provider_revision": item.provider_revision,
+        "web_url": item.web_url,
+        "availability": item.availability or "unknown",
+        "acl_state": item.acl_state or "unknown",
+        "provider_metadata": item.provider_metadata or {},
+        "shortcut_target_id": item.shortcut_target_id,
+        "shortcut_target_mime_type": item.shortcut_target_mime_type,
+        "shortcut_target_resource_key": item.shortcut_target_resource_key,
+    }
+    metadata_hash = hashlib.sha256(json.dumps(
+        metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return {
+        "snapshot_id": snapshot_id,
+        "external_id": item.id,
+        "parent_external_id": item.parent_id or None,
+        "name": item.name,
+        "mime_type": item.mime_type,
+        "node_type": "folder" if item.is_folder else "file",
+        "size_bytes": item.size,
+        "checksum": item.md5_checksum,
+        "source_modified_at": _parse_time(item.modified_time),
+        "source_path": source_path,
+        "parent_external_ids": parent_ids,
+        "provider_revision": item.provider_revision,
+        "provider_metadata_hash": metadata_hash,
+        "web_url": item.web_url,
+        "availability": item.availability or "unknown",
+        "acl_state": item.acl_state or "unknown",
+        "analysis_state": "pending",
+        "shortcut_target_id": item.shortcut_target_id,
+        "shortcut_target_mime_type": item.shortcut_target_mime_type,
+        "shortcut_target_resource_key": item.shortcut_target_resource_key,
+    }
 
 
 def _drive_folder_breadcrumb(service, folder_id: str) -> list[dict[str, str]]:
@@ -132,7 +204,15 @@ def _binding(connection, external_id):
 
 
 def _locked_snapshot(db, snapshot_id):
-    return db.scalar(select(WorkspaceSnapshot).where(WorkspaceSnapshot.id == snapshot_id).with_for_update())
+    # populate_existing=True: a caller may already hold this row in the
+    # session's identity map from an earlier unlocked read (see _build_snapshot).
+    # Without it SQLAlchemy would return that stale, pre-lock Python object
+    # instead of refreshing it from the row this SELECT ... FOR UPDATE just
+    # blocked on and locked, defeating the whole point of taking the lock.
+    return db.scalar(
+        select(WorkspaceSnapshot).where(WorkspaceSnapshot.id == snapshot_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
 
 
 def _active_snapshot_job(db, snapshot_id, project_id):
@@ -276,18 +356,20 @@ def _build_snapshot(snapshot_id: int, project_id: int, external_id: str, raise_e
             drive = storage_for_project(project_id, db)
             source_meta = drive.get_object(external_id)
             items = drive.walk_tree(external_id)
-            db.add(VirtualNode(
-                snapshot_id=snapshot.id, external_id=source_meta.id,
-                parent_external_id=source_meta.parent_id or None, name=source_meta.name,
-                mime_type=source_meta.mime_type, node_type="folder", size_bytes=source_meta.size,
-                checksum=source_meta.md5_checksum, source_modified_at=_parse_time(source_meta.modified_time),
-            ))
-            db.add_all(VirtualNode(
-                snapshot_id=snapshot.id, external_id=item.id,
-                parent_external_id=item.parent_id or None, name=item.name, mime_type=item.mime_type,
-                node_type="folder" if item.is_folder else "file", size_bytes=item.size,
-                checksum=item.md5_checksum, source_modified_at=_parse_time(item.modified_time),
-            ) for item in items)
+            objects_by_id = {source_meta.id: source_meta, **{item.id: item for item in items}}
+            # No DB lock is held during the provider read above (it can be a slow,
+            # network-bound scan). A concurrent writer racing on the same snapshot
+            # must be caught here, right before publish, under a row lock — not
+            # earlier — otherwise two workers could both insert and one would be
+            # wrongly marked failed after the other already published the nodes.
+            snapshot = _locked_snapshot(db, snapshot_id)
+            if snapshot is None or snapshot.project_id != project_id or snapshot.status == "ready":
+                db.rollback()
+                return
+            db.add_all(VirtualNode(**_virtual_node_values(
+                item, snapshot_id=snapshot.id,
+                source_path=_snapshot_path(item, objects_by_id, source_meta.id),
+            )) for item in objects_by_id.values())
             snapshot.item_count = len(items) + 1
             snapshot.status = "ready"
             snapshot.completed_at = datetime.now(timezone.utc)
@@ -800,6 +882,9 @@ def list_virtual_nodes(
     project_id: int,
     snapshot_id: int,
     parent_external_id: str | None = None,
+    cursor: int = Query(default=0, ge=0),
+    limit: int = Query(default=500, ge=1, le=5000),
+    analysis_state: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -810,21 +895,38 @@ def list_virtual_nodes(
     query = select(VirtualNode).where(VirtualNode.snapshot_id == snapshot_id)
     if parent_external_id is not None:
         query = query.where(VirtualNode.parent_external_id == parent_external_id)
-    nodes = db.scalars(query.order_by(VirtualNode.node_type, VirtualNode.name).limit(5000)).all()
+    if analysis_state is not None:
+        query = query.where(VirtualNode.analysis_state == analysis_state)
+    nodes = db.scalars(
+        query.order_by(VirtualNode.node_type, VirtualNode.name).offset(cursor).limit(limit)
+    ).all()
     return {
         "snapshot_id": snapshot_id,
         "status": snapshot.status,
+        "cursor": cursor,
+        "next_cursor": cursor + len(nodes) if len(nodes) == limit else None,
         "nodes": [
             {
                 "id": node.id,
                 "external_id": node.external_id,
                 "parent_external_id": node.parent_external_id,
+                "parent_external_ids": node.parent_external_ids,
                 "name": node.name,
                 "mime_type": node.mime_type,
                 "node_type": node.node_type,
                 "size_bytes": node.size_bytes,
                 "checksum": node.checksum,
                 "source_modified_at": node.source_modified_at,
+                "source_path": node.source_path,
+                "provider_revision": node.provider_revision,
+                "provider_metadata_hash": node.provider_metadata_hash,
+                "web_url": node.web_url,
+                "availability": node.availability,
+                "acl_state": node.acl_state,
+                "analysis_state": node.analysis_state,
+                "shortcut_target_id": node.shortcut_target_id,
+                "shortcut_target_mime_type": node.shortcut_target_mime_type,
+                "shortcut_target_resource_key": node.shortcut_target_resource_key,
             }
             for node in nodes
         ],

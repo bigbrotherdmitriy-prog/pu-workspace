@@ -5,6 +5,7 @@ from app.models.drive_connection import DriveConnection
 from app.models.document import Document
 from app.models.google_token import GoogleOAuthToken
 from app.models.integration_credential import IntegrationCredential
+from app.models.storage_oauth_state import StorageOAuthState
 from app.models.ai_cache import AIAnalysisCache
 from app.models.document_version import DocumentVersion
 from app.models.audit_log import AuditLog
@@ -22,7 +23,7 @@ from app.models.automation_rule import AutomationRule, AutomationRun
 from app.models.telegram_chat import TelegramChatLink
 from app.models.governance import Decision, Risk
 from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, WorkspaceSnapshot
-from app.models.organization_contract import Contract, Organization
+from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import ManagementHistory, Meeting, Notification, NotificationPolicy, Obligation
@@ -57,6 +58,7 @@ __all__ = [
     "Document",
     "GoogleOAuthToken",
     "IntegrationCredential",
+    "StorageOAuthState",
     "DocumentVersion",
     "AuditLog",
     "OrganizerSession",
@@ -80,6 +82,7 @@ __all__ = [
     "ExtractionResult",
     "Organization",
     "Contract",
+    "ContractVersion",
     "Message",
     "ProjectAIPolicy",
     "Obligation",

@@ -4,11 +4,16 @@ from collections import deque
 from datetime import datetime, timezone
 import io
 import os
+import time
 from typing import Any, Callable
 
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
-from app.integrations.contracts import AdapterHealth, StorageCopyResult
+from app.integrations.contracts import (
+    AdapterHealth, StorageAccessDenied, StorageCopyResult, StorageCredentialsExpired,
+    StorageRateLimited, StorageUnavailable,
+)
 
 from .config import MAX_FILES_PER_SCAN, SAFE_COPY_SUFFIX
 from .content import extract_text
@@ -21,6 +26,8 @@ GOOGLE_EXPORTS = {
     "application/vnd.google-apps.spreadsheet": "text/csv",
     "application/vnd.google-apps.presentation": "text/plain",
 }
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
+READ_RETRY_DELAYS = (0.1, 0.25)
 
 
 class UnsafeDriveMutation(RuntimeError):
@@ -43,15 +50,57 @@ class DriveClient:
     """
 
     provider = "google_drive"
+    # copy_folder_tree tags every created object with an opaque ownership
+    # marker (Drive appProperties) when given an idempotency_key, so a retry
+    # after a crash reconciles against what was actually created instead of
+    # trusting folder-name equality or re-copying from scratch.
+    supports_managed_copy_idempotency = True
 
-    def __init__(self, service: Any):
+    def __init__(self, service: Any, *, sleep: Callable[[float], None] = time.sleep):
         self.service = service
+        self._sleep = sleep
+
+    def _execute_read(self, request):
+        """Retry only side-effect-free provider reads; never replay mutations."""
+        for attempt in range(len(READ_RETRY_DELAYS) + 1):
+            try:
+                return request.execute()
+            except HttpError as exc:
+                status = int(getattr(exc.resp, "status", 0) or 0)
+                content = getattr(exc, "content", b"") or b""
+                if isinstance(content, str):
+                    content = content.encode("utf-8", errors="ignore")
+                rate_limited = status == 429 or (
+                    status == 403
+                    and any(reason in content for reason in (
+                        b"rateLimitExceeded", b"userRateLimitExceeded",
+                    ))
+                )
+                retryable = rate_limited or status >= 500
+                if retryable and attempt < len(READ_RETRY_DELAYS):
+                    self._sleep(READ_RETRY_DELAYS[attempt])
+                    continue
+                if status == 401:
+                    raise StorageCredentialsExpired("Google Drive credentials expired or were revoked") from exc
+                if rate_limited:
+                    raise StorageRateLimited("Google Drive rate limit exceeded") from exc
+                if status == 403:
+                    raise StorageAccessDenied("Google Drive object access is denied") from exc
+                raise StorageUnavailable("Google Drive is temporarily unavailable") from exc
 
     def health(self) -> AdapterHealth:
         return AdapterHealth(ready=self.service is not None, detail="service configured")
 
     @staticmethod
     def _to_file(meta: dict, fallback_parent: str = "") -> DriveFile:
+        parent_ids = tuple(str(value) for value in (meta.get("parents") or ([fallback_parent] if fallback_parent else [])))
+        capabilities = meta.get("capabilities") or {}
+        acl_state = (
+            "write" if capabilities.get("canEdit") is True
+            else "read" if capabilities.get("canDownload") is True
+            else "unknown"
+        )
+        shortcut = meta.get("shortcutDetails") or {}
         return DriveFile(
             id=meta["id"],
             name=meta["name"],
@@ -60,18 +109,33 @@ class DriveClient:
             md5_checksum=meta.get("md5Checksum"),
             size=int(meta["size"]) if meta.get("size") else None,
             modified_time=meta.get("modifiedTime"),
-            object_type="folder" if meta["mimeType"] == FOLDER_MIME else "file",
+            object_type=("folder" if meta["mimeType"] == FOLDER_MIME
+                         else "shortcut" if meta["mimeType"] == SHORTCUT_MIME else "file"),
             provider="google_drive",
+            parent_ids=parent_ids,
+            provider_revision=str(meta["version"]) if meta.get("version") is not None else None,
+            web_url=meta.get("webViewLink"),
+            availability="available",
+            acl_state=acl_state,
+            provider_metadata={"drive_id": meta.get("driveId"), "resource_key": meta.get("resourceKey"),
+                               "app_properties": dict(meta.get("appProperties") or {})},
+            shortcut_target_id=shortcut.get("targetId"),
+            shortcut_target_mime_type=shortcut.get("targetMimeType"),
+            shortcut_target_resource_key=shortcut.get("targetResourceKey"),
         )
 
     def get_object(self, object_id: str) -> DriveFile:
         return self.get_file_meta(object_id)
 
     def get_file_meta(self, file_id: str) -> DriveFile:
-        meta = self.service.files().get(
+        request = self.service.files().get(
             fileId=file_id,
-            fields="id,name,mimeType,parents,md5Checksum,size,modifiedTime,trashed",
-        ).execute()
+            fields=("id,name,mimeType,parents,md5Checksum,size,modifiedTime,version,"
+                    "webViewLink,driveId,resourceKey,appProperties,capabilities(canDownload,canEdit),"
+                    "shortcutDetails(targetId,targetMimeType,targetResourceKey),trashed"),
+            supportsAllDrives=True,
+        )
+        meta = self._execute_read(request)
         if meta.get("trashed"):
             raise ValueError("Google Drive object is in trash")
         return self._to_file(meta)
@@ -80,12 +144,17 @@ class DriveClient:
         out: list[DriveFile] = []
         page_token = None
         while True:
-            resp = self.service.files().list(
+            request = self.service.files().list(
                 q=f"'{folder_id}' in parents and trashed=false",
-                fields="nextPageToken, files(id,name,mimeType,parents,md5Checksum,size,modifiedTime)",
+                fields=("nextPageToken, files(id,name,mimeType,parents,md5Checksum,size,modifiedTime,"
+                        "version,webViewLink,driveId,resourceKey,appProperties,capabilities(canDownload,canEdit),"
+                        "shortcutDetails(targetId,targetMimeType,targetResourceKey))"),
                 pageSize=1000,
                 pageToken=page_token,
-            ).execute()
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            resp = self._execute_read(request)
             out.extend(self._to_file(x, folder_id) for x in resp.get("files", []))
             page_token = resp.get("nextPageToken")
             if not page_token:
@@ -169,17 +238,20 @@ class DriveClient:
                     queue.append(item.id)
         return out
 
-    def create_folder(self, name: str, parent_id: str) -> str:
-        created = self.service.files().create(
-            body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]},
-            fields="id",
-        ).execute()
+    def create_folder(self, name: str, parent_id: str, *, app_properties: dict[str, str] | None = None) -> str:
+        body: dict[str, Any] = {"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]}
+        if app_properties:
+            body["appProperties"] = app_properties
+        created = self.service.files().create(body=body, fields="id").execute()
         return created["id"]
 
-    def copy_file(self, file_id: str, new_parent_id: str, new_name: str | None = None) -> str:
+    def copy_file(self, file_id: str, new_parent_id: str, new_name: str | None = None,
+                  *, app_properties: dict[str, str] | None = None) -> str:
         body: dict[str, Any] = {"parents": [new_parent_id]}
         if new_name:
             body["name"] = new_name
+        if app_properties:
+            body["appProperties"] = app_properties
         copied = self.service.files().copy(fileId=file_id, body=body, fields="id").execute()
         return copied["id"]
 
@@ -250,11 +322,26 @@ class DriveClient:
             children_by_parent.setdefault(item.parent_id, []).append(item)
         ts = idempotency_key or datetime.now(timezone.utc).strftime("%Y-%m-%d %H-%M-%S UTC")
         copy_name = source_name + SAFE_COPY_SUFFIX.format(ts=ts)
+        # An opaque ownership marker (Drive appProperties), not the folder
+        # name, is what proves "this is the copy from a prior attempt of the
+        # same idempotency_key" on retry. A name match alone (the pre-existing
+        # main behaviour) is not sufficient: it also cannot tell an in-progress
+        # copy from a finished one, so a crash between creating the root and
+        # persisting copy_folder_id previously produced a second, orphaned
+        # root on the next retry. Ownership-marker reconciliation below fixes
+        # both problems at once: existing children are reused, not re-copied.
+        root_copy_id = None
         if idempotency_key:
-            existing = next((item for item in self.list_children(new_parent_id or "root") if item.is_folder and item.name == copy_name), None)
-            if existing:
-                return CopyResult(existing.id, existing.name, {source_folder_id: existing.id}, len(source_items))
-        root_copy_id = self.create_folder(copy_name, new_parent_id or "root")
+            existing_root = next((
+                item for item in self.list_children(new_parent_id or "root")
+                if item.is_folder
+                and (item.provider_metadata.get("app_properties") or {}).get("puManagedCopyKey") == idempotency_key
+            ), None)
+            if existing_root:
+                root_copy_id, copy_name = existing_root.id, existing_root.name
+        if root_copy_id is None:
+            root_ownership = {"puManagedCopyKey": idempotency_key} if idempotency_key else None
+            root_copy_id = self.create_folder(copy_name, new_parent_id or "root", app_properties=root_ownership)
         id_map: dict[str, str] = {source_folder_id: root_copy_id}
         queue: deque[str] = deque([source_folder_id])
         try:
@@ -262,6 +349,13 @@ class DriveClient:
             while queue:
                 current_source = queue.popleft()
                 current_copy = id_map[current_source]
+                existing_by_source: dict[str | None, DriveFile] = {}
+                if idempotency_key:
+                    existing_by_source = {
+                        (child.provider_metadata.get("app_properties") or {}).get("puManagedSourceId"): child
+                        for child in self.list_children(current_copy)
+                        if (child.provider_metadata.get("app_properties") or {}).get("puManagedCopyKey") == idempotency_key
+                    }
 
                 for item in children_by_parent.get(current_source, []):
                     copied_count += 1
@@ -271,12 +365,22 @@ class DriveClient:
                             f"folders_pending={len(queue)}",
                             flush=True,
                         )
+                    prior = existing_by_source.get(item.id)
+                    if prior is not None:
+                        id_map[item.id] = prior.id
+                        if item.is_folder:
+                            queue.append(item.id)
+                        continue
+                    child_ownership = (
+                        {"puManagedCopyKey": idempotency_key, "puManagedSourceId": item.id}
+                        if idempotency_key else None
+                    )
                     if item.is_folder:
-                        new_id = self.create_folder(item.name, current_copy)
+                        new_id = self.create_folder(item.name, current_copy, app_properties=child_ownership)
                         id_map[item.id] = new_id
                         queue.append(item.id)
                     else:
-                        id_map[item.id] = self.copy_file(item.id, current_copy)
+                        id_map[item.id] = self.copy_file(item.id, current_copy, app_properties=child_ownership)
         except Exception:
             # We intentionally do not trash/delete the partial copy automatically:
             # retaining evidence is safer. The session is marked failed by service layer.
