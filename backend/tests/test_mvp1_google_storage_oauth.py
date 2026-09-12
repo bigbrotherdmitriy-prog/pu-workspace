@@ -527,9 +527,22 @@ def test_legacy_reconnect_preserves_storage_credential_and_creates_mailbox_gener
 def test_legacy_and_mvp1_storage_oauth_routes_coexist_without_collision():
     from app.main import app
 
+    def _leaf_routes(routes):
+        # FastAPI's include_router() is lazy in this version: a sub-router is
+        # stored as an _IncludedRouter placeholder (no .path/.methods of its
+        # own) until expanded via effective_route_contexts(), which also
+        # recurses into further nested include_router() calls. Duck-typed so
+        # this doesn't depend on importing that private class.
+        for route in routes:
+            expand = getattr(route, "effective_route_contexts", None)
+            if callable(expand):
+                yield from expand()
+            else:
+                yield route
+
     routes = {
         (route.path, tuple(sorted(getattr(route, "methods", ()) or ())))
-        for route in app.routes
+        for route in _leaf_routes(app.routes)
     }
 
     assert ("/projects/{project_id}/google/auth", ("GET",)) in routes
