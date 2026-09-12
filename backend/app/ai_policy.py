@@ -21,16 +21,25 @@ def policy_for_project(db: Session, project_id: int) -> ProjectAIPolicy | None:
     return db.get(ProjectAIPolicy, project_id)
 
 
-def prepare_external_ai_text(db: Session, project_id: int, text: str) -> tuple[str, str]:
+def policy_mode_for_project(db: Session, project_id: int) -> str:
     policy = policy_for_project(db, project_id)
-    mode = policy.mode if policy else "external_allowed"
+    return policy.mode if policy else "external_allowed"
+
+
+def apply_ai_policy_mode(mode: str, text: str) -> str:
+    """Pure (no db access) -- safe to call from a worker thread, unlike prepare_external_ai_text."""
     if mode == "local_only":
         raise ExternalAIBlocked("Внешний AI запрещён политикой проекта")
     if mode == "metadata_only":
-        return f"Метаданные: длина текста {len(text)} символов. Содержимое политикой не передаётся.", mode
+        return f"Метаданные: длина текста {len(text)} символов. Содержимое политикой не передаётся."
     if mode != "redacted":
-        return text, mode
+        return text
     result = text
     for kind, pattern in SENSITIVE:
         result = pattern.sub(lambda match: f"[{kind}_{hashlib.sha256(match.group().encode()).hexdigest()[:8]}]", result)
-    return result, mode
+    return result
+
+
+def prepare_external_ai_text(db: Session, project_id: int, text: str) -> tuple[str, str]:
+    mode = policy_mode_for_project(db, project_id)
+    return apply_ai_policy_mode(mode, text), mode
