@@ -47,6 +47,78 @@ MESSAGE_REPLY_SCHEMA = {
     ],
 }
 
+_OBLIGATION_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "evidence_quote": {"type": "string"},
+        "due_date": {"type": ["string", "null"]},
+        "due_date_evidence_quote": {"type": ["string", "null"]},
+        "assignee_hint": {"type": ["string", "null"]},
+        "assignee_evidence_quote": {"type": ["string", "null"]},
+        "amount": {"type": ["number", "null"]},
+        "amount_currency": {"type": ["string", "null"]},
+        "amount_evidence_quote": {"type": ["string", "null"]},
+        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+    },
+    "required": [
+        "title", "evidence_quote", "due_date", "due_date_evidence_quote",
+        "assignee_hint", "assignee_evidence_quote",
+        "amount", "amount_currency", "amount_evidence_quote", "confidence",
+    ],
+}
+
+# One combined call per file replaces the LLM-relevant part of all three
+# regex engines (task_engine/response_engine/governance_engine) at once,
+# not just the four obligation sub-fields -- see docs/audits/
+# mvp2-ai-extraction-preflight.md §9-10 for why (RPM/cost of 3 calls/file
+# vs 1 across a 2000-file organizer scan).
+COMBINED_EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "obligations": {"type": "array", "items": _OBLIGATION_ITEM_SCHEMA},
+        "response_candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "evidence_quote": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                },
+                "required": ["evidence_quote", "confidence"],
+            },
+        },
+        "risks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "evidence_quote": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["risk", "deviation"]},
+                    "criticality": {"type": "string", "enum": ["medium", "high"]},
+                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                },
+                "required": ["title", "evidence_quote", "kind", "criticality", "confidence"],
+            },
+        },
+        "decisions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "evidence_quote": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                },
+                "required": ["question", "evidence_quote", "confidence"],
+            },
+        },
+    },
+    "required": ["obligations", "response_candidates", "risks", "decisions"],
+}
+
+
 MAIL_COMPOSER_SCHEMA = {
     "type": "object",
     "properties": {
@@ -65,6 +137,26 @@ SYSTEM_INSTRUCTION = """Ты — аналитик проектной, догов
 Различай факты документа, обязательства, риски, противоречия и рекомендации.
 Не считай обычное описание работ поручением без явного требования или срока.
 Ответ должен быть на русском языке и строго соответствовать JSON-схеме."""
+
+
+COMBINED_EXTRACTION_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
+
+Дополнительно для этой задачи:
+Каждое поле "*_evidence_quote" должно быть ДОСЛОВНОЙ подстрокой исходного
+текста, без перефразирования и без сокращений многоточием — иначе цитату
+нельзя будет найти в документе. Если основания для поля нет, верни null
+в самом поле и null в его evidence_quote, не выдумывай значение.
+due_date возвращай в формате ISO 8601 (YYYY-MM-DD), только если в тексте
+есть явный маркер срока ("не позднее", "до", "к", "срок:") — обычная дата
+в тексте (например, дата документа или ссылка на нормативный акт) не
+является сроком исполнения.
+assignee_hint — это то, как ответственный назван в тексте (имя, фамилия
+или должность), а не идентификатор пользователя. Если в промпте передан
+список участников проекта — предпочитай указывать одного из них, если
+текст на это указывает; не изобретай имя, которого нет ни в тексте, ни
+в списке участников.
+amount — число без разделителей тысяч и без указания валюты словами;
+валюту (например, "RUB", "USD") возвращай отдельно в amount_currency."""
 
 
 def gemini_configured() -> bool:
@@ -108,6 +200,52 @@ def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": _generation_config(model, ANALYSIS_SCHEMA, 0.1),
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = request_with_retry(
+            client, "POST", f"{base_url}/models/{model}:generateContent",
+            policy=HEAVY_AI_RETRY,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=payload,
+        )
+    parts = response.json()["candidates"][0]["content"]["parts"]
+    raw = "".join(part.get("text", "") for part in parts)
+    result = json.loads(raw)
+    if not isinstance(result, dict):
+        raise ValueError("Gemini returned an unexpected response")
+    return result
+
+
+def extract_combined_fields_with_gemini(
+    text: str, filename: str, project_name: str, member_names: list[str],
+) -> dict[str, Any]:
+    """One call replacing the LLM-relevant work of task/response/governance engines.
+
+    Raises RuntimeError if no API key is configured, or the underlying
+    httpx/JSON error otherwise -- callers classify and fall back (see
+    app/document_extraction.py), this function does not swallow failures.
+    """
+    import httpx
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    members_line = ", ".join(member_names) if member_names else "(список участников недоступен)"
+    prompt = (
+        f"Имя файла: {filename}\n"
+        f"Проект: {project_name}\n"
+        f"Участники проекта: {members_line}\n\n"
+        "Извлеки из текста: поручения (с их сроком, ответственным и суммой, если есть), "
+        "формулировки, требующие ответа, риски/отклонения и вопросы, требующие решения. "
+        "Обычное описание уже выполненных работ или технических характеристик не является "
+        "поручением.\n\nТЕКСТ ДОКУМЕНТА:\n" + text[:50_000]
+    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": COMBINED_EXTRACTION_SYSTEM_INSTRUCTION}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": _generation_config(model, COMBINED_EXTRACTION_SCHEMA, 0.1),
     }
     with httpx.Client(timeout=90.0) as client:
         response = request_with_retry(

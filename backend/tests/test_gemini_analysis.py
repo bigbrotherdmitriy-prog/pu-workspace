@@ -1,4 +1,11 @@
-from app.gemini_analysis import ANALYSIS_SCHEMA, _generation_config, format_gemini_analysis, format_message_replies
+from app.gemini_analysis import (
+    ANALYSIS_SCHEMA,
+    COMBINED_EXTRACTION_SCHEMA,
+    COMBINED_EXTRACTION_SYSTEM_INSTRUCTION,
+    _generation_config,
+    format_gemini_analysis,
+    format_message_replies,
+)
 
 
 def test_gemini_3_generation_config_uses_low_thinking_without_sampling_overrides():
@@ -54,3 +61,34 @@ def test_message_replies_are_formatted_as_three_safe_drafts():
     assert "Деловой" in message
     assert "Обычный" in message
     assert "не отправлены автоматически" in message
+
+
+def test_combined_extraction_schema_covers_all_four_categories_per_file():
+    top = COMBINED_EXTRACTION_SCHEMA["properties"]
+    assert set(top) == {"obligations", "response_candidates", "risks", "decisions"}
+    assert set(COMBINED_EXTRACTION_SCHEMA["required"]) == set(top)
+
+    obligation_props = top["obligations"]["items"]["properties"]
+    for field in (
+        "title", "evidence_quote", "due_date", "due_date_evidence_quote",
+        "assignee_hint", "assignee_evidence_quote",
+        "amount", "amount_currency", "amount_evidence_quote", "confidence",
+    ):
+        assert field in obligation_props
+
+    risk_props = top["risks"]["items"]["properties"]
+    assert risk_props["kind"]["enum"] == ["risk", "deviation"]
+    assert risk_props["criticality"]["enum"] == ["medium", "high"]
+
+
+def test_combined_extraction_generation_config_uses_the_combined_schema():
+    config = _generation_config("gemini-3.6-flash", COMBINED_EXTRACTION_SCHEMA, 0.1)
+    assert config["responseSchema"] is COMBINED_EXTRACTION_SCHEMA
+    assert config["thinkingConfig"] == {"thinkingLevel": "low"}
+
+
+def test_combined_extraction_instruction_requires_verbatim_evidence():
+    assert "ДОСЛОВНОЙ подстрокой" in COMBINED_EXTRACTION_SYSTEM_INSTRUCTION
+    assert "не выдумывай значение" in COMBINED_EXTRACTION_SYSTEM_INSTRUCTION
+    # Extends, rather than replaces, the shared base instruction.
+    assert "Не считай обычное описание работ поручением" in COMBINED_EXTRACTION_SYSTEM_INSTRUCTION
