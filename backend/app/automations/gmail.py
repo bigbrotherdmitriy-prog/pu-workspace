@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from app.database import SessionLocal, engine
 from app.models.audit_log import AuditLog
 from app.models.google_token import GoogleOAuthToken
+from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 
@@ -79,7 +80,19 @@ def sync_authorized_projects_once() -> dict[str, int]:
         from app.api.gmail import sync_gmail_project
 
         with SessionLocal() as db:
-            project_ids = list(db.scalars(select(GoogleOAuthToken.project_id).order_by(GoogleOAuthToken.project_id)))
+            # Archived projects keep their OAuth row (archiving a project does not
+            # revoke or delete its Gmail connection) but must never be synced:
+            # an archived project has no operator confirming context/tasks for
+            # it, so mail routed there would silently pile up unreviewed. See
+            # docs/audits/... incident notes: a connection left pointed at an
+            # archived-adjacent project was the proximate cause of a week of
+            # misrouted client mail.
+            project_ids = list(db.scalars(
+                select(GoogleOAuthToken.project_id)
+                .join(Project, Project.id == GoogleOAuthToken.project_id)
+                .where(Project.archived_at.is_(None))
+                .order_by(GoogleOAuthToken.project_id)
+            ))
         for project_id in project_ids:
             with SessionLocal() as db:
                 try:
