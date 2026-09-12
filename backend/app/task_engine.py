@@ -181,14 +181,22 @@ def _default_assignee(db: Session, project_id: int) -> User | None:
 
 
 def create_tasks_from_files(db: Session, project_id: int, session_id: int | None, files: list[StorageObject], source_type: str = "document_analysis") -> list[Task]:
-    assignee = _default_assignee(db, project_id)
-    if not assignee:
+    # Deferred import: document_extraction calls back into this module's
+    # extract_task_candidates for its regex fallback.
+    from app.document_extraction import (
+        FALLBACK_REASON_TEXT, extract_for_file, extract_for_files, match_assignee_hint,
+    )
+
+    default_assignee = _default_assignee(db, project_id)
+    if not default_assignee:
         return []
+    extract_for_files(db, files, project_id)  # no-op for files another engine already cached
     created: list[Task] = []
     for file in files:
         if file.is_folder:
             continue
-        for candidate in extract_task_candidates(file.content_text):
+        extraction = extract_for_file(db, file, project_id)
+        for candidate in extraction.obligations:
             excerpt_hash = hashlib.sha256(candidate.excerpt.casefold().encode()).hexdigest()
             existing = db.scalar(select(Task.id).where(
                 Task.project_id == project_id,
@@ -197,18 +205,26 @@ def create_tasks_from_files(db: Session, project_id: int, session_id: int | None
             ))
             if existing:
                 continue
+            matched_assignee = match_assignee_hint(db, project_id, candidate.assignee_hint)
+            assignee = matched_assignee or default_assignee
+            description = (
+                f"Автоматически выделено из документа «{file.name}». "
+                "Оценка эвристическая, не вероятность правильного распознавания. "
+                "Требуется ручная проверка по исходной цитате."
+                + (" Причины: " + " ".join(candidate.review_reasons) if candidate.review_reasons else "")
+            )
+            if candidate.assignee_hint and not matched_assignee:
+                description += f" LLM предположил ответственного «{candidate.assignee_hint}» — не найден среди участников проекта."
+            if extraction.extraction_method == "regex" and extraction.fallback_reason:
+                reason_text = FALLBACK_REASON_TEXT.get(extraction.fallback_reason, extraction.fallback_reason)
+                description += f" {reason_text}: ответственный и сумма не извлечены."
             task = Task(
                 project_id=project_id,
                 assignee_user_id=assignee.id,
-                created_by_user_id=assignee.id,
+                created_by_user_id=default_assignee.id,
                 organizer_session_id=session_id,
                 title=candidate.title,
-                description=(
-                    f"Автоматически выделено из документа «{file.name}». "
-                    "Оценка эвристическая, не вероятность правильного распознавания. "
-                    "Требуется ручная проверка по исходной цитате."
-                    + (" Причины: " + " ".join(candidate.review_reasons) if candidate.review_reasons else "")
-                ),
+                description=description,
                 status="assigned",
                 priority=candidate.priority,
                 due_date=candidate.due_date,
@@ -219,6 +235,13 @@ def create_tasks_from_files(db: Session, project_id: int, session_id: int | None
                 confidence=candidate.confidence,
                 needs_review=True,
                 source_type=source_type,
+                amount=candidate.amount,
+                amount_currency=candidate.amount_currency,
+                amount_evidence_quote=candidate.amount_evidence_quote,
+                due_date_evidence_quote=candidate.due_date_evidence_quote,
+                assignee_hint=candidate.assignee_hint,
+                assignee_evidence_quote=candidate.assignee_evidence_quote,
+                extraction_method=candidate.extraction_method,
             )
             db.add(task)
             db.flush()
@@ -228,6 +251,12 @@ def create_tasks_from_files(db: Session, project_id: int, session_id: int | None
                 source_type=source_type, source_id=file.id, source_name=file.name,
                 source_excerpt=candidate.excerpt, source_hash=excerpt_hash,
                 confidence=candidate.confidence,
+                amount=candidate.amount, amount_currency=candidate.amount_currency,
+                amount_evidence_quote=candidate.amount_evidence_quote,
+                due_date_evidence_quote=candidate.due_date_evidence_quote,
+                assignee_hint=candidate.assignee_hint,
+                assignee_evidence_quote=candidate.assignee_evidence_quote,
+                extraction_method=candidate.extraction_method,
             ))
             created.append(task)
     db.commit()

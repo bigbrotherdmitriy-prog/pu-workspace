@@ -51,18 +51,32 @@ def extract_response_candidates(
         ))
         if len(result) >= limit:
             break
-    if not result and ensure_response and len(" ".join(text.split())) >= 15:
-        excerpt = " ".join(text.split())[:1200]
-        result.append(ResponseCandidate(
-            f"Ответ на письмо «{source_name}»"[:500],
-            "Добрый день!\n\n"
-            "Благодарим за письмо. Информация получена и передана на проверку. "
-            "После проверки мы направим содержательный ответ.\n\n"
-            "С уважением,\n[ФИО / должность]",
-            excerpt,
-            0.55,
-        ))
+    if not result and ensure_response:
+        bonus = ensure_response_bonus(text, source_name)
+        if bonus:
+            result.append(bonus)
     return result
+
+
+def ensure_response_bonus(text: str | None, source_name: str) -> ResponseCandidate | None:
+    """The 'still produce something reviewable for email mode' fallback.
+
+    Not regex-specific: applies identically whichever path (LLM or regex)
+    found no response-worthy sentence, so create_response_drafts calls this
+    directly too -- see app/document_extraction.py.
+    """
+    normalized = " ".join((text or "").split())
+    if len(normalized) < 15:
+        return None
+    return ResponseCandidate(
+        f"Ответ на письмо «{source_name}»"[:500],
+        "Добрый день!\n\n"
+        "Благодарим за письмо. Информация получена и передана на проверку. "
+        "После проверки мы направим содержательный ответ.\n\n"
+        "С уважением,\n[ФИО / должность]",
+        normalized[:1200],
+        0.55,
+    )
 
 
 def _reviewer(db: Session, project_id: int) -> User | None:
@@ -74,6 +88,20 @@ def _reviewer(db: Session, project_id: int) -> User | None:
     return db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id))
 
 
+def _draft_candidate(source_name: str, evidence_quote: str, confidence: float) -> ResponseCandidate:
+    """Same template as extract_response_candidates' regular (non-bonus) branch --
+    the LLM path only ever supplies evidence_quote/confidence, never body text."""
+    return ResponseCandidate(
+        f"Ответ на запрос из документа «{source_name}»"[:500],
+        "Добрый день!\n\n"
+        f"В ответ на ваш запрос: «{evidence_quote}»\n\n"
+        "Сообщаем, что запрос принят в работу. Подтверждённая информация и необходимые "
+        "материалы будут направлены дополнительно после внутренней проверки.\n\n"
+        "С уважением,\n[ФИО / должность]",
+        evidence_quote, confidence,
+    )
+
+
 def create_response_drafts(
     db: Session,
     project_id: int,
@@ -82,16 +110,28 @@ def create_response_drafts(
     *,
     ensure_response: bool = False,
 ) -> list[ResponseDraft]:
+    # Deferred import: document_extraction calls back into this module's
+    # extract_response_candidates for its regex fallback.
+    from app.document_extraction import extract_for_file, extract_for_files
+
     reviewer = _reviewer(db, project_id)
     if not reviewer:
         return []
+    extract_for_files(db, files, project_id)  # no-op for files another engine already cached
     created: list[ResponseDraft] = []
     for file in files:
         if file.is_folder:
             continue
-        for candidate in extract_response_candidates(
-            file.content_text, file.name, ensure_response=ensure_response,
-        ):
+        extraction = extract_for_file(db, file, project_id)
+        candidates = [
+            _draft_candidate(file.name, raw.evidence_quote, raw.confidence)
+            for raw in extraction.response_candidates
+        ][:3]  # extract_response_candidates' historical default limit
+        if not candidates and ensure_response:
+            bonus = ensure_response_bonus(file.content_text, file.name)
+            if bonus:
+                candidates = [bonus]
+        for candidate in candidates:
             digest = hashlib.sha256(candidate.excerpt.casefold().encode()).hexdigest()
             if db.scalar(select(ResponseDraft.id).where(ResponseDraft.project_id == project_id, ResponseDraft.source_file_id == file.id, ResponseDraft.source_excerpt_hash == digest)):
                 continue
