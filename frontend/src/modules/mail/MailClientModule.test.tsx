@@ -93,6 +93,26 @@ function renderClient(client = mockClient(), propOverrides: Record<string, unkno
 }
 
 describe("MailClientModule", () => {
+  it("refreshes the selected sent folder instead of the recent inbox selection", async () => {
+    const { props, client } = renderClient();
+    await screen.findByRole("heading", { name: message.subject });
+    fireEvent.click(screen.getByRole("button", { name: /Отправленные/ }));
+    await waitFor(() => expect(client.threads).toHaveBeenLastCalledWith(7, "sent", ""));
+    fireEvent.click(screen.getByRole("button", { name: "Получить новые" }));
+    await waitFor(() => expect(props.onSync).toHaveBeenCalledWith("sent"));
+  });
+
+  it("keeps the message and shows reconnect instructions when Gmail denies modification", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const client = mockClient({ moveMessage: vi.fn().mockRejectedValue(new Error("mail_modify_permission_required")) });
+    renderClient(client);
+    await screen.findByRole("heading", { name: message.subject });
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await waitFor(() => expect(client.moveMessage).toHaveBeenCalledWith(message.id, "trash"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Переподключите Google");
+    expect(screen.getByRole("heading", { name: message.subject })).toBeVisible();
+  });
+
   it("keeps sync feedback inside the compact header area", async () => {
     const { container } = renderClient(mockClient(), { syncStatus: "Проверено 16:06. Новых: 0." });
     await screen.findByText("Проверено 16:06. Новых: 0.");

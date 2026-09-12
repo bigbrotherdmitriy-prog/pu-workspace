@@ -16,6 +16,7 @@ TASKS = "https://www.googleapis.com/auth/tasks"
 CALENDAR = "https://www.googleapis.com/auth/calendar.events"
 GMAIL_READ = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify"
 OPENID = "openid"
 
 
@@ -67,10 +68,10 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
             refresh_token=None,
             token_uri="https://oauth2.googleapis.com/token",
             id_token="synthetic-id-token",
-            scopes=[OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND],
+            scopes=[OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY],
         ),
         fetch_token=lambda **_kwargs: {
-            "scope": " ".join((OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND)),
+            "scope": " ".join((OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY)),
         },
     )
     monkeypatch.setattr(
@@ -93,7 +94,7 @@ def test_oauth_callback_encrypts_tokens_and_preserves_refresh_token_on_repeat_co
     assert "stable-refresh" not in stored.refresh_token
     assert decrypt_token(stored.access_token) == "new-access"
     assert decrypt_token(stored.refresh_token) == "stable-refresh"
-    assert set(stored.scopes.split()) == {OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND}
+    assert set(stored.scopes.split()) == {OPENID, DRIVE, TASKS, CALENDAR, GMAIL_READ, GMAIL_SEND, GMAIL_MODIFY}
 
 
 def test_capability_gating_requires_every_scope_for_each_google_surface(

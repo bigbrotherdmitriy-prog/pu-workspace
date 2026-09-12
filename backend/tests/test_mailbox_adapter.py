@@ -67,6 +67,9 @@ class Workspace:
         from app.integrations.contracts import AdapterHealth
         return AdapterHealth(True, "ready")
 
+    def authorized_scopes(self):
+        return frozenset({"https://www.googleapis.com/auth/gmail.modify"})
+
     def service(self, api, version):
         assert (api, version) == ("gmail", "v1")
         return self.gmail
@@ -134,3 +137,36 @@ def test_gmail_adapter_classifies_service_setup_failure_as_not_applied():
             to=("to@example.test",), cc=(), bcc=(), subject="Synthetic", body="Body",
         ))
     assert "secret" not in str(error.value)
+
+
+def test_google_oauth_requests_mail_modification_permission():
+    from app.api.google_drive import SCOPES
+    assert "https://www.googleapis.com/auth/gmail.modify" in SCOPES
+
+
+@pytest.mark.parametrize("destination", ["trash", "spam", "archive", "inbox"])
+def test_move_without_modify_scope_never_calls_provider(destination):
+    workspace = Workspace()
+    workspace.authorized_scopes = lambda: frozenset({"https://www.googleapis.com/auth/gmail.readonly"})
+    with pytest.raises(MailNotAppliedError, match="mail_modify_permission_required"):
+        GmailMailboxAdapter(workspace).move_message("gm-1", destination)
+    assert workspace.gmail.users_api.messages_api.move is None
+
+
+def test_move_setup_failure_is_safe_and_not_applied():
+    workspace = Workspace()
+    def broken(*args):
+        raise RuntimeError("synthetic credential secret")
+    workspace.service = broken
+    with pytest.raises(MailNotAppliedError, match="provider_unavailable_before_move") as error:
+        GmailMailboxAdapter(workspace).move_message("gm-1", "trash")
+    assert "secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("scope", ["https://www.googleapis.com/auth/gmail.modify", "https://mail.google.com/"])
+def test_move_to_trash_uses_recoverable_provider_operation(scope):
+    workspace = Workspace()
+    workspace.authorized_scopes = lambda: frozenset({scope})
+    receipt = GmailMailboxAdapter(workspace).move_message("gm-1", "trash")
+    assert receipt.destination == "trash"
+    assert workspace.gmail.users_api.messages_api.move == ("trash", {"userId": "me", "id": "gm-1"})
