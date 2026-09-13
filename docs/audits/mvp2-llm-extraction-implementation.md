@@ -129,12 +129,12 @@
 
 ## 6. Не проверено / известные границы этого отчёта
 
-- Реальный вызов Gemini (`extract_combined_fields_with_gemini`) не
-  прогонялся на настоящем `GEMINI_API_KEY` — только через моки
-  (`configured_ai_provider`) на всех уровнях. Промпт/схема не
-  валидировались против реального ответа модели.
+- ~~Реальный вызов Gemini не прогонялся на настоящем `GEMINI_API_KEY`~~ —
+  **закрыто, см. §7**: прогнан 2026-09-13 на живом production-ключе,
+  найден и исправлен реальный баг схемы.
 - §11 (async UX для `confirm_context_bulk`/`analyze_contract_package`) —
-  отдельная задача, сознательно не начата в этом пакете.
+  реализован отдельно, после этого отчёта (см. более поздний коммит той
+  же ветки).
 - `LLM_EXTRACTION_CONCURRENCY` дефолт (4) не тюнился под реальный
   RPM-тариф — пользователь решил, что тариф (Gemini Pro Max) не блокер,
   но фактическое значение стоит сверить после первого реального прогона.
@@ -143,5 +143,90 @@
   ещё 4 файла) — не перепрогонялись на реальном Postgres в рамках этой
   сессии за пределами строкового изменения; сама миграционная цепочка
   для них уже подтверждена в §3 (та же цепочка, тот же финальный revision).
+
+## 7. Живой smoke-тест на production Gemini API (2026-09-13) — найден и исправлен реальный баг схемы
+
+Прогнан `extract_combined_fields_with_gemini()` напрямую (в обход
+`document_extraction.py`, без regex-предфильтра/fallback/пула — чистая
+проверка вызова+схемы) на трёх синтетических текстах, с реальным
+production-ключом из `/opt/pu-workspace-primary/shared/.env.primary`
+(прочитан одной командой в `docker run --env-file`/`-e`, ни разу не
+выведен в чат/лог/вывод команды).
+
+### Первый прогон — 100% отказ, не связано с ключом или моделью
+
+Все три текста упали с одинаковой ошибкой:
+```
+400 Bad Request — INVALID_ARGUMENT
+"Invalid JSON payload received. Unknown name \"type\" at
+ 'generation_config.response_schema.properties[0].value.items.properties[2..8].value':
+ Proto field is not repeating, cannot start list."
+```
+Проверил отдельно: ошибка идентична и на `gemini-3.8-flash` (модель из
+прод-конфига), и на `gemini-3.6-flash` (дефолт кода) — значит дело не в
+имени модели, а в самой схеме `COMBINED_EXTRACTION_SCHEMA`.
+
+**Корневая причина**: `properties[0]` = `obligations`, `properties[2..8]`
+— ровно 7 nullable-полей (`due_date`, `due_date_evidence_quote`,
+`assignee_hint`, `assignee_evidence_quote`, `amount`, `amount_currency`,
+`amount_evidence_quote`), объявленных как `"type": ["string"/"number", "null"]`
+(JSON-Schema-style union). `responseSchema` у Gemini — protobuf-based
+(`Schema`-сообщение, общее с Vertex AI), **не принимает `"type"` как
+список** — несмотря на то, что официальный туториал
+[ai.google.dev/gemini-api/docs/structured-output](https://ai.google.dev/gemini-api/docs/structured-output)
+буквально показывает именно такую форму (`{"type": ["string", "null"]}`).
+Расхождение документации с реальным поведением API подтверждено и
+[форумом Google](https://discuss.ai.google.dev/t/responseschema-and-json-schema-specs-of-type-as-array/61211)
+(открыто с июня 2025, без официального фикса) — ни одна из существующих
+в этом файле схем (`ANALYSIS_SCHEMA`, `MESSAGE_REPLY_SCHEMA`) раньше не
+использовала union-тип, поэтому баг не проявлялся до `COMBINED_EXTRACTION_SCHEMA`.
+
+**Подтверждённый рабочий синтаксис** — одиночный `"type"` + отдельный
+булев `"nullable": true`, по образцу из
+[github.com/google-gemini/generative-ai-js issue #188](https://github.com/google-gemini/generative-ai-js/issues/188):
+```json
+{"type": "STRING", "nullable": true}
+```
+(регистр `type` не важен — существующие рабочие схемы в этом файле уже
+используют lowercase `"string"`, сохранил этот стиль).
+
+### Фикс
+
+`_OBLIGATION_ITEM_SCHEMA` (`app/gemini_analysis.py`): все 7 полей —
+`"type": ["string", "null"]` → `"type": "string", "nullable": True`
+(аналогично `"number"` для `amount`). Остальная логика
+(verbatim-проверка, fallback, пул воркеров) не тронута.
+
+### Повторный прогон — успех по всем трём текстам
+
+| Текст | Результат | Время |
+|---|---|---|
+| 1 (богатый: поручение+срок+ответственный+риск+решение+ответ) | Все 4 категории корректны; `due_date=2026-10-20` (verbatim PASS); `assignee_hint="Смирнов А.В."` — совпало с переданным `member_names` (verbatim PASS); `amount=null` — сумма в тексте была не в этом же предложении, модель разумно не привязала её к обязательству | 3.01с |
+| 2 (пустой, негативный контроль) | Все 4 массива — `[]`, никаких галлюцинаций | 1.40с |
+| 3 (ловушка: дата-ссылка на СНиП/152-ФЗ) | **`due_date=null`** (не `2003-02-23`/`2006-07-27`) — ключевая проверка пройдена; `assignee_hint=null` («ответственный… не назначен»); модель дополнительно (не запрашивалось, но разумно) завела riск/decision по неназначенному ответственному и незафиксированной стоимости | 1.77с |
+
+**Все evidence-цитаты** во всех трёх текстах прошли программную
+verbatim-проверку (`quote.casefold() in text.casefold()`) — ни одного
+перефразирования, ни одного `FAIL`. Реальные тайминги (1.4-3.0с) —
+быстрее предположения preflight §10 (2-5с), но и это лишь три вызова, не
+статистика.
+
+### Тесты-регрессии (добавлены в `tests/test_gemini_analysis.py`)
+
+- `test_combined_extraction_schema_never_uses_type_as_a_list` — статическая
+  проверка формы схемы (без сети): ни один узел `ANALYSIS_SCHEMA`/
+  `COMBINED_EXTRACTION_SCHEMA` не имеет `"type"` списком. Поймала бы
+  исходный баг без единого обращения к `GEMINI_API_KEY`.
+- `test_nullable_obligation_fields_use_type_plus_nullable_not_a_type_list` —
+  все 7 nullable-полей используют `"type"` строкой + `"nullable": True`;
+  `title`/`evidence_quote`/`confidence` не помечены `nullable`.
+- `test_extract_combined_fields_propagates_the_exact_production_schema_error` —
+  мок с буквальным телом ответа, который вернул prod, подтверждает, что
+  `extract_combined_fields_with_gemini` не глотает такую ошибку (fallback
+  в `document_extraction.py` зависит именно от того, что исключение
+  доходит до вызывающего кода).
+
+Скрипт самого smoke-теста (`gemini_smoke_test.py`) — одноразовый, в
+scratchpad сессии, **не в репозитории**, без секретов.
 
 Жду вашего подтверждения перед commit.

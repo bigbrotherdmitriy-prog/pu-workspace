@@ -52,13 +52,23 @@ _OBLIGATION_ITEM_SCHEMA = {
     "properties": {
         "title": {"type": "string"},
         "evidence_quote": {"type": "string"},
-        "due_date": {"type": ["string", "null"]},
-        "due_date_evidence_quote": {"type": ["string", "null"]},
-        "assignee_hint": {"type": ["string", "null"]},
-        "assignee_evidence_quote": {"type": ["string", "null"]},
-        "amount": {"type": ["number", "null"]},
-        "amount_currency": {"type": ["string", "null"]},
-        "amount_evidence_quote": {"type": ["string", "null"]},
+        # "type" as a list (JSON-Schema-style ["string", "null"]) is rejected
+        # by the real Gemini responseSchema ("Proto field is not repeating,
+        # cannot start list" -- confirmed via a live smoke test against the
+        # production key, docs/audits/mvp2-llm-extraction-implementation.md
+        # §7). Despite ai.google.dev/gemini-api/docs/structured-output
+        # showing the list form, the actual API only accepts a single
+        # "type" plus a separate "nullable" boolean -- confirmed against a
+        # working example in https://github.com/google-gemini/
+        # generative-ai-js/issues/188 and the parallel Vertex AI Schema
+        # message, which is what responseSchema actually compiles to.
+        "due_date": {"type": "string", "nullable": True},
+        "due_date_evidence_quote": {"type": "string", "nullable": True},
+        "assignee_hint": {"type": "string", "nullable": True},
+        "assignee_evidence_quote": {"type": "string", "nullable": True},
+        "amount": {"type": "number", "nullable": True},
+        "amount_currency": {"type": "string", "nullable": True},
+        "amount_evidence_quote": {"type": "string", "nullable": True},
         "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
     },
     "required": [
