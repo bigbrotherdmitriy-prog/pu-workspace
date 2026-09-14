@@ -341,19 +341,36 @@ def test_gemini_mail_assist_uses_policy_and_never_sends(monkeypatch, mail_contex
     assert mailbox.commands == []
 
 
-def test_mail_move_updates_provider_and_local_folder(monkeypatch, mail_context):
+@pytest.mark.parametrize("destination,label", [("spam", "SPAM"), ("trash", "TRASH")])
+def test_mail_move_updates_provider_and_local_folder(monkeypatch, mail_context, destination, label):
     adapter = FakeMailbox()
     monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
     moved = mail.move_mail_message(
-        mail_context.incoming.id, mail.MailMoveRequest(destination="spam"), mail_context.db, mail_context.user,
+        mail_context.incoming.id, mail.MailMoveRequest(destination=destination), mail_context.db, mail_context.user,
     )
-    assert adapter.commands == [("gmail-message-1", "spam")]
-    assert "SPAM" in json.loads(mail_context.incoming.mail_labels_json)
+    assert adapter.commands == [("gmail-message-1", destination)]
+    assert label in json.loads(mail_context.incoming.mail_labels_json)
     assert moved["id"] == mail_context.incoming.id
     assert mail.mail_messages(mail_context.project.id, "inbox", None, 50, None,
                               mail_context.db, mail_context.user)["messages"] == []
-    assert mail.mail_messages(mail_context.project.id, "spam", None, 50, None,
+    assert mail.mail_messages(mail_context.project.id, destination, None, 50, None,
                               mail_context.db, mail_context.user)["messages"][0]["id"] == mail_context.incoming.id
+
+
+def test_move_permission_failure_preserves_local_message(monkeypatch, mail_context):
+    from app.integrations.contracts import MailNotAppliedError
+    adapter = FakeMailbox()
+    def deny(*args):
+        raise MailNotAppliedError("mail_modify_permission_required")
+    adapter.move_message = deny
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: adapter)
+    before = mail_context.incoming.mail_labels_json
+    with pytest.raises(HTTPException) as error:
+        mail.move_mail_message(mail_context.incoming.id, mail.MailMoveRequest(destination="trash"),
+                               mail_context.db, mail_context.user)
+    assert error.value.status_code == 403
+    assert error.value.detail == "mail_modify_permission_required"
+    assert mail_context.incoming.mail_labels_json == before
 
 
 def test_unknown_outcome_blocks_retry_and_does_not_leak_provider_error(monkeypatch, mail_context):

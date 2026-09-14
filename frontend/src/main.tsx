@@ -9,7 +9,10 @@ import "./designer.css";
 import "./interface-v4.css";
 import "./interface-v6-workspace.css";
 import "./interface-v9-control-room.css";
+import "./reading-comfort.css";
+import { applyDisplayPreference } from "./modules/settings/ComfortControls";
 
+applyDisplayPreference();
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
