@@ -1,6 +1,7 @@
 from datetime import date, datetime, time as dt_time
+from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, Time, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -28,6 +29,14 @@ class Obligation(Base):
     source_excerpt: Mapped[str] = mapped_column(Text)
     source_hash: Mapped[str] = mapped_column(String(64))
     confidence: Mapped[float] = mapped_column(Float)
+    # Mirrors Task's LLM extraction fields -- see migration d29a6c4f1e83.
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    amount_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    amount_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assignee_hint: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    assignee_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_method: Mapped[str] = mapped_column(String(20), default="regex", server_default="regex")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.governance_engine import create_governance_items
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
@@ -24,6 +24,8 @@ from app.models.task import Task
 from app.models.task import TaskHistory
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.governance import Risk
+from app.models.job import BackgroundJob
+from app.jobs.queue import enqueue, update_cooperative_progress
 from app.models.user import User
 from app.models.v54_pilot import DeadlineClaim
 from app.core.v54_refs import VersionPin
@@ -642,11 +644,85 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
         details=f"messages={len(rows)}; moved={moved}; contract={contract.id if contract else 'none'}",
     ))
     db.commit()
-    for row in rows:
-        _analyze_confirmed_message(db, row)
+
+    # §11 (async UX): moving/confirming is fast and stays synchronous above.
+    # Materialization (_analyze_confirmed_message -> LLM extraction per
+    # message) is the part that can now take seconds per message, so it is
+    # deferred to a job -- see app/jobs/handlers.py:"ai_secretary.materialize_bulk".
+    active_job = db.scalar(select(BackgroundJob).where(
+        BackgroundJob.kind == "ai_secretary.materialize_bulk",
+        BackgroundJob.status.in_(("queued", "retrying", "running")),
+        BackgroundJob.payload["project_id"].as_integer() == target_project_id,
+    ).order_by(BackgroundJob.id.desc()))
+    if active_job is not None:
+        return {"confirmed": len(rows), "moved": moved, "project_id": target_project_id,
+                "contract_id": contract.id if contract else None,
+                "materialization_job_id": active_job.id, "materialization_status": active_job.status,
+                "already_running": True}
+    job = enqueue(db, "ai_secretary.materialize_bulk",
+                  {"message_ids": [row.id for row in rows], "project_id": target_project_id})
+    job.payload = {**dict(job.payload or {}), "job_id": job.id}
     db.commit()
     return {"confirmed": len(rows), "moved": moved, "project_id": target_project_id,
-            "contract_id": contract.id if contract else None}
+            "contract_id": contract.id if contract else None,
+            "materialization_job_id": job.id, "materialization_status": job.status,
+            "already_running": False}
+
+
+def _bulk_job_control(db: Session, job_id: int | None, *, completed: int, total: int, message_id: int | None = None) -> bool:
+    """Publish bounded progress and read cooperative cancellation -- same shape as ocr_batch._job_control."""
+    if job_id is None:
+        return False
+    percent = round((completed / total) * 100) if total else 100
+    _, cancel_requested = update_cooperative_progress(
+        db, job_id, percent, {"completed": completed, "total": total, "percent": percent, "message_id": message_id},
+    )
+    return cancel_requested
+
+
+def _materialize_bulk_job(payload: dict) -> dict:
+    """Background handler for "ai_secretary.materialize_bulk" -- see app/jobs/handlers.py.
+
+    Runs the exact same _analyze_confirmed_message per message that
+    confirm_context_bulk used to run inline. Idempotent: a message whose
+    analysis_required is already False (e.g. a retried/duplicate job) is a
+    no-op via _analyze_confirmed_message's own early return.
+    """
+    message_ids = [int(value) for value in payload["message_ids"]]
+    job_id = payload.get("job_id")
+    with SessionLocal() as db:
+        rows = list(db.scalars(select(Message).where(Message.id.in_(message_ids)).order_by(Message.id)))
+        total = len(rows)
+        materialized = 0
+        cancelled = _bulk_job_control(db, job_id, completed=0, total=total)
+        for index, row in enumerate(rows):
+            if cancelled or _bulk_job_control(db, job_id, completed=index, total=total, message_id=row.id):
+                cancelled = True
+                break
+            _analyze_confirmed_message(db, row)
+            db.commit()
+            materialized += 1
+        _bulk_job_control(db, job_id, completed=materialized, total=total)
+        return {"materialized": materialized, "total": total, "cancelled": cancelled}
+
+
+@router.get("/inbox/materialize-jobs/{job_id}")
+def get_materialize_job(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    job = db.get(BackgroundJob, job_id)
+    if job is None or job.kind != "ai_secretary.materialize_bulk":
+        raise HTTPException(404, "Materialization job not found")
+    project_id = int((job.payload or {}).get("project_id", -1))
+    require_project_role(db, user, project_id, "viewer")
+    result = dict(job.result or {})
+    effective_status = "cancelled" if result.get("cancelled") else job.status
+    return {
+        "job_id": job.id,
+        "status": "succeeded" if effective_status == "completed" else effective_status,
+        "progress": job.progress, "result": job.result, "attempts": job.attempts,
+        "duration_ms": job.duration_ms,
+        "error": job.last_error if job.status in {"failed", "dead_letter"} else None,
+        "created_at": job.created_at, "updated_at": job.updated_at,
+    }
 
 
 def _automation_rule_payload(db: Session, row: AutomationRule) -> dict:

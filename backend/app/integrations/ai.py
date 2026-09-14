@@ -7,6 +7,7 @@ from app.gemini_analysis import (
     analyze_document_with_gemini,
     analyze_message_with_gemini,
     compose_message_with_gemini,
+    extract_combined_fields_with_gemini,
     gemini_configured,
 )
 from app.integrations.contracts import AdapterHealth
@@ -39,6 +40,9 @@ class GeminiAIAdapter:
 
     def compose_message(self, text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
         return compose_message_with_gemini(text, context_name, action, tone)
+
+    def extract_fields(self, text: str, filename: str, project_name: str, member_names: list[str]) -> dict[str, Any]:
+        return extract_combined_fields_with_gemini(text, filename, project_name, member_names)
 
 
 def configured_ai_provider() -> GeminiAIAdapter:

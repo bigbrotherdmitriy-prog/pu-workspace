@@ -112,7 +112,7 @@ def test_postgres_materialization_migration_on_explicit_empty_database(monkeypat
     try:
         command.upgrade(config, "head")
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "c13606d92787"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "d29a6c4f1e83"
             assert "v54_materializations" in inspect(connection).get_table_names()
     finally:
         engine.dispose()
