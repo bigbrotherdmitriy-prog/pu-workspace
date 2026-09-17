@@ -1,6 +1,7 @@
 from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -34,6 +35,17 @@ class Task(Base):
     source_excerpt_hash: Mapped[str] = mapped_column(String(64))
     confidence: Mapped[float] = mapped_column(Float)
     needs_review: Mapped[bool] = mapped_column(default=True)
+    # LLM extraction fields (2026-09 pipeline replacement). All nullable: the
+    # regex fallback (extraction_method="regex") never populates amount or
+    # assignee_hint -- it has never been able to extract them, LLM failure
+    # leaves them empty with needs_review rather than guessing.
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    amount_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    amount_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assignee_hint: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    assignee_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_method: Mapped[str] = mapped_column(String(20), default="regex", server_default="regex")
     external_action_status: Mapped[str] = mapped_column(String(30), default="proposed", index=True)
     google_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     google_task_list_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

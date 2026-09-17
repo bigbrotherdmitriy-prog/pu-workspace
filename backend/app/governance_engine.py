@@ -53,9 +53,14 @@ def _source_digest(kind: str, sentence: str) -> str:
 
 
 def create_governance_items(db: Session, project_id: int, files: list[StorageObject], source_type: str = "document_analysis") -> tuple[list[Risk], list[Decision]]:
+    # Deferred import: document_extraction calls back into this module's
+    # extract_governance_candidates for its regex fallback.
+    from app.document_extraction import extract_for_file, extract_for_files
+
     owner = _owner(db, project_id)
     if not owner:
         return [], []
+    extract_for_files(db, files, project_id)  # no-op for files another engine already cached
     risks: list[Risk] = []; decisions: list[Decision] = []
     # SessionLocal has autoflush disabled. Track hashes added in this batch so
     # identical clauses from multiple files cannot violate unique constraints.
@@ -64,18 +69,18 @@ def create_governance_items(db: Session, project_id: int, files: list[StorageObj
     for file in files:
         if file.is_folder or not file.content_text:
             continue
-        risk_candidates, decision_candidates = extract_governance_candidates(file.content_text)
-        for candidate in risk_candidates:
-            sentence = candidate["text"]
+        extraction = extract_for_file(db, file, project_id)
+        for candidate in extraction.risks:
+            sentence = candidate.evidence_quote
             digest = _source_digest("risk", sentence)
             if digest not in known_risk_hashes:
-                item = Risk(project_id=project_id, owner_user_id=owner.id, kind=candidate["kind"], title=sentence[:240], description=sentence, criticality=candidate["criticality"], source_type=source_type, source_id=file.id, source_name=file.name, source_excerpt=sentence, source_hash=digest, confidence=0.82)
+                item = Risk(project_id=project_id, owner_user_id=owner.id, kind=candidate.kind, title=candidate.title, description=sentence, criticality=candidate.criticality, source_type=source_type, source_id=file.id, source_name=file.name, source_excerpt=sentence, source_hash=digest, confidence=candidate.confidence)
                 db.add(item); risks.append(item); known_risk_hashes.add(digest)
-        for candidate in decision_candidates:
-            sentence = candidate["text"]
+        for candidate in extraction.decisions:
+            sentence = candidate.evidence_quote
             digest = _source_digest("decision", sentence)
             if digest not in known_decision_hashes:
-                item = Decision(project_id=project_id, initiator_user_id=owner.id, question=sentence, source_type=source_type, source_id=file.id, source_name=file.name, source_excerpt=sentence, source_hash=digest, confidence=0.80)
+                item = Decision(project_id=project_id, initiator_user_id=owner.id, question=candidate.question, source_type=source_type, source_id=file.id, source_name=file.name, source_excerpt=sentence, source_hash=digest, confidence=candidate.confidence)
                 db.add(item); decisions.append(item); known_decision_hashes.add(digest)
     db.commit()
     return risks, decisions
