@@ -1,0 +1,79 @@
+name: Root Compose startup
+
+on:
+  pull_request:
+    paths:
+      - docker-compose.yml
+      - backend/app/core/readiness.py
+      - backend/scripts/preflight.py
+      - .github/workflows/root-compose-startup.yml
+
+permissions:
+  contents: read
+
+jobs:
+  clean-postgres-startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: puw-root-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: docker-compose.yml
+      GMAIL_AUTO_SYNC_ENABLED: "false"
+      AI_SECRETARY_AUTOMATION_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Generate disposable test credentials
+        run: |
+          python scripts/prepare_test_environment.py
+          cp .env.ci .env
+          # The root Compose stack has no CI local-upload staging mount.
+          sed -i '/^PU_LOCAL_UPLOAD_CI_RUNTIME=/d; /^PU_LOCAL_UPLOAD_STAGING_ROOT=/d' .env
+          chmod 600 .env
+      - name: Validate root Compose
+        run: docker compose config --quiet
+      - name: Start migrated backend, workers and scheduler on empty PostgreSQL
+        run: docker compose up --build -d --wait --wait-timeout 180 db backend worker scheduler
+      - name: Verify migrated schema and full runtime readiness
+        run: |
+          docker compose exec -T backend python - <<'PY'
+          import time
+          from sqlalchemy import text
+          from app.core.readiness import readiness_report
+          from app.database import engine
+
+          with engine.connect() as connection:
+              assert connection.execute(text("SELECT to_regclass('public.organizer_sessions')")).scalar_one() == "organizer_sessions"
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              report = readiness_report()
+              if report["ready"]:
+                  break
+              time.sleep(2)
+          else:
+              raise AssertionError("Runtime readiness did not become healthy after clean startup")
+          assert report["checks"]["durable_workers"]["ok"]
+          assert report["checks"]["durable_scheduler"]["ok"]
+          print("ROOT_COMPOSE_CLEAN_STARTUP_PASS")
+          PY
+      - name: Collect sanitized startup logs
+        if: always()
+        run: |
+          docker compose logs --no-color backend worker scheduler 2>&1 | python scripts/redact_ci_logs.py > root-compose-startup.log
+          docker compose ps --all > root-compose-containers.txt
+      - name: Remove disposable stack and database volume
+        if: always()
+        run: docker compose down --volumes --remove-orphans --timeout 20
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: root-compose-startup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            root-compose-startup.log
+            root-compose-containers.txt
+          if-no-files-found: ignore
+          retention-days: 7
