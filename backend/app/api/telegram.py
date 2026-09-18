@@ -21,7 +21,8 @@ from app.organizer_engine.types import DriveFile
 from app.organizer_engine.content import extract_text
 from app.response_engine import create_response_drafts
 from app.task_engine import create_tasks_from_files
-from app.integrations.actions import configured_action_adapter, publish_actions
+from app.provider_actions.contracts import ProviderActionError
+from app.provider_actions.product import queue_confirmed_action, task_effect_states
 from app.summary_engine import brief_summary
 from app.governance_engine import create_governance_items
 from app.document_engine import index_documents
@@ -44,7 +45,10 @@ def _parse_ru_date(value: str) -> date:
 
 
 def _project_owner(db, project_id: int) -> User | None:
-    return db.scalar(select(User).join(ProjectMember, ProjectMember.user_id == User.id).where(ProjectMember.project_id == project_id).order_by((ProjectMember.role == "owner").desc(), User.id))
+    return db.scalar(select(User).join(ProjectMember, ProjectMember.user_id == User.id).where(
+        ProjectMember.project_id == project_id,
+        ProjectMember.role.in_(("owner", "manager")),
+    ).order_by((ProjectMember.role == "owner").desc(), User.id))
 
 
 def _project_choices_message(db) -> str:
@@ -319,6 +323,8 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
             if not owner:
                 notify_telegram_chat(chat_id, "У проекта нет владельца для записи изменения.")
                 return {"ok": True}
+            prior_effects = task_effect_states(db, task.id)
+            before = (task.status, task.due_date, task.result_note)
             if text.startswith("/take"):
                 task.status = "in_progress"
                 answer = f"▶️ Задача #{task.id} принята в работу."
@@ -341,10 +347,34 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str | None 
                 db.add(TaskDueDateHistory(task_id=task.id, old_due_date=task.due_date, new_due_date=new_due, reason=parts[3].strip(), changed_by_user_id=owner.id))
                 task.due_date = new_due
                 answer = f"📅 Срок задачи #{task.id} перенесён на {parts[2]}. Причина сохранена."
+            changed = before != (task.status, task.due_date, task.result_note)
+            if changed:
+                task.record_version = int(task.record_version or 1) + 1
+                if task.external_action_status in {"approved", "queued", "executing", "executed", "unknown"}:
+                    task.external_action_status = "proposed"
             db.commit(); db.refresh(task)
-            publish_actions(
-                configured_action_adapter(link.project_id, db), [task], force_update=True,
-            )
+            # The Telegram admin command is a fresh explicit human action. Only
+            # previously confirmed effects may be reissued; an unresolved older
+            # attempt must be reconciled before any replacement is created.
+            queued = 0
+            if changed:
+                for effect, kind in (("task", "google.tasks.upsert"),
+                                     ("calendar", "google.calendar.upsert")):
+                    if prior_effects[effect]["status"] != "applied":
+                        continue
+                    try:
+                        queue_confirmed_action(db, action_kind=kind, target_id=task.id, actor=owner)
+                        queued += 1
+                    except ProviderActionError:
+                        db.rollback()
+                if queued:
+                    task = db.get(Task, task.id)
+                    task.external_action_status = "queued"
+                    db.commit()
+                    answer += " Обновление Google поставлено в очередь."
+                elif any(value["status"] in {"unknown", "executing", "pending"}
+                         for value in prior_effects.values()):
+                    answer += " Внешнее действие требует сверки перед повтором."
             notify_telegram_chat(chat_id, answer)
             return {"ok": True}
         source_name = f"Telegram — {link.title}"

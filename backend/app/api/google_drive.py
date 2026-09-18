@@ -180,6 +180,8 @@ def google_callback(
         )
         db.add(token)
         db.flush()
+    else:
+        token.credential_generation = int(token.credential_generation or 1) + 1
 
     try:
         token.access_token = encrypt_token(credentials.token)

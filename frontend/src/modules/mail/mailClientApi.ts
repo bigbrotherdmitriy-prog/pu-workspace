@@ -170,6 +170,9 @@ export const mailClientApi = {
       body: JSON.stringify({ revision }),
     }).then(normalizeDraft);
   },
+  draft(draftId: number) {
+    return api<RawDraft>(`/mail/drafts/${draftId}`).then(normalizeDraft);
+  },
   sendDraft(draftId: number, revision: number, idempotencyKey: string) {
     return api<RawDraft>(`/mail/drafts/${draftId}/send`, {
       method: "POST",

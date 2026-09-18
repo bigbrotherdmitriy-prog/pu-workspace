@@ -12,7 +12,9 @@ from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.audit_log import AuditLog
 from app.integrations.external_resources import external_id_for
-from app.integrations.actions import configured_action_adapter, publish_actions
+from app.integrations.actions import configured_action_adapter
+from app.provider_actions.contracts import ProviderActionError
+from app.provider_actions.product import queue_confirmed_action, task_effect_states
 from app.api.management import _locked_versioned, append_management_history
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -73,6 +75,7 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
             "source_file_name": task.source_file_name, "source_excerpt": task.source_excerpt,
             "confidence": task.confidence, "needs_review": task.needs_review,
             "message_id": task.message_id, "external_action_status": task.external_action_status,
+            "provider_effects": task_effect_states(db, task.id),
             "google_task_id": external_task_id, "google_sync_error": task.google_sync_error,
             "google_calendar_event_id": external_calendar_id,
             "google_calendar_sync_error": task.google_calendar_sync_error,
@@ -113,7 +116,8 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
             raise HTTPException(422, "Причина переноса срока обязательна")
         db.add(TaskDueDateHistory(task_id=task.id, old_due_date=task.due_date, new_due_date=payload.due_date, reason=payload.due_change_reason.strip(), changed_by_user_id=user.id))
         task.due_date = payload.due_date
-        task.google_calendar_event_id = None
+        # Keep the provider ID: a later approved revision must update that
+        # same event rather than create a duplicate after a due-date edit.
         task.google_calendar_sync_error = None
         changed = True
     if payload.status:
@@ -134,6 +138,8 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
         task.completion_document_id = payload.completion_document_id
     if changed:
         task.record_version += 1
+        if task.external_action_status in {"approved", "queued", "executing", "executed", "unknown"}:
+            task.external_action_status = "proposed"
         details = []
         if old_due_date != task.due_date:
             details.append(f"Срок: {old_due_date or 'не задан'} → {task.due_date or 'не задан'}")
@@ -165,8 +171,6 @@ def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db)
             reason=payload.due_change_reason or task.result_note,
         )
     db.commit(); db.refresh(task)
-    if task.external_action_status == "executed":
-        publish_actions(configured_action_adapter(task.project_id, db), [task], force_update=True)
     return {"id": task.id, "record_version": task.record_version, "status": task.status, "due_date": task.due_date, "result_note": task.result_note,
             "completion_document_id": task.completion_document_id, "completed_at": task.completed_at,
             "assignee_user_id": task.assignee_user_id}
@@ -209,10 +213,20 @@ def due_history(task_id: int, db: Session = Depends(get_db), user: User = Depend
 def _sync_actions(project_id: int, db: Session, user: User):
     require_project_role(db, user, project_id, "manager")
     tasks = list(db.scalars(select(Task).where(Task.project_id == project_id, Task.external_action_status == "approved")).all())
-    adapter = configured_action_adapter(project_id, db)
-    result = publish_actions(adapter, tasks)
-    return {"provider": adapter.provider, "synced": result.task_synced, "failed": result.task_failed,
-            "calendar_synced": result.calendar_synced, "calendar_failed": result.calendar_failed}
+    queued = failed = 0
+    for task in tasks:
+        try:
+            queue_confirmed_action(db, action_kind="google.tasks.upsert", target_id=task.id, actor=user)
+            if task.due_date:
+                queue_confirmed_action(db, action_kind="google.calendar.upsert", target_id=task.id, actor=user)
+            task.external_action_status = "queued"
+            db.commit()
+            queued += 1
+        except ProviderActionError:
+            db.rollback()
+            failed += 1
+    return {"provider": "google_workspace", "queued": queued, "failed": failed,
+            "synced": 0, "calendar_synced": 0, "calendar_failed": failed}
 
 
 @router.post("/sync-actions")
@@ -232,6 +246,8 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
     require_project_role(db, user, task.project_id, "manager")
     if not payload.publish_task and not payload.publish_calendar:
         raise HTTPException(422, "Select at least one external action")
+    if payload.publish_calendar and not task.due_date:
+        raise HTTPException(422, "Calendar action requires a task due date")
     old_external_status = task.external_action_status
     if task.message_id is not None and task.needs_review:
         task.needs_review = False
@@ -245,15 +261,23 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
         evidence={"source_file_id": task.source_file_id, "source_excerpt_hash": task.source_excerpt_hash},
         reason="Пользователь подтвердил внешнее действие",
     )
-    db.commit()
     adapter = configured_action_adapter(task.project_id, db)
-    result = publish_actions(
-        adapter, [task],
-        publish_tasks=payload.publish_task,
-        publish_calendar=payload.publish_calendar and bool(task.due_date),
-    )
-    task_synced, task_failed = result.task_synced, result.task_failed
-    calendar_synced, calendar_failed = result.calendar_synced, result.calendar_failed
+    db.commit()
+    queued_actions = []
+    failures = []
+    for selected, kind in ((payload.publish_task, "google.tasks.upsert"),
+                           (payload.publish_calendar, "google.calendar.upsert")):
+        if not selected:
+            continue
+        try:
+            queued_actions.append(queue_confirmed_action(db, action_kind=kind, target_id=task.id, actor=user))
+        except ProviderActionError as exc:
+            db.rollback()
+            failures.append({"action_kind": kind, "code": exc.code})
+    task = db.get(Task, task.id)
+    task_synced = calendar_synced = 0
+    task_failed = int(any(item["action_kind"] == "google.tasks.upsert" for item in failures))
+    calendar_failed = int(any(item["action_kind"] == "google.calendar.upsert" for item in failures))
     external_task_id = external_id_for(
         db, entity_type="task", entity_id=task.id, provider=adapter.provider,
         resource_type="task", legacy_id=task.google_task_id,
@@ -262,11 +286,8 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
         db, entity_type="task", entity_id=task.id, provider=adapter.provider,
         resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
     )
-    success = (not payload.publish_task or task_synced == 1 or bool(external_task_id)) and (
-        not payload.publish_calendar or not task.due_date or calendar_synced == 1 or bool(external_calendar_id)
-    )
     previous_external_status = task.external_action_status
-    task.external_action_status = "executed" if success else "failed"
+    task.external_action_status = "queued" if queued_actions else "failed"
     task.record_version += 1
     append_management_history(
         db, project_id=task.project_id, entity_type="task", entity_id=task.id,
@@ -275,17 +296,18 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
         new_values={"external_action_status": task.external_action_status},
         evidence={"provider": adapter.provider, "external_task_id": external_task_id,
                   "external_calendar_id": external_calendar_id},
-        reason="Внешнее действие выполнено" if success else "Ошибка внешнего действия",
+        reason="Внешнее действие поставлено в очередь" if queued_actions else "Ошибка постановки в очередь",
     )
     db.add(AuditLog(action="external_task_action", entity_type="task", entity_id=task.id,
-                    details=f"provider={adapter.provider}; task={task_synced}; calendar={calendar_synced}; success={success}"))
+                    details=f"provider={adapter.provider}; queued={len(queued_actions)}; failures={len(failures)}"))
     db.commit(); db.refresh(task)
     return {"id": task.id, "record_version": task.record_version, "provider": adapter.provider,
             "external_action_status": task.external_action_status,
+            "provider_effects": task_effect_states(db, task.id),
             "google_task_id": external_task_id, "google_calendar_event_id": external_calendar_id,
             "external_resources": [
                 *([{"provider": adapter.provider, "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
                 *([{"provider": adapter.provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
             ],
             "task_failed": task_failed, "google_task_failed": task_failed,
-            "calendar_failed": calendar_failed}
+            "calendar_failed": calendar_failed, "actions": queued_actions, "queue_failures": failures}

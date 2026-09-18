@@ -19,6 +19,9 @@ from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
+from app.models.google_token import GoogleOAuthToken
+from app.models.job import BackgroundJob
+from app.models.v54_provider_action import ProviderAction
 from app.models.user import User
 
 
@@ -59,6 +62,10 @@ def mail_context(db_session):
     other_project = Project(name="Project B", organization_id=organization.id)
     db_session.add_all([project, other_project])
     db_session.flush()
+    db_session.add(GoogleOAuthToken(
+        project_id=project.id, access_token=None, refresh_token=None,
+        scopes="https://www.googleapis.com/auth/gmail.send",
+    ))
     db_session.add_all([
         ProjectMember(project_id=project.id, user_id=user.id, role="owner"),
         ProjectMember(project_id=other_project.id, user_id=other_user.id, role="owner"),
@@ -323,16 +330,14 @@ def test_send_requires_current_approval_is_idempotent_and_preserves_headers(monk
                             mail_context.db, mail_context.user)
     sent = mail.send_mail_draft(created["id"], command, mail_context.db, mail_context.user)
     replay = mail.send_mail_draft(created["id"], command, mail_context.db, mail_context.user)
-    assert sent["status"] == "sent"
-    assert sent["receipt"]["external_message_id"] == "provider-message-1"
+    assert sent["status"] == "queued"
+    assert sent["receipt"] is None
     assert replay["idempotent_replay"] is True
-    assert len(adapter.commands) == 1
-    assert adapter.commands[0].to == ("supplier@example.test",) or list(adapter.commands[0].to) == ["supplier@example.test"]
-    assert list(adapter.commands[0].cc) == ["manager@example.test"]
-    assert adapter.commands[0].thread_id == "gmail-thread-1"
+    assert adapter.commands == []
+    assert mail_context.db.query(BackgroundJob).filter(BackgroundJob.id == sent["job_id"]).one().kind == "provider.action.dispatch"
 
     audits = mail_context.db.query(AuditLog).filter(AuditLog.entity_id == created["id"]).all()
-    assert {row.action for row in audits} >= {"mail_draft_created", "mail_draft_approved", "mail_send_started", "mail_sent"}
+    assert {row.action for row in audits} >= {"mail_draft_created", "mail_draft_approved", "mail_send_queued"}
     assert all("supplier@example.test" not in (row.details or "") for row in audits)
 
 
@@ -349,11 +354,12 @@ def test_rich_html_is_sanitized_and_sent_as_multipart(monkeypatch, mail_context)
     assert "script" not in created["body"]
     assert "javascript" not in created["body"]
     mail.approve_mail_draft(created["id"], mail.MailDraftApproval(revision=1), mail_context.db, mail_context.user)
-    mail.send_mail_draft(created["id"], mail.MailDraftSend(
+    queued = mail.send_mail_draft(created["id"], mail.MailDraftSend(
         revision=1, idempotency_key="rich-send-command-1"), mail_context.db, mail_context.user)
-    command = adapter.commands[0]
-    assert command.body == "Готово ссылка"
-    assert "<strong>Готово</strong>" in command.html_body
+    assert queued["status"] == "queued" and adapter.commands == []
+    draft = mail_context.db.get(ResponseDraft, created["id"])
+    assert "<strong>Готово</strong>" in draft.body
+    assert "Готово" in draft.body
 
 
 def test_mail_settings_are_user_scoped_and_signature_is_sanitized(mail_context):
@@ -447,14 +453,17 @@ def test_unknown_outcome_blocks_retry_and_does_not_leak_provider_error(monkeypat
                             mail_context.db, mail_context.user)
     command = mail.MailDraftSend(revision=1, idempotency_key="send-command-unknown")
     result = mail.send_mail_draft(created["id"], command, mail_context.db, mail_context.user)
-    assert result["status"] == "unknown"
-    assert result["error_code"] == "provider_outcome_unknown"
+    assert result["status"] == "queued"
+    draft = mail_context.db.get(ResponseDraft, created["id"])
+    draft.status = "unknown"
+    draft.last_send_error_code = "provider_outcome_unknown"
+    mail_context.db.commit()
     assert "secret" not in json.dumps(result, default=str)
     with pytest.raises(HTTPException) as blocked:
         mail.retry_mail_draft(created["id"], mail.MailDraftSend(
             revision=1, idempotency_key="send-command-retry-1"), mail_context.db, mail_context.user)
     assert blocked.value.detail == "mail_send_outcome_unknown_reconciliation_required"
-    assert len(adapter.commands) == 1
+    assert adapter.commands == []
 
 
 def test_proven_not_applied_can_be_retried_with_new_command(monkeypatch, mail_context):
@@ -463,14 +472,19 @@ def test_proven_not_applied_can_be_retried_with_new_command(monkeypatch, mail_co
     created = _new_draft(mail_context)
     mail.approve_mail_draft(created["id"], mail.MailDraftApproval(revision=1),
                             mail_context.db, mail_context.user)
-    failed = mail.send_mail_draft(created["id"], mail.MailDraftSend(
+    queued = mail.send_mail_draft(created["id"], mail.MailDraftSend(
         revision=1, idempotency_key="send-command-failed"), mail_context.db, mail_context.user)
-    assert failed["status"] == "failed"
-    adapter.outcome = "sent"
-    sent = mail.retry_mail_draft(created["id"], mail.MailDraftSend(
+    assert queued["status"] == "queued"
+    draft = mail_context.db.get(ResponseDraft, created["id"])
+    draft.status = "failed"
+    action = mail_context.db.get(ProviderAction, (queued["action_id"], queued["revision"]))
+    action.state = "NOT_APPLIED"
+    mail_context.db.commit()
+    retried = mail.retry_mail_draft(created["id"], mail.MailDraftSend(
         revision=1, idempotency_key="send-command-retry-2"), mail_context.db, mail_context.user)
-    assert sent["status"] == "sent"
-    assert len(adapter.commands) == 2
+    assert retried["status"] == "queued"
+    assert retried["revision"] == 2
+    assert adapter.commands == []
 
 
 def test_attachment_metadata_is_visible_but_send_fails_closed(mail_context):

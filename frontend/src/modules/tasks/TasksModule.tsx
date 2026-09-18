@@ -5,9 +5,20 @@ export type TaskRow = {
   assignee_user_id: number; assignee_name: string; source_file_name: string;
   source_excerpt: string; confidence: number; needs_review: boolean; message_id?: number;
   external_action_status: string; google_task_id?: string; google_calendar_event_id?: string;
+  provider_effects?: {
+    task: { status: string; external_id?: string | null };
+    calendar: { status: string; external_id?: string | null };
+  };
   result_note?: string; completion_document_id?: number; completion_document_name?: string;
   description?: string | null;
 };
+
+function effectLabel(label: string, status: string | undefined): string {
+  return `${label}: ${({
+    pending: "ожидает", executing: "выполняется", unknown: "результат неизвестен",
+    applied: "✓", failed: "ошибка", not_requested: "не запрошено",
+  } as Record<string, string>)[status || "not_requested"] || "неизвестно"}`;
+}
 
 export type TaskHistoryRow = {
   action: string; old_status?: string; new_status?: string; result_note?: string;
@@ -56,11 +67,11 @@ export function TasksModule(props: Props) {
         {task.description && <p className="task-description">{task.description}</p>}
         <small className="task-source-excerpt">{task.source_excerpt}</small>
       </div>
-      <div className="task-meta"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{task.google_task_id ? "Google Tasks ✓" : task.external_action_status === "proposed" ? "Предложение" : "Локальная"}{task.google_calendar_event_id ? " · Calendar ✓" : ""}</span></div>
+      <div className="task-meta"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{effectLabel("Google Tasks", task.provider_effects?.task.status)} · {effectLabel("Calendar", task.provider_effects?.calendar.status)}</span></div>
       <div className="task-actions">
         <label className="task-assignee"><span>Исполнитель</span><select aria-label={`Исполнитель задачи ${task.title}`} value={task.assignee_user_id} onChange={(event) => props.onAssign(task, Number(event.target.value))}>{props.members.map((member) => <option value={member.user_id} key={member.user_id}>{member.name} · {member.role}</option>)}</select></label>
         <div className="task-action-buttons">
-        {task.external_action_status !== "executed" && <button onClick={() => props.onApproveExternal(task)}>Поставить задачу</button>}
+        {["proposed", "failed"].includes(task.external_action_status) && <button onClick={() => props.onApproveExternal(task)}>Поставить задачу</button>}
         {task.status === "assigned" && <button onClick={() => props.onUpdate(task, "in_progress")}>В работу</button>}
         {task.status !== "completed" && <button className="complete" onClick={() => props.onStartCompletion(task)}>Завершить</button>}
         <button className="secondary" onClick={() => props.onLoadHistory(task)}>История</button>

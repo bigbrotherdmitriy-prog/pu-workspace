@@ -25,6 +25,8 @@ from app.models.mail_settings import MailUserSettings
 from app.models.organization_contract import Contract
 from app.models.response_draft import ResponseDraft
 from app.models.user import User
+from app.provider_actions.contracts import ProviderActionError
+from app.provider_actions.product import action_display_state, queue_confirmed_action
 
 
 router = APIRouter(prefix="/mail", tags=["mail"])
@@ -181,12 +183,17 @@ def _message_payload(db: Session, row: Message) -> dict:
         "attachments": _json(row.attachments_json, []),
         "status": row.status,
         "context_confirmed": row.context_confirmed,
-        "drafts": [_draft_payload(draft) for draft in drafts],
+        "drafts": [_draft_payload(draft, db=db) for draft in drafts],
         "created_at": row.created_at,
     }
 
 
-def _draft_payload(row: ResponseDraft, *, replay: bool = False) -> dict:
+def _draft_payload(row: ResponseDraft, *, replay: bool = False, db: Session | None = None) -> dict:
+    effect = action_display_state(db, f"gmail-draft-{row.id}") if db is not None else {"status": "not_requested"}
+    delivery_status = row.status
+    if row.status in {"queued", "sending"}:
+        delivery_status = {"pending": "queued", "executing": "sending", "unknown": "unknown",
+                           "applied": "sent", "failed": "failed"}.get(effect["status"], row.status)
     return {
         "id": row.id,
         "project_id": row.project_id,
@@ -203,7 +210,9 @@ def _draft_payload(row: ResponseDraft, *, replay: bool = False) -> dict:
         "attachments": _json(row.attachments_json, []),
         "revision": row.revision,
         "approved_revision": row.approved_revision,
-        "status": row.status,
+        "status": delivery_status,
+        "provider_verified": effect["status"] == "applied",
+        "provider_action": effect if effect["status"] != "not_requested" else None,
         "send_attempts": row.send_attempts,
         "error_code": row.last_send_error_code,
         "receipt": ({"external_message_id": row.sent_external_id, "sent_at": row.sent_at}
@@ -574,7 +583,7 @@ def mail_drafts(project_id: int, status: str | None = None,
             raise HTTPException(422, "Unsupported draft status")
         statement = statement.where(ResponseDraft.status == status)
     rows = list(db.scalars(statement.order_by(ResponseDraft.updated_at.desc(), ResponseDraft.id.desc()).limit(200)))
-    return {"drafts": [_draft_payload(row) for row in rows], "count": len(rows)}
+    return {"drafts": [_draft_payload(row, db=db) for row in rows], "count": len(rows)}
 
 
 @router.get("/drafts/{draft_id}")
@@ -583,7 +592,7 @@ def get_mail_draft(draft_id: int, db: Session = Depends(get_db), user: User = De
     if draft is None:
         raise HTTPException(404, "Mail draft not found")
     require_project_role(db, user, draft.project_id, "viewer")
-    return _draft_payload(draft)
+    return _draft_payload(draft, db=db)
 
 
 @router.post("/drafts")
@@ -633,7 +642,7 @@ def create_mail_draft(payload: MailDraftCreate, db: Session = Depends(get_db), u
                     details=f"project={draft.project_id}; mode={draft.operation_kind}; revision=1; attachment_refs={len(attachment_metadata)}"))
     db.commit()
     db.refresh(draft)
-    return _draft_payload(draft)
+    return _draft_payload(draft, db=db)
 
 
 @router.patch("/drafts/{draft_id}")
@@ -667,7 +676,7 @@ def update_mail_draft(draft_id: int, payload: MailDraftPatch, db: Session = Depe
         draft.attachments_json = json.dumps(_attachment_metadata(db, draft.project_id, payload.attachments), ensure_ascii=False)
         changed = True
     if not changed:
-        return _draft_payload(draft)
+        return _draft_payload(draft, db=db)
     draft.revision += 1
     draft.approved_revision = None
     draft.approved_by_user_id = None
@@ -679,7 +688,7 @@ def update_mail_draft(draft_id: int, payload: MailDraftPatch, db: Session = Depe
                     details=f"project={draft.project_id}; revision={draft.revision}; approval_invalidated=true"))
     db.commit()
     db.refresh(draft)
-    return _draft_payload(draft)
+    return _draft_payload(draft, db=db)
 
 
 @router.post("/drafts/{draft_id}/approve")
@@ -700,7 +709,7 @@ def approve_mail_draft(draft_id: int, payload: MailDraftApproval, db: Session = 
                     details=f"project={draft.project_id}; revision={draft.revision}; actor={user.id}"))
     db.commit()
     db.refresh(draft)
-    return _draft_payload(draft)
+    return _draft_payload(draft, db=db)
 
 
 def _idempotency_hash(draft_id: int, revision: int, key: str) -> str:
@@ -714,63 +723,39 @@ def send_mail_draft(draft_id: int, payload: MailDraftSend, db: Session = Depends
         raise HTTPException(404, "Mail draft not found")
     require_project_role(db, user, draft.project_id, "manager")
     key_hash = _idempotency_hash(draft.id, payload.revision, payload.idempotency_key)
+    if draft.status == "unknown":
+        raise HTTPException(409, "mail_send_outcome_unknown_reconciliation_required")
     if draft.send_idempotency_key == key_hash:
-        return _draft_payload(draft, replay=True)
+        return _draft_payload(draft, replay=True, db=db)
     if draft.send_idempotency_key is not None:
         raise HTTPException(409, "mail_send_command_conflict")
-    if draft.revision != payload.revision or draft.approved_revision != draft.revision or draft.status != "approved":
+    if draft.revision != payload.revision or draft.approved_revision != draft.revision or draft.status not in {"approved", "queued", "sending"}:
         raise HTTPException(409, "mail_current_revision_not_approved")
     if _json(draft.attachments_json, []):
         raise HTTPException(409, "mail_attachment_send_requires_verified_mailbox_origin")
     recipients = _address_list(draft.recipient_to)
     if not recipients:
         raise HTTPException(422, "Mail draft has no recipient")
-    adapter = mailbox_adapter_for_project(draft.project_id, db)
     source = db.get(Message, draft.message_id) if draft.message_id else None
     if source is not None and source.project_id != draft.project_id:
         raise HTTPException(409, "mail_reply_origin_mismatch")
-    rich_body = is_rich_mail_body(draft.body)
-    command = MailSendCommand(
-        to=recipients,
-        cc=_address_list(draft.recipient_cc),
-        bcc=_address_list(draft.recipient_bcc),
-        subject=draft.subject,
-        body=mail_html_to_text(draft.body) if rich_body else draft.body,
-        html_body=draft.body if rich_body else None,
-        thread_id=source.source_thread_id if source else None,
-    )
+    try:
+        queued = queue_confirmed_action(db, action_kind="gmail.message.send", target_id=draft.id, actor=user)
+    except ProviderActionError as exc:
+        db.rollback()
+        raise HTTPException(409, f"Gmail action is unavailable ({exc.code})") from exc
+    draft = db.get(ResponseDraft, draft.id)
     draft.send_idempotency_key = key_hash
-    draft.status = "sending"
-    draft.send_attempts += 1
+    draft.status = "queued"
+    if not queued["already_queued"]:
+        draft.send_attempts += 1
     draft.last_send_at = datetime.now(timezone.utc)
     draft.last_send_error_code = None
-    db.add(AuditLog(action="mail_send_started", entity_type="response_draft", entity_id=draft.id,
-                    details=f"project={draft.project_id}; revision={draft.revision}; attempt={draft.send_attempts}; provider={adapter.provider}"))
-    db.commit()
-    try:
-        receipt = adapter.send_message(command)
-    except MailNotAppliedError:
-        draft.status = "failed"
-        draft.last_send_error_code = "provider_rejected_before_effect"
-        db.add(AuditLog(action="mail_send_failed", entity_type="response_draft", entity_id=draft.id,
-                        details=f"project={draft.project_id}; revision={draft.revision}; outcome=not_applied"))
-        db.commit()
-        return _draft_payload(draft)
-    except Exception:
-        draft.status = "unknown"
-        draft.last_send_error_code = "provider_outcome_unknown"
-        db.add(AuditLog(action="mail_send_outcome_unknown", entity_type="response_draft", entity_id=draft.id,
-                        details=f"project={draft.project_id}; revision={draft.revision}; retry_blocked=true"))
-        db.commit()
-        return _draft_payload(draft)
-    draft.sent_external_id = receipt.external_message_id
-    draft.sent_at = datetime.now(timezone.utc)
-    draft.status = "sent"
-    db.add(AuditLog(action="mail_sent", entity_type="response_draft", entity_id=draft.id,
-                    details=f"project={draft.project_id}; revision={draft.revision}; provider={adapter.provider}; receipt=true"))
+    db.add(AuditLog(action="mail_send_queued", entity_type="response_draft", entity_id=draft.id,
+                    details=f"project={draft.project_id}; revision={draft.revision}; job={queued['job_id']}"))
     db.commit()
     db.refresh(draft)
-    return _draft_payload(draft)
+    return {**_draft_payload(draft, db=db), **queued}
 
 
 @router.post("/drafts/{draft_id}/retry")

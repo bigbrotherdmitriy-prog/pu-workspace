@@ -15,6 +15,8 @@ from app.database import Base
 from app.daily_briefing import build_daily_briefing
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
+from app.models.google_token import GoogleOAuthToken
+from app.models.job import BackgroundJob
 from app.models.management import Obligation
 from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
@@ -37,6 +39,10 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         db.add(project)
         db.flush()
         db.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner"))
+        db.add(GoogleOAuthToken(
+            project_id=project.id, access_token=None, refresh_token=None,
+            scopes="https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.events",
+        ))
         contract = Contract(
             project_id=project.id,
             number="ГК-08-194/25",
@@ -82,24 +88,6 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         update_obligation(obligation.id, ObligationUpdate(status="confirmed"), db, user)
         update_draft(draft.id, DraftUpdate(status="approved"), db, user)
 
-        adapter = SimpleNamespace(provider="pilot_action_adapter")
-        monkeypatch.setattr(tasks_api, "configured_action_adapter", lambda _project_id, _db: adapter)
-        monkeypatch.setattr(
-            tasks_api,
-            "publish_actions",
-            lambda *_args, **_kwargs: SimpleNamespace(
-                task_synced=1,
-                task_failed=0,
-                calendar_synced=1,
-                calendar_failed=0,
-            ),
-        )
-        monkeypatch.setattr(
-            tasks_api,
-            "external_id_for",
-            lambda _db, **kwargs: f"pilot-{kwargs['resource_type']}-1",
-        )
-
         published = approve_external(
             task.id,
             ExternalActionApproval(publish_task=True, publish_calendar=True),
@@ -110,8 +98,10 @@ def test_pilot_communication_to_action_requires_human_approval(monkeypatch):
         dashboard = project_dashboard(project.id, db, user)
         briefing = build_daily_briefing(db, project.id, today=date.today())
 
-        assert published["provider"] == "pilot_action_adapter"
-        assert published["external_action_status"] == "executed"
+        assert published["provider"] == "google_workspace"
+        assert published["external_action_status"] == "queued"
+        assert len(published["actions"]) == 2
+        assert db.query(BackgroundJob).filter(BackgroundJob.kind == "provider.action.dispatch").count() == 2
         assert db.get(Task, task.id).needs_review is False
         assert notifications["unread"] == 1
         assert notifications["notifications"][0]["kind"] == "overdue"

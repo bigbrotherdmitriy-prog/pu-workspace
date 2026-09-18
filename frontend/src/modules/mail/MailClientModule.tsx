@@ -112,7 +112,8 @@ export function readableMessageBody(content: string): string {
     .trim();
 }
 
-function statusLabel(status: MailDraft["status"]): string {
+function statusLabel(status: MailDraft["status"], verified = true): string {
+  if (status === "sent" && !verified) return "Отправлено ранее · провайдер не перепроверен";
   return {
     draft: "Черновик — не отправлен",
     approved: "Подтверждён — не отправлен",
@@ -125,8 +126,8 @@ function statusLabel(status: MailDraft["status"]): string {
   }[status];
 }
 
-function statusIcon(status: MailDraft["status"]) {
-  if (status === "sent") return <CheckCircle2 />;
+function statusIcon(status: MailDraft["status"], verified = false) {
+  if (status === "sent" && verified) return <CheckCircle2 />;
   if (status === "rejected" || status === "failed" || status === "unknown") return <XCircle />;
   return <Clock3 />;
 }
@@ -223,6 +224,23 @@ export function MailClientModule({
     // Loading is deliberately keyed only to the authoritative project selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  useEffect(() => {
+    const draft = composer?.draft;
+    if (!draft || !["queued", "sending"].includes(draft.status)) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void client.draft(draft.id).then((latest) => {
+        if (!active) return;
+        setComposer((current) => current?.draft?.id === draft.id
+          ? { ...current, draft: latest } : current);
+        if (latest.status !== draft.status && ["sent", "failed", "unknown"].includes(latest.status)) {
+          onNotice(statusLabel(latest.status, latest.provider_verified));
+        }
+      }).catch(() => { /* A transient read error never retries a provider mutation. */ });
+    }, 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [client, composer?.draft?.id, composer?.draft?.status, onNotice]);
 
   useEffect(() => {
     void client.settings().then(setMailSettings).catch(() => {
@@ -641,7 +659,7 @@ export function MailClientModule({
         </div>}
       </section>
       {composer.replyTo?.attachments.length ? <p className="mail-attachment-warning"><Paperclip /> Вложения исходного письма показаны в переписке, но не добавляются автоматически.</p> : null}
-      {composer.draft && <div className={`mail-delivery-state ${composer.draft.status}`} aria-live="polite">{statusIcon(composer.draft.status)}<div><strong>{statusLabel(composer.draft.status)}</strong>{composer.draft.safe_error && <p>{composer.draft.safe_error}</p>}</div></div>}
+      {composer.draft && <div className={`mail-delivery-state ${composer.draft.status}`} aria-live="polite">{statusIcon(composer.draft.status, composer.draft.provider_verified)}<div><strong>{statusLabel(composer.draft.status, composer.draft.provider_verified)}</strong>{composer.draft.safe_error && <p>{composer.draft.safe_error}</p>}</div></div>}
       {composer.dirty && composer.draft?.approved_revision && <p className="mail-version-warning"><AlertTriangle /> Текст изменён. Сохраните и подтвердите новую версию перед отправкой.</p>}
       {!capabilities.versioned_approval && <p className="mail-version-warning"><AlertTriangle /> Адаптер не подтвердил поддержку версионированного согласования. Отправка заблокирована.</p>}
       <footer>
