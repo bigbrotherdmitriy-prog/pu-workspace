@@ -42,6 +42,7 @@ from app.provider_actions.email_compensation import (
     describe_email_compensation,
     unavailable_email_compensation,
 )
+from app.provider_actions.product import task_effect_states
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
 
@@ -206,6 +207,7 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
             "title": task.title, "due_date": task.due_date, "confidence": task.confidence,
             "external_action_status": task.external_action_status, "google_task_id": external_task_id,
             "google_calendar_event_id": external_calendar_id,
+            "provider_effects": task_effect_states(db, task.id),
             "external_resources": [
                 *([{"provider": action_provider, "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
                 *([{"provider": action_provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
