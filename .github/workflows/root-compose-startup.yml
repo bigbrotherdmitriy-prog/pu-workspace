@@ -31,6 +31,8 @@ jobs:
         run: |
           python scripts/prepare_test_environment.py
           cp .env.ci .env
+          # The root Compose stack has no CI local-upload staging mount.
+          sed -i '/^PU_LOCAL_UPLOAD_CI_RUNTIME=/d; /^PU_LOCAL_UPLOAD_STAGING_ROOT=/d' .env
           chmod 600 .env
       - name: Validate root Compose
         run: docker compose config --quiet
