@@ -2,7 +2,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
+import app.models  # noqa: F401 - register all mapped tables
+from app.core.auth import require_user
+from app.database import Base, get_db
 
 from app.api import mail
 from app.integrations.contracts import AdapterHealth, MailFolder, MailNotAppliedError, MailSendReceipt
@@ -11,6 +18,7 @@ from app.models.audit_log import AuditLog
 from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.response_draft import ResponseDraft
 from app.models.user import User
 
 
@@ -119,6 +127,64 @@ def _new_draft(context, **overrides):
     }
     values.update(overrides)
     return mail.create_mail_draft(mail.MailDraftCreate(**values), context.db, context.user)
+
+
+@pytest.mark.parametrize("role,expected_status", [("editor", 403), ("manager", 200)])
+def test_mail_draft_approval_requires_manager_via_http(tmp_path, role, expected_status):
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'mail-role.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        organization = Organization(name="Synthetic org")
+        editor = User(name="Editor", email="editor@example.test")
+        db.add_all([organization, editor])
+        db.flush()
+        project = Project(name="Synthetic project", organization_id=organization.id)
+        db.add(project)
+        db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=editor.id, role=role))
+        draft = ResponseDraft(
+            project_id=project.id,
+            reviewer_user_id=editor.id,
+            subject="Synthetic subject",
+            body="Synthetic body",
+            recipient_to="recipient@example.test",
+            status="draft",
+            source_file_id="synthetic-message:1",
+            source_file_name="Synthetic message",
+            source_excerpt="Synthetic excerpt",
+            source_excerpt_hash="a" * 64,
+            confidence=1.0,
+        )
+        db.add(draft)
+        db.commit()
+        draft_id = draft.id
+        editor_id = editor.id
+
+    app = FastAPI()
+    app.include_router(mail.router)
+
+    def test_db():
+        with Session(engine) as db:
+            yield db
+
+    def test_editor():
+        with Session(engine) as db:
+            return db.get(User, editor_id)
+
+    app.dependency_overrides[get_db] = test_db
+    app.dependency_overrides[require_user] = test_editor
+    try:
+        with TestClient(app) as client:
+            response = client.post(f"/mail/drafts/{draft_id}/approve", json={"revision": 1})
+        assert response.status_code == expected_status
+        with Session(engine) as db:
+            saved = db.get(ResponseDraft, draft_id)
+            assert saved.status == ("draft" if role == "editor" else "approved")
+            assert saved.approved_revision == (None if role == "editor" else 1)
+            audit_id = db.scalar(select(AuditLog.id).where(AuditLog.action == "mail_draft_approved", AuditLog.entity_id == draft_id))
+            assert (audit_id is not None) == (role == "manager")
+    finally:
+        engine.dispose()
 
 
 def test_routes_expose_provider_neutral_mail_client_contract():
