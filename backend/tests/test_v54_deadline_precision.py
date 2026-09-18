@@ -22,7 +22,7 @@ def test_a09_is_single_head_and_adds_nullable_time(monkeypatch):
     output = StringIO()
     config = migration_config(output)
     assert ScriptDirectory.from_config(config).get_heads() == [CURRENT_SCHEMA_REVISION]
-    assert CURRENT_SCHEMA_REVISION == "d29a6c4f1e83"
+    assert CURRENT_SCHEMA_REVISION == "e73c2b4a901d"
     monkeypatch.setenv(
         "DATABASE_URL",
         "postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline",

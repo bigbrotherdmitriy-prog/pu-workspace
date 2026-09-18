@@ -27,7 +27,7 @@ from v54_pilot_fixture import NOW, uid
 
 
 BACKEND = Path(__file__).resolve().parents[1]
-HEAD = "d29a6c4f1e83"
+HEAD = "e73c2b4a901d"
 OWNER_PERMISSIONS = ["action.freeze", "autonomy.policy.manage"]
 
 

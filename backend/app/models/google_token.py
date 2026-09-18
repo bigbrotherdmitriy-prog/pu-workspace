@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -11,6 +11,9 @@ class GoogleOAuthToken(Base):
         primary_key=True,
         autoincrement=True,
     )
+
+    # Advances on explicit OAuth reconnect, not on routine access-token refresh.
+    credential_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"),

@@ -16,6 +16,28 @@ function props(overrides: Partial<ComponentProps<typeof TasksModule>> = {}): Com
 }
 
 describe("TasksModule layout and existing actions", () => {
+  it("does not show a checkmark from stored IDs without a confirmed provider receipt", () => {
+    render(<TasksModule {...props({ tasks: [{
+      ...task, google_task_id: "stale-task", google_calendar_event_id: "stale-event",
+      external_action_status: "unknown",
+      provider_effects: { task: { status: "unknown" }, calendar: { status: "pending" } },
+    }] })} />);
+    expect(screen.getByText(/Google Tasks: результат неизвестен/)).toBeInTheDocument();
+    expect(screen.getByText(/Calendar: ожидает/)).toBeInTheDocument();
+    expect(screen.queryByText(/Tasks: ✓/)).toBeNull();
+    expect(screen.queryByText(/Calendar: ✓/)).toBeNull();
+  });
+
+  it("shows independent Tasks and Calendar receipts under one task", () => {
+    render(<TasksModule {...props({ tasks: [{
+      ...task, external_action_status: "failed",
+      provider_effects: { task: { status: "applied", external_id: "confirmed-task" },
+                          calendar: { status: "failed" } },
+    }] })} />);
+    expect(screen.getByText(/Google Tasks: ✓/)).toBeInTheDocument();
+    expect(screen.getByText(/Calendar: ошибка/)).toBeInTheDocument();
+  });
+
   it("preserves full Russian content and groups controls separately from the body", () => {
     const { container } = render(<TasksModule {...props()} />);
     expect(screen.getByText(task.title)).toBeInTheDocument();

@@ -6,6 +6,12 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "v54.synthetic_provider_action":
         from app.provider_actions.runtime import run_installed
         return run_installed(payload)
+    if kind == "provider.action.dispatch":
+        from app.provider_actions.product import run_product_job
+        return run_product_job(payload)
+    if kind == "provider.action.reconcile":
+        from app.provider_actions.product import run_product_reconcile_job
+        return run_product_reconcile_job(payload)
     if kind == "v54.synthetic_task":
         from app.pilot_dispatch import run_installed
         return run_installed(payload)

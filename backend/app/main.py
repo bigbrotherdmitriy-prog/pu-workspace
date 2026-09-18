@@ -26,6 +26,7 @@ from app.api.analytics import router as analytics_router
 from app.api.integrations import router as integrations_router
 from app.api.project_contacts import router as project_contacts_router
 from app.api.mail import router as mail_router
+from app.api.provider_actions import router as provider_actions_router
 from app.api.jobs import router as jobs_router
 from app.api.evidence import router as evidence_router
 from app.api.autonomy_policy import router as autonomy_policy_router
@@ -150,6 +151,7 @@ app.include_router(analytics_router)
 app.include_router(integrations_router)
 app.include_router(project_contacts_router)
 app.include_router(mail_router)
+app.include_router(provider_actions_router)
 app.include_router(jobs_router)
 app.include_router(evidence_router)
 app.include_router(autonomy_policy_router)

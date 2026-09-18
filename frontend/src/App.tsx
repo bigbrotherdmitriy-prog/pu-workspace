@@ -23,6 +23,7 @@ import { NotificationsModule, type NotificationItem } from "./modules/notificati
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
+import { inboxTaskDelivery, type ProviderEffects } from "./modules/inbox/providerTaskState";
 import { MailClientModule } from "./modules/mail/MailClientModule";
 import { mailSyncRequest } from "./modules/mail/mailSyncRequest";
 import type { MailFolderKind } from "./modules/mail/types";
@@ -261,6 +262,7 @@ type InboxTask = {
   external_action_status: string;
   google_task_id?: string;
   google_calendar_event_id?: string;
+  provider_effects?: ProviderEffects;
 };
 type InboxDraft = {
   id: number;
@@ -1494,10 +1496,25 @@ export function App() {
         }),
       });
       setNotice(
-        result.external_action_status === "executed"
-          ? "Задача создана во внешних сервисах"
-          : "Не удалось создать внешнее действие; подробности сохранены",
+        result.external_action_status === "queued"
+          ? "Подтверждённые действия поставлены в очередь; результат появится после проверки у Google"
+          : "Не удалось поставить внешнее действие в очередь; подробности сохранены",
       );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function reconcileExternal(task: InboxTask) {
+    const effects = inboxTaskDelivery(task).reconcile;
+    if (!effects.length) return;
+    try {
+      for (const effect of effects) {
+        await api(`/provider-actions/${encodeURIComponent(effect.action_id!)}/revisions/${effect.revision}/reconcile`, {
+          method: "POST",
+        });
+      }
+      setNotice("Проверка состояния в Google поставлена в очередь; результат появится после сверки");
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -1556,7 +1573,9 @@ export function App() {
       setNotice(
         result.already_sent
           ? "Это письмо уже было отправлено ранее"
-          : "Ответ отправлен через Gmail и записан в аудит",
+          : result.status === "queued"
+            ? "Отправка поставлена в очередь; результат появится после проверки у Google"
+            : "Результат отправки уточняется",
       );
       await load();
     } catch (e) {
@@ -3444,14 +3463,8 @@ export function App() {
                                 {Math.round(task.confidence * 100)}%
                               </p>
                             </div>
-                            <span>
-                              {task.external_action_status === "executed"
-                                ? "Создано в Google"
-                                : task.external_action_status === "failed"
-                                  ? "Ошибка создания — можно повторить"
-                                  : "Только предложение"}
-                            </span>
-                            {task.external_action_status !== "executed" && (
+                            <span aria-live="polite">{inboxTaskDelivery(task).label}</span>
+                            {inboxTaskDelivery(task).canApprove && (
                               <button
                                 disabled={!message.context_confirmed}
                                 onClick={() => approveExternal(task)}
@@ -3460,6 +3473,9 @@ export function App() {
                                   ? "Повторить"
                                   : "Подтвердить и создать"}
                               </button>
+                            )}
+                            {inboxTaskDelivery(task).reconcile.length > 0 && (
+                              <button onClick={() => void reconcileExternal(task)}>Сверить с Google</button>
                             )}
                           </div>
                         ))}

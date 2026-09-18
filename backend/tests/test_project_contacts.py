@@ -32,7 +32,8 @@ def test_contact_draft_requires_existing_review_flow():
     gmail = (ROOT / "app/api/gmail.py").read_text(encoding="utf-8")
     assert 'status="draft"' in contacts
     assert 'requires_approval": True' in contacts
-    assert 'draft.status != "approved"' in gmail
+    assert 'draft.approved_revision != draft.revision' in gmail
+    assert 'queue_confirmed_action(db, action_kind="gmail.message.send"' in gmail
 
 
 def test_project_contact_migration_contains_discovery_safety_fields():

@@ -173,6 +173,52 @@ def test_sent_draft_reports_awaiting_reply_and_completed_message_wins(
     assert payload["workflow_state"] == "completed"
 
 
+def test_inbox_task_exposes_independent_provider_effect_states(
+    db_session, user_factory, monkeypatch,
+):
+    user, project, _calls = _world(db_session, user_factory, monkeypatch)
+    message = Message(
+        organization_id=project.organization_id,
+        project_id=project.id,
+        created_by_user_id=user.id,
+        source_type="email",
+        source_external_id="synthetic-outbox-inbox",
+        source_name="Synthetic sender",
+        source_sender="sender@example.test",
+        content="Synthetic task request",
+        attachments_json="[]",
+        summary="Synthetic",
+        context_confidence=1,
+        context_evidence="Confirmed",
+        context_confirmed=True,
+        status="ready",
+    )
+    db_session.add(message)
+    db_session.flush()
+    task = Task(
+        project_id=project.id,
+        message_id=message.id,
+        assignee_user_id=user.id,
+        created_by_user_id=user.id,
+        title="Synthetic task",
+        status="assigned",
+        source_file_id=f"message:{message.id}",
+        source_file_name="Synthetic",
+        source_excerpt="Synthetic task request",
+        source_excerpt_hash="b" * 64,
+        confidence=0.9,
+        external_action_status="proposed",
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    payload = ai._message_payload(db_session, message, actor=user)
+    assert payload["tasks"][0]["provider_effects"] == {
+        "task": {"status": "not_requested", "external_id": None},
+        "calendar": {"status": "not_requested", "external_id": None},
+    }
+
+
 def test_message_job_payload_contract_keeps_raw_mail_out_of_durable_jobs():
     from app.staging.gmail import enqueue_staged_gmail_attachment
 

@@ -277,6 +277,8 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
     MailboxIdentityService().reconcile(w.db, command(w), actor=w.user)
     flags = w.db.scalar(select(MailboxCutoverFlags)); enable_rollout(flags, "actions")
     other = Project(name="Moved context", organization_id=w.org.id); w.db.add(other); w.db.flush()
+    w.db.add(ProjectMember(project_id=other.id, user_id=w.user.id, role="manager"))
+    w.token.scopes = "https://www.googleapis.com/auth/gmail.send"
     w.message.project_id = other.id
     w.message.source_thread_id = "legacy-wrong-thread"
     draft = ResponseDraft(project_id=other.id, reviewer_user_id=w.user.id, message_id=w.message.id,
@@ -284,17 +286,15 @@ def test_reply_uses_origin_mailbox_after_context_move(db_session, user_factory, 
         status="approved", source_file_id="synthetic", source_file_name="synthetic",
         source_excerpt="synthetic", source_excerpt_hash="a" * 64, confidence=1)
     w.db.add(draft); w.db.flush(); draft.approved_revision = draft.revision
-    calls = []
-    class Service:
-        def users(self): return self
-        def messages(self): return self
-        def send(self, **kwargs): calls.append(kwargs); return SimpleNamespace(execute=lambda: {"id": "sent-synthetic"})
+    draft.approved_by_user_id = w.user.id
     monkeypatch.setattr(gmail, "require_project_role", lambda *a, **k: None)
-    monkeypatch.setattr(gmail, "google_workspace_for_project", lambda *a, **k: pytest.fail("project fallback"))
-    monkeypatch.setattr(gmail, "google_workspace_for_mailbox", lambda token_id, db: SimpleNamespace(service=lambda *a: Service()))
-    gmail.send_gmail(draft.id, w.db, w.user)
-    assert calls and calls[0]["body"]["threadId"] == "provider-thread-synthetic"
-    assert draft.status == "sent"
+    queued = gmail.send_gmail(draft.id, w.db, w.user)
+    from app.provider_actions.product import _gmail_material
+    material = _gmail_material(w.db, draft, w.user.id)
+    assert queued["status"] == "queued"
+    assert material.google_token_id == w.token.id
+    assert material.provider_thread_id == "provider-thread-synthetic"
+    assert draft.status == "queued"
 
 
 def test_attachment_uses_origin_mailbox_adapter(db_session, user_factory, monkeypatch):

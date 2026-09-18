@@ -31,6 +31,7 @@ export type MailDraft = {
   revision: number;
   approved_revision?: number | null;
   status: MailDeliveryStatus;
+  provider_verified?: boolean;
   safe_error?: string | null;
   receipt?: {
     provider?: string;
