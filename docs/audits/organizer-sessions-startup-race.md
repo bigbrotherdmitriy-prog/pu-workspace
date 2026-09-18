@@ -38,3 +38,27 @@ unique disposable schema, inserts queued/scanning/analyzing/ready sessions,
 calls the real `recover_incomplete_scans()`, and asserts status reset and
 single durable enqueue per session across two restarts. It never uses a
 production database.
+
+## PostgreSQL runtime verification — PASS (2026-09-18)
+
+On source commit `28c4ad4d45e4d896f53306ff674bc0a4180531a9`, the test was
+run in the separate `puw-mvp2-live-test` Docker Compose project on
+`72.56.108.162`: PostgreSQL 16, isolated database
+`puw_organizer_test_mvp2`, `PU_TEST_POSTGRES=1`, with
+`PUW_ORGANIZER_TEST_DATABASE_URL` pointing only to that database. The test
+itself created and dropped its unique temporary schema. It did not connect to
+production or staging databases.
+
+`alembic -c alembic.ini heads` and `current` both returned the single
+revision `d29a6c4f1e83` after the full migration chain. The backend was
+healthy. A fresh rerun of
+`tests/test_organizer_recovery_postgres.py::test_recover_incomplete_scans_after_real_postgres_migration`
+finished **1 passed, 0 failed, 0 skipped in 5.81 s** (exit code 0). The one
+warning is Alembic's existing `path_separator` deprecation in `alembic.ini`;
+it is not a test failure.
+
+Verdict for this narrowly scoped recovery test: **PostgreSQL PASS**, upgraded
+from offline-only evidence. This does not claim that the broader MVP-2 live
+Gmail → Google Tasks/Calendar acceptance has run; test Google credentials are
+not configured on the isolated stand yet. No DSN passwords or OAuth secrets
+are recorded in this report.
