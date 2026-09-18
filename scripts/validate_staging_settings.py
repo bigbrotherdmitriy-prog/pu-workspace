@@ -11,12 +11,12 @@ from urllib.parse import urlparse
 
 
 PRODUCTION_HOSTS = {
-    "37.252.23.204",
+    "72.56.108.162",
     "pu-workspace.duckdns.org",
     "www.puworkspace.ru",
     "puworkspace.ru",
 }
-PRODUCTION_ADDRESSES = {"37.252.23.204"}
+PRODUCTION_ADDRESSES = {"72.56.108.162"}
 PRODUCTION_ROOT = PurePosixPath("/opt/pu-workspace")
 SAFE_NAME = re.compile(r"^[a-z][a-z0-9_-]{2,39}$")
 SAFE_USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
