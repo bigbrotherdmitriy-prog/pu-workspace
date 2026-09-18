@@ -27,7 +27,7 @@ from app.models.v54_provider_action import (
 from app.provider_actions.contracts import ProviderActionError, ProviderPreconditionFailed
 from app.provider_actions.product import (
     RECONCILE_KIND, build_product_runtime, queue_confirmed_action, queue_reconciliation,
-    run_product_reconcile_job,
+    run_product_reconcile_job, task_effect_states,
 )
 from app.provider_actions.runtime import PRODUCT_KIND
 
@@ -205,6 +205,39 @@ def test_approved_task_and_calendar_dispatch_after_queue_status_update(world, mo
 
     assert services["google.tasks.upsert"].effects == 1
     assert services["google.calendar.upsert"].effects == 1
+
+
+def test_dead_letter_before_provider_attempt_is_visible_as_error(world):
+    queued = queue_confirmed_action(
+        world.db, action_kind="google.tasks.upsert", target_id=world.task.id, actor=world.user,
+    )
+    job = world.db.get(BackgroundJob, queued["job_id"])
+    job.status = "dead_letter"
+    world.db.commit()
+
+    state = task_effect_states(world.db, world.task.id)["task"]
+    assert state["status"] == "failed"
+    assert state["external_id"] is None
+
+
+def test_dead_letter_after_provider_attempt_is_visible_as_unknown(world):
+    queued = queue_confirmed_action(
+        world.db, action_kind="google.calendar.upsert", target_id=world.task.id, actor=world.user,
+    )
+    fake = FakeGoogle("google.calendar.upsert", crash_after=True)
+    runtime = build_product_runtime(sessions=sessions(world), service_factory=lambda *_args: fake)
+    with pytest.raises(SystemExit):
+        runtime.execute_job(
+            {"organization_id": world.org.id, "action_id": queued["action_id"], "revision": 1},
+            owner(world, queued["job_id"], "worker-crashed"),
+        )
+    job = world.db.get(BackgroundJob, queued["job_id"])
+    job.status = "dead_letter"
+    world.db.commit()
+
+    state = task_effect_states(world.db, world.task.id)["calendar"]
+    assert state["status"] == "unknown"
+    assert state["external_id"] is None
 
 
 def test_worker_dispatches_task_once_and_persists_receipt_and_external_id(world):

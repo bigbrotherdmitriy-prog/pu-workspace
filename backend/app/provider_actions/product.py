@@ -34,7 +34,7 @@ from app.models.response_draft import ResponseDraft
 from app.models.task import Task
 from app.models.user import User
 from app.models.v54_provider_action import (
-    ProviderAction, ProviderActionApproval, ProviderDispatchOutbox,
+    ProviderAction, ProviderActionApproval, ProviderDispatchOutbox, ProviderExecutionAttempt,
     ProviderOutcomeObservation,
 )
 from app.provider_actions.contracts import (
@@ -701,6 +701,12 @@ def action_display_state(db, action_id: str) -> dict:
     status = {"FROZEN": "pending", "READY": "pending", "EXECUTING": "executing",
               "UNKNOWN": "unknown", "APPLIED": "applied", "NOT_APPLIED": "failed",
               "BLOCKED": "failed"}.get(row.state, "unknown")
+    if status in {"pending", "executing"}:
+        outbox = db.get(ProviderDispatchOutbox, (row.action_id, row.revision))
+        job = db.get(BackgroundJob, outbox.job_id) if outbox and outbox.job_id else None
+        if job and job.status in {"failed", "dead_letter"}:
+            attempt = db.get(ProviderExecutionAttempt, (row.action_id, row.revision))
+            status = "unknown" if attempt else "failed"
     if status == "applied" and (observation is None or observation.outcome != "APPLIED"
                                  or not observation.external_ref):
         status = "unknown"
