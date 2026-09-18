@@ -1,3 +1,5 @@
+import pytest
+
 from app.task_engine import extract_task_candidates
 
 
@@ -60,3 +62,39 @@ def test_explicit_deadline_marker_remains_supported():
 def test_limits_candidates_per_file():
     text = " ".join(f"Исполнитель должен подготовить документ номер {i}." for i in range(20))
     assert len(extract_task_candidates(text)) == 5
+
+
+@pytest.mark.parametrize("imperative", [
+    "готовь", "подготовь", "Подготовьте", "сделай", "Сделайте",
+    "организуй", "Организуйте", "обеспечь", "Обеспечьте",
+])
+def test_imperative_with_immediately_adjacent_deadline(imperative):
+    text = f"Дмитрий, {imperative} техзадание. Срок: 25.09.2026."
+    candidates = extract_task_candidates(text)
+
+    assert len(candidates) == 1
+    assert candidates[0].due_date.isoformat() == "2026-09-25"
+    assert candidates[0].excerpt in text
+    assert "Срок: 25.09.2026" in candidates[0].excerpt
+
+
+@pytest.mark.parametrize("text", [
+    "Рекламная рассылка: Евролан Дей состоится 25.09.2026.",
+    "Подпись: дата встречи 25.09.2026. Контакты организаторов указаны ниже.",
+    "Готовый техпроект зарегистрирован 25.09.2026.",
+])
+def test_date_without_imperative_does_not_create_task(text):
+    assert extract_task_candidates(text) == []
+
+
+@pytest.mark.parametrize("suffix", [
+    "Дата встречи: 25.09.2026.",
+    "Реквизиты документа: 25.09.2026.",
+    "Приложение от 25.09.2026. Срок: 27.09.2026.",
+    "\n\nСрок: 25.09.2026.",
+])
+def test_adjacent_deadline_does_not_claim_unrelated_date(suffix):
+    candidates = extract_task_candidates("Дмитрий, готовь техзадание. " + suffix)
+
+    assert len(candidates) == 1
+    assert candidates[0].due_date is None

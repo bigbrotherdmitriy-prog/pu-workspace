@@ -55,10 +55,10 @@ def _prefilter_patterns():
         # Deferred import: task_engine/response_engine/governance_engine call
         # back into this module, so this module must not import them at load
         # time -- only their already-compiled regex constants, lazily.
-        from app.task_engine import OBLIGATION_RE
+        from app.task_engine import IMPERATIVE_RE, OBLIGATION_RE
         from app.response_engine import REQUEST_RE
         from app.governance_engine import DECISION_RE, RISK_RE
-        _PREFILTER_PATTERNS = (OBLIGATION_RE, REQUEST_RE, RISK_RE, DECISION_RE)
+        _PREFILTER_PATTERNS = (OBLIGATION_RE, IMPERATIVE_RE, REQUEST_RE, RISK_RE, DECISION_RE)
     return _PREFILTER_PATTERNS
 
 
