@@ -35,6 +35,7 @@ from app.api.access import router as access_router
 from app.api.documents import router as documents_router
 from app.api.drive import router as drive_router
 from app.api.google_drive import router as google_drive_router
+from app.api.mvp1_google_oauth import router as mvp1_google_oauth_router
 from app.api.yandex_disk import router as yandex_disk_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
@@ -46,7 +47,7 @@ from app.models import (
     ProjectMember,
     User,
 )
-from app.organizer import router as organizer_router
+from app.organizer import resources_router as mvp1_resources_router, router as organizer_router
 from app.core.auth import cleanup_expired_sessions, require_user
 from app.database import SessionLocal
 from app.core.readiness import readiness_report
@@ -154,6 +155,7 @@ app.include_router(evidence_router)
 app.include_router(autonomy_policy_router)
 app.include_router(v54_sandbox_acceptance_router)
 app.include_router(google_drive_router)
+app.include_router(mvp1_google_oauth_router)
 app.include_router(yandex_disk_router)
 app.include_router(tasks_router)
 app.include_router(responses_router)
@@ -166,6 +168,7 @@ app.include_router(workspace_router)
 
 app.include_router(history_router, dependencies=[Depends(require_user)])
 app.include_router(organizer_router, dependencies=[Depends(require_user)])
+app.include_router(mvp1_resources_router, dependencies=[Depends(require_user)])
 
 
 @app.get("/")

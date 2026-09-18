@@ -51,6 +51,17 @@ class VirtualNode(Base):
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     checksum: Mapped[str | None] = mapped_column(String(128))
     source_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_path: Mapped[str | None] = mapped_column(Text)
+    parent_external_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    provider_revision: Mapped[str | None] = mapped_column(String(500))
+    provider_metadata_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    web_url: Mapped[str | None] = mapped_column(Text)
+    availability: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    acl_state: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    analysis_state: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
+    shortcut_target_id: Mapped[str | None] = mapped_column(String(255))
+    shortcut_target_mime_type: Mapped[str | None] = mapped_column(String(255))
+    shortcut_target_resource_key: Mapped[str | None] = mapped_column(String(500))
 
 
 class ExtractionResult(Base):

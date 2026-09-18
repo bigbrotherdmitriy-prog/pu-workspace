@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.organizer_engine.content import _tesseract, extract_text, extract_text_result
+from app.organizer_engine.content import XlsxSecurityError, _tesseract, extract_text, extract_text_result
 
 
 class ContentExtractionTests(unittest.TestCase):
@@ -214,6 +214,120 @@ class ContentExtractionTests(unittest.TestCase):
             "Этап\t\tНачало\t__PU_SOURCE_COORD__:sheet1:1\n"
             "Монтаж\t\t2027-01-01\t__PU_SOURCE_COORD__:sheet1:2",
         )
+
+    def test_xlsx_adds_structural_spreadsheet_cells_without_changing_legacy_text(self):
+        NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+        REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                f'<workbook xmlns="{NS}" xmlns:r="{REL}"><sheets>'
+                '<sheet name="Смета" sheetId="1" r:id="rId1"/></sheets></workbook>',
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                f'<Relationships xmlns="{PKG}"><Relationship Id="rId1" '
+                f'Type="{REL}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                f'<worksheet xmlns="{NS}"><sheetData>'
+                '<row r="2"><c r="A2" t="inlineStr"><is><t>Итого</t></is></c>'
+                '<c r="B2"><f>SUM(A1:A1)</f><v>500</v></c></row>'
+                '</sheetData></worksheet>',
+            )
+        data = buffer.getvalue()
+        result = extract_text_result(
+            data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "смета.xlsx",
+        )
+        # Legacy TSV: unchanged, still built by _xlsx_text (coordinate marker included).
+        self.assertEqual(result.text, "Итого\t500\t__PU_SOURCE_COORD__:Смета:2")
+        # Additive structural projection from the ported app.ocr_quality.xlsx_cells.
+        self.assertEqual([sheet["sheet_name"] for sheet in result.spreadsheet_sheets], ["Смета"])
+        self.assertEqual([cell["cell_ref"] for cell in result.spreadsheet_cells], ["A2", "B2"])
+        formula_cell = result.spreadsheet_cells[1]
+        self.assertEqual(formula_cell["formula"], "SUM(A1:A1)")
+        self.assertEqual(formula_cell["cached_value"], "500")
+        self.assertEqual(formula_cell["cache_state"], "present")
+        self.assertIn("spreadsheet_cells", result.metadata())
+        self.assertIn("spreadsheet_sheets", result.metadata())
+
+    def test_xlsx_legacy_package_keeps_text_but_leaves_spreadsheet_cells_empty(self):
+        """A package xlsx_cells cannot verify structurally must not break `.text`."""
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                '<workbook xmlns="urn:x"><workbookPr date1904="0"/></workbook>',
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                '<worksheet xmlns="urn:x"><sheetData>'
+                '<row r="1"><c r="A1" t="inlineStr"><is><t>Этап</t></is></c></row>'
+                '</sheetData></worksheet>',
+            )
+        data = buffer.getvalue()
+        result = extract_text_result(
+            data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "ГПР.xlsx",
+        )
+        self.assertEqual(result.text, "Этап\t__PU_SOURCE_COORD__:sheet1:1")
+        self.assertEqual(result.spreadsheet_cells, [])
+        self.assertEqual(result.spreadsheet_sheets, [])
+        self.assertTrue(result.needs_review)
+        self.assertTrue(any(code.startswith("spreadsheet_cells_unavailable:") for code in result.warnings))
+
+    def test_xlsx_zip_bomb_style_compression_ratio_is_rejected(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("xl/worksheets/sheet1.xml", "<a>" + "0" * 5000 + "</a>")
+        data = buffer.getvalue()
+        with patch("app.organizer_engine.content._XLSX_MAX_COMPRESSION_RATIO", 1):
+            with self.assertRaises(XlsxSecurityError):
+                extract_text(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x.xlsx")
+
+    def test_xlsx_entry_count_limit_is_enforced(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("xl/worksheets/sheet1.xml", "<worksheet xmlns='urn:x'><sheetData/></worksheet>")
+            archive.writestr("xl/other.xml", "<x/>")
+        data = buffer.getvalue()
+        with patch("app.organizer_engine.content._XLSX_MAX_ENTRIES", 1):
+            with self.assertRaises(XlsxSecurityError):
+                extract_text(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x.xlsx")
+
+    def test_xlsx_archive_size_limit_is_enforced(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("xl/worksheets/sheet1.xml", "<worksheet xmlns='urn:x'><sheetData/></worksheet>")
+        data = buffer.getvalue()
+        with patch("app.organizer_engine.content._XLSX_MAX_ARCHIVE_BYTES", 10):
+            with self.assertRaises(XlsxSecurityError):
+                extract_text(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x.xlsx")
+
+    def test_xlsx_xml_node_and_depth_limits_reject_expansion_style_payloads(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            nested = "<a>" * 50 + "text" + "</a>" * 50
+            archive.writestr("xl/worksheets/sheet1.xml", f"<worksheet xmlns='urn:x'>{nested}</worksheet>")
+        data = buffer.getvalue()
+        with patch("app.organizer_engine.content._XLSX_MAX_XML_DEPTH", 10):
+            with self.assertRaises(XlsxSecurityError):
+                extract_text(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x.xlsx")
+
+    def test_xlsx_doctype_and_entity_declarations_are_denied_without_resolving_them(self):
+        for xml in (
+            '<!DOCTYPE worksheet [<!ENTITY secret "private">]><worksheet xmlns="urn:x">&secret;</worksheet>',
+            '<!DOCTYPE worksheet SYSTEM "https://invalid.test/private"><worksheet xmlns="urn:x"/>',
+        ):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("xl/worksheets/sheet1.xml", xml)
+            data = buffer.getvalue()
+            with self.assertRaises(XlsxSecurityError) as failure:
+                extract_text(data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x.xlsx")
+            self.assertNotIn("private", str(failure.exception))
 
     @patch("app.organizer_engine.content._ocr_image_page")
     def test_uses_local_ocr_for_image(self, ocr):

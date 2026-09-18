@@ -16,9 +16,21 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from app.ocr_quality.xlsx_cells import XlsxExtractionError, extract_xlsx_cells
+
 
 MAX_EXTRACTED_CHARS = 50_000
 XLSX_COORDINATE_MARKER = "__PU_SOURCE_COORD__"
+# Zip-bomb / XML-entity-expansion bounds for the legacy TSV extractor below.
+# Mirrors app.ocr_quality.xlsx_cells's budgets; the two modules are parsed
+# independently and each must fail closed on its own.
+_XLSX_MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
+_XLSX_MAX_ENTRIES = 1000
+_XLSX_MAX_XML_BYTES = 4 * 1024 * 1024
+_XLSX_MAX_UNPACKED_BYTES = 20 * 1024 * 1024
+_XLSX_MAX_COMPRESSION_RATIO = 200
+_XLSX_MAX_XML_NODES = 100_000
+_XLSX_MAX_XML_DEPTH = 128
 OCR_MIN_NATIVE_CHARS = 40
 OCR_MAX_PAGES = max(1, min(50, int(os.getenv("OCR_MAX_PAGES", "20"))))
 OCR_TIMEOUT_SECONDS = max(10, min(300, int(os.getenv("OCR_TIMEOUT_SECONDS", "120"))))
@@ -89,6 +101,12 @@ class ExtractionResult:
     table_cells: list[TableCell] = field(default_factory=list)
     needs_review: bool = False
     warnings: list[str] = field(default_factory=list)
+    # Structural, provenance-carrying XLSX cell/sheet projection (additive to
+    # `.text`, which remains the flat TSV built by `_xlsx_text` below). Empty
+    # for every non-spreadsheet input, and left empty on a spreadsheet whose
+    # package structure the bounded parser cannot verify exactly.
+    spreadsheet_cells: list[dict] = field(default_factory=list)
+    spreadsheet_sheets: list[dict] = field(default_factory=list)
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -122,6 +140,8 @@ class ExtractionResult:
                 for cell in self.table_cells[:2000]
             ],
             "warnings": self.warnings,
+            "spreadsheet_cells": self.spreadsheet_cells,
+            "spreadsheet_sheets": self.spreadsheet_sheets,
         }
 
 
@@ -142,6 +162,63 @@ def _zip_xml_text(data: bytes, prefixes: tuple[str, ...]) -> str:
     return " ".join(parts)
 
 
+class XlsxSecurityError(ValueError):
+    """An XLSX package exceeded a bounded-parsing limit or carried a denied XML construct.
+
+    Only the fixed code below escapes the parser boundary — never file content.
+    """
+
+
+def _xlsx_bounded_zip(data: bytes) -> zipfile.ZipFile:
+    """Open the archive after rejecting oversized or over-compressed (zip-bomb) input."""
+    if len(data) > _XLSX_MAX_ARCHIVE_BYTES:
+        raise XlsxSecurityError("xlsx_size_limit")
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    entries = archive.infolist()
+    if len(entries) > _XLSX_MAX_ENTRIES:
+        raise XlsxSecurityError("xlsx_entry_limit")
+    unpacked = 0
+    for info in entries:
+        unpacked += info.file_size
+        if (
+            unpacked > _XLSX_MAX_UNPACKED_BYTES
+            or info.file_size > _XLSX_MAX_XML_BYTES
+            or info.file_size > max(1, info.compress_size) * _XLSX_MAX_COMPRESSION_RATIO
+        ):
+            raise XlsxSecurityError("xlsx_size_limit")
+    return archive
+
+
+def _xlsx_bounded_xml(archive: zipfile.ZipFile, name: str) -> ElementTree.Element:
+    """Parse one archive member, denying DOCTYPE/ENTITY and bounding size/depth/node count."""
+    info = archive.getinfo(name)
+    if info.file_size > _XLSX_MAX_XML_BYTES:
+        raise XlsxSecurityError("xlsx_size_limit")
+    with archive.open(info) as stream:
+        raw = stream.read(_XLSX_MAX_XML_BYTES + 1)
+    if len(raw) > _XLSX_MAX_XML_BYTES:
+        raise XlsxSecurityError("xlsx_size_limit")
+    # OOXML mandates UTF-8; rejecting other encodings avoids declaration
+    # obfuscation and never resolves an external or internal DTD.
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise XlsxSecurityError("xlsx_xml_declaration_denied") from None
+    if "\x00" in text or re.search(r"<!\s*(?:DOCTYPE|ENTITY)\b", text, re.I):
+        raise XlsxSecurityError("xlsx_xml_declaration_denied")
+    depth = nodes = 0
+    parser = ElementTree.iterparse(io.StringIO(text), events=("start", "end"))
+    for event, _node in parser:
+        if event == "start":
+            depth += 1
+            nodes += 1
+            if depth > _XLSX_MAX_XML_DEPTH or nodes > _XLSX_MAX_XML_NODES:
+                raise XlsxSecurityError("xlsx_xml_limit")
+        else:
+            depth -= 1
+    return parser.root
+
+
 def _xlsx_column_index(reference: str | None, fallback: int) -> int:
     match = re.match(r"([A-Za-z]+)", reference or "")
     if not match:
@@ -155,7 +232,7 @@ def _xlsx_column_index(reference: str | None, fallback: int) -> int:
 def _xlsx_date_style_indexes(archive: zipfile.ZipFile) -> set[int]:
     if "xl/styles.xml" not in archive.namelist():
         return set()
-    root = ElementTree.fromstring(archive.read("xl/styles.xml"))
+    root = _xlsx_bounded_xml(archive, "xl/styles.xml")
     custom_formats: dict[int, str] = {}
     for node in root.iter():
         if node.tag.endswith("}numFmt"):
@@ -197,22 +274,22 @@ def _xlsx_date_value(raw: str, *, date_1904: bool) -> str:
 
 def _xlsx_text(data: bytes) -> str:
     """Preserve spreadsheet rows and columns for the structured import preview."""
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+    with _xlsx_bounded_zip(data) as archive:
         date_1904 = False
         if "xl/workbook.xml" in archive.namelist():
-            workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            workbook = _xlsx_bounded_xml(archive, "xl/workbook.xml")
             properties = next((node for node in workbook.iter() if node.tag.endswith("}workbookPr")), None)
             date_1904 = bool(properties is not None and properties.attrib.get("date1904", "0").casefold() in {"1", "true"})
         date_styles = _xlsx_date_style_indexes(archive)
         shared: list[str] = []
         if "xl/sharedStrings.xml" in archive.namelist():
-            root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+            root = _xlsx_bounded_xml(archive, "xl/sharedStrings.xml")
             shared = [" ".join(node.itertext()).strip() for node in root]
         sheet_names: dict[str, str] = {}
         names = set(archive.namelist())
         if "xl/workbook.xml" in names and "xl/_rels/workbook.xml.rels" in names:
-            workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
-            relationships = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+            workbook = _xlsx_bounded_xml(archive, "xl/workbook.xml")
+            relationships = _xlsx_bounded_xml(archive, "xl/_rels/workbook.xml.rels")
             targets = {
                 relation.attrib.get("Id", ""): relation.attrib.get("Target", "")
                 for relation in relationships
@@ -228,7 +305,7 @@ def _xlsx_text(data: bytes) -> str:
                     sheet_names[path] = sheet.attrib.get("name", "")
         lines: list[str] = []
         for name in sorted(item for item in archive.namelist() if item.startswith("xl/worksheets/") and item.endswith(".xml")):
-            root = ElementTree.fromstring(archive.read(name))
+            root = _xlsx_bounded_xml(archive, name)
             sheet_name = sheet_names.get(name) or name.rsplit("/", 1)[-1].removesuffix(".xml")
             for sequential_row, row in enumerate(
                 (node for node in root.iter() if node.tag.endswith("}row")), start=1
@@ -875,6 +952,26 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
         fields = _extract_fields(pages)
         confidence = _result_confidence(pages, fields)
         needs_review = attempted_ocr and confidence < OCR_REVIEW_CONFIDENCE
+        result_warnings = ["manual_review_required"] if needs_review else []
+        spreadsheet_cells: list[dict] = []
+        spreadsheet_sheets: list[dict] = []
+        is_xlsx = suffix == "xlsx" or mime_type.endswith("spreadsheetml.sheet")
+        if is_xlsx:
+            # Additive structural projection only — `.text` above stays the
+            # main TSV (with date conversion and the coordinate marker that
+            # structured_import consumes); this never changes it.
+            try:
+                cells_result = extract_xlsx_cells(data)
+            except XlsxExtractionError as exc:
+                needs_review = True
+                result_warnings.append(f"spreadsheet_cells_unavailable:{exc}")
+            else:
+                spreadsheet_cells = cells_result.cells
+                spreadsheet_sheets = cells_result.sheets
+                needs_review = needs_review or cells_result.needs_review
+                result_warnings.extend(
+                    code for code in cells_result.warnings if code not in result_warnings
+                )
         return ExtractionResult(
             text=finalized,
             method="ocr" if used_ocr else "native",
@@ -883,7 +980,9 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
             confidence=confidence, pages=pages, fields=fields,
             table_cells=_extract_table_cells(pages),
             needs_review=needs_review,
-            warnings=["manual_review_required"] if needs_review else [],
+            warnings=result_warnings,
+            spreadsheet_cells=spreadsheet_cells,
+            spreadsheet_sheets=spreadsheet_sheets,
         )
 
     from pypdf import PdfReader

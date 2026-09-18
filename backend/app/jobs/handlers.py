@@ -52,6 +52,12 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "notifications.escalation.proposal":
         from app.notification_escalation import run_escalation_proposal
         return run_escalation_proposal(payload)
+    if kind == "ai_secretary.materialize_bulk":
+        from app.api.ai_secretary import _materialize_bulk_job
+        return _materialize_bulk_job(payload)
+    if kind == "contract_package.analyze_governance":
+        from app.api.contract_package import _analyze_governance_job
+        return _analyze_governance_job(payload)
     raise ValueError(f"Unknown background job kind: {kind}")
 
 

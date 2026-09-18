@@ -386,6 +386,34 @@ def test_old_project_credentials_never_authorize_new_project(bound):
     assert bound.adapter.calls == []
 
 
+def test_completed_virtual_node_is_never_rewritten_by_a_later_build(bound):
+    """Once a snapshot is 'ready', a later _build_snapshot call must be a pure no-op:
+    it must not touch the already-persisted VirtualNode rows, even if the upstream
+    provider metadata has since changed."""
+    result = choose(bound).json()
+    workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with bound.db() as db:
+        published = {
+            node.external_id: (node.id, node.name, node.checksum, node.size_bytes, node.provider_metadata_hash)
+            for node in db.scalars(select(VirtualNode))
+        }
+    assert published  # the snapshot actually published something to protect
+
+    # Simulate the source changing upstream after publish (rename + new checksum).
+    changed = bound.adapter.items[bound.adapter.ids[-1]]
+    changed.name = 'Renamed after publish'
+    changed.md5_checksum = 'checksum-after-publish'
+
+    # A stray re-dispatch of the same job must not touch already-published nodes.
+    workspace._build_snapshot(result['id'], bound.new, bound.adapter.ids[-1], raise_errors=True)
+    with bound.db() as db:
+        after = {
+            node.external_id: (node.id, node.name, node.checksum, node.size_bytes, node.provider_metadata_hash)
+            for node in db.scalars(select(VirtualNode))
+        }
+    assert after == published
+
+
 def test_safe_copy_rejects_session_from_old_project(bound):
     result = choose(bound).json()
     with bound.db() as db:
