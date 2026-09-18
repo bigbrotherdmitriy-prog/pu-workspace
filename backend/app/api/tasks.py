@@ -288,7 +288,8 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
     )
     previous_external_status = task.external_action_status
     task.external_action_status = "queued" if queued_actions else "failed"
-    task.record_version += 1
+    # The outbox seals this exact record_version. The internal queue-status
+    # projection must not invalidate its payload before the worker starts.
     append_management_history(
         db, project_id=task.project_id, entity_type="task", entity_id=task.id,
         record_version=task.record_version, action="external_action_finished", actor_user_id=user.id,

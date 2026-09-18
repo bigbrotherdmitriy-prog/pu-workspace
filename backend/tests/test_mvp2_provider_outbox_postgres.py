@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401 - register mapped tables
+from app.api.tasks import ExternalActionApproval, approve_external
 from app.models.google_token import GoogleOAuthToken
 from app.models.job import BackgroundJob
 from app.models.organization_contract import Organization
@@ -98,6 +99,31 @@ def test_two_simultaneous_confirms_create_one_action_and_one_job(postgres_world)
         assert len(actions) == len(jobs) == 1
         assert db.get(ProviderDispatchOutbox, (actions[0].action_id, 1)).job_id == jobs[0].id
         assert set(jobs[0].payload) == {"organization_id", "action_id", "revision"}
+
+
+def test_approved_batch_retains_live_authority_after_queue_projection_on_postgresql(postgres_world):
+    sessions, (org_id, _project_id, user_id, task_id) = postgres_world
+    with sessions() as db:
+        task = db.get(Task, task_id)
+        approved = approve_external(
+            task_id,
+            ExternalActionApproval(expected_record_version=task.record_version,
+                                   publish_task=True, publish_calendar=True),
+            db=db, user=db.get(User, user_id),
+        )
+    assert len(approved["actions"]) == 2
+
+    runtime = build_product_runtime(sessions=sessions)
+    with sessions() as db:
+        rows = list(db.scalars(select(ProviderAction).where(
+            ProviderAction.organization_id == org_id,
+            ProviderAction.action_id.in_((f"google-task-{task_id}", f"google-calendar-{task_id}")),
+        )))
+        assert len(rows) == 2
+        for row in rows:
+            assert row.state == "READY"
+            authority = runtime.authority.resolve(runtime._envelope(row), operation="dispatch")
+            assert authority.can_dispatch is True
 
 
 def _claim(sessions, job_id: int, worker: str, attempt: int):

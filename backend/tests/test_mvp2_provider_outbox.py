@@ -187,6 +187,26 @@ def test_task_and_calendar_confirmation_queue_two_scoped_actions_without_effect(
     assert all(set(job.payload) == {"organization_id", "action_id", "revision"} for job in jobs)
 
 
+def test_approved_task_and_calendar_dispatch_after_queue_status_update(world, monkeypatch):
+    monkeypatch.setattr("app.api.tasks.require_project_role", lambda *args: "manager")
+    approved = approve_external(
+        world.task.id, ExternalActionApproval(publish_task=True, publish_calendar=True),
+        db=world.db, user=world.user,
+    )
+    services = {kind: FakeGoogle(kind) for kind in ("google.tasks.upsert", "google.calendar.upsert")}
+    runtime = build_product_runtime(
+        sessions=sessions(world), service_factory=lambda kind, *_args: services[kind],
+    )
+
+    for action in approved["actions"]:
+        job = world.db.get(BackgroundJob, action["job_id"])
+        outcome = runtime.execute_job(job.payload, owner(world, job.id, f"worker-{job.id}"))
+        assert outcome["outcome"] == "APPLIED"
+
+    assert services["google.tasks.upsert"].effects == 1
+    assert services["google.calendar.upsert"].effects == 1
+
+
 def test_worker_dispatches_task_once_and_persists_receipt_and_external_id(world):
     queued = queue_confirmed_action(
         world.db, action_kind="google.tasks.upsert", target_id=world.task.id, actor=world.user,
