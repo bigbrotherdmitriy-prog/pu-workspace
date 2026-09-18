@@ -7,11 +7,14 @@ from unittest.mock import Mock
 import pytest
 
 from app import document_extraction as de
+from app.api.ai_secretary import IncomingMessage, ingest_message
+from app.api.gmail import _bulk_email_reason
 from app.core.integration_types import StorageObject
 from app.models.ai_policy import ProjectAIPolicy
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.task import Task
 
 
 @pytest.fixture
@@ -48,6 +51,65 @@ def test_looks_actionable_matches_any_of_the_four_detectors():
     assert not de._looks_actionable("Обычное описание без ничего примечательного.")
     assert not de._looks_actionable("")
     assert not de._looks_actionable(None)
+
+
+def test_live_mail_imperative_with_adjacent_deadline_proposes_task(world, monkeypatch):
+    db, _user, project = world
+    text = "Дмитрий, готовь техзадание. Срок: 25.09.2026."
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    assert de._looks_actionable(text)
+    result = de.extract_for_text(db, project.id, text, "live-mail.txt")
+
+    assert result.extraction_method == "regex"
+    assert len(result.obligations) == 1
+    assert result.obligations[0].due_date.isoformat() == "2026-09-25"
+    assert "готовь техзадание" in result.obligations[0].excerpt
+
+
+def test_live_mail_materializes_task_and_nonempty_summary(world, monkeypatch):
+    db, user, project = world
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    result = ingest_message(IncomingMessage(
+        project_id=project.id,
+        source_type="email",
+        source_external_id="synthetic-imperative-deadline",
+        source_name="Тестовое письмо",
+        content="Дмитрий, готовь техзадание. Срок: 25.09.2026.",
+        routing_confidence=0.99,
+    ), db, user)
+
+    assert len(result["tasks"]) == 1
+    assert "Задач: 1" in result["summary"]
+    task = db.get(Task, result["tasks"][0]["id"])
+    assert task.due_date.isoformat() == "2026-09-25"
+    assert task.external_action_status == "proposed"
+    assert task.google_task_id is None
+
+
+def test_bulk_promotion_with_imperative_is_filtered_before_task_creation(world, monkeypatch):
+    db, user, project = world
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    text = "Сделай ремонт мечты. Срок: 25.09.2026. Евролан Дей приглашает на встречу."
+    reason = _bulk_email_reason(
+        {"list-unsubscribe": "<https://example.test/unsubscribe>"},
+        ["INBOX", "CATEGORY_PROMOTIONS"], "Рекламная рассылка", text,
+    )
+    assert reason
+
+    result = ingest_message(IncomingMessage(
+        project_id=project.id,
+        source_type="email",
+        source_external_id="synthetic-bulk-promotion",
+        source_name="Рекламная рассылка",
+        content=text,
+        routing_confidence=0.99,
+        automation_suppressed=True,
+        automation_suppression_reason=reason,
+    ), db, user)
+
+    assert result["status"] == "filtered"
+    assert result["tasks"] == []
 
 
 def test_verbatim_requires_exact_case_insensitive_substring():

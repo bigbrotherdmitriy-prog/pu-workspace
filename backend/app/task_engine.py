@@ -21,6 +21,15 @@ OBLIGATION_RE = re.compile(
     r"выполнить|устранить|оплатить|поставить)\b",
     re.IGNORECASE,
 )
+# Keep the prefilter and the regex fallback on the same deliberately narrow
+# imperative vocabulary. Match complete forms, not stems such as "готов" that
+# would also accept descriptions like "готовый документ".
+IMPERATIVE_RE = re.compile(
+    r"\b(?:(?:под)?готов(?:ь|ьте)|сдела(?:й|йте)|организу(?:й|йте)|"
+    r"обеспеч(?:ь|ьте)|выполн(?:и|ите)|направ(?:ь|ьте)|отправ(?:ь|ьте)|"
+    r"согласу(?:й|йте)|провер(?:ь|ьте)|состав(?:ь|ьте)|предостав(?:ь|ьте))\b",
+    re.IGNORECASE,
+)
 DATE_RE = re.compile(
     r"\b(?:не\s+позднее|до|к)\s+(\d{1,2})[./](\d{1,2})[./](20\d{2})\b",
     re.IGNORECASE,
@@ -38,6 +47,12 @@ MONTH_DATE_RE = re.compile(
 MONTHS = {name: index + 1 for index, name in enumerate(
     ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"))}
 SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|[\r\n]+")
+ADJACENT_DEADLINE_RE = re.compile(
+    r"(?:срок(?:\s+(?:исполнения|выполнения|предоставления|поставки|оплаты))?\s*"
+    r"[:=\-–—]?\s*|(?:не\s+позднее|до|к)\s+)"
+    r"\d{1,2}[./]\d{1,2}[./]20\d{2}[.!?]?",
+    re.IGNORECASE,
+)
 # A small set of Russian endings, not a dictionary of misspelled words. Ordinary
 # short words (и, у, по, при, их, им, ей, её, etc.) deliberately do not participate.
 # Two distinct unquoted fragments are needed: one fragment can be a name, game
@@ -145,23 +160,44 @@ def extract_task_candidates(text: str | None, limit: int = 5) -> list[TaskCandid
         return []
     result: list[TaskCandidate] = []
     seen: set[str] = set()
-    for raw in SENTENCE_RE.split(text):
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for boundary in SENTENCE_RE.finditer(text):
+        spans.append((start, boundary.start()))
+        start = boundary.end()
+    spans.append((start, len(text)))
+    for index, (start, end) in enumerate(spans):
+        raw = text[start:end]
         sentence = " ".join(raw.split()).strip(" -–—\t")
-        if len(sentence) < 18 or len(sentence) > 1200 or not OBLIGATION_RE.search(sentence):
+        if (len(sentence) < 18 or len(sentence) > 1200
+                or not (OBLIGATION_RE.search(sentence) or IMPERATIVE_RE.search(sentence))):
             continue
         digest = hashlib.sha256(sentence.casefold().encode()).hexdigest()
         if digest in seen:
             continue
         seen.add(digest)
         due = extract_explicit_due_date(sentence)
+        excerpt = sentence
+        if due is None and index + 1 < len(spans):
+            next_start, next_end = spans[index + 1]
+            gap = text[end:next_start]
+            next_sentence = " ".join(text[next_start:next_end].split()).strip()
+            # Only the immediately following, standalone deadline clause may
+            # supply a date. Never scan past prose, blank lines or signatures.
+            if (len(gap) <= 3 and len(re.findall(r"\r\n|\r|\n", gap)) <= 1
+                    and len(next_sentence) <= 80
+                    and ADJACENT_DEADLINE_RE.fullmatch(next_sentence)):
+                due = extract_explicit_due_date(next_sentence)
+                if due is not None:
+                    excerpt = text[start:next_end].strip()
         urgent = bool(re.search(r"\b(срочно|критич|немедленно|не позднее)\b", sentence, re.I))
-        review_reasons = _text_quality_review_reasons(sentence)
+        review_reasons = _text_quality_review_reasons(excerpt)
         # Compatibility scores for clean candidates; a valid date cannot override
         # damaged evidence. 0.45 is a conservative review ceiling, not 45% accuracy.
         confidence = 0.90 if due else 0.82
         if review_reasons:
             confidence = min(confidence, 0.45)
-        result.append(TaskCandidate(sentence[:240], sentence, due, "high" if urgent else "normal", confidence, review_reasons))
+        result.append(TaskCandidate(sentence[:240], excerpt, due, "high" if urgent else "normal", confidence, review_reasons))
         if len(result) >= limit:
             break
     return result
