@@ -12,8 +12,24 @@ and preflight in its own startup command. Therefore, on a fresh or partially
 migrated database, scheduler recovery could query the table before Alembic
 created it. `infra/primary/docker-compose.yml` already waits for a healthy
 backend; the root stack now does the same. Its `/health` probe can answer only
-after backend migrations and preflight complete. No SQL table name, organizer
-business logic, or Alembic migration was changed.
+after backend migrations and startup preflight complete. The startup preflight
+checks configuration, database access, and exact schema revision, but does not
+require heartbeats from workers or scheduler that have not started yet. The
+normal `/api/readiness` and default preflight still require those live services.
+Both worker and scheduler wait for the healthy backend. No SQL table name,
+organizer business logic, or Alembic migration was changed.
+
+The first root-Compose test on a disposable GitHub-hosted runner exposed a
+second ordering defect in the original fix: the backend's full preflight
+required two worker heartbeats and one scheduler heartbeat before starting
+Uvicorn, while the scheduler waited for backend health. On an empty database
+the migration reached `d29a6c4f1e83`, but preflight reported zero workers and
+zero schedulers; backend restarted and Compose failed with `container
+pu-workspace-backend is unhealthy`. This was reproduced in GitHub Actions run
+`35320619930` on diagnostic commit `c0abfade9c27619d2b4b5d4243840152e3577067`.
+The disposable stack and its volume were removed by that run. Startup-only
+preflight and the worker dependency above break the cycle without weakening
+the normal runtime readiness contract.
 
 This is a proven ordering defect in the Compose configuration, **not proof**
 that ordering caused every observed production `UndefinedTable`. A database

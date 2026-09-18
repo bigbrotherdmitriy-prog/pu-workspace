@@ -14,7 +14,7 @@ from app.database import SessionLocal
 from app.models.job import BackgroundJob, ServiceHeartbeat
 
 
-def readiness_report() -> dict:
+def readiness_report(*, include_live_services: bool = True) -> dict:
     checks: dict[str, dict] = {}
     durable_execution = os.getenv("PU_BACKGROUND_EXECUTION", "in_process") == "durable"
     app_secret = os.getenv("APP_SECRET_KEY", "")
@@ -91,7 +91,7 @@ def readiness_report() -> dict:
             revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
         checks["database"] = _check(True, "reachable")
         checks["schema"] = _check(revision == CURRENT_SCHEMA_REVISION, revision or "migration version missing")
-        if durable_execution:
+        if durable_execution and include_live_services:
             cutoff = datetime.now(timezone.utc) - timedelta(seconds=90)
             with SessionLocal() as db:
                 worker_count = len(list(db.scalars(select(ServiceHeartbeat.service_id).where(

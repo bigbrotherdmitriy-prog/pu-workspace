@@ -53,7 +53,7 @@ services:
       PU_BACKGROUND_EXECUTION: durable
       AI_SECRETARY_AUTOMATION_ENABLED: ${AI_SECRETARY_AUTOMATION_ENABLED:-true}
       AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS: ${AI_SECRETARY_AUTOMATION_INTERVAL_SECONDS:-300}
-    command: ["sh", "-c", "alembic -c alembic.ini upgrade head && python -m scripts.preflight && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${API_WORKERS:-2}"]
+    command: ["sh", "-c", "alembic -c alembic.ini upgrade head && python -m scripts.preflight --startup && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${API_WORKERS:-2}"]
     # /health becomes available only after Alembic and preflight finish.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
@@ -67,7 +67,7 @@ services:
     build: ./backend
     restart: unless-stopped
     depends_on:
-      db:
+      backend:
         condition: service_healthy
     env_file: .env
     environment:
