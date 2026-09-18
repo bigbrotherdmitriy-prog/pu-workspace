@@ -687,7 +687,7 @@ def approve_mail_draft(draft_id: int, payload: MailDraftApproval, db: Session = 
     draft = db.scalar(select(ResponseDraft).where(ResponseDraft.id == draft_id).with_for_update())
     if draft is None:
         raise HTTPException(404, "Mail draft not found")
-    require_project_role(db, user, draft.project_id, "editor")
+    require_project_role(db, user, draft.project_id, "manager")
     if draft.revision != payload.revision:
         raise HTTPException(409, "mail_draft_revision_conflict")
     if draft.status in {"sending", "sent", "unknown"}:
