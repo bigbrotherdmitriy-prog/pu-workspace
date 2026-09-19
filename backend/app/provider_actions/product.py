@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -16,7 +17,7 @@ from email.utils import getaddresses, parseaddr
 from hashlib import sha256
 from typing import Callable
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from app.google_calendar import CALENDAR_SCOPE, event_payload
 from app.google_tasks import TASKS_SCOPE, task_payload
@@ -39,7 +40,11 @@ from app.models.v54_provider_action import (
 )
 from app.provider_actions.contracts import (
     ActionEnvelope, LiveAuthority, ProviderActionError, ProviderPreconditionFailed,
-    ProviderReceipt, ProviderRequest,
+    ProviderReceipt, ProviderRequest, ProviderLookupUncertain,
+)
+from app.provider_actions.account_guard import verified_rotation_pins
+from app.provider_actions.recovery_guards import (
+    lock_action_stream, record_republication, require_republication_dispatch,
 )
 from app.provider_actions.runtime import PRODUCT_KIND, ProviderActionRuntime
 
@@ -270,9 +275,7 @@ def _target_id(action_id: str, kind: str) -> int:
 
 
 def _lock_action_stream(db, organization_id: int, action_id: str) -> None:
-    if db.bind is not None and db.bind.dialect.name == "postgresql":
-        key = int.from_bytes(sha256(f"{organization_id}:{action_id}".encode()).digest()[:8], "big", signed=True)
-        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+    lock_action_stream(db, organization_id, action_id)
 
 
 def queue_confirmed_action(db, *, action_kind: str, target_id: int, actor: User) -> dict:
@@ -289,6 +292,8 @@ def queue_confirmed_action(db, *, action_kind: str, target_id: int, actor: User)
         ProviderAction.action_id == action_id,
     ).order_by(ProviderAction.revision.desc()).with_for_update()))
     latest = rows[0] if rows else None
+    if latest:
+        require_republication_dispatch(db, latest)
     if latest and latest.state == "UNKNOWN":
         raise ProviderActionError("unknown_requires_reconciliation")
     if latest and latest.payload_hash == preliminary.payload_hash and latest.state != "NOT_APPLIED":
@@ -357,6 +362,8 @@ def queue_confirmed_action(db, *, action_kind: str, target_id: int, actor: User)
     ProviderActionRuntime._audit(db, "dispatch_requested", action_id, revision, actor.id,
                                  f"confirm-{action_id}", approval_id=approval_id)
     db.flush()
+    if latest:
+        record_republication(db, latest, row)
     payload = {"organization_id": material.organization_id, "action_id": action_id, "revision": revision}
     job = enqueue(db, PRODUCT_KIND, payload, idempotency_key=envelope.idempotency_key, max_attempts=3)
     if job.kind != PRODUCT_KIND or job.payload != payload:
@@ -388,6 +395,12 @@ class ProductAuthorityResolver:
                 target_id=_target_id(envelope.action_id, envelope.action_kind),
                 actor_id=int(approval.approved_by),
             )
+            if operation == "reconcile" and envelope.action_kind in _ROTATION_RECOVERY_KINDS:
+                action = db.get(ProviderAction, (envelope.action_id, envelope.revision))
+                token = db.get(GoogleOAuthToken, material.google_token_id)
+                if action is None or token is None:
+                    raise ProviderActionError("authority_stale")
+                verified_rotation_pins(db, action, token)
         if not _material_matches_envelope(envelope, material, operation=operation):
             raise ProviderActionError("authority_stale")
         return LiveAuthority(
@@ -398,6 +411,74 @@ class ProductAuthorityResolver:
             evidence_pins=material.evidence_pins, valid_until=self.clock() + timedelta(minutes=5),
             can_dispatch=True, can_reconcile=True,
         )
+
+    def capture_reconcile_state(self, db, envelope, *, lock=False):
+        """Bind the result to exactly the authority observed before provider I/O."""
+        if lock:
+            # OAuth callback locks this same token row before advancing its
+            # generation and identity binding. No token value enters the pins.
+            db.scalar(select(GoogleOAuthToken).where(
+                GoogleOAuthToken.project_id == envelope.project_id,
+            ).with_for_update().execution_options(populate_existing=True))
+            db.scalar(select(Project).where(Project.id == envelope.project_id)
+                      .with_for_update().execution_options(populate_existing=True))
+        approval_query = select(ProviderActionApproval).where(
+            ProviderActionApproval.action_id == envelope.action_id,
+            ProviderActionApproval.revision == envelope.revision,
+        ).execution_options(populate_existing=True)
+        approval = db.scalar(approval_query.with_for_update() if lock else approval_query)
+        if approval is None or approval.state != "GRANTED" or not approval.approved_by.isdigit():
+            raise ProviderActionError("authority_stale")
+        actor_id = int(approval.approved_by)
+        if lock:
+            db.scalar(select(ProjectMember).where(
+                ProjectMember.project_id == envelope.project_id, ProjectMember.user_id == actor_id,
+            ).with_for_update().execution_options(populate_existing=True))
+            if envelope.action_kind in _ROTATION_RECOVERY_KINDS:
+                db.scalar(select(Task).where(Task.id == _target_id(envelope.action_id, envelope.action_kind))
+                          .with_for_update().execution_options(populate_existing=True))
+        material = _material_for(db, action_kind=envelope.action_kind,
+            target_id=_target_id(envelope.action_id, envelope.action_kind), actor_id=actor_id)
+        if not _material_matches_envelope(envelope, material, operation="reconcile"):
+            raise ProviderActionError("authority_stale")
+        action = db.get(ProviderAction, (envelope.action_id, envelope.revision))
+        token = db.scalar(select(GoogleOAuthToken).where(GoogleOAuthToken.id == material.google_token_id)
+                          .execution_options(populate_existing=True))
+        identity = (verified_rotation_pins(db, action, token, lock=lock)
+                    if envelope.action_kind in _ROTATION_RECOVERY_KINDS and action and token else None)
+        return (material.organization_id, material.project_id, material.mailbox_key,
+                material.authority_epoch, material.capability_version, material.credential_generation,
+                material.evidence_pins, material.payload_hash, material.google_token_id,
+                approval.id, approval.state, identity)
+
+    def validate_reconcile_state(self, db, envelope, pins):
+        if self.capture_reconcile_state(db, envelope, lock=True) != pins:
+            raise ProviderActionError("authority_stale")
+
+    @staticmethod
+    def record_reconcile_state(db, row, sequence, pins):
+        db.add(AuditLog(action="provider_reconcile_binding", entity_type="provider_action",
+            entity_id=_target_id(row.action_id, row.action_kind),
+            details=json.dumps({"action_id": row.action_id, "revision": row.revision,
+                                "sequence": sequence, "pins_hash": _canonical_hash({"pins": pins})},
+                               sort_keys=True)))
+
+    @staticmethod
+    def matches_reconcile_state(db, row, sequence, pins):
+        expected = {"action_id": row.action_id, "revision": row.revision,
+                    "sequence": sequence, "pins_hash": _canonical_hash({"pins": pins})}
+        return db.scalar(select(AuditLog.id).where(
+            AuditLog.action == "provider_reconcile_binding",
+            AuditLog.entity_id == _target_id(row.action_id, row.action_kind),
+            AuditLog.details == json.dumps(expected, sort_keys=True),
+        ).limit(1)) is not None
+
+
+def _require_current_absence_binding(db, row, latest, *, lock=False):
+    envelope = ProviderActionRuntime._envelope(row)
+    pins = ProductAuthorityResolver(None).capture_reconcile_state(db, envelope, lock=lock)
+    if not ProductAuthorityResolver.matches_reconcile_state(db, row, latest.sequence, pins):
+        raise ProviderActionError("outcome_not_reconcilable")
 
 
 class GoogleWorkspaceProviderAdapter:
@@ -417,6 +498,29 @@ class GoogleWorkspaceProviderAdapter:
         if kind == "google.tasks.upsert":
             return workspace.service("tasks", "v1")
         return workspace.service("calendar", "v3")
+
+    @staticmethod
+    def _read_only_service(kind: str, material: _Material, db):
+        """Use one exact credential snapshot; refreshing it cannot write the DB."""
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from app.core.token_crypto import decrypt_token
+
+        token = db.scalar(select(GoogleOAuthToken).where(
+            GoogleOAuthToken.id == material.google_token_id,
+            GoogleOAuthToken.project_id == material.project_id,
+        ).execution_options(populate_existing=True))
+        if (token is None or token.credential_generation != material.credential_generation
+                or not token.access_token):
+            raise ProviderActionError("credential_stale")
+        credentials = Credentials(token=decrypt_token(token.access_token),
+            refresh_token=decrypt_token(token.refresh_token), token_uri=token.token_uri,
+            client_id=os.getenv("GOOGLE_CLIENT_ID"), client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            scopes=(token.scopes or "").split())
+        # Credentials and any refresh result now live only in this request's memory.
+        return build("tasks" if kind == "google.tasks.upsert" else "calendar",
+                     "v1" if kind == "google.tasks.upsert" else "v3",
+                     credentials=credentials, cache_discovery=False)
 
     @staticmethod
     def _receipt(request: ProviderRequest, outcome: str, external_ref: str | None = None):
@@ -462,6 +566,14 @@ class GoogleWorkspaceProviderAdapter:
         )
         if not (exact or rotated_lookup):
             raise ProviderPreconditionFailed()
+        action = db.get(ProviderAction, (request.action_id, request.revision))
+        if action is None:
+            raise ProviderPreconditionFailed()
+        if operation == "dispatch":
+            _lock_action_stream(db, request.organization_id, request.action_id)
+            require_republication_dispatch(db, action)
+        elif request.action_kind in _ROTATION_RECOVERY_KINDS:
+            verified_rotation_pins(db, action, db.get(GoogleOAuthToken, material.google_token_id))
         return target_id, material
 
     @staticmethod
@@ -554,7 +666,9 @@ class GoogleWorkspaceProviderAdapter:
     def lookup(self, request: ProviderRequest) -> ProviderReceipt | None:
         with self.sessions.begin() as db:
             target_id, material = self._context(db, request, operation="reconcile")
-            service = self.service_factory(request.action_kind, material, db)
+            factory = (self._read_only_service if request.action_kind in _ROTATION_RECOVERY_KINDS
+                       and self.service_factory == self._service else self.service_factory)
+            service = factory(request.action_kind, material, db)
             external_id = None
             if request.action_kind == "gmail.message.send":
                 draft = db.get(ResponseDraft, target_id)
@@ -587,30 +701,44 @@ class GoogleWorkspaceProviderAdapter:
                         ).execute()
                         if found.get("deleted") is True:
                             return None
-                        external_id = str(found.get("id") or external_id)
+                        if not isinstance(found, dict) or found.get("id") != external_id:
+                            raise ProviderLookupUncertain("provider_lookup_incomplete")
                     except Exception as exc:
                         if getattr(getattr(exc, "resp", None), "status", None) == 404:
                             return None
                         raise
                 else:
                     marker = f"PU-Command: {_digest(request.idempotency_key)}"
-                    hits = []
+                    hits = {}
                     page_token = None
-                    while True:
+                    seen_tokens = set()
+                    for _page_number in range(100):
                         page = service.tasks().list(
                             tasklist="@default", maxResults=100,
                             showCompleted=True, showHidden=True, pageToken=page_token,
                         ).execute()
-                        hits.extend(
-                            item for item in page.get("items", [])
-                            if marker in str(item.get("notes") or "")
-                        )
+                        if not isinstance(page, dict) or not isinstance(page.get("items", []), list):
+                            raise ProviderLookupUncertain("provider_lookup_incomplete")
+                        for item in page.get("items", []):
+                            if not isinstance(item, dict):
+                                raise ProviderLookupUncertain("provider_lookup_incomplete")
+                            if marker not in str(item.get("notes") or "").splitlines() or item.get("deleted") is True:
+                                continue
+                            if not isinstance(item.get("id"), str) or not item["id"]:
+                                raise ProviderLookupUncertain("provider_lookup_incomplete")
+                            hits[item["id"]] = item
+                        if len(hits) > 1:
+                            raise ProviderLookupUncertain("provider_lookup_ambiguous")
                         page_token = page.get("nextPageToken")
-                        if not page_token:
+                        if page_token is None or page_token == "":
                             break
+                        if not isinstance(page_token, str) or page_token in seen_tokens:
+                            raise ProviderLookupUncertain("provider_lookup_incomplete")
+                        seen_tokens.add(page_token)
+                    else:
+                        raise ProviderLookupUncertain("provider_lookup_incomplete")
                     if len(hits) == 1:
-                        external_id = str(hits[0]["id"]); task.google_task_id = external_id
-                        task.google_task_list_id = "@default"
+                        external_id = next(iter(hits))
             else:
                 task = db.get(Task, target_id)
                 external_id = external_id_for(db, entity_type="task", entity_id=task.id,
@@ -620,20 +748,30 @@ class GoogleWorkspaceProviderAdapter:
                     found = service.events().get(calendarId="primary", eventId=external_id).execute()
                     if found.get("status") == "cancelled":
                         return None
-                    external_id = str(found.get("id") or external_id)
+                    if not isinstance(found, dict) or found.get("id") != external_id:
+                        raise ProviderLookupUncertain("provider_lookup_incomplete")
                 except Exception as exc:
                     if getattr(getattr(exc, "resp", None), "status", None) == 404:
                         return None
                     raise
             if not external_id:
                 return None
-            if request.action_kind != "gmail.message.send":
-                task = db.get(Task, target_id)
-                resource = "task" if request.action_kind == "google.tasks.upsert" else "calendar_event"
-                record_external_resource(db, project_id=task.project_id, entity_type="task", entity_id=task.id,
-                    provider="google_workspace", resource_type=resource, external_id=external_id,
-                    container_id="@default" if resource == "task" else None)
             return self._receipt(request, "APPLIED", external_id)
+
+    def project_receipt(self, db, request, external_ref):
+        """Project only after the runtime has fenced the provider observation."""
+        if request.action_kind not in _ROTATION_RECOVERY_KINDS:
+            return
+        task = db.get(Task, _target_id(request.action_id, request.action_kind))
+        resource = "task" if request.action_kind == "google.tasks.upsert" else "calendar_event"
+        container = task.google_task_list_id or "@default"
+        if resource == "task":
+            task.google_task_id = external_ref; task.google_task_list_id = container
+        else:
+            task.google_calendar_event_id = external_ref
+        record_external_resource(db, project_id=task.project_id, entity_type="task", entity_id=task.id,
+            provider="google_workspace", resource_type=resource, external_id=external_ref,
+            container_id=container if resource == "task" else None)
 
 
 def build_product_runtime(*, sessions=None, service_factory=None):
@@ -655,6 +793,10 @@ def run_product_job(payload: dict) -> dict:
 
 
 def queue_reconciliation(db, *, action_id: str, revision: int, actor: User) -> dict:
+    scope = db.get(ProviderAction, (action_id, revision))
+    if scope is None:
+        raise ProviderActionError("outcome_not_reconcilable")
+    _lock_action_stream(db, scope.organization_id, action_id)
     row = db.scalar(select(ProviderAction).where(
         ProviderAction.action_id == action_id, ProviderAction.revision == revision,
     ).execution_options(populate_existing=True).with_for_update())
@@ -675,6 +817,7 @@ def queue_reconciliation(db, *, action_id: str, revision: int, actor: User) -> d
         ProviderActionRuntime._envelope(row), material, operation="reconcile",
     ):
         raise ProviderActionError("authority_stale")
+    ProductAuthorityResolver(None).capture_reconcile_state(db, ProviderActionRuntime._envelope(row), lock=True)
     payload = {"organization_id": row.organization_id, "action_id": action_id, "revision": revision}
     # A reconnect must be able to queue a fresh read-only lookup even when an
     # earlier generation's reconciliation job is already dead-lettered.
@@ -702,6 +845,10 @@ def resolve_reconciled_absence(
     """
     if confirmed_absent is not True or type(expected_observation_sequence) is not int:
         raise ProviderActionError("outcome_not_reconcilable")
+    scope = db.get(ProviderAction, (action_id, revision))
+    if scope is None:
+        raise ProviderActionError("outcome_not_reconcilable")
+    _lock_action_stream(db, scope.organization_id, action_id)
     row = db.scalar(select(ProviderAction).where(
         ProviderAction.action_id == action_id, ProviderAction.revision == revision,
     ).execution_options(populate_existing=True).with_for_update())
@@ -725,6 +872,7 @@ def resolve_reconciled_absence(
     if (material.credential_generation <= row.credential_generation
             or not _material_matches_envelope(envelope, material, operation="reconcile")):
         raise ProviderActionError("authority_stale")
+    _require_current_absence_binding(db, row, latest, lock=True)
     attempt = db.get(ProviderExecutionAttempt, (action_id, revision))
     if attempt is None or attempt.state != "UNKNOWN":
         raise ProviderActionError("outcome_not_reconcilable")
@@ -860,6 +1008,11 @@ def action_display_state(db, action_id: str) -> dict:
         and observation.source == "RECONCILE"
         and observation.safe_code == "receipt_not_found"
     )
+    if can_confirm_absence:
+        try:
+            _require_current_absence_binding(db, row, observation)
+        except ProviderActionError:
+            can_confirm_absence = False
     return {"status": status,
             "external_id": observation.external_ref if status == "applied" else None,
             "action_id": row.action_id, "revision": row.revision,

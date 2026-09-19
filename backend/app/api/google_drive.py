@@ -171,7 +171,7 @@ def google_callback(
     token = db.scalar(
         select(GoogleOAuthToken).where(
             GoogleOAuthToken.project_id == project_id
-        )
+        ).with_for_update()
     )
 
     if token is None:

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.jobs.queue import enqueue
+from app.jobs.queue import current_execution_claim, enqueue
 from app.models.audit_log import AuditLog
 from app.models.job import BackgroundJob
 from app.models.v54_provider_action import (
@@ -29,6 +29,10 @@ from app.provider_actions.contracts import (
     ProviderRequest,
     TimeoutAfterEffect,
     TimeoutBeforeEffect,
+)
+from app.provider_actions.recovery_guards import (
+    fence_republications, has_human_absence_history, human_absence_observation,
+    lock_action_stream, require_republication_dispatch,
 )
 
 
@@ -212,6 +216,7 @@ class ProviderActionRuntime:
             row, approval, outbox = self._dispatch_binding(db, payload, owner)
             attempt = db.get(ProviderExecutionAttempt, (row.action_id, row.revision))
             if attempt is None:
+                require_republication_dispatch(db, row)
                 self.authority.resolve(self._envelope(row), operation="dispatch")
                 self._require_live_approval(approval)
                 attempt = ProviderExecutionAttempt(
@@ -235,7 +240,7 @@ class ProviderActionRuntime:
 
         if source == "PROCESS_RECOVERY":
             return self._reconcile_request(action_id, revision, request,
-                                           source=source, job_id=job_id)
+                                           source=source, job_id=job_id, claim=owner)
         try:
             receipt = self.adapter.dispatch(request)
         except ProviderPreconditionFailed:
@@ -286,44 +291,69 @@ class ProviderActionRuntime:
         with self.sessions.begin() as db:
             row = self._action(db, action_id, revision, lock=True)
             attempt = db.get(ProviderExecutionAttempt, (action_id, revision))
-            if not attempt or attempt.state not in {"DISPATCHING", "UNKNOWN"}:
+            resolved_late_positive = bool(
+                attempt and receipt.outcome == "APPLIED" and receipt.external_ref
+                and ((attempt.state == "NOT_APPLIED" and human_absence_observation(db, row))
+                     or (attempt.state == "APPLIED" and has_human_absence_history(db, row)))
+            )
+            if not attempt or (attempt.state not in {"DISPATCHING", "UNKNOWN"} and not resolved_late_positive):
                 raise ProviderActionError("outcome_not_reconcilable")
-            self.authority.resolve(self._envelope(row), operation="reconcile")
+            # A verified receipt is evidence of an ORIGINAL effect, not a new
+            # authorization. Mutable content/credentials may since have changed.
+            if not resolved_late_positive:
+                self.authority.resolve(self._envelope(row), operation="reconcile")
             request = self._request(row)
             self._validate_receipt(request, receipt)
             self._audit(db, "late_receipt_observed", action_id, revision, actor_id, correlation_id)
         return self._record(action_id, revision, receipt.outcome, source="LATE_RECEIPT", job_id=None,
                             retry_safe=receipt.retry_safe, external_ref=receipt.external_ref, late=True)
 
-    def _reconcile_request(self, action_id, revision, request, *, source, job_id):
-        with self.sessions() as db:
-            row = self._action(db, action_id, revision)
-            self.authority.resolve(self._envelope(row), operation="reconcile")
+    def _reconcile_request(self, action_id, revision, request, *, source, job_id, claim=None):
+        claim = claim or current_execution_claim()
+        with self.sessions.begin() as db:
+            row = self._action(db, action_id, revision, lock=True)
+            if job_id is not None:
+                self._validate_reconcile_claim(db, row, job_id, claim)
+            capture = getattr(self.authority, "capture_reconcile_state", None)
+            authority_snapshot = (capture(db, self._envelope(row)) if capture else
+                                  self.authority.resolve(self._envelope(row), operation="reconcile"))
+            prior = self._latest(db, action_id, revision)
+            sequence = prior.sequence if prior else 0
+            prior_outcome = prior.outcome if prior else None
+        fence = dict(expected_sequence=sequence, reconcile_claim=claim if job_id is not None else None,
+                     authority_snapshot=authority_snapshot, validate_reconcile=True)
         try:
             receipt = self.adapter.lookup(request)
-        except Exception:
+        except (ProviderActionError, ProviderPreconditionFailed) as exc:
+            # A revoked/rebound account or changed content is not a provider
+            # outcome. The caller must request a new check under fresh authority.
+            raise ProviderActionError("authority_stale") from exc
+        except Exception as exc:
             # Lookup is read-only, but a transport/provider failure is not proof
             # of absence.  Persist a safe observation so the UI does not report
             # a silent success and never retain arbitrary exception text.
+            uncertain_code = getattr(exc, "safe_code", None)
+            code = uncertain_code if uncertain_code in {
+                "provider_lookup_ambiguous", "provider_lookup_incomplete",
+            } else "provider_lookup_failed"
             return self._record(
                 action_id, revision, "UNKNOWN", source=source, job_id=job_id,
-                retry_safe=False, safe_code="provider_lookup_failed",
+                retry_safe=False, safe_code=code, **fence,
             )
         if receipt is None:
             # Absence from an eventually-consistent provider search is not an
             # automatic NOT_APPLIED result.  It becomes explicit evidence that
             # a manager may resolve through the product recovery endpoint.
             return self._record(action_id, revision, "UNKNOWN", source=source, job_id=job_id,
-                                retry_safe=False, safe_code="receipt_not_found")
+                                retry_safe=False, safe_code="receipt_not_found", **fence)
         self._validate_receipt(request, receipt)
-        with self.sessions() as db:
-            prior = self._latest(db, action_id, revision)
-            late = bool(prior and prior.outcome == "UNKNOWN")
+        late = prior_outcome == "UNKNOWN"
         return self._record(action_id, revision, receipt.outcome, source=source, job_id=job_id,
-                            retry_safe=receipt.retry_safe, external_ref=receipt.external_ref, late=late)
+                            retry_safe=receipt.retry_safe, external_ref=receipt.external_ref, late=late, **fence)
 
     def _record(self, action_id, revision, outcome, *, source, job_id, retry_safe,
-                external_ref=None, safe_code=None, late=False):
+                external_ref=None, safe_code=None, late=False, expected_sequence=None,
+                reconcile_claim=None, authority_snapshot=None, validate_reconcile=False):
         if outcome == "UNKNOWN":
             retry_safe = False
         if outcome == "APPLIED":
@@ -334,7 +364,35 @@ class ProviderActionRuntime:
             if not attempt:
                 raise ProviderActionError("dispatch_binding_mismatch")
             latest = self._latest(db, action_id, revision)
-            if latest and latest.outcome == outcome and latest.source == source and latest.external_ref == external_ref:
+            newest_revision = db.scalar(select(ProviderAction.revision).where(
+                ProviderAction.action_id == action_id,
+            ).order_by(ProviderAction.revision.desc()).limit(1))
+            # A negative read started before a newer fact cannot erase that fact.
+            # A fresh later lookup of the current revision may still prove deletion.
+            if outcome != "APPLIED" and (newest_revision != revision or
+                    (expected_sequence is not None and (latest.sequence if latest else 0) != expected_sequence)):
+                return self._result(db, row)
+            if (not validate_reconcile and outcome != "APPLIED" and latest and latest.outcome == "APPLIED"):
+                return self._result(db, row)
+            if validate_reconcile:
+                if job_id is not None:
+                    self._validate_reconcile_claim(db, row, job_id, reconcile_claim)
+                validate = getattr(self.authority, "validate_reconcile_state", None)
+                if validate:
+                    validate(db, self._envelope(row), authority_snapshot)
+                else:
+                    current = self.authority.resolve(self._envelope(row), operation="reconcile")
+                    if self._authority_pin(current) != self._authority_pin(authority_snapshot):
+                        raise ProviderActionError("authority_stale")
+                if job_id is not None:
+                    self._validate_reconcile_claim(db, row, job_id, reconcile_claim)
+            record_binding = getattr(self.authority, "record_reconcile_state", None)
+            needs_binding = validate_reconcile and source == "RECONCILE" and record_binding is not None
+            matches_binding = getattr(self.authority, "matches_reconcile_state", None)
+            same_binding = bool(needs_binding and latest and matches_binding
+                and matches_binding(db, row, latest.sequence, authority_snapshot))
+            if ((not needs_binding or same_binding) and latest and latest.outcome == outcome and latest.source == source
+                    and latest.external_ref == external_ref and latest.safe_code == safe_code):
                 return self._result(db, row)
             sequence = (latest.sequence if latest else 0) + 1
             observation = ProviderOutcomeObservation(
@@ -350,15 +408,44 @@ class ProviderActionRuntime:
             attempt.state = outcome
             attempt.completed_at = self.clock()
             row.state = outcome
+            if outcome == "APPLIED" and has_human_absence_history(db, row):
+                fence_republications(db, row)
             outbox = db.get(ProviderDispatchOutbox, (action_id, revision))
             if outbox:
                 outbox.pending = False
             self._audit(db, "outcome_observed", action_id, revision, "provider-runtime",
                         f"observation-{sequence}", outcome=outcome, source=source,
                         retry_safe=retry_safe, late=late)
+            if needs_binding:
+                record_binding(db, row, sequence, authority_snapshot)
+            projector = getattr(self.adapter, "project_receipt", None)
+            if (projector and outcome == "APPLIED" and newest_revision == revision
+                    and source in {"RECONCILE", "PROCESS_RECOVERY", "LATE_RECEIPT"}):
+                projector(db, self._request(row), external_ref)
             db.flush()
             return {"action_id": action_id, "revision": revision, "outcome": outcome,
                     "retry_safe": retry_safe}
+
+    @staticmethod
+    def _authority_pin(authority):
+        return (authority.organization_id, authority.project_id, authority.mailbox_key,
+                authority.authority_epoch, authority.capability_version,
+                authority.credential_generation, authority.evidence_pins,
+                authority.can_reconcile)
+
+    def _validate_reconcile_claim(self, db, row, job_id, owner):
+        if owner is None or owner[0] != job_id:
+            raise ProviderActionError("dispatch_binding_mismatch")
+        _, worker, attempt, locked_at = owner
+        job = db.scalar(select(BackgroundJob).where(BackgroundJob.id == job_id)
+                        .execution_options(populate_existing=True).with_for_update())
+        expected = {"organization_id": row.organization_id, "action_id": row.action_id, "revision": row.revision}
+        if (job is None or job.kind not in {self.kind, "provider.action.reconcile"}
+                or job.payload != expected or job.status != "running" or job.worker_id != worker
+                or job.attempts != attempt or not job.locked_at or not locked_at
+                or _utc(job.locked_at) != _utc(locked_at) or not job.lease_expires_at
+                or _utc(job.lease_expires_at) <= _utc(self.clock())):
+            raise ProviderActionError("dispatch_binding_mismatch")
 
     def _dispatch_binding(self, db, payload, owner):
         job_id, worker_id, job_attempt, locked_at = owner
@@ -411,10 +498,15 @@ class ProviderActionRuntime:
 
     @staticmethod
     def _action(db, action_id, revision, lock=False):
+        if lock:
+            organization_id = db.scalar(select(ProviderAction.organization_id).where(
+                ProviderAction.action_id == action_id, ProviderAction.revision == revision))
+            if organization_id is not None:
+                lock_action_stream(db, organization_id, action_id)
         query = select(ProviderAction).where(ProviderAction.action_id == action_id,
                                              ProviderAction.revision == revision)
         if lock:
-            query = query.with_for_update()
+            query = query.execution_options(populate_existing=True).with_for_update()
         row = db.scalar(query)
         if row is None:
             raise ProviderActionError("dispatch_binding_mismatch")
