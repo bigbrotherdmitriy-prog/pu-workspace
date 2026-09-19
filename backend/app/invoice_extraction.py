@@ -38,6 +38,15 @@ _CATEGORY_GUARDS = {
     "командировки": ("командиров", "проезд", "гостиниц", "суточн"),
 }
 _CURRENCY_CODES = {"RUB", "USD", "EUR", "CNY", "KZT", "BYN"}
+_DATE_TOKEN = r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)"
+_DATE_RE = re.compile(_DATE_TOKEN)
+_PAYMENT_DEADLINE_RE = re.compile(
+    r"(?:срок\s+(?:оплаты|платежа)|дата\s+(?:оплаты|платежа)|"
+    r"(?:оплатить|оплата|плат[её]ж)\s+(?:до|не\s+позднее)|"
+    r"к\s+оплате\s+(?:до|не\s+позднее))"
+    r"[^\d\r\n.!?]{0,24}" + _DATE_TOKEN,
+    re.IGNORECASE,
+)
 
 
 def _money(value: object) -> Decimal | None:
@@ -63,14 +72,28 @@ def _category_supported(name: str, evidence: str) -> bool:
     return any(marker in normalized for marker in markers)
 
 
-def _date_hint(text: str) -> date | None:
-    match = re.search(r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)", text)
-    if not match:
-        return None
+def _date_from_match(match: re.Match[str]) -> date | None:
+    groups = match.groups()[-3:]
     try:
-        return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        return date(int(groups[2]), int(groups[1]), int(groups[0]))
     except ValueError:
         return None
+
+
+def _date_hint(text: str) -> date | None:
+    match = _DATE_RE.search(text)
+    if not match:
+        return None
+    return _date_from_match(match)
+
+
+def _planned_date_hint(text: str) -> date | None:
+    """Prefer an explicitly labelled payment deadline over invoice metadata dates."""
+    for match in _PAYMENT_DEADLINE_RE.finditer(text):
+        parsed = _date_from_match(match)
+        if parsed is not None:
+            return parsed
+    return _date_hint(text)
 
 
 def _regex_fallback(text: str, reason: str) -> InvoiceFields:
@@ -90,7 +113,7 @@ def _regex_fallback(text: str, reason: str) -> InvoiceFields:
         counterparty=None, counterparty_evidence_quote=None,
         payment_purpose=None, payment_purpose_evidence_quote=None,
         suggested_category_name=None, category_evidence_quote=None,
-        planned_date=_date_hint(text), confidence=0.35,
+        planned_date=_planned_date_hint(text), confidence=0.35,
         extraction_method="regex", fallback_reason=reason,
     )
 
@@ -135,7 +158,7 @@ def extract_invoice_fields(
         counterparty_evidence_quote=counterparty_quote,
         payment_purpose=purpose, payment_purpose_evidence_quote=purpose_quote,
         suggested_category_name=suggested, category_evidence_quote=category_quote,
-        planned_date=_date_hint(text),
+        planned_date=_planned_date_hint(text),
         confidence=CONFIDENCE_FROM_LLM_LEVEL.get(payload.get("confidence"), 0.45),
         extraction_method="llm",
     )
