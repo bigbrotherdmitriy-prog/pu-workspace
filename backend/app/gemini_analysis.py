@@ -128,6 +128,28 @@ COMBINED_EXTRACTION_SCHEMA = {
     "required": ["obligations", "response_candidates", "risks", "decisions"],
 }
 
+INVOICE_EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "amount": {"type": "number", "nullable": True},
+        "amount_evidence_quote": {"type": "string", "nullable": True},
+        "currency": {"type": "string", "nullable": True},
+        "counterparty": {"type": "string", "nullable": True},
+        "counterparty_evidence_quote": {"type": "string", "nullable": True},
+        "payment_purpose": {"type": "string", "nullable": True},
+        "payment_purpose_evidence_quote": {"type": "string", "nullable": True},
+        "suggested_category_name": {"type": "string", "nullable": True},
+        "category_evidence_quote": {"type": "string", "nullable": True},
+        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+    },
+    "required": [
+        "amount", "amount_evidence_quote", "currency", "counterparty",
+        "counterparty_evidence_quote", "payment_purpose",
+        "payment_purpose_evidence_quote", "suggested_category_name",
+        "category_evidence_quote", "confidence",
+    ],
+}
+
 
 MAIL_COMPOSER_SCHEMA = {
     "type": "object",
@@ -269,6 +291,52 @@ def extract_combined_fields_with_gemini(
     result = json.loads(raw)
     if not isinstance(result, dict):
         raise ValueError("Gemini returned an unexpected response")
+    return result
+
+
+def extract_invoice_fields_with_gemini(
+    text: str, filename: str, category_names: list[str],
+) -> dict[str, Any]:
+    """Extract an invoice proposal; callers must verify evidence and require confirmation."""
+    import httpx
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    categories = ", ".join(category_names) or "(категории не настроены)"
+    prompt = (
+        f"Имя файла: {filename}\n"
+        f"Разрешённые категории затрат: {categories}\n\n"
+        "Извлеки из счёта итоговую сумму к оплате, валюту, контрагента и назначение платежа. "
+        "Предложи ровно одну категорию только из разрешённого списка, если текст даёт для этого "
+        "основание. Не используй историю контрагента. Для каждого значения верни короткую "
+        "дословную цитату из документа. Если основания нет, верни null. Категория — только "
+        "предложение для последующей проверки человеком.\n\nТЕКСТ СЧЁТА:\n" + text[:50_000]
+    )
+    instruction = SYSTEM_INSTRUCTION + """
+
+Каждое поле evidence_quote должно быть дословной подстрокой исходного текста.
+Не классифицируй материалы как «Зарплата» без прямого основания в документе.
+Не применяй категорию автоматически: результат является только предложением.
+"""
+    payload = {
+        "systemInstruction": {"parts": [{"text": instruction}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": _generation_config(model, INVOICE_EXTRACTION_SCHEMA, 0.1),
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = request_with_retry(
+            client, "POST", f"{base_url}/models/{model}:generateContent",
+            policy=HEAVY_AI_RETRY,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=payload,
+        )
+    parts = response.json()["candidates"][0]["content"]["parts"]
+    result = json.loads("".join(part.get("text", "") for part in parts))
+    if not isinstance(result, dict):
+        raise ValueError("Gemini returned an unexpected invoice response")
     return result
 
 

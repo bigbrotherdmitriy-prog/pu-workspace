@@ -865,6 +865,13 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .structured-import button { padding: 9px 12px; border: 1px solid #0b9068; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
 .structured-import button.secondary { background: #fff; color: #526071; border-color: #cfd7df; }
 .structured-import button:disabled { opacity: .5; cursor: default; }
+.invoice-review-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.invoice-review-grid label { display: grid; gap: 6px; color: #526071; font-size: 12px; font-weight: 700; }
+.invoice-review-grid label.wide { grid-column: span 2; }
+.invoice-review-grid input, .invoice-review-grid select, .structured-actions input { min-height: 40px; padding: 8px 10px; border: 1px solid #cfd7df; border-radius: 8px; background: #fff; color: #15261f; }
+.invoice-evidence { display: grid; gap: 6px; padding: 12px; border-radius: 9px; background: #f3f8f6; }
+.invoice-evidence small { color: #526071; overflow-wrap: anywhere; }
+@media(max-width: 760px) { .invoice-review-grid { grid-template-columns: 1fr; } .invoice-review-grid label.wide { grid-column: auto; } }
 .structured-table { overflow: auto; max-height: 460px; border: 1px solid #dbe3df; border-radius: 9px; }
 .structured-table table { width: 100%; border-collapse: collapse; min-width: 820px; }
 .structured-table th, .structured-table td { padding: 9px 10px; border-bottom: 1px solid #e8eeeb; text-align: left; vertical-align: top; }

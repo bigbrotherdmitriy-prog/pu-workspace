@@ -173,6 +173,7 @@ export class StorageApi {
         open_risks: 0, pending_decisions: 0, contracts: 0, active_contracts: 0, messages: 0, pending_messages: 0 },
         documents_by_source: [], documents_by_status: [], tasks_by_status: [], risks_by_criticality: [], messages_by_channel: [] },
       "/execution/document-candidates": { candidates: [] },
+      "/execution/cost-categories": { categories: [] },
       "/execution/overview": { budget: [], cash_flow: [], procurement: [], acts: [], baselines: [], schedule: [], summary: {
         budget_planned: 0, budget_committed: 0, budget_actual: 0, budget_forecast: 0, budget_variance: 0, cash_balance_forecast: 0,
         cash_gap: 0, cash_gap_date: null, delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 0, unlinked_invoices: 0,

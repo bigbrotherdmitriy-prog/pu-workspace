@@ -43,6 +43,7 @@ export type FinanceOverview = {
   budget: {
     id: number;
     contract_id?: number;
+    cost_category_id?: number;
     category: string;
     description: string;
     planned_amount: number;
@@ -58,6 +59,7 @@ export type FinanceOverview = {
     schedule_item_id?: number;
     budget_line_id?: number;
     source_document_id?: number;
+    cost_category_id?: number;
     direction: string;
     title: string;
     planned_date: string;
@@ -89,6 +91,40 @@ export type FinanceOverview = {
     amount: number;
     status: string;
   }[];
+};
+
+export type CostCategory = {
+  id: number;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+};
+
+export type InvoiceExtractionProposal = {
+  id: number;
+  project_id: number;
+  source_document_id: number;
+  source_document_version_id: number;
+  source_document_sha256: string;
+  amount?: number;
+  amount_evidence_quote?: string;
+  currency: string;
+  counterparty?: string;
+  counterparty_evidence_quote?: string;
+  payment_purpose?: string;
+  payment_purpose_evidence_quote?: string;
+  proposed_cost_category_id?: number;
+  selected_cost_category_id?: number;
+  category_evidence_quote?: string;
+  planned_date?: string;
+  confidence: number;
+  extraction_method: "llm" | "regex";
+  fallback_reason?: string;
+  target_kind: "cash_flow" | "budget";
+  status: "proposed" | "confirmed" | "rejected";
+  created_cash_flow_id?: number;
+  created_budget_line_id?: number;
+  requires_confirmation: boolean;
 };
 
 export type MppPreview = {

@@ -6,6 +6,8 @@ import type {
   FinanceOverview,
   FinanceStructuredPreview,
   FinanceStructuredRow,
+  CostCategory,
+  InvoiceExtractionProposal,
 } from "./types";
 
 type FinanceControllerOptions = {
@@ -35,17 +37,21 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [financeScheduleItemId, setFinanceScheduleItemId] = useState(0);
   const [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
   const [financeBaselineId, setFinanceBaselineId] = useState(0);
+  const [costCategories, setCostCategories] = useState<CostCategory[]>([]);
+  const [invoiceExtractionProposal, setInvoiceExtractionProposal] = useState<InvoiceExtractionProposal | null>(null);
 
   async function loadFinance() {
     if (!projectId) return;
     try {
       const contractQuery = selectedFinanceContractId ? `&contract_id=${selectedFinanceContractId}` : "";
-      const [overview, suggestions] = await Promise.all([
+      const [overview, suggestions, categoryResult] = await Promise.all([
         api<FinanceOverview>(`/execution/overview?project_id=${projectId}`),
         api<{ candidates: FinanceDocumentCandidate[] }>(`/execution/document-candidates?project_id=${projectId}${contractQuery}`),
+        api<{ categories: CostCategory[] }>(`/execution/cost-categories?project_id=${projectId}`),
       ]);
       setFinance(overview);
       setFinanceCandidates(suggestions.candidates || []);
+      setCostCategories(categoryResult.categories || []);
     } catch (error) {
       setError((error as Error).message);
     }
@@ -82,6 +88,20 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       }
       return;
     }
+    if (candidate.kind === "invoice") {
+      try {
+        const proposal = await api<InvoiceExtractionProposal>(`/execution/documents/${candidate.document_id}/invoice-extraction-proposals`, {
+          method: "POST",
+          body: JSON.stringify({ project_id: projectId, target_kind: "cash_flow" }),
+        });
+        setInvoiceExtractionProposal(proposal);
+        setNotice(`Счёт «${candidate.name}» разобран. Проверьте сумму, назначение и категорию перед подтверждением.`);
+        window.setTimeout(() => document.getElementById("invoice-extraction-review")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      } catch (error) {
+        setError((error as Error).message);
+      }
+      return;
+    }
     setFinanceKind(candidate.kind);
     setFinanceTitle(candidate.name.replace(/\.[^.]+$/, ""));
     setFinanceAmount(candidate.hints.amount || "");
@@ -90,6 +110,59 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceSourceDocumentId(candidate.document_id);
     setNotice(`Документ «${candidate.name}» выбран как источник. Проверьте поля и подтвердите предложение.`);
     window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  }
+
+  function editInvoiceExtraction(patch: Partial<InvoiceExtractionProposal>) {
+    setInvoiceExtractionProposal((current) => current ? { ...current, ...patch } : current);
+  }
+
+  async function addCostCategory(name: string) {
+    const value = name.trim();
+    if (!value) return;
+    try {
+      await api("/execution/cost-categories", {
+        method: "POST", body: JSON.stringify({ project_id: projectId, name: value }),
+      });
+      await loadFinance();
+      setNotice(`Категория «${value}» добавлена в справочник.`);
+    } catch (error) { setError((error as Error).message); }
+  }
+
+  async function confirmInvoiceExtraction() {
+    const proposal = invoiceExtractionProposal;
+    if (!proposal) return;
+    try {
+      const reviewed = await api<InvoiceExtractionProposal>(`/execution/invoice-extraction-proposals/${proposal.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          selected_cost_category_id: proposal.selected_cost_category_id || null,
+          amount: proposal.amount || null,
+          counterparty: proposal.counterparty || null,
+          payment_purpose: proposal.payment_purpose || null,
+          planned_date: proposal.planned_date || null,
+          target_kind: proposal.target_kind,
+        }),
+      });
+      const confirmed = await api<InvoiceExtractionProposal>(`/execution/invoice-extraction-proposals/${reviewed.id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          contract_id: selectedFinanceContractId || null,
+          budget_line_id: reviewed.target_kind === "cash_flow" ? financeBudgetLineId || null : null,
+        }),
+      });
+      setInvoiceExtractionProposal(confirmed);
+      setNotice("Счёт подтверждён человеком; финансовая строка создана как предложение.");
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
+  async function rejectInvoiceExtraction() {
+    if (!invoiceExtractionProposal) return;
+    try {
+      const rejected = await api<InvoiceExtractionProposal>(`/execution/invoice-extraction-proposals/${invoiceExtractionProposal.id}/reject`, { method: "POST" });
+      setInvoiceExtractionProposal(rejected);
+      setNotice("Предложение по счёту отклонено; финансовые записи не создавались.");
+    } catch (error) { setError((error as Error).message); }
   }
 
   async function prepareDroppedFinanceDocument(documentId: number, name: string,
@@ -283,13 +356,15 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   return {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
+    setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
+    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }

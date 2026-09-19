@@ -149,7 +149,7 @@ class LLMExtractionFailed(RuntimeError):
 _MAX_QUOTE_LENGTH = 2000
 
 
-def _verbatim(quote: str | None, original_text: str) -> str | None:
+def verify_verbatim_evidence(quote: str | None, original_text: str) -> str | None:
     """Return quote unchanged if it is a real substring of the source, else None."""
     if not quote:
         return None
@@ -157,6 +157,10 @@ def _verbatim(quote: str | None, original_text: str) -> str | None:
     if quote.casefold() not in original_text.casefold():
         return None
     return quote
+
+
+# Backward-compatible internal name used by the existing extraction mappers.
+_verbatim = verify_verbatim_evidence
 
 
 def _parse_iso_date(value: str | None) -> date | None:
