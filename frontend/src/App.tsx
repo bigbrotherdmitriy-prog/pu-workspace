@@ -479,14 +479,16 @@ export function App() {
   const sourceProvider = picker.context?.provider;
   const sourceBreadcrumbs = picker.breadcrumbs;
   const {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows,
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
+    setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
+    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
@@ -2833,6 +2835,8 @@ export function App() {
               scheduleItemId={financeScheduleItemId}
               budgetLineId={financeBudgetLineId}
               baselineId={financeBaselineId}
+              costCategories={costCategories}
+              invoiceProposal={invoiceExtractionProposal}
               setKind={setFinanceKind}
               setTitle={setFinanceTitle}
               setAmount={setFinanceAmount}
@@ -2844,6 +2848,11 @@ export function App() {
               setScheduleItemId={setFinanceScheduleItemId}
               setBudgetLineId={setFinanceBudgetLineId}
               setBaselineId={setFinanceBaselineId}
+              onEditInvoice={editInvoiceExtraction}
+              onConfirmInvoice={() => void confirmInvoiceExtraction()}
+              onRejectInvoice={() => void rejectInvoiceExtraction()}
+              onCloseInvoice={() => setInvoiceExtractionProposal(null)}
+              onAddCostCategory={(name) => void addCostCategory(name)}
               onClosePreview={() => {
                 setFinanceStructuredPreview(null);
                 setFinanceStructuredRows([]);

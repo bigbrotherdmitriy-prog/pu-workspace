@@ -1,5 +1,5 @@
-import type { Dispatch, SetStateAction } from "react";
-import type { FinanceOverview, FinanceStructuredPreview } from "./types";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import type { CostCategory, FinanceOverview, FinanceStructuredPreview, InvoiceExtractionProposal } from "./types";
 import { formatMoney } from "../../utils/numberFormat";
 
 type Props = {
@@ -13,6 +13,10 @@ type Props = {
   setBaselineId: (value: number) => void;
   setBudgetLineId: (value: number) => void; onClosePreview: () => void; onImport: () => void; onAdd: () => void;
   onConfirm: (kind: string, id: number, status: string) => void; onConfirmPayment: (id: number, amount: number) => void;
+  costCategories?: CostCategory[]; invoiceProposal?: InvoiceExtractionProposal | null;
+  onEditInvoice?: (patch: Partial<InvoiceExtractionProposal>) => void;
+  onConfirmInvoice?: () => void; onRejectInvoice?: () => void; onCloseInvoice?: () => void;
+  onAddCostCategory?: (name: string) => void;
   includeEditor?: boolean; includeRegisters?: boolean; includeScheduleRegister?: boolean; includeCashFlowRegister?: boolean;
 };
 
@@ -22,9 +26,33 @@ export function FinanceOperations(props: Props) {
   const { finance, preview, selectedRows, setSelectedRows, selectedContractId, kind, title, amount, date, extra, objectName, category, note,
     sourceDocumentId, scheduleItemId, budgetLineId, baselineId, setKind, setTitle, setAmount, setDate, setExtra,
     setScheduleItemId, setBudgetLineId, setBaselineId, setObjectName, setCategory, setNote, onClosePreview, onImport, onAdd, onConfirm, onConfirmPayment,
+    costCategories = [], invoiceProposal, onEditInvoice, onConfirmInvoice, onRejectInvoice, onCloseInvoice, onAddCostCategory,
     includeEditor = true, includeRegisters = true, includeScheduleRegister = true, includeCashFlowRegister = true } = props;
+  const [newCategory, setNewCategory] = useState("");
   const filterContract = <T extends { contract_id?: number }>(rows: T[] | undefined) => rows?.filter((item) => !selectedContractId || item.contract_id === selectedContractId) || [];
   return <>
+    {includeEditor && invoiceProposal && <section className="card structured-import invoice-extraction-review" id="invoice-extraction-review">
+      <div className="card-head"><div><span className="eyebrow">СЧЁТ · ПРЕДЛОЖЕНИЕ AI</span><h2>Проверьте данные перед импортом</h2><p>Ни одно поле не попадёт в бюджет или ДДС без подтверждения менеджером.</p></div><button className="secondary" onClick={onCloseInvoice}>Закрыть</button></div>
+      {invoiceProposal.extraction_method === "regex" && <p className="finance-warning">AI недоступен ({invoiceProposal.fallback_reason || "fallback"}). Сумма найдена резервным правилом; заполните остальные поля вручную.</p>}
+      <div className="invoice-review-grid">
+        <label>Сумма<input type="number" min="0.01" value={invoiceProposal.amount ?? ""} onChange={(event) => onEditInvoice?.({ amount: Number(event.target.value) || undefined })} /></label>
+        <label>Валюта<input value={invoiceProposal.currency} disabled /></label>
+        <label>Плановая дата<input type="date" value={invoiceProposal.planned_date || ""} onChange={(event) => onEditInvoice?.({ planned_date: event.target.value || undefined })} /></label>
+        <label>Контрагент<input value={invoiceProposal.counterparty || ""} onChange={(event) => onEditInvoice?.({ counterparty: event.target.value })} /></label>
+        <label className="wide">Назначение платежа<input value={invoiceProposal.payment_purpose || ""} onChange={(event) => onEditInvoice?.({ payment_purpose: event.target.value })} /></label>
+        <label>Куда импортировать<select value={invoiceProposal.target_kind} onChange={(event) => onEditInvoice?.({ target_kind: event.target.value as "cash_flow" | "budget" })}><option value="cash_flow">ДДС</option><option value="budget">Бюджет</option></select></label>
+        <label>Категория затрат<select aria-label="Категория затрат счёта" value={invoiceProposal.selected_cost_category_id || ""} onChange={(event) => onEditInvoice?.({ selected_cost_category_id: Number(event.target.value) || undefined })}><option value="">Выберите категорию</option>{costCategories.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      </div>
+      <div className="invoice-evidence">
+        <strong>Основания из документа</strong>
+        <small>Сумма: {invoiceProposal.amount_evidence_quote || "не найдено"}</small>
+        <small>Контрагент: {invoiceProposal.counterparty_evidence_quote || "не найдено"}</small>
+        <small>Назначение: {invoiceProposal.payment_purpose_evidence_quote || "не найдено"}</small>
+        <small>Категория: {invoiceProposal.category_evidence_quote || "нет подтверждаемой цитаты"}</small>
+      </div>
+      <div className="structured-actions"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Новая категория" /><button className="secondary" disabled={!newCategory.trim()} onClick={() => { onAddCostCategory?.(newCategory); setNewCategory(""); }}>Добавить в справочник</button></div>
+      {invoiceProposal.status === "proposed" ? <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={!invoiceProposal.amount || !invoiceProposal.payment_purpose || !invoiceProposal.selected_cost_category_id || (invoiceProposal.target_kind === "cash_flow" && !invoiceProposal.planned_date)} onClick={onConfirmInvoice}>Подтвердить и создать предложение</button></div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>}
+    </section>}
     {includeEditor && preview && <section className="card structured-import" id="structured-import">
       <div className="card-head"><div><span className="eyebrow">ПАКЕТНОЕ ПРЕДЛОЖЕНИЕ</span><h2>{preview.name}</h2><p>Сопоставлено колонок: {Object.keys(preview.mapping).length}. Выберите строки; импорт создаст предложения со ссылкой на строку источника.</p></div><button className="secondary" onClick={onClosePreview}>Закрыть</button></div>
       {preview.issues.map((issue) => <p className="finance-warning" key={issue}>{issue}</p>)}

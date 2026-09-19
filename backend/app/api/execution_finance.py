@@ -17,10 +17,15 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem
+from app.models.execution_finance import (
+    AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal,
+    PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
+)
 from app.models.organization_contract import Contract
+from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
+from app.invoice_extraction import extract_invoice_fields
 from app.structured_import import parse_structured_rows
 from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
 from app.schedule_import.mspdi import build_mspdi
@@ -162,7 +167,8 @@ def _mpp_uid(item: ScheduleItem) -> str | None:
 class BudgetCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
-    category: str = Field(min_length=1, max_length=200)
+    category: str | None = Field(default=None, min_length=1, max_length=200)
+    cost_category_id: int | None = Field(default=None, ge=1)
     description: str = Field(min_length=2, max_length=1000)
     planned_amount: Decimal = Field(ge=0)
     forecast_amount: Decimal | None = Field(default=None, ge=0)
@@ -185,6 +191,7 @@ class CashFlowCreate(BaseModel):
     counterparty: str | None = Field(default=None, max_length=500)
     object_name: str | None = Field(default=None, max_length=300)
     category: str | None = Field(default=None, max_length=200)
+    cost_category_id: int | None = Field(default=None, ge=1)
     note: str | None = Field(default=None, max_length=5000)
 
     _planned_money = field_validator("planned_amount", mode="before")(
@@ -200,6 +207,38 @@ class InvoiceProposalCreate(CashFlowCreate):
     source_document_id: int | None = None
     source_document_version_id: int | None = None
     source_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
+
+
+class CostCategoryCreate(BaseModel):
+    project_id: int
+    name: str = Field(min_length=1, max_length=200)
+
+
+class CostCategoryUpdate(BaseModel):
+    project_id: int
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    is_active: bool | None = None
+
+
+class InvoiceExtractionCreate(BaseModel):
+    project_id: int
+    target_kind: str = Field(default="cash_flow", pattern="^(cash_flow|budget)$")
+
+
+class InvoiceExtractionUpdate(BaseModel):
+    selected_cost_category_id: int | None = Field(default=None, ge=1)
+    amount: Decimal | None = Field(default=None, gt=0)
+    counterparty: str | None = Field(default=None, max_length=500)
+    payment_purpose: str | None = Field(default=None, min_length=1, max_length=1000)
+    planned_date: date | None = None
+    target_kind: str | None = Field(default=None, pattern="^(cash_flow|budget)$")
+
+
+class InvoiceExtractionConfirm(BaseModel):
+    contract_id: int | None = None
+    budget_line_id: int | None = None
+    schedule_item_id: int | None = None
+    task_id: int | None = None
 
 
 class PaymentConfirmation(BaseModel):
@@ -288,6 +327,95 @@ _DOCUMENT_KIND_MARKERS = {
     "cash-flow": (("ддс", 55), ("движение денежных средств", 55), ("платежный календарь", 40), ("платёжный календарь", 40)),
     "act": (("акт выполненных работ", 55), ("акт приемки", 50), ("акт приёмки", 50), ("кс-2", 45), ("кс 2", 40)),
 }
+
+_DEFAULT_COST_CATEGORIES = ("Прямые", "Накладные", "Зарплата", "Аренда", "Командировки")
+
+
+def _normalize_category(value: str) -> str:
+    return " ".join(value.strip().casefold().split())
+
+
+def _project_organization_id(db: Session, project_id: int) -> int:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(404, "Проект не найден")
+    return project.organization_id
+
+
+def _ensure_default_categories(db: Session, organization_id: int) -> list[CostCategory]:
+    rows = list(db.scalars(select(CostCategory).where(
+        CostCategory.organization_id == organization_id,
+    ).order_by(CostCategory.sort_order, CostCategory.id)))
+    existing = {row.normalized_name for row in rows}
+    for index, name in enumerate(_DEFAULT_COST_CATEGORIES, start=1):
+        normalized = _normalize_category(name)
+        if normalized not in existing:
+            row = CostCategory(
+                organization_id=organization_id, name=name,
+                normalized_name=normalized, sort_order=index * 10,
+            )
+            db.add(row)
+            rows.append(row)
+    db.flush()
+    return sorted(rows, key=lambda row: (row.sort_order, row.id or 0))
+
+
+def _category_for_project(db: Session, project_id: int, category_id: int) -> CostCategory:
+    organization_id = _project_organization_id(db, project_id)
+    category = db.scalar(select(CostCategory).where(
+        CostCategory.id == category_id,
+        CostCategory.organization_id == organization_id,
+        CostCategory.is_active.is_(True),
+    ))
+    if category is None:
+        raise HTTPException(422, "Категория затрат не принадлежит организации проекта или отключена")
+    return category
+
+
+def _dual_write_category(
+    db: Session, project_id: int, category_id: int | None, legacy_name: str | None,
+    *, required: bool,
+) -> tuple[int | None, str | None]:
+    organization_id = _project_organization_id(db, project_id)
+    _ensure_default_categories(db, organization_id)
+    if category_id is not None:
+        category = _category_for_project(db, project_id, category_id)
+        return category.id, category.name
+    normalized = _normalize_category(legacy_name or "")
+    if normalized:
+        category = db.scalar(select(CostCategory).where(
+            CostCategory.organization_id == organization_id,
+            CostCategory.normalized_name == normalized,
+            CostCategory.is_active.is_(True),
+        ))
+        return (category.id if category else None), (category.name if category else legacy_name.strip())
+    if required:
+        raise HTTPException(422, "Выберите категорию затрат")
+    return None, None
+
+
+def _invoice_proposal_payload(proposal: InvoiceExtractionProposal) -> dict:
+    return {
+        "id": proposal.id, "project_id": proposal.project_id,
+        "source_document_id": proposal.source_document_id,
+        "source_document_version_id": proposal.source_document_version_id,
+        "source_document_sha256": proposal.source_document_sha256,
+        "amount": proposal.amount, "amount_evidence_quote": proposal.amount_evidence_quote,
+        "currency": proposal.currency, "counterparty": proposal.counterparty,
+        "counterparty_evidence_quote": proposal.counterparty_evidence_quote,
+        "payment_purpose": proposal.payment_purpose,
+        "payment_purpose_evidence_quote": proposal.payment_purpose_evidence_quote,
+        "proposed_cost_category_id": proposal.proposed_cost_category_id,
+        "selected_cost_category_id": proposal.selected_cost_category_id,
+        "category_evidence_quote": proposal.category_evidence_quote,
+        "planned_date": proposal.planned_date, "confidence": proposal.confidence,
+        "extraction_method": proposal.extraction_method,
+        "fallback_reason": proposal.fallback_reason,
+        "target_kind": proposal.target_kind, "status": proposal.status,
+        "created_cash_flow_id": proposal.created_cash_flow_id,
+        "created_budget_line_id": proposal.created_budget_line_id,
+        "requires_confirmation": proposal.status == "proposed",
+    }
 
 
 def _finance_document_score(name: str, content: str, kind: str) -> tuple[int, list[str]]:
@@ -819,7 +947,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status,
                       **schedule_cpm.get(x.id, {"total_float": 0, "is_critical": False,
                                                 "constraint_violation": False})} for x in schedule],
-        "budget": [{"id": x.id, "contract_id": x.contract_id, "category": x.category, "description": x.description,
+        "budget": [{"id": x.id, "contract_id": x.contract_id, "cost_category_id": x.cost_category_id,
+                    "category": x.category, "description": x.description,
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
@@ -827,6 +956,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                         "source_document_id": x.source_document_id,
                         "source_document_version_id": x.source_document_version_id,
                         "source_document_sha256": x.source_document_sha256,
+                        "cost_category_id": x.cost_category_id,
                         "direction": x.direction, "title": x.title,
                         "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
                         "actual_amount": x.actual_amount, "currency": x.currency, "counterparty": x.counterparty,
@@ -967,20 +1097,28 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
             )
         elif payload.kind == "budget":
             amount = _money(row["amount"])
+            category_id, category_name = _dual_write_category(
+                db, payload.project_id, None, row["category"], required=True,
+            )
             item = BudgetLine(
                 project_id=payload.project_id, contract_id=payload.contract_id,
-                category=row["category"], description=row["title"], planned_amount=amount,
+                cost_category_id=category_id, category=category_name,
+                description=row["title"], planned_amount=amount,
                 forecast_amount=amount, status="proposed", source_name=source_name,
                 source_excerpt=row["excerpt"],
             )
         else:
+            category_id, category_name = _dual_write_category(
+                db, payload.project_id, None, row.get("category"), required=False,
+            )
             item = CashFlowEntry(
                 project_id=payload.project_id, contract_id=payload.contract_id,
                 source_document_id=document.id, direction=row["direction"] or payload.direction,
                 source_document_version_id=version.id, source_document_sha256=digest,
                 title=row["title"], planned_date=_import_date(row["planned_date"]),
                 planned_amount=_money(row["amount"], allow_zero=False), counterparty=row["counterparty"],
-                object_name=row.get("object_name"), category=row.get("category"), note=row.get("note"),
+                object_name=row.get("object_name"), cost_category_id=category_id,
+                category=category_name, note=row.get("note"),
                 status="proposed", source_name=source_name, source_excerpt=row["excerpt"],
             )
         db.add(item)
@@ -1335,17 +1473,263 @@ def update_schedule(item_id: int, payload: ScheduleProgress, db: Session = Depen
             "auto_scheduled_ids": changed}
 
 
+@router.get("/cost-categories")
+def list_cost_categories(project_id: int, include_inactive: bool = False,
+                         db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    organization_id = _project_organization_id(db, project_id)
+    rows = _ensure_default_categories(db, organization_id)
+    db.commit()
+    return {"categories": [
+        {"id": row.id, "name": row.name, "is_active": row.is_active, "sort_order": row.sort_order}
+        for row in rows if include_inactive or row.is_active
+    ]}
+
+
+@router.post("/cost-categories")
+def create_cost_category(payload: CostCategoryCreate, db: Session = Depends(get_db),
+                         user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
+    organization_id = _project_organization_id(db, payload.project_id)
+    normalized = _normalize_category(payload.name)
+    existing = db.scalar(select(CostCategory).where(
+        CostCategory.organization_id == organization_id,
+        CostCategory.normalized_name == normalized,
+    ))
+    if existing is not None:
+        if not existing.is_active:
+            existing.is_active = True
+            db.commit()
+        return {"id": existing.id, "name": existing.name, "is_active": existing.is_active}
+    max_order = db.scalar(select(func.max(CostCategory.sort_order)).where(
+        CostCategory.organization_id == organization_id,
+    )) or 0
+    item = CostCategory(
+        organization_id=organization_id, name=payload.name.strip(),
+        normalized_name=normalized, sort_order=max_order + 10,
+    )
+    db.add(item); db.flush()
+    _audit(db, "cost_category_created", "cost_category", item.id, user.id,
+           f"organization={organization_id}")
+    db.commit()
+    return {"id": item.id, "name": item.name, "is_active": item.is_active}
+
+
+@router.patch("/cost-categories/{category_id}")
+def update_cost_category(category_id: int, payload: CostCategoryUpdate,
+                         db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
+    organization_id = _project_organization_id(db, payload.project_id)
+    item = db.scalar(select(CostCategory).where(
+        CostCategory.id == category_id,
+        CostCategory.organization_id == organization_id,
+    ))
+    if item is None:
+        raise HTTPException(404, "Категория затрат не найдена")
+    if payload.name is not None:
+        normalized = _normalize_category(payload.name)
+        duplicate = db.scalar(select(CostCategory.id).where(
+            CostCategory.organization_id == item.organization_id,
+            CostCategory.normalized_name == normalized,
+            CostCategory.id != item.id,
+        ))
+        if duplicate is not None:
+            raise HTTPException(409, "Категория с таким названием уже существует")
+        item.name = payload.name.strip()
+        item.normalized_name = normalized
+    if payload.is_active is not None:
+        item.is_active = payload.is_active
+    _audit(db, "cost_category_updated", "cost_category", item.id, user.id,
+           f"active={item.is_active}")
+    db.commit()
+    return {"id": item.id, "name": item.name, "is_active": item.is_active}
+
+
+@router.post("/documents/{document_id}/invoice-extraction-proposals")
+def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate,
+                              db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    document, version, digest, content = _document_content(db, payload.project_id, document_id)
+    existing = db.scalar(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.project_id == payload.project_id,
+        InvoiceExtractionProposal.source_document_version_id == version.id,
+    ))
+    if existing is not None:
+        return _invoice_proposal_payload(existing)
+    organization_id = _project_organization_id(db, payload.project_id)
+    categories = [row for row in _ensure_default_categories(db, organization_id) if row.is_active]
+    fields = extract_invoice_fields(
+        db, payload.project_id, content, document.name, [row.name for row in categories],
+    )
+    category_by_name = {row.name.casefold(): row for row in categories}
+    suggested = category_by_name.get((fields.suggested_category_name or "").casefold())
+    item = InvoiceExtractionProposal(
+        project_id=payload.project_id, source_document_id=document.id,
+        source_document_version_id=version.id, source_document_sha256=digest,
+        proposed_cost_category_id=suggested.id if suggested else None,
+        selected_cost_category_id=suggested.id if suggested else None,
+        amount=fields.amount, amount_evidence_quote=fields.amount_evidence_quote,
+        currency=fields.currency, counterparty=fields.counterparty,
+        counterparty_evidence_quote=fields.counterparty_evidence_quote,
+        payment_purpose=fields.payment_purpose,
+        payment_purpose_evidence_quote=fields.payment_purpose_evidence_quote,
+        category_evidence_quote=fields.category_evidence_quote,
+        planned_date=fields.planned_date, confidence=fields.confidence,
+        extraction_method=fields.extraction_method, fallback_reason=fields.fallback_reason,
+        target_kind=payload.target_kind, status="proposed",
+    )
+    db.add(item); db.flush()
+    _audit(db, "invoice_extraction_proposed", "invoice_extraction_proposal", item.id, user.id,
+           f"document={document.id}; version={version.id}; method={fields.extraction_method}")
+    db.commit()
+    return _invoice_proposal_payload(item)
+
+
+@router.patch("/invoice-extraction-proposals/{proposal_id}")
+def update_invoice_extraction(proposal_id: int, payload: InvoiceExtractionUpdate,
+                              db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.scalar(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.id == proposal_id,
+    ).with_for_update())
+    if item is None:
+        raise HTTPException(404, "Предложение счёта не найдено")
+    require_project_role(db, user, item.project_id, "manager")
+    if item.status != "proposed":
+        raise HTTPException(409, "Подтверждённое или отклонённое предложение неизменяемо")
+    data = payload.model_dump(exclude_unset=True)
+    if "selected_cost_category_id" in data:
+        if data["selected_cost_category_id"] is None:
+            item.selected_cost_category_id = None
+        else:
+            item.selected_cost_category_id = _category_for_project(
+                db, item.project_id, data["selected_cost_category_id"],
+            ).id
+        data.pop("selected_cost_category_id")
+    if "amount" in data:
+        data["amount"] = _money(data["amount"], allow_zero=False) if data["amount"] is not None else None
+    for name, value in data.items():
+        setattr(item, name, value.strip() if isinstance(value, str) else value)
+    _audit(db, "invoice_extraction_edited", "invoice_extraction_proposal", item.id, user.id,
+           "human_review=true")
+    db.commit()
+    return _invoice_proposal_payload(item)
+
+
+@router.post("/invoice-extraction-proposals/{proposal_id}/confirm")
+def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfirm,
+                               db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.scalar(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.id == proposal_id,
+    ).with_for_update())
+    if item is None:
+        raise HTTPException(404, "Предложение счёта не найдено")
+    require_project_role(db, user, item.project_id, "manager")
+    if item.status == "confirmed":
+        return _invoice_proposal_payload(item)
+    if item.status != "proposed":
+        raise HTTPException(409, "Отклонённое предложение нельзя подтвердить")
+    if item.selected_cost_category_id is None:
+        raise HTTPException(422, "Менеджер должен выбрать категорию затрат")
+    category = _category_for_project(db, item.project_id, item.selected_cost_category_id)
+    if item.amount is None or not item.payment_purpose:
+        raise HTTPException(422, "Перед подтверждением укажите сумму и назначение платежа")
+    current, digest = _current_document_pin(
+        db, item.project_id, item.source_document_id,
+        item.source_document_version_id, item.source_document_sha256,
+    )
+    if current.id != item.source_document_version_id or digest != item.source_document_sha256:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: счёт изменился после извлечения")
+    _check_contract(db, item.project_id, payload.contract_id)
+    _check_task(db, item.project_id, payload.task_id)
+    if payload.schedule_item_id is not None:
+        schedule_item = db.get(ScheduleItem, payload.schedule_item_id)
+        if schedule_item is None or schedule_item.project_id != item.project_id:
+            raise HTTPException(422, "Этап графика не принадлежит выбранному проекту")
+    document = db.get(Document, item.source_document_id)
+    source_name = document.name if document else f"document:{item.source_document_id}"
+    source_excerpt = " | ".join(filter(None, (
+        item.amount_evidence_quote, item.counterparty_evidence_quote,
+        item.payment_purpose_evidence_quote, item.category_evidence_quote,
+    )))[:2000]
+    if item.target_kind == "budget":
+        created = BudgetLine(
+            project_id=item.project_id, contract_id=payload.contract_id,
+            cost_category_id=category.id, category=category.name,
+            description=item.payment_purpose, planned_amount=item.amount,
+            forecast_amount=item.amount, status="proposed",
+            source_name=source_name, source_excerpt=source_excerpt,
+        )
+        db.add(created); db.flush()
+        item.created_budget_line_id = created.id
+    else:
+        if item.planned_date is None:
+            raise HTTPException(422, "Перед подтверждением укажите плановую дату платежа")
+        if payload.budget_line_id is not None:
+            budget = db.get(BudgetLine, payload.budget_line_id)
+            if budget is None or budget.project_id != item.project_id:
+                raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+        created = CashFlowEntry(
+            project_id=item.project_id, contract_id=payload.contract_id,
+            schedule_item_id=payload.schedule_item_id,
+            budget_line_id=payload.budget_line_id, task_id=payload.task_id,
+            source_document_id=item.source_document_id,
+            source_document_version_id=item.source_document_version_id,
+            source_document_sha256=item.source_document_sha256,
+            cost_category_id=category.id, category=category.name,
+            direction="outflow", title=item.payment_purpose,
+            planned_date=item.planned_date, planned_amount=item.amount,
+            currency=item.currency, counterparty=item.counterparty,
+            note=item.payment_purpose, status="proposed",
+            source_name=source_name, source_excerpt=source_excerpt,
+        )
+        db.add(created); db.flush()
+        item.created_cash_flow_id = created.id
+    item.status = "confirmed"
+    item.confirmed_by_user_id = user.id
+    item.confirmed_at = datetime.now(timezone.utc)
+    _audit(db, "invoice_extraction_confirmed", "invoice_extraction_proposal", item.id, user.id,
+           f"target={item.target_kind}; category={category.id}; human_confirmation=true")
+    db.commit()
+    return _invoice_proposal_payload(item)
+
+
+@router.post("/invoice-extraction-proposals/{proposal_id}/reject")
+def reject_invoice_extraction(proposal_id: int, db: Session = Depends(get_db),
+                              user: User = Depends(require_user)):
+    item = db.scalar(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.id == proposal_id,
+    ).with_for_update())
+    if item is None:
+        raise HTTPException(404, "Предложение счёта не найдено")
+    require_project_role(db, user, item.project_id, "manager")
+    if item.status == "confirmed":
+        raise HTTPException(409, "Подтверждённое предложение нельзя отклонить")
+    item.status = "rejected"
+    _audit(db, "invoice_extraction_rejected", "invoice_extraction_proposal", item.id, user.id,
+           "human_confirmation=true")
+    db.commit()
+    return _invoice_proposal_payload(item)
+
+
 @router.post("/budget")
 def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
-    data = payload.model_dump(); data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
+    data = payload.model_dump()
+    data["cost_category_id"], data["category"] = _dual_write_category(
+        db, payload.project_id, payload.cost_category_id, payload.category, required=True,
+    )
+    data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
     item = BudgetLine(**data); db.add(item); db.flush(); _audit(db, "budget_proposed", "budget_line", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
 
 
 @router.post("/cash-flow")
 def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
-    item = CashFlowEntry(**payload.model_dump()); db.add(item); db.flush(); _audit(db, "cash_flow_proposed", "cash_flow", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
+    data = payload.model_dump()
+    data["cost_category_id"], data["category"] = _dual_write_category(
+        db, payload.project_id, payload.cost_category_id, payload.category, required=False,
+    )
+    item = CashFlowEntry(**data); db.add(item); db.flush(); _audit(db, "cash_flow_proposed", "cash_flow", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
 
 
 @router.post("/invoice-proposals")
@@ -1383,6 +1767,9 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
     elif pin_version_id is not None or pin_sha256 is not None:
         raise HTTPException(422, "Версия источника указана без документа")
     data = payload.model_dump()
+    data["cost_category_id"], data["category"] = _dual_write_category(
+        db, payload.project_id, payload.cost_category_id, payload.category, required=False,
+    )
     data["source_document_version_id"] = pin_version_id
     data["source_document_sha256"] = pin_sha256
     item = CashFlowEntry(**data, status="proposed")
