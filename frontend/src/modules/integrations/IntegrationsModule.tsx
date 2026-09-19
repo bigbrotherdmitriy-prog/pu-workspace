@@ -97,7 +97,7 @@ export function IntegrationsModule({
               ) : item.action === "oauth" ? (
                 <button onClick={() => onConnectProvider(item.provider)} disabled={!item.available}>{item.connected ? "Переподключить" : "Подключить"}</button>
               ) : item.action === "local_upload" ? (
-                <button onClick={onLocalUpload}>Загрузить папку</button>
+                <button onClick={onLocalUpload} disabled={!item.available}>Загрузить папку</button>
               ) : item.action === "ai_policy" ? (
                 <button onClick={onOpenAIPolicy}>Политика AI</button>
               ) : null}

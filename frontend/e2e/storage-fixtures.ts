@@ -107,6 +107,16 @@ export class StorageApi {
         body: { detail: "Synthetic local upload reply was not configured" },
       });
     }
+    const localUploadJobMatch = path.match(/^\/local-upload\/projects\/(\d+)\/jobs\/(\d+)$/);
+    if (method === "GET" && localUploadJobMatch) {
+      return this.fulfill(route, { body: {
+        job_id: Number(localUploadJobMatch[2]), status: "completed", progress: 100,
+        error: null, result: {
+          processed: 1, skipped: 0, tasks: 0, risks: 0,
+          decisions: 0, drafts: 0, documents: [],
+        },
+      } });
+    }
     if (method === "PATCH" && /^\/projects\/\d+\/ai-policy$/.test(path)) {
       const current = this.aiPolicies.get(projectId) || {
         project_id: projectId, mode: "local_only", dlp_enabled: true, prompt_version: "v1",

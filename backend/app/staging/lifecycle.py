@@ -35,6 +35,7 @@ _SOURCE_MEDIA = frozenset({
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/bmp", "image/jpeg", "image/png", "image/tiff", "image/webp",
     "text/csv", "text/markdown", "text/plain",
 })
 

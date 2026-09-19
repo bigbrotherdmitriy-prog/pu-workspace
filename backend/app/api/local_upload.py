@@ -2,9 +2,12 @@ import base64
 import binascii
 import hashlib
 import os
+import re
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -19,12 +22,17 @@ from app.local_upload_staging import (
     get_local_upload_runtime,
     stage_and_enqueue,
 )
+from app.models.document import Document
+from app.models.job import BackgroundJob
+from app.models.materialization import Materialization
 from app.models.user import User
 
 router = APIRouter(prefix="/local-upload", tags=["local-upload"])
 MAX_FILE_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_FILE_BYTES", str(10 * 1024 * 1024)))
 MAX_BATCH_BYTES = int(os.getenv("LOCAL_UPLOAD_MAX_BATCH_BYTES", str(30 * 1024 * 1024)))
 MAX_FILES = int(os.getenv("LOCAL_UPLOAD_MAX_FILES", "50"))
+_STAGING_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_RESULT_COUNT_KEYS = ("processed", "skipped", "tasks", "risks", "decisions", "drafts")
 
 
 class LocalFile(BaseModel):
@@ -36,6 +44,37 @@ class LocalFile(BaseModel):
 class LocalBatch(BaseModel):
     project_id: int
     files: list[LocalFile] = Field(min_length=1, max_length=MAX_FILES)
+
+
+def _safe_job_result(db: Session, *, project_id: int, job: BackgroundJob) -> dict | None:
+    if job.status != "completed":
+        return None
+    raw = job.result
+    if not isinstance(raw, dict):
+        raise HTTPException(503, "local_upload_result_unavailable")
+    result: dict[str, object] = {}
+    for key in _RESULT_COUNT_KEYS:
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(503, "local_upload_result_unavailable")
+        result[key] = value
+    document_ids = raw.get("documents")
+    if (
+        not isinstance(document_ids, list)
+        or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in document_ids)
+    ):
+        raise HTTPException(503, "local_upload_result_unavailable")
+    unique_ids = sorted(set(document_ids))
+    if unique_ids:
+        visible_ids = set(db.scalars(select(Document.id).where(
+            Document.project_id == project_id,
+            Document.source == "local_upload",
+            Document.id.in_(unique_ids),
+        )))
+        if visible_ids != set(unique_ids):
+            raise HTTPException(503, "local_upload_result_unavailable")
+    result["documents"] = unique_ids
+    return result
 
 
 def _decoded_size(value: str) -> int:
@@ -126,4 +165,36 @@ def analyze_local_folder(
             {"job_id": item.job_id, "staging_id": item.staging_id, "status": item.status}
             for item in jobs
         ],
+    }
+
+
+@router.get("/projects/{project_id}/jobs/{job_id}")
+def get_local_upload_job(
+    project_id: int,
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    job = db.get(BackgroundJob, job_id)
+    payload = job.payload if job is not None else None
+    staging_id = payload.get("staging_id") if isinstance(payload, dict) else None
+    if (
+        job is None
+        or job.kind != "local_upload.process"
+        or not isinstance(payload, dict)
+        or set(payload) != {"staging_id"}
+        or not isinstance(staging_id, str)
+        or _STAGING_ID_RE.fullmatch(staging_id) is None
+    ):
+        raise HTTPException(404, "Local upload job not found")
+    materialization = db.get(Materialization, str(UUID(hex=staging_id)))
+    if materialization is None or materialization.project_id != project_id:
+        raise HTTPException(404, "Local upload job not found")
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "progress": job.progress,
+        "error": job.last_error if job.status in {"retrying", "failed", "dead_letter"} else None,
+        "result": _safe_job_result(db, project_id=project_id, job=job),
     }

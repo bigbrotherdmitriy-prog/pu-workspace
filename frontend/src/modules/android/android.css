@@ -33,6 +33,7 @@
   .mobile-upload-actions span { display: grid; gap: 3px; }
   .mobile-upload-actions small { color: #6e7c75; font-size: 10px; }
   .mobile-upload-files { display: grid; gap: 7px; }
+  .mobile-upload-files.dragging { padding: 10px; border: 2px dashed #0b9068; border-radius: 12px; background: #eefaf5; }
   .mobile-upload-files article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid #dde7e2; border-radius: var(--pu-radius-card); }
   .mobile-upload-files article > span { min-width: 0; display: grid; }
   .mobile-upload-files strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

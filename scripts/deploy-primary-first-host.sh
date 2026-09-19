@@ -24,6 +24,7 @@ BACKUP_DIR=$ROOT/backups
 COMPOSE_FILE=$RELEASE_DIR/infra/primary/docker-compose.yml
 REVISION=$(basename "$RELEASE_DIR" 2>/dev/null || true)
 VOLUME_NAME=${PROJECT}_primary_data
+LOCAL_UPLOAD_VOLUME_NAME=${PROJECT}_local_upload_staging
 CONTAINER_PREFIX=${PROJECT}-primary
 RUNTIME_ENV=$RUNTIME_DIR/$REVISION/.env.primary
 HOST_MARKER=$ROOT/shared/.pu-primary-host
@@ -185,6 +186,15 @@ if docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then
   [ "$EXISTING_VOLUME_PROJECT" = "$PROJECT" ] && [ "$EXISTING_VOLUME_KEY" = data ] \
     || fail "existing database volume does not belong to this primary Compose project"
 fi
+if docker volume inspect "$LOCAL_UPLOAD_VOLUME_NAME" >/dev/null 2>&1; then
+  LOCAL_UPLOAD_VOLUME_PROJECT=$(docker volume inspect "$LOCAL_UPLOAD_VOLUME_NAME" \
+    --format '{{ index .Labels "com.docker.compose.project" }}')
+  LOCAL_UPLOAD_VOLUME_KEY=$(docker volume inspect "$LOCAL_UPLOAD_VOLUME_NAME" \
+    --format '{{ index .Labels "com.docker.compose.volume" }}')
+  [ "$LOCAL_UPLOAD_VOLUME_PROJECT" = "$PROJECT" ] \
+    && [ "$LOCAL_UPLOAD_VOLUME_KEY" = local-upload-staging ] \
+    || fail "existing local-upload volume does not belong to this primary Compose project"
+fi
 
 echo "[2/6] starting only the isolated database"
 compose up -d db --wait --wait-timeout 120
@@ -271,6 +281,13 @@ SWITCHED=true
 
 echo "[5/6] starting only database and backend; background services stay stopped until cutover"
 compose up -d --no-build --force-recreate --wait --wait-timeout 180 db backend
+LOCAL_UPLOAD_VOLUME_PROJECT=$(docker volume inspect "$LOCAL_UPLOAD_VOLUME_NAME" \
+  --format '{{ index .Labels "com.docker.compose.project" }}')
+LOCAL_UPLOAD_VOLUME_KEY=$(docker volume inspect "$LOCAL_UPLOAD_VOLUME_NAME" \
+  --format '{{ index .Labels "com.docker.compose.volume" }}')
+[ "$LOCAL_UPLOAD_VOLUME_PROJECT" = "$PROJECT" ] \
+  && [ "$LOCAL_UPLOAD_VOLUME_KEY" = local-upload-staging ] \
+  || fail "local-upload volume does not belong to this primary Compose project"
 
 echo "[6/6] running read-only loopback smoke; no public host is contacted"
 local_smoke "$RELEASE_DIR"

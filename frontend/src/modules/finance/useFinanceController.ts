@@ -112,6 +112,33 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     window.setTimeout(() => document.getElementById("finance-entry")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
 
+  async function reviewUploadedFinanceDocuments(documentIds: number[]) {
+    const requested = new Set(documentIds);
+    if (!requested.size) {
+      setNotice("Файл обработан, но финансовый документ не был создан. Проверьте качество распознавания.");
+      return;
+    }
+    try {
+      const suggestions = await api<{ candidates: FinanceDocumentCandidate[] }>(
+        `/execution/document-candidates?project_id=${projectId}`,
+      );
+      const candidates = suggestions.candidates || [];
+      setFinanceCandidates(candidates);
+      const uploaded = candidates.filter((candidate) => requested.has(candidate.document_id));
+      if (uploaded.length === 1) {
+        await useFinanceCandidate(uploaded[0]);
+        return;
+      }
+      if (uploaded.length > 1) {
+        setNotice(`Загружено финансовых документов: ${uploaded.length}. Выберите нужный в списке для проверки.`);
+        return;
+      }
+      setNotice("Документ загружен, но не распознан как счёт, акт, ГПР, бюджет или ДДС. Он сохранён в документах проекта.");
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
+
   function editInvoiceExtraction(patch: Partial<InvoiceExtractionProposal>) {
     setInvoiceExtractionProposal((current) => current ? { ...current, ...patch } : current);
   }
@@ -363,7 +390,8 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     setInvoiceExtractionProposal, editInvoiceExtraction,
-    loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
+    loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
+    prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction,
     confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };

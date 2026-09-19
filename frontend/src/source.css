@@ -848,6 +848,7 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .finance-document-assistant .card-head { margin: 0; }
 .finance-document-assistant h2, .finance-document-assistant p { margin: 4px 0 0; }
 .finance-document-assistant .card-head button { padding: 9px 12px; border: 1px solid #0b9068; border-radius: 8px; background: #fff; color: #087a59; font-weight: 700; cursor: pointer; }
+.finance-document-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .finance-candidates { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
 .finance-candidates article { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid #dbe3df; border-radius: 10px; background: #fff; }
 .finance-candidates article.linked { opacity: .65; background: #f4f7f5; }
