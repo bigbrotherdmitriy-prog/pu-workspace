@@ -48,6 +48,9 @@ _MANAGER_ROLES = frozenset({"manager", "owner"})
 _ACTION_KINDS = frozenset({
     "gmail.message.send", "google.tasks.upsert", "google.calendar.upsert",
 })
+_ROTATION_RECOVERY_KINDS = frozenset({
+    "google.tasks.upsert", "google.calendar.upsert",
+})
 RECONCILE_KIND = "provider.action.reconcile"
 
 
@@ -227,6 +230,36 @@ def _material_for(db, *, action_kind: str, target_id: int, actor_id: int) -> _Ma
     return _task_material(db, task, actor_id, action_kind)
 
 
+def _material_matches_envelope(envelope: ActionEnvelope, material: _Material, *, operation: str) -> bool:
+    """Keep dispatch exact while allowing a human-requested lookup after OAuth rotation.
+
+    A rotated credential is never allowed to execute the old command.  For Task and
+    Calendar reconciliation only, the stable project/token identity (mailbox_key),
+    authority, evidence and payload must still match exactly and the generation may
+    only move forward.  An empty lookup remains UNKNOWN until a manager explicitly
+    confirms absence through the separate recovery endpoint.
+    """
+    expected = (
+        envelope.organization_id, envelope.project_id, envelope.mailbox_key,
+        envelope.authority_epoch, envelope.capability_version,
+        envelope.evidence_pins, envelope.payload_hash,
+    )
+    actual = (
+        material.organization_id, material.project_id, material.mailbox_key,
+        material.authority_epoch, material.capability_version,
+        material.evidence_pins, material.payload_hash,
+    )
+    if expected != actual:
+        return False
+    if material.credential_generation == envelope.credential_generation:
+        return True
+    return (
+        operation == "reconcile"
+        and envelope.action_kind in _ROTATION_RECOVERY_KINDS
+        and material.credential_generation > envelope.credential_generation
+    )
+
+
 def _target_id(action_id: str, kind: str) -> int:
     prefix = {"gmail.message.send": "gmail-draft-", "google.tasks.upsert": "google-task-",
               "google.calendar.upsert": "google-calendar-"}[kind]
@@ -355,13 +388,7 @@ class ProductAuthorityResolver:
                 target_id=_target_id(envelope.action_id, envelope.action_kind),
                 actor_id=int(approval.approved_by),
             )
-        expected = (envelope.organization_id, envelope.project_id, envelope.mailbox_key,
-                    envelope.authority_epoch, envelope.capability_version,
-                    envelope.credential_generation, envelope.evidence_pins, envelope.payload_hash)
-        actual = (material.organization_id, material.project_id, material.mailbox_key,
-                  material.authority_epoch, material.capability_version,
-                  material.credential_generation, material.evidence_pins, material.payload_hash)
-        if expected != actual:
+        if not _material_matches_envelope(envelope, material, operation=operation):
             raise ProviderActionError("authority_stale")
         return LiveAuthority(
             organization_id=material.organization_id, project_id=material.project_id,
@@ -401,7 +428,7 @@ class GoogleWorkspaceProviderAdapter:
             outcome=outcome, external_ref=external_ref,
         )
 
-    def _context(self, db, request: ProviderRequest):
+    def _context(self, db, request: ProviderRequest, *, operation: str):
         approval = db.scalar(select(ProviderActionApproval).where(
             ProviderActionApproval.action_id == request.action_id,
             ProviderActionApproval.revision == request.revision,
@@ -414,12 +441,26 @@ class GoogleWorkspaceProviderAdapter:
                                      target_id=target_id, actor_id=int(approval.approved_by))
         except ProviderActionError as exc:
             raise ProviderPreconditionFailed() from exc
-        if (material.organization_id, material.project_id, material.mailbox_key,
-                material.capability_version, material.credential_generation,
-                material.payload_hash) != (
-                request.organization_id, request.project_id, request.mailbox_key,
-                request.capability_version, request.credential_generation,
-                request.payload_hash):
+        exact = (
+            material.organization_id, material.project_id, material.mailbox_key,
+            material.capability_version, material.credential_generation,
+            material.payload_hash,
+        ) == (
+            request.organization_id, request.project_id, request.mailbox_key,
+            request.capability_version, request.credential_generation,
+            request.payload_hash,
+        )
+        rotated_lookup = (
+            operation == "reconcile"
+            and request.action_kind in _ROTATION_RECOVERY_KINDS
+            and material.organization_id == request.organization_id
+            and material.project_id == request.project_id
+            and material.mailbox_key == request.mailbox_key
+            and material.capability_version == request.capability_version
+            and material.credential_generation > request.credential_generation
+            and material.payload_hash == request.payload_hash
+        )
+        if not (exact or rotated_lookup):
             raise ProviderPreconditionFailed()
         return target_id, material
 
@@ -429,7 +470,7 @@ class GoogleWorkspaceProviderAdapter:
 
     def dispatch(self, request: ProviderRequest) -> ProviderReceipt:
         with self.sessions.begin() as db:
-            target_id, material = self._context(db, request)
+            target_id, material = self._context(db, request, operation="dispatch")
             service = self.service_factory(request.action_kind, material, db)
             if request.action_kind == "gmail.message.send":
                 draft = db.get(ResponseDraft, target_id)
@@ -512,7 +553,7 @@ class GoogleWorkspaceProviderAdapter:
 
     def lookup(self, request: ProviderRequest) -> ProviderReceipt | None:
         with self.sessions.begin() as db:
-            target_id, material = self._context(db, request)
+            target_id, material = self._context(db, request, operation="reconcile")
             service = self.service_factory(request.action_kind, material, db)
             external_id = None
             if request.action_kind == "gmail.message.send":
@@ -553,9 +594,20 @@ class GoogleWorkspaceProviderAdapter:
                         raise
                 else:
                     marker = f"PU-Command: {_digest(request.idempotency_key)}"
-                    page = service.tasks().list(tasklist="@default", maxResults=100,
-                                                showCompleted=True, showHidden=True).execute()
-                    hits = [item for item in page.get("items", []) if marker in str(item.get("notes") or "")]
+                    hits = []
+                    page_token = None
+                    while True:
+                        page = service.tasks().list(
+                            tasklist="@default", maxResults=100,
+                            showCompleted=True, showHidden=True, pageToken=page_token,
+                        ).execute()
+                        hits.extend(
+                            item for item in page.get("items", [])
+                            if marker in str(item.get("notes") or "")
+                        )
+                        page_token = page.get("nextPageToken")
+                        if not page_token:
+                            break
                     if len(hits) == 1:
                         external_id = str(hits[0]["id"]); task.google_task_id = external_id
                         task.google_task_list_id = "@default"
@@ -615,8 +667,19 @@ def queue_reconciliation(db, *, action_id: str, revision: int, actor: User) -> d
     ).order_by(ProviderOutcomeObservation.sequence.desc()).limit(1))
     if latest is None or latest.outcome not in {"UNKNOWN", "APPLIED"}:
         raise ProviderActionError("outcome_not_reconcilable")
+    material = _material_for(
+        db, action_kind=row.action_kind,
+        target_id=_target_id(row.action_id, row.action_kind), actor_id=actor.id,
+    )
+    if not _material_matches_envelope(
+        ProviderActionRuntime._envelope(row), material, operation="reconcile",
+    ):
+        raise ProviderActionError("authority_stale")
     payload = {"organization_id": row.organization_id, "action_id": action_id, "revision": revision}
-    key = f"provider-reconcile:{row.organization_id}:{action_id}:{revision}:{latest.sequence}"
+    # A reconnect must be able to queue a fresh read-only lookup even when an
+    # earlier generation's reconciliation job is already dead-lettered.
+    key = (f"provider-reconcile:{row.organization_id}:{action_id}:{revision}:"
+           f"{latest.sequence}:credential-{material.credential_generation}")
     existing_job_id = db.scalar(select(BackgroundJob.id).where(
         BackgroundJob.idempotency_key == key,
     ))
@@ -625,6 +688,74 @@ def queue_reconciliation(db, *, action_id: str, revision: int, actor: User) -> d
         raise ProviderActionError("dispatch_binding_mismatch")
     return {"action_id": action_id, "revision": revision, "job_id": job.id,
             "already_queued": existing_job_id is not None or job.attempts > 0 or job.status != "queued"}
+
+
+def resolve_reconciled_absence(
+    db, *, action_id: str, revision: int, expected_observation_sequence: int,
+    confirmed_absent: bool, actor: User,
+) -> dict:
+    """Human resolution for a rotated-credential UNKNOWN after an empty lookup.
+
+    This never calls the provider and never dispatches the old command.  It only
+    accepts the exact latest read-only reconciliation observation, records an
+    append-only NOT_APPLIED decision, and leaves any retry to a new confirmation.
+    """
+    if confirmed_absent is not True or type(expected_observation_sequence) is not int:
+        raise ProviderActionError("outcome_not_reconcilable")
+    row = db.scalar(select(ProviderAction).where(
+        ProviderAction.action_id == action_id, ProviderAction.revision == revision,
+    ).execution_options(populate_existing=True).with_for_update())
+    if (row is None or row.provider != "google_workspace" or row.state != "UNKNOWN"
+            or row.action_kind not in _ROTATION_RECOVERY_KINDS):
+        raise ProviderActionError("outcome_not_reconcilable")
+    _require_human_manager(db, row.project_id, actor.id)
+    latest = db.scalar(select(ProviderOutcomeObservation).where(
+        ProviderOutcomeObservation.action_id == action_id,
+        ProviderOutcomeObservation.revision == revision,
+    ).order_by(ProviderOutcomeObservation.sequence.desc()).limit(1))
+    if (latest is None or latest.sequence != expected_observation_sequence
+            or latest.outcome != "UNKNOWN" or latest.source != "RECONCILE"
+            or latest.safe_code != "receipt_not_found"):
+        raise ProviderActionError("outcome_not_reconcilable")
+    material = _material_for(
+        db, action_kind=row.action_kind,
+        target_id=_target_id(row.action_id, row.action_kind), actor_id=actor.id,
+    )
+    envelope = ProviderActionRuntime._envelope(row)
+    if (material.credential_generation <= row.credential_generation
+            or not _material_matches_envelope(envelope, material, operation="reconcile")):
+        raise ProviderActionError("authority_stale")
+    attempt = db.get(ProviderExecutionAttempt, (action_id, revision))
+    if attempt is None or attempt.state != "UNKNOWN":
+        raise ProviderActionError("outcome_not_reconcilable")
+    observation = ProviderOutcomeObservation(
+        action_id=action_id, revision=revision, organization_id=row.organization_id,
+        sequence=latest.sequence + 1, attempt_id=attempt.attempt_id, job_id=None,
+        mailbox_key=row.mailbox_key, command_key=row.command_key,
+        idempotency_key=row.idempotency_key, payload_hash=row.payload_hash,
+        envelope_hash=row.envelope_hash, outcome="NOT_APPLIED", retry_safe=True,
+        source="RECONCILE", late=False, external_ref=None,
+        safe_code="human_confirmed_absence_after_rotation", recorded_at=_now(),
+    )
+    db.add(observation)
+    attempt.state = "NOT_APPLIED"; attempt.completed_at = _now()
+    row.state = "NOT_APPLIED"
+    outbox = db.get(ProviderDispatchOutbox, (action_id, revision))
+    if outbox:
+        outbox.pending = False
+    db.add(AuditLog(
+        action="provider_absence_confirmed", entity_type="provider_action", entity_id=None,
+        details=(f"action_id={action_id};revision={revision};"
+                 f"old_generation={row.credential_generation};"
+                 f"current_generation={material.credential_generation}"),
+    ))
+    db.flush()
+    target_id = _target_id(row.action_id, row.action_kind)
+    task = db.get(Task, target_id)
+    if task:
+        task.external_action_status = task_overall_state(task_effect_states(db, target_id))
+    db.commit()
+    return action_display_state(db, action_id)
 
 
 def run_product_reconcile_job(payload: dict) -> dict:
@@ -710,9 +841,33 @@ def action_display_state(db, action_id: str) -> dict:
     if status == "applied" and (observation is None or observation.outcome != "APPLIED"
                                  or not observation.external_ref):
         status = "unknown"
+    reconcile_prefix = f"provider-reconcile:{row.organization_id}:{row.action_id}:{row.revision}:%"
+    reconciliation_job = db.scalar(select(BackgroundJob).where(
+        BackgroundJob.kind == RECONCILE_KIND,
+        BackgroundJob.idempotency_key.like(reconcile_prefix),
+    ).order_by(BackgroundJob.id.desc()).limit(1))
+    reconciliation_status = None
+    if reconciliation_job:
+        reconciliation_status = {
+            "queued": "queued", "retrying": "queued", "running": "running",
+            "completed": "completed", "failed": "failed", "dead_letter": "failed",
+            "cancelled": "failed",
+        }.get(reconciliation_job.status, "failed")
+    safe_code = observation.safe_code if observation else None
+    can_confirm_absence = bool(
+        status == "unknown" and observation
+        and observation.outcome == "UNKNOWN"
+        and observation.source == "RECONCILE"
+        and observation.safe_code == "receipt_not_found"
+    )
     return {"status": status,
             "external_id": observation.external_ref if status == "applied" else None,
-            "action_id": row.action_id, "revision": row.revision}
+            "action_id": row.action_id, "revision": row.revision,
+            "safe_code": safe_code,
+            "observation_sequence": observation.sequence if observation else None,
+            "reconciliation_status": reconciliation_status,
+            "reconciliation_job_id": reconciliation_job.id if reconciliation_job else None,
+            "can_confirm_absence": can_confirm_absence}
 
 
 def task_effect_states(db, task_id: int) -> dict:
