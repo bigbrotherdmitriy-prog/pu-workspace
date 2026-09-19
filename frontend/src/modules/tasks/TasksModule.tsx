@@ -2,6 +2,7 @@ import { ListTodo } from "lucide-react";
 
 export type TaskRow = {
   id: number; record_version?: number; title: string; status: string; priority: string; due_date?: string;
+  original_obligation_id?: number | null; original_obligation_due_date?: string | null; due_date_adjusted?: boolean;
   assignee_user_id: number; assignee_name: string; source_file_name: string;
   source_excerpt: string; confidence: number; needs_review: boolean; message_id?: number;
   external_action_status: string; google_task_id?: string; google_calendar_event_id?: string;
@@ -37,6 +38,7 @@ type Props = {
   history: TaskHistoryRow[];
   onFilterChange: (filter: string) => void;
   onAssign: (task: TaskRow, userId: number) => void;
+  onChangeDueDate: (task: TaskRow) => void;
   onApproveExternal: (task: TaskRow) => void;
   onUpdate: (task: TaskRow, status: string) => void;
   onStartCompletion: (task: TaskRow) => void;
@@ -65,12 +67,18 @@ export function TasksModule(props: Props) {
         <small>Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
         {task.needs_review && <p className="task-review-warning">Требуется ручная проверка по документу-источнику.</p>}
         {task.description && <p className="task-description">{task.description}</p>}
+        {task.due_date_adjusted && <p className="task-review-warning">
+          {task.original_obligation_due_date
+            ? `Срок скорректирован, исходное обязательство было до ${task.original_obligation_due_date}.`
+            : "Срок скорректирован, в исходном обязательстве срок не указан."}
+        </p>}
         <small className="task-source-excerpt">{task.source_excerpt}</small>
       </div>
       <div className="task-meta"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{effectLabel("Google Tasks", task.provider_effects?.task.status)} · {effectLabel("Calendar", task.provider_effects?.calendar.status)}</span></div>
       <div className="task-actions">
         <label className="task-assignee"><span>Исполнитель</span><select aria-label={`Исполнитель задачи ${task.title}`} value={task.assignee_user_id} onChange={(event) => props.onAssign(task, Number(event.target.value))}>{props.members.map((member) => <option value={member.user_id} key={member.user_id}>{member.name} · {member.role}</option>)}</select></label>
         <div className="task-action-buttons">
+        {task.status !== "completed" && <button className="secondary" onClick={() => props.onChangeDueDate(task)}>Изменить срок</button>}
         {["proposed", "failed"].includes(task.external_action_status) && <button onClick={() => props.onApproveExternal(task)}>Поставить задачу</button>}
         {task.status === "assigned" && <button onClick={() => props.onUpdate(task, "in_progress")}>В работу</button>}
         {task.status !== "completed" && <button className="complete" onClick={() => props.onStartCompletion(task)}>Завершить</button>}
