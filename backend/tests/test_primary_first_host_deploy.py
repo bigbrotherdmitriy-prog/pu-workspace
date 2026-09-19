@@ -54,6 +54,7 @@ def test_primary_runtime_preserves_integrations_and_pins_isolated_resources(tmp_
     assert values["PU_RELEASE_REVISION"] == revision
     assert values["PRIMARY_PORT"] == "3020"
     assert values["PRIMARY_VOLUME_NAME"] == "puw-primary-next_primary_data"
+    assert values["PRIMARY_LOCAL_UPLOAD_VOLUME_NAME"] == "puw-primary-next_local_upload_staging"
     assert values["PRIMARY_IMAGE"] == f"app-backend:{revision}"
 
 
@@ -112,7 +113,15 @@ def compose_model():
     prefix = f"{project}-primary"
     environment = {"DATABASE_URL": "redacted", "PU_RELEASE_REVISION": "a" * 40}
     services = {
-        name: {"image": image, "environment": environment.copy(), "networks": {"default": None}}
+        name: {
+            "image": image,
+            "environment": environment.copy(),
+            "networks": {"default": None},
+            "volumes": [{
+                "type": "volume", "source": "local-upload-staging",
+                "target": "/var/lib/pu-workspace-local-upload",
+            }],
+        }
         for name in ("backend", "worker", "scheduler")
     }
     services["backend"].update({
@@ -127,7 +136,10 @@ def compose_model():
     return {
         "name": project,
         "services": services,
-        "volumes": {"data": {"name": volume}},
+        "volumes": {
+            "data": {"name": volume},
+            "local-upload-staging": {"name": f"{project}_local_upload_staging"},
+        },
         "networks": {"default": {"name": f"{project}_default"}},
     }, project, image, port, volume, prefix
 
@@ -225,6 +237,9 @@ def test_primary_compose_is_standalone_loopback_only_and_has_no_relay():
     compose = (ROOT / "infra" / "primary" / "docker-compose.yml").read_text(encoding="utf-8")
     assert "127.0.0.1:${PRIMARY_PORT" in compose
     assert "name: ${PRIMARY_VOLUME_NAME" in compose
+    assert "name: ${PRIMARY_LOCAL_UPLOAD_VOLUME_NAME" in compose
+    assert "PU_LOCAL_UPLOAD_RUNTIME: production" in compose
+    assert "local-upload-staging:/var/lib/pu-workspace-local-upload" in compose
     assert "${PRIMARY_IMAGE" in compose
     assert "telegram-relay" not in compose
     assert "network_mode: host" not in compose

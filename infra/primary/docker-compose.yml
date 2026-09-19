@@ -4,12 +4,16 @@ x-environment: &environment
   DATABASE_URL: postgresql://pu_user:${POSTGRES_PASSWORD:?set in private primary env}@db:5432/pu_workspace
   PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?set candidate revision}
   PU_BACKGROUND_EXECUTION: durable
+  PU_LOCAL_UPLOAD_RUNTIME: production
+  PU_LOCAL_UPLOAD_STAGING_ROOT: /var/lib/pu-workspace-local-upload
 
 x-app: &app
   image: ${PRIMARY_IMAGE:?set candidate image}
   env_file:
     - ${PRIMARY_ENV_FILE:?set private primary env path}
   environment: *environment
+  volumes:
+    - local-upload-staging:/var/lib/pu-workspace-local-upload
   restart: unless-stopped
 
 services:
@@ -66,3 +70,5 @@ services:
 volumes:
   data:
     name: ${PRIMARY_VOLUME_NAME:?set dedicated primary volume}
+  local-upload-staging:
+    name: ${PRIMARY_LOCAL_UPLOAD_VOLUME_NAME:?set dedicated primary local-upload volume}

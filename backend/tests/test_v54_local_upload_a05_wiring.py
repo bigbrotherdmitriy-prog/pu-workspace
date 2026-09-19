@@ -6,11 +6,13 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.models
 import app.local_upload_staging as local_staging
+from app.api.local_upload import get_local_upload_job
 from app.database import Base
 from app.jobs.queue import claim, execution_owner, recover_expired
 from app.local_upload_staging import (
@@ -19,8 +21,11 @@ from app.local_upload_staging import (
     configure_local_upload_runtime, run_local_upload_job, stage_and_enqueue,
 )
 from app.models.audit_log import AuditLog
+from app.models.document import Document
 from app.models.job import BackgroundJob
 from app.models.materialization import Materialization
+from app.models.project_member import ProjectMember
+from app.models.user import User
 from app.models.v54_pilot import AuditExtension, Evidence, SourceReference, SourceVersion
 from app.staging.contracts import KekRef
 from app.staging.filesystem import FilesystemStagingStorage
@@ -254,3 +259,99 @@ def test_restart_finishes_cleanup_after_durable_finalize(wired):
     assert not list((tmp_path / "ciphertext").rglob("*.enc"))
     with sessions() as db:
         assert db.get(Materialization, str(UUID(hex=queued.staging_id))).state == "PURGED"
+
+
+def test_project_scoped_job_status_returns_only_safe_completed_result(wired):
+    _, sessions, _, _, _, _ = wired
+    queued = _stage(sessions)
+    with sessions.begin() as db:
+        db.add(ProjectMember(project_id=4, user_id=2, role="manager"))
+        document = Document(
+            project_id=4, external_id="local-status-document", name="invoice.pdf",
+            mime_type="application/pdf", source="local_upload", status="processed",
+        )
+        db.add(document)
+        db.flush()
+        job = db.get(BackgroundJob, queued.job_id)
+        job.status = "completed"
+        job.progress = 100
+        job.result = {
+            "staging_id": queued.staging_id,
+            "processed": 1, "skipped": 0, "tasks": 0, "risks": 0,
+            "decisions": 0, "drafts": 0, "documents": [document.id],
+        }
+    with sessions() as db:
+        response = get_local_upload_job(
+            project_id=4, job_id=queued.job_id, db=db, user=db.get(User, 2),
+        )
+    assert response == {
+        "job_id": queued.job_id,
+        "status": "completed",
+        "progress": 100,
+        "error": None,
+        "result": {
+            "processed": 1, "skipped": 0, "tasks": 0, "risks": 0,
+            "decisions": 0, "drafts": 0, "documents": [document.id],
+        },
+    }
+    assert "staging_id" not in response["result"]
+
+
+def test_project_scoped_job_status_hides_other_project_job(wired):
+    _, sessions, _, _, _, _ = wired
+    queued = _stage(sessions)
+    with sessions.begin() as db:
+        db.add(ProjectMember(project_id=9, user_id=2, role="manager"))
+    with sessions() as db:
+        with pytest.raises(HTTPException) as caught:
+            get_local_upload_job(
+                project_id=9, job_id=queued.job_id, db=db, user=db.get(User, 2),
+            )
+    assert caught.value.status_code == 404
+
+
+def test_project_scoped_job_status_rejects_cross_project_document_result(wired):
+    _, sessions, _, _, _, _ = wired
+    queued = _stage(sessions)
+    with sessions.begin() as db:
+        db.add(ProjectMember(project_id=4, user_id=2, role="manager"))
+        foreign_document = Document(
+            project_id=9, external_id="foreign-local-document", name="foreign.pdf",
+            mime_type="application/pdf", source="local_upload", status="processed",
+        )
+        db.add(foreign_document)
+        db.flush()
+        job = db.get(BackgroundJob, queued.job_id)
+        job.status = "completed"
+        job.result = {
+            "staging_id": queued.staging_id,
+            "processed": 1, "skipped": 0, "tasks": 0, "risks": 0,
+            "decisions": 0, "drafts": 0, "documents": [foreign_document.id],
+        }
+    with sessions() as db:
+        with pytest.raises(HTTPException) as caught:
+            get_local_upload_job(
+                project_id=4, job_id=queued.job_id, db=db, user=db.get(User, 2),
+            )
+    assert caught.value.status_code == 503
+
+
+def test_scan_image_is_admitted_by_the_same_encrypted_lifecycle(wired):
+    _, sessions, runtime, _, _, _ = wired
+    image_runtime = replace(
+        runtime,
+        allowed_mime_types=runtime.allowed_mime_types | frozenset({"image/png"}),
+    )
+    configure_local_upload_runtime(image_runtime)
+    with sessions() as db:
+        db.begin()
+        queued = stage_and_enqueue(
+            db, runtime=image_runtime, scope=UploadScope(2, 4),
+            candidate=UploadCandidate(
+                "invoice-scan.png", "image/png", b"synthetic confidential body",
+            ),
+            request_key="synthetic-image", index=0,
+        )
+    with sessions() as db:
+        row = db.get(Materialization, str(UUID(hex=queued.staging_id)))
+        assert row.manifest["media_type"] == "image/png"

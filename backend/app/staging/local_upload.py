@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 from uuid import UUID, uuid5
 
 from sqlalchemy import func, select
@@ -41,6 +41,13 @@ from app.staging.lifecycle import (
 
 _NAMESPACE = UUID("a4d8f512-6b68-4dd6-9df4-7384bd62292d")
 _SERVICE_PRINCIPAL = re.compile(r"^[a-z][a-z0-9.-]{2,99}$")
+
+
+@runtime_checkable
+class LocalUploadRetentionAuthorityPort(Protocol):
+    service_principal: str
+
+    def require(self, db: Any, row: Materialization) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +116,7 @@ class A05LocalUploadLifecycle:
         authority_factory: Callable[[Any, UploadScope], LifecycleAuthority],
         clock: Callable[[], datetime], residency: str, kek: KekRef,
         max_file_bytes: int,
-        retention_authority: LocalUploadRetentionAuthority | None = None,
+        retention_authority: LocalUploadRetentionAuthorityPort | None = None,
     ) -> None:
         if (not isinstance(storage, StagingStorage) or not callable(authority_factory)
                 or not callable(clock) or type(residency) is not str or not residency
@@ -123,7 +130,7 @@ class A05LocalUploadLifecycle:
         self.kek = kek
         self.max_file_bytes = max_file_bytes
         if retention_authority is not None and not isinstance(
-            retention_authority, LocalUploadRetentionAuthority,
+            retention_authority, LocalUploadRetentionAuthorityPort,
         ):
             raise ValueError("resource_unavailable")
         self.retention_authority = retention_authority

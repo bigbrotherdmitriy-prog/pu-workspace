@@ -47,8 +47,22 @@ def validate(model: dict, project: str, image: str, port: int, volume: str, pref
         if services[name].get("container_name") != expected:
             fail(f"service {name} has an unexpected container name")
     volumes = model.get("volumes") or {}
-    if set(volumes) != {"data"} or volumes["data"].get("name") != volume:
-        fail("database volume is not the dedicated primary volume")
+    local_upload_volume = f"{project}_local_upload_staging"
+    if (
+        set(volumes) != {"data", "local-upload-staging"}
+        or volumes["data"].get("name") != volume
+        or volumes["local-upload-staging"].get("name") != local_upload_volume
+    ):
+        fail("primary data and local-upload volumes are not dedicated")
+    for name in APP_SERVICES:
+        mounts = services[name].get("volumes") or []
+        if not any(
+            item.get("type") == "volume"
+            and item.get("source") == "local-upload-staging"
+            and item.get("target") == "/var/lib/pu-workspace-local-upload"
+            for item in mounts
+        ):
+            fail(f"{name} does not mount the dedicated local-upload volume")
     # OAuth redirect configuration may legitimately retain the production URL so
     # encrypted tokens remain usable after DNS cutover. Only executable Compose
     # fields are forbidden from contacting the old endpoint during preparation.
