@@ -64,8 +64,8 @@ APP_VERSION = "1.0.3"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    from app.staging.ci_local_upload import install_ci_local_upload_runtime
-    install_ci_local_upload_runtime()
+    from app.staging.local_upload_composition import install_local_upload_runtime
+    install_local_upload_runtime()
     db = SessionLocal()
     try:
         cleanup_expired_sessions(db)

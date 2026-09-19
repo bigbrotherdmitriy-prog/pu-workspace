@@ -96,6 +96,7 @@ def render(
         "PRIMARY_IMAGE": image,
         "PRIMARY_PORT": str(port),
         "PRIMARY_VOLUME_NAME": volume,
+        "PRIMARY_LOCAL_UPLOAD_VOLUME_NAME": f"{project}_local_upload_staging",
         "PU_RELEASE_REVISION": revision,
     })
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

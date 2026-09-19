@@ -4,7 +4,7 @@ import { IntegrationsModule, type IntegrationItem } from "./IntegrationsModule";
 
 const items: IntegrationItem[] = [
   { key: "drive", provider: "google_workspace", capability: "storage", name: "Google Drive", description: "Документы", available: true, connected: true, action: "select_source" },
-  { key: "local", provider: "local", capability: "storage", name: "Локальная папка", description: "Файлы", available: true, connected: false, action: "local_upload" },
+  { key: "local", provider: "local", capability: "storage", name: "Локальная папка", description: "Файлы", available: false, connected: false, action: "local_upload" },
 ];
 
 afterEach(cleanup);
@@ -29,6 +29,8 @@ describe("IntegrationsModule", () => {
     expect(screen.getByText("Контур данных проекта")).toBeInTheDocument();
     expect(screen.getByText("Источники и сервисы")).toBeInTheDocument();
     expect(screen.getByText("Диагностика контура")).toBeInTheDocument();
-    expect(screen.getAllByText("1")).toHaveLength(2);
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить папку" })).toBeDisabled();
   });
 });

@@ -38,6 +38,11 @@ DEFAULT_ALLOWED_MIME_TYPES = frozenset({
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/bmp",
+    "image/jpeg",
+    "image/png",
+    "image/tiff",
+    "image/webp",
     "text/csv",
     "text/markdown",
     "text/plain",
@@ -252,9 +257,9 @@ class LocalUploadProcessor(Protocol):
 class LocalUploadBusinessProcessor:
     """Existing local-only document pipeline, invoked only by a durable worker.
 
-    No Telegram notification or external AI/provider call is made here.  The
-    stable staging identity makes retries converge on the existing document
-    and task deduplication boundaries.
+    No external business mutation is executed here. Configured AI extraction
+    may run through the existing policy/fallback path; stable staging identity
+    makes retries converge on existing document and proposal boundaries.
     """
 
     def process(
@@ -343,6 +348,12 @@ def get_local_upload_runtime() -> LocalUploadRuntime:
         if _runtime is None:
             raise LocalUploadUnavailable("local_upload_staging_unavailable")
         return _runtime
+
+
+def local_upload_runtime_ready() -> bool:
+    """Expose composition health without leaking storage or key metadata."""
+    with _runtime_lock:
+        return _runtime is not None
 
 
 def canonical_mime(value: str) -> str:

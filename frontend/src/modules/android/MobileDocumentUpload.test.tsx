@@ -16,7 +16,12 @@ function setup(projectId = 7) {
 
 describe("local document upload", () => {
   it("keeps nested paths and uses the selected project only after explicit submit", async () => {
-    vi.mocked(api).mockResolvedValue({ processed: 1, tasks: 0, risks: 1, skipped: [] });
+    vi.mocked(api)
+      .mockResolvedValueOnce({ status: "queued", processed: 0, tasks: 0, risks: 0, skipped: [], jobs: [{ job_id: 41, status: "queued" }] })
+      .mockResolvedValueOnce({
+        job_id: 41, status: "completed", progress: 100, error: null,
+        result: { processed: 1, skipped: 0, tasks: 0, risks: 1, decisions: 0, drafts: 0, documents: [19] },
+      });
     const { input, onComplete, onClose } = setup();
     const file = new File(["synthetic"], "sample.txt", { type: "text/plain" });
     Object.defineProperty(file, "webkitRelativePath", { value: "QA/nested/sample.txt" });
@@ -28,7 +33,16 @@ describe("local document upload", () => {
     const [path, options] = vi.mocked(api).mock.calls[0];
     expect(path).toBe("/local-upload/analyze");
     expect(JSON.parse(options!.body as string)).toMatchObject({ project_id: 7, files: [{ path: "QA/nested/sample.txt", mime_type: "text/plain" }] });
+    expect(api).toHaveBeenNthCalledWith(2, "/local-upload/projects/7/jobs/41");
+    expect(onComplete).toHaveBeenCalledWith(expect.stringContaining("Обработано: 1"), [19]);
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("accepts dropped files through the shared drop zone", () => {
+    setup();
+    const dropZone = screen.getByLabelText("Перетащите файлы сюда");
+    fireEvent.drop(dropZone, { dataTransfer: { files: [new File(["pdf"], "invoice.pdf", { type: "application/pdf" })] } });
+    expect(screen.getByText("invoice.pdf")).toBeInTheDocument();
   });
 
   it("rejects more than 50 files instead of silently truncating", () => {
@@ -57,6 +71,18 @@ describe("local document upload", () => {
     await act(async () => reject(new Error("Synthetic failure")));
     expect(await screen.findByText("Synthetic failure")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" })).toBeEnabled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows a durable job failure and does not report completion", async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({ status: "queued", jobs: [{ job_id: 52, status: "queued" }] })
+      .mockResolvedValueOnce({ job_id: 52, status: "failed", progress: 10, error: "JobError", result: null });
+    const { input, onComplete, onClose } = setup();
+    fireEvent.change(input, { target: { files: [new File(["x"], "invoice.pdf", { type: "application/pdf" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+    expect(await screen.findByText(/JobError/)).toBeInTheDocument();
+    expect(onComplete).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
 });

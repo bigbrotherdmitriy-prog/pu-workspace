@@ -39,6 +39,7 @@ import { MeetingsModule, type MeetingRow } from "./modules/meetings/MeetingsModu
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
+import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
@@ -384,6 +385,7 @@ export function App() {
     [online, setOnline] = useState(navigator.onLine),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
+  const [localUploadPurpose, setLocalUploadPurpose] = useState<"documents" | "finance">("documents");
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("oauth") === "connected" ? "Запуск проекта" : "Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -486,7 +488,8 @@ export function App() {
     setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     setInvoiceExtractionProposal, editInvoiceExtraction,
-    loadFinance, prepareFinanceItem, useFinanceCandidate, prepareDroppedFinanceDocument, importStructuredFinance,
+    loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
+    prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction,
     confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
@@ -886,10 +889,11 @@ export function App() {
     if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
       setError(""); setContractDropStatus(`Получено файлов: ${supported.length}. Загружаю и запускаю OCR…`); setNotice(`Загружаю и анализирую договоров: ${supported.length}…`);
-      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
+      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
       const result = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
-      const documentIds = (result.documents || []).map((item: { id: number }) => item.id);
-      if (!documentIds.length) throw new Error(result.skipped?.[0]?.reason || "Текст договора не извлечён");
+      const completed = await awaitLocalUploadJobs(projectId, result.jobs || [], setContractDropStatus);
+      const documentIds = completed.documents;
+      if (!documentIds.length) throw new Error("Текст договора не извлечён");
       setContractDropStatus(`OCR завершён: документов ${documentIds.length}. Определяю роль и место в дереве…`);
       await load(); await prepareDroppedContracts(documentIds, parentContractId);
     } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Загрузка не завершена: ${message}`); setError(message); }
@@ -901,10 +905,11 @@ export function App() {
     if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
       setError(""); setNotice(`Загружаю приложения к договору: ${supported.length}…`);
-      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
+      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
       const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
-      const documentIds = (uploaded.documents || []).map((item: { id: number }) => item.id);
-      if (!documentIds.length) throw new Error(uploaded.skipped?.[0]?.reason || "Текст приложений не извлечён");
+      const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
+      const documentIds = completed.documents;
+      if (!documentIds.length) throw new Error("Текст приложений не извлечён");
       await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ document_ids: documentIds }) });
       const checked = await api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" });
       const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
@@ -920,15 +925,16 @@ export function App() {
     try {
       const label = kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС";
       setError(""); setNotice(`Загружаю и разбираю ${label}: ${supported.length} файл(ов)…`);
-      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: file.type || "application/octet-stream", content_base64: await fileBase64(file) })));
+      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
       const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
-      const documents = (uploaded.documents || []) as { id: number; name: string }[];
-      if (!documents.length) throw new Error(uploaded.skipped?.[0]?.reason || `Не удалось извлечь таблицу ${label}`);
+      const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
+      const documentIds = completed.documents;
+      if (!documentIds.length) throw new Error(`Не удалось извлечь таблицу ${label}`);
       await api(`/projects/${projectId}/contracts/${contractId}/documents`, {
         method: "POST",
-        body: JSON.stringify({ document_ids: documents.map((item) => item.id), role: kind === "cash-flow" ? "cash_flow" : kind }),
+        body: JSON.stringify({ document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
       });
-      await prepareDroppedFinanceDocument(documents[0].id, documents[0].name, kind, contractId);
+      await prepareDroppedFinanceDocument(documentIds[0], supported[0].name, kind, contractId);
       setActive("Исполнение и финансы");
       await loadFinance();
     } catch (reason) { setError((reason as Error).message); }
@@ -2812,13 +2818,25 @@ export function App() {
           ) : null}
         </section>
       </main>
-      <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} onUpload={() => setMobileUploadOpen(true)} />
+      <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} onUpload={() => { setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }} />
       <MobileDocumentUpload
         key={projectId}
         open={mobileUploadOpen}
         projectId={projectId}
+        title={localUploadPurpose === "finance" ? "Загрузить счёт или акт" : "Добавить документы"}
+        description={localUploadPurpose === "finance"
+          ? "После защищённой загрузки и OCR система предложит проверить реквизиты финансового документа."
+          : undefined}
         onClose={() => setMobileUploadOpen(false)}
-        onComplete={(message) => { setNotice(message); void load(); setActive("Документы"); }}
+        onComplete={(message, documentIds) => {
+          setNotice(message);
+          if (localUploadPurpose === "finance") {
+            void reviewUploadedFinanceDocuments(documentIds);
+          } else {
+            void load();
+            setActive("Документы");
+          }
+        }}
       />
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {active === "Исполнение и финансы" && (
@@ -2832,6 +2850,7 @@ export function App() {
               onSelectContract={setSelectedFinanceContractId}
               onPrepare={prepareFinanceItem}
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
+              onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
               onReload={() => void loadFinance()}
             />
             <DdsWorkspace
@@ -3185,7 +3204,7 @@ export function App() {
           onSyncGmail={() => void syncGmail()}
           onSelectFolder={(provider) => void openProviderSources(provider)}
           onConnectProvider={(provider) => void connectStorageProvider(provider)}
-          onLocalUpload={() => { setNotice(""); setMobileUploadOpen(true); }}
+          onLocalUpload={() => { setNotice(""); setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }}
           onOpenAIPolicy={() => setActive("Настройки")}
           onOpenGmailResults={openGmailResults}
           onReload={() => void loadIntegrations()}

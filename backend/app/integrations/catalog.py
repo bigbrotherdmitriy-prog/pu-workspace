@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.integrations.ai import configured_ai_provider
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.telegram import TelegramChannelAdapter
+from app.local_upload_staging import local_upload_runtime_ready
 from app.models.integration_credential import IntegrationCredential
 
 
@@ -92,6 +93,7 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
     telegram = TelegramChannelAdapter().health()
     ai_provider = configured_ai_provider()
     ai = ai_provider.health()
+    local_upload_ready = local_upload_runtime_ready()
     result.extend(
         [
             IntegrationStatus(
@@ -110,10 +112,10 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
                 capability="storage",
                 name="Локальная рабочая папка",
                 description="Безопасная загрузка файлов с компьютера",
-                available=True,
-                connected=True,
+                available=local_upload_ready,
+                connected=local_upload_ready,
                 action="local_upload",
-                detail="ready",
+                detail="ready" if local_upload_ready else "secure upload runtime is not configured",
             ),
             IntegrationStatus(
                 key=f"{ai_provider.provider}:ai",

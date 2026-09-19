@@ -45,6 +45,8 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
 
 
 def main() -> None:
+    from app.staging.local_upload_composition import install_local_upload_runtime
+    install_local_upload_runtime()
     shutdown = Event()
     def stop(signum, _frame):
         log.info("Scheduler received signal %s", signum)

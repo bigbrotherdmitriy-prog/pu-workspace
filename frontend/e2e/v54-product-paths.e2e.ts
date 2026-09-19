@@ -172,7 +172,7 @@ test("existing local-upload and AI-policy entries use isolated API routes", asyn
   const upload = page.getByRole("dialog", { name: "Загрузка документов" });
   await upload.locator('input[type="file"]').first().setInputFiles("e2e/fixtures/synthetic-note.txt");
   await upload.getByRole("button", { name: "Загрузить и проанализировать (1)" }).click();
-  await expect(page.getByText("Поставлено в очередь файлов: 1. Заданий: 1.")).toBeVisible();
+  await expect(page.getByText("Обработано: 1. Задач: 0. Рисков: 0. Пропущено: 0.")).toBeVisible();
   const uploadRequest = mock.requests.find(row => row.path === "/local-upload/analyze");
   expect(uploadRequest?.method).toBe("POST");
   expect(JSON.parse(uploadRequest?.body || "{}")).toMatchObject({ project_id: 2, files: [{ path: "synthetic-note.txt", mime_type: "text/plain" }] });
