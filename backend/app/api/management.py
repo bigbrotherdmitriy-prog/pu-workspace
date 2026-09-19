@@ -2,8 +2,8 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,9 +13,11 @@ from app.governance_engine import create_governance_items
 from app.models.audit_log import AuditLog
 from app.models.governance import Decision, Risk
 from app.models.job import BackgroundJob
-from app.models.management import ManagementHistory, Meeting, Notification, NotificationPolicy, Obligation
+from app.models.management import ManagementHistory, Meeting, MeetingParticipant, Notification, NotificationPolicy, Obligation
 from app.models.organization_contract import Contract
 from app.models.project import Project
+from app.models.project_contact import ProjectContact
+from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.organizer_engine.types import DriveFile
 from app.task_engine import create_tasks_from_files
@@ -35,8 +37,24 @@ class MeetingCreate(BaseModel):
     contract_id: int | None = None
     title: str = Field(min_length=2, max_length=500)
     scheduled_at: datetime | None = None
+    duration_minutes: int | None = Field(default=None, ge=1, le=10080)
     participants: str | None = Field(default=None, max_length=5000)
+    participant_user_ids: list[int] = Field(default_factory=list, max_length=200)
+    participant_contact_ids: list[int] = Field(default_factory=list, max_length=200)
     agenda: str | None = Field(default=None, max_length=10000)
+
+    @model_validator(mode="after")
+    def validate_schedule_and_participants(self):
+        if len(self.participant_user_ids) != len(set(self.participant_user_ids)):
+            raise ValueError("participant_user_ids must be unique")
+        if len(self.participant_contact_ids) != len(set(self.participant_contact_ids)):
+            raise ValueError("participant_contact_ids must be unique")
+        if self.scheduled_at is None:
+            if self.duration_minutes is not None:
+                raise ValueError("duration_minutes requires scheduled_at")
+        elif self.duration_minutes is None:
+            self.duration_minutes = 60
+        return self
 
 
 class MeetingUpdate(BaseModel):
@@ -247,6 +265,103 @@ def update_obligation(obligation_id: int, payload: ObligationUpdate, db: Session
     return _obligation_payload(item)
 
 
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _meeting_participant_payloads(db: Session, meeting_id: int) -> list[dict]:
+    rows = db.execute(
+        select(MeetingParticipant, User, ProjectContact)
+        .outerjoin(User, User.id == MeetingParticipant.user_id)
+        .outerjoin(ProjectContact, ProjectContact.id == MeetingParticipant.contact_id)
+        .where(MeetingParticipant.meeting_id == meeting_id)
+        .order_by(MeetingParticipant.id)
+    ).all()
+    return [
+        {
+            "kind": "user" if participant.user_id is not None else "contact",
+            "id": participant.user_id if participant.user_id is not None else participant.contact_id,
+            "name": user.name if user is not None else contact.name,
+            "email": user.email if user is not None else contact.email,
+        }
+        for participant, user, contact in rows
+    ]
+
+
+def _meeting_conflicts(db: Session, meeting: Meeting, actor: User) -> list[dict]:
+    if meeting.scheduled_at is None or meeting.duration_minutes is None:
+        return []
+    participants = _meeting_participant_payloads(db, meeting.id)
+    user_ids = [row["id"] for row in participants if row["kind"] == "user"]
+    contact_ids = [row["id"] for row in participants if row["kind"] == "contact"]
+    if not user_ids and not contact_ids:
+        return []
+    identity_filters = []
+    if user_ids:
+        identity_filters.append(MeetingParticipant.user_id.in_(user_ids))
+    if contact_ids:
+        identity_filters.append(MeetingParticipant.contact_id.in_(contact_ids))
+    meeting_project = db.get(Project, meeting.project_id)
+    candidate_ids = select(MeetingParticipant.meeting_id).where(or_(*identity_filters))
+    candidates = list(db.scalars(
+        select(Meeting)
+        .join(Project, Project.id == Meeting.project_id)
+        .where(
+            Meeting.id != meeting.id,
+            Meeting.id.in_(candidate_ids),
+            Meeting.scheduled_at.is_not(None),
+            Meeting.duration_minutes.is_not(None),
+            Meeting.status != "cancelled",
+            Project.organization_id == meeting_project.organization_id,
+        )
+        .order_by(Meeting.scheduled_at, Meeting.id)
+    ))
+    current_start = _aware(meeting.scheduled_at)
+    current_end = current_start + timedelta(minutes=meeting.duration_minutes)
+    identity_map = {(row["kind"], row["id"]): row for row in participants}
+    conflicts = []
+    for candidate in candidates:
+        candidate_start = _aware(candidate.scheduled_at)
+        candidate_end = candidate_start + timedelta(minutes=candidate.duration_minutes)
+        if not (current_start < candidate_end and candidate_start < current_end):
+            continue
+        candidate_participants = _meeting_participant_payloads(db, candidate.id)
+        shared = [identity_map[(row["kind"], row["id"])] for row in candidate_participants
+                  if (row["kind"], row["id"]) in identity_map]
+        if not shared:
+            continue
+        visible = actor.is_admin or db.scalar(select(ProjectMember.id).where(
+            ProjectMember.project_id == candidate.project_id,
+            ProjectMember.user_id == actor.id,
+        )) is not None
+        conflicts.append({
+            "meeting_id": candidate.id if visible else None,
+            "project_id": candidate.project_id if visible else None,
+            "title": candidate.title if visible else "Занято в другом проекте",
+            "overlap_from": max(current_start, candidate_start),
+            "overlap_to": min(current_end, candidate_end),
+            "participants": shared,
+            "redacted": not visible,
+        })
+    return conflicts
+
+
+def _meeting_payload(db: Session, item: Meeting, actor: User) -> dict:
+    participant_refs = _meeting_participant_payloads(db, item.id)
+    conflicts = _meeting_conflicts(db, item, actor)
+    return {
+        "id": item.id, "record_version": item.record_version,
+        "project_id": item.project_id, "contract_id": item.contract_id,
+        "title": item.title, "scheduled_at": item.scheduled_at,
+        "duration_minutes": item.duration_minutes, "participants": item.participants,
+        "participant_user_ids": [row["id"] for row in participant_refs if row["kind"] == "user"],
+        "participant_contact_ids": [row["id"] for row in participant_refs if row["kind"] == "contact"],
+        "participant_refs": participant_refs,
+        "agenda": item.agenda, "minutes": item.minutes, "status": item.status,
+        "has_conflicts": bool(conflicts), "conflict_count": len(conflicts), "conflicts": conflicts,
+    }
+
+
 @router.get("/meetings")
 def meetings(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
              status: str | None = None, cursor: int | None = None, limit: int = 100):
@@ -257,26 +372,53 @@ def meetings(project_id: int, db: Session = Depends(get_db), user: User = Depend
     if cursor is not None: query = query.where(Meeting.id < cursor)
     rows = list(db.scalars(query.order_by(Meeting.id.desc()).limit(limit + 1)))
     has_more = len(rows) > limit; rows = rows[:limit]
-    return {"meetings": [{"id": x.id, "record_version": x.record_version, "project_id": x.project_id, "contract_id": x.contract_id,
-                           "title": x.title, "scheduled_at": x.scheduled_at, "participants": x.participants,
-                           "agenda": x.agenda, "minutes": x.minutes, "status": x.status} for x in rows], "count": len(rows),
+    return {"meetings": [_meeting_payload(db, row, user) for row in rows], "count": len(rows),
             "next_cursor": rows[-1].id if has_more and rows else None}
 
 
 @router.post("/meetings")
 def create_meeting(payload: MeetingCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
+    project = db.get(Project, payload.project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
     if payload.contract_id is not None and not db.scalar(select(Contract.id).where(Contract.id == payload.contract_id, Contract.project_id == payload.project_id)):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
-    item = Meeting(**payload.model_dump(), created_by_user_id=user.id)
+    member_ids = set(db.scalars(select(ProjectMember.user_id).where(
+        ProjectMember.project_id == payload.project_id,
+        ProjectMember.user_id.in_(payload.participant_user_ids),
+    ))) if payload.participant_user_ids else set()
+    if member_ids != set(payload.participant_user_ids):
+        raise HTTPException(422, "Участник-пользователь должен состоять в проекте")
+    contact_ids = set(db.scalars(select(ProjectContact.id).where(
+        ProjectContact.project_id == payload.project_id,
+        ProjectContact.id.in_(payload.participant_contact_ids),
+        ProjectContact.active.is_(True),
+    ))) if payload.participant_contact_ids else set()
+    if contact_ids != set(payload.participant_contact_ids):
+        raise HTTPException(422, "Контакт должен быть активным и относиться к проекту")
+    data = payload.model_dump(exclude={"participant_user_ids", "participant_contact_ids"})
+    item = Meeting(**data, created_by_user_id=user.id)
     db.add(item); db.flush()
+    db.add_all([
+        *(MeetingParticipant(meeting_id=item.id, user_id=user_id) for user_id in payload.participant_user_ids),
+        *(MeetingParticipant(meeting_id=item.id, contact_id=contact_id) for contact_id in payload.participant_contact_ids),
+    ])
+    db.flush()
+    conflicts = _meeting_conflicts(db, item, user)
     append_management_history(db, project_id=item.project_id, entity_type="meeting", entity_id=item.id,
                               record_version=item.record_version, action="created", actor_user_id=user.id,
-                              old_values={}, new_values={"title": item.title, "status": item.status},
+                              old_values={}, new_values={"title": item.title, "status": item.status,
+                                                         "scheduled_at": item.scheduled_at,
+                                                         "duration_minutes": item.duration_minutes},
+                              evidence={"participant_user_ids": payload.participant_user_ids,
+                                        "participant_contact_ids": payload.participant_contact_ids,
+                                        "conflicting_meeting_ids": [row["meeting_id"] for row in conflicts
+                                                                    if row["meeting_id"] is not None]},
                               reason=item.agenda)
     db.add(AuditLog(action="meeting_created", entity_type="meeting", entity_id=item.id, details=f"user={user.id}"))
     db.commit(); db.refresh(item)
-    return {"id": item.id, "status": item.status, "record_version": item.record_version}
+    return _meeting_payload(db, item, user)
 
 
 @router.patch("/meetings/{meeting_id}")

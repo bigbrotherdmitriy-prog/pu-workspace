@@ -39,7 +39,7 @@ jobs:
         run: docker compose up --build -d --wait --wait-timeout 180
       - name: Verify migration head and runtime flow
         run: |
-          docker compose exec -T backend alembic heads | grep -Fx 'f91c2d4e6a80 (head)'
+          docker compose exec -T backend alembic heads | grep -Fx 'a72d4e6f8b91 (head)'
           docker compose exec -T backend alembic current
           docker compose exec -T backend python - <<'PY'
           import json
@@ -49,7 +49,7 @@ jobs:
               readiness = json.load(response)
           schema = readiness.get('checks', {}).get('schema', {})
           assert schema.get('ok') is True
-          assert schema.get('message') == 'f91c2d4e6a80'
+          assert schema.get('message') == 'a72d4e6f8b91'
           PY
           python scripts/check_ci_smoke.py --seed
       - name: Verify v5.4 runtime composition
