@@ -352,6 +352,12 @@ def _ensure_escalation_job(db: Session, *, policy: NotificationPolicy, notificat
 @router.post("/notifications/refresh")
 def refresh_notifications(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
+    refresh_notifications_for_user(project_id, db, user)
+    return list_notifications(project_id, db=db, user=user)
+
+
+def refresh_notifications_for_user(project_id: int, db: Session, user: User) -> None:
+    """Materialize one user's notifications without depending on an HTTP request."""
     policy = _policy_for_refresh(db, project_id, user)
     now = _utcnow()
     local_today = now.astimezone(require_iana_timezone(policy.timezone)).date()
@@ -385,7 +391,6 @@ def refresh_notifications(project_id: int, db: Session = Depends(get_db), user: 
         _ensure_notification(db, user.id, project_id, "decision", decision.question, decision.source_excerpt,
                              "decision", decision.id, f"decision:{decision.id}:{decision.status}")
     db.commit()
-    return list_notifications(project_id, db=db, user=user)
 
 
 @router.get("/notifications")

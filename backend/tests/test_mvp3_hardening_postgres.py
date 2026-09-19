@@ -15,7 +15,9 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.api import management as management_api
 from app.api import tasks as tasks_api
+from app.automations import notifications as notification_automation
 from app.database import Base
+from app.jobs.handlers import run
 from app.models.job import BackgroundJob
 from app.models.management import ManagementHistory, Notification, NotificationPolicy, Obligation
 from app.models.organization_contract import Organization
@@ -149,3 +151,36 @@ def test_postgres_concurrent_notification_refresh_is_idempotent(mvp3_pg_engine, 
         assert db.scalar(select(func.count()).select_from(BackgroundJob).where(
             BackgroundJob.kind == "notifications.escalation.proposal",
         )) == 2
+
+
+def test_postgres_scheduled_refresh_materializes_deadline_without_http(mvp3_pg_engine, monkeypatch):
+    now = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(management_api, "_utcnow", lambda: now)
+    monkeypatch.setattr(notification_automation, "SessionLocal", lambda: Session(mvp3_pg_engine))
+    with Session(mvp3_pg_engine) as db:
+        organization = Organization(name="MVP3 scheduled notification tenant")
+        user = User(name="Viewer", email=f"scheduled-{uuid4().hex}@example.test", is_admin=False)
+        db.add_all([organization, user]); db.flush()
+        project = Project(name="MVP3 scheduled notification project", organization_id=organization.id)
+        db.add(project); db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role="viewer"))
+        obligation = Obligation(
+            project_id=project.id, owner_user_id=user.id, title="Scheduled deadline",
+            status="confirmed", due_date=date(2026, 9, 22), source_type="manual",
+            source_id="scheduled-deadline", source_name="source.txt", source_excerpt="evidence",
+            source_hash="f" * 64, confidence=1.0,
+        )
+        db.add(obligation); db.commit()
+        project_id, user_id, obligation_id = project.id, user.id, obligation.id
+
+    assert run("notifications.refresh", {}) == {"projects": 1, "members": 1, "failed": 0}
+
+    with Session(mvp3_pg_engine) as db:
+        policy = db.scalar(select(NotificationPolicy).where(
+            NotificationPolicy.project_id == project_id, NotificationPolicy.user_id == user_id,
+        ))
+        notice = db.scalar(select(Notification).where(
+            Notification.project_id == project_id, Notification.user_id == user_id,
+        ))
+        assert policy is not None
+        assert (notice.entity_type, notice.entity_id, notice.kind) == ("obligation", obligation_id, "deadline")
