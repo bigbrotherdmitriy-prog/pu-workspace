@@ -101,6 +101,82 @@ def test_invoice_regex_fallback_never_assigns_category(monkeypatch):
     assert result.fallback_reason == "not_configured"
 
 
+def test_invoice_llm_prefers_explicit_payment_deadline_over_invoice_date(monkeypatch):
+    text = (
+        "СЧЕТ № PU-LIVE-20260919-01\n"
+        "Дата счета: 19.09.2026\n"
+        "Срок оплаты: 30.09.2026\n"
+        "Итого к оплате: 12 345,67 руб."
+    )
+    monkeypatch.setattr(invoice_extraction, "policy_mode_for_project", lambda *_: "external_allowed")
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: True)
+    monkeypatch.setattr(invoice_extraction, "extract_invoice_fields_with_gemini", lambda *_: {
+        "amount": 12345.67, "amount_evidence_quote": "12 345,67 руб.", "currency": "RUB",
+        "counterparty": None, "counterparty_evidence_quote": None,
+        "payment_purpose": None, "payment_purpose_evidence_quote": None,
+        "suggested_category_name": None, "category_evidence_quote": None,
+        "confidence": "medium",
+    })
+
+    result = extract_invoice_fields(object(), 1, text, "invoice.pdf", [])
+
+    assert result.planned_date == date(2026, 9, 30)
+
+
+def test_invoice_regex_fallback_prefers_explicit_payment_deadline(monkeypatch):
+    monkeypatch.setattr(invoice_extraction, "policy_mode_for_project", lambda *_: "external_allowed")
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: False)
+
+    result = extract_invoice_fields(
+        object(), 1,
+        "Дата счета: 19.09.2026. Срок оплаты: 30.09.2026. Итого 12 345,67 руб.",
+        "invoice.pdf", [],
+    )
+
+    assert result.planned_date == date(2026, 9, 30)
+
+
+def test_invoice_without_explicit_payment_deadline_keeps_first_valid_date(monkeypatch):
+    monkeypatch.setattr(invoice_extraction, "policy_mode_for_project", lambda *_: "external_allowed")
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: False)
+
+    result = extract_invoice_fields(
+        object(), 1, "Дата счета: 19.09.2026. Итого 12 345,67 руб.", "invoice.pdf", [],
+    )
+
+    assert result.planned_date == date(2026, 9, 19)
+
+
+@pytest.mark.parametrize("deadline", [
+    "Оплатить до 30.09.2026",
+    "Дата платежа: 30.09.2026",
+    "К оплате не позднее 30.09.2026",
+])
+def test_invoice_recognizes_supported_payment_deadline_labels(monkeypatch, deadline):
+    monkeypatch.setattr(invoice_extraction, "policy_mode_for_project", lambda *_: "external_allowed")
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: False)
+
+    result = extract_invoice_fields(
+        object(), 1, f"Дата счета: 19.09.2026. {deadline}. Итого 12 345,67 руб.",
+        "invoice.pdf", [],
+    )
+
+    assert result.planned_date == date(2026, 9, 30)
+
+
+def test_invoice_does_not_treat_unrelated_deadline_as_payment_deadline(monkeypatch):
+    monkeypatch.setattr(invoice_extraction, "policy_mode_for_project", lambda *_: "external_allowed")
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: False)
+
+    result = extract_invoice_fields(
+        object(), 1,
+        "Дата счета: 19.09.2026. Срок поставки: 30.09.2026. Итого 12 345,67 руб.",
+        "invoice.pdf", [],
+    )
+
+    assert result.planned_date == date(2026, 9, 19)
+
+
 def test_proposal_requires_manager_confirmation_before_creating_cash_flow(
     db_session, user_factory, monkeypatch,
 ):
