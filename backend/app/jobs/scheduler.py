@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from app.automations.ai_secretary import enabled as ai_enabled, interval_seconds as ai_interval
 from app.automations.gmail import enabled as gmail_enabled, interval_seconds as gmail_interval
+from app.automations.notifications import enabled as notifications_enabled, interval_seconds as notifications_interval
 from app.database import SessionLocal
 from app.jobs.queue import enqueue, touch_service
 
@@ -28,6 +29,7 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
         for kind, is_enabled, interval in (
             ("gmail.sync", gmail_enabled(), gmail_interval()),
             ("ai.rules", ai_enabled(), ai_interval()),
+            ("notifications.refresh", notifications_enabled(), notifications_interval()),
         ):
             if not is_enabled:
                 continue

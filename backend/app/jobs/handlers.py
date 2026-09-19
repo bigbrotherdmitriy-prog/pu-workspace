@@ -55,6 +55,9 @@ def run(kind: str, payload: dict) -> dict:
         from app.database import SessionLocal
         with SessionLocal() as db:
             return run_due_rules(db)
+    if kind == "notifications.refresh":
+        from app.automations.notifications import refresh_project_members_once
+        return refresh_project_members_once()
     if kind == "notifications.escalation.proposal":
         from app.notification_escalation import run_escalation_proposal
         return run_escalation_proposal(payload)
