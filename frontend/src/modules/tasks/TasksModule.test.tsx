@@ -9,7 +9,7 @@ function props(overrides: Partial<ComponentProps<typeof TasksModule>> = {}): Com
   return {
     tasks: [task], filter: "all", members, documents, history,
     completionTaskId: 0, completionNote: "", completionDocumentId: 0, historyTaskId: 0,
-    onFilterChange: vi.fn(), onAssign: vi.fn(), onApproveExternal: vi.fn(), onUpdate: vi.fn(),
+    onFilterChange: vi.fn(), onAssign: vi.fn(), onChangeDueDate: vi.fn(), onApproveExternal: vi.fn(), onUpdate: vi.fn(),
     onStartCompletion: vi.fn(), onCancelCompletion: vi.fn(), onCompletionNoteChange: vi.fn(),
     onCompletionDocumentChange: vi.fn(), onLoadHistory: vi.fn(), ...overrides,
   };
@@ -43,7 +43,7 @@ describe("TasksModule layout and existing actions", () => {
     expect(screen.getByText(task.title)).toBeInTheDocument();
     expect(container.querySelector(".task-body p")).toHaveTextContent(`${longPath} · ${task.assignee_name} · эвристическая оценка 42/100`);
     expect(screen.getByText(task.source_excerpt)).toBeInTheDocument();
-    expect(container.querySelector(".task-action-buttons")?.querySelectorAll("button")).toHaveLength(4);
+    expect(container.querySelector(".task-action-buttons")?.querySelectorAll("button")).toHaveLength(5);
     expect(container.querySelector(".task-body select")).toBeNull();
   });
 
@@ -70,15 +70,39 @@ describe("TasksModule layout and existing actions", () => {
     const callbacks = props();
     render(<TasksModule {...callbacks} />);
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Изменить срок" }));
     fireEvent.click(screen.getByRole("button", { name: "Поставить задачу" }));
     fireEvent.click(screen.getByRole("button", { name: "В работу" }));
     fireEvent.click(screen.getByRole("button", { name: /^Завершить$/ }));
     fireEvent.click(screen.getByRole("button", { name: "История" }));
     expect(callbacks.onAssign).toHaveBeenCalledWith(task, 2);
+    expect(callbacks.onChangeDueDate).toHaveBeenCalledWith(task);
     expect(callbacks.onApproveExternal).toHaveBeenCalledWith(task);
     expect(callbacks.onUpdate).toHaveBeenCalledExactlyOnceWith(task, "in_progress");
     expect(callbacks.onStartCompletion).toHaveBeenCalledWith(task);
     expect(callbacks.onLoadHistory).toHaveBeenCalledWith(task);
+  });
+
+  it("shows the immutable original obligation deadline when the working deadline changed", () => {
+    render(<TasksModule {...props({ tasks: [{
+      ...task,
+      due_date: "2026-10-03",
+      original_obligation_id: 17,
+      original_obligation_due_date: "2026-09-26",
+      due_date_adjusted: true,
+    }] })} />);
+    expect(screen.getByText("Срок скорректирован, исходное обязательство было до 2026-09-26.")).toBeInTheDocument();
+  });
+
+  it("distinguishes an assigned working deadline from a missing original deadline", () => {
+    render(<TasksModule {...props({ tasks: [{
+      ...task,
+      due_date: "2026-10-03",
+      original_obligation_id: 18,
+      original_obligation_due_date: null,
+      due_date_adjusted: true,
+    }] })} />);
+    expect(screen.getByText("Срок скорректирован, в исходном обязательстве срок не указан.")).toBeInTheDocument();
   });
 
   it("keeps completion confirmation separate and requires a nonblank result", () => {
