@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -49,11 +49,33 @@ class ScheduleItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CostCategory(Base):
+    __tablename__ = "cost_categories"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "normalized_name", name="uq_cost_categories_org_name"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True,
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    normalized_name: Mapped[str] = mapped_column(String(200))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true", index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+
 class BudgetLine(Base):
     __tablename__ = "budget_lines"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
+    cost_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_categories.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     category: Mapped[str] = mapped_column(String(200), index=True)
     description: Mapped[str] = mapped_column(String(1000))
     planned_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
@@ -79,6 +101,9 @@ class CashFlowEntry(Base):
     source_document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
     source_document_version_id: Mapped[int | None] = mapped_column(ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=True, index=True)
     source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cost_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_categories.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     direction: Mapped[str] = mapped_column(String(10), index=True)
     title: Mapped[str] = mapped_column(String(500))
     planned_date: Mapped[date] = mapped_column(Date, index=True)
@@ -95,6 +120,69 @@ class CashFlowEntry(Base):
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class InvoiceExtractionProposal(Base):
+    __tablename__ = "invoice_extraction_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "source_document_version_id",
+            name="uq_invoice_extraction_project_version",
+        ),
+        CheckConstraint(
+            "status IN ('proposed','confirmed','rejected')",
+            name="ck_invoice_extraction_status",
+        ),
+        CheckConstraint(
+            "target_kind IN ('cash_flow','budget')",
+            name="ck_invoice_extraction_target_kind",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True,
+    )
+    source_document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), index=True,
+    )
+    source_document_version_id: Mapped[int] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), index=True,
+    )
+    source_document_sha256: Mapped[str] = mapped_column(String(64))
+    proposed_cost_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_categories.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    selected_cost_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_categories.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    amount_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="RUB", server_default="RUB")
+    counterparty: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    counterparty_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_purpose: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    payment_purpose_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category_evidence_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    planned_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    extraction_method: Mapped[str] = mapped_column(String(30))
+    fallback_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_kind: Mapped[str] = mapped_column(String(20), default="cash_flow", server_default="cash_flow")
+    status: Mapped[str] = mapped_column(String(30), default="proposed", server_default="proposed", index=True)
+    confirmed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True,
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_cash_flow_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cash_flow_entries.id", ondelete="SET NULL"), nullable=True,
+    )
+    created_budget_line_id: Mapped[int | None] = mapped_column(
+        ForeignKey("budget_lines.id", ondelete="SET NULL"), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
 
 
 class ProcurementItem(Base):
