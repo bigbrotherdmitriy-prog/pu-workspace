@@ -27,7 +27,7 @@ from app.models.v54_provider_action import (
 from app.provider_actions.contracts import ProviderActionError, ProviderPreconditionFailed
 from app.provider_actions.product import (
     RECONCILE_KIND, build_product_runtime, queue_confirmed_action, queue_reconciliation,
-    run_product_reconcile_job, task_effect_states,
+    resolve_reconciled_absence, run_product_reconcile_job, task_effect_states,
 )
 from app.provider_actions.runtime import PRODUCT_KIND
 
@@ -78,6 +78,10 @@ class Request:
         return self.result
 
 
+class FakeNotFound(Exception):
+    resp = SimpleNamespace(status=404)
+
+
 class FakeGoogle:
     def __init__(self, kind: str, *, fail_after=False, crash_after=False):
         self.kind = kind
@@ -122,7 +126,8 @@ class FakeGoogle:
         if "userId" in kwargs:
             return Request(next(item for item in self.sent if item["id"] == kwargs["id"]))
         if "eventId" in kwargs:
-            return Request(self.events_by_id[kwargs["eventId"]])
+            item = self.events_by_id.get(kwargs["eventId"])
+            return Request(item, None if item is not None else FakeNotFound())
         task_id = kwargs["task"]
         return Request(next(item for item in self.task_items if item["id"] == task_id))
 
@@ -454,6 +459,130 @@ def test_oauth_reconnect_revokes_queued_project_effect(world):
             owner(world, queued["job_id"], "worker-reconnected"),
         )
     assert fake.effects == 0
+
+
+@pytest.mark.parametrize("kind", ["google.tasks.upsert", "google.calendar.upsert"])
+def test_rotated_oauth_reconciliation_is_lookup_only_and_requires_human_absence_resolution(
+    world, monkeypatch, kind,
+):
+    queued = queue_confirmed_action(
+        world.db, action_kind=kind, target_id=world.task.id, actor=world.user,
+    )
+    payload = {"organization_id": world.org.id, "action_id": queued["action_id"], "revision": 1}
+
+    def fail_before_provider(*_args):
+        raise RuntimeError("synthetic adapter outage")
+
+    initial_runtime = build_product_runtime(
+        sessions=sessions(world), service_factory=fail_before_provider,
+    )
+    assert initial_runtime.execute_job(
+        payload, owner(world, queued["job_id"], "worker-initial"),
+    )["outcome"] == "UNKNOWN"
+
+    first_check = queue_reconciliation(
+        world.db, action_id=queued["action_id"], revision=1, actor=world.user,
+    )
+    first_job = world.db.get(BackgroundJob, first_check["job_id"])
+    first_job.status = "dead_letter"; first_job.attempts = 3
+    world.db.commit()
+    failed_state = task_effect_states(world.db, world.task.id)[
+        "task" if kind == "google.tasks.upsert" else "calendar"
+    ]
+    assert failed_state["reconciliation_status"] == "failed"
+    assert failed_state["reconciliation_job_id"] == first_job.id
+    token = world.db.scalar(select(GoogleOAuthToken).where(
+        GoogleOAuthToken.project_id == world.project.id,
+    ))
+    token.credential_generation = 3
+    world.db.commit()
+
+    second_check = queue_reconciliation(
+        world.db, action_id=queued["action_id"], revision=1, actor=world.user,
+    )
+    assert second_check["job_id"] != first_check["job_id"]
+    assert "credential-3" in world.db.get(BackgroundJob, second_check["job_id"]).idempotency_key
+
+    fake = FakeGoogle(kind)
+    rotated_runtime = build_product_runtime(
+        sessions=sessions(world), service_factory=lambda *_args: fake,
+    )
+    reconcile_owner = owner(world, second_check["job_id"], "worker-rotated")
+    monkeypatch.setattr("app.provider_actions.product.build_product_runtime", lambda: rotated_runtime)
+    with execution_owner(
+        reconcile_owner[0], reconcile_owner[1],
+        attempt=reconcile_owner[2], locked_at=reconcile_owner[3],
+    ):
+        result = run_product_reconcile_job(payload)
+
+    assert result["outcome"] == "UNKNOWN"
+    assert fake.effects == 0
+    state = task_effect_states(world.db, world.task.id)[
+        "task" if kind == "google.tasks.upsert" else "calendar"
+    ]
+    assert state["safe_code"] == "receipt_not_found"
+    assert state["reconciliation_status"] == "running"
+    assert state["can_confirm_absence"] is True
+
+    with pytest.raises(ProviderActionError, match="outcome_not_reconcilable"):
+        resolve_reconciled_absence(
+            world.db, action_id=queued["action_id"], revision=1,
+            expected_observation_sequence=state["observation_sequence"],
+            confirmed_absent=False, actor=world.user,
+        )
+    membership = world.db.scalar(select(ProjectMember).where(
+        ProjectMember.project_id == world.project.id,
+        ProjectMember.user_id == world.user.id,
+    ))
+    membership.role = "editor"; world.db.commit()
+    with pytest.raises(ProviderActionError, match="authority_stale"):
+        resolve_reconciled_absence(
+            world.db, action_id=queued["action_id"], revision=1,
+            expected_observation_sequence=state["observation_sequence"],
+            confirmed_absent=True, actor=world.user,
+        )
+    membership.role = "manager"; world.db.commit()
+
+    resolved = resolve_reconciled_absence(
+        world.db, action_id=queued["action_id"], revision=1,
+        expected_observation_sequence=state["observation_sequence"],
+        confirmed_absent=True, actor=world.user,
+    )
+    assert resolved["status"] == "failed"
+    assert resolved["safe_code"] == "human_confirmed_absence_after_rotation"
+    assert world.db.get(ProviderAction, (queued["action_id"], 1)).state == "NOT_APPLIED"
+    assert world.db.scalar(select(AuditLog).where(
+        AuditLog.action == "provider_absence_confirmed",
+    )) is not None
+
+    retry = queue_confirmed_action(
+        world.db, action_kind=kind, target_id=world.task.id, actor=world.user,
+    )
+    assert retry["revision"] == 2
+    assert fake.effects == 0
+
+
+def test_rotated_oauth_absence_resolution_rejects_stale_observation_sequence(world):
+    queued = queue_confirmed_action(
+        world.db, action_kind="google.tasks.upsert", target_id=world.task.id, actor=world.user,
+    )
+    fake = FakeGoogle("google.tasks.upsert")
+    runtime = build_product_runtime(sessions=sessions(world), service_factory=lambda *_args: fake)
+    payload = {"organization_id": world.org.id, "action_id": queued["action_id"], "revision": 1}
+    # An adapter failure after dispatch entry produces the required UNKNOWN but
+    # no rotated read-only receipt_not_found observation yet.
+    runtime.adapter.service_factory = lambda *_args: (_ for _ in ()).throw(RuntimeError("offline"))
+    assert runtime.execute_job(payload, owner(world, queued["job_id"], "worker-a"))["outcome"] == "UNKNOWN"
+    token = world.db.scalar(select(GoogleOAuthToken).where(
+        GoogleOAuthToken.project_id == world.project.id,
+    ))
+    token.credential_generation += 1; world.db.commit()
+
+    with pytest.raises(ProviderActionError, match="outcome_not_reconcilable"):
+        resolve_reconciled_absence(
+            world.db, action_id=queued["action_id"], revision=1,
+            expected_observation_sequence=999, confirmed_absent=True, actor=world.user,
+        )
 
 
 def test_process_crash_after_effect_recovers_by_lookup_without_duplicate(world):

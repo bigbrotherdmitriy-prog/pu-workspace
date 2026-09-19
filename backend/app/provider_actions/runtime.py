@@ -302,12 +302,17 @@ class ProviderActionRuntime:
         try:
             receipt = self.adapter.lookup(request)
         except Exception:
-            receipt = None
+            # Lookup is read-only, but a transport/provider failure is not proof
+            # of absence.  Persist a safe observation so the UI does not report
+            # a silent success and never retain arbitrary exception text.
+            return self._record(
+                action_id, revision, "UNKNOWN", source=source, job_id=job_id,
+                retry_safe=False, safe_code="provider_lookup_failed",
+            )
         if receipt is None:
-            with self.sessions() as db:
-                latest = self._latest(db, action_id, revision)
-                if latest and latest.outcome == "UNKNOWN":
-                    return self._result(db, self._action(db, action_id, revision))
+            # Absence from an eventually-consistent provider search is not an
+            # automatic NOT_APPLIED result.  It becomes explicit evidence that
+            # a manager may resolve through the product recovery endpoint.
             return self._record(action_id, revision, "UNKNOWN", source=source, job_id=job_id,
                                 retry_safe=False, safe_code="receipt_not_found")
         self._validate_receipt(request, receipt)

@@ -23,7 +23,9 @@ import { NotificationsModule, type NotificationItem } from "./modules/notificati
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
-import { inboxTaskDelivery, type ProviderEffects } from "./modules/inbox/providerTaskState";
+import {
+  inboxTaskDelivery, type ProviderEffect, type ProviderEffects,
+} from "./modules/inbox/providerTaskState";
 import { MailClientModule } from "./modules/mail/MailClientModule";
 import { mailSyncRequest } from "./modules/mail/mailSyncRequest";
 import type { MailFolderKind } from "./modules/mail/types";
@@ -1516,7 +1518,51 @@ export function App() {
           method: "POST",
         });
       }
-      setNotice("Проверка состояния в Google поставлена в очередь; результат появится после сверки");
+      setNotice("Проверка состояния в Google поставлена в очередь");
+      let states: ProviderEffect[] = [];
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        states = await Promise.all(effects.map((effect) =>
+          api(`/provider-actions/${encodeURIComponent(effect.action_id!)}/revisions/${effect.revision}`),
+        ));
+        if (states.every((effect) => !["queued", "running"].includes(effect.reconciliation_status || ""))) {
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+      }
+      await load();
+      if (states.some((effect) => effect.reconciliation_status === "failed")) {
+        setError("Проверка в Google не удалась; требуется вмешательство. Повторный publish не выполнялся.");
+      } else if (states.some((effect) => effect.can_confirm_absence)) {
+        setNotice("Объекты в Google не найдены. Подтвердите отсутствие отдельно для разрешения повторной попытки.");
+      } else if (states.some((effect) => ["queued", "running"].includes(effect.reconciliation_status || ""))) {
+        setNotice("Сверка с Google ещё выполняется. Обновите карточку через несколько секунд.");
+      } else {
+        setNotice("Сверка с Google завершена");
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function resolveExternalAbsence(task: InboxTask) {
+    const effects = inboxTaskDelivery(task).resolveAbsence;
+    if (!effects.length) return;
+    if (!window.confirm(
+      "Подтвердить, что проверенные объекты отсутствуют в Google? Это не создаст их автоматически, но разрешит отдельную повторную попытку.",
+    )) return;
+    try {
+      for (const effect of effects) {
+        await api(
+          `/provider-actions/${encodeURIComponent(effect.action_id!)}/revisions/${effect.revision}/resolve-not-applied`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              expected_observation_sequence: effect.observation_sequence,
+              confirmed_absent: true,
+            }),
+          },
+        );
+      }
+      setNotice("Отсутствие объектов подтверждено. Новое создание возможно только через кнопку «Повторить».");
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -3484,7 +3530,16 @@ export function App() {
                               </button>
                             )}
                             {inboxTaskDelivery(task).reconcile.length > 0 && (
-                              <button onClick={() => void reconcileExternal(task)}>Сверить с Google</button>
+                              <button onClick={() => void reconcileExternal(task)}>
+                                {inboxTaskDelivery(task).reconciliationFailed
+                                  ? "Повторить сверку"
+                                  : "Сверить с Google"}
+                              </button>
+                            )}
+                            {inboxTaskDelivery(task).resolveAbsence.length > 0 && (
+                              <button onClick={() => void resolveExternalAbsence(task)}>
+                                Подтвердить отсутствие
+                              </button>
                             )}
                           </div>
                         ))}

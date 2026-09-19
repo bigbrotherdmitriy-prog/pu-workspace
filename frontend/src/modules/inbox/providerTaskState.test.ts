@@ -52,4 +52,52 @@ describe("inbox provider task delivery", () => {
     expect(state.canApprove).toBe(false);
     expect(state.reconcile).toEqual([{ status: "unknown", action_id: "google-task-7", revision: 2 }]);
   });
+
+  it("surfaces a dead-lettered reconciliation instead of silently staying unknown", () => {
+    const state = inboxTaskDelivery({
+      external_action_status: "unknown",
+      provider_effects: {
+        task: {
+          status: "unknown", action_id: "google-task-7", revision: 1,
+          reconciliation_status: "failed",
+        },
+        calendar: { status: "not_requested" },
+      },
+    });
+    expect(state.label).toContain("проверка не удалась, требуется вмешательство");
+    expect(state.reconciliationFailed).toBe(true);
+    expect(state.reconcile).toHaveLength(1);
+    expect(state.resolveAbsence).toHaveLength(0);
+  });
+
+  it("offers explicit human absence confirmation only after an empty provider lookup", () => {
+    const effect = {
+      status: "unknown", action_id: "google-task-7", revision: 1,
+      safe_code: "receipt_not_found", observation_sequence: 2,
+      reconciliation_status: "completed", can_confirm_absence: true,
+    };
+    const state = inboxTaskDelivery({
+      external_action_status: "unknown",
+      provider_effects: { task: effect, calendar: { status: "not_requested" } },
+    });
+    expect(state.label).toContain("объект не найден, подтвердите отсутствие");
+    expect(state.reconcile).toHaveLength(0);
+    expect(state.resolveAbsence).toEqual([effect]);
+    expect(state.canApprove).toBe(false);
+  });
+
+  it("shows an in-progress reconciliation and suppresses duplicate clicks", () => {
+    const state = inboxTaskDelivery({
+      external_action_status: "unknown",
+      provider_effects: {
+        task: {
+          status: "unknown", action_id: "google-task-7", revision: 1,
+          reconciliation_status: "running",
+        },
+        calendar: { status: "not_requested" },
+      },
+    });
+    expect(state.label).toContain("проверяется в Google");
+    expect(state.reconcile).toHaveLength(0);
+  });
 });
