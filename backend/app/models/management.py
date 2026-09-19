@@ -43,7 +43,13 @@ class Obligation(Base):
 
 class Meeting(Base):
     __tablename__ = "meetings"
-    __table_args__ = (CheckConstraint("record_version > 0", name="ck_meetings_record_version"),)
+    __table_args__ = (
+        CheckConstraint("record_version > 0", name="ck_meetings_record_version"),
+        CheckConstraint(
+            "duration_minutes IS NULL OR (duration_minutes >= 1 AND duration_minutes <= 10080)",
+            name="ck_meetings_duration_minutes",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -51,12 +57,37 @@ class Meeting(Base):
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     title: Mapped[str] = mapped_column(String(500))
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     participants: Mapped[str | None] = mapped_column(Text, nullable=True)
     agenda: Mapped[str | None] = mapped_column(Text, nullable=True)
     minutes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="planned", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class MeetingParticipant(Base):
+    __tablename__ = "meeting_participants"
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL AND contact_id IS NULL) OR "
+            "(user_id IS NULL AND contact_id IS NOT NULL)",
+            name="ck_meeting_participants_one_identity",
+        ),
+        UniqueConstraint("meeting_id", "user_id", name="uq_meeting_participant_user"),
+        UniqueConstraint("meeting_id", "contact_id", name="uq_meeting_participant_contact"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    meeting_id: Mapped[int] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_contacts.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Notification(Base):

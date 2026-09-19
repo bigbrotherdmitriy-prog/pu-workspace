@@ -468,6 +468,9 @@ export function App() {
     [notifications, setNotifications] = useState<NotificationRow[]>([]),
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
+    [newMeetingDuration, setNewMeetingDuration] = useState("60"),
+    [newMeetingParticipantUserIds, setNewMeetingParticipantUserIds] = useState<number[]>([]),
+    [newMeetingParticipantContactIds, setNewMeetingParticipantContactIds] = useState<number[]>([]),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [contractDropStatus, setContractDropStatus] = useState("");
@@ -2058,7 +2061,11 @@ export function App() {
   async function createMeeting() {
     if (!newMeetingTitle.trim()) return;
     try {
-      await api("/management/meetings", {
+      const selectedNames = [
+        ...members.filter((member) => newMeetingParticipantUserIds.includes(member.user_id)).map((member) => member.name),
+        ...projectContacts.filter((contact) => newMeetingParticipantContactIds.includes(contact.id)).map((contact) => contact.name),
+      ];
+      const created = await api("/management/meetings", {
         method: "POST",
         body: JSON.stringify({
           project_id: projectId,
@@ -2066,13 +2073,22 @@ export function App() {
           scheduled_at: newMeetingDate
             ? new Date(newMeetingDate).toISOString()
             : null,
+          duration_minutes: newMeetingDate ? Number(newMeetingDuration) : null,
+          participants: selectedNames.join(", ") || null,
+          participant_user_ids: newMeetingParticipantUserIds,
+          participant_contact_ids: newMeetingParticipantContactIds,
           agenda: newMeetingAgenda.trim() || null,
         }),
       });
       setNewMeetingTitle("");
       setNewMeetingDate("");
+      setNewMeetingDuration("60");
+      setNewMeetingParticipantUserIds([]);
+      setNewMeetingParticipantContactIds([]);
       setNewMeetingAgenda("");
-      setNotice("Совещание добавлено");
+      setNotice(created.has_conflicts
+        ? `Совещание добавлено. Обнаружено конфликтов: ${created.conflict_count}. Проверьте время с участниками.`
+        : "Совещание добавлено");
       await loadManagement();
     } catch (e) {
       setError((e as Error).message);
@@ -2938,10 +2954,18 @@ export function App() {
           meetings={meetings}
           title={newMeetingTitle}
           date={newMeetingDate}
+          duration={newMeetingDuration}
           agenda={newMeetingAgenda}
+          participantUserIds={newMeetingParticipantUserIds}
+          participantContactIds={newMeetingParticipantContactIds}
+          members={members}
+          contacts={projectContacts}
           onTitleChange={setNewMeetingTitle}
           onDateChange={setNewMeetingDate}
+          onDurationChange={setNewMeetingDuration}
           onAgendaChange={setNewMeetingAgenda}
+          onParticipantUserIdsChange={setNewMeetingParticipantUserIds}
+          onParticipantContactIdsChange={setNewMeetingParticipantContactIds}
           onCreate={() => void createMeeting()}
           onRecordMinutes={(meeting) => void recordMinutes(meeting)}
         />
