@@ -51,6 +51,16 @@ class ProviderPreconditionFailed(ValueError):
     """No provider mutation was attempted because a precondition failed."""
 
 
+class ProviderLookupUncertain(RuntimeError):
+    """A completed search cannot establish presence or absence safely."""
+
+    def __init__(self, safe_code: str):
+        self.safe_code = (safe_code if safe_code in {
+            "provider_lookup_ambiguous", "provider_lookup_incomplete",
+        } else "provider_lookup_incomplete")
+        super().__init__(self.safe_code)
+
+
 @dataclass(frozen=True)
 class ActionEnvelope:
     """Immutable, content-free provider command seal.
