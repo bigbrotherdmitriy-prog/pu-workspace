@@ -11,6 +11,7 @@ from app.models.document import Document
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.audit_log import AuditLog
+from app.models.management import Obligation
 from app.integrations.external_resources import external_id_for
 from app.integrations.actions import configured_action_adapter
 from app.provider_actions.contracts import ProviderActionError
@@ -49,8 +50,23 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
     if not 1 <= limit <= 200:
         raise HTTPException(422, "limit must be between 1 and 200")
     action_provider = configured_action_adapter(project_id, db).provider
+    original_obligation_id = (
+        select(Obligation.id)
+        .where(Obligation.task_id == Task.id)
+        .order_by(Obligation.id.asc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    original_obligation_due_date = (
+        select(Obligation.due_date)
+        .where(Obligation.task_id == Task.id)
+        .order_by(Obligation.id.asc())
+        .limit(1)
+        .scalar_subquery()
+    )
     query = (
-        select(Task, User).join(User, User.id == Task.assignee_user_id)
+        select(Task, User, original_obligation_id, original_obligation_due_date)
+        .join(User, User.id == Task.assignee_user_id)
         .where(Task.project_id == project_id)
     )
     if status: query = query.where(Task.status == status)
@@ -58,7 +74,7 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
     rows = db.execute(query.order_by(Task.id.desc()).limit(limit + 1)).all()
     has_more = len(rows) > limit; rows = rows[:limit]
     result = []
-    for task, assignee in rows:
+    for task, assignee, obligation_id, obligation_due_date in rows:
         external_task_id = external_id_for(
             db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="task", legacy_id=task.google_task_id,
@@ -70,7 +86,11 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
         result.append({
             "id": task.id, "record_version": task.record_version, "title": task.title, "status": task.status, "priority": task.priority,
             "description": task.description,
-            "due_date": task.due_date, "assignee_user_id": task.assignee_user_id,
+            "due_date": task.due_date,
+            "original_obligation_id": obligation_id,
+            "original_obligation_due_date": obligation_due_date,
+            "due_date_adjusted": obligation_id is not None and task.due_date != obligation_due_date,
+            "assignee_user_id": task.assignee_user_id,
             "assignee_name": assignee.name, "assignee_email": assignee.email,
             "source_file_name": task.source_file_name, "source_excerpt": task.source_excerpt,
             "confidence": task.confidence, "needs_review": task.needs_review,

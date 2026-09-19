@@ -1255,6 +1255,40 @@ export function App() {
       setError((e as Error).message);
     }
   }
+  async function changeTaskDueDate(task: TaskRow) {
+    const entered = window.prompt(
+      "Новый рабочий срок в формате ГГГГ-ММ-ДД. Оставьте пустым, чтобы снять рабочий срок. Исходный срок обязательства не изменится.",
+      task.due_date || "",
+    );
+    if (entered === null) return;
+    const dueDate = entered.trim();
+    if (dueDate) {
+      const parsed = new Date(`${dueDate}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)
+        || Number.isNaN(parsed.getTime())
+        || parsed.toISOString().slice(0, 10) !== dueDate) {
+        setError("Введите корректную дату в формате ГГГГ-ММ-ДД.");
+        return;
+      }
+    }
+    const reason = window.prompt("Укажите причину изменения рабочего срока.")?.trim();
+    if (!reason) return;
+    try {
+      setError("");
+      await api(`/tasks/${task.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          expected_record_version: task.record_version ?? 1,
+          due_date: dueDate || null,
+          due_change_reason: reason,
+        }),
+      });
+      setNotice("Рабочий срок обновлён. Исходный срок обязательства сохранён.");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   async function updateRisk(risk: RiskRow, status: string) {
     try {
       const action_note =
@@ -2372,6 +2406,7 @@ export function App() {
               history={taskHistory}
               onFilterChange={setTaskFilter}
               onAssign={(task, userId) => void assignTask(task, userId)}
+              onChangeDueDate={(task) => void changeTaskDueDate(task)}
               onApproveExternal={(task) => void approveExternal(task)}
               onUpdate={(task, status) => void updateTask(task, status)}
               onStartCompletion={startTaskCompletion}
