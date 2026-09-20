@@ -153,7 +153,7 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
         page.locator("aside nav").get_by_role(
             "button", name="Документы", exact=True,
         ).click()
-        expect(page.get_by_role("heading", name="Реестр документов")).to_be_visible()
+        expect(page.get_by_role("heading", name="Документы проекта")).to_be_visible()
         uploaded_document = page.get_by_text(SYNTHETIC_DOCUMENT, exact=True).first
         expect(uploaded_document).to_be_visible(timeout=20_000)
         uploaded_document.click()
