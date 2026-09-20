@@ -5,7 +5,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.api import management as management_api
-from app.api.governance import DecisionUpdate, RiskUpdate, update_decision, update_risk
+from app.api.governance import (
+    DecisionUpdate, RiskUpdate, decisions, risks, update_decision, update_risk,
+)
 from app.api.management import (
     MeetingUpdate,
     NotificationRead,
@@ -223,3 +225,56 @@ def test_contact_conflict_rejects_cross_tenant_candidate_binding(db_session, use
             db_session, user,
         )
     assert error.value.status_code == 409
+
+
+def test_governance_relations_are_project_scoped_exposed_and_audited(db_session, user_factory):
+    _, user, project, _ = world(db_session, user_factory)
+    task, obligation, _, risk, decision = sources(user.id, project.id)
+    db_session.add_all([task, obligation, risk, decision]); db_session.commit()
+
+    risk_result = update_risk(risk.id, RiskUpdate(
+        expected_record_version=1, status="confirmed",
+        obligation_id=obligation.id, task_id=task.id,
+    ), db_session, user)
+    decision_result = update_decision(decision.id, DecisionUpdate(
+        expected_record_version=1, status="confirmed",
+        obligation_id=obligation.id, task_id=task.id, risk_id=risk.id,
+    ), db_session, user)
+
+    assert risk_result["obligation_id"] == obligation.id
+    assert risk_result["task_id"] == task.id
+    assert decision_result["obligation_id"] == obligation.id
+    assert decision_result["task_id"] == task.id
+    assert decision_result["risk_id"] == risk.id
+    risk_row = risks(project.id, db_session, user, None, None, 100)["risks"][0]
+    decision_row = decisions(project.id, db_session, user, None, None, 100)["decisions"][0]
+    assert (risk_row["obligation_id"], risk_row["task_id"]) == (obligation.id, task.id)
+    assert (decision_row["obligation_id"], decision_row["task_id"], decision_row["risk_id"]) == (
+        obligation.id, task.id, risk.id,
+    )
+    history = db_session.scalars(select(ManagementHistory).where(
+        ManagementHistory.entity_type.in_(["risk", "decision"]),
+    ).order_by(ManagementHistory.id)).all()
+    assert history[0].new_values["obligation_id"] == obligation.id
+    assert history[1].new_values["risk_id"] == risk.id
+
+
+def test_governance_relations_reject_cross_project_without_partial_mutation(db_session, user_factory):
+    _, user, first, second = world(db_session, user_factory)
+    first_task, _, _, first_risk, _ = sources(user.id, first.id)
+    _, second_obligation, _, _, _ = sources(user.id, second.id)
+    db_session.add_all([first_task, first_risk, second_obligation]); db_session.commit()
+
+    with pytest.raises(HTTPException) as error:
+        update_risk(first_risk.id, RiskUpdate(
+            expected_record_version=1, status="confirmed",
+            obligation_id=second_obligation.id, task_id=first_task.id,
+        ), db_session, user)
+    assert error.value.status_code == 422
+    db_session.refresh(first_risk)
+    assert first_risk.record_version == 1
+    assert first_risk.status == "needs_confirmation"
+    assert first_risk.obligation_id is None and first_risk.task_id is None
+    assert db_session.scalar(select(func.count()).select_from(ManagementHistory).where(
+        ManagementHistory.entity_type == "risk", ManagementHistory.entity_id == first_risk.id,
+    )) == 0
