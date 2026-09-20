@@ -1,5 +1,5 @@
 from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, router
-from app.schedule_import.mpp import map_mpxj_task
+from app.schedule_import.mpp import _relation, map_mpxj_task
 from app.schedule_import.mspdi import build_mspdi
 from xml.etree import ElementTree
 
@@ -10,7 +10,8 @@ class Value:
 
 
 class Relation:
-    def getSourceTask(self): return ValueTask(17)
+    def getSourceTask(self): return ValueTask(42)
+    def getTargetTask(self): return ValueTask(17)
     def getType(self): return Value("FS")
     def getLag(self): return Value("0.0d")
 
@@ -48,6 +49,17 @@ def test_mpxj_task_preserves_hierarchy_dates_critical_path_and_dependencies():
     assert task.duration_text == "8.0d"
     assert task.is_critical is True
     assert task.predecessors == [{"external_uid": "17", "type": "FS", "lag": "0.0d"}]
+
+
+def test_mpxj_relation_uses_the_endpoint_other_than_the_current_task():
+    current = ValueTask(42)
+
+    class ReversedRelation(Relation):
+        def getSourceTask(self): return ValueTask(17)
+        def getTargetTask(self): return current
+
+    assert _relation(Relation(), current)["external_uid"] == "17"
+    assert _relation(ReversedRelation(), current)["external_uid"] == "17"
 
 
 def test_mpp_routes_and_binary_validation_are_explicit():

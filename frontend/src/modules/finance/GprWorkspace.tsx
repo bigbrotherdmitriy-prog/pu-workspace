@@ -133,6 +133,7 @@ export function GprWorkspace({ projectId, finance, selectedContractId, onPrepare
   const [mppPreview, setMppPreview] = useState<MppPreview | null>(null);
   const [mppBusy, setMppBusy] = useState(false);
   const [mppError, setMppError] = useState("");
+  const [mppNotice, setMppNotice] = useState("");
   const mppInput = useRef<HTMLInputElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const currentBaselineId = baselines.some((item) => item.id === baselineId) ? baselineId : baselines[0]?.id || 0;
@@ -237,7 +238,7 @@ export function GprWorkspace({ projectId, finance, selectedContractId, onPrepare
 
   async function chooseMpp(file?: File) {
     if (!file) return;
-    setMppFile(file); setMppPreview(null); setMppError(""); setMppBusy(true);
+    setMppFile(file); setMppPreview(null); setMppError(""); setMppNotice(""); setMppBusy(true);
     try {
       const content_base64 = await fileBase64(file);
       setMppPreview(await api<MppPreview>("/execution/mpp/preview", {
@@ -251,16 +252,18 @@ export function GprWorkspace({ projectId, finance, selectedContractId, onPrepare
 
   async function importMpp() {
     if (!mppFile) return;
-    setMppError(""); setMppBusy(true);
+    setMppError(""); setMppNotice(""); setMppBusy(true);
     try {
       const content_base64 = await fileBase64(mppFile);
-      const result = await api<{ baseline_id: number; created: number; duplicate: boolean }>("/execution/mpp/import", {
+      const result = await api<{ baseline_id: number; created: number; duplicate: boolean; repaired?: boolean }>("/execution/mpp/import", {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, contract_id: selectedContractId || null, baseline_id: currentBaselineId || null, filename: mppFile.name, content_base64 }),
       });
       await onImported();
       setBaselineId(result.baseline_id); setSelectedId(0); setMppFile(null); setMppPreview(null);
-      if (result.duplicate) setMppError("Этот файл уже импортирован — открыта существующая версия ГПР.");
+      if (result.repaired) setMppNotice(`Связи существующей версии восстановлены. Загружено задач: ${result.created}.`);
+      else if (result.duplicate) setMppNotice("Этот файл уже импортирован — открыта существующая версия ГПР.");
+      else setMppNotice(`ГПР создан: ${result.created} задач. Открыта новая версия.`);
       if (mppInput.current) mppInput.current.value = "";
     } catch (error) {
       setMppError(error instanceof Error ? error.message : "Не удалось импортировать MPP-файл");
@@ -324,7 +327,9 @@ export function GprWorkspace({ projectId, finance, selectedContractId, onPrepare
 
   return <section className="card gpr-workspace">
     <div className="gpr-head"><div><span className="eyebrow">КАЛЕНДАРНО-СЕТЕВОЕ ПЛАНИРОВАНИЕ</span><h2>График работ</h2><p>Иерархия задач, зависимости, план/факт и диаграмма Ганта в одном рабочем поле.</p></div><div className="gpr-controls"><select aria-label="Версия ГПР" value={currentBaselineId} onChange={(event) => { setBaselineId(Number(event.target.value)); setSelectedId(0); }}>{baselines.map((item) => <option value={item.id} key={item.id}>v{item.version} · {item.name} · {item.status}</option>)}</select><input ref={mppInput} hidden type="file" accept=".mpp" onChange={(event) => void chooseMpp(event.target.files?.[0])} /><button type="button" className="secondary" disabled={mppBusy} onClick={() => mppInput.current?.click()}><Upload />{mppBusy ? "Читаю…" : "Импорт .mpp"}</button><button type="button" onClick={() => onPrepare(currentBaselineId ? "schedule" : "baseline", currentBaselineId)}><Plus />{currentBaselineId ? "Задача" : "Версия ГПР"}</button></div></div>
-    {mppError && <div className={`gpr-import-message ${mppPreview ? "" : "error"}`}>{mppError}</div>}
+    {mppError && <div className="gpr-import-message error" role="alert">{mppError}</div>}
+    {mppNotice && <div className="gpr-import-message" role="status">{mppNotice}</div>}
+    {baselines.find((item) => item.id === currentBaselineId)?.analysis_warning && <div className="gpr-import-message error" role="alert">Эта версия ГПР содержит повреждённые связи: {baselines.find((item) => item.id === currentBaselineId)?.analysis_warning}. Повторно выберите исходный MPP-файл — система восстановит связи без создания второй копии.</div>}
     {mppPreview && <div className="gpr-import-preview"><div><strong>{mppPreview.filename}</strong><span>{mppPreview.task_count} задач · {mppPreview.relation_count} связей · {mppPreview.summary_count} сводных · {mppPreview.milestone_count} вех · {mppPreview.critical_count} критических</span>{currentBaselineId > 0 && <span>Изменения: +{mppPreview.added_count} новых · {mppPreview.changed_count} изменено · {mppPreview.removed_count} отсутствует · факт сохранится для {mppPreview.preserved_actual_count}</span>}<small>{mppPreview.planned_start || "без даты"} — {mppPreview.planned_finish || "без даты"}. Создаётся новая версия; исходник и предыдущая версия не изменяются.</small></div><div><button className="secondary" type="button" onClick={() => { setMppFile(null); setMppPreview(null); setMppError(""); if (mppInput.current) mppInput.current.value = ""; }}>Отмена</button><button type="button" disabled={mppBusy} onClick={() => void importMpp()}>{mppBusy ? "Синхронизация…" : currentBaselineId ? "Создать обновлённую версию" : "Создать ГПР"}</button></div></div>}
     <div className="gpr-toolbar"><button disabled={!editable || !selected} onClick={() => void indent()} title="Сделать подзадачей"><ArrowRightToLine /> Отступ</button><button disabled={!editable || !selected?.parent_id} onClick={() => void indent(true)} title="Поднять уровень"><ArrowLeftToLine /> Выступ</button><button disabled={!editable || !selected} onClick={() => selected && void onUpdateTask(selected.id, { is_milestone: !selected.is_milestone })}><Diamond /> Веха</button><button type="button" onClick={() => void cloneBaseline()} title="Создать редактируемую копию версии"><Copy /> Новая версия</button><label><input type="checkbox" checked={showCritical} onChange={(event) => setShowCritical(event.target.checked)} /> Критический путь</label><label>Сравнить <select aria-label="Baseline для сравнения" value={referenceBaselineId} onChange={(event) => setReferenceId(Number(event.target.value))}><option value={0}>без baseline</option>{referenceCandidates.map((item) => <option value={item.id} key={item.id}>v{item.version} · {item.name}</option>)}</select></label><span></span><button type="button" onClick={scrollToToday}><LocateFixed /> Сегодня</button><button type="button" onClick={exportProjectXml} disabled={!currentBaselineId}><Download /> Project XML</button><button type="button" onClick={exportSchedule}><Download /> CSV</button><label>Масштаб <select value={zoom} onChange={(event) => setZoom(event.target.value as Zoom)}><option value="day">День</option><option value="week">Неделя</option><option value="month">Месяц</option><option value="quarter">Квартал</option></select></label></div>
     {checkedIds.size > 0 && <div className="gpr-bulk"><strong>Выбрано: {checkedIds.size}</strong><button disabled={!editable} onClick={() => void applyBulk("shift")}>Сдвинуть даты</button><button disabled={!editable} onClick={() => void applyBulk("plan")}>План, %</button><button onClick={() => void applyBulk("fact")}>Факт, %</button><button className="secondary" onClick={() => setCheckedIds(new Set())}>Снять выбор</button></div>}

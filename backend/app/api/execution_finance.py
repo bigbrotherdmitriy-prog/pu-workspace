@@ -164,6 +164,28 @@ def _mpp_uid(item: ScheduleItem) -> str | None:
     return match.group(1) if match else None
 
 
+def _has_self_dependency(items: list[ScheduleItem]) -> bool:
+    return any(item.id in _schedule_predecessor_ids(item.predecessor_ids) for item in items)
+
+
+def _apply_mpp_relationships(tasks, imported: dict[str, ScheduleItem]) -> None:
+    """Apply hierarchy and dependency links after every row has a database ID."""
+    for row in tasks:
+        item = imported[row.external_uid]
+        parent = imported.get(row.parent_external_uid or "")
+        item.parent_id = parent.id if parent else None
+        links = []
+        for relation in row.predecessors:
+            predecessor = imported.get(str(relation.get("external_uid") or ""))
+            if predecessor is None:
+                continue
+            if predecessor.id == item.id:
+                raise HTTPException(422, "MPP содержит ссылку задачи на саму себя")
+            link_type = str(relation.get("type") or "FS")
+            links.append(f"{predecessor.id}{link_type}{_mpp_lag_suffix(relation.get('lag'))}")
+        item.predecessor_ids = ",".join(links) or None
+
+
 class BudgetCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
@@ -893,9 +915,16 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
     acts = list(db.scalars(select(AcceptanceAct).where(AcceptanceAct.project_id == project_id).order_by(AcceptanceAct.act_date.desc(), AcceptanceAct.id.desc())))
     schedule_cpm: dict[int, dict[str, int | bool]] = {}
+    baseline_warnings: dict[int, str] = {}
     for baseline in baselines:
         baseline_tasks = [item for item in schedule if item.baseline_id == baseline.id]
-        schedule_cpm.update(_schedule_cpm(baseline_tasks))
+        try:
+            schedule_cpm.update(_schedule_cpm(baseline_tasks))
+        except HTTPException as exc:
+            # One damaged imported version must not hide every budget, payment
+            # and schedule in the project.  Keep it visible and explain how to
+            # repair it by importing the original MPP again.
+            baseline_warnings[baseline.id] = str(exc.detail)
     confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}]
     relevant_cash = [x for x in cash if x.status in {"approved", "paid", "received"}]
     currencies = sorted({x.currency for x in confirmed_budget} | {x.currency for x in relevant_cash}) or ["RUB"]
@@ -938,7 +967,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
                     "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note,
-                       "source_format": x.source_format} for x in baselines],
+                       "source_format": x.source_format, "analysis_warning": baseline_warnings.get(x.id)} for x in baselines],
         "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "sort_order": x.sort_order,
                       "parent_id": x.parent_id, "duration_days": x.duration_days, "is_milestone": x.is_milestone,
                       "predecessor_ids": x.predecessor_ids, "constraint_type": x.constraint_type, "constraint_date": x.constraint_date,
@@ -1191,8 +1220,33 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
         ScheduleBaseline.source_sha256 == digest,
     ))
     if existing:
-        count = db.scalar(select(func.count(ScheduleItem.id)).where(ScheduleItem.baseline_id == existing.id)) or 0
-        return {"baseline_id": existing.id, "version": existing.version, "created": count, "duplicate": True}
+        existing_rows = list(db.scalars(select(ScheduleItem).where(
+            ScheduleItem.baseline_id == existing.id,
+        ).order_by(ScheduleItem.sort_order, ScheduleItem.id)))
+        if not _has_self_dependency(existing_rows):
+            return {"baseline_id": existing.id, "version": existing.version,
+                    "created": len(existing_rows), "duplicate": True, "repaired": False}
+
+        # Releases before this fix read the wrong MPXJ relation endpoint and
+        # persisted every dependency as a self-reference.  The encrypted
+        # upload is deliberately not retained, so repair is possible only
+        # when the owner selects the same source file again.
+        tasks = _mpp_tasks(data)
+        existing_by_uid = {uid: item for item in existing_rows if (uid := _mpp_uid(item))}
+        incoming_uids = {row.external_uid for row in tasks}
+        if set(existing_by_uid) != incoming_uids:
+            raise HTTPException(409, "Повреждённую версию ГПР нельзя безопасно восстановить: состав исходного файла изменился")
+        try:
+            _apply_mpp_relationships(tasks, existing_by_uid)
+            _schedule_cpm(existing_rows)
+        except HTTPException:
+            db.rollback()
+            raise
+        _audit(db, "mpp_schedule_repaired", "schedule_baseline", existing.id, user.id,
+               f"tasks={len(tasks)}; sha256={digest[:12]}")
+        db.commit()
+        return {"baseline_id": existing.id, "version": existing.version,
+                "created": len(existing_rows), "duplicate": True, "repaired": True}
 
     tasks = _mpp_tasks(data)
     source_baseline = None
@@ -1230,16 +1284,12 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
         )
         db.add(item); imported[row.external_uid] = item; imported_rows.append((row, item))
     db.flush()
-    for row, item in imported_rows:
-        parent = imported.get(row.parent_external_uid or "")
-        item.parent_id = parent.id if parent else None
-        links = []
-        for relation in row.predecessors:
-            predecessor = imported.get(str(relation.get("external_uid") or ""))
-            if predecessor:
-                link_type = str(relation.get("type") or "FS")
-                links.append(f"{predecessor.id}{link_type}{_mpp_lag_suffix(relation.get('lag'))}")
-        item.predecessor_ids = ",".join(links) or None
+    try:
+        _apply_mpp_relationships(tasks, imported)
+        _schedule_cpm([item for _, item in imported_rows])
+    except HTTPException:
+        db.rollback()
+        raise
     _audit(db, "mpp_schedule_imported", "schedule_baseline", baseline.id, user.id,
            f"tasks={len(tasks)}; sha256={digest[:12]}")
     db.commit()
