@@ -10,6 +10,7 @@ import { GprWorkspace } from "./modules/finance/GprWorkspace";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
+import { AttentionPanel } from "./modules/attention/AttentionPanel";
 import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState } from "./modules/ai-secretary/messageWorkflow";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
@@ -3530,6 +3531,9 @@ export function App() {
               onNotice={setNotice}
               onError={setError}
             />}
+            {active === "AI Secretary" && (
+              <AttentionPanel projectId={projectId} onOpenSection={setActive} />
+            )}
             {active === "AI Secretary" && (
               <DailyBriefingPanel briefing={dailyBriefing} onOpenSection={setActive} />
             )}

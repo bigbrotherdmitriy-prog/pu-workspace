@@ -7,6 +7,7 @@ def test_mvp3_routes_are_registered():
     assert "/management/meetings" in paths
     assert "/management/notifications/refresh" in paths
     assert "/management/notifications/{notification_id}/read" in paths
+    assert "/management/attention" in paths
 
 
 def test_meeting_and_obligation_contracts():

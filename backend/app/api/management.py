@@ -23,6 +23,7 @@ from app.models.project_contact import ProjectContact
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.notification_escalation import ALLOWED_CHANNELS, deadline_utc, outside_quiet_hours, require_iana_timezone
+from app.attention_read_model import build_attention_feed
 from app.mvp3.meeting_proposals import (
     MeetingProposalConflict, MeetingProposalDenied, bind_current_source,
     confirm_proposal, serialize_proposal,
@@ -575,6 +576,29 @@ def _meeting_payload(db: Session, item: Meeting, actor: User) -> dict:
         "can_edit": actor.is_admin or role in {"owner", "manager", "editor"},
         "can_manage": actor.is_admin or role in {"owner", "manager"},
     }
+
+
+@router.get("/attention")
+def attention_feed(
+    project_id: int | None = None,
+    contract_id: int | None = None,
+    owner_user_id: int | None = None,
+    kind: str | None = None,
+    status: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    cursor: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Permission-filtered MVP-3 attention queue; no lifecycle state is duplicated here."""
+    return build_attention_feed(
+        db, user, meeting_payload=_meeting_payload,
+        project_id=project_id, contract_id=contract_id, owner_user_id=owner_user_id,
+        kind=kind, status=status, date_from=date_from, date_to=date_to,
+        cursor=cursor, limit=limit,
+    )
 
 
 @router.get("/meetings")
