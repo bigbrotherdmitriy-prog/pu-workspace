@@ -173,7 +173,7 @@ def run(env_file: str, report_dir: Path) -> dict[str, object]:
         page.locator("aside nav").get_by_role(
             "button", name="Документы", exact=True,
         ).click()
-        expect(page.get_by_text("Документы не найдены", exact=True)).to_be_visible()
+        expect(page.get_by_text("Важных документов пока нет", exact=True)).to_be_visible()
         expect(page.get_by_text(SYNTHETIC_DOCUMENT, exact=True)).not_to_be_visible()
         selector.select_option(label="CI project A")
         expect(page.get_by_text(SYNTHETIC_DOCUMENT, exact=True).first).to_be_visible()
