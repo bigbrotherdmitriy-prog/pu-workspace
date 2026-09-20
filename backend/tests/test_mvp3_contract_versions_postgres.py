@@ -104,4 +104,3 @@ def test_postgres_two_contract_updates_have_one_cas_winner_and_one_version(contr
         assert db.scalar(select(func.count()).select_from(ContractVersion).where(
             ContractVersion.contract_id == contract_id,
         )) == 2
-

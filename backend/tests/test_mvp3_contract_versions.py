@@ -132,4 +132,3 @@ def test_versions_are_immutable_and_legacy_rows_receive_baseline(world):
     version.event = "tampered"
     with pytest.raises(ValueError, match="immutable_contract_version"):
         db.flush()
-
