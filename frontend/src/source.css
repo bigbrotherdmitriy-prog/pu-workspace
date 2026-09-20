@@ -1106,3 +1106,9 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
   .gpr-import-preview{align-items:stretch;flex-direction:column}.gpr-import-preview>div:last-child{justify-content:flex-end}
 }
 .contract-record-actions,.contract-edit-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.contract-record-actions button,.contract-edit-actions button{display:inline-flex;align-items:center;gap:6px;padding:9px 12px}.contract-record-actions svg{width:15px}.contract-edit-form{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:9px;margin-top:16px;padding:14px;border:1px solid #cfe0d8;border-radius:12px;background:#f7fbf9}.contract-edit-form>strong,.contract-edit-actions{grid-column:1/-1}.contract-edit-form label{display:grid;gap:4px;color:#65766e;font-size:11px}.contract-edit-form input,.contract-edit-form select{min-height:40px;padding:8px 10px}@media(max-width:900px){.contract-edit-form{grid-template-columns:1fr}}
+.digest-settings { display: grid; gap: 12px; }
+.digest-settings label { display: grid; gap: 6px; font-weight: 600; }
+.digest-settings input:not([type="checkbox"]), .digest-settings select {
+  max-width: 320px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+}
+.digest-quiet-hours { display: flex; flex-wrap: wrap; gap: 16px; }

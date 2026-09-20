@@ -247,6 +247,7 @@ class NotificationPolicy(Base):
     __table_args__ = (
         UniqueConstraint("project_id", "user_id", name="uq_notification_policy_project_user"),
         CheckConstraint("record_version > 0", name="ck_notification_policy_record_version"),
+        CheckConstraint("digest_cadence IN ('daily','weekdays')", name="ck_notification_policies_digest_cadence"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -261,8 +262,51 @@ class NotificationPolicy(Base):
     escalation_delays: Mapped[list] = mapped_column(JSON, nullable=False, default=lambda: [0, 60, 240])
     channels: Mapped[list] = mapped_column(JSON, nullable=False, default=lambda: ["in_app"])
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # Digest scheduling deliberately reuses the user's project-scoped timezone,
+    # quiet hours and channels.  It is opt-in so the migration cannot start
+    # producing new notifications for existing users.
+    digest_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    digest_cadence: Mapped[str] = mapped_column(String(20), nullable=False, default="daily", server_default="daily")
+    digest_local_time: Mapped[dt_time] = mapped_column(Time, nullable=False, default=dt_time(9, 0), server_default="09:00:00")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ManagementDigest(Base):
+    """Immutable, bounded digest receipt used for restart-safe materialization.
+
+    ``item_refs`` contains identifiers, status/version and evidence/source pins
+    only.  Raw titles, excerpts, message bodies and document content are never
+    stored in the receipt.
+    """
+
+    __tablename__ = "management_digests"
+    __table_args__ = (
+        UniqueConstraint("policy_id", "local_date", name="uq_management_digest_policy_day"),
+        CheckConstraint("policy_record_version > 0", name="ck_management_digest_policy_version"),
+        CheckConstraint("item_count >= 0 AND item_count <= 100", name="ck_management_digest_item_count"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    policy_id: Mapped[int] = mapped_column(ForeignKey("notification_policies.id", ondelete="RESTRICT"), index=True)
+    policy_record_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    local_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    notification_id: Mapped[int | None] = mapped_column(ForeignKey("notifications.id", ondelete="SET NULL"), nullable=True)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_refs: Mapped[list] = mapped_column(JSON, nullable=False)
+    requested_channels: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def _deny_management_digest_mutation(_mapper, _connection, _target):
+    raise ValueError("management_digest_is_append_only")
+
+
+event.listen(ManagementDigest, "before_update", _deny_management_digest_mutation)
+event.listen(ManagementDigest, "before_delete", _deny_management_digest_mutation)
 
 
 class ManagementHistory(Base):

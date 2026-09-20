@@ -13,9 +13,9 @@ from app.models.audit_log import AuditLog
 from app.models.governance import Decision, Risk
 from app.models.job import BackgroundJob
 from app.models.management import (
-    BookableResource, ManagementHistory, Meeting, MeetingParticipant,
-    MeetingProposal, MeetingResource, MeetingSourceBinding, Notification,
-    NotificationPolicy, Obligation,
+    BookableResource, ManagementDigest, ManagementHistory, Meeting,
+    MeetingParticipant, MeetingProposal, MeetingResource, MeetingSourceBinding,
+    Notification, NotificationPolicy, Obligation,
 )
 from app.models.organization_contract import Contract
 from app.models.project import Project
@@ -152,6 +152,9 @@ class NotificationPolicyUpdate(BaseModel):
     escalation_delays: list[int] = Field(default_factory=lambda: [0, 60, 240], min_length=1, max_length=10)
     channels: list[str] = Field(default_factory=lambda: ["in_app"], min_length=1, max_length=3)
     enabled: bool = True
+    digest_enabled: bool = False
+    digest_cadence: str = Field(default="daily", pattern="^(daily|weekdays)$")
+    digest_local_time: time = time(9, 0)
     @field_validator("timezone")
     @classmethod
     def valid_timezone(cls, value: str) -> str:
@@ -229,7 +232,10 @@ def _policy_payload(policy: NotificationPolicy) -> dict:
             "deadline_local_time": policy.deadline_local_time,
             "quiet_start": policy.quiet_start, "quiet_end": policy.quiet_end,
             "escalation_delays": list(policy.escalation_delays or []),
-            "channels": list(policy.channels or []), "enabled": policy.enabled}
+            "channels": list(policy.channels or []), "enabled": policy.enabled,
+            "digest_enabled": policy.digest_enabled,
+            "digest_cadence": policy.digest_cadence,
+            "digest_local_time": policy.digest_local_time}
 
 
 def _policy_for_refresh(db: Session, project_id: int, user: User) -> NotificationPolicy:
@@ -296,6 +302,34 @@ def update_notification_policy(project_id: int, payload: NotificationPolicyUpdat
                               evidence={"channels": list(policy.channels)}, reason="Политика уведомлений изменена")
     db.commit(); db.refresh(policy)
     return _policy_payload(policy)
+
+
+@router.get("/digests")
+def list_management_digests(project_id: int, db: Session = Depends(get_db),
+                            user: User = Depends(require_user),
+                            cursor: int | None = None, limit: int = 30):
+    require_project_role(db, user, project_id, "viewer")
+    if not 1 <= limit <= 100:
+        raise HTTPException(422, "limit must be between 1 and 100")
+    query = select(ManagementDigest).where(
+        ManagementDigest.project_id == project_id,
+        ManagementDigest.user_id == user.id,
+    )
+    if cursor is not None:
+        query = query.where(ManagementDigest.id < cursor)
+    rows = list(db.scalars(query.order_by(ManagementDigest.id.desc()).limit(limit + 1)))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "digests": [{
+            "id": row.id, "local_date": row.local_date,
+            "item_count": row.item_count, "item_refs": row.item_refs,
+            "requested_channels": row.requested_channels,
+            "notification_id": row.notification_id, "created_at": row.created_at,
+        } for row in rows],
+        "next_cursor": rows[-1].id if has_more and rows else None,
+        "external_actions_created": False,
+    }
 
 
 @router.get("/obligations")

@@ -20,7 +20,7 @@ import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
 import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
 import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
-import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
+import { NotificationsModule, type NotificationItem, type NotificationPolicy } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
@@ -479,6 +479,7 @@ export function App() {
     [meetingAuthority, setMeetingAuthority] = useState<Record<number, MeetingAuthorityState>>({}),
     [busyMeetingAuthorityId, setBusyMeetingAuthorityId] = useState(0),
     [notifications, setNotifications] = useState<NotificationRow[]>([]),
+    [notificationPolicy, setNotificationPolicy] = useState<NotificationPolicy | null>(null),
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingDuration, setNewMeetingDuration] = useState("60"),
@@ -2106,11 +2107,12 @@ export function App() {
   async function loadManagement() {
     if (!projectId) return;
     try {
-      const [o, m, n, r] = await Promise.all([
+      const [o, m, n, r, p] = await Promise.all([
         api(`/management/obligations?project_id=${projectId}&limit=200`),
         api(`/management/meetings?project_id=${projectId}&limit=200`),
         api(`/management/notifications?project_id=${projectId}&limit=200`),
         api(`/management/resources?project_id=${projectId}&include_inactive=true&limit=500`),
+        api(`/management/notification-policy?project_id=${projectId}`).catch(() => null),
       ]);
       setObligations(o.obligations);
       setMeetings(m.meetings);
@@ -2119,6 +2121,7 @@ export function App() {
       await Promise.all((m.meetings as MeetingRow[])
         .filter((item) => item.status === "completed")
         .map((item) => loadMeetingAuthority(item)));
+      setNotificationPolicy(p);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2353,6 +2356,31 @@ export function App() {
             : row,
         ),
       );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function saveNotificationPolicy() {
+    if (!notificationPolicy) return;
+    try {
+      const updated = await api(`/management/notification-policy?project_id=${projectId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          expected_record_version: notificationPolicy.record_version,
+          timezone: notificationPolicy.timezone,
+          deadline_local_time: notificationPolicy.deadline_local_time,
+          quiet_start: notificationPolicy.quiet_start,
+          quiet_end: notificationPolicy.quiet_end,
+          escalation_delays: notificationPolicy.escalation_delays,
+          channels: notificationPolicy.channels,
+          enabled: notificationPolicy.enabled,
+          digest_enabled: notificationPolicy.digest_enabled,
+          digest_cadence: notificationPolicy.digest_cadence,
+          digest_local_time: notificationPolicy.digest_local_time,
+        }),
+      });
+      setNotificationPolicy(updated);
+      setNotice("Настройки управленческой сводки сохранены");
     } catch (e) {
       setError((e as Error).message);
     }
@@ -3209,6 +3237,12 @@ export function App() {
           notifications={notifications}
           onRefresh={() => void refreshNotifications()}
           onMarkRead={(item) => void markNotification(item)}
+          policy={notificationPolicy}
+          canManagePolicy={Boolean(currentUser?.is_admin || members.some((member) =>
+            member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+          ))}
+          onPolicyChange={setNotificationPolicy}
+          onSavePolicy={() => void saveNotificationPolicy()}
         />
       )}
       {active === "Договоры" && (

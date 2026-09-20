@@ -28,8 +28,8 @@ from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import (
     BookableResource, ManagementHistory, Meeting, MeetingParticipant,
-    MeetingProposal, MeetingResource, MeetingSourceBinding, Notification,
-    NotificationPolicy, Obligation,
+    ManagementDigest, MeetingProposal, MeetingResource, MeetingSourceBinding,
+    Notification, NotificationPolicy, Obligation,
 )
 from app.models.execution_finance import (
     AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal,
@@ -101,6 +101,7 @@ __all__ = [
     "MeetingResource",
     "Notification",
     "NotificationPolicy",
+    "ManagementDigest",
     "ManagementHistory",
     "ScheduleBaseline",
     "ScheduleItem",
