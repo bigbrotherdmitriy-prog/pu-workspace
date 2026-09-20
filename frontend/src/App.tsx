@@ -184,6 +184,7 @@ type CurrentUser = {
 };
 type ContractRow = {
   id: number;
+  record_version: number;
   number: string;
   title: string;
   counterparty?: string;
@@ -198,6 +199,7 @@ type ContractRow = {
   source_document_id?: number;
   notes?: string;
   linked_documents?: SchemeDocument[];
+  version_history?: { id: number; sequence: number; event: string; changed_fields: string[]; occurred_at: string }[];
   analysis?: {
     source_ready: boolean;
     tasks: number;
@@ -833,9 +835,11 @@ export function App() {
   }
   async function linkContractDocument(contractId: number, documentId: number) {
     try {
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
-        body: JSON.stringify({ source_document_id: documentId || null }),
+        body: JSON.stringify({ expected_record_version: expected, source_document_id: documentId || null }),
       });
       setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
       await load();
@@ -847,9 +851,11 @@ export function App() {
   }
   async function linkContractParent(contractId: number, contractKind: string, parentContractId: number) {
     try {
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
-        body: JSON.stringify({ contract_kind: contractKind, parent_contract_id: parentContractId || null }),
+        body: JSON.stringify({ expected_record_version: expected, contract_kind: contractKind, parent_contract_id: parentContractId || null }),
       });
       setNotice("Вышестоящий договор сохранён — дерево перестроено");
       setContractStructureDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
@@ -913,7 +919,9 @@ export function App() {
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
       const documentIds = completed.documents;
       if (!documentIds.length) throw new Error("Текст приложений не извлечён");
-      await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ document_ids: documentIds }) });
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
+      await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds }) });
       const checked = await api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" });
       const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
       setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
@@ -933,9 +941,11 @@ export function App() {
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
       const documentIds = completed.documents;
       if (!documentIds.length) throw new Error(`Не удалось извлечь таблицу ${label}`);
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}/documents`, {
         method: "POST",
-        body: JSON.stringify({ document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
+        body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
       });
       await prepareDroppedFinanceDocument(documentIds[0], supported[0].name, kind, contractId);
       setActive("Исполнение и финансы");
@@ -957,6 +967,9 @@ export function App() {
         : `/projects/${projectId}/contracts`, {
         method: item.already_linked && item.linked_contract_id ? "PATCH" : "POST",
         body: JSON.stringify({
+          ...(item.already_linked && item.linked_contract_id ? {
+            expected_record_version: contracts.find((contract) => contract.id === item.linked_contract_id)?.record_version,
+          } : {}),
           number: item.number.trim(), title: item.title.trim(), counterparty: item.counterparty?.trim() || undefined,
           contract_kind: item.contract_kind, parent_contract_id: parentId,
           ...(!item.already_linked ? { source_document_id: item.document_id } : {}),
@@ -1021,9 +1034,12 @@ export function App() {
     if (!draft?.number.trim() || !draft.title.trim()) return;
     try {
       setError("");
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
         body: JSON.stringify({
+          expected_record_version: expected,
           number: draft.number.trim(), title: draft.title.trim(), counterparty: draft.counterparty.trim() || null,
           amount: draft.amount ? Number(draft.amount) : null,
           advance_amount: draft.advanceAmount ? Number(draft.advanceAmount) : null,
@@ -1055,7 +1071,7 @@ export function App() {
     try {
       setError("");
       await api(`/projects/${projectId}/contracts/${item.id}`, {
-        method: "DELETE", body: JSON.stringify({ confirmation }),
+        method: "DELETE", body: JSON.stringify({ confirmation, expected_record_version: item.record_version }),
       });
       setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
       await load();
@@ -1069,7 +1085,7 @@ export function App() {
     try {
       setError("");
       await api(`/projects/${projectId}/contracts/${item.id}`, {
-        method: "PATCH", body: JSON.stringify({ status: "archived" }),
+        method: "PATCH", body: JSON.stringify({ expected_record_version: item.record_version, status: "archived" }),
       });
       setNotice(`Договор «${item.number}» архивирован. Все документы, ГПР, ДДС и другие связи сохранены.`);
       await load();
@@ -3050,6 +3066,7 @@ export function App() {
                       <span className={`contract-source-badge ${item.source_document_id ? "linked" : "missing"}`}>
                         {item.source_document_id ? "✓ Договор привязан к документу" : "! Документ договора не привязан"}
                       </span>
+                      <small>Версия карточки: {item.record_version} · снимков истории: {item.version_history?.length || 0}</small>
                       <h2>{item.title}</h2>
                       <p>
                         {item.counterparty || "Контрагент не указан"}

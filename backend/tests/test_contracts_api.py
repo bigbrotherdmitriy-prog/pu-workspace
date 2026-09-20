@@ -39,6 +39,7 @@ def test_revenue_subcontract_payload_keeps_parent_and_terms():
 
 def test_contract_update_accepts_commercial_fields_and_delete_requires_confirmation():
     update = ContractLinkUpdate(
+        expected_record_version=1,
         number="СП-02", title="Монтаж и ПНР", counterparty="ООО Исполнитель",
         amount=Decimal("1500000"), advance_amount=Decimal("300000"),
         retention_percent=Decimal("5"), signed_at="2026-08-31", status="active",
@@ -46,11 +47,11 @@ def test_contract_update_accepts_commercial_fields_and_delete_requires_confirmat
     assert update.number == "СП-02"
     assert update.amount == Decimal("1500000")
     assert update.signed_at.isoformat() == "2026-08-31"
-    assert ContractDelete(confirmation="СП-02").confirmation == "СП-02"
+    assert ContractDelete(confirmation="СП-02", expected_record_version=1).confirmation == "СП-02"
 
 
 def test_contract_can_be_archived_without_deleting_its_links():
-    update = ContractLinkUpdate(status="archived")
+    update = ContractLinkUpdate(expected_record_version=1, status="archived")
     assert update.status == "archived"
 
 
