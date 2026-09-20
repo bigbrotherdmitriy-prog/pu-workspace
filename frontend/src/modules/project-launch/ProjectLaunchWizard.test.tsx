@@ -27,21 +27,24 @@ describe("ProjectLaunchWizard", () => {
   it("separates an existing folder import from a new managed project", () => {
     localStorage.clear();
     const openSection = vi.fn();
-    render(<ProjectLaunchWizard projectId={1} storageAuthorized onConnectStorage={vi.fn()} openSection={openSection} />);
+    const uploadProjectFolder = vi.fn();
+    render(<ProjectLaunchWizard projectId={1} storageAuthorized onConnectStorage={vi.fn()} onUploadProjectFolder={uploadProjectFolder} openSection={openSection} />);
     expect(screen.getByText("Подключить готовую папку")).toBeInTheDocument();
     expect(screen.getByText("Создать постоянную структуру")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Выбрать существующий проект" }));
     expect(openSection).not.toHaveBeenCalled();
     expect(screen.getByText("ПОДТВЕРЖДЕНИЕ")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и продолжить" }));
-    expect(openSection).toHaveBeenCalledWith("Рабочий центр", "source");
+    fireEvent.click(screen.getByRole("button", { name: /Загрузить папку с компьютера/ }));
+    expect(uploadProjectFolder).toHaveBeenCalledOnce();
+    expect(openSection).not.toHaveBeenCalled();
+    expect(localStorage.getItem("pu-project-start-mode:1")).toBe("imported");
   });
 
   it("routes to integrations before creating a workspace without storage authorization", () => {
     localStorage.clear();
     const openSection = vi.fn();
     const connectStorage = vi.fn();
-    render(<ProjectLaunchWizard projectId={2} storageAuthorized={false} onConnectStorage={connectStorage} openSection={openSection} />);
+    render(<ProjectLaunchWizard projectId={2} storageAuthorized={false} onConnectStorage={connectStorage} onUploadProjectFolder={vi.fn()} openSection={openSection} />);
     fireEvent.click(screen.getByRole("button", { name: "Выбрать новый проект" }));
     expect(screen.getByText(/подключить рабочее хранилище именно к этому проекту/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Подключить хранилище к проекту" }));

@@ -12,6 +12,7 @@ type Props = {
   onComplete: (message: string, documentIds: number[]) => void;
   title?: string;
   description?: string;
+  folderOnly?: boolean;
 };
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -49,6 +50,7 @@ export function MobileDocumentUpload({
   open, projectId, onClose, onComplete,
   title = "Добавить документы",
   description = "Файлы отправятся в выбранный проект только после нажатия «Загрузить и проанализировать».",
+  folderOnly = false,
 }: Props) {
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -134,10 +136,10 @@ export function MobileDocumentUpload({
         <div><span>ЛОКАЛЬНАЯ ЗАГРУЗКА</span><h2>{title}</h2><p>{description}</p></div>
         <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}><X /></button>
       </div>
-      <div className="mobile-upload-actions">
-        <button type="button" disabled={busy} onClick={() => filesInput.current?.click()}><FileUp /><span><strong>Выбрать файлы</strong><small>PDF, DOCX, XLSX, TXT, CSV, фото</small></span></button>
-        <button type="button" disabled={busy} onClick={() => folderInput.current?.click()}><FolderOpen /><span><strong>Выбрать папку</strong><small>С вложенными файлами, до 50 файлов</small></span></button>
-        <button type="button" disabled={busy} onClick={() => cameraInput.current?.click()}><Camera /><span><strong>Сфотографировать</strong><small>Счёт, акт или документ</small></span></button>
+      <div className={`mobile-upload-actions${folderOnly ? " folder-only" : ""}`}>
+        {!folderOnly && <button type="button" disabled={busy} onClick={() => filesInput.current?.click()}><FileUp /><span><strong>Выбрать файлы</strong><small>PDF, DOCX, XLSX, TXT, CSV, фото</small></span></button>}
+        <button type="button" disabled={busy} onClick={() => folderInput.current?.click()}><FolderOpen /><span><strong>{folderOnly ? "Выбрать папку проекта" : "Выбрать папку"}</strong><small>С вложенными файлами, до 50 файлов</small></span></button>
+        {!folderOnly && <button type="button" disabled={busy} onClick={() => cameraInput.current?.click()}><Camera /><span><strong>Сфотографировать</strong><small>Счёт, акт или документ</small></span></button>}
       </div>
       <input ref={filesInput} hidden type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,image/*" onChange={(event) => select(event.target.files)} />
       <input ref={folderInput} aria-label="Файлы из папки" hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(event) => select(event.target.files)} />
@@ -151,7 +153,7 @@ export function MobileDocumentUpload({
         onDrop={(event) => { event.preventDefault(); setDragging(false); if (!busy) select(event.dataTransfer.files); }}
       >
         {files.map((file, index) => <article key={`${file.name}-${index}`}><span><strong title={file.webkitRelativePath || file.name}>{file.webkitRelativePath || file.name}</strong><small>{Math.max(1, Math.round(file.size / 1024))} КБ</small></span><button type="button" disabled={busy} aria-label={`Удалить ${file.name}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X /></button></article>)}
-        {!files.length && <p>Перетащите файлы сюда или выберите выше. Максимум 10 МБ на файл и 60 МБ за один выбор.</p>}
+        {!files.length && <p>{folderOnly ? "Выберите папку целиком. До подтверждения ничего не будет загружено или изменено." : "Перетащите файлы сюда или выберите выше."} Максимум 4 МБ на файл и 60 МБ за один выбор.</p>}
       </div>
       {error && <p className="mobile-upload-error">{error}</p>}
       {progress && <p className="mobile-upload-progress" aria-live="polite">{progress}</p>}

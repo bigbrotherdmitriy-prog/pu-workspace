@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentsModule, type DocumentCard } from "./DocumentsModule";
 
@@ -14,6 +14,17 @@ function document(source: string, available: boolean, reason?: string): Document
 }
 
 describe("DocumentsModule OCR availability", () => {
+  it("sends an empty project to folder analysis instead of presenting the document register as an upload dump", () => {
+    const openProjectFolder = vi.fn();
+    const addImportantDocument = vi.fn();
+    render(<DocumentsModule collapsed={false} knowledgeMode={false} documents={[]} selected={null} onSelect={vi.fn()} projectId={1} onOcrComplete={vi.fn()} onOpenProjectFolder={openProjectFolder} onAddImportantDocument={addImportantDocument} />);
+    expect(screen.getByText("Важных документов пока нет")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Разобрать папку проекта" }));
+    expect(openProjectFolder).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Добавить один документ" }));
+    expect(addImportantDocument).toHaveBeenCalledOnce();
+  });
+
   it("does not offer impossible re-OCR for local uploads and explains recovery", () => {
     const selected = document("local_upload", false, "original_not_available");
     render(<DocumentsModule collapsed={false} knowledgeMode={false} documents={[selected]} selected={selected} onSelect={vi.fn()} projectId={1} onOcrComplete={vi.fn()} />);

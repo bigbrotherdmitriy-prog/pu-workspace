@@ -29,6 +29,8 @@
   .mobile-upload-head svg, .mobile-upload-files svg { width: 18px; }
   .mobile-upload-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .mobile-upload-actions > button { display: grid; justify-items: start; gap: 8px; padding: 14px; border: 1px solid #cfe0d8; border-radius: var(--pu-radius-card); background: #f4faf7; color: #173b2f; text-align: left; }
+  .mobile-upload-actions.folder-only { grid-template-columns: 1fr; }
+  .mobile-upload-actions.folder-only > button { min-height: 92px; align-content: center; }
   .mobile-upload-actions svg { color: #087a59; }
   .mobile-upload-actions span { display: grid; gap: 3px; }
   .mobile-upload-actions small { color: #6e7c75; font-size: 10px; }
