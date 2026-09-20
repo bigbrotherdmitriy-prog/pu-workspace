@@ -10,6 +10,7 @@ from app.schema import CURRENT_SCHEMA_REVISION
 
 BACKEND = Path(__file__).resolve().parents[1]
 REVISION = "b83e7f9a1c02"
+MERGE_REVISION = "b85e7f9a1d23"
 
 
 def _config(output=None):
@@ -18,12 +19,14 @@ def _config(output=None):
     return config
 
 
-def test_meeting_authority_is_single_linear_head_after_a72():
+def test_meeting_authority_is_merged_into_the_single_current_head():
     script = ScriptDirectory.from_config(_config())
     revision = script.get_revision(REVISION)
     assert revision is not None
     assert revision.down_revision == "a72d4e6f8b91"
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == [REVISION]
+    merge = script.get_revision(MERGE_REVISION)
+    assert set(merge.down_revision) == {REVISION, "b84e6f9a7c12"}
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == [MERGE_REVISION]
 
 
 def test_meeting_authority_migration_renders_postgresql_constraints(monkeypatch):
