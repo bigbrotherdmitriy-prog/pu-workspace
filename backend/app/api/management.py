@@ -21,6 +21,7 @@ from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.project_contact import ProjectContact
 from app.models.project_member import ProjectMember
+from app.models.saved_search_view import SavedSearchView
 from app.models.user import User
 from app.notification_escalation import ALLOWED_CHANNELS, deadline_utc, outside_quiet_hours, require_iana_timezone
 from app.attention_read_model import build_attention_feed
@@ -932,6 +933,14 @@ def management_history(entity_type: str, entity_id: int, project_id: int,
                        db: Session = Depends(get_db), user: User = Depends(require_user),
                        cursor: int | None = None, limit: int = 100):
     require_project_role(db, user, project_id, "viewer")
+    if entity_type == "saved_search_view":
+        private_view = db.scalar(select(SavedSearchView).where(
+            SavedSearchView.id == entity_id,
+            SavedSearchView.project_id == project_id,
+            SavedSearchView.owner_user_id == user.id,
+        ))
+        if private_view is None:
+            raise HTTPException(404, "History not found")
     if not 1 <= limit <= 200: raise HTTPException(422, "limit must be between 1 and 200")
     query = select(ManagementHistory).where(
         ManagementHistory.project_id == project_id,

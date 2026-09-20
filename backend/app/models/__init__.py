@@ -31,6 +31,7 @@ from app.models.management import (
     ManagementDigest, MeetingProposal, MeetingResource, MeetingSourceBinding,
     Notification, NotificationPolicy, Obligation,
 )
+from app.models.saved_search_view import SavedSearchView
 from app.models.execution_finance import (
     AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal,
     PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
@@ -103,6 +104,7 @@ __all__ = [
     "NotificationPolicy",
     "ManagementDigest",
     "ManagementHistory",
+    "SavedSearchView",
     "ScheduleBaseline",
     "ScheduleItem",
     "BudgetLine",
