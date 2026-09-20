@@ -193,11 +193,13 @@ def _project_organization_id(db: Session, project_id: int) -> int:
 
 def append_management_history(db: Session, *, project_id: int, entity_type: str, entity_id: int,
                               record_version: int, action: str, actor_user_id: int,
-                              old_values: dict, new_values: dict, evidence=None, reason: str | None = None):
+                              old_values: dict, new_values: dict, evidence=None, reason: str | None = None,
+                              idempotency_key: str | None = None, command_hash: str | None = None):
     db.add(ManagementHistory(
         organization_id=_project_organization_id(db, project_id), project_id=project_id,
         entity_type=entity_type, entity_id=entity_id, record_version=record_version,
         action=action, actor_user_id=actor_user_id,
+        idempotency_key=idempotency_key, command_hash=command_hash,
         old_values=jsonable_encoder(old_values), new_values=jsonable_encoder(new_values),
         evidence=jsonable_encoder(evidence) if evidence is not None else None, reason=reason,
     ))

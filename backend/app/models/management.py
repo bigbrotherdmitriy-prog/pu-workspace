@@ -270,6 +270,10 @@ class ManagementHistory(Base):
 
     __tablename__ = "management_history"
     __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "entity_type", "idempotency_key",
+            name="uq_management_history_idempotency",
+        ),
         CheckConstraint("record_version > 0", name="ck_management_history_record_version"),
     )
 
@@ -280,6 +284,11 @@ class ManagementHistory(Base):
     entity_id: Mapped[int] = mapped_column(Integer, index=True)
     record_version: Mapped[int] = mapped_column(Integer)
     action: Mapped[str] = mapped_column(String(50))
+    # Optional command identity for replay-safe human decisions. Existing
+    # history writers keep these NULL; a supplied key is tenant-unique for an
+    # entity type, so it cannot be reused for a different contact.
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    command_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     old_values: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     new_values: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

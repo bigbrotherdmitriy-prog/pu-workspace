@@ -3,8 +3,10 @@ import { Users } from "lucide-react";
 import { api } from "../../api/client";
 
 export type ProjectContact = {
-  id: number; record_version?: number; project_id: number; contract_id?: number; name: string; company?: string;
-  email: string; active: boolean; confirmed: boolean; source: string; company_activity?: string;
+  id: number; record_version: number; project_id: number; contract_id?: number; name: string; company?: string;
+  email: string; phone?: string; active: boolean; confirmed: boolean; source: string; company_activity?: string;
+  resolution_state: "proposed" | "conflict" | "confirmed" | "corrected" | "rejected";
+  resolution_reason_code: string;
 };
 export type ContactContract = { id: number; number: string; title: string };
 export type ContactDraft = {
@@ -66,6 +68,7 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
       await api(`/project-contacts/conflicts/${conflict.id}/resolve`, {
         method: "POST",
         body: JSON.stringify({
+          decision_key: `contact-conflict:${conflict.id}:${conflict.record_version}:${crypto.randomUUID()}`,
           resolution,
           reason,
           expected_record_version: conflict.record_version,
@@ -97,9 +100,14 @@ export function ContactsModule({ projectId, contacts, contracts, drafts, reload,
     if (busy) return;
     setBusy(true);
     try {
-      await api(`/project-contacts/${contact.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ confirmed: true, expected_record_version: contact.record_version ?? 1 }),
+      await api(`/project-contacts/${contact.id}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({
+          decision_key: `contact:${contact.id}:${contact.record_version}:${crypto.randomUUID()}`,
+          expected_record_version: contact.record_version,
+          decision: "confirm",
+          reason_code: "reviewed_by_operator",
+        }),
       });
       onNotice(`Контакт ${contact.email} подтверждён. Следующие письма будут направляться в этот проект.`);
       await reload();

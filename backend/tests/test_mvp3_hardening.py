@@ -16,8 +16,10 @@ from app.api.management import (
 )
 from app.api.project_contacts import (
     ContactConflictResolve,
+    ContactResolutionCommand,
     ContactUpdate,
     discover_contact_from_message,
+    resolve_contact,
     resolve_contact_conflict,
     update_contact,
 )
@@ -122,7 +124,14 @@ def test_project_contact_cas_and_history(db_session, user_factory):
                              created_by_user_id=user.id, name="Client", email="client@example.test",
                              normalized_email="client@example.test", confirmed=False)
     db_session.add(contact); db_session.commit()
-    result = update_contact(contact.id, ContactUpdate(confirmed=True, expected_record_version=1), db_session, user)
+    result = resolve_contact(
+        contact.id,
+        ContactResolutionCommand(
+            decision_key="contact-test-confirm-1", expected_record_version=1,
+            decision="confirm", reason_code="human_review",
+        ),
+        db_session, user,
+    )
     assert result["record_version"] == 2
     with pytest.raises(HTTPException) as error:
         update_contact(contact.id, ContactUpdate(active=False, expected_record_version=1), db_session, user)
@@ -164,7 +173,7 @@ def test_cross_project_contact_discovery_creates_resolvable_conflict(db_session,
     assert conflict is not None
     result = resolve_contact_conflict(
         conflict.id,
-        ContactConflictResolve(expected_record_version=1, expected_contact_record_version=1,
+        ContactConflictResolve(decision_key="conflict-test-move-1", expected_record_version=1, expected_contact_record_version=1,
                                resolution="move_to_candidate", reason="Подтверждено владельцами проектов"),
         db_session, user,
     )
@@ -186,7 +195,7 @@ def test_contact_conflict_cannot_be_resolved_without_access_to_both_projects(db_
     with pytest.raises(HTTPException) as error:
         resolve_contact_conflict(
             conflict.id,
-            ContactConflictResolve(resolution="keep_current", reason="Проверка прав"),
+            ContactConflictResolve(decision_key="conflict-test-access-1", resolution="keep_current", reason="Проверка прав"),
             db_session, user,
         )
     assert error.value.status_code == 403
@@ -210,7 +219,7 @@ def test_contact_conflict_rejects_cross_tenant_candidate_binding(db_session, use
     with pytest.raises(HTTPException) as error:
         resolve_contact_conflict(
             conflict.id,
-            ContactConflictResolve(resolution="move_to_candidate", reason="Попытка чужой привязки"),
+            ContactConflictResolve(decision_key="conflict-test-tenant-1", resolution="move_to_candidate", reason="Попытка чужой привязки"),
             db_session, user,
         )
     assert error.value.status_code == 409
