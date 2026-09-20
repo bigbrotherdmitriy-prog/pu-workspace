@@ -13,6 +13,7 @@ def test_project_search_covers_core_project_entities():
 
 def test_project_search_is_wired_to_header():
     source = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
-    assert 'import { ProjectSearchResults' in source
-    assert "projectSearchHits" in source
+    assert 'import { ProjectSearchWorkspace' in source
+    assert "<ProjectSearchWorkspace" in source
+    assert "projectId={projectId}" in source
     assert "openProjectSearchHit" in source
