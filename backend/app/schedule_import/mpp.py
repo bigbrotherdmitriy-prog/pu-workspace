@@ -45,10 +45,29 @@ def _date(value) -> date | None:
         return None
 
 
-def _relation(relation) -> dict[str, str | None]:
+def _task_uid(task) -> str | None:
+    return str(task.getUniqueID()) if task is not None else None
+
+
+def _relation(relation, current_task) -> dict[str, str | None]:
+    """Return the task at the other end of a predecessor relation.
+
+    MPXJ exposes a relation from the task currently being inspected to its
+    predecessor.  Using ``getSourceTask`` unconditionally therefore turns
+    every imported dependency into a self-reference for affected MPP files.
+    Picking the endpoint which is not the current task is stable across MPXJ
+    relation orientations and also keeps the adapter easy to fake in tests.
+    """
+    current_uid = _task_uid(current_task)
     source = relation.getSourceTask()
+    target = relation.getTargetTask()
+    source_uid = _task_uid(source)
+    target_uid = _task_uid(target)
+    predecessor_uid = target_uid if source_uid == current_uid else source_uid
+    if predecessor_uid == current_uid:
+        predecessor_uid = None
     return {
-        "external_uid": str(source.getUniqueID()) if source is not None else None,
+        "external_uid": predecessor_uid,
         "type": str(relation.getType()),
         "lag": str(relation.getLag()) if relation.getLag() is not None else None,
     }
@@ -70,7 +89,7 @@ def map_mpxj_task(task) -> MppTask:
         is_summary=bool(task.getSummary()),
         is_milestone=bool(task.getMilestone()),
         is_critical=bool(task.getCritical()),
-        predecessors=[_relation(item) for item in task.getPredecessors()],
+        predecessors=[_relation(item, task) for item in task.getPredecessors()],
     )
 
 
