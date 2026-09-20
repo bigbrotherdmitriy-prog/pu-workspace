@@ -47,7 +47,8 @@ def pg_digest_world():
     schema = "mvp3_digest_" + uuid4().hex
     with base.begin() as connection:
         connection.execute(CreateSchema(schema))
-    engine = base.execution_options(schema_translate_map={None: schema})
+    schema_url = _postgres_url().update_query_dict({"options": f"-csearch_path={schema}"})
+    engine = create_engine(schema_url, connect_args={"connect_timeout": 5})
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
     with sessions.begin() as db:

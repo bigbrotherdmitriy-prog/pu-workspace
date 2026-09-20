@@ -63,16 +63,16 @@ def test_postgres_two_contract_updates_have_one_cas_winner_and_one_version(contr
 
     locked, release, second_started = Event(), Event(), Event()
     thread_state = local()
-    original_snapshot = api._contract_snapshot
+    original_ensure_baseline = api._ensure_contract_baseline
 
-    def snapshot_with_barrier(row, db):
-        result = original_snapshot(row, db)
+    def ensure_baseline_with_barrier(db, row, *, actor_user_id):
+        result = original_ensure_baseline(db, row, actor_user_id=actor_user_id)
         if getattr(thread_state, "first", False) and row.record_version == 1:
             locked.set()
             assert release.wait(10)
         return result
 
-    monkeypatch.setattr(api, "_contract_snapshot", snapshot_with_barrier)
+    monkeypatch.setattr(api, "_ensure_contract_baseline", ensure_baseline_with_barrier)
 
     def update(first: bool):
         thread_state.first = first
