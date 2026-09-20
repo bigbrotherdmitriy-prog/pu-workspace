@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.core.auth import ROLE_LEVEL
 from app.models.materialization import Materialization
+from app.models.document import Document
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
@@ -30,6 +31,77 @@ class AuthorizedMeetingSource:
     source_version_id: str
     evidence_id: str
     materialization_id: str
+
+
+def list_current_local_upload_sources(
+    db,
+    *,
+    actor_user_id: int,
+    project_id: int,
+    limit: int = 100,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Return only exact sources that the binding guard accepts right now.
+
+    Candidate discovery never exposes source bytes, storage locators, policy
+    pins, or encryption metadata.  Every returned row is re-authorized through
+    the same fail-closed guard used by the mutation endpoint.
+    """
+
+    if type(limit) is not int or not 1 <= limit <= 200:
+        raise MeetingSourceDenied("resource_unavailable")
+    checked_at = now or datetime.now(timezone.utc)
+    rows = list(db.scalars(
+        select(Materialization)
+        .where(
+            Materialization.project_id == project_id,
+            Materialization.parent_id.is_(None),
+            Materialization.state == "DERIVED",
+            Materialization.derive_allowed.is_(True),
+        )
+        .order_by(Materialization.derived_at.desc(), Materialization.id.desc())
+        .limit(limit * 2)
+    ))
+    candidates: list[dict] = []
+    for materialization in rows:
+        try:
+            authority = require_current_local_upload_source(
+                db,
+                actor_user_id=actor_user_id,
+                project_id=project_id,
+                source_id=materialization.source_id,
+                source_version_id=materialization.source_version_id,
+                evidence_id=materialization.evidence_id,
+                materialization_id=materialization.id,
+                lock=False,
+                now=checked_at,
+            )
+        except MeetingSourceDenied:
+            continue
+        version = db.get(SourceVersion, authority.source_version_id)
+        locator = version.locator_at_observation if version is not None else None
+        locator = locator if isinstance(locator, dict) else {}
+        staging_id = UUID(authority.materialization_id).hex
+        document = db.scalar(select(Document).where(
+            Document.project_id == project_id,
+            Document.source == "local_upload",
+            Document.external_id == f"local:{staging_id}",
+        ))
+        display_name = document.name if document is not None else locator.get("display_name")
+        media_type = document.mime_type if document is not None else locator.get("media_type")
+        candidates.append({
+            "document_id": document.id if document is not None else None,
+            "display_name": display_name if isinstance(display_name, str) and display_name else "Локальный документ",
+            "media_type": media_type if isinstance(media_type, str) else None,
+            "source_id": authority.source_id,
+            "source_version_id": authority.source_version_id,
+            "evidence_id": authority.evidence_id,
+            "materialization_id": authority.materialization_id,
+            "observed_at": version.observed_at if version is not None else None,
+        })
+        if len(candidates) == limit:
+            break
+    return candidates
 
 
 def _uuid(value: str) -> str:

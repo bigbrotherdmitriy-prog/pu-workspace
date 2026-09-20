@@ -35,6 +35,16 @@ export class StorageApi {
   aiPolicies = new Map<number, Record<string, unknown>>();
   meetings: Record<string, unknown>[] = [];
   resources: Record<string, unknown>[] = [];
+  meetingProposals = new Map<number, Record<string, unknown>[]>();
+  meetingBindingReply?: Reply;
+  meetingSource = {
+    document_id: 731, display_name: "Протокол совещания.pdf", media_type: "application/pdf",
+    source_id: "11111111-1111-4111-8111-111111111111",
+    source_version_id: "22222222-2222-4222-8222-222222222222",
+    evidence_id: "33333333-3333-4333-8333-333333333333",
+    materialization_id: "44444444-4444-4444-8444-444444444444",
+    observed_at: "2026-09-20T10:00:00Z",
+  };
   attachmentImportReply: Reply = { body: {
     staging_id: "synthetic-gmail-staging", job_id: 72, status: "queued", already_queued: false,
   } };
@@ -128,6 +138,7 @@ export class StorageApi {
       const resourceRefs = this.resources.filter(row => resourceIds.includes(Number(row.id)));
       const created = {
         ...payload, id: this.meetings.length + 1, record_version: 1, status: "planned",
+        can_edit: true, can_manage: true,
         participant_refs: participants, participant_contact_ids: payload.participant_contact_ids || [],
         resource_ids: resourceIds, resource_refs: resourceRefs,
         has_conflicts: conflicts.length > 0, conflict_count: conflicts.length,
@@ -158,6 +169,76 @@ export class StorageApi {
       if (!resource) return this.fulfill(route, { status: 404, body: { detail: "Resource not found" } });
       Object.assign(resource, payload, { record_version: Number(resource.record_version) + 1 });
       return this.fulfill(route, { body: resource });
+    }
+    const meetingMatch = path.match(/^\/management\/meetings\/(\d+)$/);
+    if (method === "PATCH" && meetingMatch) {
+      const id = Number(meetingMatch[1]);
+      const row = this.meetings.find((item) => item.id === id);
+      if (!row) return this.fulfill(route, { status: 404, body: { detail: "Meeting not found" } });
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (payload.expected_record_version !== row.record_version) {
+        return this.fulfill(route, { status: 409, body: { detail: "record_version_conflict" } });
+      }
+      row.minutes = payload.minutes; row.status = payload.status;
+      row.record_version = Number(row.record_version) + 1;
+      return this.fulfill(route, { body: {
+        id, status: row.status, record_version: row.record_version,
+        tasks: 0, risks: 0, decisions: 0, proposals: 0,
+        proposal_state: "source_binding_required",
+      } });
+    }
+    const sourceCandidateMatch = path.match(/^\/management\/meetings\/(\d+)\/source-candidates$/);
+    if (method === "GET" && sourceCandidateMatch) {
+      return this.fulfill(route, { body: { candidates: [this.meetingSource], count: 1 } });
+    }
+    const proposalListMatch = path.match(/^\/management\/meetings\/(\d+)\/proposals$/);
+    if (method === "GET" && proposalListMatch) {
+      const id = Number(proposalListMatch[1]);
+      const proposals = this.meetingProposals.get(id) || [];
+      return this.fulfill(route, { body: {
+        proposals, count: proposals.length,
+        source_binding: proposals.length ? this.meetingSource : null,
+      } });
+    }
+    const sourceBindingMatch = path.match(/^\/management\/meetings\/(\d+)\/source-binding$/);
+    if (method === "POST" && sourceBindingMatch) {
+      if (this.meetingBindingReply) {
+        const reply = this.meetingBindingReply; this.meetingBindingReply = undefined;
+        return this.fulfill(route, reply);
+      }
+      const id = Number(sourceBindingMatch[1]);
+      const row = this.meetings.find((item) => item.id === id);
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (!row || payload.expected_record_version !== row.record_version) {
+        return this.fulfill(route, { status: 409, body: { detail: { code: "record_version_conflict" } } });
+      }
+      row.record_version = Number(row.record_version) + 1;
+      const proposals = [{
+        id: 501, record_version: 1, project_id: row.project_id, meeting_id: id,
+        binding_id: "binding-501", proposal_type: "task",
+        payload: { title: "Подготовить акт", excerpt: "Подготовить акт до 25.09.2026",
+          due_date_evidence_quote: "до 25.09.2026", confidence: 0.94 },
+        status: "proposed", target_entity_type: null, target_entity_id: null,
+      }];
+      this.meetingProposals.set(id, proposals);
+      return this.fulfill(route, { body: {
+        meeting_id: id, meeting_record_version: row.record_version,
+        binding_id: "binding-501", ...this.meetingSource,
+        proposal_count: proposals.length, proposals, external_actions_created: false,
+      } });
+    }
+    const proposalConfirmMatch = path.match(/^\/management\/meeting-proposals\/(\d+)\/confirm$/);
+    if (method === "POST" && proposalConfirmMatch) {
+      const proposalId = Number(proposalConfirmMatch[1]);
+      const proposal = [...this.meetingProposals.values()].flat().find((item) => item.id === proposalId);
+      if (!proposal) return this.fulfill(route, { status: 404, body: { detail: "Meeting proposal not found" } });
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (payload.expected_record_version !== proposal.record_version) {
+        return this.fulfill(route, { status: 409, body: { detail: { code: "record_version_conflict" } } });
+      }
+      proposal.status = "confirmed"; proposal.record_version = 2;
+      proposal.target_entity_type = "task"; proposal.target_entity_id = 901;
+      return this.fulfill(route, { body: proposal });
     }
     const localUploadJobMatch = path.match(/^\/local-upload\/projects\/(\d+)\/jobs\/(\d+)$/);
     if (method === "GET" && localUploadJobMatch) {

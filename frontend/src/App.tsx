@@ -35,7 +35,14 @@ import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./mod
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
 import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
-import { MeetingsModule, type BookableResourceRow, type MeetingRow } from "./modules/meetings/MeetingsModule";
+import {
+  MeetingsModule,
+  type BookableResourceRow,
+  type MeetingAuthorityState,
+  type MeetingProposal,
+  type MeetingRow,
+  type MeetingSourceCandidate,
+} from "./modules/meetings/MeetingsModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
@@ -468,6 +475,8 @@ export function App() {
   const [obligations, setObligations] = useState<ObligationRow[]>([]),
     [meetings, setMeetings] = useState<MeetingRow[]>([]),
     [bookableResources, setBookableResources] = useState<BookableResourceRow[]>([]),
+    [meetingAuthority, setMeetingAuthority] = useState<Record<number, MeetingAuthorityState>>({}),
+    [busyMeetingAuthorityId, setBusyMeetingAuthorityId] = useState(0),
     [notifications, setNotifications] = useState<NotificationRow[]>([]),
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
@@ -506,12 +515,15 @@ export function App() {
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
+  const meetingAuthorityCommands = useRef(new Map<string, string>());
 
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
       ++documentRequestRef.current;
       setDocumentRows([]);
       setSelectedDocument(null);
+      setMeetingAuthority({});
+      meetingAuthorityCommands.current.clear();
     }
     persistProjectSelection(id);
   }
@@ -2036,6 +2048,60 @@ export function App() {
     }, 300);
     return () => window.clearTimeout(timer);
   }, [ready, projectId, active, query]);
+  function authorityCommand(key: string) {
+    const current = meetingAuthorityCommands.current.get(key);
+    if (current) return current;
+    const created = globalThis.crypto.randomUUID();
+    meetingAuthorityCommands.current.set(key, created);
+    return created;
+  }
+  function meetingAuthorityError(error: unknown) {
+    const code = error instanceof ApiError ? error.code : undefined;
+    const messages: Record<string, string> = {
+      record_version_conflict: "Протокол изменился. Обновите карточку и выберите источник заново.",
+      command_conflict: "Команда уже использована для другой версии. Обновите карточку перед повтором.",
+      stale_meeting_source: "Протокол или его источник устарел. Выполните новую привязку точной версии.",
+      stale_source: "Источник больше не является текущим. Выберите актуальную версию.",
+      resource_unavailable: "Источник недоступен или больше не разрешён для этого проекта.",
+      already_confirmed: "Предложение уже подтверждено другой командой. Обновите карточку.",
+    };
+    return (code && messages[code]) || (error as Error).message;
+  }
+  async function loadMeetingAuthority(item: MeetingRow) {
+    setMeetingAuthority((current) => ({
+      ...current,
+      [item.id]: {
+        ...(current[item.id] || { candidates: [], proposals: [], loaded: false }),
+        loading: true,
+        error: undefined,
+      },
+    }));
+    try {
+      const proposalData = await api(`/management/meetings/${item.id}/proposals`);
+      const candidateData = item.can_manage && !proposalData.proposals.length
+        ? await api(`/management/meetings/${item.id}/source-candidates?limit=100`)
+        : { candidates: [] };
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          loaded: true,
+          loading: false,
+          candidates: candidateData.candidates || [],
+          proposals: proposalData.proposals || [],
+          source_binding: proposalData.source_binding || undefined,
+        },
+      }));
+    } catch (error) {
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { candidates: [], proposals: [], loaded: false }),
+          loading: false,
+          error: meetingAuthorityError(error),
+        },
+      }));
+    }
+  }
   async function loadManagement() {
     if (!projectId) return;
     try {
@@ -2049,6 +2115,9 @@ export function App() {
       setMeetings(m.meetings);
       setNotifications(n.notifications);
       setBookableResources(r.resources);
+      await Promise.all((m.meetings as MeetingRow[])
+        .filter((item) => item.status === "completed")
+        .map((item) => loadMeetingAuthority(item)));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2168,12 +2237,93 @@ export function App() {
           expected_record_version: item.record_version ?? 1,
         }),
       });
-      setNotice(
-        `Протокол обработан: задач ${result.tasks}, рисков ${result.risks}, решений ${result.decisions}`,
-      );
+      setNotice(result.proposal_state === "source_binding_required"
+        ? "Протокол сохранён. Действия не созданы: выберите точный источник и подтвердите каждое предложение."
+        : `Протокол обработан: задач ${result.tasks}, рисков ${result.risks}, решений ${result.decisions}`);
       await Promise.all([load(), loadManagement()]);
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+  async function bindMeetingSource(item: MeetingRow, source: MeetingSourceCandidate) {
+    const commandKey = `bind:${item.id}:${item.record_version}:${source.materialization_id}`;
+    setBusyMeetingAuthorityId(item.id);
+    try {
+      const result = await api(`/management/meetings/${item.id}/source-binding`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_record_version: item.record_version,
+          command_id: authorityCommand(commandKey),
+          source_id: source.source_id,
+          source_version_id: source.source_version_id,
+          evidence_id: source.evidence_id,
+          materialization_id: source.materialization_id,
+        }),
+      });
+      meetingAuthorityCommands.current.delete(commandKey);
+      setMeetings((rows) => rows.map((row) => row.id === item.id
+        ? { ...row, record_version: result.meeting_record_version }
+        : row));
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          loaded: true,
+          loading: false,
+          candidates: [],
+          proposals: result.proposals || [],
+          source_binding: {
+            ...source,
+            display_name: source.display_name,
+          },
+        },
+      }));
+      setNotice(`Источник подтверждён. Подготовлено предложений: ${result.proposal_count}. Действия ещё не применены.`);
+    } catch (error) {
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { loaded: false, candidates: [], proposals: [] }),
+          loading: false,
+          error: meetingAuthorityError(error),
+        },
+      }));
+    } finally {
+      setBusyMeetingAuthorityId(0);
+    }
+  }
+  async function confirmMeetingProposal(item: MeetingRow, proposal: MeetingProposal) {
+    const commandKey = `confirm:${proposal.id}:${proposal.record_version}`;
+    setBusyMeetingAuthorityId(item.id);
+    try {
+      const confirmed = await api(`/management/meeting-proposals/${proposal.id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_record_version: proposal.record_version,
+          command_id: authorityCommand(commandKey),
+        }),
+      });
+      meetingAuthorityCommands.current.delete(commandKey);
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { loaded: true, loading: false, candidates: [] }),
+          error: undefined,
+          proposals: (current[item.id]?.proposals || []).map((row) => row.id === proposal.id ? confirmed : row),
+        },
+      }));
+      setNotice("Предложение подтверждено и применено ровно один раз.");
+      await load();
+    } catch (error) {
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { loaded: false, candidates: [], proposals: [] }),
+          loading: false,
+          error: meetingAuthorityError(error),
+        },
+      }));
+    } finally {
+      setBusyMeetingAuthorityId(0);
     }
   }
   async function refreshNotifications() {
@@ -3045,6 +3195,11 @@ export function App() {
           onDeactivateResource={(resource) => void deactivateBookableResource(resource)}
           onCreate={() => void createMeeting()}
           onRecordMinutes={(meeting) => void recordMinutes(meeting)}
+          authority={meetingAuthority}
+          busyAuthorityId={busyMeetingAuthorityId}
+          onRefreshAuthority={(meeting) => void loadMeetingAuthority(meeting)}
+          onBindSource={(meeting, source) => void bindMeetingSource(meeting, source)}
+          onConfirmProposal={(meeting, proposal) => void confirmMeetingProposal(meeting, proposal)}
         />
       )}
       {active === "Уведомления" && (

@@ -14,8 +14,8 @@ from app.models.governance import Decision, Risk
 from app.models.job import BackgroundJob
 from app.models.management import (
     BookableResource, ManagementHistory, Meeting, MeetingParticipant,
-    MeetingProposal, MeetingResource, Notification, NotificationPolicy,
-    Obligation,
+    MeetingProposal, MeetingResource, MeetingSourceBinding, Notification,
+    NotificationPolicy, Obligation,
 )
 from app.models.organization_contract import Contract
 from app.models.project import Project
@@ -27,6 +27,8 @@ from app.mvp3.meeting_proposals import (
     MeetingProposalConflict, MeetingProposalDenied, bind_current_source,
     confirm_proposal, serialize_proposal,
 )
+from app.models.v54_pilot import SourceVersion
+from app.source_evidence.meeting_authority import MeetingSourceDenied, list_current_local_upload_sources
 
 router = APIRouter(prefix="/management", tags=["management"])
 
@@ -553,6 +555,11 @@ def _meeting_payload(db: Session, item: Meeting, actor: User) -> dict:
         for resource in resource_refs
         if resource["capacity"] is not None and participant_count > resource["capacity"]
     ]
+    membership = None if actor.is_admin else db.scalar(select(ProjectMember).where(
+        ProjectMember.project_id == item.project_id,
+        ProjectMember.user_id == actor.id,
+    ))
+    role = "owner" if actor.is_admin else (membership.role if membership is not None else "viewer")
     return {
         "id": item.id, "record_version": item.record_version,
         "project_id": item.project_id, "contract_id": item.contract_id,
@@ -565,6 +572,8 @@ def _meeting_payload(db: Session, item: Meeting, actor: User) -> dict:
         "agenda": item.agenda, "minutes": item.minutes, "status": item.status,
         "has_conflicts": bool(conflicts), "conflict_count": len(conflicts), "conflicts": conflicts,
         "has_resource_warnings": bool(resource_warnings), "resource_warnings": resource_warnings,
+        "can_edit": actor.is_admin or role in {"owner", "manager", "editor"},
+        "can_manage": actor.is_admin or role in {"owner", "manager"},
     }
 
 
@@ -698,7 +707,40 @@ def meeting_proposals(meeting_id: int, db: Session = Depends(get_db),
     rows = list(db.scalars(select(MeetingProposal).where(
         MeetingProposal.meeting_id == meeting_id,
     ).order_by(MeetingProposal.id)))
-    return {"proposals": [serialize_proposal(row) for row in rows], "count": len(rows)}
+    binding = db.get(MeetingSourceBinding, rows[0].binding_id) if rows else None
+    version = db.get(SourceVersion, binding.source_version_id) if binding is not None else None
+    locator = version.locator_at_observation if version is not None else None
+    locator = locator if isinstance(locator, dict) else {}
+    source_binding = None if binding is None else {
+        "source_id": binding.source_id,
+        "source_version_id": binding.source_version_id,
+        "evidence_id": binding.evidence_id,
+        "materialization_id": binding.materialization_id,
+        "display_name": locator.get("display_name") or "Локальный документ",
+        "media_type": locator.get("media_type"),
+        "observed_at": version.observed_at if version is not None else None,
+    }
+    return {"proposals": [serialize_proposal(row) for row in rows], "count": len(rows),
+            "source_binding": source_binding}
+
+
+@router.get("/meetings/{meeting_id}/source-candidates")
+def meeting_source_candidates(meeting_id: int, limit: int = 100,
+                              db: Session = Depends(get_db),
+                              user: User = Depends(require_user)):
+    meeting = db.get(Meeting, meeting_id)
+    if meeting is None:
+        raise HTTPException(404, "Meeting not found")
+    require_project_role(db, user, meeting.project_id, "manager")
+    if not 1 <= limit <= 200:
+        raise HTTPException(422, "limit must be between 1 and 200")
+    try:
+        candidates = list_current_local_upload_sources(
+            db, actor_user_id=user.id, project_id=meeting.project_id, limit=limit,
+        )
+    except MeetingSourceDenied:
+        raise HTTPException(403, "resource_unavailable") from None
+    return {"candidates": candidates, "count": len(candidates)}
 
 
 @router.post("/meeting-proposals/{proposal_id}/confirm")

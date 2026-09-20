@@ -2,8 +2,11 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import HTTPException
 
-from app.api.management import MeetingUpdate, finish_meeting
+from app.api.management import (
+    MeetingUpdate, finish_meeting, meeting_proposals, meeting_source_candidates, meetings,
+)
 from app.document_extraction import (
     CombinedExtraction, ObligationCandidate, RawDecisionCandidate, RawRiskCandidate,
 )
@@ -166,6 +169,66 @@ def test_exact_current_source_creates_proposal_and_confirmation_is_idempotent(
         entity_type="meeting_proposal", entity_id=proposal_id, action="confirmed",
     ).one()
     assert history.evidence["source_version_id"] == source["source_version_id"]
+
+
+def test_manager_can_list_only_current_local_upload_candidates_and_viewer_cannot(
+    db_session, user_factory,
+):
+    organization, project, manager, viewer, meeting = _world(db_session, user_factory)
+    source = _source(db_session, organization, project, manager)
+    listed = meeting_source_candidates(meeting.id, 100, db_session, manager)
+    assert listed["count"] == 1
+    assert listed["candidates"] == [{
+        "document_id": None,
+        "display_name": "minutes.txt",
+        "media_type": "text/plain",
+        **source,
+        "observed_at": db_session.get(SourceVersion, source["source_version_id"]).observed_at,
+    }]
+    with pytest.raises(HTTPException) as denied:
+        meeting_source_candidates(meeting.id, 100, db_session, viewer)
+    assert denied.value.status_code == 403
+    db_session.get(SourceReference, source["source_id"]).freshness = "stale"
+    db_session.commit()
+    assert meeting_source_candidates(meeting.id, 100, db_session, manager) == {
+        "candidates": [], "count": 0,
+    }
+
+
+def test_meeting_permissions_and_proposal_read_model_are_truthful(
+    db_session, user_factory, action_extraction,
+):
+    organization, project, manager, viewer, meeting = _world(db_session, user_factory)
+    editor = user_factory(name="Editor")
+    db_session.add(ProjectMember(project_id=project.id, user_id=editor.id, role="editor"))
+    db_session.commit()
+    manager_row = meetings(project.id, db=db_session, user=manager)["meetings"][0]
+    editor_row = meetings(project.id, db=db_session, user=editor)["meetings"][0]
+    viewer_row = meetings(project.id, db=db_session, user=viewer)["meetings"][0]
+    assert manager_row["can_edit"] is manager_row["can_manage"] is True
+    assert editor_row["can_edit"] is True
+    assert editor_row["can_manage"] is False
+    assert viewer_row["can_edit"] is viewer_row["can_manage"] is False
+    with pytest.raises(HTTPException) as editor_denied:
+        meeting_source_candidates(meeting.id, 100, db_session, editor)
+    assert editor_denied.value.status_code == 403
+    finish_meeting(meeting.id, MeetingUpdate(
+        expected_record_version=1, minutes="Подготовить протокол до 25.09.2026", status="completed",
+    ), db_session, manager)
+    source = _source(db_session, organization, project, manager)
+    service.bind_current_source(
+        db_session, meeting_id=meeting.id, actor_user_id=manager.id,
+        expected_record_version=2, command_id=_uuid(), **source,
+    )
+    db_session.commit()
+    payload = meeting_proposals(meeting.id, db_session, viewer)
+    assert payload["count"] == 1
+    assert payload["source_binding"] == {
+        **source,
+        "display_name": "minutes.txt",
+        "media_type": "text/plain",
+        "observed_at": db_session.get(SourceVersion, source["source_version_id"]).observed_at,
+    }
 
 
 def test_binding_materializes_all_candidate_kinds_as_proposals_only(

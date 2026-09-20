@@ -1,4 +1,37 @@
-import { Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle2, FileCheck2, RefreshCw, ShieldAlert, Users } from "lucide-react";
+
+export type MeetingSourceCandidate = {
+  document_id?: number;
+  display_name: string;
+  media_type?: string;
+  source_id: string;
+  source_version_id: string;
+  evidence_id: string;
+  materialization_id: string;
+  observed_at?: string;
+};
+
+export type MeetingProposal = {
+  id: number;
+  record_version: number;
+  proposal_type: "task" | "risk" | "decision";
+  payload: Record<string, unknown>;
+  status: "proposed" | "confirmed";
+  target_entity_type?: string;
+  target_entity_id?: number;
+};
+
+export type MeetingSourceBinding = Omit<MeetingSourceCandidate, "document_id">;
+
+export type MeetingAuthorityState = {
+  loaded: boolean;
+  loading: boolean;
+  error?: string;
+  candidates: MeetingSourceCandidate[];
+  proposals: MeetingProposal[];
+  source_binding?: MeetingSourceBinding;
+};
 
 export type MeetingRow = {
   id: number;
@@ -29,6 +62,8 @@ export type MeetingRow = {
   agenda?: string;
   minutes?: string;
   status: string;
+  can_edit: boolean;
+  can_manage: boolean;
 };
 
 export type BookableResourceRow = {
@@ -76,7 +111,115 @@ type Props = {
   onDeactivateResource: (resource: BookableResourceRow) => void;
   onCreate: () => void;
   onRecordMinutes: (meeting: MeetingRow) => void;
+  authority: Record<number, MeetingAuthorityState>;
+  busyAuthorityId: number;
+  onRefreshAuthority: (meeting: MeetingRow) => void;
+  onBindSource: (meeting: MeetingRow, source: MeetingSourceCandidate) => void;
+  onConfirmProposal: (meeting: MeetingRow, proposal: MeetingProposal) => void;
 };
+
+const proposalTitle = (proposal: MeetingProposal) => {
+  const value = proposal.proposal_type === "decision"
+    ? proposal.payload.question
+    : proposal.payload.title;
+  return typeof value === "string" && value.trim() ? value : "Предложение без названия";
+};
+
+const proposalType = (kind: MeetingProposal["proposal_type"]) => ({
+  task: "Поручение",
+  risk: "Риск",
+  decision: "Решение",
+}[kind]);
+
+const evidenceQuotes = (proposal: MeetingProposal) => [
+  proposal.payload.excerpt,
+  proposal.payload.due_date_evidence_quote,
+  proposal.payload.assignee_evidence_quote,
+  proposal.payload.amount_evidence_quote,
+].filter((value, index, values): value is string => (
+  typeof value === "string" && value.trim().length > 0 && values.indexOf(value) === index
+));
+
+function MeetingAuthorityPanel({
+  meeting,
+  state,
+  busy,
+  onRefresh,
+  onBind,
+  onConfirm,
+}: {
+  meeting: MeetingRow;
+  state?: MeetingAuthorityState;
+  busy: boolean;
+  onRefresh: () => void;
+  onBind: (source: MeetingSourceCandidate) => void;
+  onConfirm: (proposal: MeetingProposal) => void;
+}) {
+  const [selectedSource, setSelectedSource] = useState("");
+  const candidates = state?.candidates || [];
+  useEffect(() => {
+    if (!candidates.some((candidate) => candidate.materialization_id === selectedSource)) {
+      setSelectedSource(candidates[0]?.materialization_id || "");
+    }
+  }, [candidates, selectedSource]);
+  const selected = candidates.find((candidate) => candidate.materialization_id === selectedSource);
+
+  return <section className="meeting-authority" aria-label={`Безопасные действия: ${meeting.title}`}>
+    <div className="meeting-authority-head">
+      <div>
+        <strong>Действия из протокола</strong>
+        <small>Ничего не создаётся без точного источника и отдельного подтверждения manager.</small>
+      </div>
+      <button className="secondary" disabled={busy || state?.loading} onClick={onRefresh}>
+        <RefreshCw size={15} /> Обновить
+      </button>
+    </div>
+    {state?.loading && <p role="status">Проверяем источник и предложения…</p>}
+    {state?.error && <div className="meeting-authority-error" role="alert">
+      <ShieldAlert size={18} /><span>{state.error}</span>
+    </div>}
+    {state?.source_binding && <div className="meeting-source-proof">
+      <FileCheck2 size={18} />
+      <span><strong>{state.source_binding.display_name}</strong><small>Точная версия источника подтверждена</small></span>
+    </div>}
+    {state?.loaded && !state.proposals.length && meeting.can_manage && <div className="meeting-source-picker">
+      {candidates.length ? <>
+        <label>
+          Текущий локальный документ-источник
+          <select aria-label={`Источник протокола ${meeting.title}`} value={selectedSource}
+            onChange={(event) => setSelectedSource(event.target.value)}>
+            {candidates.map((candidate) => <option key={candidate.materialization_id} value={candidate.materialization_id}>
+              {candidate.display_name}{candidate.document_id ? ` · документ #${candidate.document_id}` : ""}
+            </option>)}
+          </select>
+        </label>
+        <button disabled={busy || !selected} onClick={() => selected && onBind(selected)}>
+          Привязать точную версию и подготовить предложения
+        </button>
+      </> : <p>Нет действующего local-upload источника. Загрузите протокол как файл и дождитесь обработки.</p>}
+    </div>}
+    {state?.loaded && !state.proposals.length && !meeting.can_manage && <p>
+      Предложения ещё не подготовлены. Привязать источник и подтвердить действия может manager проекта.
+    </p>}
+    {!!state?.proposals.length && <div className="meeting-proposal-list">
+      {state.proposals.map((proposal) => {
+        const quotes = evidenceQuotes(proposal);
+        return <article key={proposal.id} className={`meeting-proposal ${proposal.status}`}>
+          <div className="meeting-proposal-heading">
+            <span>{proposalType(proposal.proposal_type)}</span>
+            <strong>{proposalTitle(proposal)}</strong>
+          </div>
+          {!!quotes.length && <blockquote>{quotes.join(" · ")}</blockquote>}
+          {proposal.status === "confirmed" ? <p className="meeting-proposal-confirmed">
+            <CheckCircle2 size={17} /> Применено: {proposal.target_entity_type} #{proposal.target_entity_id}
+          </p> : meeting.can_manage ? <button disabled={busy} onClick={() => onConfirm(proposal)}>
+            Подтвердить только это действие
+          </button> : <small>Ожидает подтверждения manager.</small>}
+        </article>;
+      })}
+    </div>}
+  </section>;
+}
 
 export function MeetingsModule({
   projectId,
@@ -112,6 +255,11 @@ export function MeetingsModule({
   onDeactivateResource,
   onCreate,
   onRecordMinutes,
+  authority,
+  busyAuthorityId,
+  onRefreshAuthority,
+  onBindSource,
+  onConfirmProposal,
 }: Props) {
   return (
     <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
@@ -281,10 +429,18 @@ export function MeetingsModule({
                 </div>
               )}
               {!["completed", "cancelled"].includes(item.status) && (
-                <button onClick={() => onRecordMinutes(item)}>
+                <button disabled={!item.can_edit} onClick={() => onRecordMinutes(item)}>
                   Внести протокол и проанализировать
                 </button>
               )}
+              {item.status === "completed" && <MeetingAuthorityPanel
+                meeting={item}
+                state={authority[item.id]}
+                busy={busyAuthorityId === item.id}
+                onRefresh={() => onRefreshAuthority(item)}
+                onBind={(source) => onBindSource(item, source)}
+                onConfirm={(proposal) => onConfirmProposal(item, proposal)}
+              />}
             </article>
           ))}
           {!meetings.length && (

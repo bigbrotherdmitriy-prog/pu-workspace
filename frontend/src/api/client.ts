@@ -1,5 +1,10 @@
 export class ApiError extends Error {
-  constructor(message: string, public status: number | null, public requestId: string) {
+  constructor(
+    message: string,
+    public status: number | null,
+    public requestId: string,
+    public code?: string,
+  ) {
     super(message);
     this.name = "ApiError";
   }
@@ -44,11 +49,13 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const responseRequestId = response.headers.get("X-Request-ID") || requestId;
-    const detail = typeof body.detail === "string" ? body.detail : `HTTP ${response.status}`;
+    const code = typeof body.detail === "object" && body.detail !== null
+      && typeof body.detail.code === "string" ? body.detail.code : undefined;
+    const detail = typeof body.detail === "string" ? body.detail : code || `HTTP ${response.status}`;
     const message = detail.includes(responseRequestId)
       ? detail
       : `${detail}. Код обращения: ${responseRequestId}`;
-    throw new ApiError(message, response.status, responseRequestId);
+    throw new ApiError(message, response.status, responseRequestId, code);
   }
   return body as T;
 }
