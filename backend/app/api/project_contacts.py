@@ -416,6 +416,11 @@ def resolve_contact(contact_id: int, data: ContactResolutionCommand,
         decision_key=data.decision_key, command_hash=command_hash,
     )
     if replay is not None:
+        # ``observed`` may have been loaded before the transaction that
+        # recorded the replay committed its contact update.  Refresh it so an
+        # exact concurrent replay returns the applied version, not the stale
+        # identity-map snapshot that preceded the decision.
+        db.refresh(observed)
         result = payload(observed); result["already_applied"] = True
         return result
 

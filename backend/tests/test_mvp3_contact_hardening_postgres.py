@@ -90,20 +90,44 @@ def _resolve(engine, barrier, user_id, contact_id, key, *, decision="confirm"):
 
 
 def test_postgres_exact_concurrent_replay_applies_once(contact_pg_engine):
-    user_id, (contact_id,) = _world(contact_pg_engine)
-    barrier = Barrier(2)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = [future.result(timeout=20) for future in (
-            pool.submit(_resolve, contact_pg_engine, barrier, user_id, contact_id, "contact-pg-exact-replay"),
-            pool.submit(_resolve, contact_pg_engine, barrier, user_id, contact_id, "contact-pg-exact-replay"),
-        )]
-    assert sorted(result.get("record_version", 0) for result in results) == [2, 2]
-    assert sum(bool(result.get("already_applied")) for result in results) == 1
+    attempts = 20
+    for attempt in range(attempts):
+        user_id, (contact_id,) = _world(contact_pg_engine)
+        barrier = Barrier(2)
+        decision_key = f"contact-pg-exact-replay-{attempt}"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [future.result(timeout=20) for future in (
+                pool.submit(_resolve, contact_pg_engine, barrier, user_id, contact_id, decision_key),
+                pool.submit(_resolve, contact_pg_engine, barrier, user_id, contact_id, decision_key),
+            )]
+        assert sorted(result.get("record_version", 0) for result in results) == [2, 2], attempt
+        assert sum(bool(result.get("already_applied")) for result in results) == 1, attempt
     with Session(contact_pg_engine) as db:
         assert db.scalar(select(func.count()).select_from(ManagementHistory).where(
             ManagementHistory.entity_type == "project_contact",
-            ManagementHistory.idempotency_key == "contact-pg-exact-replay",
-        )) == 1
+            ManagementHistory.idempotency_key.like("contact-pg-exact-replay-%"),
+        )) == attempts
+
+
+def test_postgres_exact_replay_refreshes_preloaded_contact(contact_pg_engine):
+    user_id, (contact_id,) = _world(contact_pg_engine)
+    command = ContactResolutionCommand(
+        decision_key="contact-pg-preloaded-replay",
+        expected_record_version=1,
+        decision="confirm",
+        reason_code="concurrency_test",
+    )
+    with Session(contact_pg_engine) as stale_db:
+        observed = stale_db.get(ProjectContact, contact_id)
+        assert observed is not None and observed.record_version == 1
+
+        with Session(contact_pg_engine) as applying_db:
+            applied = resolve_contact(contact_id, command, applying_db, applying_db.get(User, user_id))
+        assert applied["record_version"] == 2
+
+        replayed = resolve_contact(contact_id, command, stale_db, stale_db.get(User, user_id))
+        assert replayed["record_version"] == 2
+        assert replayed["already_applied"] is True
 
 
 def test_postgres_different_commands_have_one_cas_winner(contact_pg_engine):
