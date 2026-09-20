@@ -1,7 +1,7 @@
 from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, Time, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, ForeignKeyConstraint, Integer, JSON, Numeric, String, Text, Time, UniqueConstraint, Uuid, event, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -88,6 +88,84 @@ class MeetingParticipant(Base):
         ForeignKey("project_contacts.id", ondelete="RESTRICT"), nullable=True, index=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MeetingSourceBinding(Base):
+    """Immutable declaration that one meeting revision uses one exact source observation."""
+
+    __tablename__ = "meeting_source_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "source_id", "source_version_id"],
+            ["v54_source_versions.organization_id", "v54_source_versions.source_id", "v54_source_versions.id"],
+            name="fk_meeting_source_binding_observation", ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "evidence_id", "source_id", "source_version_id"],
+            ["v54_evidence.organization_id", "v54_evidence.id", "v54_evidence.source_id", "v54_evidence.source_version_id"],
+            name="fk_meeting_source_binding_evidence", ondelete="RESTRICT",
+        ),
+        UniqueConstraint("meeting_id", "meeting_record_version", name="uq_meeting_source_binding_version"),
+        UniqueConstraint("meeting_id", "command_id", name="uq_meeting_source_binding_command"),
+        CheckConstraint("meeting_record_version > 1", name="ck_meeting_source_binding_version"),
+    )
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), index=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="RESTRICT"), index=True)
+    meeting_record_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
+    source_version_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
+    evidence_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
+    materialization_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("v54_materializations.id", ondelete="RESTRICT"), nullable=False,
+    )
+    command_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
+    command_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    bound_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    bound_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MeetingProposal(Base):
+    """Reviewable task/risk/decision candidate; never an external or durable action."""
+
+    __tablename__ = "meeting_proposals"
+    __table_args__ = (
+        UniqueConstraint("binding_id", "fingerprint", name="uq_meeting_proposal_fingerprint"),
+        CheckConstraint("record_version > 0", name="ck_meeting_proposal_version"),
+        CheckConstraint("proposal_type IN ('task','risk','decision')", name="ck_meeting_proposal_type"),
+        CheckConstraint("status IN ('proposed','confirmed')", name="ck_meeting_proposal_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="RESTRICT"), index=True)
+    binding_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("meeting_source_bindings.id", ondelete="RESTRICT"), index=True,
+    )
+    proposal_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="proposed", index=True)
+    confirmation_command_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    confirmation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_entity_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    target_entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    confirmed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def _deny_meeting_source_binding_mutation(_mapper, _connection, _target):
+    raise ValueError("meeting_source_binding_is_append_only")
+
+
+event.listen(MeetingSourceBinding, "before_update", _deny_meeting_source_binding_mutation)
+event.listen(MeetingSourceBinding, "before_delete", _deny_meeting_source_binding_mutation)
 
 
 class Notification(Base):

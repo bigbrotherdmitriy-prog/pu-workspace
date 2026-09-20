@@ -132,36 +132,25 @@ def test_project_contact_cas_and_history(db_session, user_factory):
     )) == 1
 
 
-def test_meeting_completion_and_derivation_rollback_together(db_session, user_factory, monkeypatch):
+def test_meeting_completion_never_derives_actions_before_source_binding(db_session, user_factory):
     _, user, project, _ = world(db_session, user_factory)
     meeting = Meeting(project_id=project.id, created_by_user_id=user.id, title="Atomic meeting")
     db_session.add(meeting); db_session.commit(); meeting_id = meeting.id
 
-    def create_task_then_legacy_commit(db, project_id, *args, **kwargs):
-        task = Task(project_id=project_id, assignee_user_id=user.id, created_by_user_id=user.id,
-                    title="Would be rolled back", status="assigned", priority="normal", source_type="meeting",
-                    source_file_id="atomic-source", source_file_name="meeting.txt", source_excerpt="evidence",
-                    source_excerpt_hash="8" * 64, confidence=1.0)
-        db.add(task); db.flush(); db.commit()
-        return [task]
-
-    def fail(*args, **kwargs):
-        raise RuntimeError("synthetic extraction failure")
-
-    monkeypatch.setattr(management_api, "create_tasks_from_files", create_task_then_legacy_commit)
-    monkeypatch.setattr(management_api, "create_governance_items", fail)
-    with pytest.raises(RuntimeError, match="synthetic extraction failure"):
-        finish_meeting(meeting_id, MeetingUpdate(minutes="Нужно выполнить обязательство до пятницы.",
-                                                  status="completed", expected_record_version=1),
-                       db_session, user)
-    db_session.rollback()
+    result = finish_meeting(
+        meeting_id,
+        MeetingUpdate(minutes="Нужно выполнить обязательство до пятницы.",
+                      status="completed", expected_record_version=1),
+        db_session, user,
+    )
     persisted = db_session.get(Meeting, meeting_id)
-    assert persisted.status == "planned"
-    assert persisted.record_version == 1
+    assert result["proposal_state"] == "source_binding_required"
+    assert persisted.status == "completed"
+    assert persisted.record_version == 2
     assert db_session.scalar(select(func.count()).select_from(Task).where(Task.project_id == project.id)) == 0
     assert db_session.scalar(select(func.count()).select_from(ManagementHistory).where(
         ManagementHistory.entity_type == "meeting", ManagementHistory.entity_id == meeting_id,
-    )) == 0
+    )) == 1
 
 
 def test_cross_project_contact_discovery_creates_resolvable_conflict(db_session, user_factory):

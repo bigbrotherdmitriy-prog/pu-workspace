@@ -9,19 +9,23 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
-from app.governance_engine import create_governance_items
 from app.models.audit_log import AuditLog
 from app.models.governance import Decision, Risk
 from app.models.job import BackgroundJob
-from app.models.management import ManagementHistory, Meeting, MeetingParticipant, Notification, NotificationPolicy, Obligation
+from app.models.management import (
+    ManagementHistory, Meeting, MeetingParticipant, MeetingProposal,
+    Notification, NotificationPolicy, Obligation,
+)
 from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.project_contact import ProjectContact
 from app.models.project_member import ProjectMember
 from app.models.user import User
-from app.organizer_engine.types import DriveFile
-from app.task_engine import create_tasks_from_files
 from app.notification_escalation import ALLOWED_CHANNELS, deadline_utc, outside_quiet_hours, require_iana_timezone
+from app.mvp3.meeting_proposals import (
+    MeetingProposalConflict, MeetingProposalDenied, bind_current_source,
+    confirm_proposal, serialize_proposal,
+)
 
 router = APIRouter(prefix="/management", tags=["management"])
 
@@ -61,6 +65,20 @@ class MeetingUpdate(BaseModel):
     expected_record_version: int = Field(default=1, ge=1)
     minutes: str = Field(min_length=3, max_length=50000)
     status: str = Field(default="completed", pattern="^(held|completed|cancelled)$")
+
+
+class MeetingSourceBindingCreate(BaseModel):
+    expected_record_version: int = Field(ge=1)
+    command_id: str
+    source_id: str
+    source_version_id: str
+    evidence_id: str
+    materialization_id: str
+
+
+class MeetingProposalConfirm(BaseModel):
+    expected_record_version: int = Field(ge=1)
+    command_id: str
 
 
 class NotificationPolicyUpdate(BaseModel):
@@ -134,18 +152,6 @@ def _locked_versioned(db: Session, model, entity_id: int, expected: int, label: 
         raise HTTPException(409, {"code": "record_version_conflict", "expected": expected,
                                   "actual": item.record_version})
     return item
-
-
-class _DeferredCommitSession:
-    """Let legacy extractors flush, while the endpoint owns the atomic commit."""
-    def __init__(self, session: Session):
-        self._session = session
-
-    def __getattr__(self, name):
-        return getattr(self._session, name)
-
-    def commit(self):
-        self._session.flush()
 
 
 def _utcnow() -> datetime:
@@ -429,23 +435,75 @@ def finish_meeting(meeting_id: int, payload: MeetingUpdate, db: Session = Depend
     item.minutes, item.status = payload.minutes.strip(), payload.status
     item.record_version += 1
     db.flush()
-    tasks = []; risks = []; decisions = []
-    if payload.status == "completed":
-        source = DriveFile(id=f"meeting:{item.id}", name=f"Протокол: {item.title}", mime_type="text/plain",
-                           parent_id="meetings", content_text=item.minutes)
-        deferred = _DeferredCommitSession(db)
-        tasks = create_tasks_from_files(deferred, item.project_id, None, [source], source_type="meeting")
-        risks, decisions = create_governance_items(deferred, item.project_id, [source], source_type="meeting")
     append_management_history(db, project_id=item.project_id, entity_type="meeting", entity_id=item.id,
                               record_version=item.record_version, action="minutes_recorded", actor_user_id=user.id,
                               old_values=old, new_values={"minutes": item.minutes, "status": item.status},
-                              evidence={"tasks": [x.id for x in tasks], "risks": [x.id for x in risks],
-                                        "decisions": [x.id for x in decisions]}, reason=item.minutes)
+                              evidence={"proposal_state": "source_binding_required"
+                                        if payload.status == "completed" else "not_applicable"},
+                              reason="Протокол сохранён; действия требуют точного источника и подтверждения")
     db.add(AuditLog(action="meeting_minutes_recorded", entity_type="meeting", entity_id=item.id,
-                    details=f"status={item.status}; tasks={len(tasks)}; risks={len(risks)}; decisions={len(decisions)}"))
+                    details=f"status={item.status};direct_actions=0;user={user.id}"))
     db.commit()
     return {"id": item.id, "status": item.status, "record_version": item.record_version,
-            "tasks": len(tasks), "risks": len(risks), "decisions": len(decisions)}
+            "tasks": 0, "risks": 0, "decisions": 0, "proposals": 0,
+            "proposal_state": "source_binding_required" if item.status == "completed" else "not_applicable"}
+
+
+def _proposal_error(exc: RuntimeError) -> HTTPException:
+    if isinstance(exc, MeetingProposalConflict):
+        return HTTPException(409, {"code": str(exc)})
+    return HTTPException(403, {"code": str(exc)})
+
+
+@router.post("/meetings/{meeting_id}/source-binding")
+def bind_meeting_source(meeting_id: int, payload: MeetingSourceBindingCreate,
+                        db: Session = Depends(get_db), user: User = Depends(require_user)):
+    meeting = db.get(Meeting, meeting_id)
+    if meeting is None:
+        raise HTTPException(404, "Meeting not found")
+    require_project_role(db, user, meeting.project_id, "manager")
+    try:
+        result = bind_current_source(
+            db, meeting_id=meeting_id, actor_user_id=user.id,
+            **payload.model_dump(),
+        )
+        db.commit()
+        return result
+    except (MeetingProposalConflict, MeetingProposalDenied) as exc:
+        db.rollback()
+        raise _proposal_error(exc) from None
+
+
+@router.get("/meetings/{meeting_id}/proposals")
+def meeting_proposals(meeting_id: int, db: Session = Depends(get_db),
+                      user: User = Depends(require_user)):
+    meeting = db.get(Meeting, meeting_id)
+    if meeting is None:
+        raise HTTPException(404, "Meeting not found")
+    require_project_role(db, user, meeting.project_id, "viewer")
+    rows = list(db.scalars(select(MeetingProposal).where(
+        MeetingProposal.meeting_id == meeting_id,
+    ).order_by(MeetingProposal.id)))
+    return {"proposals": [serialize_proposal(row) for row in rows], "count": len(rows)}
+
+
+@router.post("/meeting-proposals/{proposal_id}/confirm")
+def confirm_meeting_proposal(proposal_id: int, payload: MeetingProposalConfirm,
+                             db: Session = Depends(get_db), user: User = Depends(require_user)):
+    proposal = db.get(MeetingProposal, proposal_id)
+    if proposal is None:
+        raise HTTPException(404, "Meeting proposal not found")
+    require_project_role(db, user, proposal.project_id, "manager")
+    try:
+        result = confirm_proposal(
+            db, proposal_id=proposal_id, actor_user_id=user.id,
+            **payload.model_dump(),
+        )
+        db.commit()
+        return result
+    except (MeetingProposalConflict, MeetingProposalDenied) as exc:
+        db.rollback()
+        raise _proposal_error(exc) from None
 
 
 def _ensure_notification(db: Session, user_id: int, project_id: int, kind: str, title: str, body: str,
