@@ -61,6 +61,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "notifications.escalation.proposal":
         from app.notification_escalation import run_escalation_proposal
         return run_escalation_proposal(payload)
+    if kind == "mvp3.management_digest":
+        from app.management_digest import run_digest_job
+        return run_digest_job(payload)
     if kind == "ai_secretary.materialize_bulk":
         from app.api.ai_secretary import _materialize_bulk_job
         return _materialize_bulk_job(payload)

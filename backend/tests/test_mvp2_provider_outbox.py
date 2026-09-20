@@ -16,12 +16,13 @@ from app.mailbox_identity.service import MailboxIdentityService
 from app.models.audit_log import AuditLog
 from app.models.google_token import GoogleOAuthToken
 from app.models.job import BackgroundJob
+from app.models.management import Obligation
 from app.models.mailbox_identity import MailboxCredentialGeneration
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
-from app.models.task import Task
+from app.models.task import Task, TaskDueDateHistory, TaskHistory
 from app.models.telegram_chat import TelegramChatLink
 from app.models.v54_provider_action import (
     ProviderAction, ProviderActionApproval, ProviderDispatchOutbox,
@@ -141,7 +142,13 @@ class FakeGoogle:
     def patch(self, **kwargs):
         self.effects += 1
         external_id = kwargs.get("task") or kwargs.get("eventId")
-        return Request({"id": external_id, **kwargs["body"]})
+        body = kwargs["body"]
+        if self.kind == "google.tasks.upsert":
+            item = next(row for row in self.task_items if row["id"] == external_id)
+        else:
+            item = self.events_by_id[external_id]
+        item.update(body)
+        return Request({"id": external_id, **body})
 
     def get(self, **kwargs):
         if "userId" in kwargs:
@@ -410,6 +417,77 @@ def test_editing_published_task_requires_new_human_confirmation(world, monkeypat
     assert world.task.external_action_status == "proposed"
     assert world.task.record_version == before + 1
     assert world.db.scalar(select(BackgroundJob)) is None
+
+
+def test_due_date_correction_reapproves_and_updates_same_external_objects(world, monkeypatch):
+    """M3-02: a human correction updates the confirmed provider objects, never duplicates them."""
+    monkeypatch.setattr("app.api.tasks.require_project_role", lambda *args: "manager")
+    obligation = Obligation(
+        project_id=world.project.id, owner_user_id=world.user.id, task_id=world.task.id,
+        title=world.task.title, status="confirmed", due_date=world.task.due_date,
+        source_type=world.task.source_type, source_id=world.task.source_file_id,
+        source_name=world.task.source_file_name, source_excerpt=world.task.source_excerpt,
+        source_hash=world.task.source_excerpt_hash, confidence=world.task.confidence,
+    )
+    world.db.add(obligation); world.db.commit()
+    original_due_date = obligation.due_date
+    original_source_hash = world.task.source_excerpt_hash
+
+    services = {kind: FakeGoogle(kind) for kind in ("google.tasks.upsert", "google.calendar.upsert")}
+    runtime = build_product_runtime(
+        sessions=sessions(world), service_factory=lambda kind, *_args: services[kind],
+    )
+    first = approve_external(
+        world.task.id,
+        ExternalActionApproval(expected_record_version=1, publish_task=True, publish_calendar=True),
+        db=world.db, user=world.user,
+    )
+    for action in first["actions"]:
+        job = world.db.get(BackgroundJob, action["job_id"])
+        assert runtime.execute_job(job.payload, owner(world, job.id, f"initial-{job.id}"))["outcome"] == "APPLIED"
+
+    world.db.expire_all()
+    task = world.db.get(Task, world.task.id)
+    first_ids = (task.google_task_id, task.google_calendar_event_id)
+    corrected_due_date = date(2035, 1, 9)
+    updated = update_task(
+        task.id,
+        TaskUpdate(
+            expected_record_version=task.record_version,
+            due_date=corrected_due_date,
+            due_change_reason="Срок повторно согласован менеджером",
+        ),
+        db=world.db, user=world.user,
+    )
+    assert world.db.get(Task, task.id).external_action_status == "proposed"
+
+    repeated = approve_external(
+        task.id,
+        ExternalActionApproval(
+            expected_record_version=updated["record_version"], publish_task=True, publish_calendar=True,
+        ),
+        db=world.db, user=world.user,
+    )
+    for action in repeated["actions"]:
+        job = world.db.get(BackgroundJob, action["job_id"])
+        assert runtime.execute_job(job.payload, owner(world, job.id, f"revision-{job.id}"))["outcome"] == "APPLIED"
+
+    world.db.expire_all()
+    task = world.db.get(Task, task.id)
+    world.db.refresh(obligation)
+    assert (task.google_task_id, task.google_calendar_event_id) == first_ids
+    assert services["google.tasks.upsert"].effects == 2
+    assert services["google.calendar.upsert"].effects == 2
+    assert len(services["google.tasks.upsert"].task_items) == 1
+    assert len(services["google.calendar.upsert"].events_by_id) == 1
+    assert obligation.due_date == original_due_date
+    assert task.source_excerpt_hash == original_source_hash
+    due_history = world.db.scalars(select(TaskDueDateHistory).where(TaskDueDateHistory.task_id == task.id)).all()
+    task_history = world.db.scalars(select(TaskHistory).where(TaskHistory.task_id == task.id)).all()
+    assert [(row.old_due_date, row.new_due_date) for row in due_history] == [
+        (original_due_date, corrected_due_date),
+    ]
+    assert any("Срок:" in (row.details or "") for row in task_history)
 
 
 def test_replayed_confirmation_reuses_same_action_job(world):

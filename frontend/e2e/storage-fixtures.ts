@@ -34,6 +34,28 @@ export class StorageApi {
   evidenceReplies = new Map<string, Reply>();
   aiPolicies = new Map<number, Record<string, unknown>>();
   meetings: Record<string, unknown>[] = [];
+  attentionItems: Record<string, unknown>[] = [];
+  searchItems: Record<string, unknown>[] = [{
+    entity_type: "task", entity_id: 901, name: "Подготовить акт", date: "2026-09-25",
+    project_id: 2, contract_id: 41, counterparty: "ООО Фасад", status: "open",
+    navigation: { section: "tasks", project_id: 2, entity_type: "task", entity_id: 901 },
+  }];
+  savedSearchViews: Record<string, unknown>[] = [{
+    id: 601, project_id: 2, owner_user_id: 900, name: "Срочные задачи",
+    filters: { q: "акт", types: ["task"] }, record_version: 1,
+    created_at: "2026-09-20T10:00:00Z", updated_at: "2026-09-20T10:00:00Z",
+  }];
+  resources: Record<string, unknown>[] = [];
+  meetingProposals = new Map<number, Record<string, unknown>[]>();
+  meetingBindingReply?: Reply;
+  meetingSource = {
+    document_id: 731, display_name: "Протокол совещания.pdf", media_type: "application/pdf",
+    source_id: "11111111-1111-4111-8111-111111111111",
+    source_version_id: "22222222-2222-4222-8222-222222222222",
+    evidence_id: "33333333-3333-4333-8333-333333333333",
+    materialization_id: "44444444-4444-4444-8444-444444444444",
+    observed_at: "2026-09-20T10:00:00Z",
+  };
   attachmentImportReply: Reply = { body: {
     staging_id: "synthetic-gmail-staging", job_id: 72, status: "queued", already_queued: false,
   } };
@@ -82,6 +104,46 @@ export class StorageApi {
     }
     const path = url.pathname;
     const projectId = Number(path.match(/^\/projects\/(\d+)/)?.[1] || url.searchParams.get("project_id") || 2);
+    if (method === "GET" && path === "/project-search") {
+      const cursor = url.searchParams.get("cursor");
+      const rows = this.searchItems.filter(row => Number(row.project_id) === projectId);
+      return this.fulfill(route, { body: {
+        items: cursor ? rows.slice(1) : rows.slice(0, 1),
+        next_cursor: !cursor && rows.length > 1 ? "synthetic-page-2" : null,
+        limit: Number(url.searchParams.get("limit") || 50), scan_truncated: false,
+        scan_cap_per_type: 1000, external_actions_created: false,
+      } });
+    }
+    if (method === "GET" && path === "/saved-search-views") {
+      return this.fulfill(route, { body: { views: this.savedSearchViews.filter(row => Number(row.project_id) === projectId) } });
+    }
+    if (method === "POST" && path === "/saved-search-views") {
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const created = { ...payload, id: 602, owner_user_id: 900, record_version: 1,
+        created_at: "2026-09-20T10:00:00Z", updated_at: "2026-09-20T10:00:00Z" };
+      this.savedSearchViews.push(created);
+      return this.fulfill(route, { status: 201, body: created });
+    }
+    const savedViewMatch = path.match(/^\/saved-search-views\/(\d+)$/);
+    if (savedViewMatch && method === "PATCH") {
+      const id = Number(savedViewMatch[1]);
+      const row = this.savedSearchViews.find(item => Number(item.id) === id);
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (!row) return this.fulfill(route, { status: 404, body: { detail: "Saved view not found" } });
+      if (Number(payload.expected_record_version) !== Number(row.record_version)) return this.fulfill(route, { status: 409, body: { detail: "record_version_conflict" } });
+      Object.assign(row, { ...payload, record_version: Number(row.record_version) + 1 });
+      delete row.expected_record_version;
+      return this.fulfill(route, { body: row });
+    }
+    if (savedViewMatch && method === "DELETE") {
+      const id = Number(savedViewMatch[1]);
+      const row = this.savedSearchViews.find(item => Number(item.id) === id);
+      if (!row) return this.fulfill(route, { status: 404, body: { detail: "Saved view not found" } });
+      const expected = Number(url.searchParams.get("expected_record_version"));
+      if (expected !== Number(row.record_version)) return this.fulfill(route, { status: 409, body: { detail: "record_version_conflict" } });
+      this.savedSearchViews = this.savedSearchViews.filter(item => Number(item.id) !== id);
+      return this.fulfill(route, { body: { id, record_version: expected + 1, deleted: true } });
+    }
     const evidenceMatch = path.match(/^\/api\/v54\/evidence\/([^/]+)\/fragment$/);
     if (method === "GET" && evidenceMatch) {
       const evidenceId = decodeURIComponent(evidenceMatch[1]);
@@ -113,25 +175,121 @@ export class StorageApi {
       const start = new Date(String(payload.scheduled_at));
       const duration = Number(payload.duration_minutes);
       const userIds = (payload.participant_user_ids || []) as number[];
+      const resourceIds = (payload.resource_ids || []) as number[];
       const conflicts = this.meetings.filter(row => {
         const shared = ((row.participant_user_ids || []) as number[]).some(id => userIds.includes(id));
-        if (!shared || !row.scheduled_at || !row.duration_minutes || row.status === "cancelled") return false;
+        const sharedResource = ((row.resource_ids || []) as number[]).some(id => resourceIds.includes(id));
+        if ((!shared && !sharedResource) || !row.scheduled_at || !row.duration_minutes || row.status === "cancelled") return false;
         const otherStart = new Date(String(row.scheduled_at));
         const otherEnd = new Date(otherStart.getTime() + Number(row.duration_minutes) * 60_000);
         const end = new Date(start.getTime() + duration * 60_000);
         return start < otherEnd && otherStart < end;
       });
       const participants = userIds.map(id => ({ kind: "user", id, name: "Synthetic Operator", email: "operator@example.invalid" }));
+      const resourceRefs = this.resources.filter(row => resourceIds.includes(Number(row.id)));
       const created = {
         ...payload, id: this.meetings.length + 1, record_version: 1, status: "planned",
+        can_edit: true, can_manage: true,
         participant_refs: participants, participant_contact_ids: payload.participant_contact_ids || [],
+        resource_ids: resourceIds, resource_refs: resourceRefs,
         has_conflicts: conflicts.length > 0, conflict_count: conflicts.length,
         conflicts: conflicts.map(row => ({ meeting_id: row.id, project_id: row.project_id,
           title: row.title, overlap_from: payload.scheduled_at, overlap_to: row.scheduled_at,
-          participants, redacted: false })),
+          participants, resources: this.resources.filter(resource =>
+            resourceIds.includes(Number(resource.id)) && ((row.resource_ids || []) as number[]).includes(Number(resource.id))),
+          redacted: false })),
+        has_resource_warnings: false, resource_warnings: [],
       };
       this.meetings.unshift(created);
       return this.fulfill(route, { body: created });
+    }
+    if (method === "POST" && path === "/management/resources") {
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const created = {
+        ...payload, id: this.resources.length + 501, record_version: 1,
+        organization_id: 901, managing_project_id: Number(payload.project_id), active: true,
+      };
+      this.resources.unshift(created);
+      return this.fulfill(route, { body: created });
+    }
+    const resourceMatch = path.match(/^\/management\/resources\/(\d+)$/);
+    if (method === "PATCH" && resourceMatch) {
+      const id = Number(resourceMatch[1]);
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const resource = this.resources.find(row => Number(row.id) === id);
+      if (!resource) return this.fulfill(route, { status: 404, body: { detail: "Resource not found" } });
+      Object.assign(resource, payload, { record_version: Number(resource.record_version) + 1 });
+      return this.fulfill(route, { body: resource });
+    }
+    const meetingMatch = path.match(/^\/management\/meetings\/(\d+)$/);
+    if (method === "PATCH" && meetingMatch) {
+      const id = Number(meetingMatch[1]);
+      const row = this.meetings.find((item) => item.id === id);
+      if (!row) return this.fulfill(route, { status: 404, body: { detail: "Meeting not found" } });
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (payload.expected_record_version !== row.record_version) {
+        return this.fulfill(route, { status: 409, body: { detail: "record_version_conflict" } });
+      }
+      row.minutes = payload.minutes; row.status = payload.status;
+      row.record_version = Number(row.record_version) + 1;
+      return this.fulfill(route, { body: {
+        id, status: row.status, record_version: row.record_version,
+        tasks: 0, risks: 0, decisions: 0, proposals: 0,
+        proposal_state: "source_binding_required",
+      } });
+    }
+    const sourceCandidateMatch = path.match(/^\/management\/meetings\/(\d+)\/source-candidates$/);
+    if (method === "GET" && sourceCandidateMatch) {
+      return this.fulfill(route, { body: { candidates: [this.meetingSource], count: 1 } });
+    }
+    const proposalListMatch = path.match(/^\/management\/meetings\/(\d+)\/proposals$/);
+    if (method === "GET" && proposalListMatch) {
+      const id = Number(proposalListMatch[1]);
+      const proposals = this.meetingProposals.get(id) || [];
+      return this.fulfill(route, { body: {
+        proposals, count: proposals.length,
+        source_binding: proposals.length ? this.meetingSource : null,
+      } });
+    }
+    const sourceBindingMatch = path.match(/^\/management\/meetings\/(\d+)\/source-binding$/);
+    if (method === "POST" && sourceBindingMatch) {
+      if (this.meetingBindingReply) {
+        const reply = this.meetingBindingReply; this.meetingBindingReply = undefined;
+        return this.fulfill(route, reply);
+      }
+      const id = Number(sourceBindingMatch[1]);
+      const row = this.meetings.find((item) => item.id === id);
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (!row || payload.expected_record_version !== row.record_version) {
+        return this.fulfill(route, { status: 409, body: { detail: { code: "record_version_conflict" } } });
+      }
+      row.record_version = Number(row.record_version) + 1;
+      const proposals = [{
+        id: 501, record_version: 1, project_id: row.project_id, meeting_id: id,
+        binding_id: "binding-501", proposal_type: "task",
+        payload: { title: "Подготовить акт", excerpt: "Подготовить акт до 25.09.2026",
+          due_date_evidence_quote: "до 25.09.2026", confidence: 0.94 },
+        status: "proposed", target_entity_type: null, target_entity_id: null,
+      }];
+      this.meetingProposals.set(id, proposals);
+      return this.fulfill(route, { body: {
+        meeting_id: id, meeting_record_version: row.record_version,
+        binding_id: "binding-501", ...this.meetingSource,
+        proposal_count: proposals.length, proposals, external_actions_created: false,
+      } });
+    }
+    const proposalConfirmMatch = path.match(/^\/management\/meeting-proposals\/(\d+)\/confirm$/);
+    if (method === "POST" && proposalConfirmMatch) {
+      const proposalId = Number(proposalConfirmMatch[1]);
+      const proposal = [...this.meetingProposals.values()].flat().find((item) => item.id === proposalId);
+      if (!proposal) return this.fulfill(route, { status: 404, body: { detail: "Meeting proposal not found" } });
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (payload.expected_record_version !== proposal.record_version) {
+        return this.fulfill(route, { status: 409, body: { detail: { code: "record_version_conflict" } } });
+      }
+      proposal.status = "confirmed"; proposal.record_version = 2;
+      proposal.target_entity_type = "task"; proposal.target_entity_id = 901;
+      return this.fulfill(route, { body: proposal });
     }
     const localUploadJobMatch = path.match(/^\/local-upload\/projects\/(\d+)\/jobs\/(\d+)$/);
     if (method === "GET" && localUploadJobMatch) {
@@ -215,6 +373,10 @@ export class StorageApi {
         cash_gap: 0, cash_gap_date: null, delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 0, unlinked_invoices: 0,
       } },
       "/management/obligations": { obligations: [] }, "/management/meetings": { meetings: this.meetings }, "/management/notifications": { notifications: [] },
+      "/management/notification-policy": { record_version: 1, timezone: "Europe/Moscow", deadline_local_time: "09:00:00", quiet_start: "22:00:00", quiet_end: "07:00:00", escalation_delays: [0, 60], channels: ["in_app"], enabled: true, digest_enabled: false, digest_cadence: "daily", digest_local_time: "09:00:00" },
+      "/management/digests": { digests: [], next_cursor: null, external_actions_created: false },
+      "/management/attention": { items: this.attentionItems, count: this.attentionItems.length, next_cursor: null },
+      "/management/resources": { resources: this.resources },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },
       "/integrations/project": { project_id: projectId, adapters: [

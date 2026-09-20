@@ -5,7 +5,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.api import management as management_api
-from app.api.governance import DecisionUpdate, RiskUpdate, update_decision, update_risk
+from app.api.governance import (
+    DecisionUpdate, RiskUpdate, decisions, risks, update_decision, update_risk,
+)
 from app.api.management import (
     MeetingUpdate,
     NotificationRead,
@@ -16,8 +18,10 @@ from app.api.management import (
 )
 from app.api.project_contacts import (
     ContactConflictResolve,
+    ContactResolutionCommand,
     ContactUpdate,
     discover_contact_from_message,
+    resolve_contact,
     resolve_contact_conflict,
     update_contact,
 )
@@ -122,7 +126,14 @@ def test_project_contact_cas_and_history(db_session, user_factory):
                              created_by_user_id=user.id, name="Client", email="client@example.test",
                              normalized_email="client@example.test", confirmed=False)
     db_session.add(contact); db_session.commit()
-    result = update_contact(contact.id, ContactUpdate(confirmed=True, expected_record_version=1), db_session, user)
+    result = resolve_contact(
+        contact.id,
+        ContactResolutionCommand(
+            decision_key="contact-test-confirm-1", expected_record_version=1,
+            decision="confirm", reason_code="human_review",
+        ),
+        db_session, user,
+    )
     assert result["record_version"] == 2
     with pytest.raises(HTTPException) as error:
         update_contact(contact.id, ContactUpdate(active=False, expected_record_version=1), db_session, user)
@@ -132,36 +143,25 @@ def test_project_contact_cas_and_history(db_session, user_factory):
     )) == 1
 
 
-def test_meeting_completion_and_derivation_rollback_together(db_session, user_factory, monkeypatch):
+def test_meeting_completion_never_derives_actions_before_source_binding(db_session, user_factory):
     _, user, project, _ = world(db_session, user_factory)
     meeting = Meeting(project_id=project.id, created_by_user_id=user.id, title="Atomic meeting")
     db_session.add(meeting); db_session.commit(); meeting_id = meeting.id
 
-    def create_task_then_legacy_commit(db, project_id, *args, **kwargs):
-        task = Task(project_id=project_id, assignee_user_id=user.id, created_by_user_id=user.id,
-                    title="Would be rolled back", status="assigned", priority="normal", source_type="meeting",
-                    source_file_id="atomic-source", source_file_name="meeting.txt", source_excerpt="evidence",
-                    source_excerpt_hash="8" * 64, confidence=1.0)
-        db.add(task); db.flush(); db.commit()
-        return [task]
-
-    def fail(*args, **kwargs):
-        raise RuntimeError("synthetic extraction failure")
-
-    monkeypatch.setattr(management_api, "create_tasks_from_files", create_task_then_legacy_commit)
-    monkeypatch.setattr(management_api, "create_governance_items", fail)
-    with pytest.raises(RuntimeError, match="synthetic extraction failure"):
-        finish_meeting(meeting_id, MeetingUpdate(minutes="Нужно выполнить обязательство до пятницы.",
-                                                  status="completed", expected_record_version=1),
-                       db_session, user)
-    db_session.rollback()
+    result = finish_meeting(
+        meeting_id,
+        MeetingUpdate(minutes="Нужно выполнить обязательство до пятницы.",
+                      status="completed", expected_record_version=1),
+        db_session, user,
+    )
     persisted = db_session.get(Meeting, meeting_id)
-    assert persisted.status == "planned"
-    assert persisted.record_version == 1
+    assert result["proposal_state"] == "source_binding_required"
+    assert persisted.status == "completed"
+    assert persisted.record_version == 2
     assert db_session.scalar(select(func.count()).select_from(Task).where(Task.project_id == project.id)) == 0
     assert db_session.scalar(select(func.count()).select_from(ManagementHistory).where(
         ManagementHistory.entity_type == "meeting", ManagementHistory.entity_id == meeting_id,
-    )) == 0
+    )) == 1
 
 
 def test_cross_project_contact_discovery_creates_resolvable_conflict(db_session, user_factory):
@@ -175,7 +175,7 @@ def test_cross_project_contact_discovery_creates_resolvable_conflict(db_session,
     assert conflict is not None
     result = resolve_contact_conflict(
         conflict.id,
-        ContactConflictResolve(expected_record_version=1, expected_contact_record_version=1,
+        ContactConflictResolve(decision_key="conflict-test-move-1", expected_record_version=1, expected_contact_record_version=1,
                                resolution="move_to_candidate", reason="Подтверждено владельцами проектов"),
         db_session, user,
     )
@@ -197,7 +197,7 @@ def test_contact_conflict_cannot_be_resolved_without_access_to_both_projects(db_
     with pytest.raises(HTTPException) as error:
         resolve_contact_conflict(
             conflict.id,
-            ContactConflictResolve(resolution="keep_current", reason="Проверка прав"),
+            ContactConflictResolve(decision_key="conflict-test-access-1", resolution="keep_current", reason="Проверка прав"),
             db_session, user,
         )
     assert error.value.status_code == 403
@@ -221,7 +221,60 @@ def test_contact_conflict_rejects_cross_tenant_candidate_binding(db_session, use
     with pytest.raises(HTTPException) as error:
         resolve_contact_conflict(
             conflict.id,
-            ContactConflictResolve(resolution="move_to_candidate", reason="Попытка чужой привязки"),
+            ContactConflictResolve(decision_key="conflict-test-tenant-1", resolution="move_to_candidate", reason="Попытка чужой привязки"),
             db_session, user,
         )
     assert error.value.status_code == 409
+
+
+def test_governance_relations_are_project_scoped_exposed_and_audited(db_session, user_factory):
+    _, user, project, _ = world(db_session, user_factory)
+    task, obligation, _, risk, decision = sources(user.id, project.id)
+    db_session.add_all([task, obligation, risk, decision]); db_session.commit()
+
+    risk_result = update_risk(risk.id, RiskUpdate(
+        expected_record_version=1, status="confirmed",
+        obligation_id=obligation.id, task_id=task.id,
+    ), db_session, user)
+    decision_result = update_decision(decision.id, DecisionUpdate(
+        expected_record_version=1, status="confirmed",
+        obligation_id=obligation.id, task_id=task.id, risk_id=risk.id,
+    ), db_session, user)
+
+    assert risk_result["obligation_id"] == obligation.id
+    assert risk_result["task_id"] == task.id
+    assert decision_result["obligation_id"] == obligation.id
+    assert decision_result["task_id"] == task.id
+    assert decision_result["risk_id"] == risk.id
+    risk_row = risks(project.id, db_session, user, None, None, 100)["risks"][0]
+    decision_row = decisions(project.id, db_session, user, None, None, 100)["decisions"][0]
+    assert (risk_row["obligation_id"], risk_row["task_id"]) == (obligation.id, task.id)
+    assert (decision_row["obligation_id"], decision_row["task_id"], decision_row["risk_id"]) == (
+        obligation.id, task.id, risk.id,
+    )
+    history = db_session.scalars(select(ManagementHistory).where(
+        ManagementHistory.entity_type.in_(["risk", "decision"]),
+    ).order_by(ManagementHistory.id)).all()
+    assert history[0].new_values["obligation_id"] == obligation.id
+    assert history[1].new_values["risk_id"] == risk.id
+
+
+def test_governance_relations_reject_cross_project_without_partial_mutation(db_session, user_factory):
+    _, user, first, second = world(db_session, user_factory)
+    first_task, _, _, first_risk, _ = sources(user.id, first.id)
+    _, second_obligation, _, _, _ = sources(user.id, second.id)
+    db_session.add_all([first_task, first_risk, second_obligation]); db_session.commit()
+
+    with pytest.raises(HTTPException) as error:
+        update_risk(first_risk.id, RiskUpdate(
+            expected_record_version=1, status="confirmed",
+            obligation_id=second_obligation.id, task_id=first_task.id,
+        ), db_session, user)
+    assert error.value.status_code == 422
+    db_session.refresh(first_risk)
+    assert first_risk.record_version == 1
+    assert first_risk.status == "needs_confirmation"
+    assert first_risk.obligation_id is None and first_risk.task_id is None
+    assert db_session.scalar(select(func.count()).select_from(ManagementHistory).where(
+        ManagementHistory.entity_type == "risk", ManagementHistory.entity_id == first_risk.id,
+    )) == 0

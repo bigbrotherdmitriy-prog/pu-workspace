@@ -10,6 +10,7 @@ import { GprWorkspace } from "./modules/finance/GprWorkspace";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
+import { AttentionPanel } from "./modules/attention/AttentionPanel";
 import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState } from "./modules/ai-secretary/messageWorkflow";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
@@ -19,7 +20,7 @@ import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
 import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
 import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
-import { NotificationsModule, type NotificationItem } from "./modules/notifications/NotificationsModule";
+import { NotificationsModule, type ManagementDigest, type NotificationItem, type NotificationPolicy } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
@@ -35,8 +36,15 @@ import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./mod
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
 import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
-import { MeetingsModule, type MeetingRow } from "./modules/meetings/MeetingsModule";
-import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
+import {
+  MeetingsModule,
+  type BookableResourceRow,
+  type MeetingAuthorityState,
+  type MeetingProposal,
+  type MeetingRow,
+  type MeetingSourceCandidate,
+} from "./modules/meetings/MeetingsModule";
+import { ProjectSearchWorkspace, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
@@ -184,6 +192,7 @@ type CurrentUser = {
 };
 type ContractRow = {
   id: number;
+  record_version: number;
   number: string;
   title: string;
   counterparty?: string;
@@ -198,6 +207,7 @@ type ContractRow = {
   source_document_id?: number;
   notes?: string;
   linked_documents?: SchemeDocument[];
+  version_history?: { id: number; sequence: number; event: string; changed_fields: string[]; occurred_at: string }[];
   analysis?: {
     source_ready: boolean;
     tasks: number;
@@ -465,12 +475,22 @@ export function App() {
     [error, setError] = useState("");
   const [obligations, setObligations] = useState<ObligationRow[]>([]),
     [meetings, setMeetings] = useState<MeetingRow[]>([]),
+    [bookableResources, setBookableResources] = useState<BookableResourceRow[]>([]),
+    [meetingAuthority, setMeetingAuthority] = useState<Record<number, MeetingAuthorityState>>({}),
+    [busyMeetingAuthorityId, setBusyMeetingAuthorityId] = useState(0),
     [notifications, setNotifications] = useState<NotificationRow[]>([]),
+    [managementDigests, setManagementDigests] = useState<ManagementDigest[]>([]),
+    [notificationPolicy, setNotificationPolicy] = useState<NotificationPolicy | null>(null),
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingDuration, setNewMeetingDuration] = useState("60"),
     [newMeetingParticipantUserIds, setNewMeetingParticipantUserIds] = useState<number[]>([]),
     [newMeetingParticipantContactIds, setNewMeetingParticipantContactIds] = useState<number[]>([]),
+    [newMeetingResourceIds, setNewMeetingResourceIds] = useState<number[]>([]),
+    [newResourceName, setNewResourceName] = useState(""),
+    [newResourceKind, setNewResourceKind] = useState<BookableResourceRow["kind"]>("room"),
+    [newResourceTimezone, setNewResourceTimezone] = useState("Europe/Moscow"),
+    [newResourceCapacity, setNewResourceCapacity] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [contractDropStatus, setContractDropStatus] = useState("");
@@ -498,12 +518,16 @@ export function App() {
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
+  const meetingAuthorityCommands = useRef(new Map<string, string>());
 
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
       ++documentRequestRef.current;
+      setQuery("");
       setDocumentRows([]);
       setSelectedDocument(null);
+      setMeetingAuthority({});
+      meetingAuthorityCommands.current.clear();
     }
     persistProjectSelection(id);
   }
@@ -833,9 +857,11 @@ export function App() {
   }
   async function linkContractDocument(contractId: number, documentId: number) {
     try {
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
-        body: JSON.stringify({ source_document_id: documentId || null }),
+        body: JSON.stringify({ expected_record_version: expected, source_document_id: documentId || null }),
       });
       setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
       await load();
@@ -847,9 +873,11 @@ export function App() {
   }
   async function linkContractParent(contractId: number, contractKind: string, parentContractId: number) {
     try {
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
-        body: JSON.stringify({ contract_kind: contractKind, parent_contract_id: parentContractId || null }),
+        body: JSON.stringify({ expected_record_version: expected, contract_kind: contractKind, parent_contract_id: parentContractId || null }),
       });
       setNotice("Вышестоящий договор сохранён — дерево перестроено");
       setContractStructureDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
@@ -913,7 +941,9 @@ export function App() {
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
       const documentIds = completed.documents;
       if (!documentIds.length) throw new Error("Текст приложений не извлечён");
-      await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ document_ids: documentIds }) });
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
+      await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds }) });
       const checked = await api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" });
       const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
       setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
@@ -933,9 +963,11 @@ export function App() {
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
       const documentIds = completed.documents;
       if (!documentIds.length) throw new Error(`Не удалось извлечь таблицу ${label}`);
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}/documents`, {
         method: "POST",
-        body: JSON.stringify({ document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
+        body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
       });
       await prepareDroppedFinanceDocument(documentIds[0], supported[0].name, kind, contractId);
       setActive("Исполнение и финансы");
@@ -957,6 +989,9 @@ export function App() {
         : `/projects/${projectId}/contracts`, {
         method: item.already_linked && item.linked_contract_id ? "PATCH" : "POST",
         body: JSON.stringify({
+          ...(item.already_linked && item.linked_contract_id ? {
+            expected_record_version: contracts.find((contract) => contract.id === item.linked_contract_id)?.record_version,
+          } : {}),
           number: item.number.trim(), title: item.title.trim(), counterparty: item.counterparty?.trim() || undefined,
           contract_kind: item.contract_kind, parent_contract_id: parentId,
           ...(!item.already_linked ? { source_document_id: item.document_id } : {}),
@@ -1021,9 +1056,12 @@ export function App() {
     if (!draft?.number.trim() || !draft.title.trim()) return;
     try {
       setError("");
+      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
         body: JSON.stringify({
+          expected_record_version: expected,
           number: draft.number.trim(), title: draft.title.trim(), counterparty: draft.counterparty.trim() || null,
           amount: draft.amount ? Number(draft.amount) : null,
           advance_amount: draft.advanceAmount ? Number(draft.advanceAmount) : null,
@@ -1055,7 +1093,7 @@ export function App() {
     try {
       setError("");
       await api(`/projects/${projectId}/contracts/${item.id}`, {
-        method: "DELETE", body: JSON.stringify({ confirmation }),
+        method: "DELETE", body: JSON.stringify({ confirmation, expected_record_version: item.record_version }),
       });
       setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
       await load();
@@ -1069,7 +1107,7 @@ export function App() {
     try {
       setError("");
       await api(`/projects/${projectId}/contracts/${item.id}`, {
-        method: "PATCH", body: JSON.stringify({ status: "archived" }),
+        method: "PATCH", body: JSON.stringify({ expected_record_version: item.record_version, status: "archived" }),
       });
       setNotice(`Договор «${item.number}» архивирован. Все документы, ГПР, ДДС и другие связи сохранены.`);
       await load();
@@ -2014,17 +2052,80 @@ export function App() {
     }, 300);
     return () => window.clearTimeout(timer);
   }, [ready, projectId, active, query]);
+  function authorityCommand(key: string) {
+    const current = meetingAuthorityCommands.current.get(key);
+    if (current) return current;
+    const created = globalThis.crypto.randomUUID();
+    meetingAuthorityCommands.current.set(key, created);
+    return created;
+  }
+  function meetingAuthorityError(error: unknown) {
+    const code = error instanceof ApiError ? error.code : undefined;
+    const messages: Record<string, string> = {
+      record_version_conflict: "Протокол изменился. Обновите карточку и выберите источник заново.",
+      command_conflict: "Команда уже использована для другой версии. Обновите карточку перед повтором.",
+      stale_meeting_source: "Протокол или его источник устарел. Выполните новую привязку точной версии.",
+      stale_source: "Источник больше не является текущим. Выберите актуальную версию.",
+      resource_unavailable: "Источник недоступен или больше не разрешён для этого проекта.",
+      already_confirmed: "Предложение уже подтверждено другой командой. Обновите карточку.",
+    };
+    return (code && messages[code]) || (error as Error).message;
+  }
+  async function loadMeetingAuthority(item: MeetingRow) {
+    setMeetingAuthority((current) => ({
+      ...current,
+      [item.id]: {
+        ...(current[item.id] || { candidates: [], proposals: [], loaded: false }),
+        loading: true,
+        error: undefined,
+      },
+    }));
+    try {
+      const proposalData = await api(`/management/meetings/${item.id}/proposals`);
+      const candidateData = item.can_manage && !proposalData.proposals.length
+        ? await api(`/management/meetings/${item.id}/source-candidates?limit=100`)
+        : { candidates: [] };
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          loaded: true,
+          loading: false,
+          candidates: candidateData.candidates || [],
+          proposals: proposalData.proposals || [],
+          source_binding: proposalData.source_binding || undefined,
+        },
+      }));
+    } catch (error) {
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { candidates: [], proposals: [], loaded: false }),
+          loading: false,
+          error: meetingAuthorityError(error),
+        },
+      }));
+    }
+  }
   async function loadManagement() {
     if (!projectId) return;
     try {
-      const [o, m, n] = await Promise.all([
+      const [o, m, n, r, p, d] = await Promise.all([
         api(`/management/obligations?project_id=${projectId}&limit=200`),
         api(`/management/meetings?project_id=${projectId}&limit=200`),
         api(`/management/notifications?project_id=${projectId}&limit=200`),
+        api(`/management/resources?project_id=${projectId}&include_inactive=true&limit=500`),
+        api(`/management/notification-policy?project_id=${projectId}`).catch(() => null),
+        api(`/management/digests?project_id=${projectId}&limit=30`).catch(() => ({ digests: [] })),
       ]);
       setObligations(o.obligations);
       setMeetings(m.meetings);
       setNotifications(n.notifications);
+      setBookableResources(r.resources);
+      await Promise.all((m.meetings as MeetingRow[])
+        .filter((item) => item.status === "completed")
+        .map((item) => loadMeetingAuthority(item)));
+      setNotificationPolicy(p);
+      setManagementDigests(d.digests || []);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2077,6 +2178,7 @@ export function App() {
           participants: selectedNames.join(", ") || null,
           participant_user_ids: newMeetingParticipantUserIds,
           participant_contact_ids: newMeetingParticipantContactIds,
+          resource_ids: newMeetingResourceIds,
           agenda: newMeetingAgenda.trim() || null,
         }),
       });
@@ -2085,10 +2187,45 @@ export function App() {
       setNewMeetingDuration("60");
       setNewMeetingParticipantUserIds([]);
       setNewMeetingParticipantContactIds([]);
+      setNewMeetingResourceIds([]);
       setNewMeetingAgenda("");
       setNotice(created.has_conflicts
-        ? `Совещание добавлено. Обнаружено конфликтов: ${created.conflict_count}. Проверьте время с участниками.`
+        ? `Совещание добавлено. Обнаружено конфликтов: ${created.conflict_count}. Проверьте время и занятость.`
         : "Совещание добавлено");
+      await loadManagement();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function createBookableResource() {
+    if (!newResourceName.trim()) return;
+    try {
+      await api("/management/resources", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          kind: newResourceKind,
+          name: newResourceName.trim(),
+          timezone: newResourceTimezone.trim(),
+          capacity: newResourceCapacity ? Number(newResourceCapacity) : null,
+        }),
+      });
+      setNewResourceName("");
+      setNewResourceCapacity("");
+      setNotice("Ресурс добавлен в каталог организации");
+      await loadManagement();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function deactivateBookableResource(resource: BookableResourceRow) {
+    try {
+      await api(`/management/resources/${resource.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expected_record_version: resource.record_version, active: false }),
+      });
+      setNewMeetingResourceIds((current) => current.filter((id) => id !== resource.id));
+      setNotice("Ресурс отключён; история бронирований сохранена");
       await loadManagement();
     } catch (e) {
       setError((e as Error).message);
@@ -2108,12 +2245,93 @@ export function App() {
           expected_record_version: item.record_version ?? 1,
         }),
       });
-      setNotice(
-        `Протокол обработан: задач ${result.tasks}, рисков ${result.risks}, решений ${result.decisions}`,
-      );
+      setNotice(result.proposal_state === "source_binding_required"
+        ? "Протокол сохранён. Действия не созданы: выберите точный источник и подтвердите каждое предложение."
+        : `Протокол обработан: задач ${result.tasks}, рисков ${result.risks}, решений ${result.decisions}`);
       await Promise.all([load(), loadManagement()]);
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+  async function bindMeetingSource(item: MeetingRow, source: MeetingSourceCandidate) {
+    const commandKey = `bind:${item.id}:${item.record_version}:${source.materialization_id}`;
+    setBusyMeetingAuthorityId(item.id);
+    try {
+      const result = await api(`/management/meetings/${item.id}/source-binding`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_record_version: item.record_version,
+          command_id: authorityCommand(commandKey),
+          source_id: source.source_id,
+          source_version_id: source.source_version_id,
+          evidence_id: source.evidence_id,
+          materialization_id: source.materialization_id,
+        }),
+      });
+      meetingAuthorityCommands.current.delete(commandKey);
+      setMeetings((rows) => rows.map((row) => row.id === item.id
+        ? { ...row, record_version: result.meeting_record_version }
+        : row));
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          loaded: true,
+          loading: false,
+          candidates: [],
+          proposals: result.proposals || [],
+          source_binding: {
+            ...source,
+            display_name: source.display_name,
+          },
+        },
+      }));
+      setNotice(`Источник подтверждён. Подготовлено предложений: ${result.proposal_count}. Действия ещё не применены.`);
+    } catch (error) {
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { loaded: false, candidates: [], proposals: [] }),
+          loading: false,
+          error: meetingAuthorityError(error),
+        },
+      }));
+    } finally {
+      setBusyMeetingAuthorityId(0);
+    }
+  }
+  async function confirmMeetingProposal(item: MeetingRow, proposal: MeetingProposal) {
+    const commandKey = `confirm:${proposal.id}:${proposal.record_version}`;
+    setBusyMeetingAuthorityId(item.id);
+    try {
+      const confirmed = await api(`/management/meeting-proposals/${proposal.id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_record_version: proposal.record_version,
+          command_id: authorityCommand(commandKey),
+        }),
+      });
+      meetingAuthorityCommands.current.delete(commandKey);
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { loaded: true, loading: false, candidates: [] }),
+          error: undefined,
+          proposals: (current[item.id]?.proposals || []).map((row) => row.id === proposal.id ? confirmed : row),
+        },
+      }));
+      setNotice("Предложение подтверждено и применено ровно один раз.");
+      await load();
+    } catch (error) {
+      setMeetingAuthority((current) => ({
+        ...current,
+        [item.id]: {
+          ...(current[item.id] || { loaded: false, candidates: [], proposals: [] }),
+          loading: false,
+          error: meetingAuthorityError(error),
+        },
+      }));
+    } finally {
+      setBusyMeetingAuthorityId(0);
     }
   }
   async function refreshNotifications() {
@@ -2142,6 +2360,31 @@ export function App() {
             : row,
         ),
       );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function saveNotificationPolicy() {
+    if (!notificationPolicy) return;
+    try {
+      const updated = await api(`/management/notification-policy?project_id=${projectId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          expected_record_version: notificationPolicy.record_version,
+          timezone: notificationPolicy.timezone,
+          deadline_local_time: notificationPolicy.deadline_local_time,
+          quiet_start: notificationPolicy.quiet_start,
+          quiet_end: notificationPolicy.quiet_end,
+          escalation_delays: notificationPolicy.escalation_delays,
+          channels: notificationPolicy.channels,
+          enabled: notificationPolicy.enabled,
+          digest_enabled: notificationPolicy.digest_enabled,
+          digest_cadence: notificationPolicy.digest_cadence,
+          digest_local_time: notificationPolicy.digest_local_time,
+        }),
+      });
+      setNotificationPolicy(updated);
+      setNotice("Настройки управленческой сводки сохранены");
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2209,32 +2452,30 @@ export function App() {
     if (inboxFilter === "filtered") return item.status === "filtered";
     return true;
   });
-  const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
-  const projectSearchHits: ProjectSearchHit[] = normalizedQuery.length < 2 ? [] : [
-    ...documentRows.filter((item) => `${item.name} ${item.summary || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "document" as const, title: item.name, detail: item.summary || item.status })),
-    ...contracts.filter((item) => `${item.number} ${item.title} ${item.counterparty || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "contract" as const, title: `${item.number} — ${item.title}`, detail: item.counterparty || item.status })),
-    ...tasks.filter((item) => `${item.title} ${item.source_excerpt || ""} ${item.source_file_name}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "task" as const, title: item.title, detail: `${item.status}${item.due_date ? ` · до ${item.due_date}` : ""}` })),
-    ...inbox.filter((item) => `${item.source_name} ${item.source_sender || ""} ${item.summary}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "message" as const, title: item.source_name, detail: item.source_sender || item.summary })),
-  ].slice(0, 30);
   function openProjectSearchHit(hit: ProjectSearchHit) {
     setQuery("");
+    const sections: Record<ProjectSearchHit["kind"], string> = {
+      project: "Проекты", document: "Документы", contract: "Договоры", task: "Задачи",
+      obligation: "Обязательства", risk: "Риски и решения", decision: "Риски и решения", message: "Письма",
+    };
+    const navigationSections: Record<string, string> = {
+      projects: "Проекты", documents: "Документы", contracts: "Договоры", tasks: "Задачи",
+      obligations: "Обязательства", governance: "Риски и решения", messages: "Письма",
+    };
+    const section = navigationSections[hit.navigation.section] || sections[hit.kind];
+    const target = new URL(window.location.href);
+    target.searchParams.set("search_section", hit.navigation.section || section);
+    target.searchParams.set("search_entity_type", hit.kind);
+    target.searchParams.set("search_entity_id", String(hit.id));
+    window.history.replaceState({}, "", `${target.pathname}${target.search}${target.hash}`);
     if (hit.kind === "document") {
-      const document = documentRows.find((item) => item.id === hit.id);
       setActive("Документы");
-      if (document) void openDocument(document);
-    } else if (hit.kind === "contract") {
-      setActive("Договоры");
-    } else if (hit.kind === "task") {
-      setActive("Задачи");
-    } else {
+      void openDocument({ id: hit.id } as DocumentRow);
+    } else if (hit.kind === "message") {
       setActive("Письма");
       setMailView("inbox");
       setExpandedInboxId(hit.id);
-    }
+    } else setActive(section);
   }
   return (
     <div className="shell">
@@ -2333,16 +2574,7 @@ export function App() {
                 <span>Установить</span>
               </button>
             )}
-            <div className="search">
-              <Search />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Поиск по проекту"
-              />
-              <kbd>Ctrl K</kbd>
-              <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
-            </div>
+            <ProjectSearchWorkspace projectId={projectId} query={query} onQueryChange={setQuery} onOpen={openProjectSearchHit} />
             <label className="project-switcher">
               <FolderKanban />
               <span>Проект</span>
@@ -2959,6 +3191,7 @@ export function App() {
       )}
       {active === "Совещания" && (
         <MeetingsModule
+          projectId={projectId}
           collapsed={collapsed}
           meetings={meetings}
           title={newMeetingTitle}
@@ -2969,22 +3202,50 @@ export function App() {
           participantContactIds={newMeetingParticipantContactIds}
           members={members}
           contacts={projectContacts}
+          resources={bookableResources}
+          resourceIds={newMeetingResourceIds}
+          canManageResources={Boolean(currentUser?.is_admin || members.some((member) =>
+            member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+          ))}
+          resourceName={newResourceName}
+          resourceKind={newResourceKind}
+          resourceTimezone={newResourceTimezone}
+          resourceCapacity={newResourceCapacity}
           onTitleChange={setNewMeetingTitle}
           onDateChange={setNewMeetingDate}
           onDurationChange={setNewMeetingDuration}
           onAgendaChange={setNewMeetingAgenda}
           onParticipantUserIdsChange={setNewMeetingParticipantUserIds}
           onParticipantContactIdsChange={setNewMeetingParticipantContactIds}
+          onResourceIdsChange={setNewMeetingResourceIds}
+          onResourceNameChange={setNewResourceName}
+          onResourceKindChange={setNewResourceKind}
+          onResourceTimezoneChange={setNewResourceTimezone}
+          onResourceCapacityChange={setNewResourceCapacity}
+          onCreateResource={() => void createBookableResource()}
+          onDeactivateResource={(resource) => void deactivateBookableResource(resource)}
           onCreate={() => void createMeeting()}
           onRecordMinutes={(meeting) => void recordMinutes(meeting)}
+          authority={meetingAuthority}
+          busyAuthorityId={busyMeetingAuthorityId}
+          onRefreshAuthority={(meeting) => void loadMeetingAuthority(meeting)}
+          onBindSource={(meeting, source) => void bindMeetingSource(meeting, source)}
+          onConfirmProposal={(meeting, proposal) => void confirmMeetingProposal(meeting, proposal)}
         />
       )}
       {active === "Уведомления" && (
         <NotificationsModule
           collapsed={collapsed}
           notifications={notifications}
+          digests={managementDigests}
           onRefresh={() => void refreshNotifications()}
           onMarkRead={(item) => void markNotification(item)}
+          policy={notificationPolicy}
+          canManagePolicy={Boolean(currentUser?.is_admin || members.some((member) =>
+            member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+          ))}
+          onPolicyChange={setNotificationPolicy}
+          onSavePolicy={() => void saveNotificationPolicy()}
         />
       )}
       {active === "Договоры" && (
@@ -3059,6 +3320,7 @@ export function App() {
                       <span className={`contract-source-badge ${item.source_document_id ? "linked" : "missing"}`}>
                         {item.source_document_id ? "✓ Договор привязан к документу" : "! Документ договора не привязан"}
                       </span>
+                      <small>Версия карточки: {item.record_version} · снимков истории: {item.version_history?.length || 0}</small>
                       <h2>{item.title}</h2>
                       <p>
                         {item.counterparty || "Контрагент не указан"}
@@ -3306,6 +3568,9 @@ export function App() {
               onNotice={setNotice}
               onError={setError}
             />}
+            {active === "AI Secretary" && (
+              <AttentionPanel projectId={projectId} onOpenSection={setActive} />
+            )}
             {active === "AI Secretary" && (
               <DailyBriefingPanel briefing={dailyBriefing} onOpenSection={setActive} />
             )}

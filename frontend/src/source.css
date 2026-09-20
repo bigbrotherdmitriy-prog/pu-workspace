@@ -699,10 +699,34 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .meeting-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .meeting-conflict-warning { display: grid; gap: 6px; margin: 12px 0; padding: 12px; border: 1px solid #e9a83b; border-radius: 10px; background: #fff8e8; color: #734b00; }
 .meeting-conflict-warning p, .meeting-conflict-warning small { margin: 0; }
+.meeting-resource-catalog { display: grid; gap: 14px; margin-bottom: 18px; }
+.meeting-resource-form { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(120px, 1fr)) auto; gap: 10px; align-items: end; }
+.meeting-resource-list { display: grid; gap: 8px; }
+.meeting-resource-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+@media (max-width: 900px) { .meeting-resource-form { grid-template-columns: 1fr; } }
 .meeting-card h2 { margin: 9px 0 4px; }
 .meeting-card > p { color: #748091; }
 .meeting-agenda { margin: 12px 0; padding: 12px; border-radius: 8px; background: #f7f9fc; }
 .meeting-agenda p { margin: 5px 0 0; white-space: pre-wrap; }
+.meeting-authority { display: grid; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #d6dde7; }
+.meeting-authority-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.meeting-authority-head > div { display: grid; gap: 4px; }
+.meeting-authority-head small { color: #667587; line-height: 1.35; }
+.meeting-authority-head .secondary { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.meeting-authority-error { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px solid #d74d4d; border-radius: 8px; background: #fff1f1; color: #8b2020; }
+.meeting-source-proof { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: 8px; background: #edf8f3; color: #087a59; }
+.meeting-source-proof span { display: grid; gap: 2px; min-width: 0; }
+.meeting-source-proof strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meeting-source-picker { display: grid; gap: 9px; }
+.meeting-source-picker label { display: grid; gap: 5px; color: #586575; font-size: 13px; font-weight: 650; }
+.meeting-source-picker select { min-width: 0; padding: 9px 10px; border: 1px solid #d6dde7; border-radius: 8px; background: #fff; font: inherit; }
+.meeting-proposal-list { display: grid; gap: 10px; }
+.meeting-proposal { display: grid; gap: 9px; padding: 12px; border: 1px solid #d6dde7; border-radius: 10px; background: #fff; }
+.meeting-proposal.confirmed { border-color: #9bd4bf; background: #f3fbf8; }
+.meeting-proposal-heading { display: grid; gap: 3px; }
+.meeting-proposal-heading span { color: #087a59; font-size: 12px; font-weight: 750; text-transform: uppercase; }
+.meeting-proposal blockquote { margin: 0; padding: 8px 10px; border-left: 3px solid #8fb5a8; background: #f7f9fc; color: #4f5e6e; white-space: pre-wrap; }
+.meeting-proposal-confirmed { display: flex; align-items: center; gap: 6px; margin: 0; color: #087a59; font-weight: 700; }
 .notification-list { display: grid; gap: 0; }
 .notification-list > article { display: grid; grid-template-columns: auto 1fr auto; gap: 13px; align-items: start; padding: 15px 0; border-top: 1px solid #e9edf3; }
 .notification-list > article:first-child { border-top: 0; }
@@ -1087,3 +1111,9 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
   .gpr-import-preview{align-items:stretch;flex-direction:column}.gpr-import-preview>div:last-child{justify-content:flex-end}
 }
 .contract-record-actions,.contract-edit-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.contract-record-actions button,.contract-edit-actions button{display:inline-flex;align-items:center;gap:6px;padding:9px 12px}.contract-record-actions svg{width:15px}.contract-edit-form{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:9px;margin-top:16px;padding:14px;border:1px solid #cfe0d8;border-radius:12px;background:#f7fbf9}.contract-edit-form>strong,.contract-edit-actions{grid-column:1/-1}.contract-edit-form label{display:grid;gap:4px;color:#65766e;font-size:11px}.contract-edit-form input,.contract-edit-form select{min-height:40px;padding:8px 10px}@media(max-width:900px){.contract-edit-form{grid-template-columns:1fr}}
+.digest-settings { display: grid; gap: 12px; }
+.digest-settings label { display: grid; gap: 6px; font-weight: 600; }
+.digest-settings input:not([type="checkbox"]), .digest-settings select {
+  max-width: 320px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+}
+.digest-quiet-hours { display: flex; flex-wrap: wrap; gap: 16px; }

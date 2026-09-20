@@ -430,7 +430,11 @@ def test_gmail_pilot_ingress_wires_observation_binding_and_current(db_session, u
     monkeypatch.setattr(gmail, "google_workspace_for_mailbox",
                         lambda *a, **k: SimpleNamespace(service=lambda *a: FakeGmail()))
     monkeypatch.setattr(gmail, "project_candidate", lambda *a, **k: (w.project.id, .4, "synthetic"))
-    monkeypatch.setattr(gmail, "contact_for_sender", lambda *a, **k: None)
+    contact_scopes = []
+    monkeypatch.setattr(
+        gmail, "contact_for_sender",
+        lambda *a, **k: contact_scopes.append(k.get("mail_connection_id")) or None,
+    )
     monkeypatch.setattr(gmail, "notify_telegram", lambda *a, **k: None)
     monkeypatch.setattr(ai_secretary, "create_tasks_from_files", lambda *a, **k: [])
     monkeypatch.setattr(ai_secretary, "create_response_drafts", lambda *a, **k: [])
@@ -443,6 +447,7 @@ def test_gmail_pilot_ingress_wires_observation_binding_and_current(db_session, u
     binding = w.db.get(MailboxOriginBinding, current.binding_id)
     assert result["processed"] == 1 and binding.state == "confirmed"
     assert binding.provider_message_id == item["id"]
+    assert contact_scopes == [w.mail.id]
 
 
 def test_shared_subject_project_resolves_current_mailbox_generation(db_session, user_factory):

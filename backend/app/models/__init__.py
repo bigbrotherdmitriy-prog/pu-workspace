@@ -26,7 +26,12 @@ from app.models.workspace import ExtractionResult, SourceFolder, VirtualNode, Wo
 from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
-from app.models.management import ManagementHistory, Meeting, MeetingParticipant, Notification, NotificationPolicy, Obligation
+from app.models.management import (
+    BookableResource, ManagementHistory, Meeting, MeetingParticipant,
+    ManagementDigest, MeetingProposal, MeetingResource, MeetingSourceBinding,
+    Notification, NotificationPolicy, Obligation,
+)
+from app.models.saved_search_view import SavedSearchView
 from app.models.execution_finance import (
     AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal,
     PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
@@ -91,9 +96,15 @@ __all__ = [
     "Obligation",
     "Meeting",
     "MeetingParticipant",
+    "MeetingSourceBinding",
+    "MeetingProposal",
+    "BookableResource",
+    "MeetingResource",
     "Notification",
     "NotificationPolicy",
+    "ManagementDigest",
     "ManagementHistory",
+    "SavedSearchView",
     "ScheduleBaseline",
     "ScheduleItem",
     "BudgetLine",

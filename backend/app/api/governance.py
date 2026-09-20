@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.governance import Decision, Risk
+from app.models.management import Obligation
 from app.models.task import Task
 from app.models.user import User
 from app.api.management import _locked_versioned, append_management_history
@@ -16,6 +17,8 @@ class RiskUpdate(BaseModel):
     expected_record_version: int = Field(default=1, ge=1)
     status: str = Field(pattern="^(confirmed|mitigating|resolved|dismissed)$")
     action_note: str | None = Field(default=None, max_length=5000)
+    obligation_id: int | None = Field(default=None, ge=1)
+    task_id: int | None = Field(default=None, ge=1)
 
 
 class DecisionUpdate(BaseModel):
@@ -23,6 +26,17 @@ class DecisionUpdate(BaseModel):
     status: str = Field(pattern="^(confirmed|decided|executed|dismissed)$")
     decision_text: str | None = Field(default=None, max_length=5000)
     reason: str | None = Field(default=None, max_length=5000)
+    obligation_id: int | None = Field(default=None, ge=1)
+    task_id: int | None = Field(default=None, ge=1)
+    risk_id: int | None = Field(default=None, ge=1)
+
+
+def _require_same_project_relation(db: Session, model, relation_id: int | None, project_id: int) -> None:
+    if relation_id is None:
+        return
+    relation = db.get(model, relation_id)
+    if relation is None or relation.project_id != project_id:
+        raise HTTPException(422, "Связанный объект не найден в этом проекте")
 
 
 @router.get("/open-issues")
@@ -49,6 +63,7 @@ def risks(project_id: int, db: Session = Depends(get_db), user: User = Depends(r
     has_more = len(rows) > limit; rows = rows[:limit]
     return {"risks": [{"id": x.id, "record_version": x.record_version, "kind": x.kind, "title": x.title,
                         "criticality": x.criticality, "status": x.status, "action_note": x.action_note,
+                        "obligation_id": x.obligation_id, "task_id": x.task_id,
                         "source_id": x.source_id, "source_name": x.source_name, "source_excerpt": x.source_excerpt,
                         "source_hash": x.source_hash, "confidence": x.confidence} for x in rows],
             "next_cursor": rows[-1].id if has_more and rows else None}
@@ -60,17 +75,26 @@ def update_risk(risk_id: int, payload: RiskUpdate, db: Session = Depends(get_db)
     require_project_role(db, user, item.project_id, "manager")
     if payload.status in {"mitigating", "resolved"} and not (payload.action_note or item.action_note or "").strip():
         raise HTTPException(422, "Укажите действие или результат работы с риском")
-    old = {"status": item.status, "action_note": item.action_note}
+    if "obligation_id" in payload.model_fields_set:
+        _require_same_project_relation(db, Obligation, payload.obligation_id, item.project_id)
+    if "task_id" in payload.model_fields_set:
+        _require_same_project_relation(db, Task, payload.task_id, item.project_id)
+    old = {"status": item.status, "action_note": item.action_note,
+           "obligation_id": item.obligation_id, "task_id": item.task_id}
     item.status = payload.status
     if payload.action_note is not None: item.action_note = payload.action_note.strip() or None
+    if "obligation_id" in payload.model_fields_set: item.obligation_id = payload.obligation_id
+    if "task_id" in payload.model_fields_set: item.task_id = payload.task_id
     item.record_version += 1
     append_management_history(db, project_id=item.project_id, entity_type="risk", entity_id=item.id,
                               record_version=item.record_version, action="updated", actor_user_id=user.id,
-                              old_values=old, new_values={"status": item.status, "action_note": item.action_note},
+                              old_values=old, new_values={"status": item.status, "action_note": item.action_note,
+                                                          "obligation_id": item.obligation_id, "task_id": item.task_id},
                               evidence={"source_id": item.source_id, "source_hash": item.source_hash},
                               reason=item.action_note)
     db.commit()
-    return {"id": item.id, "record_version": item.record_version, "status": item.status}
+    return {"id": item.id, "record_version": item.record_version, "status": item.status,
+            "obligation_id": item.obligation_id, "task_id": item.task_id}
 
 
 @router.get("/decisions")
@@ -85,6 +109,7 @@ def decisions(project_id: int, db: Session = Depends(get_db), user: User = Depen
     has_more = len(rows) > limit; rows = rows[:limit]
     return {"decisions": [{"id": x.id, "record_version": x.record_version, "question": x.question,
                             "status": x.status, "decision_text": x.decision_text, "reason": x.reason,
+                            "obligation_id": x.obligation_id, "task_id": x.task_id, "risk_id": x.risk_id,
                             "source_id": x.source_id, "source_name": x.source_name,
                             "source_excerpt": x.source_excerpt, "source_hash": x.source_hash,
                             "confidence": x.confidence} for x in rows],
@@ -97,16 +122,29 @@ def update_decision(decision_id: int, payload: DecisionUpdate, db: Session = Dep
     require_project_role(db, user, item.project_id, "manager")
     if payload.status in {"decided", "executed"} and not (payload.decision_text or item.decision_text or "").strip():
         raise HTTPException(422, "Зафиксируйте принятое решение")
-    old = {"status": item.status, "decision_text": item.decision_text, "reason": item.reason}
+    if "obligation_id" in payload.model_fields_set:
+        _require_same_project_relation(db, Obligation, payload.obligation_id, item.project_id)
+    if "task_id" in payload.model_fields_set:
+        _require_same_project_relation(db, Task, payload.task_id, item.project_id)
+    if "risk_id" in payload.model_fields_set:
+        _require_same_project_relation(db, Risk, payload.risk_id, item.project_id)
+    old = {"status": item.status, "decision_text": item.decision_text, "reason": item.reason,
+           "obligation_id": item.obligation_id, "task_id": item.task_id, "risk_id": item.risk_id}
     item.status = payload.status
     if payload.decision_text is not None: item.decision_text = payload.decision_text.strip() or None
     if payload.reason is not None: item.reason = payload.reason.strip() or None
+    if "obligation_id" in payload.model_fields_set: item.obligation_id = payload.obligation_id
+    if "task_id" in payload.model_fields_set: item.task_id = payload.task_id
+    if "risk_id" in payload.model_fields_set: item.risk_id = payload.risk_id
     item.record_version += 1
     append_management_history(db, project_id=item.project_id, entity_type="decision", entity_id=item.id,
                               record_version=item.record_version, action="updated", actor_user_id=user.id,
                               old_values=old, new_values={"status": item.status,
-                                                         "decision_text": item.decision_text, "reason": item.reason},
+                                                         "decision_text": item.decision_text, "reason": item.reason,
+                                                         "obligation_id": item.obligation_id,
+                                                         "task_id": item.task_id, "risk_id": item.risk_id},
                               evidence={"source_id": item.source_id, "source_hash": item.source_hash},
                               reason=item.reason)
     db.commit()
-    return {"id": item.id, "record_version": item.record_version, "status": item.status}
+    return {"id": item.id, "record_version": item.record_version, "status": item.status,
+            "obligation_id": item.obligation_id, "task_id": item.task_id, "risk_id": item.risk_id}
