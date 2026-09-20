@@ -433,7 +433,7 @@ def test_downgrade_refuses_to_erase_pilot_history(db):
 
 def test_single_head_and_postgresql_offline_migration(monkeypatch):
     heads = ScriptDirectory.from_config(migration_config()).get_heads()
-    assert heads == [CURRENT_SCHEMA_REVISION] == ["b87e7f9a3f45"]
+    assert heads == [CURRENT_SCHEMA_REVISION] == ["b88e7f9a4f56"]
     # Explicit synthetic URL, offline only: never inherit DATABASE_URL.
     monkeypatch.setenv("DATABASE_URL","postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline")
     buf = StringIO()

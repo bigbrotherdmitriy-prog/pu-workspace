@@ -68,6 +68,7 @@ function renderModule(
   const onConfirmProposal = callbacks.onConfirmProposal || vi.fn<(meeting: MeetingRow, proposal: MeetingProposal) => void>();
   const onRecordMinutes = callbacks.onRecordMinutes || vi.fn<(meeting: MeetingRow) => void>();
   render(<MeetingsModule
+    projectId={12}
     collapsed={false}
     meetings={[row]}
     title=""
