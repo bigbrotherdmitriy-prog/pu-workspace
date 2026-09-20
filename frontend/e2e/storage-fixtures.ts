@@ -35,6 +35,16 @@ export class StorageApi {
   aiPolicies = new Map<number, Record<string, unknown>>();
   meetings: Record<string, unknown>[] = [];
   attentionItems: Record<string, unknown>[] = [];
+  searchItems: Record<string, unknown>[] = [{
+    entity_type: "task", entity_id: 901, name: "Подготовить акт", date: "2026-09-25",
+    project_id: 2, contract_id: 41, counterparty: "ООО Фасад", status: "open",
+    navigation: { section: "tasks", project_id: 2, entity_type: "task", entity_id: 901 },
+  }];
+  savedSearchViews: Record<string, unknown>[] = [{
+    id: 601, project_id: 2, owner_user_id: 900, name: "Срочные задачи",
+    filters: { q: "акт", types: ["task"] }, record_version: 1,
+    created_at: "2026-09-20T10:00:00Z", updated_at: "2026-09-20T10:00:00Z",
+  }];
   resources: Record<string, unknown>[] = [];
   meetingProposals = new Map<number, Record<string, unknown>[]>();
   meetingBindingReply?: Reply;
@@ -94,6 +104,46 @@ export class StorageApi {
     }
     const path = url.pathname;
     const projectId = Number(path.match(/^\/projects\/(\d+)/)?.[1] || url.searchParams.get("project_id") || 2);
+    if (method === "GET" && path === "/project-search") {
+      const cursor = url.searchParams.get("cursor");
+      const rows = this.searchItems.filter(row => Number(row.project_id) === projectId);
+      return this.fulfill(route, { body: {
+        items: cursor ? rows.slice(1) : rows.slice(0, 1),
+        next_cursor: !cursor && rows.length > 1 ? "synthetic-page-2" : null,
+        limit: Number(url.searchParams.get("limit") || 50), scan_truncated: false,
+        scan_cap_per_type: 1000, external_actions_created: false,
+      } });
+    }
+    if (method === "GET" && path === "/saved-search-views") {
+      return this.fulfill(route, { body: { views: this.savedSearchViews.filter(row => Number(row.project_id) === projectId) } });
+    }
+    if (method === "POST" && path === "/saved-search-views") {
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const created = { ...payload, id: 602, owner_user_id: 900, record_version: 1,
+        created_at: "2026-09-20T10:00:00Z", updated_at: "2026-09-20T10:00:00Z" };
+      this.savedSearchViews.push(created);
+      return this.fulfill(route, { status: 201, body: created });
+    }
+    const savedViewMatch = path.match(/^\/saved-search-views\/(\d+)$/);
+    if (savedViewMatch && method === "PATCH") {
+      const id = Number(savedViewMatch[1]);
+      const row = this.savedSearchViews.find(item => Number(item.id) === id);
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      if (!row) return this.fulfill(route, { status: 404, body: { detail: "Saved view not found" } });
+      if (Number(payload.expected_record_version) !== Number(row.record_version)) return this.fulfill(route, { status: 409, body: { detail: "record_version_conflict" } });
+      Object.assign(row, { ...payload, record_version: Number(row.record_version) + 1 });
+      delete row.expected_record_version;
+      return this.fulfill(route, { body: row });
+    }
+    if (savedViewMatch && method === "DELETE") {
+      const id = Number(savedViewMatch[1]);
+      const row = this.savedSearchViews.find(item => Number(item.id) === id);
+      if (!row) return this.fulfill(route, { status: 404, body: { detail: "Saved view not found" } });
+      const expected = Number(url.searchParams.get("expected_record_version"));
+      if (expected !== Number(row.record_version)) return this.fulfill(route, { status: 409, body: { detail: "record_version_conflict" } });
+      this.savedSearchViews = this.savedSearchViews.filter(item => Number(item.id) !== id);
+      return this.fulfill(route, { body: { id, record_version: expected + 1, deleted: true } });
+    }
     const evidenceMatch = path.match(/^\/api\/v54\/evidence\/([^/]+)\/fragment$/);
     if (method === "GET" && evidenceMatch) {
       const evidenceId = decodeURIComponent(evidenceMatch[1]);

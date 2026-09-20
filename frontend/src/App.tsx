@@ -44,7 +44,7 @@ import {
   type MeetingRow,
   type MeetingSourceCandidate,
 } from "./modules/meetings/MeetingsModule";
-import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
+import { ProjectSearchWorkspace, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
@@ -523,6 +523,7 @@ export function App() {
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
       ++documentRequestRef.current;
+      setQuery("");
       setDocumentRows([]);
       setSelectedDocument(null);
       setMeetingAuthority({});
@@ -2451,32 +2452,30 @@ export function App() {
     if (inboxFilter === "filtered") return item.status === "filtered";
     return true;
   });
-  const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
-  const projectSearchHits: ProjectSearchHit[] = normalizedQuery.length < 2 ? [] : [
-    ...documentRows.filter((item) => `${item.name} ${item.summary || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "document" as const, title: item.name, detail: item.summary || item.status })),
-    ...contracts.filter((item) => `${item.number} ${item.title} ${item.counterparty || ""}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "contract" as const, title: `${item.number} — ${item.title}`, detail: item.counterparty || item.status })),
-    ...tasks.filter((item) => `${item.title} ${item.source_excerpt || ""} ${item.source_file_name}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "task" as const, title: item.title, detail: `${item.status}${item.due_date ? ` · до ${item.due_date}` : ""}` })),
-    ...inbox.filter((item) => `${item.source_name} ${item.source_sender || ""} ${item.summary}`.toLocaleLowerCase("ru-RU").includes(normalizedQuery))
-      .map((item) => ({ id: item.id, kind: "message" as const, title: item.source_name, detail: item.source_sender || item.summary })),
-  ].slice(0, 30);
   function openProjectSearchHit(hit: ProjectSearchHit) {
     setQuery("");
+    const sections: Record<ProjectSearchHit["kind"], string> = {
+      project: "Проекты", document: "Документы", contract: "Договоры", task: "Задачи",
+      obligation: "Обязательства", risk: "Риски и решения", decision: "Риски и решения", message: "Письма",
+    };
+    const navigationSections: Record<string, string> = {
+      projects: "Проекты", documents: "Документы", contracts: "Договоры", tasks: "Задачи",
+      obligations: "Обязательства", governance: "Риски и решения", messages: "Письма",
+    };
+    const section = navigationSections[hit.navigation.section] || sections[hit.kind];
+    const target = new URL(window.location.href);
+    target.searchParams.set("search_section", hit.navigation.section || section);
+    target.searchParams.set("search_entity_type", hit.kind);
+    target.searchParams.set("search_entity_id", String(hit.id));
+    window.history.replaceState({}, "", `${target.pathname}${target.search}${target.hash}`);
     if (hit.kind === "document") {
-      const document = documentRows.find((item) => item.id === hit.id);
       setActive("Документы");
-      if (document) void openDocument(document);
-    } else if (hit.kind === "contract") {
-      setActive("Договоры");
-    } else if (hit.kind === "task") {
-      setActive("Задачи");
-    } else {
+      void openDocument({ id: hit.id } as DocumentRow);
+    } else if (hit.kind === "message") {
       setActive("Письма");
       setMailView("inbox");
       setExpandedInboxId(hit.id);
-    }
+    } else setActive(section);
   }
   return (
     <div className="shell">
@@ -2575,16 +2574,7 @@ export function App() {
                 <span>Установить</span>
               </button>
             )}
-            <div className="search">
-              <Search />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Поиск по проекту"
-              />
-              <kbd>Ctrl K</kbd>
-              <ProjectSearchResults query={query} hits={projectSearchHits} onOpen={openProjectSearchHit} />
-            </div>
+            <ProjectSearchWorkspace projectId={projectId} query={query} onQueryChange={setQuery} onOpen={openProjectSearchHit} />
             <label className="project-switcher">
               <FolderKanban />
               <span>Проект</span>
