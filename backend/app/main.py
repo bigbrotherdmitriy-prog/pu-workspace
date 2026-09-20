@@ -19,6 +19,8 @@ from app.api.contract_discovery import router as contract_discovery_router
 from app.api.contract_package import router as contract_package_router
 from app.api.ai_secretary import router as ai_secretary_router
 from app.api.management import router as management_router
+from app.api.project_search import router as project_search_router
+from app.api.saved_search_views import router as saved_search_views_router
 from app.api.execution_finance import router as execution_finance_router
 from app.api.gmail import router as gmail_router
 from app.api.ai_policy import router as ai_policy_router
@@ -144,6 +146,8 @@ app.include_router(contract_discovery_router)
 app.include_router(contract_package_router)
 app.include_router(ai_secretary_router)
 app.include_router(management_router)
+app.include_router(project_search_router)
+app.include_router(saved_search_views_router)
 app.include_router(execution_finance_router)
 app.include_router(gmail_router)
 app.include_router(ai_policy_router)
