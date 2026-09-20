@@ -13,8 +13,9 @@ from app.models.audit_log import AuditLog
 from app.models.governance import Decision, Risk
 from app.models.job import BackgroundJob
 from app.models.management import (
-    ManagementHistory, Meeting, MeetingParticipant, MeetingProposal,
-    Notification, NotificationPolicy, Obligation,
+    BookableResource, ManagementHistory, Meeting, MeetingParticipant,
+    MeetingProposal, MeetingResource, Notification, NotificationPolicy,
+    Obligation,
 )
 from app.models.organization_contract import Contract
 from app.models.project import Project
@@ -45,6 +46,7 @@ class MeetingCreate(BaseModel):
     participants: str | None = Field(default=None, max_length=5000)
     participant_user_ids: list[int] = Field(default_factory=list, max_length=200)
     participant_contact_ids: list[int] = Field(default_factory=list, max_length=200)
+    resource_ids: list[int] = Field(default_factory=list, max_length=100)
     agenda: str | None = Field(default=None, max_length=10000)
 
     @model_validator(mode="after")
@@ -53,12 +55,69 @@ class MeetingCreate(BaseModel):
             raise ValueError("participant_user_ids must be unique")
         if len(self.participant_contact_ids) != len(set(self.participant_contact_ids)):
             raise ValueError("participant_contact_ids must be unique")
+        if len(self.resource_ids) != len(set(self.resource_ids)):
+            raise ValueError("resource_ids must be unique")
         if self.scheduled_at is None:
             if self.duration_minutes is not None:
                 raise ValueError("duration_minutes requires scheduled_at")
         elif self.duration_minutes is None:
             self.duration_minutes = 60
         return self
+
+
+class BookableResourceCreate(BaseModel):
+    project_id: int
+    kind: str = Field(pattern="^(room|equipment|other)$")
+    name: str = Field(min_length=2, max_length=500)
+    timezone: str = Field(default="Europe/Moscow", min_length=1, max_length=100)
+    capacity: int | None = Field(default=None, ge=1, le=100000)
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("resource name must contain at least two non-space characters")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        require_iana_timezone(value)
+        return value
+
+
+class BookableResourceUpdate(BaseModel):
+    expected_record_version: int = Field(ge=1)
+    kind: str | None = Field(default=None, pattern="^(room|equipment|other)$")
+    name: str | None = Field(default=None, min_length=2, max_length=500)
+    timezone: str | None = Field(default=None, min_length=1, max_length=100)
+    capacity: int | None = Field(default=None, ge=1, le=100000)
+    active: bool | None = None
+
+    @model_validator(mode="after")
+    def non_nullable_fields_cannot_be_cleared(self):
+        for field in ("kind", "name", "timezone", "active"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("resource name must contain at least two non-space characters")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str | None) -> str | None:
+        if value is not None:
+            require_iana_timezone(value)
+        return value
 
 
 class MeetingUpdate(BaseModel):
@@ -271,6 +330,97 @@ def update_obligation(obligation_id: int, payload: ObligationUpdate, db: Session
     return _obligation_payload(item)
 
 
+def _bookable_resource_payload(item: BookableResource) -> dict:
+    return {
+        "id": item.id,
+        "record_version": item.record_version,
+        "organization_id": item.organization_id,
+        "managing_project_id": item.managing_project_id,
+        "kind": item.kind,
+        "name": item.name,
+        "timezone": item.timezone,
+        "capacity": item.capacity,
+        "active": item.active,
+    }
+
+
+@router.get("/resources")
+def bookable_resources(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user),
+                       include_inactive: bool = False, cursor: int | None = None, limit: int = 200):
+    require_project_role(db, user, project_id, "viewer")
+    if not 1 <= limit <= 500:
+        raise HTTPException(422, "limit must be between 1 and 500")
+    organization_id = _project_organization_id(db, project_id)
+    query = select(BookableResource).where(BookableResource.organization_id == organization_id)
+    if not include_inactive:
+        query = query.where(BookableResource.active.is_(True))
+    if cursor is not None:
+        query = query.where(BookableResource.id < cursor)
+    rows = list(db.scalars(query.order_by(BookableResource.id.desc()).limit(limit + 1)))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "resources": [_bookable_resource_payload(row) for row in rows],
+        "count": len(rows),
+        "next_cursor": rows[-1].id if has_more and rows else None,
+    }
+
+
+@router.post("/resources")
+def create_bookable_resource(payload: BookableResourceCreate, db: Session = Depends(get_db),
+                             user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "manager")
+    organization_id = _project_organization_id(db, payload.project_id)
+    item = BookableResource(
+        organization_id=organization_id,
+        managing_project_id=payload.project_id,
+        created_by_user_id=user.id,
+        kind=payload.kind,
+        name=payload.name.strip(),
+        timezone=payload.timezone,
+        capacity=payload.capacity,
+        active=True,
+    )
+    db.add(item); db.flush()
+    append_management_history(
+        db, project_id=payload.project_id, entity_type="bookable_resource", entity_id=item.id,
+        record_version=item.record_version, action="created", actor_user_id=user.id,
+        old_values={}, new_values=_bookable_resource_payload(item),
+    )
+    db.add(AuditLog(action="bookable_resource_created", entity_type="bookable_resource",
+                    entity_id=item.id, details=f"project={payload.project_id}; user={user.id}"))
+    db.commit(); db.refresh(item)
+    return _bookable_resource_payload(item)
+
+
+@router.patch("/resources/{resource_id}")
+def update_bookable_resource(resource_id: int, payload: BookableResourceUpdate,
+                             db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = _locked_versioned(db, BookableResource, resource_id, payload.expected_record_version,
+                             "Bookable resource")
+    require_project_role(db, user, item.managing_project_id, "manager")
+    project = db.get(Project, item.managing_project_id)
+    if project is None or project.organization_id != item.organization_id:
+        raise HTTPException(409, "Bookable resource tenant binding is invalid")
+    old = _bookable_resource_payload(item)
+    changes = payload.model_dump(exclude={"expected_record_version"}, exclude_unset=True)
+    if "name" in changes:
+        changes["name"] = changes["name"].strip()
+    for field, value in changes.items():
+        setattr(item, field, value)
+    item.record_version += 1
+    db.flush()
+    append_management_history(
+        db, project_id=item.managing_project_id, entity_type="bookable_resource", entity_id=item.id,
+        record_version=item.record_version, action="updated", actor_user_id=user.id,
+        old_values=old, new_values=_bookable_resource_payload(item),
+    )
+    db.add(AuditLog(action="bookable_resource_updated", entity_type="bookable_resource",
+                    entity_id=item.id, details=f"active={item.active}; user={user.id}"))
+    db.commit(); db.refresh(item)
+    return _bookable_resource_payload(item)
+
+
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
@@ -294,27 +444,56 @@ def _meeting_participant_payloads(db: Session, meeting_id: int) -> list[dict]:
     ]
 
 
+def _meeting_resource_payloads(db: Session, meeting_id: int) -> list[dict]:
+    rows = db.execute(
+        select(MeetingResource, BookableResource)
+        .join(BookableResource, BookableResource.id == MeetingResource.resource_id)
+        .where(MeetingResource.meeting_id == meeting_id)
+        .order_by(MeetingResource.id)
+    ).all()
+    return [
+        {
+            "id": resource.id,
+            "kind": resource.kind,
+            "name": resource.name,
+            "timezone": resource.timezone,
+            "capacity": resource.capacity,
+            "active": resource.active,
+        }
+        for _reservation, resource in rows
+    ]
+
+
 def _meeting_conflicts(db: Session, meeting: Meeting, actor: User) -> list[dict]:
     if meeting.scheduled_at is None or meeting.duration_minutes is None:
         return []
     participants = _meeting_participant_payloads(db, meeting.id)
+    resources = _meeting_resource_payloads(db, meeting.id)
     user_ids = [row["id"] for row in participants if row["kind"] == "user"]
     contact_ids = [row["id"] for row in participants if row["kind"] == "contact"]
-    if not user_ids and not contact_ids:
+    resource_ids = [row["id"] for row in resources]
+    if not user_ids and not contact_ids and not resource_ids:
         return []
+    candidate_queries = []
     identity_filters = []
     if user_ids:
         identity_filters.append(MeetingParticipant.user_id.in_(user_ids))
     if contact_ids:
         identity_filters.append(MeetingParticipant.contact_id.in_(contact_ids))
+    if identity_filters:
+        candidate_queries.append(select(MeetingParticipant.meeting_id).where(or_(*identity_filters)))
+    if resource_ids:
+        candidate_queries.append(select(MeetingResource.meeting_id).where(
+            MeetingResource.resource_id.in_(resource_ids),
+        ))
     meeting_project = db.get(Project, meeting.project_id)
-    candidate_ids = select(MeetingParticipant.meeting_id).where(or_(*identity_filters))
+    candidate_filter = or_(*(Meeting.id.in_(query) for query in candidate_queries))
     candidates = list(db.scalars(
         select(Meeting)
         .join(Project, Project.id == Meeting.project_id)
         .where(
             Meeting.id != meeting.id,
-            Meeting.id.in_(candidate_ids),
+            candidate_filter,
             Meeting.scheduled_at.is_not(None),
             Meeting.duration_minutes.is_not(None),
             Meeting.status != "cancelled",
@@ -325,6 +504,7 @@ def _meeting_conflicts(db: Session, meeting: Meeting, actor: User) -> list[dict]
     current_start = _aware(meeting.scheduled_at)
     current_end = current_start + timedelta(minutes=meeting.duration_minutes)
     identity_map = {(row["kind"], row["id"]): row for row in participants}
+    resource_map = {row["id"]: row for row in resources}
     conflicts = []
     for candidate in candidates:
         candidate_start = _aware(candidate.scheduled_at)
@@ -334,7 +514,9 @@ def _meeting_conflicts(db: Session, meeting: Meeting, actor: User) -> list[dict]
         candidate_participants = _meeting_participant_payloads(db, candidate.id)
         shared = [identity_map[(row["kind"], row["id"])] for row in candidate_participants
                   if (row["kind"], row["id"]) in identity_map]
-        if not shared:
+        candidate_resources = _meeting_resource_payloads(db, candidate.id)
+        shared_resources = [resource_map[row["id"]] for row in candidate_resources if row["id"] in resource_map]
+        if not shared and not shared_resources:
             continue
         visible = actor.is_admin or db.scalar(select(ProjectMember.id).where(
             ProjectMember.project_id == candidate.project_id,
@@ -347,6 +529,7 @@ def _meeting_conflicts(db: Session, meeting: Meeting, actor: User) -> list[dict]
             "overlap_from": max(current_start, candidate_start),
             "overlap_to": min(current_end, candidate_end),
             "participants": shared,
+            "resources": shared_resources,
             "redacted": not visible,
         })
     return conflicts
@@ -354,7 +537,20 @@ def _meeting_conflicts(db: Session, meeting: Meeting, actor: User) -> list[dict]
 
 def _meeting_payload(db: Session, item: Meeting, actor: User) -> dict:
     participant_refs = _meeting_participant_payloads(db, item.id)
+    resource_refs = _meeting_resource_payloads(db, item.id)
     conflicts = _meeting_conflicts(db, item, actor)
+    participant_count = len(participant_refs)
+    resource_warnings = [
+        {
+            "code": "capacity_exceeded",
+            "resource_id": resource["id"],
+            "resource_name": resource["name"],
+            "capacity": resource["capacity"],
+            "participant_count": participant_count,
+        }
+        for resource in resource_refs
+        if resource["capacity"] is not None and participant_count > resource["capacity"]
+    ]
     return {
         "id": item.id, "record_version": item.record_version,
         "project_id": item.project_id, "contract_id": item.contract_id,
@@ -363,8 +559,10 @@ def _meeting_payload(db: Session, item: Meeting, actor: User) -> dict:
         "participant_user_ids": [row["id"] for row in participant_refs if row["kind"] == "user"],
         "participant_contact_ids": [row["id"] for row in participant_refs if row["kind"] == "contact"],
         "participant_refs": participant_refs,
+        "resource_ids": [row["id"] for row in resource_refs], "resource_refs": resource_refs,
         "agenda": item.agenda, "minutes": item.minutes, "status": item.status,
         "has_conflicts": bool(conflicts), "conflict_count": len(conflicts), "conflicts": conflicts,
+        "has_resource_warnings": bool(resource_warnings), "resource_warnings": resource_warnings,
     }
 
 
@@ -403,12 +601,25 @@ def create_meeting(payload: MeetingCreate, db: Session = Depends(get_db), user: 
     ))) if payload.participant_contact_ids else set()
     if contact_ids != set(payload.participant_contact_ids):
         raise HTTPException(422, "Контакт должен быть активным и относиться к проекту")
-    data = payload.model_dump(exclude={"participant_user_ids", "participant_contact_ids"})
+    selected_resources = list(db.scalars(
+        select(BookableResource)
+        .where(BookableResource.id.in_(payload.resource_ids))
+        .order_by(BookableResource.id)
+        .with_for_update()
+    )) if payload.resource_ids else []
+    if (
+        {resource.id for resource in selected_resources} != set(payload.resource_ids)
+        or any(resource.organization_id != project.organization_id or not resource.active
+               for resource in selected_resources)
+    ):
+        raise HTTPException(422, "Ресурс должен быть активным и относиться к организации проекта")
+    data = payload.model_dump(exclude={"participant_user_ids", "participant_contact_ids", "resource_ids"})
     item = Meeting(**data, created_by_user_id=user.id)
     db.add(item); db.flush()
     db.add_all([
         *(MeetingParticipant(meeting_id=item.id, user_id=user_id) for user_id in payload.participant_user_ids),
         *(MeetingParticipant(meeting_id=item.id, contact_id=contact_id) for contact_id in payload.participant_contact_ids),
+        *(MeetingResource(meeting_id=item.id, resource_id=resource_id) for resource_id in payload.resource_ids),
     ])
     db.flush()
     conflicts = _meeting_conflicts(db, item, user)
@@ -419,6 +630,7 @@ def create_meeting(payload: MeetingCreate, db: Session = Depends(get_db), user: 
                                                          "duration_minutes": item.duration_minutes},
                               evidence={"participant_user_ids": payload.participant_user_ids,
                                         "participant_contact_ids": payload.participant_contact_ids,
+                                        "resource_ids": payload.resource_ids,
                                         "conflicting_meeting_ids": [row["meeting_id"] for row in conflicts
                                                                     if row["meeting_id"] is not None]},
                               reason=item.agenda)

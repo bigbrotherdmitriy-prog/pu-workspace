@@ -34,6 +34,7 @@ export class StorageApi {
   evidenceReplies = new Map<string, Reply>();
   aiPolicies = new Map<number, Record<string, unknown>>();
   meetings: Record<string, unknown>[] = [];
+  resources: Record<string, unknown>[] = [];
   attachmentImportReply: Reply = { body: {
     staging_id: "synthetic-gmail-staging", job_id: 72, status: "queued", already_queued: false,
   } };
@@ -113,25 +114,50 @@ export class StorageApi {
       const start = new Date(String(payload.scheduled_at));
       const duration = Number(payload.duration_minutes);
       const userIds = (payload.participant_user_ids || []) as number[];
+      const resourceIds = (payload.resource_ids || []) as number[];
       const conflicts = this.meetings.filter(row => {
         const shared = ((row.participant_user_ids || []) as number[]).some(id => userIds.includes(id));
-        if (!shared || !row.scheduled_at || !row.duration_minutes || row.status === "cancelled") return false;
+        const sharedResource = ((row.resource_ids || []) as number[]).some(id => resourceIds.includes(id));
+        if ((!shared && !sharedResource) || !row.scheduled_at || !row.duration_minutes || row.status === "cancelled") return false;
         const otherStart = new Date(String(row.scheduled_at));
         const otherEnd = new Date(otherStart.getTime() + Number(row.duration_minutes) * 60_000);
         const end = new Date(start.getTime() + duration * 60_000);
         return start < otherEnd && otherStart < end;
       });
       const participants = userIds.map(id => ({ kind: "user", id, name: "Synthetic Operator", email: "operator@example.invalid" }));
+      const resourceRefs = this.resources.filter(row => resourceIds.includes(Number(row.id)));
       const created = {
         ...payload, id: this.meetings.length + 1, record_version: 1, status: "planned",
         participant_refs: participants, participant_contact_ids: payload.participant_contact_ids || [],
+        resource_ids: resourceIds, resource_refs: resourceRefs,
         has_conflicts: conflicts.length > 0, conflict_count: conflicts.length,
         conflicts: conflicts.map(row => ({ meeting_id: row.id, project_id: row.project_id,
           title: row.title, overlap_from: payload.scheduled_at, overlap_to: row.scheduled_at,
-          participants, redacted: false })),
+          participants, resources: this.resources.filter(resource =>
+            resourceIds.includes(Number(resource.id)) && ((row.resource_ids || []) as number[]).includes(Number(resource.id))),
+          redacted: false })),
+        has_resource_warnings: false, resource_warnings: [],
       };
       this.meetings.unshift(created);
       return this.fulfill(route, { body: created });
+    }
+    if (method === "POST" && path === "/management/resources") {
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const created = {
+        ...payload, id: this.resources.length + 501, record_version: 1,
+        organization_id: 901, managing_project_id: Number(payload.project_id), active: true,
+      };
+      this.resources.unshift(created);
+      return this.fulfill(route, { body: created });
+    }
+    const resourceMatch = path.match(/^\/management\/resources\/(\d+)$/);
+    if (method === "PATCH" && resourceMatch) {
+      const id = Number(resourceMatch[1]);
+      const payload = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      const resource = this.resources.find(row => Number(row.id) === id);
+      if (!resource) return this.fulfill(route, { status: 404, body: { detail: "Resource not found" } });
+      Object.assign(resource, payload, { record_version: Number(resource.record_version) + 1 });
+      return this.fulfill(route, { body: resource });
     }
     const localUploadJobMatch = path.match(/^\/local-upload\/projects\/(\d+)\/jobs\/(\d+)$/);
     if (method === "GET" && localUploadJobMatch) {
@@ -215,6 +241,7 @@ export class StorageApi {
         cash_gap: 0, cash_gap_date: null, delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 0, unlinked_invoices: 0,
       } },
       "/management/obligations": { obligations: [] }, "/management/meetings": { meetings: this.meetings }, "/management/notifications": { notifications: [] },
+      "/management/resources": { resources: this.resources },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },
       "/integrations/project": { project_id: projectId, adapters: [

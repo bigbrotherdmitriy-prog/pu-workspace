@@ -27,8 +27,9 @@ from app.models.organization_contract import Contract, ContractVersion, Organiza
 from app.models.ai_secretary import Message
 from app.models.ai_policy import ProjectAIPolicy
 from app.models.management import (
-    ManagementHistory, Meeting, MeetingParticipant, MeetingProposal,
-    MeetingSourceBinding, Notification, NotificationPolicy, Obligation,
+    BookableResource, ManagementHistory, Meeting, MeetingParticipant,
+    MeetingProposal, MeetingResource, MeetingSourceBinding, Notification,
+    NotificationPolicy, Obligation,
 )
 from app.models.execution_finance import (
     AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal,
@@ -96,6 +97,8 @@ __all__ = [
     "MeetingParticipant",
     "MeetingSourceBinding",
     "MeetingProposal",
+    "BookableResource",
+    "MeetingResource",
     "Notification",
     "NotificationPolicy",
     "ManagementHistory",

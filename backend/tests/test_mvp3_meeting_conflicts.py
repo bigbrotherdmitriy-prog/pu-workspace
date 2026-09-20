@@ -152,6 +152,7 @@ def test_cross_project_conflict_is_redacted_without_access(db_session, user_fact
         "overlap_to": datetime(2026, 9, 20, 11, tzinfo=timezone.utc),
         "participants": [{"kind": "user", "id": participant.id,
                           "name": participant.name, "email": participant.email}],
+        "resources": [],
         "redacted": True,
     }
 

@@ -35,7 +35,7 @@ import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./mod
 import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
 import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
 import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
-import { MeetingsModule, type MeetingRow } from "./modules/meetings/MeetingsModule";
+import { MeetingsModule, type BookableResourceRow, type MeetingRow } from "./modules/meetings/MeetingsModule";
 import { ProjectSearchResults, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
@@ -467,12 +467,18 @@ export function App() {
     [error, setError] = useState("");
   const [obligations, setObligations] = useState<ObligationRow[]>([]),
     [meetings, setMeetings] = useState<MeetingRow[]>([]),
+    [bookableResources, setBookableResources] = useState<BookableResourceRow[]>([]),
     [notifications, setNotifications] = useState<NotificationRow[]>([]),
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
     [newMeetingDuration, setNewMeetingDuration] = useState("60"),
     [newMeetingParticipantUserIds, setNewMeetingParticipantUserIds] = useState<number[]>([]),
     [newMeetingParticipantContactIds, setNewMeetingParticipantContactIds] = useState<number[]>([]),
+    [newMeetingResourceIds, setNewMeetingResourceIds] = useState<number[]>([]),
+    [newResourceName, setNewResourceName] = useState(""),
+    [newResourceKind, setNewResourceKind] = useState<BookableResourceRow["kind"]>("room"),
+    [newResourceTimezone, setNewResourceTimezone] = useState("Europe/Moscow"),
+    [newResourceCapacity, setNewResourceCapacity] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [contractDropStatus, setContractDropStatus] = useState("");
@@ -2033,14 +2039,16 @@ export function App() {
   async function loadManagement() {
     if (!projectId) return;
     try {
-      const [o, m, n] = await Promise.all([
+      const [o, m, n, r] = await Promise.all([
         api(`/management/obligations?project_id=${projectId}&limit=200`),
         api(`/management/meetings?project_id=${projectId}&limit=200`),
         api(`/management/notifications?project_id=${projectId}&limit=200`),
+        api(`/management/resources?project_id=${projectId}&include_inactive=true&limit=500`),
       ]);
       setObligations(o.obligations);
       setMeetings(m.meetings);
       setNotifications(n.notifications);
+      setBookableResources(r.resources);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2093,6 +2101,7 @@ export function App() {
           participants: selectedNames.join(", ") || null,
           participant_user_ids: newMeetingParticipantUserIds,
           participant_contact_ids: newMeetingParticipantContactIds,
+          resource_ids: newMeetingResourceIds,
           agenda: newMeetingAgenda.trim() || null,
         }),
       });
@@ -2101,10 +2110,45 @@ export function App() {
       setNewMeetingDuration("60");
       setNewMeetingParticipantUserIds([]);
       setNewMeetingParticipantContactIds([]);
+      setNewMeetingResourceIds([]);
       setNewMeetingAgenda("");
       setNotice(created.has_conflicts
-        ? `Совещание добавлено. Обнаружено конфликтов: ${created.conflict_count}. Проверьте время с участниками.`
+        ? `Совещание добавлено. Обнаружено конфликтов: ${created.conflict_count}. Проверьте время и занятость.`
         : "Совещание добавлено");
+      await loadManagement();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function createBookableResource() {
+    if (!newResourceName.trim()) return;
+    try {
+      await api("/management/resources", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          kind: newResourceKind,
+          name: newResourceName.trim(),
+          timezone: newResourceTimezone.trim(),
+          capacity: newResourceCapacity ? Number(newResourceCapacity) : null,
+        }),
+      });
+      setNewResourceName("");
+      setNewResourceCapacity("");
+      setNotice("Ресурс добавлен в каталог организации");
+      await loadManagement();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function deactivateBookableResource(resource: BookableResourceRow) {
+    try {
+      await api(`/management/resources/${resource.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expected_record_version: resource.record_version, active: false }),
+      });
+      setNewMeetingResourceIds((current) => current.filter((id) => id !== resource.id));
+      setNotice("Ресурс отключён; история бронирований сохранена");
       await loadManagement();
     } catch (e) {
       setError((e as Error).message);
@@ -2966,6 +3010,7 @@ export function App() {
       )}
       {active === "Совещания" && (
         <MeetingsModule
+          projectId={projectId}
           collapsed={collapsed}
           meetings={meetings}
           title={newMeetingTitle}
@@ -2976,12 +3021,28 @@ export function App() {
           participantContactIds={newMeetingParticipantContactIds}
           members={members}
           contacts={projectContacts}
+          resources={bookableResources}
+          resourceIds={newMeetingResourceIds}
+          canManageResources={Boolean(currentUser?.is_admin || members.some((member) =>
+            member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+          ))}
+          resourceName={newResourceName}
+          resourceKind={newResourceKind}
+          resourceTimezone={newResourceTimezone}
+          resourceCapacity={newResourceCapacity}
           onTitleChange={setNewMeetingTitle}
           onDateChange={setNewMeetingDate}
           onDurationChange={setNewMeetingDuration}
           onAgendaChange={setNewMeetingAgenda}
           onParticipantUserIdsChange={setNewMeetingParticipantUserIds}
           onParticipantContactIdsChange={setNewMeetingParticipantContactIds}
+          onResourceIdsChange={setNewMeetingResourceIds}
+          onResourceNameChange={setNewResourceName}
+          onResourceKindChange={setNewResourceKind}
+          onResourceTimezoneChange={setNewResourceTimezone}
+          onResourceCapacityChange={setNewResourceCapacity}
+          onCreateResource={() => void createBookableResource()}
+          onDeactivateResource={(resource) => void deactivateBookableResource(resource)}
           onCreate={() => void createMeeting()}
           onRecordMinutes={(meeting) => void recordMinutes(meeting)}
         />

@@ -694,6 +694,11 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .meeting-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .meeting-conflict-warning { display: grid; gap: 6px; margin: 12px 0; padding: 12px; border: 1px solid #e9a83b; border-radius: 10px; background: #fff8e8; color: #734b00; }
 .meeting-conflict-warning p, .meeting-conflict-warning small { margin: 0; }
+.meeting-resource-catalog { display: grid; gap: 14px; margin-bottom: 18px; }
+.meeting-resource-form { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(120px, 1fr)) auto; gap: 10px; align-items: end; }
+.meeting-resource-list { display: grid; gap: 8px; }
+.meeting-resource-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+@media (max-width: 900px) { .meeting-resource-form { grid-template-columns: 1fr; } }
 .meeting-card h2 { margin: 9px 0 4px; }
 .meeting-card > p { color: #748091; }
 .meeting-agenda { margin: 12px 0; padding: 12px; border-radius: 8px; background: #f7f9fc; }

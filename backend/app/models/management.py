@@ -168,6 +168,60 @@ event.listen(MeetingSourceBinding, "before_update", _deny_meeting_source_binding
 event.listen(MeetingSourceBinding, "before_delete", _deny_meeting_source_binding_mutation)
 
 
+class BookableResource(Base):
+    __tablename__ = "bookable_resources"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("organization_id", "managing_project_id"),
+            ("projects.organization_id", "projects.id"),
+            name="fk_bookable_resources_managing_project_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("record_version > 0", name="ck_bookable_resources_record_version"),
+        CheckConstraint(
+            "kind IN ('room', 'equipment', 'other')",
+            name="ck_bookable_resources_kind",
+        ),
+        CheckConstraint(
+            "capacity IS NULL OR capacity > 0",
+            name="ck_bookable_resources_capacity",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+    managing_project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(100), nullable=False, server_default="Europe/Moscow")
+    capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+
+class MeetingResource(Base):
+    __tablename__ = "meeting_resources"
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "resource_id", name="uq_meeting_resource"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    meeting_id: Mapped[int] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    resource_id: Mapped[int] = mapped_column(
+        ForeignKey("bookable_resources.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = (
