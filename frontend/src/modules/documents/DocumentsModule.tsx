@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileScan, FileText, RefreshCw, Search, X } from "lucide-react";
+import { FilePlus2, FileScan, FileText, FolderSearch2, RefreshCw, Search, X } from "lucide-react";
 import { api } from "../../api/client";
 
 export type DocumentListItem = {
@@ -22,6 +22,8 @@ type Props = {
   onSelect: (document: DocumentListItem) => void;
   projectId: number;
   onOcrComplete: () => void;
+  onAddImportantDocument?: () => void;
+  onOpenProjectFolder?: () => void;
 };
 
 type OcrBatch = { job_id: number; status: string; result?: { total: number; processed: unknown[]; skipped: unknown[]; tasks: number; risks: number; decisions: number; drafts: number }; error?: string };
@@ -107,7 +109,7 @@ function documentCountLabel(count: number) {
   return `${count} документов`;
 }
 
-export function DocumentsModule({ collapsed, knowledgeMode, documents, selected, onSelect, projectId, onOcrComplete }: Props) {
+export function DocumentsModule({ collapsed, knowledgeMode, documents, selected, onSelect, projectId, onOcrComplete, onAddImportantDocument, onOpenProjectFolder }: Props) {
   const [previousVersion, setPreviousVersion] = useState(0);
   const [currentVersion, setCurrentVersion] = useState(0);
   const [comparison, setComparison] = useState<null | {
@@ -210,8 +212,10 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
   return <section className={`documents-overlay ${collapsed ? "collapsed" : ""}`}>
     <div className="documents-layout">
       <div className="card document-register-panel">
-        <div className="card-head document-register-head"><div><h2>{knowledgeMode ? "Центр знаний" : "Реестр документов"}</h2><p>{documents.length === filteredDocuments.length ? documentCountLabel(documents.length) : `Показано ${filteredDocuments.length} из ${documents.length}`}</p></div>
+        <div className="card-head document-register-head"><div><h2>{knowledgeMode ? "Центр знаний" : "Документы проекта"}</h2><p>{documents.length === filteredDocuments.length ? documentCountLabel(documents.length) : `Показано ${filteredDocuments.length} из ${documents.length}`}</p></div><div className="document-register-actions">
+          {!knowledgeMode && onAddImportantDocument && <button type="button" onClick={onAddImportantDocument}><FilePlus2 />Добавить документ</button>}
           <button className="document-ocr-bulk" disabled={Boolean(ocrBusy) || !eligibleDocuments.length} onClick={() => void startOcr(eligibleDocuments.map((item) => item.id))} title={eligibleDocuments.length ? `Повторно распознать ${eligibleDocuments.length} доступных PDF и изображений, не изменяя оригиналы` : "Нет документов с доступным оригиналом для повторного OCR"} aria-label="Повторно распознать доступные сканы"><RefreshCw className={ocrBusy ? "spin" : ""} />{ocrBusy ? (ocrBatch?.status === "queued" ? "В очереди" : "Распознаю…") : "OCR сканов"}</button>
+        </div>
         </div>
         {ocrResult && <div className="ocr-batch-result" role="status" aria-live="polite"><strong>OCR завершён</strong><span>Распознано: {ocrResult.processed.length} из {ocrResult.total}</span><span>Пропущено: {ocrResult.skipped.length}</span><span>Новых предложений: задач {ocrResult.tasks}, рисков {ocrResult.risks}, решений {ocrResult.decisions}</span></div>}
         {ocrError && <p className="version-error" role="alert">{ocrError}</p>}
@@ -238,7 +242,7 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
             <span className="document-file-kind" aria-hidden="true"><FileText /><small>{extensionLabel(item.name, item.mime_type)}</small></span>
             <span className="document-register-copy"><strong>{item.name}</strong><span className="document-register-meta"><small className={`document-status ${statusGroup(item.status)}`}>{statusLabel(item.status)}</small><small>{sourceLabel(item.source)}</small><small>Версия {item.current_version || 1}</small><small>№ {item.id}</small></span>{documentNameCounts[item.name.trim().toLocaleLowerCase("ru-RU")] > 1 && <small className="document-duplicate-note">Ещё {documentNameCounts[item.name.trim().toLocaleLowerCase("ru-RU")] - 1} с таким названием</small>}{item.extraction_method && <small className={`ocr-quality ${item.extraction_quality || ""}`}>OCR: {humanize(item.extraction_method)} · {item.ocr_pages ? `${item.ocr_pages} стр.` : "страницы не указаны"}</small>}</span>
           </button>)}
-          {!filteredDocuments.length && <div className="empty document-register-empty"><FileText /><strong>{documents.length ? "По заданным условиям документы не найдены" : "Документы не найдены"}</strong><p>{documents.length ? "Измените запрос или сбросьте фильтры." : "Подключите источник или загрузите файл — он появится здесь."}</p>{documents.length > 0 && <button type="button" onClick={resetFilters}>Сбросить фильтры</button>}</div>}
+          {!filteredDocuments.length && <div className="empty document-register-empty"><FileText /><strong>{documents.length ? "По заданным условиям документы не найдены" : "Важных документов пока нет"}</strong><p>{documents.length ? "Измените запрос или сбросьте фильтры." : "Весь архив проекта сначала загрузите через «Запуск проекта»: система разберёт папку и подготовит предложения. Здесь добавляйте отдельные важные документы."}</p>{documents.length > 0 ? <button type="button" onClick={resetFilters}>Сбросить фильтры</button> : <div className="document-empty-actions">{onOpenProjectFolder && <button type="button" onClick={onOpenProjectFolder}><FolderSearch2 />Разобрать папку проекта</button>}{onAddImportantDocument && <button type="button" className="secondary" onClick={onAddImportantDocument}><FilePlus2 />Добавить один документ</button>}</div>}</div>}
         </div>
       </div>
       <div className="card document-detail">

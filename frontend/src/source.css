@@ -157,6 +157,11 @@
 .document-register-empty strong { margin-top: 10px; color: #2b3a33; text-align: center; }
 .document-register-empty p { max-width: 310px; margin: 6px auto 14px; color: #718078; text-align: center; }
 .document-register-empty > button { width: auto; min-height: 38px; display: inline-flex; padding: 0 13px; border: 1px solid #acd0c2; border-radius: 9px; color: #087454; background: #fff; }
+.document-register-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.document-register-actions > button, .document-empty-actions > button { width: auto; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 1px solid #087454; border-radius: 9px; color: #fff; background: #087454; font-weight: 700; }
+.document-register-actions svg, .document-empty-actions svg { width: 17px; height: 17px; }
+.document-empty-actions { display: flex; justify-content: center; gap: 9px; flex-wrap: wrap; }
+.document-empty-actions > button.secondary { color: #087454; background: #fff; }
 .document-detail { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .document-detail h3 { margin: 25px 0 8px; }
 .ocr-batch-result { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 12px; padding: 12px; border: 1px solid #b8dfcf; border-radius: 12px; background: #eef8f3; color: #27463b; font-size: 13px; }

@@ -15,6 +15,14 @@ function setup(projectId = 7) {
 }
 
 describe("local document upload", () => {
+  it("shows one unambiguous folder action for the project-folder flow", () => {
+    render(<MobileDocumentUpload open projectId={7} folderOnly title="Разобрать папку проекта" onClose={vi.fn()} onComplete={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Выбрать папку проекта/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Выбрать файлы/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Сфотографировать/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/До подтверждения ничего не будет загружено/)).toBeInTheDocument();
+  });
+
   it("keeps nested paths and uses the selected project only after explicit submit", async () => {
     vi.mocked(api)
       .mockResolvedValueOnce({ status: "queued", processed: 0, tasks: 0, risks: 0, skipped: [], jobs: [{ job_id: 41, status: "queued" }] })

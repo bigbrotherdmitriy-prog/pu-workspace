@@ -395,7 +395,7 @@ export function App() {
     [online, setOnline] = useState(navigator.onLine),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
-  const [localUploadPurpose, setLocalUploadPurpose] = useState<"documents" | "finance">("documents");
+  const [localUploadPurpose, setLocalUploadPurpose] = useState<"documents" | "finance" | "project-folder">("documents");
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("oauth") === "connected" ? "Запуск проекта" : "Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -2634,6 +2634,7 @@ export function App() {
               projectId={projectId}
               storageAuthorized={googleState?.authorized === true}
               onConnectStorage={() => void connectGoogle()}
+              onUploadProjectFolder={() => { setLocalUploadPurpose("project-folder"); setMobileUploadOpen(true); }}
               openSection={(section, target) => {
                 if (target === "contacts") setMailView("companies");
                 setActive(section);
@@ -3071,15 +3072,23 @@ export function App() {
         key={projectId}
         open={mobileUploadOpen}
         projectId={projectId}
-        title={localUploadPurpose === "finance" ? "Загрузить счёт или акт" : "Добавить документы"}
+        title={localUploadPurpose === "finance" ? "Загрузить счёт или акт" : localUploadPurpose === "project-folder" ? "Разобрать папку проекта" : "Добавить важный документ"}
         description={localUploadPurpose === "finance"
           ? "После защищённой загрузки и OCR система предложит проверить реквизиты финансового документа."
-          : undefined}
+          : localUploadPurpose === "project-folder"
+            ? "Выберите папку проекта целиком. Система сохранит пути файлов, распознает содержимое и подготовит договоры, суммы, сроки, задачи и риски как предложения для проверки."
+            : "Добавьте отдельный важный документ. Для разбора всей папки проекта используйте раздел «Запуск проекта»."}
+        folderOnly={localUploadPurpose === "project-folder"}
         onClose={() => setMobileUploadOpen(false)}
         onComplete={(message, documentIds) => {
           setNotice(message);
           if (localUploadPurpose === "finance") {
             void reviewUploadedFinanceDocuments(documentIds);
+          } else if (localUploadPurpose === "project-folder") {
+            localStorage.setItem(`pu-project-start-mode:${projectId}`, "imported");
+            setNotice(`Папка проекта разобрана. ${message} Проверьте найденные документы и предложения.`);
+            void load();
+            setActive("Запуск проекта");
           } else {
             void load();
             setActive("Документы");
@@ -4119,7 +4128,7 @@ export function App() {
         </section>
       )}
       {(active === "Документы" || active === "Центр знаний") && (
-        <DocumentsModule collapsed={collapsed} knowledgeMode={active === "Центр знаний"} documents={visibleDocuments} selected={selectedDocument} onSelect={(item) => void openDocument(item)} projectId={projectId} onOcrComplete={() => { setNotice("Повторное OCR завершено. Реестр и связи обновлены."); void load(); }} />
+        <DocumentsModule collapsed={collapsed} knowledgeMode={active === "Центр знаний"} documents={visibleDocuments} selected={selectedDocument} onSelect={(item) => void openDocument(item)} projectId={projectId} onOcrComplete={() => { setNotice("Повторное OCR завершено. Реестр и связи обновлены."); void load(); }} onAddImportantDocument={() => { setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }} onOpenProjectFolder={() => setActive("Запуск проекта")} />
       )}
       <ContextualAssistant section={active} onAsk={openContextualAssistant} />
     </div>
