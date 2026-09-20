@@ -40,7 +40,13 @@ def test_project_launch_uses_loaded_core_state_without_provider_calls():
     assert "state.scheduleRows" in wizard
     assert "state.cashFlowRows" in wizard
     assert "state.confirmedContacts" in wizard
-    assert "google" not in wizard.casefold()
+    # Provider labels are allowed in the UX, but the launch wizard must not
+    # call Google/Drive provider endpoints directly.  It works through the
+    # loaded readiness state and callbacks owned by the application shell.
+    wizard_casefold = wizard.casefold()
+    assert "/storage/google" not in wizard_casefold
+    assert "/google_drive" not in wizard_casefold
+    assert "googleapis.com" not in wizard_casefold
     assert "launch-readiness" in hook
     assert "sourceReady" in hook
     assert "google" not in hook.casefold()

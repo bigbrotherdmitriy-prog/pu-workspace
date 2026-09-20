@@ -66,7 +66,7 @@ describe("project document isolation", () => {
     await screen.findByText(documentA.summary);
     switchToB();
     expect(screen.queryByText(documentA.summary)).not.toBeInTheDocument();
-    await screen.findByText("Документы не найдены");
+    await screen.findByText("Важных документов пока нет");
     expect(screen.queryByRole("heading", { name: documentA.name })).not.toBeInTheDocument();
     expect(sessionStorage.getItem("pu_active_project_id")).toBe("2");
     fireEvent.change(screen.getByRole("combobox", { name: "Текущий проект" }), { target: { value: "1" } });
@@ -79,7 +79,7 @@ describe("project document isolation", () => {
     detailResponse = () => pending;
     await openDocuments();
     switchToB();
-    await screen.findByText("Документы не найдены");
+    await screen.findByText("Важных документов пока нет");
     await act(async () => { resolve(documentA); await pending; });
     expect(screen.queryByText(documentA.summary)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: documentA.name })).not.toBeInTheDocument();

@@ -1,17 +1,23 @@
 import { useEffect, useState } from "react";
-import { Building2, Check, Circle, FileCheck2, FolderPlus, FolderSearch2, Import, Mail, Route, WalletCards } from "lucide-react";
+import { Building2, Check, Circle, FileCheck2, FolderPlus, FolderSearch2, HardDriveUpload, Import, Mail, Route, WalletCards } from "lucide-react";
 import { api } from "../../api/client";
 import "./project-launch.css";
 import { useProjectLaunchReadiness } from "./useProjectLaunchReadiness";
 
 type LaunchTarget = "source" | "contacts";
-type Props = { projectId: number; storageAuthorized: boolean; onConnectStorage: () => void; openSection: (section: string, target?: LaunchTarget) => void };
+type Props = {
+  projectId: number;
+  storageAuthorized: boolean;
+  onConnectStorage: () => void;
+  onUploadProjectFolder: () => void;
+  openSection: (section: string, target?: LaunchTarget) => void;
+};
 type Step = {
   title: string; description: string; section: string; target?: LaunchTarget;
   complete: boolean; status: string; nextAction: string; icon: typeof Circle;
 };
 
-export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectStorage, openSection }: Props) {
+export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectStorage, onUploadProjectFolder, openSection }: Props) {
   const { state, error, reload } = useProjectLaunchReadiness(projectId);
   const [selectedMode, setSelectedMode] = useState<"managed" | "imported" | null>(() => {
     const saved = localStorage.getItem(`pu-project-start-mode:${projectId}`);
@@ -49,6 +55,13 @@ export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectSto
     setPendingMode(null);
     openSection("Рабочий центр", "source");
   }
+  function uploadImportedWorkspace() {
+    localStorage.setItem(`pu-project-start-mode:${projectId}`, "imported");
+    localStorage.removeItem(`pu-project-pending-start-mode:${projectId}`);
+    setSelectedMode("imported");
+    setPendingMode(null);
+    onUploadProjectFolder();
+  }
   function confirmMode() {
     if (!storageAuthorized) {
       setCreateError("Открываем подключение рабочего хранилища. После авторизации вы автоматически вернётесь к этому шагу; выбранный сценарий сохранится.");
@@ -69,7 +82,7 @@ export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectSto
       <article className={`card launch-mode-card ${pendingMode === "imported" ? "selected" : ""}`}><Import /><span className="launch-eyebrow">СУЩЕСТВУЮЩИЙ ПРОЕКТ</span><h2>Подключить готовую папку</h2><p>Подключим выбранную папку, сохраним исходную иерархию, создадим безопасную копию и проанализируем все доступные файлы.</p><ul><li>Оригиналы не изменяются</li><li>Вложенные папки сохраняются</li><li>Все найденные документы анализируются</li></ul><button onClick={() => chooseMode("imported")}>{pendingMode === "imported" ? "Выбрано" : "Выбрать существующий проект"}</button></article>
       <article className={`card launch-mode-card managed ${pendingMode === "managed" ? "selected" : ""}`}><FolderPlus /><span className="launch-eyebrow">НОВЫЙ ПРОЕКТ</span><h2>Создать постоянную структуру</h2><p>Создадим постоянную папку проекта и стандартные разделы для договоров, ГПР, финансов, переписки, исполнения и архива.</p><ul><li>Единая структура с первого дня</li><li>Папка остаётся рабочей</li><li>Структура сохраняется при наполнении</li></ul><button onClick={() => chooseMode("managed")}>{pendingMode === "managed" ? "Выбрано" : "Выбрать новый проект"}</button></article>
     </div>{createError && <p className="launch-create-error">{createError}</p>}
-    {pendingMode && <section className="card launch-mode-confirm" role="status"><div><span className="launch-eyebrow">ПОДТВЕРЖДЕНИЕ</span><h3>{pendingMode === "imported" ? "Подключить существующую папку" : "Создать новый проект с постоянной структурой"}</h3><p>{pendingMode === "imported" ? "Далее вы выберете папку. PU Workspace создаст безопасную копию, сохранит дерево и запустит анализ файлов." : "PU Workspace создаст в подключённом хранилище постоянную папку и стандартное дерево разделов. Это станет основной рабочей структурой проекта."}</p>{!storageAuthorized && <p className="launch-storage-warning"><strong>Следующий шаг:</strong> подключить рабочее хранилище именно к этому проекту. После авторизации мастер откроется снова автоматически.</p>}</div><div className="launch-confirm-actions"><button className="secondary" onClick={() => { localStorage.removeItem(`pu-project-pending-start-mode:${projectId}`); setPendingMode(null); setCreateError(""); }}>Изменить выбор</button><button disabled={creating} onClick={confirmMode}>{creating ? "Создаю структуру…" : storageAuthorized ? "Подтвердить и продолжить" : "Подключить хранилище к проекту"}</button></div></section>}
+    {pendingMode && <section className="card launch-mode-confirm" role="status"><div><span className="launch-eyebrow">ПОДТВЕРЖДЕНИЕ</span><h3>{pendingMode === "imported" ? "Разобрать существующую папку проекта" : "Создать новый проект с постоянной структурой"}</h3><p>{pendingMode === "imported" ? "Выберите, где находится папка. Файлы будут проанализированы как входящие материалы, а найденные договоры, суммы, сроки и задачи появятся как предложения для проверки." : "PU Workspace создаст в подключённом хранилище постоянную папку и стандартное дерево разделов. Это станет основной рабочей структурой проекта."}</p>{pendingMode === "imported" && <p className="launch-storage-note">Папка с компьютера загружается один раз. Google Drive остаётся подключённым источником и позволяет повторять анализ актуального состояния.</p>}{pendingMode === "managed" && !storageAuthorized && <p className="launch-storage-warning"><strong>Следующий шаг:</strong> подключить рабочее хранилище именно к этому проекту. После авторизации мастер откроется снова автоматически.</p>}</div><div className="launch-confirm-actions"><button className="secondary" onClick={() => { localStorage.removeItem(`pu-project-pending-start-mode:${projectId}`); setPendingMode(null); setCreateError(""); }}>Изменить выбор</button>{pendingMode === "imported" ? <><button className="secondary" onClick={confirmMode}>{storageAuthorized ? "Выбрать в Google Drive" : "Подключить Google Drive"}</button><button onClick={uploadImportedWorkspace}><HardDriveUpload /> Загрузить папку с компьютера</button></> : <button disabled={creating} onClick={confirmMode}>{creating ? "Создаю структуру…" : storageAuthorized ? "Подтвердить и продолжить" : "Подключить хранилище к проекту"}</button>}</div></section>}
   </section>;
   const financeNextAction = !state.scheduleRows
     ? "Создать или импортировать ГПР для договора"
@@ -91,7 +104,7 @@ export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectSto
   return <section className="project-launch-page">
     <div className="launch-hero card"><div><span className="launch-eyebrow">МАСТЕР ЗАПУСКА · {mode === "managed" ? "НОВЫЙ ПРОЕКТ" : "СУЩЕСТВУЮЩИЙ АРХИВ"}</span><h2>{state.projectName || "Выбранный проект"}</h2><p>{mode === "managed" ? "Постоянная структура проекта → договоры → ГПР → ДДС → ежедневная работа." : "Исходная папка → безопасная копия → анализ → договоры → ГПР и ДДС."}</p></div><div className="launch-progress" aria-label={`Готовность проекта ${progress}%`}><strong>{progress}%</strong><span>{completed} из {steps.length} этапов</span></div></div>
     <div className="launch-progress-bar"><span style={{ width: `${progress}%` }} /></div>
-    <div className="launch-steps">{steps.map((step, index) => { const Icon = step.icon; return <article className={`launch-step card ${step.complete ? "complete" : "pending"}`} key={step.title}><div className="launch-step-number">{step.complete ? <Check /> : index + 1}</div><div className="launch-step-icon"><Icon /></div><div className="launch-step-copy"><h3>{step.title}</h3><p>{step.description}</p><small>{step.complete ? "Готово: " : "Состояние: "}{step.status}</small>{!step.complete && <strong className="launch-step-action">Дальше: {step.nextAction}</strong>}</div><button onClick={() => openSection(step.section, step.target)}>{step.complete ? "Проверить" : step.nextAction}</button></article> })}</div>
+    <div className="launch-steps">{steps.map((step, index) => { const Icon = step.icon; const folderStep = step.title === "Проект и рабочая папка" && mode === "imported"; return <article className={`launch-step card ${step.complete ? "complete" : "pending"}`} key={step.title}><div className="launch-step-number">{step.complete ? <Check /> : index + 1}</div><div className="launch-step-icon"><Icon /></div><div className="launch-step-copy"><h3>{step.title}</h3><p>{step.description}</p><small>{step.complete ? "Готово: " : "Состояние: "}{step.status}</small>{!step.complete && <strong className="launch-step-action">Дальше: {step.nextAction}</strong>}</div>{folderStep && !step.complete ? <div className="launch-step-buttons"><button onClick={onUploadProjectFolder}><HardDriveUpload /> С компьютера</button><button className="secondary" onClick={() => openSection(step.section, step.target)}><FolderSearch2 /> Google Drive</button></div> : <button onClick={() => openSection(step.section, step.target)}>{step.complete ? "Проверить" : step.nextAction}</button>}</article> })}</div>
     <section className="launch-next card"><Route /><div><h3>{next ? `Сейчас: ${next.nextAction}` : "Проект готов к ежедневной работе"}</h3><p>{next ? `${next.title}. ${next.description}` : `Подключено входящих писем: ${state.inboxMessages}. Контроль задач и исходящих ответов работает через подтверждения пользователя.`}</p></div>{next && <button onClick={() => openSection(next.section, next.target)}>Продолжить запуск</button>}</section>
   </section>;
 }
