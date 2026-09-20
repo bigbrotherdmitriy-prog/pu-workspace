@@ -34,6 +34,7 @@ export class StorageApi {
   evidenceReplies = new Map<string, Reply>();
   aiPolicies = new Map<number, Record<string, unknown>>();
   meetings: Record<string, unknown>[] = [];
+  attentionItems: Record<string, unknown>[] = [];
   resources: Record<string, unknown>[] = [];
   meetingProposals = new Map<number, Record<string, unknown>[]>();
   meetingBindingReply?: Reply;
@@ -322,6 +323,9 @@ export class StorageApi {
         cash_gap: 0, cash_gap_date: null, delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 0, unlinked_invoices: 0,
       } },
       "/management/obligations": { obligations: [] }, "/management/meetings": { meetings: this.meetings }, "/management/notifications": { notifications: [] },
+      "/management/notification-policy": { record_version: 1, timezone: "Europe/Moscow", deadline_local_time: "09:00:00", quiet_start: "22:00:00", quiet_end: "07:00:00", escalation_delays: [0, 60], channels: ["in_app"], enabled: true, digest_enabled: false, digest_cadence: "daily", digest_local_time: "09:00:00" },
+      "/management/digests": { digests: [], next_cursor: null, external_actions_created: false },
+      "/management/attention": { items: this.attentionItems, count: this.attentionItems.length, next_cursor: null },
       "/management/resources": { resources: this.resources },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },

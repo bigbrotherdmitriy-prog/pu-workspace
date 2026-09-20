@@ -26,9 +26,25 @@ export type NotificationPolicy = {
   digest_local_time: string;
 };
 
+export type ManagementDigest = {
+  id: number;
+  local_date: string;
+  item_count: number;
+  item_refs: Array<{
+    entity_type: "task" | "obligation" | "risk" | "decision";
+    entity_id: number;
+    record_version: number;
+    status?: string;
+    proposal_origin?: { evidence_id?: string; meeting_id?: number };
+  }>;
+  requested_channels: string[];
+  created_at: string;
+};
+
 type Props = {
   collapsed: boolean;
   notifications: NotificationItem[];
+  digests: ManagementDigest[];
   onRefresh: () => void;
   onMarkRead: (notification: NotificationItem) => void;
   policy: NotificationPolicy | null;
@@ -38,7 +54,7 @@ type Props = {
 };
 
 export function NotificationsModule({
-  collapsed, notifications, onRefresh, onMarkRead, policy, canManagePolicy,
+  collapsed, notifications, digests, onRefresh, onMarkRead, policy, canManagePolicy,
   onPolicyChange, onSavePolicy,
 }: Props) {
   return (
@@ -106,6 +122,18 @@ export function NotificationsModule({
             {canManagePolicy && <button onClick={onSavePolicy}>Сохранить настройки сводки</button>}
           </section>
         )}
+        {!!digests.length && <section className="card digest-history" aria-label="Готовые управленческие сводки">
+          <h3>Готовые сводки</h3>
+          {digests.map((digest) => <article key={digest.id}>
+            <strong>{new Date(`${digest.local_date}T00:00:00`).toLocaleDateString("ru-RU")} · {digest.item_count}</strong>
+            <ul>
+              {digest.item_refs.map((item) => <li key={`${item.entity_type}-${item.entity_id}`}>
+                {item.entity_type} #{item.entity_id}{item.status ? ` · ${item.status}` : ""}
+                {item.proposal_origin?.evidence_id ? " · основание закреплено" : ""}
+              </li>)}
+            </ul>
+          </article>)}
+        </section>}
         <section className="card notification-list">
           {notifications.map((item) => (
             <article className={item.is_read ? "read" : ""} key={item.id}>

@@ -20,7 +20,7 @@ import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
 import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
 import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
-import { NotificationsModule, type NotificationItem, type NotificationPolicy } from "./modules/notifications/NotificationsModule";
+import { NotificationsModule, type ManagementDigest, type NotificationItem, type NotificationPolicy } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
@@ -479,6 +479,7 @@ export function App() {
     [meetingAuthority, setMeetingAuthority] = useState<Record<number, MeetingAuthorityState>>({}),
     [busyMeetingAuthorityId, setBusyMeetingAuthorityId] = useState(0),
     [notifications, setNotifications] = useState<NotificationRow[]>([]),
+    [managementDigests, setManagementDigests] = useState<ManagementDigest[]>([]),
     [notificationPolicy, setNotificationPolicy] = useState<NotificationPolicy | null>(null),
     [newMeetingTitle, setNewMeetingTitle] = useState(""),
     [newMeetingDate, setNewMeetingDate] = useState(""),
@@ -2107,12 +2108,13 @@ export function App() {
   async function loadManagement() {
     if (!projectId) return;
     try {
-      const [o, m, n, r, p] = await Promise.all([
+      const [o, m, n, r, p, d] = await Promise.all([
         api(`/management/obligations?project_id=${projectId}&limit=200`),
         api(`/management/meetings?project_id=${projectId}&limit=200`),
         api(`/management/notifications?project_id=${projectId}&limit=200`),
         api(`/management/resources?project_id=${projectId}&include_inactive=true&limit=500`),
         api(`/management/notification-policy?project_id=${projectId}`).catch(() => null),
+        api(`/management/digests?project_id=${projectId}&limit=30`).catch(() => ({ digests: [] })),
       ]);
       setObligations(o.obligations);
       setMeetings(m.meetings);
@@ -2122,6 +2124,7 @@ export function App() {
         .filter((item) => item.status === "completed")
         .map((item) => loadMeetingAuthority(item)));
       setNotificationPolicy(p);
+      setManagementDigests(d.digests || []);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -3235,6 +3238,7 @@ export function App() {
         <NotificationsModule
           collapsed={collapsed}
           notifications={notifications}
+          digests={managementDigests}
           onRefresh={() => void refreshNotifications()}
           onMarkRead={(item) => void markNotification(item)}
           policy={notificationPolicy}
