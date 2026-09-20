@@ -31,6 +31,14 @@ export type LocalUploadSummary = {
 const POLL_INTERVAL_MS = 1000;
 const POLL_LIMIT = 300;
 
+export function localUploadProgressMessage(job: Pick<LocalUploadJob, "job_id" | "status" | "progress">, position = 1, total = 1): string {
+  const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
+  const phase = job.status === "queued" || job.status === "retrying"
+    ? "Ожидает обработчика"
+    : job.status === "completed" ? "OCR завершён" : "OCR и анализ выполняются";
+  return `${phase}: файл ${position} из ${total}, ${progress}% · задача №${job.job_id}`;
+}
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -47,10 +55,17 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   webp: "image/webp",
 };
 
+const SUPPORTED_LOCAL_UPLOAD_MIME_TYPES = new Set(Object.values(MIME_BY_EXTENSION));
+
 export function localUploadMimeType(file: File): string {
-  if (file.type) return file.type.toLowerCase();
+  const browserMimeType = file.type.toLowerCase();
+  if (SUPPORTED_LOCAL_UPLOAD_MIME_TYPES.has(browserMimeType)) return browserMimeType;
   const extension = file.name.toLowerCase().split(".").pop() || "";
   return MIME_BY_EXTENSION[extension] || "application/octet-stream";
+}
+
+export function isSupportedLocalUploadFile(file: File): boolean {
+  return SUPPORTED_LOCAL_UPLOAD_MIME_TYPES.has(localUploadMimeType(file));
 }
 
 async function waitForJob(
@@ -61,8 +76,8 @@ async function waitForJob(
   total = 1,
 ): Promise<LocalUploadJob> {
   for (let attempt = 0; attempt < POLL_LIMIT; attempt += 1) {
-    onProgress?.(`Анализ ${position} из ${total}`);
     const job = await api<LocalUploadJob>(`/local-upload/projects/${projectId}/jobs/${jobId}`);
+    onProgress?.(localUploadProgressMessage(job, position, total));
     if (job.status === "completed") return job;
     if (["failed", "dead_letter", "cancelled"].includes(job.status)) {
       throw new Error(job.error || `Обработка файла завершилась со статусом ${job.status}`);

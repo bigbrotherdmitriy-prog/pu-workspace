@@ -53,6 +53,34 @@ describe("local document upload", () => {
     expect(screen.getByText("invoice.pdf")).toBeInTheDocument();
   });
 
+  it("skips unsupported folder artifacts without blocking supported invoices", async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({ status: "queued", jobs: [{ job_id: 61, status: "queued" }] })
+      .mockResolvedValueOnce({
+        job_id: 61, status: "completed", progress: 100, error: null,
+        result: { processed: 1, skipped: 0, tasks: 0, risks: 0, decisions: 0, drafts: 0, documents: [29] },
+      });
+    const { input, onComplete } = setup();
+    const invoice = new File(["pdf"], "invoice.pdf", { type: "application/pdf" });
+    const systemFile = new File(["system"], "desktop.ini", { type: "application/octet-stream" });
+    fireEvent.change(input, { target: { files: [invoice, systemFile] } });
+
+    expect(screen.getByText(/Пропущено неподдерживаемых файлов: 1 \(desktop.ini\)/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Удалить desktop.ini" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    const request = JSON.parse(vi.mocked(api).mock.calls[0][1]!.body as string);
+    expect(request.files).toHaveLength(1);
+    expect(request.files[0]).toMatchObject({ path: "invoice.pdf", mime_type: "application/pdf" });
+  });
+
+  it("explains when a folder contains no supported documents", () => {
+    const { input } = setup();
+    fireEvent.change(input, { target: { files: [new File(["system"], "desktop.ini")] } });
+    expect(screen.getByText(/Пропущено неподдерживаемых файлов: 1 \(desktop.ini\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить и проанализировать (0)" })).toBeDisabled();
+  });
+
   it("rejects more than 50 files instead of silently truncating", () => {
     const { input } = setup();
     fireEvent.change(input, { target: { files: Array.from({ length: 51 }, (_, i) => new File(["x"], `${i}.txt`)) } });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { FileSearch, Network, X } from "lucide-react";
 
 export type BulkContractProposal = {
@@ -74,7 +75,7 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
   return <section className="card contract-bulk-launch">
     <div><FileSearch /><span><strong>Массовый разбор договоров</strong><small>Выберите файлы, проверьте распознанные роли и импортируйте готовое дерево.</small></span></div>
     <button onClick={() => setOpen(true)}>Выбрать все договоры</button>
-    {open && <div className="contract-bulk-backdrop" role="dialog" aria-modal="true" aria-label="Массовый разбор договоров">
+    {open && createPortal(<div className="contract-bulk-backdrop" role="dialog" aria-modal="true" aria-label="Массовый разбор договоров">
       <div className="contract-bulk-dialog">
         <header><div><span className="eyebrow">МАССОВЫЙ МАСТЕР</span><h2>Файлы → проверка → дерево договоров</h2><p>Система ничего не привяжет до вашего подтверждения.</p></div><button className="icon-button" aria-label="Закрыть" onClick={() => setOpen(false)}><X /></button></header>
         {!proposals.length ? <>
@@ -103,6 +104,6 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
         </>}
         {error && <p className="error">{error}</p>}
       </div>
-    </div>}
+    </div>, document.body)}
   </section>;
 }

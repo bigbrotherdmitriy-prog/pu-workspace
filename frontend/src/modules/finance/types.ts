@@ -22,6 +22,7 @@ export type FinanceOverview = {
     status: string;
     note?: string;
     source_format?: string;
+    analysis_warning?: string;
   }[];
   schedule: {
     id: number;

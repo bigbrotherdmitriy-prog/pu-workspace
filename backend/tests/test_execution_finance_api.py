@@ -1,5 +1,7 @@
+import hashlib
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 from app.api.execution_finance import (
     BaselineClone,
@@ -7,6 +9,7 @@ from app.api.execution_finance import (
     BudgetCreate,
     CashFlowCreate,
     InvoiceProposalCreate,
+    MppImportRequest,
     PaymentConfirmation,
     ScheduleItemCreate,
     ScheduleBulkUpdate,
@@ -21,6 +24,8 @@ from app.api.execution_finance import (
     _start_from_finish,
     bulk_update_schedule,
     clone_baseline,
+    import_mpp,
+    overview,
     router,
 )
 from app.models.execution_finance import ScheduleBaseline, ScheduleItem
@@ -171,6 +176,69 @@ def test_bulk_date_shift_reschedules_successors(db_session, user_factory):
 def test_schedule_calendar_day_boundaries_are_inclusive():
     assert _finish_from_start(date(2026, 9, 1), 3) == date(2026, 9, 3)
     assert _start_from_finish(date(2026, 9, 10), 7) == date(2026, 9, 4)
+
+
+def test_overview_keeps_a_corrupt_import_visible_for_repair(db_session, user_factory):
+    user = user_factory(is_admin=True)
+    baseline = ScheduleBaseline(
+        project_id=91, created_by_user_id=user.id, name="Старый импорт MPP", version=1,
+        status="draft", source_format="mpp", source_sha256="a" * 64,
+    )
+    db_session.add(baseline)
+    db_session.flush()
+    task = ScheduleItem(
+        project_id=91, baseline_id=baseline.id, title="Повреждённая связь", sort_order=1,
+        duration_days=1,
+    )
+    db_session.add(task)
+    db_session.flush()
+    task.predecessor_ids = f"{task.id}FS"
+    db_session.flush()
+
+    result = overview(91, db_session, user)
+
+    assert result["baselines"][0]["analysis_warning"] == "Зависимости образуют цикл"
+    assert result["schedule"][0]["id"] == task.id
+    assert result["schedule"][0]["is_critical"] is False
+
+
+def test_reimport_repairs_legacy_self_dependencies_in_place(db_session, user_factory, monkeypatch):
+    user = user_factory(is_admin=True)
+    digest = hashlib.sha256(b"MPP").hexdigest()
+    baseline = ScheduleBaseline(
+        project_id=92, created_by_user_id=user.id, name="plan.mpp", version=1,
+        status="draft", source_format="mpp", source_sha256=digest,
+    )
+    db_session.add(baseline)
+    db_session.flush()
+    first = ScheduleItem(
+        project_id=92, baseline_id=baseline.id, title="Подготовка", sort_order=1,
+        duration_days=1, source_excerpt="MPP task UID 10",
+    )
+    second = ScheduleItem(
+        project_id=92, baseline_id=baseline.id, title="Монтаж", sort_order=2,
+        duration_days=1, source_excerpt="MPP task UID 20",
+    )
+    db_session.add_all([first, second])
+    db_session.flush()
+    second.predecessor_ids = f"{second.id}FS"
+    db_session.flush()
+    rows = [
+        SimpleNamespace(external_uid="10", parent_external_uid=None, predecessors=[]),
+        SimpleNamespace(external_uid="20", parent_external_uid=None,
+                        predecessors=[{"external_uid": "10", "type": "FS", "lag": "0.0d"}]),
+    ]
+    monkeypatch.setattr("app.api.execution_finance._mpp_tasks", lambda _data: rows)
+
+    result = import_mpp(
+        MppImportRequest(project_id=92, filename="plan.mpp", content_base64="TVBQ"),
+        db_session, user,
+    )
+
+    assert result["duplicate"] is True
+    assert result["repaired"] is True
+    assert result["baseline_id"] == baseline.id
+    assert second.predecessor_ids == f"{first.id}FS"
 
 
 def test_linked_budget_totals_are_idempotent_and_ignore_cancelled_entries():
