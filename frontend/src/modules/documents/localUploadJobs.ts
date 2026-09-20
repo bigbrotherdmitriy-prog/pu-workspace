@@ -47,10 +47,17 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   webp: "image/webp",
 };
 
+const SUPPORTED_LOCAL_UPLOAD_MIME_TYPES = new Set(Object.values(MIME_BY_EXTENSION));
+
 export function localUploadMimeType(file: File): string {
-  if (file.type) return file.type.toLowerCase();
+  const browserMimeType = file.type.toLowerCase();
+  if (SUPPORTED_LOCAL_UPLOAD_MIME_TYPES.has(browserMimeType)) return browserMimeType;
   const extension = file.name.toLowerCase().split(".").pop() || "";
   return MIME_BY_EXTENSION[extension] || "application/octet-stream";
+}
+
+export function isSupportedLocalUploadFile(file: File): boolean {
+  return SUPPORTED_LOCAL_UPLOAD_MIME_TYPES.has(localUploadMimeType(file));
 }
 
 async function waitForJob(
