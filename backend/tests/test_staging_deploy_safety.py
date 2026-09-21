@@ -323,6 +323,19 @@ def test_staging_workflow_is_opt_in_serial_and_does_not_target_production():
     assert "deploy-production.sh" not in workflow
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX shell")
+@pytest.mark.parametrize("host", ["72.56.108.162", "37.252.23.204", "puworkspace.ru", "www.puworkspace.ru", "pu-workspace.duckdns.org"])
+def test_staging_shell_rejects_production_url_before_any_host_mutation(host):
+    result = subprocess.run(
+        ["sh", str(ROOT / "scripts" / "deploy-staging.sh"),
+         "/srv/pu-workspace-staging", "a" * 40, "puw-staging", "3010",
+         f"https://{host}", "/nonexistent-staging-test-archive"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "production public URL is forbidden" in result.stderr
+
+
 def test_staging_deploy_script_has_lock_backup_rollback_and_public_smoke():
     deploy = (ROOT / "scripts" / "deploy-staging.sh").read_text(encoding="utf-8")
     for marker in [
