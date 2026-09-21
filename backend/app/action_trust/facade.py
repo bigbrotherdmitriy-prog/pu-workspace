@@ -12,6 +12,7 @@ from app.core.v54_interfaces import AuditAppend, DispatchBinding, RequestScope, 
 from app.core.v54_refs import ObjectRef, VersionPin, require_same_tenant
 from app.models.ai_secretary import Message
 from app.models.job import BackgroundJob
+from app.models.management import Notification
 from app.models.task import Task
 from app.models.v54_pilot import (
     ActionApproval, ActionPolicy, ActionReceipt, ActionRevision, DeadlineClaim,
@@ -31,7 +32,8 @@ class TrustFacade:
             .execution_options(populate_existing=True))
         if policy is None:
             raise TrustConflict("policy_unavailable")
-        if live and policy.rules.get("schema_version") == "v54.autonomy-policy.1":
+        if live and policy.rules.get("schema_version") in {
+                "v54.autonomy-policy.1", "v54.autonomy-policy.2"}:
             if self.autonomy is None:
                 raise TrustConflict("policy_unavailable")
             try:
@@ -41,9 +43,10 @@ class TrustFacade:
             if (current is None or view is None or current.id != policy.id
                     or current.revision != policy.revision or view.policy != e.policy
                     or view.policy_sha256 != e.policy_sha256
-                    or (e.autonomy == "AUTO" and (
-                        e.action_type != "task.internal.create" or not view.enabled
-                        or view.create_internal_task != "AUTO"))):
+                    or (e.autonomy == "AUTO" and (not view.enabled or {
+                        "task.internal.create": view.create_internal_task,
+                        "notification.internal.create": view.create_internal_notification,
+                    }.get(e.action_type) != "AUTO"))):
                 raise TrustConflict("policy_unavailable")
         elif live:
             db.refresh(policy, with_for_update=True)
@@ -96,7 +99,8 @@ class TrustFacade:
     def _server_policy(self, db, scope, row, envelope, authorization):
         from app.autonomy_policy import AutonomyDecision, candidate_binding
         if (self.autonomy is None or envelope.autonomy != "AUTO"
-                or envelope.action_type != "task.internal.create"):
+                or envelope.action_type not in {
+                    "task.internal.create", "notification.internal.create"}):
             raise TrustConflict("server_policy_not_applicable")
         try:
             candidate = self._candidate(db, scope, row, envelope)
@@ -467,17 +471,29 @@ class TrustFacade:
         if db.get_transaction() is not transaction or not transaction.is_active:
             raise TrustConflict("task_mutation_transaction_violation")
         require_same_tenant(scope.tenant, target)
-        if target.type != "task" or (e.action_type == "task.internal.cancel" and target != e.target.ref):
-            raise TrustConflict("mutation_result_invalid")
-        task = db.get(Task, int(target.id.value))
-        if task is None or task.project_id != obj.project_id:
-            raise TrustConflict("mutation_result_invalid")
+        if e.action_type == "notification.internal.create":
+            if target.type != "notification":
+                raise TrustConflict("mutation_result_invalid")
+            notification = db.get(Notification, int(target.id.value))
+            if (notification is None or notification.project_id != obj.project_id
+                    or notification.user_id != int(e.payload.recipient_ref.id.value)
+                    or notification.kind != "auto_task_due_soon"
+                    or notification.entity_type != "task"
+                    or notification.entity_id != int(e.target.ref.id.value)):
+                raise TrustConflict("mutation_result_invalid")
+        else:
+            if target.type != "task" or (e.action_type == "task.internal.cancel" and target != e.target.ref):
+                raise TrustConflict("mutation_result_invalid")
+            task = db.get(Task, int(target.id.value))
+            if task is None or task.project_id != obj.project_id:
+                raise TrustConflict("mutation_result_invalid")
         if e.action_type == "task.internal.create":
             if (task.status != "assigned" or task.title != e.payload.title
                     or task.due_date is None or task.due_date.isoformat() != e.payload.due_date
                     or task.assignee_user_id != int(e.payload.assignee_ref.id.value)):
                 raise TrustConflict("mutation_result_invalid")
-        elif task.status != "cancelled" or task.record_version != e.target.value + 1:
+        elif (e.action_type == "task.internal.cancel"
+              and (task.status != "cancelled" or task.record_version != e.target.value + 1)):
             raise TrustConflict("mutation_result_invalid")
         # Mutation must not commit/rollback/close; caller aborts the whole T2 on
         # any failure. Recheck time/lease after DB-only work, before receipt flush.

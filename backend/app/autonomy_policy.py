@@ -25,10 +25,13 @@ from app.models.v54_pilot import ActionPolicy
 
 
 POLICY_SCOPE = "v54.autonomy.organization"
-POLICY_SCHEMA = "v54.autonomy-policy.1"
+POLICY_SCHEMA_V1 = "v54.autonomy-policy.1"
+POLICY_SCHEMA = "v54.autonomy-policy.2"
 CREATE_INTERNAL_TASK = "task.internal.create"
+CREATE_INTERNAL_NOTIFICATION = "notification.internal.create"
 SEND_EXTERNAL_MESSAGE = "message.external.send"
-_AUTO_EFFECTS = ("internal_task.create", "task_history.append")
+_TASK_AUTO_EFFECTS = ("internal_task.create", "task_history.append")
+_NOTIFICATION_AUTO_EFFECTS = ("management_history.append", "notification.create")
 _CONFIRM_PREFIXES = ("message.external.", "email.", "finance.", "legal.", "destructive.", "access.")
 
 
@@ -50,6 +53,7 @@ class PolicyAssignmentCommand(StrictDTO):
     expected_policy_hash: StrictStr | None = None
     expected_authority_epoch: StrictInt
     create_internal_task: Literal["AUTO", "CONFIRM"]
+    create_internal_notification: Literal["AUTO", "CONFIRM"] = "CONFIRM"
     send_external_message: Literal["CONFIRM"] = "CONFIRM"
     valid_until: AwareDatetime
 
@@ -120,6 +124,7 @@ class AutonomyPolicyView(StrictDTO):
     policy_sha256: StrictStr
     enabled: StrictBool
     create_internal_task: Literal["AUTO", "CONFIRM"]
+    create_internal_notification: Literal["AUTO", "CONFIRM"]
     send_external_message: Literal["CONFIRM"]
     authority_epoch: StrictInt
     changed_by: ObjectRef
@@ -155,15 +160,23 @@ def validate_stored_rules(rules: dict) -> dict:
     }
     if type(rules) is not dict or set(rules) != required:
         _deny()
-    if (rules["schema_version"] != POLICY_SCHEMA or rules["policy_kind"] != "autonomy"
+    schema = rules.get("schema_version")
+    expected_modes = ({CREATE_INTERNAL_TASK, SEND_EXTERNAL_MESSAGE}
+                      if schema == POLICY_SCHEMA_V1 else
+                      {CREATE_INTERNAL_TASK, CREATE_INTERNAL_NOTIFICATION, SEND_EXTERNAL_MESSAGE})
+    if (schema not in {POLICY_SCHEMA_V1, POLICY_SCHEMA} or rules["policy_kind"] != "autonomy"
             or rules["scope"] != POLICY_SCOPE or type(rules["organization_id"]) is not int
             or type(rules["revision"]) is not int or rules["revision"] <= 0
             or type(rules["enabled"]) is not bool
             or rules["default_modes"] != {"advisory": "ASSIST", "execute": "CONFIRM"}
-            or set(rules["action_modes"]) != {CREATE_INTERNAL_TASK, SEND_EXTERNAL_MESSAGE}
+            or set(rules["action_modes"]) != expected_modes
             or rules["action_modes"].get(CREATE_INTERNAL_TASK) not in {"AUTO", "CONFIRM"}
+            or (schema == POLICY_SCHEMA
+                and rules["action_modes"].get(CREATE_INTERNAL_NOTIFICATION) not in {"AUTO", "CONFIRM"})
             or rules["action_modes"].get(SEND_EXTERNAL_MESSAGE) != "CONFIRM"
             or (not rules["enabled"] and rules["action_modes"].get(CREATE_INTERNAL_TASK) != "CONFIRM")
+            or (not rules["enabled"] and schema == POLICY_SCHEMA
+                and rules["action_modes"].get(CREATE_INTERNAL_NOTIFICATION) != "CONFIRM")
             or type(rules["authority_epoch"]) is not int or rules["authority_epoch"] <= 0):
         _deny()
     policy_ref = ObjectRef.model_validate(rules["policy_ref"])
@@ -283,12 +296,13 @@ class AutonomyPolicyService:
         return AutonomyPolicyView(
             policy=pin, policy_sha256=row.policy_hash, enabled=rules["enabled"],
             create_internal_task=rules["action_modes"][CREATE_INTERNAL_TASK],
+            create_internal_notification=rules["action_modes"].get(CREATE_INTERNAL_NOTIFICATION, "CONFIRM"),
             send_external_message="CONFIRM", authority_epoch=rules["authority_epoch"],
             changed_by=changed_by, changed_at=changed_at, valid_until=effective_valid_until,
         )
 
     def _rules(self, *, scope, policy_ref, revision_number, owner, enabled,
-               create_mode, valid_until, now):
+               create_mode, notification_mode, valid_until, now):
         return {
             "schema_version": POLICY_SCHEMA,
             "policy_kind": "autonomy",
@@ -299,7 +313,11 @@ class AutonomyPolicyService:
             "revision": revision_number,
             "enabled": enabled,
             "default_modes": {"advisory": "ASSIST", "execute": "CONFIRM"},
-            "action_modes": {CREATE_INTERNAL_TASK: create_mode, SEND_EXTERNAL_MESSAGE: "CONFIRM"},
+            "action_modes": {
+                CREATE_INTERNAL_TASK: create_mode,
+                CREATE_INTERNAL_NOTIFICATION: notification_mode,
+                SEND_EXTERNAL_MESSAGE: "CONFIRM",
+            },
             "changed_by": scope.actor.model_dump(mode="json"),
             "authority_epoch": owner.authority_epoch,
             "changed_at": now.isoformat(),
@@ -343,6 +361,7 @@ class AutonomyPolicyService:
         rules = self._rules(
             scope=scope, policy_ref=policy_ref, revision_number=next_revision,
             owner=owner, enabled=True, create_mode=command.create_internal_task,
+            notification_mode=command.create_internal_notification,
             valid_until=valid_until, now=now,
         )
         row = ActionPolicy(
@@ -373,6 +392,7 @@ class AutonomyPolicyService:
         rules = self._rules(
             scope=scope, policy_ref=live.policy.ref, revision_number=current.revision + 1,
             owner=owner, enabled=False, create_mode="CONFIRM", valid_until=valid_until, now=now,
+            notification_mode="CONFIRM",
         )
         row = ActionPolicy(
             id=current.id, revision=current.revision + 1, organization_id=current.organization_id,
@@ -402,9 +422,19 @@ class AutonomyPolicyService:
             mode, reason = "ASSIST", "advisory_stage"
         elif candidate.action_type == CREATE_INTERNAL_TASK:
             safe = (candidate.risk == "LOW" and candidate.reversal == "COMPENSATABLE"
-                    and candidate.effects == _AUTO_EFFECTS)
+                    and candidate.effects == _TASK_AUTO_EFFECTS)
             if safe and view and view.enabled and view.create_internal_task == "AUTO":
                 mode, reason = "AUTO", "explicit_low_risk_policy"
+            else:
+                mode, reason = "CONFIRM", "human_confirmation_required"
+        elif candidate.action_type == CREATE_INTERNAL_NOTIFICATION:
+            safe = (candidate.risk == "LOW" and candidate.reversal == "COMPENSATABLE"
+                    and candidate.effects == _NOTIFICATION_AUTO_EFFECTS
+                    and candidate.confidence_basis_points is not None
+                    and candidate.confidence_basis_points >= 9_500
+                    and candidate.verbatim_evidence is True)
+            if safe and view and view.enabled and view.create_internal_notification == "AUTO":
+                mode, reason = "AUTO", "explicit_low_risk_notification_policy"
             else:
                 mode, reason = "CONFIRM", "human_confirmation_required"
         elif candidate.action_type == SEND_EXTERNAL_MESSAGE or candidate.action_type.startswith(_CONFIRM_PREFIXES):
@@ -412,12 +442,15 @@ class AutonomyPolicyService:
         else:
             mode, reason = "DENY", "unknown_capability"
         # Defense in depth: no malformed/high-risk candidate can become AUTO.
-        if mode == "AUTO" and (candidate.risk != "LOW" or candidate.action_type != CREATE_INTERNAL_TASK):
+        if mode == "AUTO" and (candidate.risk != "LOW" or candidate.action_type not in {
+                CREATE_INTERNAL_TASK, CREATE_INTERNAL_NOTIFICATION}):
             mode, reason = "CONFIRM", "human_confirmation_required"
         default_until = now + timedelta(days=366)
         valid_until = min(view.valid_until, requester.valid_until, default_until) if view else min(
             requester.valid_until, default_until
         )
+        if candidate.action_type == CREATE_INTERNAL_NOTIFICATION:
+            valid_until = min(valid_until, now + timedelta(hours=6))
         return AutonomyDecision(
             mode=mode, reason=reason, policy=view.policy if view else None,
             policy_sha256=view.policy_sha256 if view else None,

@@ -2,7 +2,7 @@
 from sqlalchemy import func, select
 
 from app.action_trust.guards import TrustConflict, reference
-from app.core.v54_dto import CreateTaskPayload
+from app.core.v54_dto import CreateInternalNotificationPayload, CreateTaskPayload
 from app.core.v54_refs import ObjectRef, VersionPin
 from app.models.ai_secretary import Message
 from app.models.task import Task
@@ -73,6 +73,9 @@ def live_pins(db, *, guards, scope, envelope, action, operation):
         if e.payload.due_date != claim.due_date.isoformat() or e.payload.timezone != claim.timezone:
             raise TrustConflict("claim_payload_mismatch")
         guards.allow(db, scope, "task.assign", e.payload.assignee_ref)
+    elif isinstance(e.payload, CreateInternalNotificationPayload):
+        if e.payload.due_date != claim.due_date.isoformat():
+            raise TrustConflict("claim_payload_mismatch")
     for pin in (e.claim, *e.evidence, *e.source_versions):
         result = guards.resolve(db, scope, pin, operation)
         if pin.ref.type in {"evidence", "deadline_claim"} and result.verification != "verified":

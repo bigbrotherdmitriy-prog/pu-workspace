@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, model_validator
 
 INT_TYPES = frozenset({"organization", "user", "project", "contract", "message",
-                       "task", "response_draft", "background_job"})
+                       "task", "notification", "response_draft", "background_job"})
 UUID_TYPES = frozenset({"connection_identity", "mail_connection", "source", "source_version",
                         "evidence", "deadline_claim", "context_relation", "action", "policy",
                         "approval", "receipt", "ledger_event", "mailbox_origin_decision",
