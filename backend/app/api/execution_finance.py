@@ -25,7 +25,7 @@ from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
-from app.invoice_extraction import extract_invoice_fields
+from app.invoice_extraction import InvoiceFields, extract_invoice_fields
 from app.structured_import import parse_structured_rows
 from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
 from app.schedule_import.mspdi import build_mspdi
@@ -438,6 +438,29 @@ def _invoice_proposal_payload(proposal: InvoiceExtractionProposal) -> dict:
         "created_budget_line_id": proposal.created_budget_line_id,
         "requires_confirmation": proposal.status == "proposed",
     }
+
+
+def _apply_invoice_extraction_fields(
+    proposal: InvoiceExtractionProposal,
+    fields: InvoiceFields,
+    categories: list[CostCategory],
+) -> None:
+    category_by_name = {row.name.casefold(): row for row in categories}
+    suggested = category_by_name.get((fields.suggested_category_name or "").casefold())
+    proposal.proposed_cost_category_id = suggested.id if suggested else None
+    proposal.selected_cost_category_id = suggested.id if suggested else None
+    proposal.amount = fields.amount
+    proposal.amount_evidence_quote = fields.amount_evidence_quote
+    proposal.currency = fields.currency
+    proposal.counterparty = fields.counterparty
+    proposal.counterparty_evidence_quote = fields.counterparty_evidence_quote
+    proposal.payment_purpose = fields.payment_purpose
+    proposal.payment_purpose_evidence_quote = fields.payment_purpose_evidence_quote
+    proposal.category_evidence_quote = fields.category_evidence_quote
+    proposal.planned_date = fields.planned_date
+    proposal.confidence = fields.confidence
+    proposal.extraction_method = fields.extraction_method
+    proposal.fallback_reason = fields.fallback_reason
 
 
 def _finance_document_score(name: str, content: str, kind: str) -> tuple[int, list[str]]:
@@ -1611,26 +1634,73 @@ def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate
     fields = extract_invoice_fields(
         db, payload.project_id, content, document.name, [row.name for row in categories],
     )
-    category_by_name = {row.name.casefold(): row for row in categories}
-    suggested = category_by_name.get((fields.suggested_category_name or "").casefold())
     item = InvoiceExtractionProposal(
         project_id=payload.project_id, source_document_id=document.id,
         source_document_version_id=version.id, source_document_sha256=digest,
-        proposed_cost_category_id=suggested.id if suggested else None,
-        selected_cost_category_id=suggested.id if suggested else None,
-        amount=fields.amount, amount_evidence_quote=fields.amount_evidence_quote,
-        currency=fields.currency, counterparty=fields.counterparty,
-        counterparty_evidence_quote=fields.counterparty_evidence_quote,
-        payment_purpose=fields.payment_purpose,
-        payment_purpose_evidence_quote=fields.payment_purpose_evidence_quote,
-        category_evidence_quote=fields.category_evidence_quote,
-        planned_date=fields.planned_date, confidence=fields.confidence,
-        extraction_method=fields.extraction_method, fallback_reason=fields.fallback_reason,
         target_kind=payload.target_kind, status="proposed",
     )
+    _apply_invoice_extraction_fields(item, fields, categories)
     db.add(item); db.flush()
     _audit(db, "invoice_extraction_proposed", "invoice_extraction_proposal", item.id, user.id,
            f"document={document.id}; version={version.id}; method={fields.extraction_method}")
+    db.commit()
+    return _invoice_proposal_payload(item)
+
+
+@router.post("/invoice-extraction-proposals/{proposal_id}/retry-ai")
+def retry_invoice_extraction_ai(proposal_id: int, db: Session = Depends(get_db),
+                                user: User = Depends(require_user)):
+    item = db.get(InvoiceExtractionProposal, proposal_id)
+    if item is None:
+        raise HTTPException(404, "Предложение счёта не найдено")
+    require_project_role(db, user, item.project_id, "editor")
+    if item.status != "proposed":
+        raise HTTPException(409, "Подтверждённое или отклонённое предложение нельзя анализировать повторно")
+    if item.extraction_method != "regex" or item.fallback_reason != "temporarily_unavailable":
+        raise HTTPException(409, "Повторный AI-анализ доступен только после временной недоступности AI")
+
+    version, _digest = _current_document_pin(
+        db, item.project_id, item.source_document_id,
+        item.source_document_version_id, item.source_document_sha256,
+    )
+    if not (version.content or "").strip():
+        raise HTTPException(409, "У версии документа нет извлечённого текста")
+    document = db.get(Document, item.source_document_id)
+    if document is None:
+        raise HTTPException(409, "Исходный документ больше не существует")
+    organization_id = _project_organization_id(db, item.project_id)
+    categories = [row for row in _ensure_default_categories(db, organization_id) if row.is_active]
+    fields = extract_invoice_fields(
+        db, item.project_id, version.content, document.name,
+        [row.name for row in categories],
+    )
+
+    item = db.scalar(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.id == proposal_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    if item is None:
+        raise HTTPException(404, "Предложение счёта не найдено")
+    if item.status != "proposed":
+        raise HTTPException(409, "Предложение изменилось во время повторного анализа")
+    if item.extraction_method == "llm":
+        return _invoice_proposal_payload(item)
+    if item.extraction_method != "regex" or item.fallback_reason != "temporarily_unavailable":
+        raise HTTPException(409, "Предложение изменилось во время повторного анализа")
+    _current_document_pin(
+        db, item.project_id, item.source_document_id,
+        item.source_document_version_id, item.source_document_sha256,
+    )
+
+    if fields.extraction_method == "llm":
+        _apply_invoice_extraction_fields(item, fields, categories)
+        outcome = "success"
+    else:
+        # Do not discard human-visible fallback fields when the provider is
+        # still unavailable. Only expose the latest classified reason.
+        item.fallback_reason = fields.fallback_reason
+        outcome = fields.fallback_reason or "fallback"
+    _audit(db, "invoice_extraction_ai_retried", "invoice_extraction_proposal", item.id, user.id,
+           f"document={item.source_document_id}; version={item.source_document_version_id}; outcome={outcome}")
     db.commit()
     return _invoice_proposal_payload(item)
 

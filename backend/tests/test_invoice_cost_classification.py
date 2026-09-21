@@ -15,10 +15,12 @@ from app.api.execution_finance import (
     confirm_invoice_extraction,
     create_cost_category,
     create_invoice_extraction,
+    retry_invoice_extraction_ai,
     update_cost_category,
     update_invoice_extraction,
 )
 from app.invoice_extraction import InvoiceFields, extract_invoice_fields
+from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.execution_finance import BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal
@@ -175,6 +177,137 @@ def test_invoice_does_not_treat_unrelated_deadline_as_payment_deadline(monkeypat
     )
 
     assert result.planned_date == date(2026, 9, 19)
+
+
+def test_temporary_invoice_fallback_can_retry_same_version_with_llm(
+    db_session, user_factory, monkeypatch,
+):
+    user, project, document, version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    fallback = InvoiceFields(
+        amount=Decimal("125400.50"), amount_evidence_quote="125 400,50 руб.",
+        currency="RUB", counterparty=None, counterparty_evidence_quote=None,
+        payment_purpose=None, payment_purpose_evidence_quote=None,
+        suggested_category_name=None, category_evidence_quote=None,
+        planned_date=date(2026, 9, 20), confidence=0.35, extraction_method="regex",
+        fallback_reason="temporarily_unavailable",
+    )
+    llm = InvoiceFields(
+        amount=Decimal("125400.50"), amount_evidence_quote="125 400,50 руб.",
+        currency="RUB", counterparty="ООО Бетон", counterparty_evidence_quote="ООО Бетон",
+        payment_purpose="строительные материалы",
+        payment_purpose_evidence_quote="строительные материалы",
+        suggested_category_name="Прямые", category_evidence_quote="материалы",
+        planned_date=date(2026, 9, 20), confidence=0.92, extraction_method="llm",
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: fallback)
+    proposed = create_invoice_extraction(
+        document.id, InvoiceExtractionCreate(project_id=project.id), db_session, user,
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: llm)
+
+    retried = retry_invoice_extraction_ai(proposed["id"], db_session, user)
+
+    assert retried["id"] == proposed["id"]
+    assert retried["source_document_version_id"] == version.id
+    assert retried["source_document_sha256"] == proposed["source_document_sha256"]
+    assert retried["extraction_method"] == "llm"
+    assert retried["fallback_reason"] is None
+    assert retried["counterparty"] == "ООО Бетон"
+    assert retried["payment_purpose"] == "строительные материалы"
+    assert db_session.query(InvoiceExtractionProposal).count() == 1
+    assert db_session.query(CashFlowEntry).count() == 0
+    audit = db_session.query(AuditLog).filter_by(action="invoice_extraction_ai_retried").one()
+    assert "outcome=success" in audit.details
+
+
+def test_failed_invoice_ai_retry_preserves_existing_fallback_fields(
+    db_session, user_factory, monkeypatch,
+):
+    user, project, document, _version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    original = InvoiceFields(
+        amount=Decimal("125400.50"), amount_evidence_quote="125 400,50 руб.",
+        currency="RUB", counterparty=None, counterparty_evidence_quote=None,
+        payment_purpose=None, payment_purpose_evidence_quote=None,
+        suggested_category_name=None, category_evidence_quote=None,
+        planned_date=date(2026, 9, 20), confidence=0.35, extraction_method="regex",
+        fallback_reason="temporarily_unavailable",
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: original)
+    proposed = create_invoice_extraction(
+        document.id, InvoiceExtractionCreate(project_id=project.id), db_session, user,
+    )
+    second_fallback = InvoiceFields(
+        amount=Decimal("999.00"), amount_evidence_quote="999 руб.", currency="RUB",
+        counterparty=None, counterparty_evidence_quote=None, payment_purpose=None,
+        payment_purpose_evidence_quote=None, suggested_category_name=None,
+        category_evidence_quote=None, planned_date=None, confidence=0.1,
+        extraction_method="regex", fallback_reason="temporarily_unavailable",
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: second_fallback)
+
+    retried = retry_invoice_extraction_ai(proposed["id"], db_session, user)
+
+    assert retried["extraction_method"] == "regex"
+    assert retried["fallback_reason"] == "temporarily_unavailable"
+    assert retried["amount"] == Decimal("125400.50")
+    assert retried["amount_evidence_quote"] == "125 400,50 руб."
+
+
+def test_invoice_ai_retry_rejects_changed_source_version_before_provider_call(
+    db_session, user_factory, monkeypatch,
+):
+    user, project, document, _version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    fallback = InvoiceFields(
+        amount=Decimal("125400.50"), amount_evidence_quote="125 400,50 руб.",
+        currency="RUB", counterparty=None, counterparty_evidence_quote=None,
+        payment_purpose=None, payment_purpose_evidence_quote=None,
+        suggested_category_name=None, category_evidence_quote=None,
+        planned_date=None, confidence=0.35, extraction_method="regex",
+        fallback_reason="temporarily_unavailable",
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: fallback)
+    proposed = create_invoice_extraction(
+        document.id, InvoiceExtractionCreate(project_id=project.id), db_session, user,
+    )
+    db_session.add(DocumentVersion(document_id=document.id, version_number=2, content="changed invoice"))
+    document.current_version = 2
+    db_session.commit()
+    monkeypatch.setattr(
+        finance_api, "extract_invoice_fields",
+        lambda *_args, **_kwargs: pytest.fail("provider must not be called for a changed source"),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        retry_invoice_extraction_ai(proposed["id"], db_session, user)
+
+    assert error.value.status_code == 409
+    assert "SOURCE_VERSION_MISMATCH" in error.value.detail
+
+
+def test_invoice_ai_retry_is_not_offered_for_permanent_fallback(
+    db_session, user_factory, monkeypatch,
+):
+    user, project, document, version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    proposal = InvoiceExtractionProposal(
+        project_id=project.id, source_document_id=document.id,
+        source_document_version_id=version.id,
+        source_document_sha256=finance_api.hashlib.sha256(version.content.encode()).hexdigest(),
+        amount=Decimal("125400.50"), currency="RUB", confidence=0.35,
+        extraction_method="regex", fallback_reason="policy_blocked",
+        target_kind="cash_flow", status="proposed",
+    )
+    db_session.add(proposal)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as error:
+        retry_invoice_extraction_ai(proposal.id, db_session, user)
+
+    assert error.value.status_code == 409
+    assert "временной недоступности" in error.value.detail
 
 
 def test_proposal_requires_manager_confirmation_before_creating_cash_flow(

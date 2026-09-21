@@ -504,7 +504,7 @@ export function App() {
   const sourceProvider = picker.context?.provider;
   const sourceBreadcrumbs = picker.breadcrumbs;
   const {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal,
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceAiRetrying,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
@@ -513,7 +513,7 @@ export function App() {
     setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction,
+    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
     confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
@@ -3162,6 +3162,8 @@ export function App() {
               onEditInvoice={editInvoiceExtraction}
               onConfirmInvoice={() => void confirmInvoiceExtraction()}
               onRejectInvoice={() => void rejectInvoiceExtraction()}
+              onRetryInvoiceAi={() => void retryInvoiceAiAnalysis()}
+              invoiceAiRetrying={invoiceAiRetrying}
               onCloseInvoice={() => setInvoiceExtractionProposal(null)}
               onAddCostCategory={(name) => void addCostCategory(name)}
               onClosePreview={() => {

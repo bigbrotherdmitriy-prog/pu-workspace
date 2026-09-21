@@ -73,4 +73,32 @@ describe("invoice extraction review", () => {
     render(<FinanceOperations {...props({ invoiceProposal: { ...proposal, selected_cost_category_id: undefined } })} />);
     expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
   });
+
+  it("offers AI retry only for a temporary provider fallback", () => {
+    const onRetryInvoiceAi = vi.fn();
+    render(<FinanceOperations {...props({
+      invoiceProposal: { ...proposal, extraction_method: "regex", fallback_reason: "temporarily_unavailable" },
+      onRetryInvoiceAi,
+    })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Повторить AI-анализ" }));
+    expect(onRetryInvoiceAi).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer retry for a permanent AI fallback", () => {
+    render(<FinanceOperations {...props({
+      invoiceProposal: { ...proposal, extraction_method: "regex", fallback_reason: "policy_blocked" },
+    })} />);
+
+    expect(screen.queryByRole("button", { name: "Повторить AI-анализ" })).not.toBeInTheDocument();
+  });
+
+  it("disables the retry button while analysis is running", () => {
+    render(<FinanceOperations {...props({
+      invoiceProposal: { ...proposal, extraction_method: "regex", fallback_reason: "temporarily_unavailable" },
+      invoiceAiRetrying: true,
+    })} />);
+
+    expect(screen.getByRole("button", { name: "Повторный анализ…" })).toBeDisabled();
+  });
 });
