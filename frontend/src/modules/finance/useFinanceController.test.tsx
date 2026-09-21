@@ -45,4 +45,43 @@ describe("uploaded finance document routing", () => {
     expect(result.current.invoiceExtractionProposal).toEqual(proposal);
     expect(setError).not.toHaveBeenCalled();
   });
+
+  it("retries a temporary invoice fallback without uploading the document again", async () => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const candidate = {
+      document_id: 91, name: "invoice.pdf", kind: "invoice", score: 98,
+      reasons: ["счёт"], hints: {}, already_linked: false,
+    };
+    const fallback = {
+      id: 17, project_id: 7, source_document_id: 91,
+      source_document_version_id: 1, source_document_sha256: "a".repeat(64),
+      currency: "RUB", confidence: 0.35, extraction_method: "regex",
+      fallback_reason: "temporarily_unavailable", target_kind: "cash_flow",
+      status: "proposed", requires_confirmation: true,
+    };
+    const llm = {
+      ...fallback, extraction_method: "llm", fallback_reason: undefined,
+      counterparty: "ООО Бетон", payment_purpose: "Материалы", confidence: 0.92,
+    };
+    vi.mocked(api)
+      .mockResolvedValueOnce({ candidates: [candidate] })
+      .mockResolvedValueOnce(fallback)
+      .mockResolvedValueOnce(llm);
+    const { result } = renderHook(() => useFinanceController({
+      ready: false, projectId: 7, setNotice, setError,
+    }));
+    await act(async () => result.current.reviewUploadedFinanceDocuments([91]));
+
+    await act(async () => result.current.retryInvoiceAiAnalysis());
+
+    expect(api).toHaveBeenNthCalledWith(
+      3, "/execution/invoice-extraction-proposals/17/retry-ai", { method: "POST" },
+    );
+    expect(result.current.invoiceExtractionProposal).toEqual(llm);
+    expect(setNotice).toHaveBeenLastCalledWith(
+      "AI-анализ выполнен повторно. Проверьте обновлённые реквизиты и основания.",
+    );
+    expect(setError).not.toHaveBeenCalled();
+  });
 });

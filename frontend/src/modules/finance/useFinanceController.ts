@@ -39,6 +39,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [financeBaselineId, setFinanceBaselineId] = useState(0);
   const [costCategories, setCostCategories] = useState<CostCategory[]>([]);
   const [invoiceExtractionProposal, setInvoiceExtractionProposal] = useState<InvoiceExtractionProposal | null>(null);
+  const [invoiceAiRetrying, setInvoiceAiRetrying] = useState(false);
 
   async function loadFinance() {
     if (!projectId) return;
@@ -190,6 +191,28 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       setInvoiceExtractionProposal(rejected);
       setNotice("Предложение по счёту отклонено; финансовые записи не создавались.");
     } catch (error) { setError((error as Error).message); }
+  }
+
+  async function retryInvoiceAiAnalysis() {
+    const proposal = invoiceExtractionProposal;
+    if (!proposal || invoiceAiRetrying) return;
+    setInvoiceAiRetrying(true);
+    try {
+      const retried = await api<InvoiceExtractionProposal>(
+        `/execution/invoice-extraction-proposals/${proposal.id}/retry-ai`,
+        { method: "POST" },
+      );
+      setInvoiceExtractionProposal(retried);
+      if (retried.extraction_method === "llm") {
+        setNotice("AI-анализ выполнен повторно. Проверьте обновлённые реквизиты и основания.");
+      } else {
+        setNotice("AI пока недоступен. Резервный результат сохранён; можно повторить позже.");
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setInvoiceAiRetrying(false);
+    }
   }
 
   async function prepareDroppedFinanceDocument(documentId: number, name: string,
@@ -383,7 +406,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   return {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal,
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceAiRetrying,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
@@ -392,7 +415,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance,
-    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction,
+    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
     confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }

@@ -25,11 +25,12 @@ from app.api.execution_finance import (
     InvoiceExtractionCreate,
     confirm_invoice_extraction,
     create_invoice_extraction,
+    retry_invoice_extraction_ai,
 )
 from app.invoice_extraction import InvoiceFields
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import CashFlowEntry, CostCategory
+from app.models.execution_finance import CashFlowEntry, CostCategory, InvoiceExtractionProposal
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -127,6 +128,61 @@ def test_upload_proposal_confirmation_creates_dual_written_cash_flow_on_postgres
     assert entry.source_document_version_id == version.id
     assert entry.source_document_sha256 == hashlib.sha256(content.encode()).hexdigest()
     assert inspect(engine).get_table_names().count("invoice_extraction_proposals") == 1
+
+
+def test_temporary_fallback_retry_updates_same_postgres_proposal(pg_session, monkeypatch):
+    db, _engine = pg_session
+    suffix = uuid4().hex
+    user = User(name="Invoice Editor", email=f"invoice-retry-{suffix}@example.test", is_admin=False)
+    organization = Organization(name=f"Invoice Retry {suffix}")
+    db.add_all([user, organization])
+    db.flush()
+    project = Project(name="Invoice Retry", organization_id=organization.id)
+    db.add(project)
+    db.flush()
+    db.add(ProjectMember(project_id=project.id, user_id=user.id, role="editor"))
+    document = Document(
+        project_id=project.id, name="invoice-retry.pdf", source="local_upload",
+        status="analyzed", current_version=1,
+    )
+    db.add(document)
+    db.flush()
+    version = DocumentVersion(
+        document_id=document.id, version_number=1,
+        content="Поставщик ООО Бетон. Материалы. Итого 125 400,50 руб.",
+    )
+    db.add(version)
+    db.commit()
+    fallback = InvoiceFields(
+        amount=Decimal("125400.50"), amount_evidence_quote="125 400,50 руб.",
+        currency="RUB", counterparty=None, counterparty_evidence_quote=None,
+        payment_purpose=None, payment_purpose_evidence_quote=None,
+        suggested_category_name=None, category_evidence_quote=None,
+        planned_date=None, confidence=0.35, extraction_method="regex",
+        fallback_reason="temporarily_unavailable",
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: fallback)
+    proposed = create_invoice_extraction(
+        document.id, InvoiceExtractionCreate(project_id=project.id), db, user,
+    )
+    llm = InvoiceFields(
+        amount=Decimal("125400.50"), amount_evidence_quote="125 400,50 руб.",
+        currency="RUB", counterparty="ООО Бетон", counterparty_evidence_quote="ООО Бетон",
+        payment_purpose="Материалы", payment_purpose_evidence_quote="Материалы",
+        suggested_category_name="Прямые", category_evidence_quote="Материалы",
+        planned_date=date(2026, 9, 22), confidence=0.95, extraction_method="llm",
+    )
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: llm)
+
+    retried = retry_invoice_extraction_ai(proposed["id"], db, user)
+
+    stored = db.get(InvoiceExtractionProposal, proposed["id"])
+    assert retried["id"] == proposed["id"] == stored.id
+    assert stored.source_document_version_id == version.id
+    assert stored.extraction_method == "llm" and stored.fallback_reason is None
+    assert stored.counterparty == "ООО Бетон"
+    assert db.query(InvoiceExtractionProposal).count() == 1
+    assert db.query(CashFlowEntry).count() == 0
 
 
 def test_dirty_legacy_text_categories_survive_and_are_backfilled_on_postgres(monkeypatch):

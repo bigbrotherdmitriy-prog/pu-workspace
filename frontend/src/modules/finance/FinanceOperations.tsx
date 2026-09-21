@@ -16,6 +16,7 @@ type Props = {
   costCategories?: CostCategory[]; invoiceProposal?: InvoiceExtractionProposal | null;
   onEditInvoice?: (patch: Partial<InvoiceExtractionProposal>) => void;
   onConfirmInvoice?: () => void; onRejectInvoice?: () => void; onCloseInvoice?: () => void;
+  onRetryInvoiceAi?: () => void; invoiceAiRetrying?: boolean;
   onAddCostCategory?: (name: string) => void;
   includeEditor?: boolean; includeRegisters?: boolean; includeScheduleRegister?: boolean; includeCashFlowRegister?: boolean;
 };
@@ -27,13 +28,14 @@ export function FinanceOperations(props: Props) {
     sourceDocumentId, scheduleItemId, budgetLineId, baselineId, setKind, setTitle, setAmount, setDate, setExtra,
     setScheduleItemId, setBudgetLineId, setBaselineId, setObjectName, setCategory, setNote, onClosePreview, onImport, onAdd, onConfirm, onConfirmPayment,
     costCategories = [], invoiceProposal, onEditInvoice, onConfirmInvoice, onRejectInvoice, onCloseInvoice, onAddCostCategory,
+    onRetryInvoiceAi, invoiceAiRetrying = false,
     includeEditor = true, includeRegisters = true, includeScheduleRegister = true, includeCashFlowRegister = true } = props;
   const [newCategory, setNewCategory] = useState("");
   const filterContract = <T extends { contract_id?: number }>(rows: T[] | undefined) => rows?.filter((item) => !selectedContractId || item.contract_id === selectedContractId) || [];
   return <>
     {includeEditor && invoiceProposal && <section className="card structured-import invoice-extraction-review" id="invoice-extraction-review">
       <div className="card-head"><div><span className="eyebrow">СЧЁТ · ПРЕДЛОЖЕНИЕ AI</span><h2>Проверьте данные перед импортом</h2><p>Ни одно поле не попадёт в бюджет или ДДС без подтверждения менеджером.</p></div><button className="secondary" onClick={onCloseInvoice}>Закрыть</button></div>
-      {invoiceProposal.extraction_method === "regex" && <p className="finance-warning">AI недоступен ({invoiceProposal.fallback_reason || "fallback"}). Сумма найдена резервным правилом; заполните остальные поля вручную.</p>}
+      {invoiceProposal.extraction_method === "regex" && <div className="finance-warning">AI недоступен ({invoiceProposal.fallback_reason || "fallback"}). Сумма найдена резервным правилом; заполните остальные поля вручную.{invoiceProposal.status === "proposed" && invoiceProposal.fallback_reason === "temporarily_unavailable" && <button className="secondary" disabled={invoiceAiRetrying} onClick={onRetryInvoiceAi}>{invoiceAiRetrying ? "Повторный анализ…" : "Повторить AI-анализ"}</button>}</div>}
       <div className="invoice-review-grid">
         <label>Сумма<input type="number" min="0.01" value={invoiceProposal.amount ?? ""} onChange={(event) => onEditInvoice?.({ amount: Number(event.target.value) || undefined })} /></label>
         <label>Валюта<input value={invoiceProposal.currency} disabled /></label>
