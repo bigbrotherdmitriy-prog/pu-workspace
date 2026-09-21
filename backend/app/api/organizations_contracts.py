@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
+from app.finance_source_pins import resolve_current_document_pin
 from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
@@ -662,10 +663,20 @@ def _payment_schedule_candidates(content: str) -> list[dict]:
     return list(unique.values())[:50]
 
 
-def _create_payment_schedule_proposals(db: Session, row: Contract, document: Document, content: str) -> list[CashFlowEntry]:
+def _create_payment_schedule_proposals(db: Session, row: Contract, document: Document) -> list[CashFlowEntry]:
     direction = cash_flow_direction(row.contract_kind)
     if direction is None:
         return []
+    # Some legacy/synthetic documents have only summary text and no immutable
+    # DocumentVersion. They may still participate in non-financial analysis,
+    # but must never produce an unpinned financial proposal.
+    current_version_exists = db.scalar(select(DocumentVersion.id).where(
+        DocumentVersion.document_id == document.id,
+        DocumentVersion.version_number == document.current_version,
+    ))
+    if current_version_exists is None:
+        return []
+    pin = resolve_current_document_pin(db, row.project_id, document.id)
     baseline = db.scalar(select(ScheduleBaseline).where(
         ScheduleBaseline.project_id == row.project_id,
         ScheduleBaseline.contract_id == row.id,
@@ -675,7 +686,7 @@ def _create_payment_schedule_proposals(db: Session, row: Contract, document: Doc
         ScheduleItem.baseline_id == baseline.id if baseline else False,
     ).order_by(ScheduleItem.planned_finish, ScheduleItem.id)))
     created: list[CashFlowEntry] = []
-    for candidate in _payment_schedule_candidates(content):
+    for candidate in _payment_schedule_candidates(pin.version.content or ""):
         existing = db.scalar(select(CashFlowEntry.id).where(
             CashFlowEntry.project_id == row.project_id,
             CashFlowEntry.contract_id == row.id,
@@ -690,7 +701,10 @@ def _create_payment_schedule_proposals(db: Session, row: Contract, document: Doc
         item = CashFlowEntry(
             project_id=row.project_id, contract_id=row.id,
             schedule_item_id=stage.id if stage else None,
-            source_document_id=document.id, direction=direction,
+            source_document_id=document.id,
+            source_document_version_id=pin.version.id,
+            source_document_sha256=pin.sha256,
+            direction=direction,
             title=f"Платёж по договору {row.number}", planned_date=candidate["planned_date"],
             planned_amount=candidate["amount"], actual_amount=Decimal("0"),
             counterparty=row.counterparty, status="proposed", source_name=document.name,
@@ -757,7 +771,7 @@ def analyze_contract(project_id: int, contract_id: int,
     created_risks, created_decisions = create_governance_items(
         db, project_id, [source], source_type="contract_analysis",
     )
-    payment_rows = _create_payment_schedule_proposals(db, row, document, content)
+    payment_rows = _create_payment_schedule_proposals(db, row, document)
     remembered_organizations = remember_contract_organizations(db, row, content, document.id)
     task_ids = list(db.scalars(select(Task.id).where(
         Task.project_id == project_id, Task.source_file_id == source_id,

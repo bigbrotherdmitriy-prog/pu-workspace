@@ -70,6 +70,13 @@ class CostCategory(Base):
 
 class BudgetLine(Base):
     __tablename__ = "budget_lines"
+    __table_args__ = (
+        CheckConstraint(
+            "(source_document_version_id IS NULL AND source_document_sha256 IS NULL) OR "
+            "(source_document_version_id IS NOT NULL AND source_document_sha256 IS NOT NULL)",
+            name="ck_budget_line_source_pin_pair",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -84,6 +91,13 @@ class BudgetLine(Base):
     forecast_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
     status: Mapped[str] = mapped_column(String(30), default="proposed", index=True)
+    source_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    source_document_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -206,10 +220,21 @@ class ProcurementItem(Base):
 
 class AcceptanceAct(Base):
     __tablename__ = "acceptance_acts"
+    __table_args__ = (
+        CheckConstraint(
+            "(source_document_version_id IS NULL AND source_document_sha256 IS NULL) OR "
+            "(source_document_version_id IS NOT NULL AND source_document_sha256 IS NOT NULL)",
+            name="ck_acceptance_act_source_pin_pair",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_document_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     number: Mapped[str] = mapped_column(String(200))
     title: Mapped[str] = mapped_column(String(500))
     act_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)

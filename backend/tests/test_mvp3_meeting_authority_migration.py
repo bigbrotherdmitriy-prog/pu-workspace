@@ -26,7 +26,7 @@ def test_meeting_authority_is_merged_into_the_single_current_head():
     assert revision.down_revision == "a72d4e6f8b91"
     merge = script.get_revision(MERGE_REVISION)
     assert set(merge.down_revision) == {REVISION, "b84e6f9a7c12"}
-    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["b89e7f9a5a67"]
+    assert script.get_heads() == [CURRENT_SCHEMA_REVISION] == ["c04f1a2b3d45"]
 
 
 def test_meeting_authority_migration_renders_postgresql_constraints(monkeypatch):
