@@ -8,4 +8,4 @@ RUN useradd --system --uid 10001 --create-home bridge \
     && chown bridge:bridge /data
 USER bridge
 EXPOSE 8080
-CMD ["uvicorn", "app.v54_live_provider_bridge:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+CMD ["uvicorn", "app.v54_live_provider_bridge:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--no-access-log"]

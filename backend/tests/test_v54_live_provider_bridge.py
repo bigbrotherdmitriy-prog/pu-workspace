@@ -135,3 +135,11 @@ def test_setup_is_hidden_and_cannot_reconnect_configured_sink(tmp_path):
         assert client.post(
             "/oauth/start", headers={"X-PUW-Setup-Token": "s" * 32}, follow_redirects=False
         ).status_code == 409
+
+
+def test_sandbox_container_disables_query_bearing_access_logs():
+    dockerfile = (
+        Path(__file__).resolve().parents[2] / "infra" / "s10-live-provider" / "Dockerfile"
+    ).read_text(encoding="utf-8")
+
+    assert '"--no-access-log"' in dockerfile
