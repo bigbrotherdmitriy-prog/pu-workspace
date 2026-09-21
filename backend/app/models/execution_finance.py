@@ -199,6 +199,56 @@ class InvoiceExtractionProposal(Base):
     )
 
 
+class ContractBudgetProposal(Base):
+    __tablename__ = "contract_budget_proposals"
+    __table_args__ = (
+        UniqueConstraint("contract_id", "contract_record_version", name="uq_contract_budget_proposal_version"),
+        CheckConstraint("operation IN ('create','revise')", name="ck_contract_budget_proposal_operation"),
+        CheckConstraint("status IN ('proposed','confirmed','rejected','superseded')", name="ck_contract_budget_proposal_status"),
+        CheckConstraint(
+            "(source_document_id IS NULL AND source_document_version_id IS NULL AND source_document_sha256 IS NULL) OR "
+            "(source_document_id IS NOT NULL AND source_document_version_id IS NOT NULL AND source_document_sha256 IS NOT NULL)",
+            name="ck_contract_budget_proposal_source_pin",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id", ondelete="CASCADE"), index=True)
+    contract_record_version: Mapped[int] = mapped_column(Integer)
+    operation: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    advance_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    retention_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="RUB", server_default="RUB")
+    description: Mapped[str] = mapped_column(String(1000))
+    selected_cost_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_categories.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    source_document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    source_document_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
+    source_document_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    target_budget_line_id: Mapped[int | None] = mapped_column(
+        ForeignKey("budget_lines.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    created_budget_line_id: Mapped[int | None] = mapped_column(
+        ForeignKey("budget_lines.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    status: Mapped[str] = mapped_column(String(30), default="proposed", server_default="proposed", index=True)
+    confirmed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True,
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+
 class ProcurementItem(Base):
     __tablename__ = "procurement_items"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

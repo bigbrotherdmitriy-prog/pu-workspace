@@ -19,7 +19,7 @@ def _config(output=None):
 
 def test_contact_hardening_is_merged_into_the_single_current_head():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["d15a7c9e2b40"]
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["e26b8d0f3c51"]
     assert scripts.get_revision("b09c4f1d2e73").down_revision == "a72d4e6f8b91"
     assert set(scripts.get_revision("b86e7f9a2e34").down_revision) == {
         "b85e7f9a1d23", "b09c4f1d2e73",
