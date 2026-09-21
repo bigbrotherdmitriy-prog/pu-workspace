@@ -9,8 +9,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.execution_finance import PaymentConfirmation, confirm_payment
-from app.models.execution_finance import CashFlowEntry, PaymentEvent
+from app.api.execution_finance import PaymentConfirmation, StatusUpdate, confirm_payment, update_status
+from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, PaymentEvent
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -86,3 +86,49 @@ def test_postgres_concurrent_payload_conflict_has_one_winner_and_one_409(mvp3_pg
         assert len(events) == 1
         item = db.get(CashFlowEntry, item_id)
         assert item.actual_amount == events[0].amount and item.status == "paid"
+
+
+def _act_projection_world(engine) -> tuple[int, list[int], int]:
+    with Session(engine) as db:
+        organization = Organization(name=f"Concurrent act tenant {uuid4().hex}")
+        user = User(name="Act manager", email=f"act-{uuid4().hex}@example.test", is_admin=False)
+        db.add_all([organization, user]); db.flush()
+        project = Project(name="Concurrent act project", organization_id=organization.id)
+        db.add(project); db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role="manager"))
+        budget = BudgetLine(
+            project_id=project.id, category="Works", description="Concurrent works",
+            planned_amount=Decimal("100.00"), committed_amount=Decimal("0.00"),
+            actual_amount=Decimal("0.00"), forecast_amount=Decimal("100.00"),
+            currency="RUB", status="approved",
+        )
+        db.add(budget); db.flush()
+        acts = [AcceptanceAct(
+            project_id=project.id, budget_line_id=budget.id, number=f"A-{index}",
+            title=f"Concurrent act {index}", amount=amount, currency="RUB", status="approved",
+        ) for index, amount in enumerate((Decimal("40.00"), Decimal("35.00")), 1)]
+        db.add_all(acts); db.commit()
+        return budget.id, [row.id for row in acts], user.id
+
+
+def _sign_act(engine, act_id: int, user_id: int):
+    with Session(engine) as db:
+        return update_status("acts", act_id, StatusUpdate(status="signed"), db, db.get(User, user_id))
+
+
+def test_postgres_concurrent_act_signatures_project_exact_sum(mvp3_pg_engine):
+    budget_id, act_ids, user_id = _act_projection_world(mvp3_pg_engine)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [future.result(timeout=15) for future in (
+            pool.submit(_sign_act, mvp3_pg_engine, act_ids[0], user_id),
+            pool.submit(_sign_act, mvp3_pg_engine, act_ids[1], user_id),
+        )]
+
+    assert {result["status"] for result in results} == {"signed"}
+    with Session(mvp3_pg_engine) as db:
+        budget = db.get(BudgetLine, budget_id)
+        assert budget.actual_amount == Decimal("75.00")
+        assert db.scalar(select(func.count()).select_from(AcceptanceAct).where(
+            AcceptanceAct.budget_line_id == budget_id,
+            AcceptanceAct.status == "signed",
+        )) == 2

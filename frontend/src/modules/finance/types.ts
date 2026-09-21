@@ -50,6 +50,8 @@ export type FinanceOverview = {
     planned_amount: number;
     actual_amount: number;
     committed_amount: number;
+    remaining_amount: number;
+    overrun_amount: number;
     forecast_amount: number;
     currency: string;
     status: string;
@@ -86,6 +88,7 @@ export type FinanceOverview = {
   acts: {
     id: number;
     contract_id?: number;
+    budget_line_id?: number;
     number: string;
     title: string;
     act_date?: string;

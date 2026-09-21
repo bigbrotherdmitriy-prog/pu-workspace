@@ -19,7 +19,7 @@ def _config(output=None):
 
 def test_governance_relations_are_the_single_sequential_head():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["c04f1a2b3d45"]
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["d15a7c9e2b40"]
     assert scripts.get_revision("b89e7f9a5a67").down_revision == "b88e7f9a4f56"
     assert set(scripts.get_revision("b88e7f9a4f56").down_revision) == {
         "b86e7f9a1d24", "b87e7f9a3f45",
