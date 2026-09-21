@@ -1,9 +1,9 @@
-"""Foundation-backed synthetic pilot. All helpers join a caller transaction.
+"""Foundation-backed context projection. All helpers join a caller transaction.
 
 The caller MUST roll back on any exception, including a failed audit/Trust call.
 No method starts/commits/rolls back a transaction, calls a provider, enqueues a
 job, writes a claim/Task/approval/receipt, or interprets source text as authority.
-Resolver and Trust are injected foundation Protocols, never allow-all defaults.
+Resolver, origin policy and Trust are injected, never allow-all defaults.
 """
 from __future__ import annotations
 
@@ -59,11 +59,16 @@ def boundary(method):
 class ContextCommunication:
     def __init__(self, *, resolver: Resolver, gate: PilotGate,
                  authorize_audit: Callable[[Session, RequestScope, ObjectRef], bool],
-                 authorize_mailbox=None,
+                 authorize_mailbox=None, identity_providers=frozenset({"synthetic"}),
+                 message_source_types=frozenset({"synthetic"}),
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.resolver, self.gate = resolver, gate
         self.authorize_audit, self.clock = authorize_audit, clock
         self.authorize_mailbox = authorize_mailbox
+        self.identity_providers = frozenset(identity_providers)
+        self.message_source_types = frozenset(message_source_types)
+        if not self.identity_providers or not self.message_source_types:
+            raise ValueError("context_origin_policy_required")
 
     def _entry(self, db, scope):
         if not db.in_transaction():
@@ -125,7 +130,7 @@ class ContextCommunication:
             raise ContextError("resource_unavailable")
         identity = self._row(db, ConnectionIdentity, mail.identity_id, lock=lock)
         if (not identity or identity.organization_id != int(scope.tenant.value)
-                or identity.state != "verified" or identity.provider != "synthetic"):
+                or identity.state != "verified" or identity.provider not in self.identity_providers):
             raise ContextError("resource_unavailable")
         self._allow(db, scope, self._pin(self._ref(scope, "connection_identity", identity.id),
                                        identity.record_version), lock=lock)
@@ -146,7 +151,8 @@ class ContextCommunication:
                 or (in_scope and msg.project_id != int(scope.project.id.value))):
             raise ContextError("resource_unavailable")
         self._allow(db, scope, self._pin(ref, msg.context_version), lock=False)
-        if not msg.mail_connection_id or not msg.source_reference_id or msg.source_type != "synthetic":
+        if (not msg.mail_connection_id or not msg.source_reference_id
+                or msg.source_type not in self.message_source_types):
             raise ContextError("legacy_origin_unresolved")
         mail = self._row(db, MailConnection, msg.mail_connection_id, lock=False)
         source = self._row(db, SourceReference, msg.source_reference_id, lock=False)

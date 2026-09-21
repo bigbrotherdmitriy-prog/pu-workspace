@@ -79,15 +79,17 @@ def require_resolution(result: Resolution, *, scope: RequestScope, pin: VersionP
 
 
 class PilotGate(StrictDTO):
-    """No enabled production defaults. Tests pass an explicitly synthetic grant."""
+    """Exactly one explicit scope grant; product composition remains default-off."""
     synthetic_scope_authorized: StrictBool = False
+    product_scope_authorized: StrictBool = False
     roles_known: StrictBool = False
     retention_known: StrictBool = False
     valid_until: AwareDatetime | None = None
 
     def require_confirm(self, *, mode: str, action_type: str, now: datetime) -> None:
+        scope_authorized = self.synthetic_scope_authorized ^ self.product_scope_authorized
         if (mode != "CONFIRM" or action_type not in {"task.internal.create", "task.internal.cancel"}
-                or not self.synthetic_scope_authorized or not self.roles_known or not self.retention_known
+                or not scope_authorized or not self.roles_known or not self.retention_known
                 or now.tzinfo is None or self.valid_until is None or self.valid_until <= now):
             raise ValueError("pilot_disabled")
 

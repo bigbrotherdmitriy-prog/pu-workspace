@@ -291,6 +291,7 @@ def main() -> None:
             "backend/tests/test_v54_autonomy_authorization.py",
             "backend/tests/test_v54_staging_safety_hardening.py",
             "backend/tests/test_v54_pilot_integration.py",
+            "backend/tests/test_mvp5_product_pilot.py",
             "backend/tests/test_v54_product_acceptance.py",
             "backend/tests/test_v54_c01_content_pipeline.py",
             "backend/tests/test_v54_corpus_confirm_subset.py",
