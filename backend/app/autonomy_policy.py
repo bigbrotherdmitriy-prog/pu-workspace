@@ -91,6 +91,8 @@ class ActionCandidate(StrictDTO):
     effects: tuple[StrictStr, ...]
     envelope_sha256: StrictStr
     payload_sha256: StrictStr
+    confidence_basis_points: StrictInt | None = None
+    verbatim_evidence: StrictBool = False
 
     @model_validator(mode="after")
     def validate_binding(self):
@@ -98,9 +100,19 @@ class ActionCandidate(StrictDTO):
                 or not self.effects or tuple(sorted(set(self.effects))) != self.effects
                 or any(not re.fullmatch(r"[a-z][a-z0-9_.]{2,99}", item) for item in self.effects)
                 or not re.fullmatch("[0-9a-f]{64}", self.envelope_sha256)
-                or not re.fullmatch("[0-9a-f]{64}", self.payload_sha256)):
+                or not re.fullmatch("[0-9a-f]{64}", self.payload_sha256)
+                or (self.confidence_basis_points is not None
+                    and not 0 <= self.confidence_basis_points <= 10_000)):
             raise ValueError("invalid action binding")
         return self
+
+
+def candidate_binding(candidate: ActionCandidate) -> dict:
+    """Stable envelope binding; runtime evidence facts remain in the decision."""
+    return candidate.model_copy(update={
+        "confidence_basis_points": None,
+        "verbatim_evidence": False,
+    }).model_dump(mode="json")
 
 
 class AutonomyPolicyView(StrictDTO):
@@ -128,6 +140,8 @@ class AutonomyDecision(StrictDTO):
     effects: tuple[StrictStr, ...]
     envelope_sha256: StrictStr
     payload_sha256: StrictStr
+    confidence_basis_points: StrictInt | None = None
+    verbatim_evidence: StrictBool = False
     decided_at: AwareDatetime
     valid_until: AwareDatetime
 
@@ -411,6 +425,8 @@ class AutonomyPolicyService:
             action_type=candidate.action_type, stage=candidate.stage, risk=candidate.risk,
             reversal=candidate.reversal, effects=candidate.effects,
             envelope_sha256=candidate.envelope_sha256, payload_sha256=candidate.payload_sha256,
+            confidence_basis_points=candidate.confidence_basis_points,
+            verbatim_evidence=candidate.verbatim_evidence,
             decided_at=now, valid_until=valid_until,
         )
 
@@ -424,6 +440,8 @@ class AutonomyPolicyService:
             decision.effects == candidate.effects,
             decision.envelope_sha256 == candidate.envelope_sha256,
             decision.payload_sha256 == candidate.payload_sha256,
+            decision.confidence_basis_points == candidate.confidence_basis_points,
+            decision.verbatim_evidence == candidate.verbatim_evidence,
         )
         if not all(exact) or decision.valid_until <= self._now():
             raise AutonomyConflict("stale_action_binding")

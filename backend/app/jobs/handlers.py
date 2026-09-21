@@ -12,9 +12,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "provider.action.reconcile":
         from app.provider_actions.product import run_product_reconcile_job
         return run_product_reconcile_job(payload)
-    if kind == "v54.synthetic_task":
+    if kind in {"v54.synthetic_task", "v54.product_task"}:
         from app.pilot_dispatch import run_installed
-        return run_installed(payload)
+        return run_installed(payload, kind=kind)
     if kind == "local_upload.process":
         from app.local_upload_staging import run_local_upload_job
         return run_local_upload_job(payload)

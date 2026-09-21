@@ -84,8 +84,7 @@ class TrustFacade:
             raise TrustConflict("resource_unavailable")
         return action, row, e
 
-    @staticmethod
-    def _candidate(row, envelope):
+    def _candidate(self, db, scope, row, envelope):
         from app.autonomy_policy import ActionCandidate
         payload = envelope.payload.model_dump(mode="json")
         return ActionCandidate(
@@ -95,14 +94,16 @@ class TrustFacade:
         )
 
     def _server_policy(self, db, scope, row, envelope, authorization):
-        from app.autonomy_policy import AutonomyDecision
+        from app.autonomy_policy import AutonomyDecision, candidate_binding
         if (self.autonomy is None or envelope.autonomy != "AUTO"
                 or envelope.action_type != "task.internal.create"):
             raise TrustConflict("server_policy_not_applicable")
         try:
-            candidate = self._candidate(row, envelope)
+            candidate = self._candidate(db, scope, row, envelope)
             decision = AutonomyDecision.model_validate(authorization.authorization_decision)
-            if (canonical_hash(candidate.model_dump(mode="json")) != authorization.action_hash
+            if decision.mode != "AUTO":
+                raise TrustConflict("server_policy_not_applicable")
+            if (canonical_hash(candidate_binding(candidate)) != authorization.action_hash
                     or canonical_hash(decision.model_dump(mode="json")) != authorization.decision_hash
                     or authorization.envelope_hash != candidate.envelope_sha256
                     or authorization.payload_hash != candidate.payload_sha256
@@ -111,8 +112,7 @@ class TrustFacade:
                     or authorization.policy_sha256 != envelope.policy_sha256
                     or authorization.authority_epoch != decision.policy_authority_epoch
                     or utc(authorization.authorization_valid_until) != decision.valid_until
-                    or utc(authorization.authorization_valid_until) <= self.guards.now()
-                    or decision.mode != "AUTO"):
+                    or utc(authorization.authorization_valid_until) <= self.guards.now()):
                 raise TrustConflict("server_policy_binding_mismatch")
             self.autonomy.recheck(db, scope=scope, candidate=candidate, decision=decision)
         except TrustConflict:
@@ -334,9 +334,9 @@ class TrustFacade:
                 live_pins(db, guards=self.guards, scope=scope, envelope=e,
                           action=obj, operation="dispatch")
                 return
-            candidate = self._candidate(row, e)
+            candidate = self._candidate(db, scope, row, e)
             try:
-                from app.autonomy_policy import AutonomyDecision
+                from app.autonomy_policy import AutonomyDecision, candidate_binding
                 decision = AutonomyDecision.model_validate(
                     (decision or self.autonomy.decide(db, scope=scope, candidate=candidate)).model_dump(mode="json")
                 )
@@ -349,7 +349,7 @@ class TrustFacade:
                 policy_hash=decision.policy_sha256,
                 authority_epoch=decision.policy_authority_epoch,
                 decision_hash=canonical_hash(decision_dump),
-                action_hash=canonical_hash(candidate.model_dump(mode="json")),
+                action_hash=canonical_hash(candidate_binding(candidate)),
                 payload_hash=candidate.payload_sha256,
                 authorization_decision=decision_dump,
                 authorization_valid_until=decision.valid_until,

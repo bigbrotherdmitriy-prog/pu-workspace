@@ -17,9 +17,14 @@ from app.models.v54_pilot import ActionReceipt, ActionRevision, PendingDispatch,
 
 
 class InternalTaskMutation:
-    def __init__(self, *, guards, trust=None):
+    def __init__(self, *, guards, trust=None, source_type="v54_synthetic",
+                 source_file_name="V5.4 internal action"):
         self.guards = guards
         self.trust = trust
+        if source_type not in {"v54_synthetic", "v54_auto"}:
+            raise ValueError("unsupported_pilot_source_type")
+        self.source_type = source_type
+        self.source_file_name = source_file_name
 
     def apply(self, db, *, scope, binding):
         # TrustFacade owns authorization and the Project -> Authority -> policy
@@ -58,8 +63,8 @@ class InternalTaskMutation:
             task = Task(project_id=action.project_id, message_id=action.message_id,
                 assignee_user_id=int(payload.assignee_ref.id.value), created_by_user_id=int(scope.actor.id.value),
                 title=payload.title, due_date=date.fromisoformat(payload.due_date), status="assigned",
-                record_version=1, source_type="v54_synthetic", source_file_id=action.id,
-                source_file_name="V5.4 internal action", source_excerpt="",
+                record_version=1, source_type=self.source_type, source_file_id=action.id,
+                source_file_name=self.source_file_name, source_excerpt="",
                 source_excerpt_hash=canonical_hash({"action_id": action.id}), confidence=1.0,
                 needs_review=False, external_action_status="not_requested")
             db.add(task)
@@ -67,7 +72,7 @@ class InternalTaskMutation:
         else:
             task = db.scalar(select(Task).where(Task.id == int(envelope.target.ref.id.value))
                 .with_for_update().execution_options(populate_existing=True))
-            if (task is None or task.source_type != "v54_synthetic" or task.message_id != action.message_id
+            if (task is None or task.source_type != self.source_type or task.message_id != action.message_id
                     or task.project_id != action.project_id or task.record_version != envelope.target.value
                     or task.status != "assigned" or task.external_action_status != "not_requested"
                     or task.google_task_id or task.google_calendar_event_id
