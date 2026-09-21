@@ -1,6 +1,7 @@
 """Opt-in real PostgreSQL gate for the MVP4 payment ledger."""
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -9,9 +10,21 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.execution_finance import PaymentConfirmation, StatusUpdate, confirm_payment, update_status
-from app.models.execution_finance import AcceptanceAct, BudgetLine, CashFlowEntry, PaymentEvent
-from app.models.organization_contract import Organization
+from app.api.execution_finance import (
+    ActCreate, InvoiceExtractionConfirm, PaymentConfirmation, StatusUpdate,
+    confirm_invoice_extraction, confirm_payment, create_act, update_status,
+)
+from app.api.organizations_contracts import (
+    ContractBudgetProposalUpdate, confirm_contract_budget_proposal,
+    create_contract_budget_proposal, update_contract_budget_proposal,
+)
+from app.models.document import Document
+from app.models.document_version import DocumentVersion
+from app.models.execution_finance import (
+    AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory,
+    InvoiceExtractionProposal, PaymentEvent, ScheduleBaseline, ScheduleItem,
+)
+from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
@@ -67,6 +80,96 @@ def test_postgres_concurrent_identical_payment_confirmation_creates_one_event(mv
         )) == 1
         item = db.get(CashFlowEntry, item_id)
         assert item.actual_amount == Decimal("100.00") and item.status == "paid"
+
+
+def test_postgres_canonical_contract_schedule_budget_invoice_payment_and_act_chain(mvp3_pg_engine):
+    with Session(mvp3_pg_engine) as db:
+        suffix = uuid4().hex
+        organization = Organization(name=f"Canonical chain {suffix}")
+        manager = User(name="Canonical manager", email=f"canonical-{suffix}@example.test", is_admin=False)
+        db.add_all([organization, manager]); db.flush()
+        project = Project(name="Canonical chain", organization_id=organization.id)
+        db.add(project); db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=manager.id, role="manager"))
+        contract = Contract(
+            project_id=project.id, number="CHAIN-PG", title="Canonical contract",
+            contract_kind="supply", amount=Decimal("1000"), status="active",
+        )
+        category = CostCategory(
+            organization_id=organization.id, name="Прямые", normalized_name=f"direct-{suffix}", is_active=True,
+        )
+        db.add_all([contract, category]); db.flush()
+
+        budget_proposal = create_contract_budget_proposal(project.id, contract.id, db, manager)
+        update_contract_budget_proposal(
+            budget_proposal["id"],
+            ContractBudgetProposalUpdate(selected_cost_category_id=category.id),
+            db, manager,
+        )
+        confirmed_budget = confirm_contract_budget_proposal(budget_proposal["id"], db, manager)
+        budget = db.get(BudgetLine, confirmed_budget["created_budget_line_id"])
+        baseline = ScheduleBaseline(
+            project_id=project.id, contract_id=contract.id, created_by_user_id=manager.id,
+            name="Canonical GPR", version=1, status="approved",
+        )
+        db.add(baseline); db.flush()
+        stage = ScheduleItem(project_id=project.id, baseline_id=baseline.id, title="Canonical stage")
+        document = Document(
+            project_id=project.id, name="invoice.pdf", source="local_upload",
+            status="analyzed", current_version=1,
+        )
+        db.add_all([stage, document]); db.flush()
+        content = "Поставка материалов. Итого 300 руб. Оплатить 25.09.2026."
+        version = DocumentVersion(document_id=document.id, version_number=1, content=content)
+        db.add(version); db.flush()
+        invoice = InvoiceExtractionProposal(
+            project_id=project.id, source_document_id=document.id,
+            source_document_version_id=version.id,
+            source_document_sha256=hashlib.sha256(content.encode()).hexdigest(),
+            amount=Decimal("300"), currency="RUB", payment_purpose="Поставка материалов",
+            planned_date=date(2026, 9, 25), selected_cost_category_id=category.id,
+            confidence=0.9, extraction_method="llm", target_kind="cash_flow", status="proposed",
+        )
+        db.add(invoice); db.flush()
+
+        confirmed_invoice = confirm_invoice_extraction(
+            invoice.id,
+            InvoiceExtractionConfirm(
+                contract_id=contract.id, schedule_item_id=stage.id, budget_line_id=budget.id,
+            ),
+            db, manager,
+        )
+        cash_flow = db.get(CashFlowEntry, confirmed_invoice["created_cash_flow_id"])
+        update_status("cash-flow", cash_flow.id, StatusUpdate(status="approved"), db, manager)
+        payment = confirm_payment(
+            cash_flow.id,
+            PaymentConfirmation(
+                actual_amount="300", actual_date="2026-09-25", idempotency_key="canonical-payment-key",
+            ),
+            db, manager,
+        )
+        act_result = create_act(
+            ActCreate(
+                project_id=project.id, contract_id=contract.id, budget_line_id=budget.id,
+                number="ACT-PG", title="Accepted canonical work", act_date="2026-09-26",
+                amount="250", currency="RUB",
+            ),
+            db, manager,
+        )
+        update_status("acts", act_result["id"], StatusUpdate(status="approved"), db, manager)
+        signed = update_status("acts", act_result["id"], StatusUpdate(status="signed"), db, manager)
+
+        db.refresh(budget)
+        assert (cash_flow.contract_id, cash_flow.schedule_item_id, cash_flow.budget_line_id) == (
+            contract.id, stage.id, budget.id,
+        )
+        assert payment["status"] == "paid"
+        assert db.scalar(select(func.count()).select_from(PaymentEvent).where(
+            PaymentEvent.cash_flow_entry_id == cash_flow.id,
+        )) == 1
+        assert budget.committed_amount == Decimal("300.00")
+        assert budget.actual_amount == Decimal("250.00")
+        assert signed["budget_actual_amount"] == Decimal("250.00")
 
 
 def test_postgres_concurrent_payload_conflict_has_one_winner_and_one_409(mvp3_pg_engine):

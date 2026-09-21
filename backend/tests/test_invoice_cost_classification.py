@@ -23,8 +23,8 @@ from app.invoice_extraction import InvoiceFields, extract_invoice_fields
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal
-from app.models.organization_contract import Organization
+from app.models.execution_finance import BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal, ScheduleBaseline, ScheduleItem
+from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 
 
@@ -46,6 +46,26 @@ def _world(db_session, user_factory, content: str = "Счёт за матери�
     db_session.add(version)
     db_session.flush()
     return user, project, document, version
+
+
+def _control_chain(db, user, project):
+    contract = Contract(project_id=project.id, number="INV-1", title="Invoice contract", status="active")
+    db.add(contract); db.flush()
+    baseline = ScheduleBaseline(
+        project_id=project.id, contract_id=contract.id, created_by_user_id=user.id,
+        name="Invoice GPR", version=1, status="approved",
+    )
+    db.add(baseline); db.flush()
+    stage = ScheduleItem(project_id=project.id, baseline_id=baseline.id, title="Invoice stage")
+    budget = BudgetLine(
+        project_id=project.id, contract_id=contract.id, category="Прямые",
+        description="Invoice budget", planned_amount=Decimal("500000"),
+        forecast_amount=Decimal("500000"), currency="RUB", status="approved",
+    )
+    db.add_all([stage, budget]); db.flush()
+    return InvoiceExtractionConfirm(
+        contract_id=contract.id, schedule_item_id=stage.id, budget_line_id=budget.id,
+    )
 
 
 def test_invoice_llm_fields_require_verbatim_evidence_and_reject_materials_as_salary(monkeypatch):
@@ -344,9 +364,8 @@ def test_proposal_requires_manager_confirmation_before_creating_cash_flow(
     assert reviewed["status"] == "proposed"
     assert db_session.query(CashFlowEntry).count() == 0
 
-    confirmed = confirm_invoice_extraction(
-        proposed["id"], InvoiceExtractionConfirm(), db_session, user,
-    )
+    controls = _control_chain(db_session, user, project)
+    confirmed = confirm_invoice_extraction(proposed["id"], controls, db_session, user)
     entry = db_session.get(CashFlowEntry, confirmed["created_cash_flow_id"])
     assert confirmed["status"] == "confirmed"
     assert entry.project_id == project.id
@@ -420,7 +439,7 @@ def test_repeated_counterparty_does_not_auto_apply_prior_category(
     first = create_invoice_extraction(
         first_document.id, InvoiceExtractionCreate(project_id=project.id), db_session, user,
     )
-    confirm_invoice_extraction(first["id"], InvoiceExtractionConfirm(), db_session, user)
+    confirm_invoice_extraction(first["id"], _control_chain(db_session, user, project), db_session, user)
 
     second_document = Document(
         project_id=project.id, name="invoice-repeat.pdf", source="local_upload",

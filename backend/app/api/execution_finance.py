@@ -264,6 +264,12 @@ class InvoiceExtractionConfirm(BaseModel):
     task_id: int | None = None
 
 
+class CashFlowControlLinks(BaseModel):
+    contract_id: int = Field(ge=1)
+    schedule_item_id: int = Field(ge=1)
+    budget_line_id: int = Field(ge=1)
+
+
 class PaymentConfirmation(BaseModel):
     actual_amount: Decimal | None = Field(default=None, gt=0)
     actual_date: date | None = None
@@ -515,6 +521,34 @@ def _check_contract(db: Session, project_id: int, contract_id: int | None):
 def _check_task(db: Session, project_id: int, task_id: int | None) -> None:
     if task_id is not None and not db.scalar(select(Task.id).where(Task.id == task_id, Task.project_id == project_id)):
         raise HTTPException(422, "Задача не принадлежит выбранному проекту")
+
+
+def _validate_invoice_control_chain(
+    db: Session, *, project_id: int, contract_id: int | None,
+    schedule_item_id: int | None, budget_line_id: int | None, currency: str,
+) -> tuple[Contract, ScheduleItem, BudgetLine]:
+    """Validate the canonical Contract -> GPR/Budget junction used by invoices."""
+    if contract_id is None or schedule_item_id is None or budget_line_id is None:
+        raise HTTPException(422, "Для счёта обязательны договор, этап ГПР и строка бюджета")
+    contract = db.scalar(select(Contract).where(
+        Contract.id == contract_id, Contract.project_id == project_id,
+    ))
+    if contract is None:
+        raise HTTPException(422, "Договор не принадлежит выбранному проекту")
+    schedule_item = db.get(ScheduleItem, schedule_item_id)
+    if schedule_item is None or schedule_item.project_id != project_id:
+        raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
+    baseline = db.get(ScheduleBaseline, schedule_item.baseline_id)
+    if baseline is None or baseline.project_id != project_id or baseline.contract_id != contract_id:
+        raise HTTPException(422, "Этап ГПР не связан с выбранным договором")
+    budget = db.get(BudgetLine, budget_line_id)
+    if budget is None or budget.project_id != project_id:
+        raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+    if budget.contract_id != contract_id:
+        raise HTTPException(422, "Строка бюджета не связана с выбранным договором")
+    if budget.currency != currency:
+        raise HTTPException(422, "Валюта счёта не совпадает с валютой строки бюджета")
+    return contract, schedule_item, budget
 
 
 def _current_document_pin(
@@ -1808,12 +1842,9 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     )
     if current.id != item.source_document_version_id or digest != item.source_document_sha256:
         raise HTTPException(409, "SOURCE_VERSION_MISMATCH: счёт изменился после извлечения")
-    _check_contract(db, item.project_id, payload.contract_id)
     _check_task(db, item.project_id, payload.task_id)
-    if payload.schedule_item_id is not None:
-        schedule_item = db.get(ScheduleItem, payload.schedule_item_id)
-        if schedule_item is None or schedule_item.project_id != item.project_id:
-            raise HTTPException(422, "Этап графика не принадлежит выбранному проекту")
+    if item.target_kind == "budget":
+        _check_contract(db, item.project_id, payload.contract_id)
     document = db.get(Document, item.source_document_id)
     source_name = document.name if document else f"document:{item.source_document_id}"
     source_excerpt = " | ".join(filter(None, (
@@ -1836,10 +1867,11 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     else:
         if item.planned_date is None:
             raise HTTPException(422, "Перед подтверждением укажите плановую дату платежа")
-        if payload.budget_line_id is not None:
-            budget = db.get(BudgetLine, payload.budget_line_id)
-            if budget is None or budget.project_id != item.project_id:
-                raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+        _validate_invoice_control_chain(
+            db, project_id=item.project_id, contract_id=payload.contract_id,
+            schedule_item_id=payload.schedule_item_id,
+            budget_line_id=payload.budget_line_id, currency=item.currency,
+        )
         created = CashFlowEntry(
             project_id=item.project_id, contract_id=payload.contract_id,
             schedule_item_id=payload.schedule_item_id,
@@ -1907,27 +1939,14 @@ def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), use
 @router.post("/invoice-proposals")
 def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
-    _check_contract(db, payload.project_id, payload.contract_id)
     if payload.direction != "outflow":
         raise HTTPException(422, "Счёт на оплату должен быть расходом ДДС")
-    if payload.contract_id is None or payload.schedule_item_id is None or payload.budget_line_id is None:
-        raise HTTPException(422, "Для счёта обязательны договор, этап ГПР и строка бюджета")
     _check_task(db, payload.project_id, payload.task_id)
-    if payload.schedule_item_id is not None:
-        stage = db.get(ScheduleItem, payload.schedule_item_id)
-        if stage is None or stage.project_id != payload.project_id:
-            raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
-        baseline = db.get(ScheduleBaseline, stage.baseline_id)
-        if payload.contract_id and baseline and baseline.contract_id not in {None, payload.contract_id}:
-            raise HTTPException(422, "Этап ГПР связан с другим договором")
-    if payload.budget_line_id is not None:
-        budget = db.get(BudgetLine, payload.budget_line_id)
-        if budget is None or budget.project_id != payload.project_id:
-            raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
-        if payload.contract_id and budget.contract_id not in {None, payload.contract_id}:
-            raise HTTPException(422, "Строка бюджета связана с другим договором")
-        if budget.currency != payload.currency:
-            raise HTTPException(422, "Валюта счёта не совпадает с валютой строки бюджета")
+    _validate_invoice_control_chain(
+        db, project_id=payload.project_id, contract_id=payload.contract_id,
+        schedule_item_id=payload.schedule_item_id,
+        budget_line_id=payload.budget_line_id, currency=payload.currency,
+    )
     pin_version_id = payload.source_document_version_id
     pin_sha256 = payload.source_document_sha256
     if payload.source_document_id is not None:
@@ -1951,6 +1970,40 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
            f"budget={payload.budget_line_id}; document={payload.source_document_id}; version={pin_version_id}")
     db.commit()
     return {"id": item.id, "status": item.status, "requires_payment_confirmation": True}
+
+
+@router.post("/cash-flow/{item_id}/link-controls")
+def link_cash_flow_controls(item_id: int, payload: CashFlowControlLinks,
+                            db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = _locked_cash_flow(db, item_id)
+    require_project_role(db, user, item.project_id, "manager")
+    if item.status != "proposed":
+        raise HTTPException(409, "Связи можно изменить только у предложения ДДС")
+    _validate_invoice_control_chain(
+        db, project_id=item.project_id, contract_id=payload.contract_id,
+        schedule_item_id=payload.schedule_item_id,
+        budget_line_id=payload.budget_line_id, currency=item.currency,
+    )
+    before = {
+        "contract_id": item.contract_id,
+        "schedule_item_id": item.schedule_item_id,
+        "budget_line_id": item.budget_line_id,
+    }
+    item.contract_id = payload.contract_id
+    item.schedule_item_id = payload.schedule_item_id
+    item.budget_line_id = payload.budget_line_id
+    after = {
+        "contract_id": item.contract_id,
+        "schedule_item_id": item.schedule_item_id,
+        "budget_line_id": item.budget_line_id,
+    }
+    _audit(
+        db, "cash_flow_controls_linked", "cash_flow", item.id, user.id,
+        f"before={json.dumps(before, ensure_ascii=False)}; after={json.dumps(after, ensure_ascii=False)}; "
+        "human_confirmation=true",
+    )
+    db.commit()
+    return {"id": item.id, "status": item.status, **after}
 
 
 @router.post("/cash-flow/{item_id}/confirm-payment")
@@ -2151,6 +2204,15 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             )
     if kind == "cash-flow" and item.status in {"paid", "received"} and payload.status != item.status:
         raise HTTPException(409, "Подтверждённый платёж изменяется только корректировкой или сторно")
+    if (
+        kind == "cash-flow" and payload.status == "approved"
+        and item.direction == "outflow" and item.source_document_id is not None
+    ):
+        _validate_invoice_control_chain(
+            db, project_id=item.project_id, contract_id=item.contract_id,
+            schedule_item_id=item.schedule_item_id,
+            budget_line_id=item.budget_line_id, currency=item.currency,
+        )
     if kind == "cash-flow" and (payload.actual_amount is not None or payload.actual_date is not None):
         raise HTTPException(422, "Фактическая сумма и дата задаются только платёжным событием")
     if kind == "budget" and payload.status != "rejected" and item.source_document_id is not None:

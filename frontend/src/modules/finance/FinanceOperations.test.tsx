@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FinanceOperations } from "./FinanceOperations";
-import type { InvoiceExtractionProposal } from "./types";
+import type { FinanceOverview, InvoiceExtractionProposal } from "./types";
 
 
 const proposal: InvoiceExtractionProposal = {
@@ -33,10 +33,12 @@ afterEach(cleanup);
 
 function props(overrides: Record<string, unknown> = {}) {
   return {
-    finance: null, preview: null, selectedRows: [], setSelectedRows: vi.fn(),
-    selectedContractId: 0, kind: "budget", title: "", amount: "", date: "", extra: "",
-    objectName: "", category: "", note: "", sourceDocumentId: 0, scheduleItemId: 0,
-    budgetLineId: 0, baselineId: 0, setKind: vi.fn(), setTitle: vi.fn(), setAmount: vi.fn(),
+    finance: { baselines: [{ id: 51, contract_id: 41 }], schedule: [{ id: 52, baseline_id: 51, title: "Монтаж" }],
+      budget: [{ id: 61, contract_id: 41, description: "Монтаж" }] } as unknown as FinanceOverview,
+    preview: null, selectedRows: [], setSelectedRows: vi.fn(),
+    selectedContractId: 41, kind: "budget", title: "", amount: "", date: "", extra: "",
+    objectName: "", category: "", note: "", sourceDocumentId: 0, scheduleItemId: 52,
+    budgetLineId: 61, baselineId: 0, setKind: vi.fn(), setTitle: vi.fn(), setAmount: vi.fn(),
     setDate: vi.fn(), setExtra: vi.fn(), setObjectName: vi.fn(), setCategory: vi.fn(),
     setNote: vi.fn(), setScheduleItemId: vi.fn(), setBudgetLineId: vi.fn(),
     setBaselineId: vi.fn(), onClosePreview: vi.fn(), onImport: vi.fn(), onAdd: vi.fn(),
@@ -72,6 +74,18 @@ describe("invoice extraction review", () => {
   it("does not enable confirmation while category is missing", () => {
     render(<FinanceOperations {...props({ invoiceProposal: { ...proposal, selected_cost_category_id: undefined } })} />);
     expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
+  });
+
+  it("requires and exposes the contract schedule and budget controls", () => {
+    const setScheduleItemId = vi.fn();
+    const setBudgetLineId = vi.fn();
+    render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0, setScheduleItemId, setBudgetLineId })} />);
+
+    expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Этап ГПР счёта"), { target: { value: "52" } });
+    fireEvent.change(screen.getByLabelText("Строка бюджета счёта"), { target: { value: "61" } });
+    expect(setScheduleItemId).toHaveBeenCalledWith(52);
+    expect(setBudgetLineId).toHaveBeenCalledWith(61);
   });
 
   it("offers AI retry only for a temporary provider fallback", () => {

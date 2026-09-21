@@ -30,8 +30,8 @@ from app.api.execution_finance import (
 from app.invoice_extraction import InvoiceFields
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
-from app.models.execution_finance import CashFlowEntry, CostCategory, InvoiceExtractionProposal
-from app.models.organization_contract import Organization
+from app.models.execution_finance import BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal, ScheduleBaseline, ScheduleItem
+from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
@@ -115,8 +115,25 @@ def test_upload_proposal_confirmation_creates_dual_written_cash_flow_on_postgres
     assert proposed["status"] == "proposed"
     assert db.query(CashFlowEntry).filter_by(project_id=project.id).count() == 0
 
+    contract = Contract(project_id=project.id, number="PG-INV", title="Runtime contract", status="active")
+    db.add(contract); db.flush()
+    baseline = ScheduleBaseline(
+        project_id=project.id, contract_id=contract.id, created_by_user_id=user.id,
+        name="Runtime GPR", version=1, status="approved",
+    )
+    db.add(baseline); db.flush()
+    stage = ScheduleItem(project_id=project.id, baseline_id=baseline.id, title="Runtime stage")
+    budget = BudgetLine(
+        project_id=project.id, contract_id=contract.id, category="Прямые",
+        description="Runtime budget", planned_amount=Decimal("500000"),
+        forecast_amount=Decimal("500000"), currency="RUB", status="approved",
+    )
+    db.add_all([stage, budget]); db.flush()
+
     confirmed = confirm_invoice_extraction(
-        proposed["id"], InvoiceExtractionConfirm(), db, user,
+        proposed["id"], InvoiceExtractionConfirm(
+            contract_id=contract.id, schedule_item_id=stage.id, budget_line_id=budget.id,
+        ), db, user,
     )
     entry = db.get(CashFlowEntry, confirmed["created_cash_flow_id"])
     category = db.get(CostCategory, entry.cost_category_id)
@@ -127,6 +144,9 @@ def test_upload_proposal_confirmation_creates_dual_written_cash_flow_on_postgres
     assert entry.source_document_id == document.id
     assert entry.source_document_version_id == version.id
     assert entry.source_document_sha256 == hashlib.sha256(content.encode()).hexdigest()
+    assert (entry.contract_id, entry.schedule_item_id, entry.budget_line_id) == (
+        contract.id, stage.id, budget.id,
+    )
     assert inspect(engine).get_table_names().count("invoice_extraction_proposals") == 1
 
 

@@ -175,6 +175,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         method: "POST",
         body: JSON.stringify({
           contract_id: selectedFinanceContractId || null,
+          schedule_item_id: reviewed.target_kind === "cash_flow" ? financeScheduleItemId || null : null,
           budget_line_id: reviewed.target_kind === "cash_flow" ? financeBudgetLineId || null : null,
         }),
       });
@@ -312,6 +313,21 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     }
   }
 
+  async function linkCashFlowControls(id: number, contractId: number, scheduleItemId: number, budgetLineId: number) {
+    try {
+      await api(`/execution/cash-flow/${id}/link-controls`, {
+        method: "POST",
+        body: JSON.stringify({
+          contract_id: contractId,
+          schedule_item_id: scheduleItemId,
+          budget_line_id: budgetLineId,
+        }),
+      });
+      setNotice("ДДС безопасно связан с договором, этапом ГПР и строкой бюджета.");
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
   async function confirmFinance(kind: string, id: number, status: string) {
     try {
       await api(`/execution/${kind}/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
@@ -417,6 +433,6 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }
