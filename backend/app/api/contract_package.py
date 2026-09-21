@@ -115,7 +115,7 @@ def analyze_contract_package(project_id: int, contract_id: int, db: Session = De
                            "title": "Текст не извлечён", "severity": "error"})
             continue
         issues.extend(_financial_issues(contract, document, content))
-        financial_entries += len(_create_payment_schedule_proposals(db, contract, document, content))
+        financial_entries += len(_create_payment_schedule_proposals(db, contract, document))
         governance_document_ids.append(document.id)
     direction = cash_flow_direction(contract.contract_kind)
     db.add(AuditLog(action="contract_package_analyzed", entity_type="contract", entity_id=contract_id,

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
+from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
@@ -311,6 +312,8 @@ class ActCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
     document_id: int | None = None
+    expected_document_version_id: int | None = None
+    expected_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
     number: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=2, max_length=500)
     act_date: date | None = None
@@ -520,21 +523,10 @@ def _current_document_pin(
     expected_version_id: int | None = None,
     expected_sha256: str | None = None,
 ) -> tuple[DocumentVersion, str]:
-    document = db.scalar(select(Document).where(Document.id == document_id, Document.project_id == project_id))
-    if document is None:
-        raise HTTPException(422, "Документ не принадлежит выбранному проекту")
-    current = db.scalar(select(DocumentVersion).where(
-        DocumentVersion.document_id == document.id,
-        DocumentVersion.version_number == document.current_version,
-    ))
-    if current is None:
-        raise HTTPException(409, "У документа нет доступной текущей версии")
-    digest = hashlib.sha256((current.content or "").encode("utf-8")).hexdigest()
-    if expected_version_id is not None and expected_version_id != current.id:
-        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась")
-    if expected_sha256 is not None and expected_sha256 != digest:
-        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: содержимое документа изменилось")
-    return current, digest
+    pin = resolve_current_document_pin(
+        db, project_id, document_id, expected_version_id, expected_sha256,
+    )
+    return pin.version, pin.sha256
 
 
 def _assert_cash_flow_source_current(
@@ -547,13 +539,14 @@ def _assert_cash_flow_source_current(
         if expected_version_id is not None or expected_sha256 is not None:
             raise HTTPException(409, "SOURCE_VERSION_MISMATCH: у платежа нет закреплённого документа")
         return
-    current, digest = _current_document_pin(
-        db, item.project_id, item.source_document_id, expected_version_id, expected_sha256,
+    pin = assert_document_pin_current(
+        db, item.project_id, item.source_document_id,
+        item.source_document_version_id, item.source_document_sha256,
     )
-    if item.source_document_version_id is not None and item.source_document_version_id != current.id:
-        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: предложение создано по другой версии документа")
-    if item.source_document_sha256 is not None and item.source_document_sha256 != digest:
-        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: закреплённый документ изменился")
+    if expected_version_id is not None and expected_version_id != pin.version.id:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась")
+    if expected_sha256 is not None and expected_sha256 != pin.sha256:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: содержимое документа изменилось")
 
 
 def _payment_payload_hash(
@@ -1001,6 +994,9 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                                                 "constraint_violation": False})} for x in schedule],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "cost_category_id": x.cost_category_id,
                     "category": x.category, "description": x.description,
+                    "source_document_id": x.source_document_id,
+                    "source_document_version_id": x.source_document_version_id,
+                    "source_document_sha256": x.source_document_sha256,
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
@@ -1017,7 +1013,9 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
                           "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
                           "planned_amount": x.planned_amount, "actual_amount": x.actual_amount, "currency": x.currency} for x in procurement],
-        "acts": [{"id": x.id, "contract_id": x.contract_id, "document_id": x.document_id, "number": x.number,
+        "acts": [{"id": x.id, "contract_id": x.contract_id, "document_id": x.document_id,
+                    "source_document_version_id": x.source_document_version_id,
+                    "source_document_sha256": x.source_document_sha256, "number": x.number,
                    "title": x.title, "act_date": x.act_date, "amount": x.amount, "currency": x.currency,
                    "status": x.status} for x in acts],
     }
@@ -1073,17 +1071,15 @@ def document_candidates(project_id: int, contract_id: int | None = None,
 
 
 def _document_content(db: Session, project_id: int, document_id: int) -> tuple[Document, DocumentVersion, str, str]:
-    document = db.scalar(select(Document).where(Document.id == document_id, Document.project_id == project_id))
-    if document is None:
-        raise HTTPException(404, "Документ не найден в выбранном проекте")
-    version = db.scalar(select(DocumentVersion).where(
-        DocumentVersion.document_id == document.id,
-    ).order_by(DocumentVersion.version_number.desc()))
-    content = version.content if version and version.content else ""
+    pin = resolve_current_document_pin(
+        db, project_id, document_id,
+        missing_status=404,
+        missing_detail="Документ не найден в выбранном проекте",
+    )
+    content = pin.version.content or ""
     if not content.strip():
         raise HTTPException(409, "У документа ещё нет извлечённого табличного текста")
-    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    return document, version, digest, content
+    return pin.document, pin.version, pin.sha256, content
 
 
 def _import_date(value: str | None) -> date | None:
@@ -1157,7 +1153,8 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                 cost_category_id=category_id, category=category_name,
                 description=row["title"], planned_amount=amount,
                 forecast_amount=amount, status="proposed", source_name=source_name,
-                source_excerpt=row["excerpt"],
+                source_excerpt=row["excerpt"], source_document_id=document.id,
+                source_document_version_id=version.id, source_document_sha256=digest,
             )
         else:
             category_id, category_name = _dual_write_category(
@@ -1777,6 +1774,9 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
             cost_category_id=category.id, category=category.name,
             description=item.payment_purpose, planned_amount=item.amount,
             forecast_amount=item.amount, status="proposed",
+            source_document_id=item.source_document_id,
+            source_document_version_id=item.source_document_version_id,
+            source_document_sha256=item.source_document_sha256,
             source_name=source_name, source_excerpt=source_excerpt,
         )
         db.add(created); db.flush()
@@ -2043,7 +2043,24 @@ def create_procurement(payload: ProcurementCreate, db: Session = Depends(get_db)
 @router.post("/acts")
 def create_act(payload: ActCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
-    item = AcceptanceAct(**payload.model_dump()); db.add(item); db.flush(); _audit(db, "act_proposed", "acceptance_act", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
+    data = payload.model_dump(exclude={"expected_document_version_id", "expected_document_sha256"})
+    if payload.document_id is not None:
+        pin = resolve_current_document_pin(
+            db, payload.project_id, payload.document_id,
+            payload.expected_document_version_id, payload.expected_document_sha256,
+        )
+        data["source_document_version_id"] = pin.version.id
+        data["source_document_sha256"] = pin.sha256
+    elif payload.expected_document_version_id is not None or payload.expected_document_sha256 is not None:
+        raise HTTPException(422, "Версия источника указана без документа")
+    item = AcceptanceAct(**data)
+    db.add(item); db.flush()
+    _audit(
+        db, "act_proposed", "acceptance_act", item.id, user.id,
+        f"status=proposed; document={item.document_id}; version={item.source_document_version_id}",
+    )
+    db.commit()
+    return {"id": item.id, "status": item.status}
 
 
 @router.patch("/{kind}/{item_id}/status")
@@ -2062,6 +2079,16 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         raise HTTPException(409, "Подтверждённый платёж изменяется только корректировкой или сторно")
     if kind == "cash-flow" and (payload.actual_amount is not None or payload.actual_date is not None):
         raise HTTPException(422, "Фактическая сумма и дата задаются только платёжным событием")
+    if kind == "budget" and payload.status != "rejected" and item.source_document_id is not None:
+        assert_document_pin_current(
+            db, item.project_id, item.source_document_id,
+            item.source_document_version_id, item.source_document_sha256,
+        )
+    if kind == "acts" and payload.status != "rejected" and item.document_id is not None:
+        assert_document_pin_current(
+            db, item.project_id, item.document_id,
+            item.source_document_version_id, item.source_document_sha256,
+        )
     item.status = payload.status
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
