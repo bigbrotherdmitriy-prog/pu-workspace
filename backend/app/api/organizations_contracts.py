@@ -1,10 +1,12 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
+import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, require_project_role, require_user
@@ -17,7 +19,8 @@ from app.models.governance import Decision, Risk
 from app.models.management import Meeting, Obligation
 from app.models.task import Task
 from app.models.execution_finance import (
-    AcceptanceAct, BudgetLine, CashFlowEntry, ProcurementItem, ScheduleBaseline, ScheduleItem,
+    AcceptanceAct, BudgetLine, CashFlowEntry, ContractBudgetProposal, CostCategory,
+    ProcurementItem, ScheduleBaseline, ScheduleItem,
 )
 from app.models.ai_secretary import Message
 from app.models.automation_rule import AutomationRule
@@ -115,6 +118,12 @@ class ContractLinkUpdate(BaseModel):
         default=None,
         pattern="^(prime_reference|customer|revenue_subcontract|downstream_subcontract|supply)$",
     )
+
+
+class ContractBudgetProposalUpdate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0)
+    description: str | None = Field(default=None, min_length=1, max_length=1000)
+    selected_cost_category_id: int | None = None
 
 
 def _normalized(value: str | None) -> str:
@@ -448,6 +457,279 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
     return _contract(row, db)
 
 
+def _contract_budget_proposal(row: ContractBudgetProposal) -> dict:
+    return {
+        "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
+        "contract_record_version": row.contract_record_version,
+        "operation": row.operation, "amount": row.amount,
+        "advance_amount": row.advance_amount, "retention_percent": row.retention_percent,
+        "currency": row.currency, "description": row.description,
+        "selected_cost_category_id": row.selected_cost_category_id,
+        "source_document_id": row.source_document_id,
+        "source_document_version_id": row.source_document_version_id,
+        "source_document_sha256": row.source_document_sha256,
+        "source_name": row.source_name,
+        "target_budget_line_id": row.target_budget_line_id,
+        "created_budget_line_id": row.created_budget_line_id,
+        "status": row.status, "confirmed_by_user_id": row.confirmed_by_user_id,
+        "confirmed_at": row.confirmed_at,
+        "requires_confirmation": row.status == "proposed",
+    }
+
+
+def _contract_budget_category(db: Session, project_id: int, category_id: int) -> CostCategory:
+    project = db.get(Project, project_id)
+    category = db.scalar(select(CostCategory).where(
+        CostCategory.id == category_id,
+        CostCategory.organization_id == project.organization_id,
+        CostCategory.is_active.is_(True),
+    )) if project is not None else None
+    if category is None:
+        raise HTTPException(422, "Категория затрат не принадлежит организации проекта или отключена")
+    return category
+
+
+def _latest_contract_budget_line(db: Session, contract_id: int) -> BudgetLine | None:
+    proposal = db.scalar(select(ContractBudgetProposal).where(
+        ContractBudgetProposal.contract_id == contract_id,
+        ContractBudgetProposal.status == "confirmed",
+        ContractBudgetProposal.created_budget_line_id.is_not(None),
+    ).order_by(ContractBudgetProposal.contract_record_version.desc(), ContractBudgetProposal.id.desc()))
+    return db.get(BudgetLine, proposal.created_budget_line_id) if proposal is not None else None
+
+
+def _assert_contract_budget_source_current(db: Session, contract: Contract,
+                                           proposal: ContractBudgetProposal) -> None:
+    if contract.record_version != proposal.contract_record_version:
+        raise HTTPException(409, "CONTRACT_VERSION_MISMATCH: условия договора изменились после создания предложения")
+    if proposal.source_document_id is None:
+        if contract.source_document_id is not None:
+            raise HTTPException(409, "SOURCE_VERSION_MISMATCH: источник договора изменился")
+        return
+    if contract.source_document_id != proposal.source_document_id:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: источник договора изменился")
+    resolve_current_document_pin(
+        db, contract.project_id, proposal.source_document_id,
+        proposal.source_document_version_id, proposal.source_document_sha256,
+    )
+
+
+@router.post("/projects/{project_id}/contracts/{contract_id}/budget-proposals")
+def create_contract_budget_proposal(project_id: int, contract_id: int,
+                                    db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "editor")
+    contract = db.scalar(select(Contract).where(
+        Contract.id == contract_id, Contract.project_id == project_id,
+    ).with_for_update())
+    if contract is None:
+        raise HTTPException(404, "Contract not found")
+    if not is_financial_contract(contract.contract_kind):
+        raise HTTPException(422, "Для договора-контекста бюджет не формируется")
+    if contract.amount is None or contract.amount <= 0:
+        raise HTTPException(422, "Сначала укажите положительную сумму договора")
+    if contract.advance_amount is not None and contract.advance_amount > contract.amount:
+        raise HTTPException(422, "Аванс не может превышать сумму договора")
+    existing = db.scalar(select(ContractBudgetProposal).where(
+        ContractBudgetProposal.contract_id == contract.id,
+        ContractBudgetProposal.contract_record_version == contract.record_version,
+    ))
+    if existing is not None:
+        return _contract_budget_proposal(existing)
+
+    source = {"document_id": None, "version_id": None, "sha256": None, "name": None}
+    if contract.source_document_id is not None:
+        try:
+            pin = resolve_current_document_pin(db, project_id, contract.source_document_id)
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                raise HTTPException(
+                    409,
+                    "SOURCE_PIN_MISSING: договор связан с документом, но текущая версия источника недоступна",
+                ) from exc
+            raise
+        source = {
+            "document_id": pin.document.id, "version_id": pin.version.id,
+            "sha256": pin.sha256, "name": pin.document.name,
+        }
+    target = _latest_contract_budget_line(db, contract.id)
+    for older in db.scalars(select(ContractBudgetProposal).where(
+        ContractBudgetProposal.contract_id == contract.id,
+        ContractBudgetProposal.status == "proposed",
+    ).with_for_update()):
+        older.status = "superseded"
+        db.add(AuditLog(
+            action="contract_budget_proposal_superseded", entity_type="contract_budget_proposal",
+            entity_id=older.id, details=f"user={user.id}; superseded_by_contract_version={contract.record_version}",
+        ))
+    proposal = ContractBudgetProposal(
+        project_id=project_id, contract_id=contract.id,
+        contract_record_version=contract.record_version,
+        operation="revise" if target is not None else "create",
+        amount=contract.amount, advance_amount=contract.advance_amount,
+        retention_percent=contract.retention_percent, currency="RUB",
+        description=f"Договор {contract.number}: {contract.title}",
+        source_document_id=source["document_id"],
+        source_document_version_id=source["version_id"],
+        source_document_sha256=source["sha256"], source_name=source["name"],
+        target_budget_line_id=target.id if target is not None else None,
+    )
+    try:
+        with db.begin_nested():
+            db.add(proposal)
+            db.flush()
+    except IntegrityError:
+        existing = db.scalar(select(ContractBudgetProposal).where(
+            ContractBudgetProposal.contract_id == contract.id,
+            ContractBudgetProposal.contract_record_version == contract.record_version,
+        ))
+        if existing is None:
+            raise
+        return _contract_budget_proposal(existing)
+    db.add(AuditLog(
+        action="contract_budget_proposed", entity_type="contract_budget_proposal",
+        entity_id=proposal.id,
+        details=(f"user={user.id}; contract={contract.id}; contract_version={contract.record_version}; "
+                 f"operation={proposal.operation}; amount={proposal.amount}; human_confirmation_required=true"),
+    ))
+    db.commit()
+    return _contract_budget_proposal(proposal)
+
+
+@router.patch("/contract-budget-proposals/{proposal_id}")
+def update_contract_budget_proposal(proposal_id: int, payload: ContractBudgetProposalUpdate,
+                                    db: Session = Depends(get_db), user: User = Depends(require_user)):
+    proposal = db.scalar(select(ContractBudgetProposal).where(
+        ContractBudgetProposal.id == proposal_id,
+    ).with_for_update())
+    if proposal is None:
+        raise HTTPException(404, "Предложение бюджета не найдено")
+    require_project_role(db, user, proposal.project_id, "manager")
+    if proposal.status != "proposed":
+        raise HTTPException(409, "Подтверждённое, отклонённое или устаревшее предложение неизменяемо")
+    before = _contract_budget_proposal(proposal)
+    data = payload.model_dump(exclude_unset=True)
+    if "amount" in data and data["amount"] is None:
+        raise HTTPException(422, "Сумма предложения обязательна")
+    if "description" in data and data["description"] is None:
+        raise HTTPException(422, "Описание предложения обязательно")
+    if "selected_cost_category_id" in data and data["selected_cost_category_id"] is not None:
+        data["selected_cost_category_id"] = _contract_budget_category(
+            db, proposal.project_id, data["selected_cost_category_id"],
+        ).id
+    for name, value in data.items():
+        setattr(proposal, name, value.strip() if isinstance(value, str) else value)
+    db.add(AuditLog(
+        action="contract_budget_proposal_edited", entity_type="contract_budget_proposal",
+        entity_id=proposal.id,
+        details=f"user={user.id}; before={json.dumps(before, default=str, ensure_ascii=False)}; after={json.dumps(_contract_budget_proposal(proposal), default=str, ensure_ascii=False)}",
+    ))
+    db.commit()
+    return _contract_budget_proposal(proposal)
+
+
+@router.post("/contract-budget-proposals/{proposal_id}/confirm")
+def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get_db),
+                                     user: User = Depends(require_user)):
+    proposal = db.scalar(select(ContractBudgetProposal).where(
+        ContractBudgetProposal.id == proposal_id,
+    ).with_for_update())
+    if proposal is None:
+        raise HTTPException(404, "Предложение бюджета не найдено")
+    require_project_role(db, user, proposal.project_id, "manager")
+    if proposal.status == "confirmed":
+        return _contract_budget_proposal(proposal)
+    if proposal.status != "proposed":
+        raise HTTPException(409, "Отклонённое или устаревшее предложение нельзя подтвердить")
+    contract = db.scalar(select(Contract).where(
+        Contract.id == proposal.contract_id, Contract.project_id == proposal.project_id,
+    ).with_for_update())
+    if contract is None:
+        raise HTTPException(409, "Договор больше не существует")
+    _assert_contract_budget_source_current(db, contract, proposal)
+    if proposal.selected_cost_category_id is None:
+        raise HTTPException(422, "Менеджер должен выбрать категорию затрат")
+    category = _contract_budget_category(db, proposal.project_id, proposal.selected_cost_category_id)
+    before = None
+    if proposal.operation == "create":
+        budget = BudgetLine(
+            project_id=proposal.project_id, contract_id=proposal.contract_id,
+            cost_category_id=category.id, category=category.name,
+            description=proposal.description, planned_amount=proposal.amount,
+            committed_amount=Decimal("0"), actual_amount=Decimal("0"),
+            forecast_amount=proposal.amount, currency=proposal.currency, status="proposed",
+            source_document_id=proposal.source_document_id,
+            source_document_version_id=proposal.source_document_version_id,
+            source_document_sha256=proposal.source_document_sha256,
+            source_name=proposal.source_name,
+        )
+        db.add(budget); db.flush()
+    else:
+        budget = db.scalar(select(BudgetLine).where(
+            BudgetLine.id == proposal.target_budget_line_id,
+            BudgetLine.project_id == proposal.project_id,
+            BudgetLine.contract_id == proposal.contract_id,
+        ).with_for_update())
+        if budget is None:
+            raise HTTPException(409, "TARGET_BUDGET_LINE_MISSING: исходная строка бюджета больше не существует")
+        before = {
+            "id": budget.id, "planned_amount": str(budget.planned_amount),
+            "forecast_amount": str(budget.forecast_amount), "committed_amount": str(budget.committed_amount),
+            "actual_amount": str(budget.actual_amount), "category": budget.category,
+            "description": budget.description,
+        }
+        budget.cost_category_id = category.id
+        budget.category = category.name
+        budget.description = proposal.description
+        budget.planned_amount = proposal.amount
+        budget.forecast_amount = proposal.amount
+        budget.currency = proposal.currency
+        budget.source_document_id = proposal.source_document_id
+        budget.source_document_version_id = proposal.source_document_version_id
+        budget.source_document_sha256 = proposal.source_document_sha256
+        budget.source_name = proposal.source_name
+        budget.status = "proposed"
+    proposal.created_budget_line_id = budget.id
+    proposal.status = "confirmed"
+    proposal.confirmed_by_user_id = user.id
+    proposal.confirmed_at = datetime.now(timezone.utc)
+    after = {
+        "id": budget.id, "planned_amount": str(budget.planned_amount),
+        "forecast_amount": str(budget.forecast_amount), "committed_amount": str(budget.committed_amount),
+        "actual_amount": str(budget.actual_amount), "category": budget.category,
+        "description": budget.description,
+    }
+    db.add(AuditLog(
+        action="contract_budget_confirmed", entity_type="contract_budget_proposal",
+        entity_id=proposal.id,
+        details=(f"user={user.id}; operation={proposal.operation}; budget_line={budget.id}; "
+                 f"before={json.dumps(before, ensure_ascii=False)}; after={json.dumps(after, ensure_ascii=False)}"),
+    ))
+    db.commit()
+    return _contract_budget_proposal(proposal)
+
+
+@router.post("/contract-budget-proposals/{proposal_id}/reject")
+def reject_contract_budget_proposal(proposal_id: int, db: Session = Depends(get_db),
+                                    user: User = Depends(require_user)):
+    proposal = db.scalar(select(ContractBudgetProposal).where(
+        ContractBudgetProposal.id == proposal_id,
+    ).with_for_update())
+    if proposal is None:
+        raise HTTPException(404, "Предложение бюджета не найдено")
+    require_project_role(db, user, proposal.project_id, "manager")
+    if proposal.status == "confirmed":
+        raise HTTPException(409, "Подтверждённое предложение нельзя отклонить")
+    if proposal.status == "superseded":
+        raise HTTPException(409, "Устаревшее предложение уже заменено новой версией")
+    proposal.status = "rejected"
+    db.add(AuditLog(
+        action="contract_budget_rejected", entity_type="contract_budget_proposal",
+        entity_id=proposal.id, details=f"user={user.id}; human_confirmation=true",
+    ))
+    db.commit()
+    return _contract_budget_proposal(proposal)
+
+
 class ContractDelete(BaseModel):
     confirmation: str
     expected_record_version: int = Field(gt=0)
@@ -460,6 +742,7 @@ def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> di
         ("documents", ContractDocumentLink, ContractDocumentLink.contract_id),
         ("schedule_baselines", ScheduleBaseline, ScheduleBaseline.contract_id),
         ("budget_lines", BudgetLine, BudgetLine.contract_id),
+        ("budget_proposals", ContractBudgetProposal, ContractBudgetProposal.contract_id),
         ("cash_flow_entries", CashFlowEntry, CashFlowEntry.contract_id),
         ("procurement_items", ProcurementItem, ProcurementItem.contract_id),
         ("acceptance_acts", AcceptanceAct, AcceptanceAct.contract_id),
@@ -866,6 +1149,11 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
         "source_document_id": row.source_document_id, "notes": row.notes,
     }
     if db is not None:
+        proposals = list(db.scalars(select(ContractBudgetProposal).where(
+            ContractBudgetProposal.contract_id == row.id,
+            ContractBudgetProposal.project_id == row.project_id,
+        ).order_by(ContractBudgetProposal.contract_record_version.desc(), ContractBudgetProposal.id.desc())))
+        result["budget_proposals"] = [_contract_budget_proposal(proposal) for proposal in proposals]
         versions = list(db.scalars(select(ContractVersion).where(
             ContractVersion.contract_id == row.id,
             ContractVersion.project_id == row.project_id,

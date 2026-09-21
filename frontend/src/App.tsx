@@ -215,7 +215,18 @@ type ContractRow = {
     risks: number;
     decisions: number;
   };
+  budget_proposals?: ContractBudgetProposal[];
 };
+type ContractBudgetProposal = {
+  id: number; contract_id: number; contract_record_version: number;
+  operation: "create" | "revise"; amount: number; advance_amount?: number;
+  retention_percent?: number; currency: string; description: string;
+  selected_cost_category_id?: number; source_document_id?: number;
+  source_document_version_id?: number; source_document_sha256?: string;
+  target_budget_line_id?: number; created_budget_line_id?: number;
+  status: "proposed" | "confirmed" | "rejected" | "superseded";
+};
+type ContractBudgetDraft = { amount: string; description: string; categoryId: number };
 type ContractEditDraft = {
   number: string; title: string; counterparty: string; amount: string;
   advanceAmount: string; retentionPercent: string; signedAt: string; status: string;
@@ -413,6 +424,7 @@ export function App() {
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
     [contractStructureDrafts, setContractStructureDrafts] = useState<Record<number, { kind: string; parentId: number }>>({}),
     [contractEditDrafts, setContractEditDrafts] = useState<Record<number, ContractEditDraft>>({}),
+    [contractBudgetDrafts, setContractBudgetDrafts] = useState<Record<number, ContractBudgetDraft>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
     [droppedContractProposals, setDroppedContractProposals] = useState<BulkContractProposal[]>([]),
     [contractFinancialChecks, setContractFinancialChecks] = useState<Record<number, ContractFinancialCheck>>({}),
@@ -1071,6 +1083,49 @@ export function App() {
       });
       setContractEditDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
       setNotice("Договор обновлён. Связанные документы, ГПР, бюджет и ДДС сохранены.");
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function proposeContractBudget(contractId: number) {
+    try {
+      setError("");
+      const proposal = await api(`/projects/${projectId}/contracts/${contractId}/budget-proposals`, { method: "POST" });
+      setContractBudgetDrafts((current) => ({ ...current, [proposal.id]: {
+        amount: String(proposal.amount), description: proposal.description,
+        categoryId: Number(proposal.selected_cost_category_id || 0),
+      } }));
+      setNotice(proposal.operation === "revise"
+        ? "Подготовлено предложение пересмотреть существующую строку бюджета. Проверьте и подтвердите как менеджер."
+        : "Подготовлено предложение одной строки бюджета на общую сумму договора. Проверьте и подтвердите как менеджер.");
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function confirmContractBudget(proposal: ContractBudgetProposal) {
+    const draft = contractBudgetDrafts[proposal.id] || {
+      amount: String(proposal.amount), description: proposal.description,
+      categoryId: Number(proposal.selected_cost_category_id || 0),
+    };
+    if (!draft.categoryId) { setError("Выберите категорию затрат перед подтверждением"); return; }
+    try {
+      setError("");
+      await api(`/contract-budget-proposals/${proposal.id}`, {
+        method: "PATCH", body: JSON.stringify({
+          amount: Number(draft.amount), description: draft.description,
+          selected_cost_category_id: draft.categoryId,
+        }),
+      });
+      await api(`/contract-budget-proposals/${proposal.id}/confirm`, { method: "POST" });
+      setNotice(proposal.operation === "revise"
+        ? "Строка бюджета пересмотрена без задвоения суммы; факт и обязательства сохранены."
+        : "Предложение подтверждено: создана одна строка бюджета.");
+      await load(); await loadFinance();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function rejectContractBudget(proposalId: number) {
+    try {
+      setError("");
+      await api(`/contract-budget-proposals/${proposalId}/reject`, { method: "POST" });
+      setNotice("Предложение бюджета отклонено. Финансовые записи не создавались.");
       await load();
     } catch (e) { setError((e as Error).message); }
   }
@@ -3363,6 +3418,39 @@ export function App() {
                         {item.retention_percent ? ` · удержание ${item.retention_percent}%` : ""}
                         {item.warranty_until ? ` · гарантия до ${new Date(item.warranty_until).toLocaleDateString("ru-RU")}` : ""}
                       </small>}
+                      {item.contract_kind !== "prime_reference" && <div className="contract-budget-proposal">
+                        <button className="secondary" disabled={!item.amount} onClick={() => void proposeContractBudget(item.id)}>
+                          Предложить бюджет по договору
+                        </button>
+                        {!item.amount && <small>Сначала укажите общую сумму договора.</small>}
+                        {(item.budget_proposals || []).filter((proposal) => proposal.status === "proposed").slice(0, 1).map((proposal) => {
+                          const draft = contractBudgetDrafts[proposal.id] || {
+                            amount: String(proposal.amount), description: proposal.description,
+                            categoryId: Number(proposal.selected_cost_category_id || 0),
+                          };
+                          const canManage = Boolean(currentUser?.is_admin || members.some((member) =>
+                            member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+                          ));
+                          const change = (values: Partial<ContractBudgetDraft>) => setContractBudgetDrafts((current) => ({
+                            ...current, [proposal.id]: { ...draft, ...values },
+                          }));
+                          return <div className="contract-edit-form" key={proposal.id}>
+                            <strong>{proposal.operation === "revise" ? "Пересмотр строки бюджета" : "Предложение строки бюджета"}</strong>
+                            <small>Общая сумма — одна строка. Аванс {proposal.advance_amount ? money(proposal.advance_amount) : "не указан"}; удержание {proposal.retention_percent ? `${proposal.retention_percent}%` : "не указано"} — справочно.</small>
+                            <input aria-label="Сумма предложения бюджета" type="number" min="0.01" step="0.01" value={draft.amount} onChange={(event) => change({ amount: event.target.value })} />
+                            <input aria-label="Описание предложения бюджета" value={draft.description} onChange={(event) => change({ description: event.target.value })} />
+                            <select aria-label="Категория предложения бюджета" value={draft.categoryId || ""} onChange={(event) => change({ categoryId: Number(event.target.value) })}>
+                              <option value="">Выберите категорию затрат</option>
+                              {costCategories.filter((category) => category.is_active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                            </select>
+                            {proposal.source_document_id && <small>Источник закреплён: документ #{proposal.source_document_id}, версия #{proposal.source_document_version_id}.</small>}
+                            {canManage ? <div className="contract-edit-actions">
+                              <button className="secondary" onClick={() => void rejectContractBudget(proposal.id)}>Отклонить</button>
+                              <button disabled={!draft.amount || !draft.description.trim() || !draft.categoryId} onClick={() => void confirmContractBudget(proposal)}>Подтвердить бюджет</button>
+                            </div> : <small>Предложение создано. Подтвердить или отклонить его может менеджер проекта.</small>}
+                          </div>;
+                        })}
+                      </div>}
                       {contractEditDrafts[item.id] ? (() => {
                         const draft = contractEditDrafts[item.id];
                         const change = (field: keyof ContractEditDraft, value: string) => setContractEditDrafts((current) => ({

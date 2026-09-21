@@ -48,6 +48,21 @@ jobs:
         run: |
           set -o pipefail
           pytest tests -q 2>&1 | tee ../pytest.log
+      - name: Contract budget proposal PostgreSQL gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_mvp4_contract_budget_proposals_postgres.py \
+            --junitxml=../contract-budget-postgres.xml 2>&1 | tee ../contract-budget-postgres.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../contract-budget-postgres.xml').getroot()
+          cases = report.findall('.//testcase')
+          assert len(cases) == 2, f'Expected 2 PostgreSQL gates, collected {len(cases)}'
+          assert not report.findall('.//skipped'), 'Contract budget PostgreSQL gates must not skip tests'
+          PY
       - name: Provider outbox PostgreSQL recovery races
         working-directory: backend
         env:
@@ -103,6 +118,8 @@ jobs:
           name: verification-logs-${{ github.sha }}
           path: |
             pytest.log
+            contract-budget-postgres.log
+            contract-budget-postgres.xml
             provider-outbox-postgres.log
             provider-outbox-postgres.xml
             frontend-check.log
