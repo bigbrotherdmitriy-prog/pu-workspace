@@ -311,6 +311,7 @@ class ProcurementCreate(BaseModel):
 class ActCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
+    budget_line_id: int | None = Field(default=None, ge=1)
     document_id: int | None = None
     expected_document_version_id: int | None = None
     expected_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
@@ -654,10 +655,12 @@ def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, de
     db.add(AuditLog(action=action, entity_type=kind, entity_id=entity_id, details=f"user={user_id}; {details}"))
 
 
-def _linked_budget_totals(rows: list[CashFlowEntry]) -> tuple[Decimal, Decimal]:
-    committed = sum((row.planned_amount for row in rows if row.direction == "outflow" and row.status in {"approved", "paid"}), Decimal("0"))
-    actual = sum((row.actual_amount for row in rows if row.direction == "outflow" and row.status == "paid"), Decimal("0"))
-    return committed, actual
+def _linked_budget_committed(rows: list[CashFlowEntry]) -> Decimal:
+    return sum(
+        (row.planned_amount for row in rows
+         if row.direction == "outflow" and row.status in {"approved", "paid"}),
+        Decimal("0"),
+    )
 
 
 def _refresh_budget_from_cash_flow(db: Session, budget_line_id: int | None) -> None:
@@ -667,7 +670,53 @@ def _refresh_budget_from_cash_flow(db: Session, budget_line_id: int | None) -> N
     if budget is None:
         return
     rows = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.budget_line_id == budget.id)))
-    budget.committed_amount, budget.actual_amount = _linked_budget_totals(rows)
+    # Cash flow is the commitment/payment ledger.  Completed work is projected
+    # independently from signed acceptance acts.
+    budget.committed_amount = _linked_budget_committed(rows)
+
+
+def _lock_budget_line(db: Session, budget_line_id: int) -> BudgetLine:
+    budget = db.scalar(
+        select(BudgetLine).where(BudgetLine.id == budget_line_id).with_for_update()
+    )
+    if budget is None:
+        raise HTTPException(422, "Строка бюджета не найдена")
+    return budget
+
+
+def _validate_act_budget_link(
+    db: Session, *, project_id: int, contract_id: int | None,
+    budget_line_id: int | None, currency: str,
+) -> BudgetLine | None:
+    if budget_line_id is None:
+        return None
+    budget = db.get(BudgetLine, budget_line_id)
+    if budget is None or budget.project_id != project_id:
+        raise HTTPException(422, "Строка бюджета не принадлежит проекту акта")
+    if contract_id is not None and budget.contract_id is not None and budget.contract_id != contract_id:
+        raise HTTPException(422, "Строка бюджета относится к другому договору")
+    if budget.currency != currency:
+        raise HTTPException(422, "Валюта акта не совпадает с валютой строки бюджета")
+    return budget
+
+
+def _refresh_budget_actual_from_acts(
+    db: Session, budget_line_id: int | None, *, budget: BudgetLine | None = None,
+) -> tuple[Decimal, Decimal] | None:
+    if budget_line_id is None:
+        return None
+    locked = budget or _lock_budget_line(db, budget_line_id)
+    db.flush()
+    actual = db.scalar(select(func.coalesce(func.sum(AcceptanceAct.amount), 0)).where(
+        AcceptanceAct.budget_line_id == budget_line_id,
+        AcceptanceAct.status.in_(("signed", "paid")),
+    ))
+    locked.actual_amount = _money(actual or 0)
+    remaining = (locked.planned_amount - locked.actual_amount).quantize(
+        MONEY_QUANTUM, rounding=ROUND_HALF_UP,
+    )
+    overrun = _money(max(locked.actual_amount - locked.planned_amount, Decimal("0")))
+    return remaining, overrun
 
 
 def _schedule_predecessor_ids(value: str | None) -> list[int]:
@@ -998,6 +1047,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "source_document_version_id": x.source_document_version_id,
                     "source_document_sha256": x.source_document_sha256,
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
+                    "remaining_amount": x.planned_amount - x.actual_amount,
+                    "overrun_amount": max(x.actual_amount - x.planned_amount, Decimal("0")),
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
                         "budget_line_id": x.budget_line_id, "task_id": x.task_id,
@@ -1013,7 +1064,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
                           "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
                           "planned_amount": x.planned_amount, "actual_amount": x.actual_amount, "currency": x.currency} for x in procurement],
-        "acts": [{"id": x.id, "contract_id": x.contract_id, "document_id": x.document_id,
+        "acts": [{"id": x.id, "contract_id": x.contract_id,
+                    "budget_line_id": x.budget_line_id, "document_id": x.document_id,
                     "source_document_version_id": x.source_document_version_id,
                     "source_document_sha256": x.source_document_sha256, "number": x.number,
                    "title": x.title, "act_date": x.act_date, "amount": x.amount, "currency": x.currency,
@@ -2043,6 +2095,10 @@ def create_procurement(payload: ProcurementCreate, db: Session = Depends(get_db)
 @router.post("/acts")
 def create_act(payload: ActCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
+    _validate_act_budget_link(
+        db, project_id=payload.project_id, contract_id=payload.contract_id,
+        budget_line_id=payload.budget_line_id, currency=payload.currency,
+    )
     data = payload.model_dump(exclude={"expected_document_version_id", "expected_document_sha256"})
     if payload.document_id is not None:
         pin = resolve_current_document_pin(
@@ -2057,7 +2113,8 @@ def create_act(payload: ActCreate, db: Session = Depends(get_db), user: User = D
     db.add(item); db.flush()
     _audit(
         db, "act_proposed", "acceptance_act", item.id, user.id,
-        f"status=proposed; document={item.document_id}; version={item.source_document_version_id}",
+        f"status=proposed; budget={item.budget_line_id}; document={item.document_id}; "
+        f"version={item.source_document_version_id}",
     )
     db.commit()
     return {"id": item.id, "status": item.status}
@@ -2068,13 +2125,30 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "procurement": ProcurementItem, "acts": AcceptanceAct, "baselines": ScheduleBaseline}
     model = models.get(kind)
     if model is None: raise HTTPException(404, "Unsupported register")
-    item = db.get(model, item_id)
+    item = (
+        db.scalar(select(AcceptanceAct).where(AcceptanceAct.id == item_id).with_for_update())
+        if kind == "acts" else db.get(model, item_id)
+    )
     if item is None: raise HTTPException(404, "Item not found")
     require_project_role(db, user, item.project_id, "manager")
     allowed = {"budget": {"approved", "active", "closed", "rejected"}, "cash-flow": {"approved", "cancelled"},
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved", "superseded"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
+    previous_status = item.status
+    if kind == "acts" and payload.status != previous_status:
+        transitions = {
+            "proposed": {"approved", "rejected"},
+            "approved": {"signed", "rejected"},
+            "signed": {"approved", "paid"},
+            "paid": {"approved"},
+            "rejected": set(),
+        }
+        if payload.status not in transitions.get(previous_status, set()):
+            raise HTTPException(
+                409,
+                f"Недопустимый переход статуса акта: {previous_status} -> {payload.status}",
+            )
     if kind == "cash-flow" and item.status in {"paid", "received"} and payload.status != item.status:
         raise HTTPException(409, "Подтверждённый платёж изменяется только корректировкой или сторно")
     if kind == "cash-flow" and (payload.actual_amount is not None or payload.actual_date is not None):
@@ -2084,11 +2158,32 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             db, item.project_id, item.source_document_id,
             item.source_document_version_id, item.source_document_sha256,
         )
-    if kind == "acts" and payload.status != "rejected" and item.document_id is not None:
+    authorizing_act_transition = (
+        kind == "acts" and payload.status in {"approved", "signed", "paid"}
+        and not (previous_status in {"signed", "paid"} and payload.status == "approved")
+    )
+    if authorizing_act_transition and item.document_id is not None:
         assert_document_pin_current(
             db, item.project_id, item.document_id,
             item.source_document_version_id, item.source_document_sha256,
         )
+    locked_budget = None
+    budget_actual_before = None
+    if kind == "acts" and payload.status in {"signed", "paid"}:
+        if item.budget_line_id is None:
+            raise HTTPException(409, "BUDGET_LINE_REQUIRED: подпишите акт после связи со строкой бюджета")
+        locked_budget = _lock_budget_line(db, item.budget_line_id)
+        _validate_act_budget_link(
+            db, project_id=item.project_id, contract_id=item.contract_id,
+            budget_line_id=item.budget_line_id, currency=item.currency,
+        )
+        if locked_budget.status == "rejected":
+            raise HTTPException(409, "Нельзя списать факт в отклонённую строку бюджета")
+        budget_actual_before = locked_budget.actual_amount
+    elif kind == "acts" and item.budget_line_id is not None and previous_status in {"signed", "paid"}:
+        locked_budget = _lock_budget_line(db, item.budget_line_id)
+        budget_actual_before = locked_budget.actual_amount
+
     item.status = payload.status
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
@@ -2097,5 +2192,28 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         if hasattr(item, "actual_delivery"): item.actual_delivery = payload.actual_date
     if kind == "cash-flow":
         _refresh_budget_from_cash_flow(db, item.budget_line_id)
-    _audit(db, f"{kind}_status_updated", kind, item.id, user.id, f"status={payload.status}"); db.commit()
-    return {"id": item.id, "status": item.status}
+    budget_projection = None
+    if kind == "acts" and item.budget_line_id is not None and (
+        previous_status in {"signed", "paid"} or payload.status in {"signed", "paid"}
+    ):
+        budget_projection = _refresh_budget_actual_from_acts(
+            db, item.budget_line_id, budget=locked_budget,
+        )
+    details = f"old_status={previous_status}; status={payload.status}"
+    response = {"id": item.id, "status": item.status}
+    if kind == "acts" and locked_budget is not None and budget_projection is not None:
+        remaining, overrun = budget_projection
+        details += (
+            f"; budget={locked_budget.id}; budget_actual_before={budget_actual_before}; "
+            f"budget_actual_after={locked_budget.actual_amount}; overrun={overrun}"
+        )
+        response.update({
+            "budget_line_id": locked_budget.id,
+            "budget_actual_amount": locked_budget.actual_amount,
+            "budget_remaining_amount": remaining,
+            "budget_overrun_amount": overrun,
+            "budget_warning": "BUDGET_ACTUAL_EXCEEDED" if overrun > 0 else None,
+        })
+    _audit(db, f"{kind}_status_updated", kind, item.id, user.id, details)
+    db.commit()
+    return response

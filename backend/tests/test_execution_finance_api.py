@@ -16,7 +16,7 @@ from app.api.execution_finance import (
     StatusUpdate,
     _finance_document_hints,
     _finance_document_score,
-    _linked_budget_totals,
+    _linked_budget_committed,
     _remap_schedule_predecessors,
     _finish_from_start,
     _schedule_predecessors,
@@ -241,7 +241,7 @@ def test_reimport_repairs_legacy_self_dependencies_in_place(db_session, user_fac
     assert second.predecessor_ids == f"{first.id}FS"
 
 
-def test_linked_budget_totals_are_idempotent_and_ignore_cancelled_entries():
+def test_linked_budget_committed_is_idempotent_and_ignores_cancelled_entries():
     class Entry:
         def __init__(self, status, planned, actual="0", direction="outflow"):
             self.status = status
@@ -249,14 +249,13 @@ def test_linked_budget_totals_are_idempotent_and_ignore_cancelled_entries():
             self.actual_amount = Decimal(actual)
             self.direction = direction
 
-    committed, actual = _linked_budget_totals([
+    committed = _linked_budget_committed([
         Entry("approved", "100"),
         Entry("paid", "200", "190"),
         Entry("cancelled", "300"),
         Entry("received", "400", "400", "inflow"),
     ])
     assert committed == Decimal("300")
-    assert actual == Decimal("190")
 
 
 def test_paid_status_is_reserved_for_explicit_payment_confirmation():

@@ -282,8 +282,9 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         body = { ...body, title: financeTitle.trim(), supplier: financeExtra.trim() || null, planned_delivery: financeDate || null, planned_amount: amount };
       }
       if (financeKind === "act") {
+        if (!financeBudgetLineId) throw new Error("Свяжите акт со строкой бюджета");
         path = "/execution/acts";
-        body = { ...body, number: financeExtra.trim() || "б/н", title: financeTitle.trim(), act_date: financeDate || null, amount, document_id: financeSourceDocumentId || null };
+        body = { ...body, number: financeExtra.trim() || "б/н", title: financeTitle.trim(), act_date: financeDate || null, amount, document_id: financeSourceDocumentId || null, budget_line_id: financeBudgetLineId };
       }
       if (financeKind === "baseline") {
         path = "/execution/baselines";

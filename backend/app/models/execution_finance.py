@@ -230,6 +230,9 @@ class AcceptanceAct(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
+    budget_line_id: Mapped[int | None] = mapped_column(
+        ForeignKey("budget_lines.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
     source_document_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=True, index=True,
