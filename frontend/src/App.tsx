@@ -526,7 +526,7 @@ export function App() {
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
@@ -3172,6 +3172,9 @@ export function App() {
               onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
               onConfirmMany={confirmFinanceMany}
               onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
+              onLinkControls={(id, contractId, scheduleItemId, budgetLineId) =>
+                void linkCashFlowControls(id, contractId, scheduleItemId, budgetLineId)
+              }
             />
             <GprWorkspace
               projectId={projectId}

@@ -10,6 +10,7 @@ type Props = {
   onConfirm: (kind: string, id: number, status: string) => void;
   onConfirmMany: (kind: string, ids: number[], status: string) => void | Promise<void>;
   onConfirmPayment: (id: number, amount: number) => void;
+  onLinkControls: (id: number, contractId: number, scheduleItemId: number, budgetLineId: number) => void | Promise<void>;
 };
 
 type Tab = "months" | "calendar" | "details" | "summary";
@@ -61,7 +62,7 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment }: Props) {
+export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onLinkControls }: Props) {
   const [tab, setTab] = useState<Tab>("months");
   const [objectFilter, setObjectFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -71,6 +72,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
   const [query, setQuery] = useState("");
   const [selectedProposed, setSelectedProposed] = useState<Set<number>>(new Set());
   const [confirmingMany, setConfirmingMany] = useState(false);
+  const [linkDrafts, setLinkDrafts] = useState<Record<number, { scheduleItemId: number; budgetLineId: number }>>({});
   const rows = useMemo<CashRow[]>(() => (finance?.cash_flow || [])
     .filter((row) => !selectedContractId || row.contract_id === selectedContractId)
     .map((row) => ({
@@ -81,6 +83,21 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     })), [finance, selectedContractId]);
   const objects = useMemo(() => Array.from(new Set(rows.map((row) => row.object))).sort((a, b) => a.localeCompare(b, "ru")), [rows]);
   const categories = useMemo(() => Array.from(new Set(rows.map((row) => row.category))).sort((a, b) => a.localeCompare(b, "ru")), [rows]);
+  const linkOptions = (row: CashRow) => {
+    const contractId = row.contract_id || selectedContractId;
+    const baselineIds = new Set((finance?.baselines || []).filter((item) => item.contract_id === contractId).map((item) => item.id));
+    return {
+      contractId,
+      schedule: (finance?.schedule || []).filter((item) => baselineIds.has(item.baseline_id)),
+      budget: (finance?.budget || []).filter((item) => item.contract_id === contractId),
+    };
+  };
+  const setLinkDraft = (id: number, patch: Partial<{ scheduleItemId: number; budgetLineId: number }>) => {
+    setLinkDrafts((current) => ({
+      ...current,
+      [id]: { scheduleItemId: current[id]?.scheduleItemId || 0, budgetLineId: current[id]?.budgetLineId || 0, ...patch },
+    }));
+  };
   const visibleRows = useMemo(() => rows.filter((row) =>
     (objectFilter === "all" || row.object === objectFilter) &&
     (categoryFilter === "all" || row.category === categoryFilter) &&
@@ -138,7 +155,11 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     return { category, value, share: totals.outflow ? value / totals.outflow : 0 };
   }).filter((item) => item.value > 0).sort((a, b) => b.value - a.value);
 
-  const proposedRows = visibleRows.filter((row) => row.status === "proposed");
+  const canConfirm = (row: CashRow) => row.status === "proposed" && (
+    row.direction !== "outflow" || !row.source_document_id
+    || Boolean(row.contract_id && row.schedule_item_id && row.budget_line_id)
+  );
+  const proposedRows = visibleRows.filter(canConfirm);
   const selectedVisibleIds = proposedRows.filter((row) => selectedProposed.has(row.id)).map((row) => row.id);
   const allVisibleProposedSelected = proposedRows.length > 0 && selectedVisibleIds.length === proposedRows.length;
   const toggleProposed = (id: number) => setSelectedProposed((current) => {
@@ -238,7 +259,15 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       return [<tr className="group object" key={object}><td>{object.toLocaleUpperCase("ru-RU")}</td><td></td>{months.map((key) => <td className="money" key={key}>{formatMoney(objectRows.filter((row) => monthKey(row.actual_date || row.planned_date) === key).reduce((sum, row) => sum + amount(row), 0))}</td>)}<td className="money">{formatMoney(objectTotal)}</td></tr>, ...detailRows];
     })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Календарь появится после добавления операций.</p>}</div>}
 
-    {tab === "details" && <div className="dds-table-wrap">{proposedRows.length > 0 && <div className="dds-head-actions"><button className="secondary" type="button" onClick={toggleAllProposed}>{allVisibleProposedSelected ? "Снять выбор" : "Выбрать предложенные"}</button><button type="button" disabled={!selectedVisibleIds.length || confirmingMany} onClick={confirmSelected}><CheckCheck /> {confirmingMany ? "Подтверждаем…" : `Подтвердить выбранные (${selectedVisibleIds.length})`}</button></div>}<table className="dds-table"><thead><tr><th><input type="checkbox" aria-label="Выбрать все предложенные операции" checked={allVisibleProposedSelected} disabled={!proposedRows.length} onChange={toggleAllProposed} /></th><th>№</th><th>Дата</th><th>Месяц</th><th>Объект</th><th>Статья</th><th>Тип операции</th><th>Сумма, ₽</th><th>Описание операции</th><th>Статус</th><th></th></tr></thead><tbody>{visibleRows.map((row, index) => <tr key={row.id}><td>{row.status === "proposed" && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td>{index + 1}</td><td>{dateFormat.format(new Date(`${row.actual_date || row.planned_date}T00:00:00Z`))}</td><td>{monthLong.format(monthDate(monthKey(row.actual_date || row.planned_date)))}</td><td>{row.object}</td><td>{row.category}</td><td><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money">{formatMoney(amount(row))}</td><td>{row.note}</td><td>{row.status}</td><td className="dds-row-actions">{row.status === "proposed" && <button type="button" onClick={() => onConfirm("cash-flow", row.id, "approved")}>Подтвердить</button>}{row.status === "approved" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}</td></tr>)}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}
+    {tab === "details" && <div className="dds-table-wrap">{proposedRows.length > 0 && <div className="dds-head-actions"><button className="secondary" type="button" onClick={toggleAllProposed}>{allVisibleProposedSelected ? "Снять выбор" : "Выбрать предложенные"}</button><button type="button" disabled={!selectedVisibleIds.length || confirmingMany} onClick={confirmSelected}><CheckCheck /> {confirmingMany ? "Подтверждаем…" : `Подтвердить выбранные (${selectedVisibleIds.length})`}</button></div>}<table className="dds-table"><thead><tr><th><input type="checkbox" aria-label="Выбрать все предложенные операции" checked={allVisibleProposedSelected} disabled={!proposedRows.length} onChange={toggleAllProposed} /></th><th>№</th><th>Дата</th><th>Месяц</th><th>Объект</th><th>Статья</th><th>Тип операции</th><th>Сумма, ₽</th><th>Описание операции</th><th>Статус</th><th></th></tr></thead><tbody>{visibleRows.map((row, index) => {
+      const controlsComplete = Boolean(row.contract_id && row.schedule_item_id && row.budget_line_id);
+      const options = linkOptions(row);
+      const draft = linkDrafts[row.id] || { scheduleItemId: row.schedule_item_id || 0, budgetLineId: row.budget_line_id || 0 };
+      return <tr key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td>{index + 1}</td><td>{dateFormat.format(new Date(`${row.actual_date || row.planned_date}T00:00:00Z`))}</td><td>{monthLong.format(monthDate(monthKey(row.actual_date || row.planned_date)))}</td><td>{row.object}</td><td>{row.category}</td><td><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money">{formatMoney(amount(row))}</td><td>{row.note}</td><td>{row.status}</td><td className="dds-row-actions">
+        {row.status === "proposed" && row.direction === "outflow" && row.source_document_id && !controlsComplete ? <div className="dds-control-links"><select aria-label={`Этап ГПР для ${row.title}`} value={draft.scheduleItemId} onChange={(event) => setLinkDraft(row.id, { scheduleItemId: Number(event.target.value) })}><option value={0}>Этап ГПР</option>{options.schedule.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><select aria-label={`Строка бюджета для ${row.title}`} value={draft.budgetLineId} onChange={(event) => setLinkDraft(row.id, { budgetLineId: Number(event.target.value) })}><option value={0}>Строка бюджета</option>{options.budget.map((item) => <option value={item.id} key={item.id}>{item.description}</option>)}</select><button type="button" disabled={!options.contractId || !draft.scheduleItemId || !draft.budgetLineId} onClick={() => onLinkControls(row.id, options.contractId, draft.scheduleItemId, draft.budgetLineId)}>Связать с контролями</button></div> : row.status === "proposed" && <button type="button" onClick={() => onConfirm("cash-flow", row.id, "approved")}>Подтвердить</button>}
+        {row.status === "approved" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}
+      </td></tr>;
+    })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}
 
     {tab === "summary" && <div className="dds-summary">
       <section><h3>По объектам</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Объект</th><th>Приход, ₽</th><th>Расход, ₽</th><th>Чистый поток, ₽</th></tr></thead><tbody>{objectSummary.map((item) => <tr key={item.object}><td>{item.object}</td><td className="money positive">{formatMoney(item.inflow)}</td><td className="money">{formatMoney(item.outflow)}</td><td className={`money ${item.net < 0 ? "negative" : "positive"}`}>{formatMoney(item.net)}</td></tr>)}<tr className="total"><td>ИТОГО</td><td className="money">{formatMoney(totals.inflow)}</td><td className="money">{formatMoney(totals.outflow)}</td><td className="money">{formatMoney(totals.net)}</td></tr></tbody></table></div></section>
