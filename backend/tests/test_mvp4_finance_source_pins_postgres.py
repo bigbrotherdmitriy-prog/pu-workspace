@@ -33,7 +33,9 @@ def _test_url() -> str:
         or database.startswith("puw_invoice_test")
         or (os.getenv("PU_TEST_POSTGRES") == "1" and database == "pu_workspace_test")
     ) and not parsed.query
-    return value
+    if parsed.drivername == "postgresql":
+        parsed = parsed.set(drivername="postgresql+psycopg")
+    return parsed.render_as_string(hide_password=False)
 
 
 def test_dirty_postgres_migration_preserves_legacy_rows_and_enforces_pin_pairs(monkeypatch):
