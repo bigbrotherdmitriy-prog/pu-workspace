@@ -1,0 +1,18 @@
+services:
+  bridge:
+    image: puw-s10-live-provider:${PUW_S10_IMAGE_TAG:?set PUW_S10_IMAGE_TAG}
+    container_name: puw-s10-live-provider-bridge
+    restart: unless-stopped
+    env_file:
+      - /opt/puw-s10-live-provider/private/bridge.env
+    volumes:
+      - /opt/puw-s10-live-provider/data:/data
+    ports:
+      - "127.0.0.1:18082:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

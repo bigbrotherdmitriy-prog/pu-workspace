@@ -160,3 +160,25 @@ gh workflow run v54-live-provider-acceptance.yml `
 3. Создать protected GitHub Environment и четыре тестовых secrets.
 4. Выполнить ручной workflow на точном release SHA.
 5. Сохранить artifact digest и reviewer approval в release evidence.
+
+## Реализация Google Tasks bridge
+
+Репозиторий содержит отдельное ASGI-приложение
+`backend/app/v54_live_provider_bridge.py` и изолированную композицию
+`infra/s10-live-provider/docker-compose.yml`. Это не router product runtime:
+
+- OAuth и зашифрованный refresh token хранятся только в отдельном каталоге
+  `/opt/puw-s10-live-provider/data`;
+- допускается только заранее зафиксированная test-only identity;
+- используется единственный список `PU Workspace S10 Sandbox`, который должен
+  быть пустым перед эффектом и после cleanup;
+- effect содержит только SHA-256 маркеры, не письмо, адрес, документ или
+  provider object ID;
+- повтор того же `command_key` не создаёт второй объект;
+- stale bridge-объекты удаляются по короткому TTL;
+- bridge публикуется только через отдельный HTTPS hostname с меткой `sandbox`.
+
+Серверный `bridge.env` (права `0600`) содержит только test-only OAuth client,
+Fernet key, bridge/setup tokens, точный ожидаемый email и redirect URI. Эти
+значения не копируются в GitHub. После OAuth в GitHub Environment передаются
+только четыре content-free bridge secrets, перечисленные выше.
