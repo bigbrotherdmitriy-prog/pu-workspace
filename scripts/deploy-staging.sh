@@ -46,7 +46,7 @@ case "$PORT" in *[!0-9]*|'') fail "staging port must be numeric" ;; esac
 [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] && [ "$PORT" -ne 3000 ] && [ "$PORT" -ne 443 ] \
   || fail "unsafe staging port"
 case "$PUBLIC_URL" in
-  https://37.252.23.204*|https://pu-workspace.duckdns.org*|https://puworkspace.ru*|https://www.puworkspace.ru*)
+  https://72.56.108.162*|https://37.252.23.204*|https://pu-workspace.duckdns.org*|https://puworkspace.ru*|https://www.puworkspace.ru*)
     fail "production public URL is forbidden" ;;
   https://*) ;;
   *) fail "staging public URL must use HTTPS" ;;
