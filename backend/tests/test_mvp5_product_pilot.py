@@ -25,6 +25,7 @@ from app.core.v54_interfaces import RequestScope
 from app.core.v54_refs import ObjectRef, TaggedId, VersionPin
 from app.database import Base
 from app.models.ai_secretary import Message
+from app.models.audit_log import AuditLog
 from app.models.integration_credential import IntegrationCredential
 from app.models.job import BackgroundJob
 from app.models.mailbox_identity import MailboxCredentialGeneration
@@ -50,6 +51,7 @@ from app.models.v54_pilot import (
     SourceVersion,
 )
 from app.pilot_dispatch import PRODUCT_KIND, ProductDispatch, pilot_command_key
+from app.pilot_incidents import ALERT_AUDIT_ACTION, notify_product_auto_incidents_once
 from app.pilot_product import (
     ProductPilotComposition,
     ProductPilotSettings,
@@ -725,3 +727,43 @@ def test_postgres_notification_concurrent_duplicate_effect_is_idempotent(product
                 first.action_ref.id.value, second.action_ref.id.value,
             ]),
         )) == 2
+
+
+def test_postgres_product_incident_alert_serializes_competing_schedulers(
+    product_world, monkeypatch,
+):
+    sessions, _component, _runtime, _settings, _view = product_world
+    if sessions.kw["bind"].dialect.name != "postgresql":
+        pytest.skip("PostgreSQL incident-alert row-lock proof")
+    delivered = []
+    monkeypatch.setattr("app.pilot_incidents.telegram_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.pilot_incidents.notify_telegram",
+        lambda message: delivered.append(message) or True,
+    )
+    with sessions.begin() as db:
+        job = BackgroundJob(
+            kind=PRODUCT_KIND, payload={"action_id": "never-render-this"},
+            status="dead_letter", attempts=3, max_attempts=3,
+            priority=100, progress=0,
+        )
+        db.add(job)
+        db.flush()
+        job_id = job.id
+    barrier = Barrier(2)
+
+    def compete(_number):
+        barrier.wait(timeout=5)
+        return notify_product_auto_incidents_once(sessions=sessions, limit=1)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(compete, (1, 2)))
+    assert sorted(outcomes) == [0, 1]
+    assert len(delivered) == 1
+    assert f"job_id={job_id}" in delivered[0]
+    assert "never-render-this" not in delivered[0]
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(AuditLog).where(
+            AuditLog.action == ALERT_AUDIT_ACTION,
+            AuditLog.entity_id == job_id,
+        )) == 1
