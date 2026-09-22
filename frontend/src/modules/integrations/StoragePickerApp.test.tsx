@@ -12,7 +12,7 @@ const empty = {
   summary: { attention: 0, active: 0, failed: 0, dead_letter: 0 },
   documents: [], snapshots: [], tasks: [], risks: [], decisions: [], drafts: [], messages: [], proposals: [],
   contracts: [], members: [], logs: [], adapters: [], rules: [], contacts: [], obligations: [], meetings: [],
-  notifications: [], sessions: [], candidates: [], baselines: [], budget: [], cash_flow: [],
+  notifications: [], sessions: [], candidates: [], baselines: [], budget: [], cash_flow: [], attention: [],
 };
 beforeEach(() => {
   sessionStorage.clear(); sessionStorage.setItem("pu_active_project_id", "2");
@@ -139,6 +139,34 @@ it("does not invent progress for a building snapshot with no worker measurements
   await screen.findByLabelText("Обработка: процент не предоставлен сервером");
   expect(screen.queryByText("5%")).not.toBeInTheDocument();
   expect(screen.queryByText("10%")).not.toBeInTheDocument();
+});
+
+it("preserves active analysis while navigating away from the folder picker and back", async () => {
+  const previous = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, options) => {
+    if (path.includes("/source-folders/discover")) return {
+      project_id: 2, provider: "google_drive", connection_id: "a", connection_row_id: 7,
+      folder_id: "root", breadcrumbs: [], folders: [{ id: "opaque-C", name: "Папка",
+        registered: true, is_primary: true, snapshot_status: "ready", snapshot_id: 31,
+        analysis_status: "analyzing", analysis_result: { organizer_session_id: 42 }, item_count: 20 }],
+    };
+    if (path.endsWith("/processing-queue")) return {
+      summary: { active: 1 }, snapshots: [], sessions: [{ id: 42, status: "running", progress: 37,
+        source_item_count: 20, copy_item_count: 20, processed_item_count: 7 }],
+    };
+    return previous(path, options);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Выбрать рабочую папку" }));
+  await screen.findByLabelText("Прогресс анализа 37%");
+  for (const section of ["Сегодня", "Запуск проекта", "Интеграции", "Журнал"]) {
+    fireEvent.click(screen.getByTitle(section, { exact: true }));
+    expect(screen.queryByText("Папки для последовательного разбора")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: section, level: 1 })).toBeInTheDocument();
+  }
+  fireEvent.click(screen.getByTitle("Рабочий центр", { exact: true }));
+  expect(await screen.findByLabelText("Прогресс анализа 37%")).toHaveTextContent("7 обработано · 13 осталось");
+  expect(mockApi.mock.calls.some(([, options]) => options?.method && options.method !== "GET")).toBe(false);
 });
 
 it("shows measured durable-job progress for the metadata snapshot", async () => {

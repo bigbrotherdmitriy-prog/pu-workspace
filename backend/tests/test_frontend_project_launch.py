@@ -11,7 +11,9 @@ def test_project_launch_is_a_separate_frontend_module():
     assert 'from "./modules/project-launch/ProjectLaunchWizard"' in app
     assert '[Route, "Запуск проекта"]' in app
     assert 'active === "Запуск проекта"' in app
-    assert 'active === "Рабочий центр" || showSources ? (' in app
+    assert 'active === "Рабочий центр" ? (' in app
+    # An open picker must not override the user's selected section.
+    assert 'active === "Рабочий центр" || showSources ? (' not in app
     assert 'onSelectFolder={(provider) => void openProviderSources(provider)}' in app
     assert 'setActive("Рабочий центр"); void openSources("root")' not in app
     assert "openSources(sourceFolderId);" in app
