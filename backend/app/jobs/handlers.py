@@ -70,6 +70,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "contract_package.analyze_governance":
         from app.api.contract_package import _analyze_governance_job
         return _analyze_governance_job(payload)
+    if kind == "contracts.discover_batch":
+        from app.api.contract_discovery import _discover_contract_batch_job
+        return _discover_contract_batch_job(payload)
     raise ValueError(f"Unknown background job kind: {kind}")
 
 
