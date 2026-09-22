@@ -5,6 +5,7 @@ from app.api.contract_discovery import (
     ContractDiscoveryRequest,
     _contract_discovery_batches,
     _contract_parties,
+    _discover_documents,
     _party_chain_parent,
     _referenced_existing_contract,
     _short_contract_title,
@@ -12,7 +13,8 @@ from app.api.contract_discovery import (
     router,
 )
 from app.models.organization_contract import Contract
-import pytest
+from app.models.document import Document
+from app.models.document_version import DocumentVersion
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -175,6 +177,131 @@ def test_builds_contract_chain_when_parent_contractor_becomes_child_customer():
     assert _contract_parties(prime_text) == {"заказчик": "налогсервис", "подрядчик": "булат"}
     assert _contract_parties(subcontract_text) == {"заказчик": "булат", "подрядчик": "дисиайсолюшнс"}
     assert _party_chain_parent(subcontract_text, [(prime, prime_text)]) is prime
+
+
+def test_builds_supply_chain_when_parent_contractor_becomes_child_buyer():
+    parent = Contract(id=5, project_id=1, number="Б-УЗП130-02-2026", title="Наш договор")
+    parent_text = (
+        'ФКУ «Налог-Сервис», именуемое в дальнейшем «Заказчик», и '
+        'ООО «ДИСИАЙ СОЛЮШНС», именуемое в дальнейшем «Подрядчик», заключили договор.'
+    )
+    supply_text = (
+        'ООО «Сириус», именуемое в дальнейшем «Поставщик», и '
+        'ООО «ДИСИАЙ СОЛЮШНС», именуемое в дальнейшем «Покупатель», заключили договор.'
+    )
+    assert _contract_parties(supply_text) == {"поставщик": "сириус", "покупатель": "дисиайсолюшнс"}
+    assert _party_chain_parent(supply_text, [(parent, parent_text)]) is parent
+
+
+@pytest.mark.parametrize("contractor", [
+    "ИП Демиденко Алексей Сергеевич",
+    "Индивидуальный предприниматель Демиденко Алексей Сергеевич",
+])
+def test_discovers_sole_proprietor_as_downstream_counterparty(contractor):
+    result = discover_contract_fields(
+        "Договор субподряда 02-2111-26.pdf",
+        f'Договор субподряда № 02/2111-26 от 27.03.2026. '
+        f'ООО «ДИСИАЙ СОЛЮШНС», именуемое «Заказчик», и {contractor}, '
+        'именуемый «Подрядчик», заключили настоящий Договор. Предмет договора. '
+        'Цена договора. Ответственность сторон.',
+    )
+    assert result["contract_kind"] == "downstream_subcontract"
+    assert result["counterparty"] == contractor
+    assert any("по роли подрядчика/исполнителя" in item for item in result["evidence"])
+
+
+def _document_with_content(db_session, project_id: int, name: str, content: str) -> Document:
+    document = Document(project_id=project_id, name=name, source="local_upload", status="processed")
+    db_session.add(document)
+    db_session.flush()
+    db_session.add(DocumentVersion(document_id=document.id, version_number=1, content=content))
+    db_session.flush()
+    return document
+
+
+def test_discovery_assigns_existing_parent_to_supply_contract(db_session):
+    project_id = 701
+    parent_text = (
+        'Договор № Б-УЗП130-02-2026. ФКУ «Налог-Сервис», именуемое «Заказчик», и '
+        'ООО «ДИСИАЙ СОЛЮШНС», именуемое «Подрядчик», заключили настоящий договор. '
+        'Предмет договора. Цена договора.'
+    )
+    parent_document = _document_with_content(db_session, project_id, "Б-УЗП130-02-2026.pdf", parent_text)
+    parent = Contract(
+        project_id=project_id, number="Б-УЗП130-02-2026", title="Наш договор",
+        contract_kind="customer", source_document_id=parent_document.id,
+    )
+    db_session.add(parent)
+    db_session.flush()
+    supply_document = _document_with_content(
+        db_session, project_id, "Договор поставка-подряд ДИСИАЙ СОЛЮШНС - Сириус.docx",
+        'Договор поставки № 02/С/ДС от 02.02.2026. ООО «Сириус», именуемое в дальнейшем '
+        '«Поставщик», и ООО «ДИСИАЙ СОЛЮШНС», именуемое в дальнейшем «Покупатель», '
+        'заключили настоящий Договор. Предмет договора. Цена договора. Ответственность сторон.',
+    )
+
+    proposal = _discover_documents(db_session, project_id, [supply_document])["proposals"][0]
+
+    assert proposal["contract_kind"] == "supply"
+    assert proposal["parent_contract_id"] == parent.id
+    assert proposal["parent_document_id"] is None
+    assert proposal["counterparty"] == "ООО «Сириус»"
+    assert any(f"вышестоящий договор {parent.number}" in item for item in proposal["evidence"])
+
+
+def test_discovery_promotes_child_and_extracts_sole_proprietor(db_session):
+    project_id = 702
+    parent_document = _document_with_content(
+        db_session, project_id, "Б-УЗП130-02-2026.pdf",
+        'Договор № Б-УЗП130-02-2026. ФКУ «Налог-Сервис», именуемое «Заказчик», и '
+        'ООО «ДИСИАЙ СОЛЮШНС», именуемое «Подрядчик», заключили настоящий договор. '
+        'Предмет договора. Цена договора.',
+    )
+    parent = Contract(
+        project_id=project_id, number="Б-УЗП130-02-2026", title="Наш договор",
+        contract_kind="customer", source_document_id=parent_document.id,
+    )
+    db_session.add(parent)
+    db_session.flush()
+    child_document = _document_with_content(
+        db_session, project_id, "Договор+сметы откорр.pdf",
+        'Договор № 02/2111-26 от 27.03.2026. ООО «ДИСИАЙ СОЛЮШНС», именуемое '
+        '«Заказчик», и Индивидуальный предприниматель Демиденко Алексей Сергеевич, '
+        'именуемый «Подрядчик», заключили настоящий Договор. Предмет договора. '
+        'Цена договора. Ответственность сторон.',
+    )
+
+    proposal = _discover_documents(db_session, project_id, [child_document])["proposals"][0]
+
+    assert proposal["contract_kind"] == "downstream_subcontract"
+    assert proposal["parent_contract_id"] == parent.id
+    assert proposal["counterparty"] == "Индивидуальный предприниматель Демиденко Алексей Сергеевич"
+
+
+def test_supply_parent_stays_unset_when_party_chain_is_ambiguous(db_session):
+    project_id = 703
+    for suffix in ("A", "B"):
+        parent_document = _document_with_content(
+            db_session, project_id, f"Родитель {suffix}.pdf",
+            f'Договор № Р-{suffix}/2026. ООО «Заказчик {suffix}», именуемое «Заказчик», и '
+            'ООО «ДИСИАЙ СОЛЮШНС», именуемое «Подрядчик», заключили настоящий договор. '
+            'Предмет договора. Цена договора.',
+        )
+        db_session.add(Contract(
+            project_id=project_id, number=f"Р-{suffix}/2026", title=f"Родитель {suffix}",
+            contract_kind="customer", source_document_id=parent_document.id,
+        ))
+    db_session.flush()
+    supply_document = _document_with_content(
+        db_session, project_id, "Договор поставки П-17.docx",
+        'Договор поставки № П-17/2026. ООО «Сириус», именуемое «Поставщик», и '
+        'ООО «ДИСИАЙ СОЛЮШНС», именуемое «Покупатель», заключили настоящий договор. '
+        'Предмет договора. Цена договора. Ответственность сторон.',
+    )
+
+    proposal = _discover_documents(db_session, project_id, [supply_document])["proposals"][0]
+
+    assert proposal["parent_contract_id"] is None
 
 
 def test_uses_exact_number_and_short_subject_as_contract_name():
