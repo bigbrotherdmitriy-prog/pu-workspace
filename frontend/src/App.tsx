@@ -48,6 +48,10 @@ import {
 import { ProjectSearchWorkspace, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
+import { SyncStatusPanel } from "./modules/android/SyncStatusPanel";
+import { clearOfflineData } from "./offline/db";
+import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine";
+import { useOfflineSync } from "./offline/useOfflineSync";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
@@ -540,6 +544,7 @@ export function App() {
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
+  const offlineSync = useOfflineSync(currentUser?.id || 0, projectId, () => { void load(); });
 
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
@@ -1361,32 +1366,60 @@ export function App() {
     }
   }
   async function updateTask(task: TaskRow, status: string) {
+    const result_note = status === "completed" ? completionNote.trim() : undefined;
+    if (status === "completed" && !result_note) {
+      setError("Кратко укажите, что выполнено. Подтверждающий документ добавляется по желанию.");
+      return;
+    }
+    const patch = {
+      status,
+      result_note,
+      ...(status === "completed" ? { completion_document_id: completionDocumentId || null } : {}),
+    };
     try {
       setError("");
-      const result_note = status === "completed" ? completionNote.trim() : undefined;
-      if (status === "completed" && !result_note) {
-        setError("Кратко укажите, что выполнено. Подтверждающий документ добавляется по желанию.");
-        return;
+      if (!navigator.onLine) {
+        if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
+        await enqueueTaskUpdate({
+          userId: currentUser.id, projectId, taskId: task.id,
+          baseToken: task.sync_base_token || undefined, patch,
+        });
+        setTasks((rows) => rows.map((row) => row.id === task.id
+          ? { ...row, ...patch, offline_pending: true }
+          : row));
+        setNotice("Изменение сохранено на устройстве и будет отправлено после восстановления связи.");
+      } else {
+        await api(`/tasks/${task.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ expected_record_version: task.record_version ?? 1, ...patch }),
+        });
+        setNotice(
+          status === "completed"
+            ? "Задача завершена и синхронизирована"
+            : "Задача взята в работу",
+        );
+        await load();
       }
-      await api(`/tasks/${task.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          expected_record_version: task.record_version ?? 1,
-          status,
-          result_note,
-          ...(status === "completed" ? { completion_document_id: completionDocumentId || null } : {}),
-        }),
-      });
-      setNotice(
-        status === "completed"
-          ? "Задача завершена и синхронизирована"
-          : "Задача взята в работу",
-      );
       setCompletionTaskId(0);
       setCompletionNote("");
       setCompletionDocumentId(0);
-      await load();
     } catch (e) {
+      if (e instanceof ApiError && e.status === null && currentUser) {
+        try {
+          await enqueueTaskUpdate({
+            userId: currentUser.id, projectId, taskId: task.id,
+            baseToken: task.sync_base_token || undefined, patch,
+          });
+          setTasks((rows) => rows.map((row) => row.id === task.id
+            ? { ...row, ...patch, offline_pending: true }
+            : row));
+          setNotice("Связь прервалась. Изменение сохранено на устройстве и будет отправлено позже.");
+          return;
+        } catch (queueError) {
+          setError((queueError as Error).message);
+          return;
+        }
+      }
       setError((e as Error).message);
     }
   }
@@ -1408,19 +1441,44 @@ export function App() {
     }
     const reason = window.prompt("Укажите причину изменения рабочего срока.")?.trim();
     if (!reason) return;
+    const patch = { due_date: dueDate || null, due_change_reason: reason };
     try {
       setError("");
-      await api(`/tasks/${task.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          expected_record_version: task.record_version ?? 1,
-          due_date: dueDate || null,
-          due_change_reason: reason,
-        }),
-      });
-      setNotice("Рабочий срок обновлён. Исходный срок обязательства сохранён.");
-      await load();
+      if (!navigator.onLine) {
+        if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
+        await enqueueTaskUpdate({
+          userId: currentUser.id, projectId, taskId: task.id,
+          baseToken: task.sync_base_token || undefined, patch,
+        });
+        setTasks((rows) => rows.map((row) => row.id === task.id
+          ? { ...row, due_date: patch.due_date || undefined, offline_pending: true }
+          : row));
+        setNotice("Новый срок сохранён на устройстве и будет отправлен после восстановления связи.");
+      } else {
+        await api(`/tasks/${task.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ expected_record_version: task.record_version ?? 1, ...patch }),
+        });
+        setNotice("Рабочий срок обновлён. Исходный срок обязательства сохранён.");
+        await load();
+      }
     } catch (e) {
+      if (e instanceof ApiError && e.status === null && currentUser) {
+        try {
+          await enqueueTaskUpdate({
+            userId: currentUser.id, projectId, taskId: task.id,
+            baseToken: task.sync_base_token || undefined, patch,
+          });
+          setTasks((rows) => rows.map((row) => row.id === task.id
+            ? { ...row, due_date: patch.due_date || undefined, offline_pending: true }
+            : row));
+          setNotice("Связь прервалась. Новый срок сохранён на устройстве.");
+          return;
+        } catch (queueError) {
+          setError((queueError as Error).message);
+          return;
+        }
+      }
       setError((e as Error).message);
     }
   }
@@ -1765,8 +1823,23 @@ export function App() {
     }
   }
   async function assignTask(task: TaskRow, assigneeUserId: number) {
+    const assignee = members.find((member) => member.user_id === assigneeUserId);
+    const optimistic = (offlinePending: boolean, recordVersion?: number) => setTasks((rows) => rows.map((row) => row.id === task.id
+      ? { ...row, ...(recordVersion ? { record_version: recordVersion } : {}),
+          assignee_user_id: assigneeUserId, assignee_name: assignee?.name || row.assignee_name,
+          offline_pending: offlinePending }
+      : row));
     try {
-      const assignee = members.find((member) => member.user_id === assigneeUserId);
+      if (!navigator.onLine) {
+        if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
+        await enqueueTaskUpdate({
+          userId: currentUser.id, projectId, taskId: task.id,
+          baseToken: task.sync_base_token || undefined, patch: { assignee_user_id: assigneeUserId },
+        });
+        optimistic(true);
+        setNotice(`Исполнитель будет изменён на «${assignee?.name || "участник проекта"}» после синхронизации.`);
+        return;
+      }
       const result = await api(`/tasks/${task.id}`, {
         method: "PATCH",
         body: JSON.stringify({
@@ -1774,12 +1847,23 @@ export function App() {
           expected_record_version: task.record_version ?? 1,
         }),
       });
-      setTasks((rows) => rows.map((row) => row.id === task.id
-        ? { ...row, record_version: result.record_version,
-            assignee_user_id: assigneeUserId, assignee_name: assignee?.name || row.assignee_name }
-        : row));
+      optimistic(false, result.record_version);
       setNotice(`Исполнитель задачи: ${assignee?.name || "участник проекта"}`);
     } catch (e) {
+      if (e instanceof ApiError && e.status === null && currentUser) {
+        try {
+          await enqueueTaskUpdate({
+            userId: currentUser.id, projectId, taskId: task.id,
+            baseToken: task.sync_base_token || undefined, patch: { assignee_user_id: assigneeUserId },
+          });
+          optimistic(true);
+          setNotice("Связь прервалась. Новый исполнитель сохранён на устройстве.");
+          return;
+        } catch (queueError) {
+          setError((queueError as Error).message);
+          return;
+        }
+      }
       setError((e as Error).message);
     }
   }
@@ -2464,10 +2548,15 @@ export function App() {
   }
   async function markNotification(item: NotificationRow) {
     try {
-      await api(`/management/notifications/${item.id}/read`, {
-        method: "POST",
-        body: JSON.stringify({ expected_record_version: item.record_version }),
-      });
+      if (!navigator.onLine) {
+        if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
+        await enqueueNotificationRead({ userId: currentUser.id, projectId, notificationId: item.id });
+      } else {
+        await api(`/management/notifications/${item.id}/read`, {
+          method: "POST",
+          body: JSON.stringify({ expected_record_version: item.record_version }),
+        });
+      }
       setNotifications((rows) =>
         rows.map((row) =>
           row.id === item.id
@@ -2475,7 +2564,19 @@ export function App() {
             : row,
         ),
       );
+      if (!navigator.onLine) setNotice("Отметка сохранена на устройстве и будет синхронизирована позже.");
     } catch (e) {
+      if (e instanceof ApiError && e.status === null && currentUser) {
+        try {
+          await enqueueNotificationRead({ userId: currentUser.id, projectId, notificationId: item.id });
+          setNotifications((rows) => rows.map((row) => row.id === item.id ? { ...row, is_read: true } : row));
+          setNotice("Связь прервалась. Отметка сохранена на устройстве.");
+          return;
+        } catch (queueError) {
+          setError((queueError as Error).message);
+          return;
+        }
+      }
       setError((e as Error).message);
     }
   }
@@ -2592,6 +2693,18 @@ export function App() {
       setExpandedInboxId(hit.id);
     } else setActive(section);
   }
+  async function logout() {
+    if (offlineSync.summary.total > 0 && !window.confirm(
+      `На устройстве осталось несинхронизированных изменений: ${offlineSync.summary.total}. При выходе локальная очередь будет удалена. Выйти?`,
+    )) return;
+    try {
+      await api("/auth/logout", { method: "POST" });
+      if (typeof indexedDB !== "undefined") await clearOfflineData();
+      setReady(false);
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }
   return (
     <div className="shell">
       <div className="pu-ambient" aria-hidden="true">
@@ -2636,9 +2749,7 @@ export function App() {
           )}
           <button
             className="icon"
-            onClick={() => {
-              void api("/auth/logout", { method: "POST" }).finally(() => setReady(false));
-            }}
+            onClick={() => { void logout(); }}
           >
             <LogOut />
           </button>
@@ -2730,6 +2841,15 @@ export function App() {
             </button>
           </div>
         </header>
+        {ready && currentUser && projectId > 0 && <SyncStatusPanel
+          online={online}
+          summary={offlineSync.summary}
+          conflicts={offlineSync.conflicts}
+          onSync={() => { void offlineSync.syncNow(true); }}
+          onResolve={(id, resolution) => {
+            void offlineSync.resolve(id, resolution).catch((reason) => setError((reason as Error).message));
+          }}
+        />}
         <section className="content">
           <ComfortControls />
           {error && <div className="error">{error}</div>}
@@ -3200,6 +3320,7 @@ export function App() {
         key={projectId}
         open={mobileUploadOpen}
         projectId={projectId}
+        userId={currentUser?.id || 0}
         title={localUploadPurpose === "finance" ? "Загрузить счёт или акт" : localUploadPurpose === "project-folder" ? "Разобрать папку проекта" : "Добавить важный документ"}
         description={localUploadPurpose === "finance"
           ? "После защищённой загрузки и OCR система предложит проверить реквизиты финансового документа."

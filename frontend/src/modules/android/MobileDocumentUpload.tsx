@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Camera, FileUp, FolderOpen, Upload, X } from "lucide-react";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
+import { enqueueDocumentUpload } from "../../offline/syncEngine";
 import {
   awaitLocalUploadJobs, isSupportedLocalUploadFile, localUploadMimeType, type QueuedLocalUploadJob,
 } from "../documents/localUploadJobs";
@@ -8,6 +9,7 @@ import {
 type Props = {
   open: boolean;
   projectId: number;
+  userId: number;
   onClose: () => void;
   onComplete: (message: string, documentIds: number[]) => void;
   title?: string;
@@ -47,7 +49,7 @@ function readBase64(file: File): Promise<string> {
 }
 
 export function MobileDocumentUpload({
-  open, projectId, onClose, onComplete,
+  open, projectId, userId, onClose, onComplete,
   title = "Добавить документы",
   description = "Файлы отправятся в выбранный проект только после нажатия «Загрузить и проанализировать».",
   folderOnly = false,
@@ -97,11 +99,27 @@ export function MobileDocumentUpload({
   }
 
   async function upload() {
-    if (!files.length || !projectId || busy) return;
+    if (!files.length || !projectId || !userId || busy) return;
     let uploadedCount = 0;
     try {
       setBusy(true);
       setError("");
+      if (!navigator.onLine) {
+        await enqueueDocumentUpload({
+          userId,
+          projectId,
+          files: files.map((file) => ({
+            name: file.name,
+            path: file.webkitRelativePath || file.name,
+            mimeType: localUploadMimeType(file),
+            blob: file,
+          })),
+        });
+        setFiles([]);
+        onComplete(`Сохранено на устройстве: ${files.length}. Файлы отправятся после восстановления связи.`, []);
+        onClose();
+        return;
+      }
       const batches = partitionFiles(files);
       const total = { processed: 0, tasks: 0, risks: 0, skipped: 0, jobs: 0 };
       const jobs: QueuedLocalUploadJob[] = [];
@@ -133,6 +151,31 @@ export function MobileDocumentUpload({
       );
       onClose();
     } catch (reason) {
+      const remaining = files.slice(uploadedCount);
+      if (remaining.length && ((reason instanceof ApiError && reason.status === null) || !navigator.onLine)) {
+        try {
+          await enqueueDocumentUpload({
+            userId,
+            projectId,
+            files: remaining.map((file) => ({
+              name: file.name,
+              path: file.webkitRelativePath || file.name,
+              mimeType: localUploadMimeType(file),
+              blob: file,
+            })),
+          });
+          setFiles([]);
+          onComplete(
+            `Загружено: ${uploadedCount}. Сохранено на устройстве: ${remaining.length}; отправятся после восстановления связи.`,
+            [],
+          );
+          onClose();
+          return;
+        } catch (queueError) {
+          setError((queueError as Error).message);
+          return;
+        }
+      }
       if (uploadedCount) {
         setFiles((items) => items.slice(uploadedCount));
       }
@@ -172,7 +215,7 @@ export function MobileDocumentUpload({
       {warning && <p className="mobile-upload-warning" role="status">{warning}</p>}
       {error && <p className="mobile-upload-error">{error}</p>}
       {progress && <p className="mobile-upload-progress" aria-live="polite">{progress}</p>}
-      <button className="mobile-upload-submit" type="button" disabled={!files.length || busy || !projectId} onClick={() => void upload()}><Upload />{busy ? `Анализирую… ${progress}` : `Загрузить и проанализировать (${files.length})`}</button>
+      <button className="mobile-upload-submit" type="button" disabled={!files.length || busy || !projectId || !userId} onClick={() => void upload()}><Upload />{busy ? `Анализирую… ${progress}` : `Загрузить и проанализировать (${files.length})`}</button>
     </section>
   </div>;
 }

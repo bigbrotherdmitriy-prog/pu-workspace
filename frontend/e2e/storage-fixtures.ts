@@ -350,6 +350,7 @@ export class StorageApi {
     if (method !== "GET") return this.block(route, `Unexpected write ${method} ${path}`);
     const single: Record<string, unknown> = {
       "/auth/me": { id: 900, name: "Synthetic Operator", email: "operator@example.invalid", is_admin: true },
+      "/mobile-sync/status": { conflicts: [], count: 0 },
       "/organizations/current/requisites": { id: 901, name: "Synthetic Organization", requisites_status: "draft" },
       "/projects/": { projects: this.projectRows },
       "/api/readiness": { ready: true, google_drive_ready: true, telegram_ready: false, checks: {} },
