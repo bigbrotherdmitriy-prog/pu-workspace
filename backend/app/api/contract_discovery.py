@@ -34,10 +34,40 @@ _FILENAME_CONTRACT_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 _COMPANY_RE = re.compile(
-    r"\b((?:ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\s*[«\"']?[^\n,;]{2,100}?[»\"']?)"
+    r"\b((?:общество\s+с\s+ограниченной\s+ответственностью|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\b"
+    r"\s*(?:[«\"'][^»\"'\n]{2,100}[»\"']|[^\n,;]{2,100}?))"
     r"(?=\s*(?:,|именуем|в лице|$))",
     re.IGNORECASE,
 )
+
+
+def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
+    """Resolve supply-side role, never select a party by document order."""
+    body = text[:15_000]
+    matches = list(_COMPANY_RE.finditer(body))
+    companies: dict[str, str] = {}
+    suppliers: dict[str, tuple[str, str]] = {}
+    for index, match in enumerate(matches):
+        company = " ".join(match.group(1).split()).strip(" .,:;")
+        key = _organization_key(company)
+        companies.setdefault(key, company)
+        # A role belongs only to the current organization, not the next party.
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        tail = body[match.end():min(end, match.end() + 800)]
+        role = re.search(
+            r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
+            r"(поставщик|покупатель|заказчик|подрядчик)\b", tail, re.IGNORECASE,
+        )
+        if role and role.group(1).casefold() == "поставщик":
+            suppliers[key] = (company, body[match.start():match.end() + role.end()])
+    if kind == "supply":
+        if len(suppliers) == 1:
+            company, quote = next(iter(suppliers.values()))
+            return company, f"контрагент предложен по роли поставщика: {quote}"
+        return None, "поставщик не определён однозначно; подтвердите контрагента вручную"
+    if len(companies) == 1:
+        return next(iter(companies.values())), "найдена одна организация; подтвердите контрагента"
+    return None, "стороны не определены однозначно; подтвердите контрагента вручную"
 
 
 def _text_for_document(db: Session, document: Document) -> str:
@@ -153,12 +183,6 @@ def discover_contract_fields(name: str, content: str) -> dict:
     filename_number_match = _FILENAME_CONTRACT_NUMBER_RE.fullmatch(fallback_number.replace(" ", ""))
     filename_number = filename_number_match.group("number") if filename_number_match else None
     number = (number_match.group(1).strip(" .,:;№") if number_match else filename_number or fallback_number) or "Без номера"
-    companies = []
-    for value in _COMPANY_RE.findall(text[:15_000]):
-        normalized = " ".join(value.split()).strip(" .,:;")
-        if normalized.casefold() not in {item.casefold() for item in companies}:
-            companies.append(normalized)
-
     attachment_name = bool(re.search(
         r"(?:^|\W)(?:приложени|спецификац|график|ведомост|смет|техническ.*задани)",
         Path(name).stem.casefold(),
@@ -179,14 +203,15 @@ def discover_contract_fields(name: str, content: str) -> dict:
     ))
     confidence = min(0.95, 0.35 + (0.25 if number_match else 0.18 if filename_number else 0) + legal_markers * 0.06)
     is_contract = not attachment_name and (bool(number_match) or bool(filename_number) or legal_markers >= 2)
+    counterparty, party_evidence = _discovered_counterparty(text, kind)
     return {
         "number": number,
         "title": _short_contract_title(content, fallback_number),
-        "counterparty": companies[-1] if companies else None,
+        "counterparty": counterparty,
         "contract_kind": kind,
         "confidence": round(confidence, 2),
         "is_contract": is_contract,
-        "evidence": [kind_reason, *( ["номер найден в тексте"] if number_match else
+        "evidence": [kind_reason, party_evidence, *( ["номер найден в тексте"] if number_match else
                      ["структурированный номер договора найден в имени файла"] if filename_number else
                      ["название взято из имени файла; номер требует проверки"]),
                      f"юридических признаков: {legal_markers}",

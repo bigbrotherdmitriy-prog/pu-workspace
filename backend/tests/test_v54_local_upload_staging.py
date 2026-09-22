@@ -219,6 +219,32 @@ def test_admission_normalizes_filename_mime_and_enforces_scope_and_limits():
         UploadScope(0, 23)
 
 
+def test_legacy_doc_admission_routes_to_existing_antiword_extractor(monkeypatch):
+    from app.organizer_engine import content
+
+    raw = b"synthetic legacy document"
+    candidate = admit_candidate(
+        "Договор.DOC", "application/msword", raw, max_file_bytes=1024,
+        allowed_mime_types=local_staging.DEFAULT_ALLOWED_MIME_TYPES,
+    )
+    expected = "Договор на изготовление и монтаж рам кондиционеров. Стоимость работ 1000000 рублей."
+    calls = []
+
+    monkeypatch.setattr(content.shutil, "which", lambda name: "/usr/bin/antiword" if name == "antiword" else None)
+
+    def run(args, **kwargs):
+        assert args[0] == "antiword"
+        assert Path(args[1]).read_bytes() == raw
+        assert kwargs == dict(capture_output=True, timeout=content.OCR_TIMEOUT_SECONDS, check=False)
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=expected.encode("utf-8"))
+
+    monkeypatch.setattr(content.subprocess, "run", run)
+    assert content.extract_text(candidate.content, candidate.mime_type, candidate.display_name) == expected
+    assert len(calls) == 1
+    assert not Path(calls[0][1]).exists()
+
+
 def test_stage_encrypts_and_job_payload_is_metadata_only(tmp_path, monkeypatch):
     runtime, _, captured, queued, secret = stage_secret(tmp_path, monkeypatch)
     assert queued == EnqueuedUpload(queued.staging_id, 71, "queued")

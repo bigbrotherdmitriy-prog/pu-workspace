@@ -35,6 +35,7 @@ ALLOWED_RESULT_KEYS = frozenset({
     "processed", "skipped", "tasks", "risks", "decisions", "drafts", "documents",
 })
 DEFAULT_ALLOWED_MIME_TYPES = frozenset({
+    "application/msword",
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
