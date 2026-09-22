@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 35
     environment: staging
     env:
-      STAGING_HOST: ${{ vars.STAGING_HOST }}
+      STAGING_HOST: 37.252.23.204
       STAGING_USER: ${{ vars.STAGING_USER }}
       STAGING_ROOT: ${{ vars.STAGING_ROOT }}
       STAGING_PROJECT: ${{ vars.STAGING_PROJECT }}

@@ -33,7 +33,7 @@ def valid_settings():
 
 @pytest.mark.parametrize(("key", "value"), [
     ("STAGING_HOST", "pu-workspace.duckdns.org"),
-    ("STAGING_HOST", "37.252.23.204"),
+    ("STAGING_HOST", "72.56.108.162"),
     ("STAGING_HOST", "127.0.0.1"),
     ("STAGING_ROOT", "/opt/pu-workspace"),
     ("STAGING_ROOT", "/opt/pu-workspace/staging"),
@@ -56,7 +56,7 @@ def test_staging_settings_accept_isolated_target():
 
 def test_staging_hostname_must_not_resolve_to_production_server():
     def production_resolver(*_args, **_kwargs):
-        return [(2, 1, 6, "", ("37.252.23.204", 0))]
+        return [(2, 1, 6, "", ("72.56.108.162", 0))]
 
     with pytest.raises(ValueError, match="production host"):
         script("validate_staging_settings").validate(valid_settings(), resolver=production_resolver)
@@ -69,7 +69,7 @@ def test_staging_public_hostname_may_use_a_separate_proxy_address():
         elif host == "staging.example.test":
             address = "1.1.1.1"
         else:
-            address = "37.252.23.204"
+            address = "72.56.108.162"
         return [(2, 1, 6, "", (address, 0))]
 
     assert script("validate_staging_settings").validate(
@@ -79,7 +79,7 @@ def test_staging_public_hostname_may_use_a_separate_proxy_address():
 
 def test_staging_public_hostname_must_not_resolve_to_production_server():
     def resolver(host, *_args, **_kwargs):
-        address = "93.184.216.34" if host == "staging-host.example.test" else "37.252.23.204"
+        address = "93.184.216.34" if host == "staging-host.example.test" else "72.56.108.162"
         return [(2, 1, 6, "", (address, 0))]
 
     with pytest.raises(ValueError, match="production host"):
@@ -88,7 +88,7 @@ def test_staging_public_hostname_must_not_resolve_to_production_server():
 
 def test_staging_dns_identity_accepts_one_dedicated_host():
     def resolver(host, *_args, **_kwargs):
-        address = "37.252.23.204" if host in script("validate_staging_settings").PRODUCTION_HOSTS else "93.184.216.34"
+        address = "72.56.108.162" if host in script("validate_staging_settings").PRODUCTION_HOSTS else "93.184.216.34"
         return [(2, 1, 6, "", (address, 0))]
 
     assert script("validate_staging_settings").validate(
@@ -96,9 +96,28 @@ def test_staging_dns_identity_accepts_one_dedicated_host():
     ) == valid_settings()
 
 
+def test_former_production_ip_is_staging_only_after_production_dns_moves():
+    values = valid_settings()
+    values["STAGING_HOST"] = "37.252.23.204"
+    values["STAGING_PUBLIC_URL"] = "https://puw-staging.37-252-23-204.sslip.io"
+
+    def resolver(host, *_args, **_kwargs):
+        address = "72.56.108.162" if host in script("validate_staging_settings").PRODUCTION_HOSTS else "37.252.23.204"
+        return [(2, 1, 6, "", (address, 0))]
+
+    assert script("validate_staging_settings").validate(values, resolver=resolver) == values
+
+    def stale_production_dns(host, *_args, **_kwargs):
+        address = "37.252.23.204" if host == "puworkspace.ru" else "72.56.108.162"
+        return [(2, 1, 6, "", (address, 0))]
+
+    with pytest.raises(ValueError, match="production host"):
+        script("validate_staging_settings").validate(values, resolver=stale_production_dns)
+
+
 def test_staging_rejects_ipv4_mapped_production_address():
     def resolver(*_args, **_kwargs):
-        return [(10, 1, 6, "", ("::ffff:37.252.23.204", 0, 0, 0))]
+        return [(10, 1, 6, "", ("::ffff:72.56.108.162", 0, 0, 0))]
 
     with pytest.raises(ValueError, match="production host"):
         script("validate_staging_settings").validate(valid_settings(), resolver=resolver)
@@ -299,8 +318,22 @@ def test_staging_workflow_is_opt_in_serial_and_does_not_target_production():
     assert "StrictHostKeyChecking=yes" in workflow
     assert "--workflow .github/workflows/staging-preflight.yml" in workflow
     assert "actions: read" in workflow
+    assert "STAGING_HOST: 37.252.23.204" in workflow
     assert "pu-workspace.duckdns.org" not in workflow
     assert "deploy-production.sh" not in workflow
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX shell")
+@pytest.mark.parametrize("host", ["72.56.108.162", "37.252.23.204", "puworkspace.ru", "www.puworkspace.ru", "pu-workspace.duckdns.org"])
+def test_staging_shell_rejects_production_url_before_any_host_mutation(host):
+    result = subprocess.run(
+        ["sh", str(ROOT / "scripts" / "deploy-staging.sh"),
+         "/srv/pu-workspace-staging", "a" * 40, "puw-staging", "3010",
+         f"https://{host}", "/nonexistent-staging-test-archive"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "production public URL is forbidden" in result.stderr
 
 
 def test_staging_deploy_script_has_lock_backup_rollback_and_public_smoke():
