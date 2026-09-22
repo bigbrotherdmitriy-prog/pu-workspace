@@ -15,6 +15,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind in {"v54.synthetic_task", "v54.product_task"}:
         from app.pilot_dispatch import run_installed
         return run_installed(payload, kind=kind)
+    if kind == "v54.product_intent.produce":
+        from app.pilot_intent_producer import run_product_intent_job
+        return run_product_intent_job(payload)
     if kind == "local_upload.process":
         from app.local_upload_staging import run_local_upload_job
         return run_local_upload_job(payload)
