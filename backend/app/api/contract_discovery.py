@@ -253,7 +253,9 @@ def discover_contract_fields(name: str, content: str) -> dict:
     identity_with_number = own_heading and bool(number_match) and corroborating
     structured_scan = bool(filename_number) and paired_roles and len(legal_sections) >= 2
     legal_document = own_heading and conclusion and paired_roles and len(legal_sections) >= 2
-    is_contract = not negative_document and not reference_only and (
+    content_proves_standalone_contract = own_heading and bool(number_match) and bool(legal_sections)
+    blocked_by_filename = negative_document and not content_proves_standalone_contract
+    is_contract = not blocked_by_filename and not reference_only and (
         identity_with_number or structured_scan or legal_document
     )
     confidence = min(0.95, 0.28 + (0.22 if own_heading else 0) + (0.18 if number_match else 0)
@@ -275,7 +277,10 @@ def discover_contract_fields(name: str, content: str) -> dict:
         evidence.append("найдена формулировка заключения настоящего договора")
     if legal_sections:
         evidence.append(f"юридические разделы ({len(legal_sections)}): {', '.join(legal_sections)}")
-    if negative_document:
+    if negative_document and content_proves_standalone_contract:
+        evidence.append("содержимое подтверждает самостоятельный договор вопреки имени файла")
+    elif negative_document:
+        evidence.append("файл похож на приложение, а не на самостоятельный договор")
         evidence.append("исключён: заголовок относится к акту, счёту, письму или приложению")
     elif reference_only:
         evidence.append("исключён: найдена только ссылка на другой договор")
