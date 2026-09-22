@@ -19,7 +19,7 @@ import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPick
 import { buildContractTree } from "./modules/contracts/contractTree";
 import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
 import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
-import { ContractBulkImportWizard, type BulkContractProposal } from "./modules/contracts/ContractBulkImportWizard";
+import { ContractBulkImportWizard, type BulkContractCandidate, type BulkContractProposal, type ContractDiscoveryProgress } from "./modules/contracts/ContractBulkImportWizard";
 import { NotificationsModule, type ManagementDigest, type NotificationItem, type NotificationPolicy } from "./modules/notifications/NotificationsModule";
 import { TodayModule } from "./modules/today/TodayModule";
 import { InboxModule } from "./modules/inbox/InboxModule";
@@ -909,6 +909,32 @@ export function App() {
     }
     if (result.rejected_count) setNotice(`Найдено договоров: ${proposals.length}. Приложений и связанных файлов исключено: ${result.rejected_count}.`);
     return proposals;
+  }
+  async function findContractCandidates(onProgress: (progress: ContractDiscoveryProgress) => void): Promise<{ candidates: BulkContractCandidate[]; remaining: BulkContractCandidate[] }> {
+    const started = await api(`/projects/${projectId}/contracts/discovery-jobs`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+    const jobs: Array<{ job_id: number; count: number }> = started.jobs || [];
+    if (!jobs.length) {
+      onProgress({ completed: 0, total: 0, jobsCompleted: 0, jobsTotal: 0 });
+      return { candidates: [], remaining: [] };
+    }
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const states = await Promise.all(jobs.map((job) => api(`/projects/${projectId}/contracts/discovery-jobs/${job.job_id}`)));
+      const failed = states.find((state) => ["failed", "dead_letter", "cancelled"].includes(state.status));
+      if (failed) throw new Error(`Партия анализа не завершена: ${failed.error || failed.status}`);
+      const jobsCompleted = states.filter((state) => state.status === "completed").length;
+      const completed = states.reduce((sum, state, index) => sum + (state.status === "completed"
+        ? jobs[index].count : Math.round(jobs[index].count * Math.min(99, state.progress || 0) / 100)), 0);
+      onProgress({ completed, total: started.total, jobsCompleted, jobsTotal: jobs.length });
+      if (jobsCompleted === jobs.length) {
+        const candidates = states.flatMap((state) => state.result?.proposals || []);
+        const remaining = states.flatMap((state) => state.result?.rejected || []);
+        return { candidates, remaining };
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 600));
+    }
+    throw new Error("Анализ договоров выполняется слишком долго. Повторите открытие мастера позже.");
   }
   async function prepareDroppedContracts(documentIds: number[], parentContractId?: number) {
     try {
@@ -3353,7 +3379,7 @@ export function App() {
               <ContractBulkImportWizard
                 documents={documentRows}
                 contracts={contracts}
-                onDiscover={discoverBulkContracts}
+                onFindCandidates={findContractCandidates}
                 onImport={importBulkContracts}
                 incomingProposals={droppedContractProposals}
                 onIncomingConsumed={() => setDroppedContractProposals([])}

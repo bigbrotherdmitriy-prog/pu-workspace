@@ -459,6 +459,10 @@
 .contract-bulk-files label { display:flex; align-items:center; gap:10px; padding:11px; border:1px solid var(--pu-border); border-radius:10px; }
 .contract-bulk-files span { min-width:0; display:grid; }
 .contract-bulk-files strong,.contract-bulk-files small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.contract-bulk-group { display:grid; gap:8px; padding:12px; border:1px solid var(--pu-border); border-radius:12px; }
+.contract-bulk-group h3,.contract-bulk-group summary { margin:0; font-weight:800; cursor:pointer; }
+.contract-bulk-group>p { margin:0; font-size:13px; }
+.contract-bulk-progress { padding:12px; border-radius:10px; background:#e8f5ef; color:#075e46; font-weight:700; }
 .contract-bulk-proposals { display:grid; gap:10px; }
 .contract-bulk-proposals article { min-width:0; display:grid; grid-template-columns:34px minmax(0,1fr); gap:10px; padding:14px; border:1px solid #c9ddd5; border-left:3px solid #087a59; border-radius:12px; }
 .contract-bulk-proposals article.linked { opacity:.58; }
