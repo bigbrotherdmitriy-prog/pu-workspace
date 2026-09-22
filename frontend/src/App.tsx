@@ -762,6 +762,7 @@ export function App() {
     }
   }
   async function openProviderSources(provider: string) {
+    setActive("Рабочий центр");
     await picker.open(provider);
   }
   async function syncGmail(options: { silent?: boolean; folder?: MailFolderKind } = {}) {
@@ -1185,7 +1186,10 @@ export function App() {
     }
   }
   async function openSources(folderId?: string) {
-    if (folderId === undefined) await picker.open();
+    if (folderId === undefined) {
+      setActive("Рабочий центр");
+      await picker.open();
+    }
     else await picker.navigate(folderId);
   }
   async function queueFolder(folder: DriveFolder) {
@@ -2726,7 +2730,7 @@ export function App() {
               onUpdateRisk={(risk, status) => void updateRisk(risk, status)}
               onUpdateDecision={(decision, status) => void updateDecision(decision, status)}
             />
-          ) : active === "Рабочий центр" || showSources ? (
+          ) : active === "Рабочий центр" ? (
             <>
               <section className="dashboard-overview-deck">
                 <div className="dashboard-hero">
@@ -2987,7 +2991,20 @@ export function App() {
                         const remainingItems = processedItems === null || !totalItems ? null : Math.max(0, totalItems - processedItems);
                         const isProcessing = folder.snapshot_status === "building" || folder.analysis_status === "analyzing";
                         return (
-                        <article key={folder.id}>
+                        <article
+                          key={folder.id}
+                          className="source-folder-row"
+                          title="Открыть папку двойным щелчком"
+                          onDoubleClick={(event) => {
+                            if (
+                              busyFolder ||
+                              (event.target as HTMLElement).closest(
+                                "button, a, input, select, textarea",
+                              )
+                            ) return;
+                            void openSources(folder.id);
+                          }}
+                        >
                           <FolderKanban />
                           <div>
                             <strong>

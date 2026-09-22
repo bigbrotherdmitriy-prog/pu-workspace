@@ -7,6 +7,16 @@ test("01 new project stays selected beside Persistent Project", async ({ page, m
   expect(mock.requests.filter(row => row.path.includes("/source-folders/")).every(row => row.path.startsWith("/projects/2/"))).toBe(true);
 });
 
+test("01a folder row opens on double click without connecting it", async ({ page, mock }) => {
+  await start(page); await open(page);
+  const row = picker(page).locator("article").filter({ has: page.getByText("Проект #1", { exact: true }) });
+
+  await row.getByText("Проект #1", { exact: true }).dblclick();
+
+  await expect(picker(page).locator(".source-breadcrumbs").getByRole("button", { name: "Проект #1", exact: true })).toBeDisabled();
+  expect(mock.requests.some(request => request.path.includes("/snapshot-queue"))).toBe(false);
+});
+
 for (const provider of ["google_drive", "yandex_disk"] as Provider[]) {
   test(`02-04 ${provider}: selected provider, nested folders, encoded confirmation, parent navigation`, async ({ page, mock }, info) => {
     mock.provider = provider;
@@ -176,6 +186,35 @@ test("13 processing shows measured counts or unknown, never invented percentages
   await expect(picker(page).getByLabel("Прогресс анализа 37%")).toContainText("running");
   await expect(picker(page).getByText(/^(5|10)%$/)).toHaveCount(0);
   await info.attach("synthetic-real-progress", { body: await page.screenshot(), contentType: "image/png" });
+});
+
+test("active analysis does not capture navigation and progress refreshes after returning", async ({ page, mock }) => {
+  const result = discovery("google_drive");
+  result.folders = [{ ...folder("google_drive", paths.google_drive[2], "Анализируемая папка"),
+    registered: true, snapshot_id: 31, snapshot_status: "ready", analysis_status: "analyzing",
+    analysis_result: { organizer_session_id: 42 }, item_count: 20 }];
+  mock.discoveryReply = () => ({ body: result });
+  mock.queue = { summary: { active: 1, failed: 0, dead_letter: 0 }, snapshots: [], sessions: [
+    { id: 42, status: "running", progress: 37, source_item_count: 20, copy_item_count: 20,
+      processed_item_count: 7, queue_position: null, retry_count: 0 },
+  ] };
+  await start(page); await open(page);
+  await expect(picker(page).getByLabel("Прогресс анализа 37%")).toBeVisible();
+  for (const section of ["Сегодня", "Запуск проекта", "Документы", "Интеграции", "Журнал", "Задачи", "Риски и решения"]) {
+    await page.getByTitle(section, { exact: true }).click();
+    await expect(page.getByRole("heading", { name: section, level: 1 })).toBeVisible();
+    await expect(picker(page)).toHaveCount(0);
+  }
+  // Let a real polling request arrive while another section is active.
+  mock.queue.sessions = [{ id: 42, status: "running", progress: 60, source_item_count: 20,
+    copy_item_count: 20, processed_item_count: 12, queue_position: null, retry_count: 0 }];
+  await page.waitForResponse(response => response.url().includes("/processing-queue") && response.ok());
+  await expect(page.getByRole("heading", { name: "Риски и решения", level: 1 })).toBeVisible();
+  await expect(picker(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "Рабочий центр", exact: true }).click();
+  await expect(picker(page).getByLabel("Прогресс анализа 60%")).toContainText("12 обработано · 8 осталось");
+  await expect(picker(page).getByText("Анализируемая папка", { exact: true })).toBeVisible();
+  expect(mock.requests.filter(row => row.method !== "GET")).toEqual([]);
 });
 
 test("explicit missing project never falls back after reload", async ({ page, mock }) => {

@@ -392,6 +392,10 @@ export class StorageApi {
     const scoped: Record<string, unknown> = {
       snapshots: { snapshots: this.snapshots.filter(row => row.project_id === projectId) },
       "processing-queue": this.queue,
+      "site-location": { project_id: projectId, latitude: null, longitude: null },
+      "launch-readiness": { project_name: "Новый проект", source_ready: true, documents: 0,
+        analyzed_documents: 0, contracts: 0, linked_contracts: 0, schedule_rows: 0,
+        budget_rows: 0, cash_flow_rows: 0, contacts: 0, confirmed_contacts: 0, inbox_messages: 0 },
       "google/status": { authorized: true, gmail_authorized: false },
       documents: { documents: [] }, contracts: { contracts: [] },
       members: { members: [{ user_id: 900, role: "manager", name: "Synthetic Operator", email: "operator@example.invalid" }] },
