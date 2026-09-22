@@ -743,6 +743,21 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .notification-kind svg { width: 17px; }
 .notification-list button { padding: 7px 10px; border: 1px solid #ccd5e1; border-radius: 8px; background: #fff; cursor: pointer; }
 .finance-page { display: grid; gap: 16px; }
+.gpr-page { display: grid; gap: 16px; }
+.gpr-contract-context { border-left: 4px solid #185adb; }
+.finance-import-hub { display: grid; gap: 16px; padding: 20px 22px; border-left: 4px solid #168462; }
+.finance-import-heading h2, .finance-import-heading p { margin: 4px 0 0; }
+.finance-import-heading p { max-width: 850px; color: #66756e; }
+.finance-import-actions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.finance-import-actions article { display: grid; grid-template-columns: auto 1fr; gap: 8px 11px; align-items: start; padding: 15px; border: 1px solid #d6e1dc; border-radius: 10px; background: #f8fbf9; }
+.finance-import-actions article > b { grid-row: 1 / span 2; display: grid; place-items: center; width: 29px; height: 29px; border-radius: 50%; color: #fff; background: #168462; }
+.finance-import-actions article > div { display: grid; gap: 4px; min-width: 0; }
+.finance-import-actions article strong { font-size: 15px; }
+.finance-import-actions article small { color: #6e7c75; line-height: 1.4; }
+.finance-import-actions article button { grid-column: 2; justify-self: start; min-height: 38px; padding: 9px 13px; border: 0; border-radius: 8px; color: #fff; background: #176b52; font-weight: 700; cursor: pointer; }
+.finance-import-actions article button:disabled { color: #89958f; background: #e3e8e5; cursor: not-allowed; }
+.finance-import-hint { margin: 0; padding: 10px 12px; border-radius: 8px; color: #76510a; background: #fff5d9; }
+@media (max-width: 900px) { .finance-import-actions { grid-template-columns: 1fr; } }
 .dds-workspace { padding: 0; overflow: hidden; }
 .dds-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 24px 18px; }
 .dds-head h2 { margin: 3px 0 5px; font-size: 22px; }

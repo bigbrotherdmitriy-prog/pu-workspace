@@ -39,7 +39,7 @@ const sectionByKind: Record<DailyBriefingItem["kind"], string> = {
   draft: "Письма",
   context: "AI Secretary",
   missing_contract_source: "Договоры",
-  empty_schedule: "Исполнение и финансы",
+  empty_schedule: "График работ",
   unlinked_budget: "Исполнение и финансы",
   unlinked_cash_flow: "Исполнение и финансы",
   payment_confirmation: "Исполнение и финансы",

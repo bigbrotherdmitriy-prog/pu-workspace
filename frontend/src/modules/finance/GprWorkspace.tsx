@@ -325,7 +325,7 @@ export function GprWorkspace({ projectId, finance, selectedContractId, onPrepare
     return [{ key: `${predecessor.id}-${task.id}-${link.type}`, path: `M ${x1} ${y1} H ${bend} V ${y2} H ${x2}`, critical: network.critical.has(predecessor.id) && network.critical.has(task.id), label: `${predecessor.id}${link.type}${link.lag ? `${link.lag > 0 ? "+" : ""}${link.lag}д` : ""}` }];
   }));
 
-  return <section className="card gpr-workspace">
+  return <section className="card gpr-workspace" id="gpr-workspace">
     <div className="gpr-head"><div><span className="eyebrow">КАЛЕНДАРНО-СЕТЕВОЕ ПЛАНИРОВАНИЕ</span><h2>График работ</h2><p>Иерархия задач, зависимости, план/факт и диаграмма Ганта в одном рабочем поле.</p></div><div className="gpr-controls"><select aria-label="Версия ГПР" value={currentBaselineId} onChange={(event) => { setBaselineId(Number(event.target.value)); setSelectedId(0); }}>{baselines.map((item) => <option value={item.id} key={item.id}>v{item.version} · {item.name} · {item.status}</option>)}</select><input ref={mppInput} hidden type="file" accept=".mpp" onChange={(event) => void chooseMpp(event.target.files?.[0])} /><button type="button" className="secondary" disabled={mppBusy} onClick={() => mppInput.current?.click()}><Upload />{mppBusy ? "Читаю…" : "Импорт .mpp"}</button><button type="button" onClick={() => onPrepare(currentBaselineId ? "schedule" : "baseline", currentBaselineId)}><Plus />{currentBaselineId ? "Задача" : "Версия ГПР"}</button></div></div>
     {mppError && <div className="gpr-import-message error" role="alert">{mppError}</div>}
     {mppNotice && <div className="gpr-import-message" role="status">{mppNotice}</div>}

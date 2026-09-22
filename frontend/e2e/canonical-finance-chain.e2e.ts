@@ -100,7 +100,15 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
 
   await page.goto("/new/");
   await page.getByRole("button", { name: "Исполнение и финансы" }).click();
+  await expect(page.locator(".gpr-workspace")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Загрузить бюджет" })).toBeDisabled();
   await page.getByLabel("Финансовый договор").selectOption("41");
+  await expect(page.getByRole("button", { name: "Загрузить бюджет" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Загрузить плановый ДДС" })).toBeEnabled();
+  await page.getByRole("button", { name: "График работ", exact: true }).click();
+  await expect(page.locator(".gpr-workspace")).toBeVisible();
+  await expect(page.getByText(/Здесь находятся только календарный план/)).toBeVisible();
+  await page.getByRole("button", { name: "Исполнение и финансы" }).click();
   await page.getByRole("button", { name: "Проверить и использовать" }).click();
   await page.getByLabel("Этап ГПР счёта").selectOption("72");
   await page.getByLabel("Строка бюджета счёта").selectOption("81");
