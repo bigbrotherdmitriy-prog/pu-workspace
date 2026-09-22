@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import or_, select
 
 from app.models.ai_secretary import Message
+from app.models.audit_log import AuditLog
 from app.models.mailbox_identity import (
     MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
@@ -50,6 +51,8 @@ def rollout_flags_are_valid(flags):
         return False
     shadow_write, shadow_read_compare, pilot_write, primary_read, actions = values
     return not (
+        (shadow_read_compare and not shadow_write)
+        or
         (pilot_write and not (shadow_write and shadow_read_compare))
         or (primary_read and not pilot_write)
         or (actions and not primary_read)
@@ -288,3 +291,71 @@ def observe_gmail_message(db, *, runtime: MailboxRuntime, project_id: int,
         current.version_id = version.id
     db.flush()
     return source, version
+
+
+def shadow_observe_gmail_message(db, *, runtime: MailboxRuntime, message: Message,
+                                 provider_message_id: str, provider_thread_id: str | None,
+                                 observation_key: str, actor: User):
+    """Write and compare the additive mailbox envelope without cutting over Message.
+
+    Shadow mode deliberately leaves the legacy message origin columns untouched.
+    A mismatch is recorded for operator review; it is never repaired or promoted
+    automatically and therefore cannot authorize mailbox actions.
+    """
+    if (not runtime.flags.shadow_write or runtime.flags.pilot_write
+            or message.organization_id != runtime.organization_id):
+        _deny()
+    require_mailbox_authority(db, runtime=runtime, actor=actor, permission="ingest")
+    if runtime.flags.shadow_read_compare:
+        require_mailbox_authority(db, runtime=runtime, actor=actor, permission="read")
+    source, version = observe_gmail_message(
+        db,
+        runtime=runtime,
+        project_id=message.project_id,
+        provider_message_id=provider_message_id,
+        provider_thread_id=provider_thread_id,
+        observation_key=observation_key,
+    )
+    status = None
+    if runtime.flags.shadow_read_compare:
+        current = db.get(SourceCurrent, source.id)
+        try:
+            located_message_id, located_thread_id = provider_locator(source)
+        except ValueError:
+            located_message_id, located_thread_id = None, None
+        matches = all((
+            message.mail_connection_id is None,
+            message.provider_message_id is None,
+            message.source_reference_id is None,
+            message.organization_id == source.organization_id,
+            message.project_id == source.origin_project_id,
+            message.source_external_id == source.external_id == provider_message_id,
+            source.identity_id == runtime.identity_id,
+            source.namespace == "gmail",
+            source.object_kind == "message",
+            source.freshness == "fresh",
+            source.availability == "available",
+            current is not None and current.organization_id == runtime.organization_id,
+            current is not None and current.version_id == version.id,
+            version.source_id == source.id,
+            version.locator_at_observation == source.canonical_locator,
+            located_message_id == provider_message_id,
+            located_thread_id == provider_thread_id,
+        ))
+        status = "match" if matches else "mismatch"
+        details = f"generation={runtime.generation};status={status}"
+        already_recorded = db.scalar(select(AuditLog.id).where(
+            AuditLog.action == "mailbox_shadow_compare",
+            AuditLog.entity_type == "message",
+            AuditLog.entity_id == message.id,
+            AuditLog.details == details,
+        ).limit(1))
+        if already_recorded is None:
+            db.add(AuditLog(
+                action="mailbox_shadow_compare",
+                entity_type="message",
+                entity_id=message.id,
+                details=details,
+            ))
+            db.flush()
+    return source, version, status
