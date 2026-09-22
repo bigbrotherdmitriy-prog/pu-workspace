@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { FileSearch, Network, X } from "lucide-react";
 
@@ -19,10 +19,12 @@ export type BulkContractProposal = {
 
 type DocumentOption = { id: number; name: string; mime_type?: string; source: string };
 type ContractOption = { id: number; number: string; title: string };
+export type BulkContractCandidate = BulkContractProposal & { reason?: string };
+export type ContractDiscoveryProgress = { completed: number; total: number; jobsCompleted: number; jobsTotal: number };
 type Props = {
   documents: DocumentOption[];
   contracts: ContractOption[];
-  onDiscover: (documentIds: number[]) => Promise<BulkContractProposal[]>;
+  onFindCandidates: (onProgress: (progress: ContractDiscoveryProgress) => void) => Promise<{ candidates: BulkContractCandidate[]; remaining: BulkContractCandidate[] }>;
   onImport: (proposals: BulkContractProposal[]) => Promise<number>;
   incomingProposals?: BulkContractProposal[];
   onIncomingConsumed?: () => void;
@@ -36,15 +38,19 @@ const kindLabel: Record<string, string> = {
   supply: "Поставщик",
 };
 
-export function ContractBulkImportWizard({ documents, contracts, onDiscover, onImport, incomingProposals, onIncomingConsumed }: Props) {
+export function ContractBulkImportWizard({ documents, contracts, onFindCandidates, onImport, incomingProposals, onIncomingConsumed }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number[]>([]);
   const [proposals, setProposals] = useState<BulkContractProposal[]>([]);
+  const [candidates, setCandidates] = useState<BulkContractCandidate[]>([]);
+  const [remaining, setRemaining] = useState<BulkContractCandidate[]>([]);
+  const [scanComplete, setScanComplete] = useState(false);
+  const [progress, setProgress] = useState<ContractDiscoveryProgress>({ completed: 0, total: 0, jobsCompleted: 0, jobsTotal: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const files = useMemo(() => documents.filter((item) => !item.mime_type?.includes("folder") &&
-    (!query.trim() || item.name.toLocaleLowerCase("ru-RU").includes(query.trim().toLocaleLowerCase("ru-RU")))), [documents, query]);
+  const filteredCandidates = useMemo(() => candidates.filter((item) => !query.trim() || item.document_name.toLocaleLowerCase("ru-RU").includes(query.trim().toLocaleLowerCase("ru-RU"))), [candidates, query]);
+  const filteredRemaining = useMemo(() => remaining.filter((item) => !query.trim() || item.document_name.toLocaleLowerCase("ru-RU").includes(query.trim().toLocaleLowerCase("ru-RU"))), [remaining, query]);
   const needsParent = (kind: string) => !["prime_reference", "customer"].includes(kind);
   const invalid = proposals.some((item) => !item.number.trim() || !item.title.trim() ||
     (needsParent(item.contract_kind) && !item.parent_document_id && !item.parent_contract_id));
@@ -55,12 +61,20 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
     onIncomingConsumed?.();
   }, [incomingProposals, onIncomingConsumed]);
 
-  async function analyze() {
-    if (!selected.length) return;
-    setBusy(true); setError("");
-    try { setProposals(await onDiscover(selected)); }
-    catch (reason) { setError((reason as Error).message); }
+  async function scan() {
+    setBusy(true); setError(""); setScanComplete(false); setCandidates([]); setRemaining([]); setSelected([]);
+    try {
+      const result = await onFindCandidates(setProgress);
+      setCandidates(result.candidates); setRemaining(result.remaining);
+      setSelected(result.candidates.map((item) => item.document_id)); setScanComplete(true);
+    } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
+  }
+
+  function analyze() {
+    if (!selected.length) return;
+    const byId = new Map([...candidates, ...remaining].map((item) => [item.document_id, item]));
+    setProposals(selected.map((id) => byId.get(id)).filter((item): item is BulkContractCandidate => Boolean(item)));
   }
 
   async function apply() {
@@ -74,15 +88,20 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
 
   return <section className="card contract-bulk-launch">
     <div><FileSearch /><span><strong>Массовый разбор договоров</strong><small>Выберите файлы, проверьте распознанные роли и импортируйте готовое дерево.</small></span></div>
-    <button onClick={() => setOpen(true)}>Выбрать все договоры</button>
+    <button onClick={() => { setOpen(true); if (!busy) void scan(); }}>Найти договоры</button>
     {open && createPortal(<div className="contract-bulk-backdrop" role="dialog" aria-modal="true" aria-label="Массовый разбор договоров">
       <div className="contract-bulk-dialog">
         <header><div><span className="eyebrow">МАССОВЫЙ МАСТЕР</span><h2>Файлы → проверка → дерево договоров</h2><p>Система ничего не привяжет до вашего подтверждения.</p></div><button className="icon-button" aria-label="Закрыть" onClick={() => setOpen(false)}><X /></button></header>
         {!proposals.length ? <>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по названию файла" />
-          <div className="contract-bulk-tools"><button className="secondary" onClick={() => setSelected(files.map((item) => item.id))}>Выбрать все найденные ({files.length})</button><button className="secondary" onClick={() => setSelected([])}>Снять выбор</button><b>Выбрано: {selected.length}</b></div>
-          <div className="contract-bulk-files">{files.slice(0, 300).map((item) => <label draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-pu-document-id", String(item.id)); event.dataTransfer.effectAllowed = "copy"; }} key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span><strong>{item.name}</strong><small>{item.source} · можно перетащить на схему</small></span></label>)}</div>
-          <button disabled={!selected.length || busy} onClick={analyze}>{busy ? "Анализирую выбранные файлы…" : `Проанализировать ${selected.length} файлов`}</button>
+          {busy && <div className="contract-bulk-progress" role="status">Обработано {progress.completed} из {progress.total || documents.length} · партий {progress.jobsCompleted} из {progress.jobsTotal || "…"}</div>}
+          {!busy && !scanComplete && <button onClick={() => void scan()}>Найти кандидатов</button>}
+          {scanComplete && <>
+            <div className="contract-bulk-tools"><button className="secondary" onClick={() => setSelected(candidates.map((item) => item.document_id))}>Выбрать кандидатов ({candidates.length})</button><button className="secondary" onClick={() => setSelected([])}>Снять выбор</button><b>Выбрано: {selected.length}</b></div>
+            <section className="contract-bulk-group"><h3>Найдено кандидатов: {candidates.length}</h3><div className="contract-bulk-files">{filteredCandidates.map((item) => <CandidateRow item={item} selected={selected} setSelected={setSelected} key={item.document_id} />)}</div></section>
+            <details className="contract-bulk-group"><summary>Остальные документы: {remaining.length}</summary><p>Они не выбраны. Добавьте файл вручную, только если уверены, что это договор.</p><div className="contract-bulk-files">{filteredRemaining.map((item) => <CandidateRow item={item} selected={selected} setSelected={setSelected} key={item.document_id} />)}</div></details>
+            <button disabled={!selected.length} onClick={analyze}>{`Проверить ${selected.length} предложений`}</button>
+          </>}
         </> : <>
           <div className="contract-bulk-tree-head"><Network /><span><strong>Проверьте порядок договоров</strong><small>Для каждого нижнего договора укажите непосредственный вышестоящий.</small></span></div>
           <div className="contract-bulk-proposals">{proposals.map((item, index) => <article className={item.already_linked ? "linked" : ""} key={item.document_id}>
@@ -106,4 +125,11 @@ export function ContractBulkImportWizard({ documents, contracts, onDiscover, onI
       </div>
     </div>, document.body)}
   </section>;
+}
+
+function CandidateRow({ item, selected, setSelected }: { item: BulkContractCandidate; selected: number[]; setSelected: Dispatch<SetStateAction<number[]>> }) {
+  return <label key={item.document_id}>
+    <input type="checkbox" checked={selected.includes(item.document_id)} onChange={(event) => setSelected((current) => event.target.checked ? [...new Set([...current, item.document_id])] : current.filter((id) => id !== item.document_id))} />
+    <span><strong>{item.document_name}</strong><small>{item.reason || item.evidence.join("; ")}</small></span>
+  </label>;
 }
