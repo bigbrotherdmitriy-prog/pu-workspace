@@ -23,6 +23,7 @@ from app.mailbox_identity.runtime import (
     require_mailbox_authority,
     runtime_for_message,
     runtime_for_project_connection,
+    shadow_observe_gmail_message,
 )
 from app.integrations.telegram import notify_telegram
 from app.core.auth import require_project_role, require_user
@@ -402,6 +403,16 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                     has_actions=_message_has_actions(db, existing),
                     human_reviewed=_message_was_reviewed_by_human(db, existing),
                 )
+                if mailbox_runtime and mailbox_runtime.flags.shadow_write and not mailbox_write:
+                    shadow_observe_gmail_message(
+                        db,
+                        runtime=mailbox_runtime,
+                        message=existing,
+                        provider_message_id=item["id"],
+                        provider_thread_id=item.get("threadId"),
+                        observation_key=str(item.get("historyId") or item["id"]),
+                        actor=user,
+                    )
                 # Older synchronized rows predate attachment metadata. Backfill
                 # metadata once, without re-running message analysis or alerts.
                 existing_attachments = json.loads(existing.attachments_json or "[]")
@@ -490,6 +501,16 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
                 if headers.get(key)
             }, ensure_ascii=False)
             stored.mail_labels_json = json.dumps(item.get("labelIds") or [])
+            if mailbox_runtime and mailbox_runtime.flags.shadow_write and not mailbox_write:
+                shadow_observe_gmail_message(
+                    db,
+                    runtime=mailbox_runtime,
+                    message=stored,
+                    provider_message_id=item["id"],
+                    provider_thread_id=item.get("threadId"),
+                    observation_key=str(item.get("historyId") or item["id"]),
+                    actor=user,
+                )
             processed += 1 if result["status"] else 0
             if not bulk_reason and not automated_sender_reason and result.get("context_confirmed"):
                 discover_contact_from_message(
