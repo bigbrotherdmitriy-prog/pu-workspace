@@ -38,12 +38,16 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
         from app.management_digest import schedule_digest_jobs
         created += schedule_digest_jobs(db, now=now)
     from app.pilot_dispatch import recover_installed
+    from app.pilot_incidents import notify_product_auto_incidents_once
     from app.local_upload_staging import recover_local_upload_retention
     from app.staging.gmail import recover_gmail_attachment_jobs
-    return (
+    recovered = (
         created + recover_installed() + recover_gmail_attachment_jobs()
         + recover_local_upload_retention()
     )
+    # Operational projection only: Telegram failure never changes durable work.
+    notify_product_auto_incidents_once()
+    return recovered
 
 
 def main() -> None:
