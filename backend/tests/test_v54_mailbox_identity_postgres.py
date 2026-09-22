@@ -14,7 +14,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.mailbox_identity.runtime import runtime_for_message
+from app.mailbox_identity.runtime import runtime_for_message, runtime_for_project_connection
 from app.mailbox_identity.service import MailboxIdentityService
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
@@ -24,6 +24,7 @@ from app.models.mailbox_identity import (
     MailboxCutoverFlags,
     MailboxOriginBinding,
     MailboxOriginCurrent,
+    MailboxProjectCohort,
 )
 from app.models.organization_contract import Organization
 from app.models.project import Project
@@ -161,6 +162,11 @@ def test_s02_same_provider_message_and_thread_are_isolated_per_mailbox(
             flags.shadow_read_compare = True
             flags.pilot_write = True
             flags.primary_read = True
+            cohort = db.scalar(select(MailboxProjectCohort).where(
+                MailboxProjectCohort.project_id == projects[index].id,
+                MailboxProjectCohort.credential_generation == generation,
+            ))
+            cohort.enabled = True
             db.add(MailboxAuthorityState(
                 organization_id=organization.id,
                 mail_connection_id=connection.id,
@@ -270,6 +276,11 @@ def test_s02_shadow_compare_is_additive_and_idempotent_on_postgres(
         ))
         flags.shadow_write = True
         flags.shadow_read_compare = True
+        cohort = db.scalar(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.project_id == project.id,
+            MailboxProjectCohort.credential_generation == generation,
+        ))
+        cohort.enabled = True
         db.add(MailboxAuthorityState(
             organization_id=organization.id, mail_connection_id=connection.id,
             principal_kind="user", principal_id=str(user.id), permissions=["ingest", "read"],
@@ -301,3 +312,52 @@ def test_s02_shadow_compare_is_additive_and_idempotent_on_postgres(
         _require(len(audits) == 1)
         _require(audits[0].details == f"generation={generation};status=match")
         _require(provider_message not in audits[0].details and "@" not in audits[0].details)
+
+
+def test_shared_identity_rollout_is_project_scoped_on_postgres(mailbox_pg_engine):
+    with Session(mailbox_pg_engine) as db:
+        user = User(name="Synthetic cohort owner", email="cohort-owner@example.test", is_admin=False)
+        organization = Organization(name="Synthetic cohort organization")
+        db.add_all([user, organization]); db.flush()
+        first = Project(name="Synthetic cohort alpha", organization_id=organization.id)
+        second = Project(name="Synthetic cohort beta", organization_id=organization.id)
+        db.add_all([first, second]); db.flush()
+        db.add_all([
+            ProjectMember(project_id=first.id, user_id=user.id, role="owner"),
+            ProjectMember(project_id=second.id, user_id=user.id, role="owner"),
+        ])
+        token1 = GoogleOAuthToken(project_id=first.id)
+        token2 = GoogleOAuthToken(project_id=second.id)
+        db.add_all([token1, token2]); db.flush()
+        identity, connection, generation1 = MailboxIdentityService().bind_verified_google_subject(
+            db, organization_id=organization.id, google_token_id=token1.id,
+            subject="synthetic-shared-cohort-subject",
+        )
+        cohort1 = db.scalar(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.project_id == first.id,
+            MailboxProjectCohort.credential_generation == generation1,
+        ))
+        cohort1.enabled = True
+        db.flush()
+        _require(runtime_for_project_connection(db, first.id) is not None)
+
+        _identity, _connection, generation2 = MailboxIdentityService().bind_verified_google_subject(
+            db, organization_id=organization.id, google_token_id=token2.id,
+            subject=identity.account_key,
+        )
+        _require(generation2 == generation1 + 1 and _connection.id == connection.id)
+        cohort2 = db.scalar(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.project_id == second.id,
+            MailboxProjectCohort.credential_generation == generation2,
+        ))
+        _require(cohort2.enabled is False)
+        with pytest.raises(ValueError, match="resource_unavailable"):
+            runtime_for_project_connection(db, first.id)
+        _require(runtime_for_project_connection(db, second.id) is None)
+
+        cohort2.enabled = True
+        db.flush()
+        runtime2 = runtime_for_project_connection(db, second.id)
+        _require(runtime2.generation == generation2)
+        _require(runtime2.google_token_id == token2.id)
+        db.commit()

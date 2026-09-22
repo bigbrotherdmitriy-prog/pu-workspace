@@ -13,7 +13,7 @@ def test_notification_auto_migration_is_the_single_head():
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "migrations"))
     assert ScriptDirectory.from_config(config).get_heads() == [CURRENT_SCHEMA_REVISION]
-    assert CURRENT_SCHEMA_REVISION == "a54f001c0a10"
+    assert CURRENT_SCHEMA_REVISION == "a54f001c0a11"
 
 
 def test_notification_auto_migration_only_extends_the_closed_action_catalog():

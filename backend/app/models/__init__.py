@@ -50,6 +50,7 @@ from app.models.v54_pilot import (  # additive, inactive pilot foundation
 from app.models.v54_authority import AuthorityState
 from app.models.mailbox_identity import (
     MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
+    MailboxProjectCohort,
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
 )
 from app.models.materialization import Materialization
@@ -125,6 +126,7 @@ __all__ = [
     "MailUserSettings",
     "AuthorityState",
     "MailboxAuthorityState", "MailboxCredentialGeneration", "MailboxCutoverFlags",
+    "MailboxProjectCohort",
     "MailboxOriginBinding", "MailboxOriginCurrent", "MailboxOriginDecision",
     "Materialization",
     "ProviderAction", "ProviderActionApproval", "ProviderDispatchOutbox",
