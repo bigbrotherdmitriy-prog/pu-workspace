@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, JSON, String, UniqueConstraint, Uuid, event, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Integer, JSON, String, UniqueConstraint, Uuid, event, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -146,6 +146,55 @@ class MailboxCutoverFlags(Base):
     primary_read: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     actions: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     record_version: Mapped[int] = mapped_column(server_default="1")
+
+
+class MailboxProjectCohort(Base):
+    """Explicit project boundary for mailbox rollout on a shared identity.
+
+    Cutover flags remain pinned to the exact mailbox credential generation.
+    A project participates only when its own cohort row is explicitly enabled;
+    another project using the same Google account cannot inherit that rollout.
+    """
+
+    __tablename__ = "v54_mailbox_project_cohorts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "project_id"],
+            ["projects.organization_id", "projects.id"],
+            ondelete="RESTRICT",
+            name="fk_v54_mailbox_cohort_project",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "mail_connection_id"],
+            ["v54_mail_connections.organization_id", "v54_mail_connections.id"],
+            ondelete="RESTRICT",
+            name="fk_v54_mailbox_cohort_mail",
+        ),
+        ForeignKeyConstraint(
+            ["changed_by_user_id"], ["users.id"], ondelete="RESTRICT",
+            name="fk_v54_mailbox_cohort_actor",
+        ),
+        UniqueConstraint(
+            "organization_id", "project_id", "mail_connection_id", "credential_generation",
+            name="uq_v54_mailbox_project_cohort",
+        ),
+        CheckConstraint(
+            "credential_generation > 0 AND record_version > 0",
+            name="ck_v54_mailbox_cohort_versions",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    mail_connection_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
+    credential_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    record_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    changed_by_user_id: Mapped[int | None] = mapped_column(Integer)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
 
 
 def _deny_change(*_args, **_kwargs): raise ValueError("append_only_record")

@@ -9,6 +9,7 @@ from app.models.audit_log import AuditLog
 from app.models.mailbox_identity import (
     MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
+    MailboxProjectCohort,
 )
 from app.models.user import User
 from app.models.v54_pilot import (
@@ -93,6 +94,31 @@ def _runtime(db, generation, *, expected_mail_connection_id=None):
                           generation.google_token_id, flags, mailbox_cohort=mailbox_cohort)
 
 
+def _project_cohort_enabled(db, *, runtime: MailboxRuntime, project_id: int) -> bool:
+    return bool(db.scalar(select(MailboxProjectCohort.id).where(
+        MailboxProjectCohort.organization_id == runtime.organization_id,
+        MailboxProjectCohort.project_id == project_id,
+        MailboxProjectCohort.mail_connection_id == runtime.mail_connection_id,
+        MailboxProjectCohort.credential_generation == runtime.generation,
+        MailboxProjectCohort.enabled.is_(True),
+    ).limit(1)))
+
+
+def _project_has_enabled_cohort(db, *, runtime: MailboxRuntime, project_id: int) -> bool:
+    return bool(db.scalar(select(MailboxProjectCohort.id).where(
+        MailboxProjectCohort.organization_id == runtime.organization_id,
+        MailboxProjectCohort.project_id == project_id,
+        MailboxProjectCohort.mail_connection_id == runtime.mail_connection_id,
+        MailboxProjectCohort.enabled.is_(True),
+    ).limit(1)))
+
+
+def _credential_owner_project_matches(db, *, runtime: MailboxRuntime, project_id: int) -> bool:
+    from app.models.google_token import GoogleOAuthToken
+    token = db.get(GoogleOAuthToken, runtime.google_token_id)
+    return bool(token and token.project_id == project_id)
+
+
 def require_mailbox_authority(db, *, runtime, actor: User, permission: str, expected_version=None):
     """Actor is trusted server context and is intentionally absent from request DTOs."""
     if not actor or not actor.id or db.get(User, actor.id) is not actor:
@@ -134,6 +160,14 @@ def runtime_for_project_connection(db, project_id):
     runtime = _runtime(db, generation)
     if not runtime:
         _deny()
+    if (not _credential_owner_project_matches(db, runtime=runtime, project_id=project_id)
+            or not _project_cohort_enabled(db, runtime=runtime, project_id=project_id)):
+        # A previously enrolled project may never fall back to a project token
+        # after credential rotation.  It must be explicitly re-enrolled for the
+        # exact new generation.  Projects that never enrolled stay legacy.
+        if _project_has_enabled_cohort(db, runtime=runtime, project_id=project_id):
+            _deny()
+        return None
     return runtime
 
 
@@ -226,6 +260,12 @@ def runtime_for_message(db, message: Message, *, actor: User, action=False):
             or source_version.source_id != source.id
             or source_version.revision != decision.source_version_revision
             or source_version.revision != 1):
+        _deny()
+    if not _project_cohort_enabled(
+        db, runtime=runtime, project_id=source.origin_project_id,
+    ) or not _credential_owner_project_matches(
+        db, runtime=runtime, project_id=source.origin_project_id,
+    ):
         _deny()
     provider_message_id, provider_thread_id = provider_locator(source)
     if (provider_message_id != source.external_id or provider_message_id != binding.provider_message_id
