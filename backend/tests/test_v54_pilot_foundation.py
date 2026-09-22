@@ -433,7 +433,7 @@ def test_downgrade_refuses_to_erase_pilot_history(db):
 
 def test_single_head_and_postgresql_offline_migration(monkeypatch):
     heads = ScriptDirectory.from_config(migration_config()).get_heads()
-    assert heads == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a10"]
+    assert heads == [CURRENT_SCHEMA_REVISION] == ["a54f001c0a11"]
     # Explicit synthetic URL, offline only: never inherit DATABASE_URL.
     monkeypatch.setenv("DATABASE_URL","postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline")
     buf = StringIO()
@@ -441,7 +441,9 @@ def test_single_head_and_postgresql_offline_migration(monkeypatch):
     sql = buf.getvalue()
     assert "CREATE TABLE v54_sources" in sql and "fk_v54_evidence_observation" in sql
     assert "UPDATE alembic_version" in sql
-    assert "DROP TABLE" not in sql and "INSERT INTO v54" not in sql
+    assert "DROP TABLE" not in sql
+    assert sql.count("INSERT INTO v54") == 1
+    assert "INSERT INTO v54_mailbox_project_cohorts" in sql
 
 
 def test_postgresql_upgrade_downgrade_only_on_explicit_empty_test_db(monkeypatch):

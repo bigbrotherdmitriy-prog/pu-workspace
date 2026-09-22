@@ -13,9 +13,11 @@ from app.mailbox_identity.runtime import (
 )
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
+from app.models.google_token import GoogleOAuthToken
 from app.models.mailbox_identity import (
     MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags,
     MailboxOriginBinding, MailboxOriginCurrent, MailboxOriginDecision,
+    MailboxProjectCohort,
 )
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -71,6 +73,10 @@ class MailboxIdentityService:
                                      subject: str, now=None):
         now = now or datetime.now(timezone.utc)
         if not subject or not str(subject).strip() or organization_id <= 0 or google_token_id <= 0:
+            _fail()
+        token = db.get(GoogleOAuthToken, google_token_id)
+        project = db.get(Project, token.project_id) if token else None
+        if token is None or project is None or project.organization_id != organization_id:
             _fail()
         prior = db.scalar(select(MailboxCredentialGeneration).where(
             MailboxCredentialGeneration.organization_id == organization_id,
@@ -130,6 +136,23 @@ class MailboxIdentityService:
                       generation=generation) is None:
             db.add(MailboxCutoverFlags(organization_id=organization_id,
                 mail_connection_id=mail.id, credential_generation=generation))
+            db.flush()
+        cohort = db.scalar(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.organization_id == organization_id,
+            MailboxProjectCohort.project_id == project.id,
+            MailboxProjectCohort.mail_connection_id == mail.id,
+            MailboxProjectCohort.credential_generation == generation,
+        ))
+        if cohort is None:
+            db.add(MailboxProjectCohort(
+                organization_id=organization_id,
+                project_id=project.id,
+                mail_connection_id=mail.id,
+                credential_generation=generation,
+                enabled=False,
+                record_version=1,
+                changed_at=now,
+            ))
             db.flush()
         return identity, mail, generation
 
@@ -246,6 +269,107 @@ class MailboxIdentityService:
             primary_read=flags.primary_read,
             actions=flags.actions,
         )
+
+    def change_project_cohort(
+        self,
+        db,
+        *,
+        organization_id: int,
+        project_id: int,
+        mail_connection_id: str,
+        credential_generation: int,
+        binding_epoch: int,
+        enabled: bool,
+        actor: User,
+        authority_version: int,
+        expected_record_version: int,
+    ) -> MailboxProjectCohort:
+        """CAS one project into or out of a shared mailbox rollout generation."""
+        _trusted_actor(db, actor)
+        if (type(enabled) is not bool or type(expected_record_version) is not int
+                or expected_record_version <= 0):
+            _fail("cohort_version_conflict")
+        project = db.scalar(select(Project).where(
+            Project.id == project_id,
+            Project.organization_id == organization_id,
+            Project.archived_at.is_(None),
+        ).with_for_update())
+        membership = db.scalar(select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == actor.id,
+        ).with_for_update())
+        if project is None or membership is None or membership.role != "owner":
+            _fail()
+        mail = db.scalar(select(MailConnection).where(
+            MailConnection.organization_id == organization_id,
+            MailConnection.id == mail_connection_id,
+            MailConnection.namespace == "gmail",
+            MailConnection.state == "active",
+        ).with_for_update())
+        identity = db.scalar(select(ConnectionIdentity).where(
+            ConnectionIdentity.organization_id == organization_id,
+            ConnectionIdentity.id == (mail.identity_id if mail else None),
+            ConnectionIdentity.state == "verified",
+            ConnectionIdentity.credential_generation == credential_generation,
+            ConnectionIdentity.binding_epoch == binding_epoch,
+        ).with_for_update())
+        generation = db.scalar(select(MailboxCredentialGeneration).where(
+            MailboxCredentialGeneration.organization_id == organization_id,
+            MailboxCredentialGeneration.connection_identity_id == (
+                identity.id if identity else None
+            ),
+            MailboxCredentialGeneration.generation == credential_generation,
+            MailboxCredentialGeneration.binding_epoch == binding_epoch,
+            MailboxCredentialGeneration.state == "active",
+        ).with_for_update())
+        token = db.get(GoogleOAuthToken, generation.google_token_id) if generation else None
+        cohort = db.scalar(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.organization_id == organization_id,
+            MailboxProjectCohort.project_id == project_id,
+            MailboxProjectCohort.mail_connection_id == mail_connection_id,
+            MailboxProjectCohort.credential_generation == credential_generation,
+        ).with_for_update())
+        if (mail is None or identity is None or generation is None or token is None
+                or token.project_id != project_id or cohort is None
+                or cohort.record_version != expected_record_version
+                or cohort.enabled is enabled):
+            _fail("cohort_version_conflict")
+        runtime = type("CohortRuntime", (), {
+            "organization_id": organization_id,
+            "mail_connection_id": mail_connection_id,
+        })()
+        try:
+            require_mailbox_authority(
+                db,
+                runtime=runtime,
+                actor=actor,
+                permission="rollout",
+                expected_version=authority_version,
+            )
+        except ValueError:
+            _fail()
+        result = db.execute(update(MailboxProjectCohort).where(
+            MailboxProjectCohort.id == cohort.id,
+            MailboxProjectCohort.record_version == expected_record_version,
+        ).values(
+            enabled=enabled,
+            record_version=expected_record_version + 1,
+            changed_by_user_id=actor.id,
+            changed_at=datetime.now(timezone.utc),
+        ).execution_options(synchronize_session="fetch"))
+        if result.rowcount != 1:
+            _fail("cohort_version_conflict")
+        db.add(AuditLog(
+            action="mailbox_project_cohort_changed",
+            entity_type="mailbox_project_cohort",
+            entity_id=cohort.id,
+            details=(f"project_id={project_id};enabled={str(enabled).lower()};"
+                     f"from_version={expected_record_version};"
+                     f"to_version={expected_record_version + 1};actor_user_id={actor.id}"),
+        ))
+        db.flush()
+        db.refresh(cohort)
+        return cohort
 
     @staticmethod
     def _authority(db, command, organization_id, actor):
