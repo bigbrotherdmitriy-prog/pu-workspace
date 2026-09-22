@@ -12,6 +12,50 @@ from app.api.contract_discovery import (
     router,
 )
 from app.models.organization_contract import Contract
+import pytest
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("legal_form", ["Общество с ограниченной ответственностью", "ООО"])
+def test_supply_counterparty_uses_role_not_order(reverse, legal_form):
+    supplier = f'{legal_form} «Сириус», именуемое в дальнейшем «Поставщик», в лице директора'
+    buyer = ('Общество с ограниченной ответственностью «ДИСИАЙ СОЛЮШНС», '
+             'в лице генерального директора, действующего на основании Устава, '
+             'именуемое в дальнейшем «Покупатель»')
+    parties = [supplier, buyer]
+    if reverse:
+        parties.reverse()
+    text = 'Договор поставки (с условием подряда). ' + ', с одной стороны, и '.join(parties)
+    result = discover_contract_fields('Договор.docx', text)
+    assert result['counterparty'] == f'{legal_form} «Сириус»'
+    assert any('по роли поставщика' in item and 'Сириус' in item for item in result['evidence'])
+
+
+@pytest.mark.parametrize('text', [
+    'ООО «Сириус», и ООО «Покупатель», заключили договор поставки.',
+    'ООО «Наша компания», именуемое в дальнейшем «Покупатель», договор поставки.',
+    'ООО «Первый», именуемое «Поставщик», и ООО «Второй», именуемое «Поставщик», договор поставки.',
+    'ООО «Первый», в лице директора, и ООО «Второй», именуемое «Покупатель», договор поставки.',
+])
+def test_ambiguous_supply_counterparty_remains_unset(text):
+    result = discover_contract_fields('Договор.docx', text)
+    assert result['counterparty'] is None
+    assert any('подтвердите контрагента вручную' in item for item in result['evidence'])
+
+
+def test_supply_counterparty_does_not_select_bank_at_end():
+    result = discover_contract_fields('Договор.docx',
+        'Договор поставки. ООО «Сириус», именуемое «Поставщик», '
+        'ООО «Наша компания», именуемое «Покупатель», '
+        'Реквизиты сторон. АО «Банк», реквизиты банка.')
+    assert result['counterparty'] == 'ООО «Сириус»'
+
+
+def test_non_supply_multiple_parties_are_not_selected_by_order():
+    result = discover_contract_fields('Договор.docx',
+        'Договор подряда. ООО «Первый», именуемое «Заказчик», '
+        'ООО «Второй», именуемое «Подрядчик», заключили договор.')
+    assert result['counterparty'] is None
 
 
 def test_bulk_contract_discovery_route_is_available():

@@ -44,7 +44,8 @@ _FILENAME_CONTRACT_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 _COMPANY_RE = re.compile(
-    r"\b((?:ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\s*[«\"']?[^\n,;]{2,100}?[»\"']?)"
+    r"\b((?:общество\s+с\s+ограниченной\s+ответственностью|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\b"
+    r"\s*(?:[«\"'][^»\"'\n]{2,100}[»\"']|[^\n,;]{2,100}?))"
     r"(?=\s*(?:,|именуем|в лице|$))",
     re.IGNORECASE,
 )
@@ -72,6 +73,35 @@ _LEGAL_SECTIONS = (
     ("споры", re.compile(r"\b(?:разрешение|порядок\s+разрешения)\s+споров\b", re.IGNORECASE)),
     ("реквизиты", re.compile(r"\b(?:адреса\s+и\s+)?реквизиты\s+(?:и\s+подписи\s+)?сторон\b", re.IGNORECASE)),
 )
+
+
+def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
+    """Resolve supply-side role, never select a party by document order."""
+    body = text[:15_000]
+    matches = list(_COMPANY_RE.finditer(body))
+    companies: dict[str, str] = {}
+    suppliers: dict[str, tuple[str, str]] = {}
+    for index, match in enumerate(matches):
+        company = " ".join(match.group(1).split()).strip(" .,:;")
+        key = _organization_key(company)
+        companies.setdefault(key, company)
+        # A role belongs only to the current organization, not the next party.
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        tail = body[match.end():min(end, match.end() + 800)]
+        role = re.search(
+            r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
+            r"(поставщик|покупатель|заказчик|подрядчик)\b", tail, re.IGNORECASE,
+        )
+        if role and role.group(1).casefold() == "поставщик":
+            suppliers[key] = (company, body[match.start():match.end() + role.end()])
+    if kind == "supply":
+        if len(suppliers) == 1:
+            company, quote = next(iter(suppliers.values()))
+            return company, f"контрагент предложен по роли поставщика: {quote}"
+        return None, "поставщик не определён однозначно; подтвердите контрагента вручную"
+    if len(companies) == 1:
+        return next(iter(companies.values())), "найдена одна организация; подтвердите контрагента"
+    return None, "стороны не определены однозначно; подтвердите контрагента вручную"
 
 
 def _text_for_document(db: Session, document: Document) -> str:
@@ -251,10 +281,12 @@ def discover_contract_fields(name: str, content: str) -> dict:
         evidence.append("исключён: найдена только ссылка на другой договор")
     elif not is_contract:
         evidence.append("исключён: недостаточно независимых признаков самостоятельного договора")
+    counterparty, party_evidence = _discovered_counterparty(text, kind)
+    evidence.insert(1, party_evidence)
     return {
         "number": number,
         "title": _short_contract_title(content, fallback_number),
-        "counterparty": companies[-1] if companies else None,
+        "counterparty": counterparty,
         "contract_kind": kind,
         "confidence": round(confidence, 2),
         "is_contract": is_contract,

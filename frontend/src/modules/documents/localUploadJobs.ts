@@ -40,6 +40,7 @@ export function localUploadProgressMessage(job: Pick<LocalUploadJob, "job_id" | 
 }
 
 const MIME_BY_EXTENSION: Record<string, string> = {
+  doc: "application/msword",
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
