@@ -54,6 +54,20 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe("invoice extraction review", () => {
+  it("limits the separate GPR editor to schedule records", () => {
+    render(<FinanceOperations {...props({
+      invoiceProposal: null,
+      editorScope: "gpr",
+      kind: "baseline",
+    })} />);
+
+    const selector = screen.getByLabelText("Тип финансовой записи");
+    expect(selector).toHaveTextContent("Версия ГПР");
+    expect(selector).toHaveTextContent("Этап ГПР");
+    expect(selector).not.toHaveTextContent("Строка бюджета");
+    expect(screen.getByRole("heading", { name: "Добавить версию или задачу ГПР" })).toBeInTheDocument();
+  });
+
   it("shows evidence and requires an explicit human confirmation", () => {
     const onConfirmInvoice = vi.fn();
     render(<FinanceOperations {...props({ onConfirmInvoice })} />);

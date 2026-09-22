@@ -49,6 +49,6 @@ describe("DailyBriefingPanel", () => {
 
     fireEvent.click(within(container).getByRole("button", { name: "Открыть" }));
 
-    expect(onOpenSection).toHaveBeenCalledWith("Исполнение и финансы");
+    expect(onOpenSection).toHaveBeenCalledWith("График работ");
   });
 });

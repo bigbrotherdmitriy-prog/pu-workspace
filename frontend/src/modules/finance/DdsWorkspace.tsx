@@ -229,7 +229,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     }
   };
 
-  return <section className="card dds-workspace">
+  return <section className="card dds-workspace" id="dds-workspace">
     <div className="dds-head">
       <div><span className="eyebrow">ПЛАТЁЖНЫЙ КАЛЕНДАРЬ</span><h2>Движение денежных средств</h2><p>Все представления считаются из единой детализации. План заменяется фактом после подтверждения оплаты.</p></div>
       <div className="dds-head-actions"><button className="secondary" type="button" onClick={() => exportView()}><Download /> Экспорт: {tabs.find((item) => item.id === tab)?.label}</button>{tab !== "details" && <button className="secondary" type="button" onClick={() => exportView("details")}><Download /> Детализация</button>}<button className="secondary" type="button" onClick={() => onPrepare("cash-in")}><Plus /> Приход</button><button type="button" onClick={() => onPrepare("cash-out")}><Plus /> Расход</button></div>

@@ -7,6 +7,7 @@ import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
 import { GprWorkspace } from "./modules/finance/GprWorkspace";
+import { GprContractContext } from "./modules/finance/GprContractContext";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
@@ -64,6 +65,7 @@ import {
   Bell,
   Bot,
   CalendarDays,
+  CalendarRange,
   ChevronLeft,
   ClipboardCheck,
   Download,
@@ -375,7 +377,7 @@ const navigationGroups = [
   ] },
   { label: "Контроль", items: [
     [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
-    [Wallet, "Исполнение и финансы"], [BarChart3, "Аналитика"],
+    [CalendarRange, "График работ"], [Wallet, "Исполнение и финансы"], [BarChart3, "Аналитика"],
     [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
   ] },
   { label: "Система", items: [
@@ -1016,7 +1018,7 @@ export function App() {
         body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
       });
       await prepareDroppedFinanceDocument(documentIds[0], supported[0].name, kind, contractId);
-      setActive("Исполнение и финансы");
+      setActive(kind === "schedule" ? "График работ" : "Исполнение и финансы");
       await loadFinance();
     } catch (reason) { setError((reason as Error).message); }
   }
@@ -3222,6 +3224,61 @@ export function App() {
         }}
       />
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
+      {active === "График работ" && (
+        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
+          <div className="module-page gpr-page">
+            <GprContractContext contracts={contracts} selectedContractId={selectedFinanceContractId} onSelectContract={setSelectedFinanceContractId} />
+            <GprWorkspace
+              projectId={projectId}
+              finance={finance}
+              selectedContractId={selectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onUpdateTask={updateScheduleTask}
+              onBulkUpdate={bulkUpdateSchedule}
+              onCloneBaseline={cloneScheduleBaseline}
+              onImported={loadFinance}
+            />
+            <FinanceOperations
+              finance={finance}
+              preview={null}
+              selectedRows={financeStructuredRows}
+              setSelectedRows={setFinanceStructuredRows}
+              selectedContractId={selectedFinanceContractId}
+              kind={financeKind}
+              title={financeTitle}
+              amount={financeAmount}
+              date={financeDate}
+              extra={financeExtra}
+              objectName={financeObject}
+              category={financeCategory}
+              note={financeNote}
+              sourceDocumentId={0}
+              scheduleItemId={financeScheduleItemId}
+              budgetLineId={financeBudgetLineId}
+              baselineId={financeBaselineId}
+              costCategories={costCategories}
+              setKind={setFinanceKind}
+              setTitle={setFinanceTitle}
+              setAmount={setFinanceAmount}
+              setDate={setFinanceDate}
+              setExtra={setFinanceExtra}
+              setObjectName={setFinanceObject}
+              setCategory={setFinanceCategory}
+              setNote={setFinanceNote}
+              setScheduleItemId={setFinanceScheduleItemId}
+              setBudgetLineId={setFinanceBudgetLineId}
+              setBaselineId={setFinanceBaselineId}
+              onClosePreview={() => undefined}
+              onImport={() => undefined}
+              onAdd={() => void addFinanceItem()}
+              onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
+              onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
+              includeRegisters={false}
+              editorScope="gpr"
+            />
+          </div>
+        </section>
+      )}
       {active === "Исполнение и финансы" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page finance-page">
@@ -3234,6 +3291,8 @@ export function App() {
               onPrepare={prepareFinanceItem}
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
               onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
+              onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
+              onOpenSchedule={() => setActive("График работ")}
               onReload={() => void loadFinance()}
             />
             <DdsWorkspace
@@ -3246,16 +3305,6 @@ export function App() {
               onLinkControls={(id, contractId, scheduleItemId, budgetLineId) =>
                 void linkCashFlowControls(id, contractId, scheduleItemId, budgetLineId)
               }
-            />
-            <GprWorkspace
-              projectId={projectId}
-              finance={finance}
-              selectedContractId={selectedFinanceContractId}
-              onPrepare={prepareFinanceItem}
-              onUpdateTask={updateScheduleTask}
-              onBulkUpdate={bulkUpdateSchedule}
-              onCloneBaseline={cloneScheduleBaseline}
-              onImported={loadFinance}
             />
             <FinanceOperations
               finance={finance}
@@ -3309,6 +3358,7 @@ export function App() {
               }
               includeScheduleRegister={false}
               includeCashFlowRegister={false}
+              editorScope="finance"
             />
           </div>
         </section>
