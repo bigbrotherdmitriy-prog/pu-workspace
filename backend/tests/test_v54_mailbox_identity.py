@@ -9,7 +9,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.mailbox_identity.dto import ReconciliationCommand, ReconciliationEvidencePin
 from app.mailbox_identity.oauth import OIDCVerificationError, verified_google_subject
-from app.mailbox_identity.runtime import observe_gmail_message, runtime_for_message, runtime_for_project_connection
+from app.mailbox_identity.runtime import (
+    observe_gmail_message, rollout_flags_are_valid, runtime_for_message,
+    runtime_for_project_connection,
+)
 from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
@@ -45,7 +48,7 @@ def world(db_session, user_factory):
     identity, mail, generation = MailboxIdentityService().bind_verified_google_subject(
         db, organization_id=org.id, google_token_id=token.id, subject="oidc-subject-synthetic", now=NOW)
     db.add(MailboxAuthorityState(organization_id=org.id, mail_connection_id=mail.id,
-        principal_kind="user", principal_id=str(user.id), permissions=["reconcile", "ingest", "action"], state="active",
+        principal_kind="user", principal_id=str(user.id), permissions=["reconcile", "ingest", "read", "action"], state="active",
         authority_version=1, valid_until=NOW + timedelta(days=1)))
     source = SourceReference(organization_id=org.id, origin_project_id=project.id,
         identity_id=identity.id, namespace="gmail", external_id="provider-message-synthetic",
@@ -157,6 +160,13 @@ def test_flags_are_created_false(db_session, user_factory):
     w = world(db_session, user_factory)
     flags = w.db.scalar(select(MailboxCutoverFlags))
     assert not any((flags.shadow_write, flags.shadow_read_compare, flags.pilot_write, flags.primary_read, flags.actions))
+
+
+def test_shadow_compare_cannot_be_enabled_without_shadow_write(db_session, user_factory):
+    w = world(db_session, user_factory)
+    flags = w.db.scalar(select(MailboxCutoverFlags))
+    flags.shadow_read_compare = True
+    assert rollout_flags_are_valid(flags) is False
 
 
 def test_same_provider_id_is_unique_per_mailbox(db_session, user_factory):
@@ -448,6 +458,117 @@ def test_gmail_pilot_ingress_wires_observation_binding_and_current(db_session, u
     assert result["processed"] == 1 and binding.state == "confirmed"
     assert binding.provider_message_id == item["id"]
     assert contact_scopes == [w.mail.id]
+
+
+def test_gmail_shadow_ingress_writes_and_compares_without_cutover(db_session, user_factory, monkeypatch):
+    from app.api import ai_secretary, gmail
+    w = world(db_session, user_factory)
+    flags = w.db.scalar(select(MailboxCutoverFlags))
+    enable_rollout(flags, "shadow_read_compare")
+    item = {"id": "shadow-provider-message", "threadId": "shadow-provider-thread", "historyId": "shadow-history-1",
+        "labelIds": ["INBOX"], "payload": {"mimeType": "text/plain", "headers": [
+            {"name": "Subject", "value": "Shadow synthetic"},
+            {"name": "From", "value": "sender@example.test"}],
+            "body": {"data": base64.urlsafe_b64encode(b"Shadow synthetic body").decode()}}}
+    class FakeGmail:
+        def users(self): return self
+        def messages(self): return self
+        def list(self, **kwargs): return SimpleNamespace(execute=lambda: {"messages": [{"id": item["id"]}]})
+        def get(self, **kwargs): return SimpleNamespace(execute=lambda: item)
+    monkeypatch.setattr(gmail, "google_workspace_for_project", lambda *a, **k: pytest.fail("project fallback"))
+    monkeypatch.setattr(gmail, "google_workspace_for_mailbox",
+                        lambda *a, **k: SimpleNamespace(service=lambda *a: FakeGmail()))
+    monkeypatch.setattr(gmail, "project_candidate", lambda *a, **k: (w.project.id, .4, "synthetic"))
+    monkeypatch.setattr(gmail, "contact_for_sender", lambda *a, **k: None)
+    monkeypatch.setattr(gmail, "notify_telegram", lambda *a, **k: None)
+    monkeypatch.setattr(ai_secretary, "create_tasks_from_files", lambda *a, **k: [])
+    monkeypatch.setattr(ai_secretary, "create_response_drafts", lambda *a, **k: [])
+    monkeypatch.setattr(ai_secretary, "create_governance_items", lambda *a, **k: ([], []))
+    monkeypatch.setattr(ai_secretary, "brief_summary", lambda *a, **k: "Synthetic")
+    monkeypatch.setattr(ai_secretary, "configured_action_adapter", lambda *a, **k: SimpleNamespace(provider="test"))
+
+    result = gmail.sync_gmail_project(w.project.id, w.db, w.user, query="newer_than:7d", max_results=1)
+    message = w.db.scalar(select(Message).where(Message.source_external_id == item["id"]))
+    source = w.db.scalar(select(SourceReference).where(SourceReference.external_id == item["id"]))
+    audit = w.db.scalar(select(AuditLog).where(
+        AuditLog.action == "mailbox_shadow_compare", AuditLog.entity_id == message.id))
+    assert result == {"processed": 1, "skipped": 0, "failed": 0, "reclassified": 0, "errors": []}
+    assert message.mail_connection_id is None and message.provider_message_id is None
+    assert message.source_reference_id is None and message.origin_version == 1
+    assert source.origin_project_id == w.project.id and source.identity_id == w.identity.id
+    assert w.db.get(SourceCurrent, source.id) is not None
+    assert audit.details == f"generation={w.generation};status=match"
+    assert item["id"] not in audit.details and "@" not in audit.details
+    assert w.db.scalar(select(MailboxOriginCurrent).where(MailboxOriginCurrent.message_id == message.id)) is None
+
+
+def test_gmail_shadow_requires_narrow_ingest_and_read_authority(db_session, user_factory, monkeypatch):
+    from app.api import gmail
+    w = world(db_session, user_factory)
+    flags = w.db.scalar(select(MailboxCutoverFlags))
+    enable_rollout(flags, "shadow_read_compare")
+    authority = w.db.scalar(select(MailboxAuthorityState))
+    authority.permissions = ["ingest"]
+    runtime = runtime_for_project_connection(w.db, w.project.id)
+    with pytest.raises(ValueError, match="resource_unavailable"):
+        gmail.shadow_observe_gmail_message(
+            w.db, runtime=runtime, message=w.message,
+            provider_message_id=w.message.source_external_id,
+            provider_thread_id="provider-thread-synthetic",
+            observation_key="observation-synthetic", actor=w.user,
+        )
+
+
+def test_gmail_shadow_existing_legacy_message_is_compared_without_reingest(db_session, user_factory, monkeypatch):
+    from app.api import gmail
+    w = world(db_session, user_factory)
+    flags = w.db.scalar(select(MailboxCutoverFlags))
+    enable_rollout(flags, "shadow_read_compare")
+    item = {"id": w.message.source_external_id, "threadId": "provider-thread-synthetic",
+            "historyId": "observation-synthetic", "labelIds": ["INBOX"],
+            "payload": {"mimeType": "text/plain", "headers": [
+                {"name": "Subject", "value": "Existing synthetic"},
+                {"name": "From", "value": "sender@example.test"}],
+                "body": {"data": base64.urlsafe_b64encode(b"Synthetic").decode()}}}
+    class FakeGmail:
+        def users(self): return self
+        def messages(self): return self
+        def list(self, **kwargs): return SimpleNamespace(execute=lambda: {"messages": [{"id": item["id"]}]})
+        def get(self, **kwargs): return SimpleNamespace(execute=lambda: item)
+    monkeypatch.setattr(gmail, "google_workspace_for_mailbox",
+                        lambda *a, **k: SimpleNamespace(service=lambda *a: FakeGmail()))
+    monkeypatch.setattr(gmail, "create_response_drafts", lambda *a, **k: [])
+    result = gmail.sync_gmail_project(w.project.id, w.db, w.user, query="rfc822msgid:synthetic", max_results=1)
+    audit = w.db.scalar(select(AuditLog).where(
+        AuditLog.action == "mailbox_shadow_compare", AuditLog.entity_id == w.message.id))
+    assert result["skipped"] == 1 and result["processed"] == 0 and result["failed"] == 0
+    assert audit.details == f"generation={w.generation};status=match"
+    assert w.message.mail_connection_id is None and w.message.source_reference_id is None
+    assert w.db.get(MailboxOriginCurrent, w.message.id) is None
+
+
+def test_gmail_shadow_mismatch_is_audited_without_repair_or_cutover(db_session, user_factory):
+    from app.api import gmail
+    w = world(db_session, user_factory)
+    flags = w.db.scalar(select(MailboxCutoverFlags))
+    enable_rollout(flags, "shadow_read_compare")
+    other = Project(name="Mismatched shadow project", organization_id=w.org.id)
+    w.db.add(other); w.db.flush()
+    runtime = runtime_for_project_connection(w.db, w.project.id)
+    w.message.project_id = other.id
+    w.db.flush()
+    source, _version, status = gmail.shadow_observe_gmail_message(
+        w.db, runtime=runtime, message=w.message,
+        provider_message_id=w.message.source_external_id,
+        provider_thread_id="provider-thread-synthetic",
+        observation_key="observation-synthetic", actor=w.user,
+    )
+    audit = w.db.scalar(select(AuditLog).where(
+        AuditLog.action == "mailbox_shadow_compare", AuditLog.entity_id == w.message.id))
+    assert status == "mismatch" and audit.details.endswith("status=mismatch")
+    assert source.origin_project_id == w.project.id and w.message.project_id == other.id
+    assert w.message.mail_connection_id is None and w.message.source_reference_id is None
+    assert w.db.get(MailboxOriginCurrent, w.message.id) is None
 
 
 def test_shared_subject_project_resolves_current_mailbox_generation(db_session, user_factory):

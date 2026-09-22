@@ -29,7 +29,7 @@ from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
-from app.models.v54_pilot import ConnectionIdentity, MailConnection, SourceReference
+from app.models.v54_pilot import ConnectionIdentity, MailConnection, SourceCurrent, SourceReference
 
 
 def _require(condition: bool) -> None:
@@ -221,3 +221,83 @@ def test_s02_same_provider_message_and_thread_are_isolated_per_mailbox(
         _require(provider_thread not in audit_details)
         _require(message_content not in audit_details)
         _require("@" not in audit_details)
+
+
+def test_s02_shadow_compare_is_additive_and_idempotent_on_postgres(
+        mailbox_pg_engine, monkeypatch):
+    from app.api import gmail
+
+    provider_message = "synthetic-shadow-external-id"
+    provider_thread = "synthetic-shadow-thread-id"
+    item = {
+        "id": provider_message,
+        "threadId": provider_thread,
+        "historyId": "synthetic-shadow-observation",
+        "labelIds": ["INBOX"],
+        "payload": {"mimeType": "text/plain", "headers": [], "body": {"data": ""}},
+    }
+
+    class FakeGmail:
+        def users(self): return self
+        def messages(self): return self
+        def list(self, **_kwargs):
+            return SimpleNamespace(execute=lambda: {"messages": [{"id": provider_message}]})
+        def get(self, **_kwargs): return SimpleNamespace(execute=lambda: item)
+
+    monkeypatch.setattr(gmail, "google_workspace_for_project",
+                        lambda *_args, **_kwargs: pytest.fail("project_fallback"))
+    monkeypatch.setattr(gmail, "google_workspace_for_mailbox",
+                        lambda *_args, **_kwargs: SimpleNamespace(service=lambda *_a: FakeGmail()))
+    monkeypatch.setattr(gmail, "create_response_drafts", lambda *_args, **_kwargs: [])
+
+    with Session(mailbox_pg_engine) as db:
+        user = User(name="Synthetic shadow operator", email="shadow-operator@example.test", is_admin=False)
+        organization = Organization(name="Synthetic shadow organization")
+        db.add_all([user, organization]); db.flush()
+        project = Project(name="Synthetic shadow project", organization_id=organization.id)
+        db.add(project); db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role="manager"))
+        token = GoogleOAuthToken(project_id=project.id)
+        db.add(token); db.flush()
+        identity, connection, generation = MailboxIdentityService().bind_verified_google_subject(
+            db, organization_id=organization.id, google_token_id=token.id,
+            subject="synthetic-shadow-subject",
+        )
+        flags = db.scalar(select(MailboxCutoverFlags).where(
+            MailboxCutoverFlags.organization_id == organization.id,
+            MailboxCutoverFlags.mail_connection_id == connection.id,
+            MailboxCutoverFlags.credential_generation == generation,
+        ))
+        flags.shadow_write = True
+        flags.shadow_read_compare = True
+        db.add(MailboxAuthorityState(
+            organization_id=organization.id, mail_connection_id=connection.id,
+            principal_kind="user", principal_id=str(user.id), permissions=["ingest", "read"],
+            state="active", authority_version=1,
+            valid_until=datetime.now(timezone.utc) + timedelta(hours=1),
+        ))
+        message = Message(
+            organization_id=organization.id, project_id=project.id, created_by_user_id=user.id,
+            source_type="email", source_external_id=provider_message,
+            source_name="Synthetic", content="Synthetic", summary="Synthetic",
+            context_evidence="Synthetic", attachments_json="[]",
+        )
+        db.add(message); db.commit()
+
+        first = gmail.sync_gmail_project(project.id, db, user, query="synthetic", max_results=1)
+        second = gmail.sync_gmail_project(project.id, db, user, query="synthetic", max_results=1)
+        _require(first["skipped"] == second["skipped"] == 1)
+        _require(first["failed"] == second["failed"] == 0)
+        db.refresh(message)
+        _require(message.mail_connection_id is None and message.provider_message_id is None)
+        _require(message.source_reference_id is None and message.origin_version == 1)
+        sources = list(db.scalars(select(SourceReference).where(
+            SourceReference.external_id == provider_message)))
+        _require(len(sources) == 1 and sources[0].identity_id == identity.id)
+        _require(db.get(SourceCurrent, sources[0].id) is not None)
+        _require(db.get(MailboxOriginCurrent, message.id) is None)
+        audits = list(db.scalars(select(AuditLog).where(
+            AuditLog.action == "mailbox_shadow_compare", AuditLog.entity_id == message.id)))
+        _require(len(audits) == 1)
+        _require(audits[0].details == f"generation={generation};status=match")
+        _require(provider_message not in audits[0].details and "@" not in audits[0].details)
