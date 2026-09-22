@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { isSupportedLocalUploadFile, localUploadMimeType, localUploadProgressMessage } from "./localUploadJobs";
 
 describe("local upload MIME normalization", () => {
+  it.each(["", "application/octet-stream", "application/msword"])("accepts legacy DOC with browser MIME %s", (type) => {
+    const file = new File(["synthetic doc"], "Договор.DOC", { type });
+    expect(localUploadMimeType(file)).toBe("application/msword");
+    expect(isSupportedLocalUploadFile(file)).toBe(true);
+  });
+
   it("recognizes a PDF or scan even when the browser omits its MIME type", () => {
     expect(localUploadMimeType(new File(["pdf"], "invoice.PDF"))).toBe("application/pdf");
     expect(localUploadMimeType(new File(["image"], "scan.JPEG"))).toBe("image/jpeg");
