@@ -19,7 +19,7 @@ from app.models.audit_log import AuditLog
 from app.models.google_token import GoogleOAuthToken
 from app.models.mailbox_identity import (
     MailboxAuthorityState, MailboxCutoverFlags, MailboxOriginBinding,
-    MailboxOriginCurrent, MailboxOriginDecision,
+    MailboxOriginCurrent, MailboxOriginDecision, MailboxProjectCohort,
 )
 from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
@@ -37,7 +37,7 @@ def enable_rollout(flags, through):
         setattr(flags, name, True)
 
 
-def world(db_session, user_factory):
+def world(db_session, user_factory, *, cohort_enabled=True):
     db = db_session
     user = user_factory()
     org = Organization(name="Synthetic mailbox org"); db.add(org); db.flush()
@@ -47,6 +47,11 @@ def world(db_session, user_factory):
     db.add(token); db.flush()
     identity, mail, generation = MailboxIdentityService().bind_verified_google_subject(
         db, organization_id=org.id, google_token_id=token.id, subject="oidc-subject-synthetic", now=NOW)
+    cohort = db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == project.id,
+        MailboxProjectCohort.credential_generation == generation,
+    ))
+    cohort.enabled = cohort_enabled
     db.add(MailboxAuthorityState(organization_id=org.id, mail_connection_id=mail.id,
         principal_kind="user", principal_id=str(user.id), permissions=["reconcile", "ingest", "read", "action"], state="active",
         authority_version=1, valid_until=NOW + timedelta(days=1)))
@@ -78,7 +83,7 @@ def world(db_session, user_factory):
     db.add(message); db.flush()
     return SimpleNamespace(db=db, user=user, org=org, project=project, token=token,
         identity=identity, mail=mail, generation=generation, source=source, version=version,
-        evidence=evidence, message=message)
+        evidence=evidence, message=message, cohort=cohort)
 
 
 def command(w, **changes):
@@ -160,6 +165,13 @@ def test_flags_are_created_false(db_session, user_factory):
     w = world(db_session, user_factory)
     flags = w.db.scalar(select(MailboxCutoverFlags))
     assert not any((flags.shadow_write, flags.shadow_read_compare, flags.pilot_write, flags.primary_read, flags.actions))
+
+
+def test_project_cohort_is_created_disabled_and_runtime_uses_legacy_path(
+        db_session, user_factory):
+    w = world(db_session, user_factory, cohort_enabled=False)
+    assert w.cohort.enabled is False and w.cohort.record_version == 1
+    assert runtime_for_project_connection(w.db, w.project.id) is None
 
 
 def test_shadow_compare_cannot_be_enabled_without_shadow_write(db_session, user_factory):
@@ -571,7 +583,7 @@ def test_gmail_shadow_mismatch_is_audited_without_repair_or_cutover(db_session, 
     assert w.db.get(MailboxOriginCurrent, w.message.id) is None
 
 
-def test_shared_subject_project_resolves_current_mailbox_generation(db_session, user_factory):
+def test_shared_subject_generation_requires_explicit_project_cohort(db_session, user_factory):
     w = world(db_session, user_factory)
     project2 = Project(name="Second project", organization_id=w.org.id); w.db.add(project2); w.db.flush()
     token2 = GoogleOAuthToken(project_id=project2.id, token_uri="https://oauth2.googleapis.com/token")
@@ -582,7 +594,16 @@ def test_shared_subject_project_resolves_current_mailbox_generation(db_session, 
     current_flags = w.db.scalar(select(MailboxCutoverFlags).where(
         MailboxCutoverFlags.credential_generation == generation2))
     enable_rollout(current_flags, "pilot_write"); w.db.flush()
-    runtime = runtime_for_project_connection(w.db, w.project.id)
+    with pytest.raises(ValueError, match="resource_unavailable"):
+        runtime_for_project_connection(w.db, w.project.id)
+    cohort2 = w.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == project2.id,
+        MailboxProjectCohort.credential_generation == generation2,
+    ))
+    assert cohort2.enabled is False
+    cohort2.enabled = True
+    w.db.flush()
+    runtime = runtime_for_project_connection(w.db, project2.id)
     assert runtime.generation == generation2 and runtime.google_token_id == token2.id
 
 
@@ -596,8 +617,8 @@ def test_rotated_mailbox_cohort_never_falls_back_to_project_token(db_session, us
     MailboxIdentityService().bind_verified_google_subject(
         w.db, organization_id=w.org.id, google_token_id=token2.id,
         subject=w.identity.account_key, now=NOW)
-    runtime = runtime_for_project_connection(w.db, w.project.id)
-    assert runtime.mailbox_cohort and not runtime.flags.pilot_write
+    with pytest.raises(ValueError, match="resource_unavailable"):
+        runtime_for_project_connection(w.db, w.project.id)
     monkeypatch.setattr(gmail, "google_workspace_for_project", lambda *a, **k: pytest.fail("project fallback"))
     monkeypatch.setattr(gmail, "google_workspace_for_mailbox", lambda *a, **k: pytest.fail("provider call"))
     with pytest.raises(HTTPException) as exc:

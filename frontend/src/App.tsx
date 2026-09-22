@@ -762,6 +762,7 @@ export function App() {
     }
   }
   async function openProviderSources(provider: string) {
+    setActive("Рабочий центр");
     await picker.open(provider);
   }
   async function syncGmail(options: { silent?: boolean; folder?: MailFolderKind } = {}) {
@@ -1211,7 +1212,10 @@ export function App() {
     }
   }
   async function openSources(folderId?: string) {
-    if (folderId === undefined) await picker.open();
+    if (folderId === undefined) {
+      setActive("Рабочий центр");
+      await picker.open();
+    }
     else await picker.navigate(folderId);
   }
   async function queueFolder(folder: DriveFolder) {
@@ -2752,7 +2756,7 @@ export function App() {
               onUpdateRisk={(risk, status) => void updateRisk(risk, status)}
               onUpdateDecision={(decision, status) => void updateDecision(decision, status)}
             />
-          ) : active === "Рабочий центр" || showSources ? (
+          ) : active === "Рабочий центр" ? (
             <>
               <section className="dashboard-overview-deck">
                 <div className="dashboard-hero">

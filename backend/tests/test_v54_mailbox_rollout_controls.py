@@ -13,9 +13,12 @@ from app.mailbox_identity.runtime import runtime_for_project_connection
 from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
 from app.models.audit_log import AuditLog
 from app.models.google_token import GoogleOAuthToken
-from app.models.mailbox_identity import MailboxAuthorityState, MailboxCutoverFlags
+from app.models.mailbox_identity import (
+    MailboxAuthorityState, MailboxCutoverFlags, MailboxProjectCohort,
+)
 from app.models.organization_contract import Organization
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.user import User
 
 
@@ -31,6 +34,7 @@ def rollout_world(db_session, user_factory, *, admin=False):
     project = Project(name="Mailbox rollout", organization_id=organization.id)
     db.add(project)
     db.flush()
+    db.add(ProjectMember(project_id=project.id, user_id=actor.id, role="owner"))
     token = GoogleOAuthToken(
         project_id=project.id,
         access_token="private-access-token",
@@ -121,6 +125,52 @@ def test_api_commits_one_transition_and_returns_next_etag(db_session, user_facto
     assert result.record_version == 2
     assert response.headers["etag"] == '"2"'
     assert len(audit_rows(world)) == 1
+
+
+def test_project_cohort_requires_owner_rollout_authority_and_cas(db_session, user_factory):
+    world = rollout_world(db_session, user_factory)
+    cohort = world.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == world.project.id,
+        MailboxProjectCohort.credential_generation == world.generation,
+    ))
+    assert cohort.enabled is False and runtime_for_project_connection(
+        world.db, world.project.id,
+    ) is None
+    changed = MailboxIdentityService().change_project_cohort(
+        world.db,
+        organization_id=world.organization.id,
+        project_id=world.project.id,
+        mail_connection_id=world.connection.id,
+        credential_generation=world.generation,
+        binding_epoch=world.identity.binding_epoch,
+        enabled=True,
+        actor=world.actor,
+        authority_version=world.authority.authority_version,
+        expected_record_version=1,
+    )
+    assert changed.enabled is True and changed.record_version == 2
+    assert runtime_for_project_connection(world.db, world.project.id) is not None
+    audit = world.db.scalar(select(AuditLog).where(
+        AuditLog.action == "mailbox_project_cohort_changed",
+        AuditLog.entity_id == cohort.id,
+    ))
+    assert audit.details == (
+        f"project_id={world.project.id};enabled=true;from_version=1;"
+        f"to_version=2;actor_user_id={world.actor.id}"
+    )
+    with pytest.raises(MailboxConflict, match="cohort_version_conflict"):
+        MailboxIdentityService().change_project_cohort(
+            world.db,
+            organization_id=world.organization.id,
+            project_id=world.project.id,
+            mail_connection_id=world.connection.id,
+            credential_generation=world.generation,
+            binding_epoch=world.identity.binding_epoch,
+            enabled=False,
+            actor=world.actor,
+            authority_version=world.authority.authority_version,
+            expected_record_version=1,
+        )
 
 
 def test_dto_requires_exact_pins_and_confirm_never_auto(db_session, user_factory):
