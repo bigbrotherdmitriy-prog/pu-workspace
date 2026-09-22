@@ -99,14 +99,34 @@ class CancelTaskPayload(StrictDTO):
     reason: StrictStr
 
 
+class CreateInternalNotificationPayload(StrictDTO):
+    """Closed, server-rendered in-app notification payload.
+
+    No title/body/channel is accepted from a model or caller.  The executor
+    renders the fixed template and always writes to the local Notification
+    table only.
+    """
+    template_id: Literal["task_due_soon"]
+    recipient_ref: ObjectRef
+    condition_key: Literal["task_due_soon"]
+    due_date: StrictStr
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if (self.recipient_ref.type != "user"
+                or date.fromisoformat(self.due_date).isoformat() != self.due_date):
+            raise ValueError("unsupported internal notification payload")
+        return self
+
+
 class ActionEnvelope(StrictDTO):
     schema_version: Literal["v54.integration.1"]
     canonicalization: Literal["pu-action-c14n-v1"]
     action_ref: ObjectRef
     revision: StrictInt
-    action_type: Literal["task.internal.create", "task.internal.cancel"]
+    action_type: Literal["task.internal.create", "task.internal.cancel", "notification.internal.create"]
     action_type_version: StrictInt
-    executor_version: Literal["task-db-v1"]
+    executor_version: Literal["task-db-v1", "notification-db-v1"]
     stage: Literal["PROPOSE"]
     project_ref: ObjectRef
     requested_by: ObjectRef
@@ -123,7 +143,7 @@ class ActionEnvelope(StrictDTO):
     autonomy: Literal["CONFIRM", "AUTO"]
     reversal: Literal["COMPENSATABLE"]
     effects: tuple[StrictStr, ...]
-    payload: CreateTaskPayload | CancelTaskPayload
+    payload: CreateTaskPayload | CancelTaskPayload | CreateInternalNotificationPayload
     idempotency_key: StrictStr
     compensates_action_ref: ObjectRef | None
 
@@ -150,12 +170,21 @@ class ActionEnvelope(StrictDTO):
                 or not self.idempotency_key or len(self.idempotency_key) > 200):
             raise ValueError("invalid sealed envelope")
         if self.action_type == "task.internal.create":
-            if (not isinstance(self.payload, CreateTaskPayload) or self.compensates_action_ref is not None
+            if (self.executor_version != "task-db-v1" or not isinstance(self.payload, CreateTaskPayload)
+                    or self.compensates_action_ref is not None
                     or self.target.ref != self.project_ref
                     or self.effects != ("internal_task.create", "task_history.append")):
                 raise ValueError("invalid create effect")
             refs.extend([self.payload.assignee_ref, self.payload.contract_ref])
-        elif (self.autonomy != "CONFIRM" or not isinstance(self.payload, CancelTaskPayload) or self.target.ref.type != "task"
+        elif self.action_type == "notification.internal.create":
+            if (self.executor_version != "notification-db-v1"
+                    or not isinstance(self.payload, CreateInternalNotificationPayload)
+                    or self.compensates_action_ref is not None or self.target.ref.type != "task"
+                    or self.effects != ("management_history.append", "notification.create")):
+                raise ValueError("invalid notification effect")
+            refs.append(self.payload.recipient_ref)
+        elif (self.executor_version != "task-db-v1" or self.autonomy != "CONFIRM"
+              or not isinstance(self.payload, CancelTaskPayload) or self.target.ref.type != "task"
               or not self.compensates_action_ref or self.compensates_action_ref.type != "action"
               or self.compensates_action_ref == self.action_ref
               or self.effects != ("internal_task.cancel", "task_history.append")):

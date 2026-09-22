@@ -272,7 +272,10 @@ class PilotAction(Scoped, Base):
         scoped_fk("project_id", "projects", "fk_v54_action_project"),
         scoped_fk("compensates_action_id", "v54_actions", "fk_v54_action_compensation"),
         UniqueConstraint("organization_id", "message_id", "claim_id", "action_type", name="uq_v54_action_intent"),
-        CheckConstraint("action_type IN ('task.internal.create','task.internal.cancel')", name="ck_v54_action_type"),
+        CheckConstraint(
+            "action_type IN ('task.internal.create','task.internal.cancel','notification.internal.create')",
+            name="ck_v54_action_type",
+        ),
         CheckConstraint("record_version > 0 AND reservation_fence >= 0", name="ck_v54_action_version"),
         CheckConstraint("business_state IN ('AWAITING_POLICY','AWAITING_APPROVAL','READY','BLOCKED','CANCELLED','EXECUTING','SUCCEEDED','FAILED_NOT_APPLIED','UNKNOWN')",
                         name="ck_v54_action_state"),
@@ -560,7 +563,8 @@ def _validate_insert(mapper, connection, target):
         if ref.type != expected_type or pin.ref != ref:
             raise ValueError("context_target_mismatch")
     if isinstance(target, ActionPolicy):
-        if target.rules.get("schema_version") == "v54.autonomy-policy.1":
+        if target.rules.get("schema_version") in {
+                "v54.autonomy-policy.1", "v54.autonomy-policy.2"}:
             from app.autonomy_policy import validate_stored_rules
             rules = validate_stored_rules(target.rules)
             if (canonical_hash(rules) != target.policy_hash or target.mode != "CONFIRM"
@@ -621,7 +625,8 @@ def _validate_insert(mapper, connection, target):
                 envelope_sha256=revision_row["envelope_hash"],
                 payload_sha256=canonical_hash(seal.payload.model_dump(mode="json")),
             )
-            if (seal.autonomy != "AUTO" or seal.action_type != "task.internal.create"
+            if (seal.autonomy != "AUTO" or seal.action_type not in {
+                    "task.internal.create", "notification.internal.create"}
                     or canonical_hash(decision.model_dump(mode="json")) != target.decision_hash
                     or canonical_hash(candidate.model_dump(mode="json")) != target.action_hash
                     or candidate.payload_sha256 != target.payload_hash

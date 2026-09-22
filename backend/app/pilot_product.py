@@ -1,8 +1,9 @@
-"""Default-off product composition for the narrow MVP-5 internal-task pilot.
+"""Default-off product composition for the narrow MVP-5 internal-action pilot.
 
 This module does not enable a policy, create authority rows, or produce actions.
-It only makes an already sealed, explicitly authorized ``task.internal.create``
-intent executable by the durable queue for one configured owner/project pair.
+It only makes explicitly authorized, already sealed internal intents executable
+by the durable queue for one configured owner/project pair.  Each capability
+has its own opt-in; notification AUTO is off even when the task pilot is on.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from app.action_trust.guards import Guards, TrustConflict
 from app.autonomy_policy import AutonomyConflict, AutonomyPolicyService
 from app.context_communication.service import ContextCommunication
 from app.core.v54_authority import AuthorityDenied, AuthorityResolver
+from app.core.v54_dto import ActionEnvelope
 from app.core.v54_interfaces import PilotGate, RequestScope, Resolution
 from app.core.v54_permissions import utc
 from app.core.v54_refs import VersionPin, require_same_tenant
@@ -43,6 +45,7 @@ from app.models.v54_pilot import (
     SourceVersion,
 )
 from app.pilot_dispatch import ProductDispatch, install_product_runtime
+from app.pilot_notification_mutation import InternalMutationRouter, InternalNotificationMutation
 from app.pilot_task_mutation import InternalTaskMutation
 
 
@@ -73,6 +76,10 @@ class ProductPilotSettings:
     hourly_quota: int = 3
     policy_ttl_hours: int = 24
     minimum_confidence: float = 0.9
+    notification_enabled: bool = False
+    notification_ttl_hours: int = 6
+    notification_project_hourly_quota: int = 3
+    notification_recipient_daily_quota: int = 10
 
     def __post_init__(self):
         if not self.enabled:
@@ -82,7 +89,14 @@ class ProductPilotSettings:
                 or type(self.hourly_quota) is not int or not 2 <= self.hourly_quota <= 3
                 or type(self.policy_ttl_hours) is not int or not 24 <= self.policy_ttl_hours <= 48
                 or type(self.minimum_confidence) is not float
-                or not 0.9 <= self.minimum_confidence <= 1.0):
+                or not 0.9 <= self.minimum_confidence <= 1.0
+                or type(self.notification_enabled) is not bool
+                or type(self.notification_ttl_hours) is not int
+                or not 1 <= self.notification_ttl_hours <= 6
+                or type(self.notification_project_hourly_quota) is not int
+                or not 1 <= self.notification_project_hourly_quota <= 3
+                or type(self.notification_recipient_daily_quota) is not int
+                or not 1 <= self.notification_recipient_daily_quota <= 10):
             raise TrustConflict("product_pilot_configuration_invalid")
 
 
@@ -94,6 +108,9 @@ def load_product_pilot_settings() -> ProductPilotSettings:
         quota = int(os.getenv("PU_V54_AUTO_PILOT_HOURLY_QUOTA", "3"))
         ttl = int(os.getenv("PU_V54_AUTO_PILOT_POLICY_TTL_HOURS", "24"))
         confidence = float(os.getenv("PU_V54_AUTO_PILOT_MIN_CONFIDENCE", "0.9"))
+        notification_ttl = int(os.getenv("PU_V54_AUTO_NOTIFICATION_TTL_HOURS", "6"))
+        notification_hourly = int(os.getenv("PU_V54_AUTO_NOTIFICATION_PROJECT_HOURLY_QUOTA", "3"))
+        notification_daily = int(os.getenv("PU_V54_AUTO_NOTIFICATION_RECIPIENT_DAILY_QUOTA", "10"))
     except ValueError:
         raise TrustConflict("product_pilot_configuration_invalid") from None
     return ProductPilotSettings(
@@ -103,6 +120,10 @@ def load_product_pilot_settings() -> ProductPilotSettings:
         hourly_quota=quota,
         policy_ttl_hours=ttl,
         minimum_confidence=confidence,
+        notification_enabled=_enabled(os.getenv("PU_V54_AUTO_NOTIFICATION_ENABLED")),
+        notification_ttl_hours=notification_ttl,
+        notification_project_hourly_quota=notification_hourly,
+        notification_recipient_daily_quota=notification_daily,
     )
 
 
@@ -310,7 +331,7 @@ class ProductResolver:
             version = row.revision if row and action and action.current_revision == row.revision else None
         elif kind == "task":
             row = self._load(db, Task, Task.id == int(key), Task.project_id == int(scope.project.id.value), lock=lock)
-            version = row.record_version if row and row.source_type == "v54_auto" else None
+            version = row.record_version if row else None
         elif kind == "policy":
             row = self._load(db, ActionPolicy, ActionPolicy.id == key,
                              ActionPolicy.organization_id == int(scope.tenant.value),
@@ -363,6 +384,12 @@ class ProductAutonomyPolicyService(AutonomyPolicyService):
     def _limited(self, db, scope, candidate, decision, *, enforce_quota):
         if decision.mode != "AUTO":
             return decision
+        notification = candidate.action_type == "notification.internal.create"
+        if notification and not self.settings.notification_enabled:
+            return decision.model_copy(update={
+                "mode": "CONFIRM",
+                "reason": "notification_auto_disabled",
+            })
         if (candidate.confidence_basis_points is None
                 or candidate.confidence_basis_points < round(self.settings.minimum_confidence * 10_000)
                 or candidate.verbatim_evidence is not True):
@@ -375,22 +402,85 @@ class ProductAutonomyPolicyService(AutonomyPolicyService):
                 or view.valid_until - view.changed_at > timedelta(hours=self.settings.policy_ttl_hours)):
             return decision.model_copy(update={"mode": "CONFIRM", "reason": "policy_ttl_exceeds_pilot_limit"})
         if enforce_quota:
-            used = db.scalar(
-                select(func.count())
-                .select_from(PendingDispatch)
-                .join(ActionRevision, ActionRevision.action_id == PendingDispatch.action_id)
-                .join(PilotAction, PilotAction.id == PendingDispatch.action_id)
-                .where(
-                    PendingDispatch.authorization_origin == "SERVER_POLICY",
-                    PendingDispatch.policy_id == current.id,
-                    PilotAction.project_id == self.settings.project_id,
-                    ActionRevision.revision == PendingDispatch.revision,
-                    ActionRevision.created_at >= self._now() - timedelta(hours=1),
-                )
-            ) or 0
-            if used >= self.settings.hourly_quota:
-                return decision.model_copy(update={"mode": "CONFIRM", "reason": "hourly_quota_exhausted"})
+            if notification:
+                quota = self._notification_quota(db, scope, candidate, current)
+                if quota is not None:
+                    return decision.model_copy(update={"mode": "CONFIRM", "reason": quota})
+            else:
+                used = db.scalar(
+                    select(func.count())
+                    .select_from(PendingDispatch)
+                    .join(ActionRevision, ActionRevision.action_id == PendingDispatch.action_id)
+                    .join(PilotAction, PilotAction.id == PendingDispatch.action_id)
+                    .where(
+                        PendingDispatch.authorization_origin == "SERVER_POLICY",
+                        PendingDispatch.policy_id == current.id,
+                        PilotAction.project_id == self.settings.project_id,
+                        ActionRevision.revision == PendingDispatch.revision,
+                        ActionRevision.created_at >= self._now() - timedelta(hours=1),
+                    )
+                ) or 0
+                if used >= self.settings.hourly_quota:
+                    return decision.model_copy(update={"mode": "CONFIRM", "reason": "hourly_quota_exhausted"})
+        if notification:
+            return decision.model_copy(update={
+                "valid_until": min(
+                    decision.valid_until,
+                    self._now() + timedelta(hours=self.settings.notification_ttl_hours),
+                ),
+            })
         return decision
+
+    def _notification_quota(self, db, scope, candidate, current):
+        """Count sealed AUTO reservations while the current policy row is locked.
+
+        ``lock_current_view`` above serializes this calculation for the one
+        configured project.  Counting dispatch reservations (including completed
+        ones) keeps crash/retry paths from obtaining fresh quota.
+        """
+        candidate_row = db.scalar(select(ActionRevision).where(
+            ActionRevision.organization_id == int(scope.tenant.value),
+            ActionRevision.envelope_hash == candidate.envelope_sha256,
+        ))
+        if candidate_row is None:
+            return "notification_binding_unavailable"
+        try:
+            candidate_envelope = ActionEnvelope.model_validate(candidate_row.envelope)
+            recipient_id = int(candidate_envelope.payload.recipient_ref.id.value)
+        except (AttributeError, TypeError, ValueError):
+            return "notification_binding_unavailable"
+        now = self._now()
+        rows = db.execute(
+            select(ActionRevision.envelope, ActionRevision.created_at)
+            .select_from(PendingDispatch)
+            .join(ActionRevision, ActionRevision.action_id == PendingDispatch.action_id)
+            .join(PilotAction, PilotAction.id == PendingDispatch.action_id)
+            .where(
+                PendingDispatch.authorization_origin == "SERVER_POLICY",
+                PendingDispatch.policy_id == current.id,
+                PilotAction.project_id == self.settings.project_id,
+                PilotAction.action_type == "notification.internal.create",
+                ActionRevision.revision == PendingDispatch.revision,
+                ActionRevision.created_at >= now - timedelta(days=1),
+            )
+        ).all()
+        project_used = 0
+        recipient_used = 0
+        for sealed, created_at in rows:
+            created_at = utc(created_at)
+            if created_at >= now - timedelta(hours=1):
+                project_used += 1
+            try:
+                existing = ActionEnvelope.model_validate(sealed)
+                if int(existing.payload.recipient_ref.id.value) == recipient_id:
+                    recipient_used += 1
+            except (AttributeError, TypeError, ValueError):
+                return "notification_binding_unavailable"
+        if project_used >= self.settings.notification_project_hourly_quota:
+            return "notification_project_hourly_quota_exhausted"
+        if recipient_used >= self.settings.notification_recipient_daily_quota:
+            return "notification_recipient_daily_quota_exhausted"
+        return None
 
     def decide(self, db, *, scope, candidate):
         decision = super().decide(db, scope=scope, candidate=candidate)
@@ -431,9 +521,18 @@ class ProductPilotComposition:
         self.guards = Guards(resolver=self.resolver, authorize=self.authorize, gate=self.gate, clock=clock)
         self.autonomy = ProductAutonomyPolicyService(settings=settings, authority=authority, clock=clock)
         self.trust = ProductTrustFacade(guards=self.guards, autonomy=self.autonomy)
-        self.mutation = InternalTaskMutation(
+        task_mutation = InternalTaskMutation(
             guards=self.guards, trust=self.trust, source_type="v54_auto",
             source_file_name="MVP-5 owner AUTO action",
+        )
+        self.mutation = InternalMutationRouter(
+            task=task_mutation,
+            notification=InternalNotificationMutation(
+                guards=self.guards,
+                trust=self.trust,
+                project_hourly_quota=settings.notification_project_hourly_quota,
+                recipient_daily_quota=settings.notification_recipient_daily_quota,
+            ),
         )
 
     def authorize(self, db, scope, operation, subject, *, lock):
@@ -480,6 +579,7 @@ def install_product_pilot_runtime(*, settings: ProductPilotSettings | None = Non
         composition_for_scope=lambda _scope: ProductPilotComposition(settings=settings),
         project_id=settings.project_id,
         owner_user_id=settings.owner_user_id,
+        notification_enabled=settings.notification_enabled,
         allow_sqlite_for_tests=allow_sqlite_for_tests,
     )
     install_product_runtime(runtime)

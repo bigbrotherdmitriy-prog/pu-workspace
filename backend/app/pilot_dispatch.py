@@ -207,6 +207,7 @@ class ProductDispatch(PilotDispatch):
     """Exact owner/project runtime; no wildcard tenant or actor is accepted."""
 
     def __init__(self, *, sessions, composition_for_scope, project_id, owner_user_id,
+                 notification_enabled=False,
                  allow_sqlite_for_tests=False):
         url = sessions.kw["bind"].url
         backend = url.get_backend_name()
@@ -214,11 +215,15 @@ class ProductDispatch(PilotDispatch):
             raise TrustConflict("product_database_required")
         if type(project_id) is not int or project_id <= 0 or type(owner_user_id) is not int or owner_user_id <= 0:
             raise TrustConflict("product_scope_required")
+        if type(notification_enabled) is not bool:
+            raise TrustConflict("product_pilot_configuration_invalid")
         self.project_id, self.owner_user_id = project_id, owner_user_id
+        self.notification_enabled = notification_enabled
         super().__init__(sessions=sessions, composition_for_scope=composition_for_scope, kind=PRODUCT_KIND)
 
     def _validate_scope(self, scope, action_type):
         if (int(scope.project.id.value) != self.project_id
                 or int(scope.actor.id.value) != self.owner_user_id
-                or action_type != "task.internal.create"):
+                or action_type not in ({"task.internal.create", "notification.internal.create"}
+                                       if self.notification_enabled else {"task.internal.create"})):
             raise TrustConflict("resource_unavailable")

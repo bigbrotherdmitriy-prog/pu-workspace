@@ -88,7 +88,8 @@ class PilotGate(StrictDTO):
 
     def require_confirm(self, *, mode: str, action_type: str, now: datetime) -> None:
         scope_authorized = self.synthetic_scope_authorized ^ self.product_scope_authorized
-        if (mode != "CONFIRM" or action_type not in {"task.internal.create", "task.internal.cancel"}
+        if (mode != "CONFIRM" or action_type not in {
+                "task.internal.create", "task.internal.cancel", "notification.internal.create"}
                 or not scope_authorized or not self.roles_known or not self.retention_known
                 or now.tzinfo is None or self.valid_until is None or self.valid_until <= now):
             raise ValueError("pilot_disabled")

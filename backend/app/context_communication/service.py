@@ -469,7 +469,8 @@ class ContextCommunication:
         """Preflight only. Trust.freeze MUST lock/recheck before sealing (no inverse locks)."""
         envelope = ActionEnvelope.model_validate(envelope.model_dump(mode="json"))
         msg = self._message(db, scope, message, lock=False)
-        if (envelope.action_type != "task.internal.create" or envelope.requested_by != scope.actor
+        if (envelope.action_type not in {"task.internal.create", "notification.internal.create"}
+                or envelope.requested_by != scope.actor
                 or envelope.project_ref != scope.project or not msg.context_confirmed
                 or envelope.expected_context_version != msg.context_version):
             raise ContextError("context_version_conflict")
@@ -487,10 +488,19 @@ class ContextCommunication:
         project_pin = VersionPin.model_validate(project.expected_target)
         contract_pin = VersionPin.model_validate(contract.expected_target)
         self._targets(db, scope, project_pin, contract_pin, lock=False)
-        if envelope.target != project_pin or project_pin.ref != scope.project:
+        if project_pin.ref != scope.project:
             raise ContextError("context_state_conflict")
-        if envelope.payload.contract_ref != ObjectRef.model_validate(contract.target_ref):
-            raise ContextError("contract_project_mismatch")
+        if envelope.action_type == "task.internal.create":
+            if envelope.target != project_pin:
+                raise ContextError("context_state_conflict")
+            if envelope.payload.contract_ref != ObjectRef.model_validate(contract.target_ref):
+                raise ContextError("contract_project_mismatch")
+        else:
+            task = db.get(Task, int(envelope.target.ref.id.value))
+            if (task is None or task.project_id != int(scope.project.id.value)
+                    or task.record_version != envelope.target.value):
+                raise ContextError("context_state_conflict")
+            self._allow(db, scope, envelope.target, operation="metadata", lock=False)
         for pin in envelope.relations:
             self._allow(db, scope, pin, lock=False)
         self._evidence(db, scope, msg, envelope.evidence, lock=False)

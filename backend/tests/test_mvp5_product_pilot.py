@@ -15,7 +15,12 @@ from sqlalchemy.orm import sessionmaker
 from app.action_trust.guards import TrustConflict, reference, revision
 from app.autonomy_policy import PolicyAssignmentCommand
 from app.core.v54_authority import PILOT_OPERATIONS, PILOT_SCOPE
-from app.core.v54_dto import ActionEnvelope, CreateTaskPayload, canonical_json
+from app.core.v54_dto import (
+    ActionEnvelope,
+    CreateInternalNotificationPayload,
+    CreateTaskPayload,
+    canonical_json,
+)
 from app.core.v54_interfaces import RequestScope
 from app.core.v54_refs import ObjectRef, TaggedId, VersionPin
 from app.database import Base
@@ -23,6 +28,7 @@ from app.models.ai_secretary import Message
 from app.models.integration_credential import IntegrationCredential
 from app.models.job import BackgroundJob
 from app.models.mailbox_identity import MailboxCredentialGeneration
+from app.models.management import ManagementHistory, Notification
 from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -30,7 +36,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.models.v54_authority import AuthorityState
 from app.models.v54_pilot import (
-    ActionReceipt, AuditExtension,
+    ActionReceipt, ActionRevision, AuditExtension,
     ConnectionIdentity,
     ContextRelation,
     DeadlineClaim,
@@ -65,7 +71,9 @@ def ref(kind: str, value, tenant: int = 1) -> ObjectRef:
         namespace="pu",
         type=kind,
         tenant_id=TaggedId(kind="int", value=str(tenant)),
-        id=TaggedId(kind="int" if kind in {"message", "project", "contract", "task", "user"} else "uuid",
+        id=TaggedId(kind="int" if kind in {
+            "message", "project", "contract", "task", "notification", "user"
+        } else "uuid",
                     value=str(value)),
     )
 
@@ -114,11 +122,13 @@ def product_world(tmp_path):
     settings = ProductPilotSettings(
         enabled=True, project_id=10, owner_user_id=2,
         hourly_quota=2, policy_ttl_hours=24, minimum_confidence=0.9,
+        notification_enabled=True,
     )
     component = ProductPilotComposition(settings=settings, clock=lambda: NOW)
     runtime = ProductDispatch(
         sessions=sessions, composition_for_scope=lambda _scope: component,
-        project_id=10, owner_user_id=2, allow_sqlite_for_tests=True,
+        project_id=10, owner_user_id=2, notification_enabled=True,
+        allow_sqlite_for_tests=True,
     )
     with sessions.begin() as db:
         db.add(Organization(id=1, name="Owner tenant"))
@@ -162,6 +172,7 @@ def product_world(tmp_path):
         view = component.autonomy.assign(db, scope=scope(), command=PolicyAssignmentCommand(
             expected_policy_id=None, expected_revision=0, expected_policy_hash=None,
             expected_authority_epoch=1, create_internal_task="AUTO",
+            create_internal_notification="AUTO",
             valid_until=NOW + timedelta(hours=24),
         ))
     try:
@@ -289,11 +300,65 @@ def request_auto(db, component, envelope, action):
     )
 
 
+def seed_notification_intent(db, component, view, number: int, *, task=None,
+                             recipient_id=2, confidence=0.95):
+    base, task_action = seed_intent(db, component, view, number, confidence=confidence)
+    action_row = db.get(PilotAction, task_action.ref.id.value)
+    if task is None:
+        task = Task(
+            project_id=10, message_id=action_row.message_id, assignee_user_id=2,
+            created_by_user_id=2, title=f"Notification target {number}",
+            due_date=date(2026, 9, 25), status="assigned", record_version=1,
+            source_type="v54_auto", source_file_id=f"notification-target-{number}",
+            source_file_name="notification test", source_excerpt="",
+            source_excerpt_hash=(f"{number:064x}"[-64:]), confidence=1.0,
+            needs_review=False, external_action_status="not_requested",
+        )
+        db.add(task)
+        db.flush()
+    action_ref = ref("action", ident("notification-action", number))
+    envelope = ActionEnvelope(
+        **{
+            **base.model_dump(mode="python"),
+            "action_ref": action_ref,
+            "action_type": "notification.internal.create",
+            "executor_version": "notification-db-v1",
+            "target": VersionPin(ref=ref("task", task.id), version_kind="record_version",
+                                 value=task.record_version),
+            "effects": ("management_history.append", "notification.create"),
+            "payload": CreateInternalNotificationPayload(
+                template_id="task_due_soon", recipient_ref=ref("user", recipient_id),
+                condition_key="task_due_soon", due_date="2026-09-25",
+            ),
+            "idempotency_key": pilot_command_key(action_ref, 1),
+        }
+    )
+    action = component.trust.freeze(db, scope=scope(), envelope=envelope)
+    return envelope, action, task
+
+
+def run_action(sessions, runtime, envelope):
+    job_id = runtime.enqueue_action(envelope.action_ref.id.value, str(uuid4()))
+    with sessions.begin() as db:
+        job = db.get(BackgroundJob, job_id)
+        job.status = "running"
+        job.worker_id = "mvp5-notification-test"
+        job.attempts = 1
+        job.locked_at = NOW
+        job.lease_expires_at = NOW + timedelta(minutes=3)
+        owner = (job.id, job.worker_id, job.attempts, job.locked_at)
+        payload = dict(job.payload)
+    return runtime.execute(payload, owner), payload, owner
+
+
 def test_product_pilot_is_default_off_and_rejects_partial_configuration(monkeypatch):
     for name in (
         "PU_V54_AUTO_PILOT_ENABLED", "PU_V54_AUTO_PILOT_PROJECT_ID",
         "PU_V54_AUTO_PILOT_OWNER_USER_ID", "PU_V54_AUTO_PILOT_HOURLY_QUOTA",
         "PU_V54_AUTO_PILOT_POLICY_TTL_HOURS", "PU_V54_AUTO_PILOT_MIN_CONFIDENCE",
+        "PU_V54_AUTO_NOTIFICATION_ENABLED", "PU_V54_AUTO_NOTIFICATION_TTL_HOURS",
+        "PU_V54_AUTO_NOTIFICATION_PROJECT_HOURLY_QUOTA",
+        "PU_V54_AUTO_NOTIFICATION_RECIPIENT_DAILY_QUOTA",
     ):
         monkeypatch.delenv(name, raising=False)
     assert load_product_pilot_settings().enabled is False
@@ -303,15 +368,157 @@ def test_product_pilot_is_default_off_and_rejects_partial_configuration(monkeypa
         load_product_pilot_settings()
 
 
+def test_notification_auto_has_a_separate_default_off_runtime_gate(product_world):
+    sessions, _component, _runtime, settings, view = product_world
+    disabled = replace(settings, notification_enabled=False)
+    component = ProductPilotComposition(settings=disabled, clock=lambda: NOW)
+    runtime = ProductDispatch(
+        sessions=sessions, composition_for_scope=lambda _scope: component,
+        project_id=10, owner_user_id=2, notification_enabled=False,
+        allow_sqlite_for_tests=True,
+    )
+    with sessions.begin() as db:
+        envelope, action, _task = seed_notification_intent(db, component, view, 101)
+        with pytest.raises(TrustConflict, match="server_policy_not_applicable"):
+            request_auto(db, component, envelope, action)
+    with pytest.raises(TrustConflict, match="resource_unavailable"):
+        runtime._validate_scope(scope(), "notification.internal.create")
+
+
 def test_product_dispatch_rejects_every_other_project_and_actor(product_world):
     _sessions, _component, runtime, _settings, _view = product_world
     runtime._validate_scope(scope(), "task.internal.create")
+    runtime._validate_scope(scope(), "notification.internal.create")
     with pytest.raises(TrustConflict, match="resource_unavailable"):
         runtime._validate_scope(scope(project_id=11), "task.internal.create")
     with pytest.raises(TrustConflict, match="resource_unavailable"):
         runtime._validate_scope(scope(owner_id=3), "task.internal.create")
     with pytest.raises(TrustConflict, match="resource_unavailable"):
         runtime._validate_scope(scope(), "task.internal.cancel")
+
+
+def test_notification_auto_ttl_dedupe_receipt_and_fixed_local_effect(product_world):
+    sessions, component, runtime, _settings, view = product_world
+    with sessions.begin() as db:
+        envelope, action, task = seed_notification_intent(db, component, view, 102)
+        request_auto(db, component, envelope, action)
+        pending = db.get(PendingDispatch, envelope.action_ref.id.value)
+        decision_until = pending.authorization_decision["valid_until"]
+        assert datetime.fromisoformat(decision_until) <= NOW + timedelta(hours=6)
+        task_id = task.id
+    first, payload, owner = run_action(sessions, runtime, envelope)
+    second = runtime.execute(payload, owner)
+    assert first == second
+    with sessions() as db:
+        rows = list(db.scalars(select(Notification).where(Notification.entity_id == task_id)))
+        assert len(rows) == 1
+        notification = rows[0]
+        assert notification.user_id == 2
+        assert notification.kind == "auto_task_due_soon"
+        assert notification.title == "Задача требует внимания"
+        assert "2026-09-25" in notification.body
+        receipt = db.scalar(select(ActionReceipt).where(
+            ActionReceipt.action_id == envelope.action_ref.id.value,
+        ))
+        assert first == {"receipt_id": receipt.id}
+        assert receipt.outcome == "APPLIED"
+        assert receipt.target_ref == ref("notification", notification.id).model_dump(mode="json")
+        history = db.scalar(select(ManagementHistory).where(
+            ManagementHistory.entity_type == "notification",
+            ManagementHistory.entity_id == notification.id,
+        ))
+        assert history is not None and history.action == "auto_created"
+
+
+def test_notification_project_hourly_quota_allows_three_and_blocks_fourth(product_world):
+    sessions, component, _runtime, _settings, view = product_world
+    with sessions.begin() as db:
+        for number in (111, 112, 113):
+            envelope, action, _task = seed_notification_intent(db, component, view, number)
+            request_auto(db, component, envelope, action)
+        envelope, action, _task = seed_notification_intent(db, component, view, 114)
+        with pytest.raises(TrustConflict, match="server_policy_not_applicable"):
+            request_auto(db, component, envelope, action)
+        assert db.scalar(select(func.count()).select_from(PendingDispatch).join(
+            PilotAction, PilotAction.id == PendingDispatch.action_id,
+        ).where(PilotAction.action_type == "notification.internal.create")) == 3
+
+
+def test_notification_recipient_daily_quota_blocks_eleventh(product_world):
+    sessions, _component, _runtime, settings, view = product_world
+    current = [NOW - timedelta(hours=6)]
+    component = ProductPilotComposition(settings=settings, clock=lambda: current[0])
+    for batch in range(3):
+        with sessions.begin() as db:
+            for offset in range(3):
+                number = 120 + batch * 3 + offset
+                envelope, action, _task = seed_notification_intent(db, component, view, number)
+                request_auto(db, component, envelope, action)
+        current[0] += timedelta(hours=2)
+    with sessions.begin() as db:
+        envelope, action, _task = seed_notification_intent(db, component, view, 129)
+        request_auto(db, component, envelope, action)
+    with sessions.begin() as db:
+        envelope, action, _task = seed_notification_intent(db, component, view, 130)
+        with pytest.raises(TrustConflict, match="server_policy_not_applicable"):
+            request_auto(db, component, envelope, action)
+
+
+def test_notification_recovery_repairs_missing_queue_marker_and_applies_once(product_world):
+    sessions, component, runtime, _settings, view = product_world
+    with sessions.begin() as db:
+        envelope, action, task = seed_notification_intent(db, component, view, 131)
+        request_auto(db, component, envelope, action)
+        task_id = task.id
+    assert runtime.recover() == 1
+    assert runtime.recover() == 0
+    with sessions.begin() as db:
+        pending = db.get(PendingDispatch, envelope.action_ref.id.value)
+        job = db.get(BackgroundJob, pending.job_id)
+        job.status = "running"
+        job.worker_id = "mvp5-notification-recovery"
+        job.attempts = 1
+        job.locked_at = NOW
+        job.lease_expires_at = NOW + timedelta(minutes=3)
+        owner = (job.id, job.worker_id, job.attempts, job.locked_at)
+        payload = dict(job.payload)
+        # Simulate a crash after durable enqueue and before the marker commit.
+        pending.job_id = None
+    result = runtime.execute(payload, owner)
+    with sessions() as db:
+        receipt = db.get(ActionReceipt, result["receipt_id"])
+        assert receipt is not None and receipt.outcome == "APPLIED"
+        assert db.scalar(select(func.count()).select_from(Notification).where(
+            Notification.entity_id == task_id,
+        )) == 1
+
+
+def test_notification_same_event_deduplicates_to_one_local_effect(product_world):
+    sessions, component, runtime, _settings, view = product_world
+    with sessions.begin() as db:
+        first, first_action, task = seed_notification_intent(db, component, view, 141)
+        second, second_action, _ = seed_notification_intent(
+            db, component, view, 142, task=task,
+        )
+        request_auto(db, component, first, first_action)
+        request_auto(db, component, second, second_action)
+        task_id = task.id
+    first_result, _payload, _owner = run_action(sessions, runtime, first)
+    second_result, _payload, _owner = run_action(sessions, runtime, second)
+    assert first_result != second_result
+    with sessions() as db:
+        notifications = list(db.scalars(select(Notification).where(
+            Notification.entity_id == task_id,
+        )))
+        assert len(notifications) == 1
+        receipts = list(db.scalars(select(ActionReceipt).where(
+            ActionReceipt.action_id.in_([
+                first.action_ref.id.value, second.action_ref.id.value,
+            ]),
+        )))
+        assert len(receipts) == 2
+        expected = ref("notification", notifications[0].id).model_dump(mode="json")
+        assert {canonical_json(item.target_ref) for item in receipts} == {canonical_json(expected)}
 
 
 def test_high_confidence_verified_verbatim_owner_task_runs_once(product_world):
@@ -439,3 +646,82 @@ def test_postgres_hourly_quota_serializes_competing_third_action(product_world):
         assert db.scalar(select(func.count()).select_from(PendingDispatch).where(
             PendingDispatch.authorization_origin == "SERVER_POLICY",
         )) == 3
+
+
+def test_postgres_notification_quota_serializes_competing_fourth_action(product_world):
+    sessions, component, _runtime, _settings, view = product_world
+    if sessions.kw["bind"].dialect.name != "postgresql":
+        pytest.skip("PostgreSQL notification quota row-lock proof")
+    with sessions.begin() as db:
+        for number in (201, 202):
+            envelope, action, _task = seed_notification_intent(db, component, view, number)
+            request_auto(db, component, envelope, action)
+        candidates = [
+            seed_notification_intent(db, component, view, number)[:2]
+            for number in (203, 204)
+        ]
+    barrier = Barrier(2)
+
+    def compete(candidate):
+        envelope, action = candidate
+        try:
+            with sessions.begin() as db:
+                barrier.wait(timeout=5)
+                request_auto(db, component, envelope, action)
+            return "AUTO"
+        except TrustConflict as exc:
+            return str(exc)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(compete, candidates))
+    assert sorted(outcomes) == ["AUTO", "server_policy_not_applicable"]
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(PendingDispatch).join(
+            PilotAction, PilotAction.id == PendingDispatch.action_id,
+        ).where(PilotAction.action_type == "notification.internal.create")) == 3
+
+
+def test_postgres_notification_concurrent_duplicate_effect_is_idempotent(product_world):
+    sessions, component, runtime, _settings, view = product_world
+    if sessions.kw["bind"].dialect.name != "postgresql":
+        pytest.skip("PostgreSQL notification dedupe proof")
+    with sessions.begin() as db:
+        first, first_action, task = seed_notification_intent(db, component, view, 211)
+        second, second_action, _ = seed_notification_intent(
+            db, component, view, 212, task=task,
+        )
+        request_auto(db, component, first, first_action)
+        request_auto(db, component, second, second_action)
+        task_id = task.id
+    executions = []
+    for envelope in (first, second):
+        job_id = runtime.enqueue_action(envelope.action_ref.id.value, str(uuid4()))
+        with sessions.begin() as db:
+            job = db.get(BackgroundJob, job_id)
+            job.status = "running"
+            job.worker_id = f"mvp5-notification-race-{job_id}"
+            job.attempts = 1
+            job.locked_at = NOW
+            job.lease_expires_at = NOW + timedelta(minutes=3)
+            executions.append((dict(job.payload), (
+                job.id, job.worker_id, job.attempts, job.locked_at,
+            )))
+    barrier = Barrier(2)
+
+    def execute(item):
+        payload, owner = item
+        barrier.wait(timeout=5)
+        return runtime.execute(payload, owner)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(execute, executions))
+    assert len({item["receipt_id"] for item in results}) == 2
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Notification).where(
+            Notification.entity_id == task_id,
+        )) == 1
+        assert db.scalar(select(func.count()).select_from(ActionReceipt).where(
+            ActionReceipt.action_id.in_([
+                first.action_ref.id.value, second.action_ref.id.value,
+            ]),
+        )) == 2
