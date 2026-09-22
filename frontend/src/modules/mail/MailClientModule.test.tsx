@@ -25,6 +25,7 @@ const message: MailMessage = {
   subject: "Срок поставки", preview: "Просим подтвердить срок", content: "Просим подтвердить срок поставки до 10 сентября.",
   summary: "Нужно подтвердить срок поставки.", received_at: "2026-09-04T10:00:00Z",
   status: "ready", needs_attention: true, context_confirmed: true,
+  context_version: 4, auto_context_confirmation_state: "not_confirmed",
   context_confidence: .96, context_evidence: "Найден номер договора", source_url: "https://example.test/message/101",
   attachments: [{ attachment_id: "att-1", name: "specification.pdf", mime_type: "application/pdf", size: 2048 }],
   drafts: [approvedDraft],
@@ -59,6 +60,9 @@ function mockClient(overrides: Record<string, unknown> = {}) {
     approveDraft: vi.fn().mockImplementation(async (_id: number, revision: number) => ({ ...approvedDraft, revision, approved_revision: revision, status: "approved" })),
     sendDraft: vi.fn().mockResolvedValue({ ...approvedDraft, status: "sent", receipt: { provider: "gmail", sent_at: "2026-09-04T10:05:00Z" } }),
     confirmContext: vi.fn().mockResolvedValue(message),
+    confirmContextForAuto: vi.fn().mockResolvedValue({
+      message_id: message.id, state: "confirmed_current", already_confirmed: false,
+    }),
     setMessageStatus: vi.fn().mockResolvedValue({ ...message, status: "in_progress" }),
     settings: vi.fn().mockResolvedValue({
       display_name: "Operator", signature_html: "", auto_signature_new: true, auto_signature_reply: true,
@@ -150,6 +154,15 @@ describe("MailClientModule", () => {
     expect(screen.getByRole("button", { name: /Черновики/ })).toBeInTheDocument();
     expect(screen.queryByText(/не добавляются автоматически/i)).not.toBeInTheDocument();
     expect(client.threads).toHaveBeenCalledWith(7, "inbox", "");
+  });
+
+  it("keeps AI confidence separate from explicit owner confirmation for AUTO", async () => {
+    const { client, props } = renderClient();
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    expect(screen.getByText(/AI 96%/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить контекст для AUTO" }));
+    await waitFor(() => expect(client.confirmContextForAuto).toHaveBeenCalledWith(101, 7, 11, 4));
+    expect(props.onNotice).toHaveBeenCalledWith("Владелец явно подтвердил контекст для AUTO");
   });
 
   it("keeps saved mail usable when the live provider is temporarily unavailable", async () => {
