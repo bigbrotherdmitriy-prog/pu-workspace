@@ -2987,7 +2987,20 @@ export function App() {
                         const remainingItems = processedItems === null || !totalItems ? null : Math.max(0, totalItems - processedItems);
                         const isProcessing = folder.snapshot_status === "building" || folder.analysis_status === "analyzing";
                         return (
-                        <article key={folder.id}>
+                        <article
+                          key={folder.id}
+                          className="source-folder-row"
+                          title="Открыть папку двойным щелчком"
+                          onDoubleClick={(event) => {
+                            if (
+                              busyFolder ||
+                              (event.target as HTMLElement).closest(
+                                "button, a, input, select, textarea",
+                              )
+                            ) return;
+                            void openSources(folder.id);
+                          }}
+                        >
                           <FolderKanban />
                           <div>
                             <strong>
