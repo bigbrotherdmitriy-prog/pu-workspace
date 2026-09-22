@@ -71,6 +71,7 @@ def _required_int(name: str) -> int:
 @dataclass(frozen=True, slots=True)
 class ProductPilotSettings:
     enabled: bool
+    producer_enabled: bool = False
     project_id: int | None = None
     owner_user_id: int | None = None
     hourly_quota: int = 3
@@ -82,6 +83,10 @@ class ProductPilotSettings:
     notification_recipient_daily_quota: int = 10
 
     def __post_init__(self):
+        if type(self.enabled) is not bool or type(self.producer_enabled) is not bool:
+            raise TrustConflict("product_pilot_configuration_invalid")
+        if self.producer_enabled and not self.enabled:
+            raise TrustConflict("product_pilot_configuration_invalid")
         if not self.enabled:
             return
         if (type(self.project_id) is not int or self.project_id <= 0
@@ -115,6 +120,7 @@ def load_product_pilot_settings() -> ProductPilotSettings:
         raise TrustConflict("product_pilot_configuration_invalid") from None
     return ProductPilotSettings(
         enabled=True,
+        producer_enabled=_enabled(os.getenv("PU_V54_AUTO_INTENT_PRODUCER_ENABLED")),
         project_id=_required_int("PU_V54_AUTO_PILOT_PROJECT_ID"),
         owner_user_id=_required_int("PU_V54_AUTO_PILOT_OWNER_USER_ID"),
         hourly_quota=quota,

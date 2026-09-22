@@ -658,12 +658,36 @@ def confirm_context_for_auto(message_id: int, payload: AutoContextConfirmation,
             "context_version_conflict", "owner_context_confirmation_required",
         } else 404
         raise HTTPException(status, str(error)) from error
+    producer_job_id = None
+    from app.action_trust.guards import TrustConflict
+    from app.pilot_product import load_product_pilot_settings
+    try:
+        settings = load_product_pilot_settings()
+    except (TrustConflict, ValueError):
+        settings = None
+    if (settings is not None and settings.enabled and settings.producer_enabled
+            and settings.project_id == result.message.project_id
+            and settings.owner_user_id == user.id):
+        from app.pilot_intent_producer import PRODUCT_INTENT_KIND, producer_job_key
+        job = enqueue(
+            db,
+            PRODUCT_INTENT_KIND,
+            {
+                "message_id": result.message.id,
+                "expected_context_version": result.message.context_version,
+                "owner_user_id": user.id,
+                "project_id": result.message.project_id,
+            },
+            idempotency_key=producer_job_key(result.message),
+        )
+        producer_job_id = job.id
     return {
         "message_id": result.message.id,
         "state": result.state,
         "already_confirmed": result.already_confirmed,
         "context_confirmed_by_user_at": result.message.context_confirmed_by_user_at,
         "context_confirmed_context_version": result.message.context_confirmed_context_version,
+        "producer_job_id": producer_job_id,
     }
 
 
