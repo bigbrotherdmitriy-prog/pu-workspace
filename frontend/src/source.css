@@ -24,6 +24,7 @@
 .source-actions button, .source-list button { padding: 9px 12px; border: 1px solid #dfe4eb; border-radius: 9px; background: #fff; color: #26364f; cursor: pointer; }
 .source-list { display: grid; }
 .source-list article { display: flex; align-items: center; gap: 12px; padding: 13px 3px; border-top: 1px solid #eef1f5; }
+.source-list article.source-folder-row { cursor: pointer; }
 .source-list article:first-child { border-top: 0; }
 .source-list article > svg { color: #185adb; flex: none; }
 .source-list article > div { min-width: 0; flex: 1; }

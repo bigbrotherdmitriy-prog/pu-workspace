@@ -7,6 +7,16 @@ test("01 new project stays selected beside Persistent Project", async ({ page, m
   expect(mock.requests.filter(row => row.path.includes("/source-folders/")).every(row => row.path.startsWith("/projects/2/"))).toBe(true);
 });
 
+test("01a folder row opens on double click without connecting it", async ({ page, mock }) => {
+  await start(page); await open(page);
+  const row = picker(page).locator("article").filter({ has: page.getByText("Проект #1", { exact: true }) });
+
+  await row.getByText("Проект #1", { exact: true }).dblclick();
+
+  await expect(picker(page).locator(".source-breadcrumbs").getByRole("button", { name: "Проект #1", exact: true })).toBeDisabled();
+  expect(mock.requests.some(request => request.path.includes("/snapshot-queue"))).toBe(false);
+});
+
 for (const provider of ["google_drive", "yandex_disk"] as Provider[]) {
   test(`02-04 ${provider}: selected provider, nested folders, encoded confirmation, parent navigation`, async ({ page, mock }, info) => {
     mock.provider = provider;
