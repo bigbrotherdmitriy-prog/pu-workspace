@@ -7,6 +7,7 @@ import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
 import { GprWorkspace } from "./modules/finance/GprWorkspace";
+import { GprContractContext } from "./modules/finance/GprContractContext";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
@@ -3198,10 +3199,7 @@ export function App() {
       {active === "График работ" && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page gpr-page">
-            <section className="card finance-contract-chain gpr-contract-context">
-              <div><span className="eyebrow">ОТДЕЛЬНЫЙ РАЗДЕЛ ГПР</span><h2>График работ по договору</h2><p>Здесь находятся только календарный план, зависимости и диаграмма Ганта. Бюджет и плановый ДДС загружаются в разделе «Исполнение и финансы».</p></div>
-              <select aria-label="Договор для графика работ" value={selectedFinanceContractId} onChange={(event) => setSelectedFinanceContractId(Number(event.target.value))}><option value={0}>Выберите договор для ГПР</option>{contracts.filter((item) => item.contract_kind !== "prime_reference").map((item) => <option value={item.id} key={item.id}>{item.number} — {item.title}</option>)}</select>
-            </section>
+            <GprContractContext contracts={contracts} selectedContractId={selectedFinanceContractId} onSelectContract={setSelectedFinanceContractId} />
             <GprWorkspace
               projectId={projectId}
               finance={finance}
