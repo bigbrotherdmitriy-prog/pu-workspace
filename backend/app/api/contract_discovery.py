@@ -201,8 +201,11 @@ def discover_contract_fields(name: str, content: str) -> dict:
         "предмет договора", "права и обязанности", "цена договора", "срок действия",
         "реквизиты сторон", "заказчик", "подрядчик",
     ))
+    content_proves_standalone_contract = bool(number_match) and legal_markers >= 1
     confidence = min(0.95, 0.35 + (0.25 if number_match else 0.18 if filename_number else 0) + legal_markers * 0.06)
-    is_contract = not attachment_name and (bool(number_match) or bool(filename_number) or legal_markers >= 2)
+    is_contract = content_proves_standalone_contract or (
+        not attachment_name and (bool(number_match) or bool(filename_number) or legal_markers >= 2)
+    )
     counterparty, party_evidence = _discovered_counterparty(text, kind)
     return {
         "number": number,
@@ -215,7 +218,10 @@ def discover_contract_fields(name: str, content: str) -> dict:
                      ["структурированный номер договора найден в имени файла"] if filename_number else
                      ["название взято из имени файла; номер требует проверки"]),
                      f"юридических признаков: {legal_markers}",
-                     *( ["файл похож на приложение, а не на самостоятельный договор"] if attachment_name else [])],
+                     *( ["содержимое подтверждает самостоятельный договор вопреки имени файла"]
+                        if attachment_name and content_proves_standalone_contract else
+                        ["файл похож на приложение, а не на самостоятельный договор"]
+                        if attachment_name else [])],
     }
 
 

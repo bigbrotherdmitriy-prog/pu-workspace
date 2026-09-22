@@ -96,6 +96,27 @@ def test_does_not_treat_procurement_appendix_as_standalone_supply_contract():
     assert "приложение" in result["evidence"][-1]
 
 
+def test_contract_content_overrides_estimate_signal_in_combined_pdf_filename():
+    result = discover_contract_fields(
+        "Договор+сметыs откорр.pdf",
+        "Договор № 02/2111-26 от 27.03.2026 г. Заказчик и Подрядчик заключили настоящий "
+        "договор. 1. Предмет Договора. Подрядчик выполняет строительно-монтажные работы. "
+        "2. Цена договора, порядок расчётов и оплаты.",
+    )
+    assert result["is_contract"] is True
+    assert result["number"] == "02/2111-26"
+    assert "содержимое подтверждает самостоятельный договор вопреки имени файла" in result["evidence"]
+
+
+def test_attachment_name_still_blocks_without_own_contract_number():
+    result = discover_contract_fields(
+        "Приложение и смета.pdf",
+        "Предмет договора. Цена договора. Заказчик и Подрядчик. Смета к договору.",
+    )
+    assert result["is_contract"] is False
+    assert "файл похож на приложение, а не на самостоятельный договор" in result["evidence"]
+
+
 def test_rejects_short_ocr_noise_as_contract_number():
     result = discover_contract_fields(
         "Б-УЗП130-02-2026.pdf",
