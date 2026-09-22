@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
+from app.core.v54_authority import AuthorityResolver
 from app.database import SessionLocal, get_db
 from app.governance_engine import create_governance_items
 from app.models.ai_secretary import Message
@@ -43,6 +44,12 @@ from app.provider_actions.email_compensation import (
     unavailable_email_compensation,
 )
 from app.provider_actions.product import task_effect_states
+from app.owner_context_confirmation import (
+    OwnerContextConfirmationDenied,
+    clear_owner_context_confirmation,
+    confirm_owner_context_for_auto,
+    owner_context_confirmation_state,
+)
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
 
@@ -69,6 +76,13 @@ class IncomingMessage(BaseModel):
 class ContextConfirmation(BaseModel):
     project_id: int | None = None
     contract_id: int | None = None
+    expected_context_version: int | None = Field(default=None, gt=0)
+
+
+class AutoContextConfirmation(BaseModel):
+    project_id: int = Field(gt=0)
+    contract_id: int = Field(gt=0)
+    expected_context_version: int = Field(gt=0)
 
 
 class BulkContextConfirmation(ContextConfirmation):
@@ -239,6 +253,13 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         "content": row.content, "attachments": attachments,
         "summary": row.summary, "context_confidence": row.context_confidence,
         "context_evidence": row.context_evidence, "context_confirmed": row.context_confirmed,
+        "context_resolved": row.context_confirmed,
+        "context_version": row.context_version,
+        "context_confirmed_by_user_id": row.context_confirmed_by_user_id,
+        "context_confirmed_by_user_at": row.context_confirmed_by_user_at,
+        "context_confirmed_context_version": row.context_confirmed_context_version,
+        "context_confirmed_authority_epoch": row.context_confirmed_authority_epoch,
+        "auto_context_confirmation_state": owner_context_confirmation_state(db, row),
         "status": row.status, "created_at": row.created_at,
         "analysis_required": row.analysis_required,
         "workflow_state": workflow_state, "workflow_reason": workflow_reason,
@@ -546,15 +567,33 @@ def ingest(payload: IncomingMessage, db: Session = Depends(get_db), user: User =
 
 @router.post("/inbox/{message_id}/confirm-context")
 def confirm_context(message_id: int, payload: ContextConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    row = db.get(Message, message_id)
-    if row is None:
+    observed = db.get(Message, message_id)
+    if observed is None:
         raise HTTPException(404, "Message not found")
+    observed_project_id = observed.project_id
+    target_project_id = payload.project_id or observed_project_id
+    projects = {
+        project.id: project
+        for project in db.scalars(
+            select(Project).where(Project.id.in_({observed_project_id, target_project_id}))
+            .order_by(Project.id).with_for_update()
+        )
+    }
+    row = db.scalar(
+        select(Message).where(Message.id == message_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if row is None or row.project_id != observed_project_id:
+        raise HTTPException(409, "context_version_conflict")
+    if (payload.expected_context_version is not None
+            and row.context_version != payload.expected_context_version):
+        raise HTTPException(409, "context_version_conflict")
     require_project_role(db, user, row.project_id, "viewer")
-    target_project_id = payload.project_id or row.project_id
     require_project_role(db, user, target_project_id, "editor")
-    target_project = db.get(Project, target_project_id)
+    target_project = projects.get(target_project_id)
     if target_project is None or target_project.organization_id != row.organization_id:
         raise HTTPException(422, "Project does not belong to this organization")
+    old_context = (row.project_id, row.contract_id)
     if target_project_id != row.project_id:
         old_project_id = row.project_id
         row.project_id = target_project_id
@@ -573,11 +612,19 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
         row.contract_id = contract.id
         for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
             draft.contract_id = contract.id
-        row.context_evidence = f"Проект и договор подтверждены пользователем: {target_project.name}; {contract.number}"
     else:
-        row.context_evidence = f"Проект подтверждён пользователем: {target_project.name}"
+        row.contract_id = None
+        for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
+            draft.contract_id = None
+    if old_context != (row.project_id, row.contract_id):
+        row.context_version += 1
+        clear_owner_context_confirmation(row)
+        db.add(AuditLog(
+            action="message_auto_context_owner_confirmation_invalidated",
+            entity_type="message", entity_id=row.id,
+            details=f"context_version={row.context_version}",
+        ))
     row.context_confirmed = True
-    row.context_confidence = 1.0
     row.status = "ready"
     db.add(AuditLog(action="message_context_confirmed", entity_type="message", entity_id=row.id,
                     details=f"project={row.project_id}; contract={row.contract_id or 'none'}"))
@@ -587,18 +634,93 @@ def confirm_context(message_id: int, payload: ContextConfirmation, db: Session =
     return _message_payload(db, row, actor=user)
 
 
+@router.post("/inbox/{message_id}/confirm-context-for-auto")
+def confirm_context_for_auto(message_id: int, payload: AutoContextConfirmation,
+                             db: Session = Depends(get_db),
+                             user: User = Depends(require_user)):
+    try:
+        result = confirm_owner_context_for_auto(
+            db,
+            message_id=message_id,
+            project_id=payload.project_id,
+            contract_id=payload.contract_id,
+            expected_context_version=payload.expected_context_version,
+            user_id=user.id,
+            authority=AuthorityResolver(),
+            clock=lambda: datetime.now(timezone.utc),
+            correlation_id=f"owner-context-confirmation:{message_id}",
+        )
+        db.commit()
+        db.refresh(result.message)
+    except OwnerContextConfirmationDenied as error:
+        db.rollback()
+        status = 409 if str(error) in {
+            "context_version_conflict", "owner_context_confirmation_required",
+        } else 404
+        raise HTTPException(status, str(error)) from error
+    producer_job_id = None
+    from app.action_trust.guards import TrustConflict
+    from app.pilot_product import load_product_pilot_settings
+    try:
+        settings = load_product_pilot_settings()
+    except (TrustConflict, ValueError):
+        settings = None
+    if (settings is not None and settings.enabled and settings.producer_enabled
+            and settings.project_id == result.message.project_id
+            and settings.owner_user_id == user.id):
+        from app.pilot_intent_producer import PRODUCT_INTENT_KIND, producer_job_key
+        job = enqueue(
+            db,
+            PRODUCT_INTENT_KIND,
+            {
+                "message_id": result.message.id,
+                "expected_context_version": result.message.context_version,
+                "owner_user_id": user.id,
+                "project_id": result.message.project_id,
+            },
+            idempotency_key=producer_job_key(result.message),
+        )
+        producer_job_id = job.id
+    return {
+        "message_id": result.message.id,
+        "state": result.state,
+        "already_confirmed": result.already_confirmed,
+        "context_confirmed_by_user_at": result.message.context_confirmed_by_user_at,
+        "context_confirmed_context_version": result.message.context_confirmed_context_version,
+        "producer_job_id": producer_job_id,
+    }
+
+
 @router.post("/inbox/confirm-context-bulk")
 def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Atomically move and confirm several messages in one user-approved action."""
     message_ids = list(dict.fromkeys(payload.message_ids))
-    rows = list(db.scalars(select(Message).where(Message.id.in_(message_ids)).order_by(Message.id)))
-    if len(rows) != len(message_ids):
+    observed_rows = list(db.scalars(
+        select(Message).where(Message.id.in_(message_ids)).order_by(Message.id)
+    ))
+    if len(observed_rows) != len(message_ids):
         raise HTTPException(404, "One or more messages were not found")
     target_project_id = payload.project_id
     if target_project_id is None:
         raise HTTPException(422, "Target project is required")
+    observed_projects = {row.id: row.project_id for row in observed_rows}
+    locked_projects = {
+        project.id: project
+        for project in db.scalars(
+            select(Project).where(Project.id.in_(
+                set(observed_projects.values()) | {target_project_id}
+            )).order_by(Project.id).with_for_update()
+        )
+    }
+    rows = list(db.scalars(
+        select(Message).where(Message.id.in_(message_ids)).order_by(Message.id)
+        .with_for_update().execution_options(populate_existing=True)
+    ))
+    if (len(rows) != len(message_ids)
+            or any(row.project_id != observed_projects.get(row.id) for row in rows)):
+        raise HTTPException(409, "context_version_conflict")
     require_project_role(db, user, target_project_id, "editor")
-    target_project = db.get(Project, target_project_id)
+    target_project = locked_projects.get(target_project_id)
     if target_project is None:
         raise HTTPException(404, "Project not found")
     contract = None
@@ -616,6 +738,7 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
     moved = 0
     for row in rows:
         old_project_id = row.project_id
+        old_context = (row.project_id, row.contract_id)
         if old_project_id != target_project_id:
             moved += 1
             row.project_id = target_project_id
@@ -632,13 +755,16 @@ def confirm_context_bulk(payload: BulkContextConfirmation, db: Session = Depends
         row.contract_id = contract.id if contract else None
         for draft in db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id)):
             draft.contract_id = contract.id if contract else None
+        if old_context != (row.project_id, row.contract_id):
+            row.context_version += 1
+            clear_owner_context_confirmation(row)
+            db.add(AuditLog(
+                action="message_auto_context_owner_confirmation_invalidated",
+                entity_type="message", entity_id=row.id,
+                details=f"context_version={row.context_version}",
+            ))
         row.context_confirmed = True
-        row.context_confidence = 1.0
         row.status = "ready"
-        row.context_evidence = (
-            f"Массово подтверждены проект и договор: {target_project.name}; {contract.number}"
-            if contract else f"Массово подтверждён проект: {target_project.name}"
-        )
     db.add(AuditLog(
         action="message_context_bulk_confirmed",
         entity_type="project",

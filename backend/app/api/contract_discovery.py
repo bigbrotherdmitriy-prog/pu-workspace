@@ -44,7 +44,8 @@ _FILENAME_CONTRACT_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 _COMPANY_RE = re.compile(
-    r"\b((?:общество\s+с\s+ограниченной\s+ответственностью|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\b"
+    r"\b((?:общество\s+с\s+ограниченной\s+ответственностью|"
+    r"индивидуальн(?:ый|ого)\s+предпринимател(?:ь|я)|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\b"
     r"\s*(?:[«\"'][^»\"'\n]{2,100}[»\"']|[^\n,;]{2,100}?))"
     r"(?=\s*(?:,|именуем|в лице|$))",
     re.IGNORECASE,
@@ -76,11 +77,13 @@ _LEGAL_SECTIONS = (
 
 
 def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
-    """Resolve supply-side role, never select a party by document order."""
+    """Resolve an external provider by its legal role, never by document order."""
     body = text[:15_000]
     matches = list(_COMPANY_RE.finditer(body))
     companies: dict[str, str] = {}
-    suppliers: dict[str, tuple[str, str]] = {}
+    providers: dict[str, dict[str, tuple[str, str]]] = {
+        "поставщик": {}, "подрядчик": {}, "исполнитель": {},
+    }
     for index, match in enumerate(matches):
         company = " ".join(match.group(1).split()).strip(" .,:;")
         key = _organization_key(company)
@@ -90,15 +93,27 @@ def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
         tail = body[match.end():min(end, match.end() + 800)]
         role = re.search(
             r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
-            r"(поставщик|покупатель|заказчик|подрядчик)\b", tail, re.IGNORECASE,
+            r"(поставщик|покупатель|заказчик|подрядчик|исполнитель)\b", tail, re.IGNORECASE,
         )
-        if role and role.group(1).casefold() == "поставщик":
-            suppliers[key] = (company, body[match.start():match.end() + role.end()])
-    if kind == "supply":
-        if len(suppliers) == 1:
-            company, quote = next(iter(suppliers.values()))
-            return company, f"контрагент предложен по роли поставщика: {quote}"
-        return None, "поставщик не определён однозначно; подтвердите контрагента вручную"
+        normalized_role = role.group(1).casefold() if role else None
+        if normalized_role in providers:
+            providers[normalized_role][key] = (company, body[match.start():match.end() + role.end()])
+    desired_roles = {
+        "supply": ("поставщик",),
+        "downstream_subcontract": ("подрядчик", "исполнитель"),
+    }.get(kind, ())
+    if desired_roles:
+        matches_by_role = {
+            key: value
+            for role_name in desired_roles
+            for key, value in providers[role_name].items()
+        }
+        if len(matches_by_role) == 1:
+            company, quote = next(iter(matches_by_role.values()))
+            role_label = "поставщика" if kind == "supply" else "подрядчика/исполнителя"
+            return company, f"контрагент предложен по роли {role_label}: {quote}"
+        expected = "поставщик" if kind == "supply" else "подрядчик/исполнитель"
+        return None, f"{expected} не определён однозначно; подтвердите контрагента вручную"
     if len(companies) == 1:
         return next(iter(companies.values())), "найдена одна организация; подтвердите контрагента"
     return None, "стороны не определены однозначно; подтвердите контрагента вручную"
@@ -128,9 +143,10 @@ def _referenced_existing_contract(content: str, contracts: list[Contract], exclu
 
 
 _PARTY_RE = re.compile(
-    r"(?P<org>(?:(?:общество\s+с\s+ограниченной\s+ответственностью)|ООО|АО|ПАО|ЗАО|ФКУ|ФГУП)"
+    r"(?P<org>(?:(?:общество\s+с\s+ограниченной\s+ответственностью)|"
+    r"(?:индивидуальн(?:ый|ого)\s+предпринимател(?:ь|я))|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)"
     r"\s+.{1,220}?)\s*,?\s*именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
-    r"(?P<role>заказчик|подрядчик)[»\"']?",
+    r"(?P<role>заказчик|подрядчик|покупатель|поставщик|исполнитель)[»\"']?",
     re.IGNORECASE,
 )
 
@@ -139,7 +155,8 @@ def _organization_key(value: str) -> str:
     quoted = re.findall(r"[«\"]([^»\"]{2,100})[»\"]", value)
     candidate = min(quoted, key=len) if quoted else value
     candidate = re.sub(
-        r"\b(?:общество\s+с\s+ограниченной\s+ответственностью|ООО|АО|ПАО|ЗАО|ФКУ|ФГУП)\b",
+        r"\b(?:общество\s+с\s+ограниченной\s+ответственностью|"
+        r"индивидуальн(?:ый|ого)\s+предпринимател(?:ь|я)|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\b",
         " ", candidate, flags=re.IGNORECASE,
     )
     return _normalized_reference(candidate)
@@ -189,15 +206,24 @@ def _short_contract_title(content: str, fallback: str) -> str:
 
 
 def _party_chain_parent(content: str, contract_contents: list[tuple[Contract, str]], excluded_id: int | None = None) -> Contract | None:
-    child_customer = _contract_parties(content).get("заказчик")
-    if not child_customer:
+    child_parties = _contract_parties(content)
+    child_demand_parties = {
+        child_parties[role] for role in ("заказчик", "покупатель") if child_parties.get(role)
+    }
+    if len(child_demand_parties) != 1:
         return None
+    child_customer = next(iter(child_demand_parties))
     matches = []
     for contract, parent_content in contract_contents:
         if contract.id == excluded_id:
             continue
-        parent_contractor = _contract_parties(parent_content).get("подрядчик")
-        if parent_contractor and parent_contractor == child_customer:
+        parent_parties = _contract_parties(parent_content)
+        parent_provider_parties = {
+            parent_parties[role]
+            for role in ("подрядчик", "исполнитель", "поставщик")
+            if parent_parties.get(role)
+        }
+        if child_customer in parent_provider_parties:
             matches.append(contract)
     return matches[0] if len(matches) == 1 else None
 
@@ -353,17 +379,30 @@ def _discover_documents(db: Session, project_id: int, documents: list[Document],
             linked_contract.id if linked_contract else None,
         )
         inferred_parent = existing_parent or party_parent
-        if inferred_parent and child["contract_kind"] == "customer":
-            child["contract_kind"] = (
-                "revenue_subcontract" if inferred_parent.contract_kind == "prime_reference"
-                else "downstream_subcontract"
-            )
+        if inferred_parent and child["contract_kind"] != "prime_reference":
+            if child["contract_kind"] == "customer":
+                child["contract_kind"] = (
+                    "revenue_subcontract" if inferred_parent.contract_kind == "prime_reference"
+                    else "downstream_subcontract"
+                )
             child["parent_contract_id"] = inferred_parent.id
-            reason = "совпали роли сторон: подрядчик верхнего договора стал заказчиком нижнего" if party_parent is inferred_parent else "найдена явная ссылка в тексте"
+            reason = (
+                "совпали роли сторон: исполнитель верхнего договора стал заказчиком/покупателем нижнего"
+                if party_parent is inferred_parent else "найдена явная ссылка в тексте"
+            )
             child["evidence"].append(
                 f"вышестоящий договор {inferred_parent.number}: {reason}"
             )
+        if not child.get("counterparty"):
+            counterparty, party_evidence = _discovered_counterparty(
+                content_by_document.get(child["document_id"], ""), child["contract_kind"],
+            )
+            if counterparty:
+                child["counterparty"] = counterparty
+                child["evidence"].append(party_evidence)
         if child["contract_kind"] in {"prime_reference", "customer"}:
+            continue
+        if child["parent_contract_id"]:
             continue
         body = re.sub(r"[^0-9a-zа-яё]+", "", content_by_document.get(child["document_id"], "").casefold())
         referenced = [item for item in proposals if item is not child and len(re.sub(r"\W+", "", item["number"])) >= 4

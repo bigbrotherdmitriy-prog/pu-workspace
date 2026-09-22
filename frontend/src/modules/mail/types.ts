@@ -59,8 +59,15 @@ export type MailMessage = {
   status: string;
   needs_attention?: boolean;
   context_confirmed?: boolean;
+  context_resolved?: boolean;
+  context_version?: number;
   context_confidence?: number;
   context_evidence?: string;
+  context_confirmed_by_user_id?: number | null;
+  context_confirmed_by_user_at?: string | null;
+  context_confirmed_context_version?: number | null;
+  context_confirmed_authority_epoch?: number | null;
+  auto_context_confirmation_state?: "not_confirmed" | "confirmed_current" | "stale_context" | "stale_authority" | "invalid";
   source_url?: string;
   attachments: MailAttachment[];
   drafts: MailDraft[];

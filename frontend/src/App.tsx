@@ -323,6 +323,13 @@ type InboxMessage = {
   context_confidence: number;
   context_evidence: string;
   context_confirmed: boolean;
+  context_resolved?: boolean;
+  context_version: number;
+  context_confirmed_by_user_id?: number | null;
+  context_confirmed_by_user_at?: string | null;
+  context_confirmed_context_version?: number | null;
+  context_confirmed_authority_epoch?: number | null;
+  auto_context_confirmation_state?: "not_confirmed" | "confirmed_current" | "stale_context" | "stale_authority" | "invalid";
   status: string;
   analysis_required?: boolean;
   workflow_state?: MessageWorkflowState;
@@ -1584,9 +1591,30 @@ export function App() {
         body: JSON.stringify({
           project_id: message.project_id || projectId,
           contract_id: message.contract_id || null,
+          expected_context_version: message.context_version,
         }),
       });
       setNotice("Связь сообщения с проектом и договором подтверждена");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function confirmMessageContextForAuto(message: InboxMessage) {
+    if (!message.contract_id) {
+      setError("Для AUTO сначала подтвердите договор письма");
+      return;
+    }
+    try {
+      await api(`/ai-secretary/inbox/${message.id}/confirm-context-for-auto`, {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: message.project_id,
+          contract_id: message.contract_id,
+          expected_context_version: message.context_version,
+        }),
+      });
+      setNotice("Владелец явно подтвердил контекст для AUTO");
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -3995,6 +4023,23 @@ export function App() {
                           >
                             Подтвердить связь
                           </button>
+                        </div>
+                      )}
+                      {expanded && message.context_confirmed && (
+                        <div className="context-confirm">
+                          <small>
+                            AI-уверенность: {Math.round(message.context_confidence * 100)}%. Это не подтверждение владельца.
+                          </small>
+                          {message.auto_context_confirmation_state === "confirmed_current" ? (
+                            <strong>Контекст для AUTO явно подтверждён владельцем</strong>
+                          ) : (
+                            <button
+                              disabled={!message.contract_id}
+                              onClick={() => confirmMessageContextForAuto(message)}
+                            >
+                              Подтвердить контекст для AUTO
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>

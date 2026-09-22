@@ -475,8 +475,22 @@ export function MailClientModule({
 
   async function confirmContext(message: MailMessage, targetProjectId: number, contractId: number) {
     try {
-      await client.confirmContext(message.id, targetProjectId, contractId || null);
+      await client.confirmContext(message.id, targetProjectId, contractId || null, message.context_version);
       onNotice("Проект и договор письма подтверждены");
+      await loadMailbox();
+    } catch (error) { onError((error as Error).message); }
+  }
+
+  async function confirmContextForAuto(message: MailMessage) {
+    if (!message.contract_id || !message.context_version) {
+      onError("Для AUTO сначала подтвердите проект и договор письма");
+      return;
+    }
+    try {
+      await client.confirmContextForAuto(
+        message.id, message.project_id, message.contract_id, message.context_version,
+      );
+      onNotice("Владелец явно подтвердил контекст для AUTO");
       await loadMailbox();
     } catch (error) { onError((error as Error).message); }
   }
@@ -610,7 +624,14 @@ export function MailClientModule({
               const contract = document.getElementById(`mail-contract-${selectedMessage.id}`) as HTMLSelectElement;
               void confirmContext(selectedMessage, Number(project.value), Number(contract.value));
             }}>{selectedMessage.context_confirmed ? "Изменить связь" : "Подтвердить связь"}</button>
-            <small>{selectedMessage.context_evidence || "Контекст не определён"}{selectedMessage.context_confidence !== undefined ? ` · ${Math.round(selectedMessage.context_confidence * 100)}%` : ""}</small>
+            <small>{selectedMessage.context_evidence || "Контекст не определён"}{selectedMessage.context_confidence !== undefined ? ` · AI ${Math.round(selectedMessage.context_confidence * 100)}%` : ""}</small>
+            {selectedMessage.auto_context_confirmation_state === "confirmed_current"
+              ? <small>Контекст для AUTO явно подтверждён владельцем</small>
+              : <button
+                  type="button"
+                  disabled={!selectedMessage.context_confirmed || !selectedMessage.contract_id}
+                  onClick={() => void confirmContextForAuto(selectedMessage)}
+                >Подтвердить контекст для AUTO</button>}
           </div>
           <div className="mail-thread-messages">
             {selectedThread.messages.map((message) => <article key={message.id} className={message.direction === "outgoing" ? "outgoing" : "incoming"}>
