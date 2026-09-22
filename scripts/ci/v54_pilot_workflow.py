@@ -21,7 +21,7 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "v54-runtime-artifacts" / "protocol.json"
-HEAD = "b17c4d2e6f90"
+HEAD = "c31a7b9d2e40"
 DATABASES = ("puw_v54_test_migrations", "puw_v54_test_foundation", "puw_v54_test_runtime")
 PHASES: list[dict] = []
 CREATED: list[str] = []

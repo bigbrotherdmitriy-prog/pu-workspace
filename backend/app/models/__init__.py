@@ -58,6 +58,7 @@ from app.models.v54_provider_action import (
     ProviderAction, ProviderActionApproval, ProviderDispatchOutbox,
     ProviderExecutionAttempt, ProviderOutcomeObservation,
 )
+from app.models.mobile_sync import MobileSyncCommand, MobileSyncConflict
 
 __all__ = [
     "Project",
@@ -131,4 +132,5 @@ __all__ = [
     "Materialization",
     "ProviderAction", "ProviderActionApproval", "ProviderDispatchOutbox",
     "ProviderExecutionAttempt", "ProviderOutcomeObservation",
+    "MobileSyncCommand", "MobileSyncConflict",
 ]

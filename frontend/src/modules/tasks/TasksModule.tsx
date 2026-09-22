@@ -2,6 +2,7 @@ import { ListTodo } from "lucide-react";
 
 export type TaskRow = {
   id: number; record_version?: number; title: string; status: string; priority: string; due_date?: string;
+  sync_base_token?: string | null; offline_pending?: boolean;
   original_obligation_id?: number | null; original_obligation_due_date?: string | null; due_date_adjusted?: boolean;
   assignee_user_id: number; assignee_name: string; source_file_name: string;
   source_excerpt: string; confidence: number; needs_review: boolean; message_id?: number;
@@ -10,7 +11,7 @@ export type TaskRow = {
     task: { status: string; external_id?: string | null };
     calendar: { status: string; external_id?: string | null };
   };
-  result_note?: string; completion_document_id?: number; completion_document_name?: string;
+  result_note?: string; completion_document_id?: number | null; completion_document_name?: string;
   description?: string | null;
 };
 
@@ -63,6 +64,7 @@ export function TasksModule(props: Props) {
       <div className={`task-priority ${task.priority}`} />
       <div className="task-body">
         <strong>{task.title}</strong>
+        {task.offline_pending && <span className="task-offline-pending">Ожидает синхронизации</span>}
         <p>{task.source_file_name} · {task.assignee_name} · эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
         <small>Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
         {task.needs_review && <p className="task-review-warning">Требуется ручная проверка по документу-источнику.</p>}

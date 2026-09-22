@@ -1,22 +1,31 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
+import { enqueueDocumentUpload } from "../../offline/syncEngine";
 import { MobileDocumentUpload } from "./MobileDocumentUpload";
 
-vi.mock("../../api/client", () => ({ api: vi.fn() }));
+vi.mock("../../api/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/client")>()),
+  api: vi.fn(),
+}));
+vi.mock("../../offline/syncEngine", () => ({ enqueueDocumentUpload: vi.fn() }));
 afterEach(cleanup);
-beforeEach(() => { vi.mocked(api).mockReset(); });
+beforeEach(() => {
+  vi.mocked(api).mockReset();
+  vi.mocked(enqueueDocumentUpload).mockReset();
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+});
 
 function setup(projectId = 7) {
   const onClose = vi.fn(), onComplete = vi.fn();
-  const view = render(<MobileDocumentUpload open projectId={projectId} onClose={onClose} onComplete={onComplete} />);
+  const view = render(<MobileDocumentUpload open projectId={projectId} userId={1} onClose={onClose} onComplete={onComplete} />);
   const input = view.container.querySelector('input[webkitdirectory]') as HTMLInputElement;
   return { input, onClose, onComplete };
 }
 
 describe("local document upload", () => {
   it("shows one unambiguous folder action for the project-folder flow", () => {
-    render(<MobileDocumentUpload open projectId={7} folderOnly title="Разобрать папку проекта" onClose={vi.fn()} onComplete={vi.fn()} />);
+    render(<MobileDocumentUpload open projectId={7} userId={1} folderOnly title="Разобрать папку проекта" onClose={vi.fn()} onComplete={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Выбрать папку проекта/ })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /Выбрать файлы/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Сфотографировать/ })).not.toBeInTheDocument();
@@ -93,6 +102,25 @@ describe("local document upload", () => {
     const { input } = setup(0);
     fireEvent.change(input, { target: { files: [new File(["x"], "sample.txt")] } });
     expect(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" })).toBeDisabled();
+  });
+
+  it("keeps selected files durably on the device while offline", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    vi.mocked(enqueueDocumentUpload).mockResolvedValue("queued-upload-1");
+    const { input, onComplete, onClose } = setup();
+    const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+
+    await waitFor(() => expect(enqueueDocumentUpload).toHaveBeenCalledOnce());
+    expect(enqueueDocumentUpload).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 1, projectId: 7,
+      files: [expect.objectContaining({ name: "invoice.pdf", path: "invoice.pdf" })],
+    }));
+    expect(api).not.toHaveBeenCalled();
+    expect(onComplete).toHaveBeenCalledWith(expect.stringContaining("Сохранено на устройстве: 1"), []);
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("disables changes while uploading and retains files on failure", async () => {

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy import select
@@ -8,15 +8,18 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.models.task import Task, TaskDueDateHistory, TaskHistory
 from app.models.document import Document
-from app.models.project_member import ProjectMember
-from app.models.user import User
 from app.models.audit_log import AuditLog
+from app.models.user import User
 from app.models.management import Obligation
+from app.models.project import Project
 from app.integrations.external_resources import external_id_for
 from app.integrations.actions import configured_action_adapter
 from app.provider_actions.contracts import ProviderActionError
 from app.provider_actions.product import queue_confirmed_action, task_effect_states
 from app.api.management import _locked_versioned, append_management_history
+from app.task_mutations import apply_task_patch
+from app.task_mutations import task_sync_snapshot
+from app.mobile_sync_tokens import maybe_issue_mobile_sync_token
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -106,6 +109,16 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
             "result_note": task.result_note, "completed_at": task.completed_at,
             "completion_document_id": task.completion_document_id,
             "completion_document_name": db.get(Document, task.completion_document_id).name if task.completion_document_id and db.get(Document, task.completion_document_id) else None,
+            "sync_base_token": maybe_issue_mobile_sync_token({
+                "v": 1,
+                "organization_id": db.get(Project, task.project_id).organization_id,
+                "project_id": task.project_id,
+                "user_id": user.id,
+                "entity_type": "task",
+                "entity_id": task.id,
+                "record_version": task.record_version,
+                "base": task_sync_snapshot(task),
+            }),
         })
     return {"tasks": result, "count": len(rows),
             "next_cursor": rows[-1][0].id if has_more and rows else None}
@@ -115,81 +128,13 @@ def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depe
 def update_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     task = _locked_versioned(db, Task, task_id, payload.expected_record_version, "Task")
     require_project_role(db, user, task.project_id, "editor")
-    old_snapshot = {"status": task.status, "due_date": task.due_date,
-                    "assignee_user_id": task.assignee_user_id, "result_note": task.result_note,
-                    "completion_document_id": task.completion_document_id}
-    old_status = task.status
-    old_due_date = task.due_date
-    old_assignee_user_id = task.assignee_user_id
-    changed = False
-    if "assignee_user_id" in payload.model_fields_set:
-        membership = db.scalar(select(ProjectMember).where(
-            ProjectMember.project_id == task.project_id,
-            ProjectMember.user_id == payload.assignee_user_id,
-        ))
-        if membership is None:
-            raise HTTPException(422, "Исполнитель должен быть участником проекта")
-        task.assignee_user_id = payload.assignee_user_id
-        changed = changed or task.assignee_user_id != old_assignee_user_id
-    if "due_date" in payload.model_fields_set and payload.due_date != task.due_date:
-        if not (payload.due_change_reason or "").strip():
-            raise HTTPException(422, "Причина переноса срока обязательна")
-        db.add(TaskDueDateHistory(task_id=task.id, old_due_date=task.due_date, new_due_date=payload.due_date, reason=payload.due_change_reason.strip(), changed_by_user_id=user.id))
-        task.due_date = payload.due_date
-        # Keep the provider ID: a later approved revision must update that
-        # same event rather than create a duplicate after a due-date edit.
-        task.google_calendar_sync_error = None
-        changed = True
-    if payload.status:
-        if payload.status == "completed" and not (payload.result_note or task.result_note or "").strip():
-            raise HTTPException(422, "Для завершения задачи укажите подтверждаемый результат")
-        task.status = payload.status
-        task.completed_at = datetime.now(timezone.utc) if payload.status == "completed" else None
-        changed = changed or payload.status != old_status
-    if payload.result_note is not None:
-        new_note = payload.result_note.strip() or None
-        changed = changed or new_note != task.result_note
-        task.result_note = new_note
-    if "completion_document_id" in payload.model_fields_set:
-        document = db.get(Document, payload.completion_document_id) if payload.completion_document_id else None
-        if payload.completion_document_id and (not document or document.project_id != task.project_id):
-            raise HTTPException(422, "Подтверждающий документ должен относиться к проекту задачи")
-        changed = changed or payload.completion_document_id != task.completion_document_id
-        task.completion_document_id = payload.completion_document_id
-    if changed:
-        task.record_version += 1
-        if task.external_action_status in {"approved", "queued", "executing", "executed", "unknown"}:
-            task.external_action_status = "proposed"
-        details = []
-        if old_due_date != task.due_date:
-            details.append(f"Срок: {old_due_date or 'не задан'} → {task.due_date or 'не задан'}")
-        if old_assignee_user_id != task.assignee_user_id:
-            assignee = db.get(User, task.assignee_user_id)
-            details.append(f"Исполнитель: {assignee.name if assignee else task.assignee_user_id}")
-        db.add(TaskHistory(
-            task_id=task.id,
-            action="completed" if task.status == "completed" and old_status != "completed" else "updated",
-            old_status=old_status,
-            new_status=task.status,
-            result_note=task.result_note,
-            completion_document_id=task.completion_document_id,
-            details="; ".join(details) or None,
-            changed_by_user_id=user.id,
-        ))
-        db.add(AuditLog(action="task_updated", entity_type="task", entity_id=task.id,
-                        details=f"user={user.id}; status={old_status}->{task.status}; completion_document_id={task.completion_document_id}"))
-        append_management_history(
-            db, project_id=task.project_id, entity_type="task", entity_id=task.id,
-            record_version=task.record_version, action="updated", actor_user_id=user.id,
-            old_values=old_snapshot,
-            new_values={"status": task.status, "due_date": task.due_date,
-                        "assignee_user_id": task.assignee_user_id, "result_note": task.result_note,
-                        "completion_document_id": task.completion_document_id},
-            evidence={"source_file_id": task.source_file_id,
-                      "source_excerpt_hash": task.source_excerpt_hash,
-                      "completion_document_id": task.completion_document_id},
-            reason=payload.due_change_reason or task.result_note,
-        )
+    apply_task_patch(
+        db,
+        task=task,
+        actor=user,
+        changes=payload.model_dump(exclude={"expected_record_version"}, exclude_unset=True),
+        fields_set=payload.model_fields_set - {"expected_record_version"},
+    )
     db.commit(); db.refresh(task)
     return {"id": task.id, "record_version": task.record_version, "status": task.status, "due_date": task.due_date, "result_note": task.result_note,
             "completion_document_id": task.completion_document_id, "completed_at": task.completed_at,
