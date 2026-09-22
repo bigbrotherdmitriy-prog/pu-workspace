@@ -234,6 +234,8 @@ def seed_intent(db, component, view, number: int, *, confidence=0.95):
         context_evidence="owner confirmed", context_confirmed=True, status="ready",
         mail_connection_id=ident("mail", 1), provider_message_id=f"message-{number}",
         source_reference_id=source.id, context_version=2, origin_version=1,
+        context_confirmed_by_user_id=2, context_confirmed_by_user_at=NOW,
+        context_confirmed_context_version=2, context_confirmed_authority_epoch=1,
     )
     db.add(message)
     db.flush()

@@ -22,6 +22,17 @@ class Message(Base):
                              ondelete="RESTRICT", name="fk_v54_message_source"),
         CheckConstraint("context_version > 0", name="ck_v54_message_context_version"),
         CheckConstraint("origin_version > 0", name="ck_v54_message_origin_version"),
+        CheckConstraint(
+            "(context_confirmed_by_user_id IS NULL "
+            "AND context_confirmed_by_user_at IS NULL "
+            "AND context_confirmed_context_version IS NULL "
+            "AND context_confirmed_authority_epoch IS NULL) OR "
+            "(context_confirmed_by_user_id IS NOT NULL "
+            "AND context_confirmed_by_user_at IS NOT NULL "
+            "AND context_confirmed_context_version > 0 "
+            "AND context_confirmed_authority_epoch > 0)",
+            name="ck_message_owner_context_confirmation_complete",
+        ),
         CheckConstraint("(mail_connection_id IS NULL AND provider_message_id IS NULL AND source_reference_id IS NULL) OR "
                         "(mail_connection_id IS NOT NULL AND provider_message_id IS NOT NULL AND source_reference_id IS NOT NULL)",
                         name="ck_v54_message_origin"),
@@ -55,6 +66,16 @@ class Message(Base):
     context_confidence: Mapped[float] = mapped_column(Float, default=1.0)
     context_evidence: Mapped[str] = mapped_column(Text)
     context_confirmed: Mapped[bool] = mapped_column(default=False, index=True)
+    # Explicit owner action for Product AUTO.  The legacy context_confirmed flag
+    # means only that routing is usable; it is never proof of human approval.
+    context_confirmed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True,
+    )
+    context_confirmed_by_user_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    context_confirmed_context_version: Mapped[int | None] = mapped_column(nullable=True)
+    context_confirmed_authority_epoch: Mapped[int | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="needs_review", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

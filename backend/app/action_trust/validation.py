@@ -10,6 +10,7 @@ from app.models.v54_pilot import (
     ActionReceipt, ConnectionIdentity, ContextRelation, DeadlineClaim, Evidence,
     MailConnection, PilotAction, SourceReference, SourceVersion,
 )
+from app.owner_context_confirmation import require_current_owner_context_confirmation
 
 
 def live_pins(db, *, guards, scope, envelope, action, operation):
@@ -26,6 +27,11 @@ def live_pins(db, *, guards, scope, envelope, action, operation):
             or e.project_ref != scope.project or message.context_version != e.expected_context_version
             or not message.mail_connection_id or not message.source_reference_id):
         raise TrustConflict("context_unavailable")
+    if message.source_type == "email":
+        try:
+            require_current_owner_context_confirmation(db, message)
+        except ValueError as error:
+            raise TrustConflict("context_unavailable") from error
     mail = db.get(MailConnection, message.mail_connection_id, populate_existing=True)
     identity = db.get(ConnectionIdentity, e.connection_ref.id.value, populate_existing=True)
     if (mail is None or identity is None or mail.organization_id != action.organization_id

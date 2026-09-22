@@ -33,6 +33,7 @@ from app.models.v54_pilot import (
     ContextRelation, DeadlineClaim, Evidence, MailConnection, PilotAction, SourceCurrent,
     SourceReference, SourceVersion,
 )
+from app.owner_context_confirmation import require_current_owner_context_confirmation
 
 
 class ContextError(ValueError):
@@ -322,6 +323,12 @@ class ContextCommunication:
     def _cas_message(db, msg, expected, **values):
         if type(expected) is not int or expected <= 0 or msg.context_version != expected:
             raise ContextError("context_version_conflict")
+        values.update(
+            context_confirmed_by_user_id=None,
+            context_confirmed_by_user_at=None,
+            context_confirmed_context_version=None,
+            context_confirmed_authority_epoch=None,
+        )
         result = db.execute(update(Message).where(Message.id == msg.id,
             Message.organization_id == msg.organization_id, Message.context_version == expected)
             .values(context_version=expected + 1, **values).execution_options(synchronize_session="fetch"))
@@ -474,6 +481,11 @@ class ContextCommunication:
                 or envelope.project_ref != scope.project or not msg.context_confirmed
                 or envelope.expected_context_version != msg.context_version):
             raise ContextError("context_version_conflict")
+        if msg.source_type == "email":
+            try:
+                require_current_owner_context_confirmation(db, msg)
+            except ValueError as error:
+                raise ContextError("owner_context_confirmation_required") from error
         mail = db.get(MailConnection, msg.mail_connection_id)
         if envelope.connection_ref != self._ref(scope, "connection_identity", mail.identity_id):
             raise ContextError("origin_conflict")
