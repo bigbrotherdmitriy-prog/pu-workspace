@@ -10,7 +10,12 @@ type RawMessage = {
   id: number; project_id: number; contract_id?: number | null; direction: "incoming" | "outgoing";
   thread_id: string; subject: string; sender?: string | null; content: string; summary?: string;
   headers?: { to?: string; cc?: string }; attachments?: MailMessage["attachments"];
-  status: string; context_confirmed?: boolean; created_at: string; drafts?: RawDraft[];
+  status: string; context_confirmed?: boolean; context_resolved?: boolean; context_version?: number;
+  context_confidence?: number; context_evidence?: string;
+  context_confirmed_by_user_id?: number | null; context_confirmed_by_user_at?: string | null;
+  context_confirmed_context_version?: number | null; context_confirmed_authority_epoch?: number | null;
+  auto_context_confirmation_state?: MailMessage["auto_context_confirmation_state"];
+  created_at: string; drafts?: RawDraft[];
 };
 
 function addresses(value: string | string[] | undefined | null): MailAddress[] {
@@ -55,7 +60,15 @@ function message(raw: RawMessage): MailMessage {
     preview: raw.summary || plainPreview(raw.content), content: raw.content,
     summary: raw.summary, received_at: raw.created_at, status: raw.status,
     needs_attention: !raw.context_confirmed || ["ready", "in_progress"].includes(raw.status),
-    context_confirmed: raw.context_confirmed, attachments: raw.attachments || [],
+    context_confirmed: raw.context_confirmed, context_resolved: raw.context_resolved,
+    context_version: raw.context_version, context_confidence: raw.context_confidence,
+    context_evidence: raw.context_evidence,
+    context_confirmed_by_user_id: raw.context_confirmed_by_user_id,
+    context_confirmed_by_user_at: raw.context_confirmed_by_user_at,
+    context_confirmed_context_version: raw.context_confirmed_context_version,
+    context_confirmed_authority_epoch: raw.context_confirmed_authority_epoch,
+    auto_context_confirmation_state: raw.auto_context_confirmation_state,
+    attachments: raw.attachments || [],
     drafts: (raw.drafts || []).map(normalizeDraft),
   };
 }
@@ -188,11 +201,27 @@ export const mailClientApi = {
   assist(input: MailAssistRequest) {
     return api<MailAssistResult>("/mail/assist", { method: "POST", body: JSON.stringify(input) });
   },
-  confirmContext(messageId: number, projectId: number, contractId: number | null) {
+  confirmContext(messageId: number, projectId: number, contractId: number | null, expectedContextVersion?: number) {
     return api<RawMessage>(`/ai-secretary/inbox/${messageId}/confirm-context`, {
       method: "POST",
-      body: JSON.stringify({ project_id: projectId, contract_id: contractId }),
+      body: JSON.stringify({
+        project_id: projectId,
+        contract_id: contractId,
+        expected_context_version: expectedContextVersion,
+      }),
     }).then(message);
+  },
+  confirmContextForAuto(messageId: number, projectId: number, contractId: number, expectedContextVersion: number) {
+    return api<{ message_id: number; state: string; already_confirmed: boolean }>(
+      `/ai-secretary/inbox/${messageId}/confirm-context-for-auto`, {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: projectId,
+          contract_id: contractId,
+          expected_context_version: expectedContextVersion,
+        }),
+      },
+    );
   },
   setMessageStatus(messageId: number, status: "in_progress" | "completed") {
     return api<RawMessage>(`/ai-secretary/inbox/${messageId}/status`, {
