@@ -3535,7 +3535,11 @@ export function App() {
                 setFinanceStructuredRows([]);
               }}
               onImport={() => void importStructuredFinance()}
-              onAdd={() => void addFinanceItem().then(() => setFinanceEditorOpen(false))}
+              onAdd={() => void addFinanceItem().then(() => {
+                if (financeKind === "cash-in" || financeKind === "cash-out") {
+                  setFinanceEditorOpen(false);
+                }
+              })}
               onConfirm={(kind, id, status) =>
                 void confirmFinance(kind, id, status)
               }
