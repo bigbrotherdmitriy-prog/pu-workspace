@@ -11,8 +11,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.execution_finance import (
-    ActCreate, InvoiceExtractionConfirm, PaymentConfirmation, StatusUpdate,
-    confirm_invoice_extraction, confirm_payment, create_act, update_status,
+    ActCreate, CashFlowPlanMutationRequest, InvoiceExtractionConfirm,
+    PaymentConfirmation, StatusUpdate, confirm_invoice_extraction,
+    confirm_payment, create_act, mutate_cash_flow_plan, update_status,
 )
 from app.api.organizations_contracts import (
     ContractBudgetProposalUpdate, confirm_contract_budget_proposal,
@@ -21,7 +22,7 @@ from app.api.organizations_contracts import (
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.execution_finance import (
-    AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory,
+    AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, CostCategory,
     InvoiceExtractionProposal, PaymentEvent, ScheduleBaseline, ScheduleItem,
 )
 from app.models.organization_contract import Contract, Organization
@@ -80,6 +81,47 @@ def test_postgres_concurrent_identical_payment_confirmation_creates_one_event(mv
         )) == 1
         item = db.get(CashFlowEntry, item_id)
         assert item.actual_amount == Decimal("100.00") and item.status == "paid"
+
+
+def _mutate_plan(engine, item_id: int, user_id: int, *, key: str):
+    with Session(engine) as db:
+        return mutate_cash_flow_plan(
+            item_id,
+            CashFlowPlanMutationRequest(
+                operation="move",
+                planned_date="2026-10-10",
+                planned_amount="100.00",
+                expected_record_version=1,
+                idempotency_key=key,
+            ),
+            db,
+            db.get(User, user_id),
+        )
+
+
+def test_postgres_concurrent_identical_plan_mutation_replays_one_receipt(mvp3_pg_engine):
+    item_id, user_id = _payment_world(mvp3_pg_engine, title="Concurrent plan move")
+    with Session(mvp3_pg_engine) as db:
+        item = db.get(CashFlowEntry, item_id)
+        item.status = "proposed"
+        db.commit()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [future.result(timeout=15) for future in (
+            pool.submit(_mutate_plan, mvp3_pg_engine, item_id, user_id, key="same-plan-move-key"),
+            pool.submit(_mutate_plan, mvp3_pg_engine, item_id, user_id, key="same-plan-move-key"),
+        )]
+
+    assert results[0]["mutation_id"] == results[1]["mutation_id"]
+    assert {result["replayed"] for result in results} == {False, True}
+    with Session(mvp3_pg_engine) as db:
+        assert db.scalar(select(func.count()).select_from(CashFlowPlanMutation).where(
+            CashFlowPlanMutation.cash_flow_entry_id == item_id,
+            CashFlowPlanMutation.idempotency_key == "same-plan-move-key",
+        )) == 1
+        item = db.get(CashFlowEntry, item_id)
+        assert item.planned_date == date(2026, 10, 10)
+        assert item.record_version == 2
 
 
 def test_postgres_canonical_contract_schedule_budget_invoice_payment_and_act_chain(mvp3_pg_engine):

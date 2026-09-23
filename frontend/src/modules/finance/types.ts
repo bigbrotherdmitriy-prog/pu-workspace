@@ -13,6 +13,13 @@ export type FinanceOverview = {
     acts_pending: number;
     pending_payments: number;
     unlinked_invoices: number;
+    currency?: string;
+    mixed_currency?: boolean;
+    by_currency?: Record<string, {
+      budget_planned: number; budget_committed: number; budget_actual: number;
+      budget_forecast: number; budget_variance: number; cash_balance_forecast: number;
+      cash_gap: number; cash_gap_date?: string;
+    }>;
   };
   baselines: {
     id: number;
@@ -68,12 +75,14 @@ export type FinanceOverview = {
     planned_date: string;
     planned_amount: number;
     actual_amount: number;
+    currency: string;
     actual_date?: string;
     counterparty?: string;
     object_name?: string;
     category?: string;
     note?: string;
     status: string;
+    record_version: number;
   }[];
   procurement: {
     id: number;

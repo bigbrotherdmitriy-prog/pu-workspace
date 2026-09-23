@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GprWorkspace } from "./GprWorkspace";
 import type { FinanceOverview } from "./types";
 
@@ -15,6 +15,8 @@ const finance = {
     { id: 102, baseline_id: 9, parent_id: 101, title: "Монтаж", sort_order: 2, duration_days: 6, predecessor_ids: "101", planned_start: "2026-09-04", planned_finish: "2026-09-09", planned_progress: 50, actual_progress: 0, status: "planned" },
   ],
 } as FinanceOverview;
+
+afterEach(cleanup);
 
 describe("GprWorkspace", () => {
   it("shows the task grid and saves edits to the selected task", async () => {
@@ -35,5 +37,21 @@ describe("GprWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /Сохранить/ }));
 
     await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith(2, expect.objectContaining({ title: "Монтаж ИБП" })));
+  });
+
+  it("exports GPR explicitly and opens linked DDS operations", () => {
+    const createObjectUrl = vi.fn(() => "blob:gpr");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const onOpenCashFlow = vi.fn();
+    const linked = { ...finance, cash_flow: [{ id: 44, schedule_item_id: 2, direction: "outflow", title: "Монтаж", planned_date: "2026-09-15", planned_amount: 100, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1 }] } as FinanceOverview;
+    render(<GprWorkspace projectId={1} finance={linked} selectedContractId={4} onPrepare={vi.fn()} onUpdateTask={vi.fn().mockResolvedValue(undefined)} onBulkUpdate={vi.fn().mockResolvedValue(undefined)} onCloneBaseline={vi.fn().mockResolvedValue(11)} onImported={vi.fn()} onOpenCashFlow={onOpenCashFlow} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Экспорт ГПР CSV" }));
+    expect(createObjectUrl).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "1 →" }));
+    expect(onOpenCashFlow).toHaveBeenCalledWith(2);
+    click.mockRestore();
   });
 });

@@ -7,6 +7,7 @@ import { useFinanceController } from "./modules/finance/useFinanceController";
 import { FinanceModule } from "./modules/finance/FinanceModule";
 import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
 import { GprWorkspace } from "./modules/finance/GprWorkspace";
+import { GprDdsWorkspace, type GprDdsTab } from "./modules/finance/GprDdsWorkspace";
 import { GprContractContext } from "./modules/finance/GprContractContext";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
@@ -381,7 +382,7 @@ const navigationGroups = [
   ] },
   { label: "Контроль", items: [
     [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
-    [CalendarRange, "График работ"], [Wallet, "Исполнение и финансы"], [BarChart3, "Аналитика"],
+    [CalendarRange, "ГПР и ДДС"], [BarChart3, "Аналитика"],
     [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
   ] },
   { label: "Система", items: [
@@ -518,6 +519,8 @@ export function App() {
     [newResourceCapacity, setNewResourceCapacity] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
+  const [gprDdsTab, setGprDdsTab] = useState<GprDdsTab>("gpr");
+  const [focusedScheduleItemId, setFocusedScheduleItemId] = useState(0);
   const [contractDropStatus, setContractDropStatus] = useState("");
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
@@ -539,7 +542,8 @@ export function App() {
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
+    updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
@@ -1023,8 +1027,26 @@ export function App() {
         body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
       });
       await prepareDroppedFinanceDocument(documentIds[0], supported[0].name, kind, contractId);
-      setActive(kind === "schedule" ? "График работ" : "Исполнение и финансы");
+      setGprDdsTab(kind === "schedule" ? "gpr" : "dds");
+      setActive("ГПР и ДДС");
       await loadFinance();
+    } catch (reason) { setError((reason as Error).message); }
+  }
+
+  async function uploadDdsInvoices(files: File[]) {
+    const supported = files.filter((file) => file.type === "application/pdf" || file.name.toLocaleLowerCase().endsWith(".pdf"));
+    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
+    if (!supported.length) { setError("Перетащите счёт в формате PDF."); return; }
+    if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
+    try {
+      setError(""); setNotice(`Загружаю и анализирую счетов: ${supported.length}…`);
+      const payload = await Promise.all(supported.slice(0, 20).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
+      const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
+      const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
+      if (!completed.documents.length) throw new Error("Не удалось извлечь текст счёта");
+      await load();
+      await reviewUploadedFinanceDocuments(completed.documents);
+      setGprDdsTab("dds"); setActive("ГПР и ДДС");
     } catch (reason) { setError((reason as Error).message); }
   }
   async function importBulkContracts(proposals: BulkContractProposal[]): Promise<number> {
@@ -1216,7 +1238,8 @@ export function App() {
         method: "POST",
       });
       setSelectedFinanceContractId(contractId);
-      setActive("Исполнение и финансы");
+      setGprDdsTab("dds");
+      setActive("ГПР и ДДС");
       setNotice(result.created
         ? "Цепочка договора создана: заполните этапы ГПР, затем бюджет и ДДС"
         : "Цепочка договора открыта: ГПР, бюджет и ДДС связаны с договором");
@@ -3345,9 +3368,13 @@ export function App() {
         }}
       />
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
-      {active === "График работ" && (
+      {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (
         <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page gpr-page">
+          <div className="module-page gpr-dds-page">
+          <GprDdsWorkspace
+            tab={active === "Исполнение и финансы" ? "dds" : active === "График работ" ? "gpr" : gprDdsTab}
+            onTabChange={(tab) => { setGprDdsTab(tab); if (active !== "ГПР и ДДС") setActive("ГПР и ДДС"); }}
+            gpr={<>
             <GprContractContext contracts={contracts} selectedContractId={selectedFinanceContractId} onSelectContract={setSelectedFinanceContractId} />
             <GprWorkspace
               projectId={projectId}
@@ -3358,6 +3385,8 @@ export function App() {
               onBulkUpdate={bulkUpdateSchedule}
               onCloneBaseline={cloneScheduleBaseline}
               onImported={loadFinance}
+              focusTaskId={focusedScheduleItemId}
+              onOpenCashFlow={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("dds"); }}
             />
             <FinanceOperations
               finance={finance}
@@ -3397,12 +3426,8 @@ export function App() {
               includeRegisters={false}
               editorScope="gpr"
             />
-          </div>
-        </section>
-      )}
-      {active === "Исполнение и финансы" && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page finance-page">
+            </>}
+            dds={<>
             <FinanceModule
               finance={finance}
               candidates={financeCandidates}
@@ -3413,7 +3438,7 @@ export function App() {
               onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
               onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
               onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
-              onOpenSchedule={() => setActive("График работ")}
+              onOpenSchedule={() => setGprDdsTab("gpr")}
               onReload={() => void loadFinance()}
             />
             <DdsWorkspace
@@ -3426,6 +3451,12 @@ export function App() {
               onLinkControls={(id, contractId, scheduleItemId, budgetLineId) =>
                 void linkCashFlowControls(id, contractId, scheduleItemId, budgetLineId)
               }
+              onMutatePlan={mutateCashFlowPlan}
+              onUndoPlanMutation={undoCashFlowPlanMutation}
+              focusScheduleItemId={focusedScheduleItemId}
+              onOpenSchedule={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("gpr"); }}
+              onDropInvoices={uploadDdsInvoices}
+              onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); }}
             />
             <FinanceOperations
               finance={finance}
@@ -3481,6 +3512,8 @@ export function App() {
               includeCashFlowRegister={false}
               editorScope="finance"
             />
+            </>}
+          />
           </div>
         </section>
       )}
