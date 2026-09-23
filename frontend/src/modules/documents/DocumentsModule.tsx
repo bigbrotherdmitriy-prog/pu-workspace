@@ -251,7 +251,13 @@ export function DocumentsModule({ collapsed, knowledgeMode, documents, selected,
             {selected.source_url && <a className="source-link" href={selected.source_url} target="_blank" rel="noreferrer">Открыть оригинал</a>}
           </div>
           <div className="document-links"><span>Задачи <strong>{selected.links.tasks}</strong></span><span>Риски <strong>{selected.links.risks}</strong></span><span>Решения <strong>{selected.links.decisions}</strong></span><span>Черновики <strong>{selected.links.drafts}</strong></span></div>
-          <h3>Краткая сводка</h3><p className="document-summary">{selected.summary || "Сводка появится после анализа содержимого."}</p>
+          <dl className="document-information" aria-label={`Сведения о документе ${selected.name}`}>
+            <div className="document-information-wide"><dt>Описание</dt><dd className="document-summary">{selected.summary || "Описание появится после анализа содержимого."}</dd></div>
+            <div><dt>Источник</dt><dd>{sourceLabel(selected.source)}</dd></div>
+            <div><dt>Статус</dt><dd>{statusLabel(selected.status)}</dd></div>
+            <div><dt>Версия</dt><dd>{selected.current_version || 1}</dd></div>
+            <div><dt>Тип</dt><dd>{documentTypeLabel(selected.name, selected.mime_type)}</dd></div>
+          </dl>
           <div className="document-ocr-actions">
             {selected.ocr_reprocess_available === false
               ? <span role="note">{unavailableOcrMessage}</span>

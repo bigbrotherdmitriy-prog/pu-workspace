@@ -41,7 +41,11 @@ describe("TasksModule layout and existing actions", () => {
   it("preserves full Russian content and groups controls separately from the body", () => {
     const { container } = render(<TasksModule {...props()} />);
     expect(screen.getByText(task.title)).toBeInTheDocument();
-    expect(container.querySelector(".task-body p")).toHaveTextContent(`${longPath} · ${task.assignee_name} · эвристическая оценка 42/100`);
+    expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent(`ПриоритетВысокий`);
+    expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent(`Участники${task.assignee_name}`);
+    expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent(`Описание${task.description}`);
+    expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent(`Источник${longPath}`);
+    expect(screen.getByText("Эвристическая оценка 42/100")).toBeInTheDocument();
     expect(screen.getByText(task.source_excerpt)).toBeInTheDocument();
     expect(container.querySelector(".task-action-buttons")?.querySelectorAll("button")).toHaveLength(5);
     expect(container.querySelector(".task-body select")).toBeNull();
@@ -60,10 +64,17 @@ describe("TasksModule layout and existing actions", () => {
 
   it.each([null, undefined])("supports historical rows without description (%s)", (description) => {
     const { container } = render(<TasksModule {...props({ tasks: [{ ...task, description, confidence: 0.82, needs_review: false }] })} />);
-    expect(container.querySelector(".task-description")).toBeNull();
+    expect(container.querySelector(".task-description")).toHaveTextContent("Описание не указано");
     expect(container.querySelector(".task-review-warning")).toBeNull();
-    expect(screen.getByText(/эвристическая оценка 82\/100/)).toBeInTheDocument();
+    expect(screen.getByText("Эвристическая оценка 82/100")).toBeInTheDocument();
     expect(screen.getByText(/Отсутствие предупреждений не гарантирует/)).toBeInTheDocument();
+  });
+
+  it("shows safe fallbacks for missing source and participant fields", () => {
+    render(<TasksModule {...props({ tasks: [{ ...task, source_file_name: "", source_excerpt: "", assignee_name: "" }] })} />);
+    expect(screen.getByText("Источник не указан")).toBeInTheDocument();
+    expect(screen.getByText("Не назначены")).toBeInTheDocument();
+    expect(screen.queryByText("Фрагмент источника")).toBeNull();
   });
 
   it("retains assignment, external approval, start, completion request and history callbacks", () => {
