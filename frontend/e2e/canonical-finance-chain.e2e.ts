@@ -132,6 +132,7 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   await dds.getByRole("button", { name: "Оплата", exact: true }).click();
   await expect(dds.getByText("paid", { exact: true })).toBeVisible();
 
+  await dds.getByRole("button", { name: "Расход", exact: true }).click();
   await dds.getByLabel("Тип финансовой записи").selectOption("act");
   await dds.getByPlaceholder("Название").fill("Акт монтажа");
   await dds.getByPlaceholder("Сумма, ₽").fill("25000");

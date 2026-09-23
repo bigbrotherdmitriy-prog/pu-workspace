@@ -60,6 +60,7 @@ test("links an act, signs it into budget actual, then revokes the projection", a
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   const dds = page.getByRole("tabpanel", { name: "ДДС" });
   await dds.getByLabel("Финансовый договор").selectOption("41");
+  await dds.getByRole("button", { name: "Расход", exact: true }).click();
   await dds.getByLabel("Тип финансовой записи").selectOption("act");
   await dds.getByPlaceholder("Название").fill("Акт монтажа");
   await dds.getByPlaceholder("Сумма, ₽").fill("40000");
