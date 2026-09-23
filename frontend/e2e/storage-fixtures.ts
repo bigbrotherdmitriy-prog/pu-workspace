@@ -329,6 +329,14 @@ export class StorageApi {
     if (method === "GET" && /^\/mail\/projects\/\d+\/threads$/.test(path)) {
       return this.fulfill(route, { body: { threads: [], next_cursor: null } });
     }
+    const evidenceTrailMatch = path.match(/^\/api\/v54\/projects\/(\d+)\/evidence-trail$/);
+    if (method === "GET" && evidenceTrailMatch) {
+      return this.fulfill(route, { body: {
+        project_id: Number(evidenceTrailMatch[1]),
+        items: [],
+        next_cursor: null,
+      } });
+    }
     if (method === "GET" && /^\/projects\/\d+\/source-folders\/discover$/.test(path)) {
       if (this.discoveryReply) return this.fulfill(route, this.discoveryReply(url));
       const selected = url.searchParams.get("provider");
