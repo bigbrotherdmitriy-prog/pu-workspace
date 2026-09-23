@@ -56,21 +56,23 @@ test("links an act, signs it into budget actual, then revokes the projection", a
   });
 
   await page.goto("/new/");
-  await page.getByRole("button", { name: "Исполнение и финансы" }).click();
-  await page.getByLabel("Финансовый договор").selectOption("41");
-  await page.getByLabel("Тип финансовой записи").selectOption("act");
-  await page.getByPlaceholder("Название").fill("Акт монтажа");
-  await page.getByPlaceholder("Сумма, ₽").fill("40000");
-  await page.getByPlaceholder("Номер акта").fill("A-91");
-  await page.getByLabel("Строка бюджета для акта").selectOption("81");
-  await page.getByRole("button", { name: "Создать предложение" }).click();
+  await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  const dds = page.getByRole("tabpanel", { name: "ДДС" });
+  await dds.getByLabel("Финансовый договор").selectOption("41");
+  await dds.getByLabel("Тип финансовой записи").selectOption("act");
+  await dds.getByPlaceholder("Название").fill("Акт монтажа");
+  await dds.getByPlaceholder("Сумма, ₽").fill("40000");
+  await dds.getByPlaceholder("Номер акта").fill("A-91");
+  await dds.getByLabel("Строка бюджета для акта").selectOption("81");
+  await dds.getByRole("button", { name: "Создать предложение" }).click();
 
-  await page.getByRole("button", { name: "Подтвердить", exact: true }).click();
-  await page.getByRole("button", { name: "Подписать", exact: true }).click();
-  await expect(page.getByText(/факт работ 40[\s ]?000,00 ₽/)).toBeVisible();
+  await dds.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await dds.getByRole("button", { name: "Подписать", exact: true }).click();
+  await expect(dds.getByText(/факт работ 40[\s ]?000,00 ₽/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Отменить подписание" }).click();
-  await expect(page.getByText(/факт работ 0,00 ₽/)).toBeVisible();
+  await dds.getByRole("button", { name: "Отменить подписание" }).click();
+  await expect(dds.getByText(/факт работ 0,00 ₽/)).toBeVisible();
   expect(acts[0].status).toBe("approved");
   expect(mock.unexpected).toEqual([]);
 });

@@ -3423,6 +3423,7 @@ export function App() {
               onAdd={() => void addFinanceItem()}
               onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
               onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
+              includeEditor={active === "График работ" || (active === "ГПР и ДДС" && gprDdsTab === "gpr")}
               includeRegisters={false}
               editorScope="gpr"
             />
@@ -3508,6 +3509,7 @@ export function App() {
               onConfirmPayment={(id, amount) =>
                 void confirmCashPayment(id, amount)
               }
+              includeEditor={active === "Исполнение и финансы" || (active === "ГПР и ДДС" && gprDdsTab === "dds")}
               includeScheduleRegister={false}
               includeCashFlowRegister={false}
               editorScope="finance"
