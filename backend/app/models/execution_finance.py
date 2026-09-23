@@ -130,10 +130,35 @@ class CashFlowEntry(Base):
     category: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="proposed", index=True)
+    record_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     source_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CashFlowPlanMutation(Base):
+    """Idempotent receipt for spreadsheet-like edits of proposed DDS rows."""
+
+    __tablename__ = "cash_flow_plan_mutations"
+    __table_args__ = (
+        UniqueConstraint("cash_flow_entry_id", "idempotency_key", name="uq_cash_flow_plan_mutation_key"),
+        CheckConstraint("operation IN ('edit','move','copy')", name="ck_cash_flow_plan_mutation_operation"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    cash_flow_entry_id: Mapped[int] = mapped_column(ForeignKey("cash_flow_entries.id", ondelete="CASCADE"), index=True)
+    result_cash_flow_entry_id: Mapped[int] = mapped_column(ForeignKey("cash_flow_entries.id", ondelete="RESTRICT"), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    operation: Mapped[str] = mapped_column(String(20))
+    expected_record_version: Mapped[int] = mapped_column(Integer)
+    resulting_record_version: Mapped[int] = mapped_column(Integer)
+    previous_planned_date: Mapped[date] = mapped_column(Date)
+    previous_planned_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    planned_date: Mapped[date] = mapped_column(Date)
+    planned_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class InvoiceExtractionProposal(Base):

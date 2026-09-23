@@ -19,7 +19,7 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.execution_finance import (
-    AcceptanceAct, BudgetLine, CashFlowEntry, CostCategory, InvoiceExtractionProposal,
+    AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, CostCategory, InvoiceExtractionProposal,
     PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
 )
 from app.models.organization_contract import Contract
@@ -268,6 +268,18 @@ class CashFlowControlLinks(BaseModel):
     contract_id: int = Field(ge=1)
     schedule_item_id: int = Field(ge=1)
     budget_line_id: int = Field(ge=1)
+
+
+class CashFlowPlanMutationRequest(BaseModel):
+    operation: str = Field(pattern="^(edit|move|copy)$")
+    planned_date: date
+    planned_amount: Decimal = Field(gt=0)
+    expected_record_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+    _planned_money = field_validator("planned_amount", mode="before")(
+        lambda value: _money(value, allow_zero=False)
+    )
 
 
 class PaymentConfirmation(BaseModel):
@@ -1094,7 +1106,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                         "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
                         "actual_amount": x.actual_amount, "currency": x.currency, "counterparty": x.counterparty,
                        "object_name": x.object_name, "category": x.category, "note": x.note,
-                       "status": x.status} for x in cash],
+                        "status": x.status, "record_version": x.record_version} for x in cash],
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
                           "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
                           "planned_amount": x.planned_amount, "actual_amount": x.actual_amount, "currency": x.currency} for x in procurement],
@@ -2004,6 +2016,131 @@ def link_cash_flow_controls(item_id: int, payload: CashFlowControlLinks,
     )
     db.commit()
     return {"id": item.id, "status": item.status, **after}
+
+
+def _plan_mutation_payload(receipt: CashFlowPlanMutation, *, replayed: bool = False) -> dict:
+    return {
+        "mutation_id": receipt.id,
+        "operation": receipt.operation,
+        "source_id": receipt.cash_flow_entry_id,
+        "result_id": receipt.result_cash_flow_entry_id,
+        "planned_date": receipt.planned_date,
+        "planned_amount": receipt.planned_amount,
+        "record_version": receipt.resulting_record_version,
+        "undone": receipt.undone_at is not None,
+        "replayed": replayed,
+    }
+
+
+@router.post("/cash-flow/{item_id}/plan-mutations")
+def mutate_cash_flow_plan(item_id: int, payload: CashFlowPlanMutationRequest,
+                          db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = _locked_cash_flow(db, item_id)
+    require_project_role(db, user, item.project_id, "editor")
+    existing = db.scalar(select(CashFlowPlanMutation).where(
+        CashFlowPlanMutation.cash_flow_entry_id == item.id,
+        CashFlowPlanMutation.idempotency_key == payload.idempotency_key,
+    ))
+    if existing is not None:
+        return _plan_mutation_payload(existing, replayed=True)
+    if item.status != "proposed" or item.actual_date is not None or item.actual_amount != 0:
+        raise HTTPException(
+            409,
+            "CONFIRMED_CASH_FLOW_IMMUTABLE: изменяйте подтверждённый факт только через коррекцию платежа",
+        )
+    if item.record_version != payload.expected_record_version:
+        raise HTTPException(409, "CASH_FLOW_VERSION_MISMATCH: обновите ДДС и повторите изменение")
+    if payload.operation == "copy" and item.source_document_id is not None:
+        raise HTTPException(409, "INVOICE_COPY_FORBIDDEN: счёт нельзя дублировать; создайте отдельную плановую операцию")
+
+    previous_date, previous_amount = item.planned_date, item.planned_amount
+    result = item
+    if payload.operation == "copy":
+        result = CashFlowEntry(
+            project_id=item.project_id, contract_id=item.contract_id,
+            schedule_item_id=item.schedule_item_id, budget_line_id=item.budget_line_id,
+            task_id=item.task_id, cost_category_id=item.cost_category_id,
+            direction=item.direction, title=item.title, planned_date=payload.planned_date,
+            planned_amount=payload.planned_amount, actual_amount=Decimal("0"), currency=item.currency,
+            counterparty=item.counterparty, object_name=item.object_name, category=item.category,
+            note=item.note, status="proposed", source_name=item.source_name,
+            source_excerpt=item.source_excerpt, record_version=1,
+        )
+        db.add(result)
+        db.flush()
+    else:
+        item.planned_date = payload.planned_date
+        item.planned_amount = payload.planned_amount
+        item.record_version += 1
+        db.flush()
+
+    receipt = CashFlowPlanMutation(
+        project_id=item.project_id, cash_flow_entry_id=item.id,
+        result_cash_flow_entry_id=result.id, idempotency_key=payload.idempotency_key,
+        operation=payload.operation, expected_record_version=payload.expected_record_version,
+        resulting_record_version=result.record_version,
+        previous_planned_date=previous_date, previous_planned_amount=previous_amount,
+        planned_date=result.planned_date, planned_amount=result.planned_amount,
+    )
+    db.add(receipt)
+    try:
+        db.flush()
+    except IntegrityError:
+        # SQLite does not honour FOR UPDATE and a future alternate database
+        # may schedule both requests before either sees the receipt. The
+        # unique key is the final fence: discard our tentative mutation and
+        # return the winning receipt instead of surfacing a 500.
+        db.rollback()
+        replay = db.scalar(select(CashFlowPlanMutation).where(
+            CashFlowPlanMutation.cash_flow_entry_id == item_id,
+            CashFlowPlanMutation.idempotency_key == payload.idempotency_key,
+        ))
+        if replay is None:
+            raise
+        return _plan_mutation_payload(replay, replayed=True)
+    _audit(
+        db, "cash_flow_plan_mutated", "cash_flow", result.id, user.id,
+        f"mutation={receipt.id}; operation={payload.operation}; source={item.id}; "
+        f"old_date={previous_date}; old_amount={previous_amount}; "
+        f"date={result.planned_date}; amount={result.planned_amount}; version={result.record_version}",
+    )
+    db.commit()
+    return _plan_mutation_payload(receipt)
+
+
+@router.post("/cash-flow/plan-mutations/{mutation_id}/undo")
+def undo_cash_flow_plan_mutation(mutation_id: int, db: Session = Depends(get_db),
+                                 user: User = Depends(require_user)):
+    receipt = db.scalar(select(CashFlowPlanMutation).where(
+        CashFlowPlanMutation.id == mutation_id,
+    ).with_for_update())
+    if receipt is None:
+        raise HTTPException(404, "Изменение ДДС не найдено")
+    require_project_role(db, user, receipt.project_id, "editor")
+    if receipt.undone_at is not None:
+        return _plan_mutation_payload(receipt, replayed=True)
+    result = _locked_cash_flow(db, receipt.result_cash_flow_entry_id)
+    if result.project_id != receipt.project_id:
+        raise HTTPException(409, "PROJECT_SCOPE_MISMATCH")
+    if result.status != "proposed" or result.actual_date is not None or result.actual_amount != 0:
+        raise HTTPException(409, "Изменение уже подтверждено и отменяется только корректировкой")
+    if result.record_version != receipt.resulting_record_version:
+        raise HTTPException(409, "CASH_FLOW_VERSION_MISMATCH: после изменения строка уже редактировалась")
+    if receipt.operation == "copy":
+        result.status = "cancelled"
+        result.record_version += 1
+    else:
+        result.planned_date = receipt.previous_planned_date
+        result.planned_amount = receipt.previous_planned_amount
+        result.record_version += 1
+    receipt.undone_at = datetime.now(timezone.utc)
+    _audit(
+        db, "cash_flow_plan_mutation_undone", "cash_flow", result.id, user.id,
+        f"mutation={receipt.id}; operation={receipt.operation}; version={result.record_version}",
+    )
+    db.commit()
+    return {**_plan_mutation_payload(receipt), "result_status": result.status,
+            "record_version": result.record_version}
 
 
 @router.post("/cash-flow/{item_id}/confirm-payment")

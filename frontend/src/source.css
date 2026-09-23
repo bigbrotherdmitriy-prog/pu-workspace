@@ -753,6 +753,18 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .notification-list button { padding: 7px 10px; border: 1px solid #ccd5e1; border-radius: 8px; background: #fff; cursor: pointer; }
 .finance-page { display: grid; gap: 16px; }
 .gpr-page { display: grid; gap: 16px; }
+.gpr-dds-page { width: 100%; max-width: none; }
+.gpr-dds-unified { display: grid; gap: 14px; width: 100%; min-width: 0; }
+.gpr-dds-unified-head { position: sticky; top: -20px; z-index: 8; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 18px; border: 1px solid #d6dee8; border-radius: 12px; background: rgba(255,255,255,.97); box-shadow: 0 5px 18px rgba(28,42,61,.08); backdrop-filter: blur(8px); }
+.gpr-dds-unified-head h1 { margin: 2px 0 0; font-size: 25px; }
+.gpr-dds-primary-tabs { display: flex; gap: 5px; }
+.gpr-dds-primary-tabs button { display: inline-flex; align-items: center; gap: 7px; min-width: 130px; justify-content: center; padding: 11px 18px; border: 1px solid #ccd6e2; border-radius: 9px; background: #fff; color: #425169; font-weight: 750; cursor: pointer; }
+.gpr-dds-primary-tabs button.active { border-color: #185adb; background: #185adb; color: #fff; }
+.gpr-dds-primary-tabs svg { width: 17px; height: 17px; }
+.gpr-dds-page .gpr-split { max-height: none; overflow: visible; }
+.gpr-dds-page .gpr-grid { overflow-x: auto; overflow-y: visible; }
+.gpr-dds-page .dds-table-wrap { overflow-x: auto; overflow-y: visible; }
+.gpr-dds-page .dds-calendar { max-height: none; }
 .gpr-contract-context { border-left: 4px solid #185adb; }
 .finance-import-hub { display: grid; gap: 16px; padding: 20px 22px; border-left: 4px solid #168462; }
 .finance-import-heading h2, .finance-import-heading p { margin: 4px 0 0; }
@@ -768,6 +780,18 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .finance-import-hint { margin: 0; padding: 10px 12px; border-radius: 8px; color: #76510a; background: #fff5d9; }
 @media (max-width: 900px) { .finance-import-actions { grid-template-columns: 1fr; } }
 .dds-workspace { padding: 0; overflow: hidden; }
+.dds-invoice-drop { display: flex; align-items: center; gap: 12px; margin: 0 24px 14px; padding: 14px 16px; border: 2px dashed #9fb2c9; border-radius: 10px; background: #f8fbff; color: #46566d; }
+.dds-invoice-drop.active { border-color: #185adb; background: #edf4ff; }
+.dds-invoice-drop svg { width: 24px; color: #185adb; }
+.dds-invoice-drop div { display: grid; gap: 3px; }
+.dds-invoice-drop small { color: #6e7d91; }
+.dds-drop-choice { position: sticky; top: 72px; z-index: 7; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid #aebed2; background: #fff8dc; box-shadow: 0 5px 14px rgba(28,42,61,.12); }
+.dds-drop-choice strong { margin-right: auto; }
+.dds-plan-cell { min-width: 125px; }
+.dds-plan-cell > div { cursor: grab; }
+.dds-plan-cell input { width: 110px; padding: 6px 7px; border: 1px solid #b8c6d8; border-radius: 6px; text-align: right; font: inherit; }
+.dds-plan-cell small { display: block; margin-top: 3px; color: #157347; }
+.dds-schedule-link, .gpr-cash-link { margin-left: 8px; padding: 3px 7px; border: 1px solid #b8c7da; border-radius: 6px; background: #fff; color: #185adb; font-size: 11px; cursor: pointer; }
 .dds-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 24px 18px; }
 .dds-head h2 { margin: 3px 0 5px; font-size: 22px; }
 .dds-head p { margin: 0; color: #748091; font-size: 13px; }

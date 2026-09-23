@@ -33,7 +33,7 @@ from app.models.management import (
 )
 from app.models.saved_search_view import SavedSearchView
 from app.models.execution_finance import (
-    AcceptanceAct, BudgetLine, CashFlowEntry, ContractBudgetProposal, CostCategory, InvoiceExtractionProposal,
+    AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, ContractBudgetProposal, CostCategory, InvoiceExtractionProposal,
     PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
 )
 from app.models.external_resource import ExternalResourceLink
@@ -111,6 +111,7 @@ __all__ = [
     "ScheduleItem",
     "BudgetLine",
     "CashFlowEntry",
+    "CashFlowPlanMutation",
     "CostCategory",
     "ContractBudgetProposal",
     "InvoiceExtractionProposal",

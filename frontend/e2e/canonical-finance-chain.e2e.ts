@@ -99,23 +99,27 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   });
 
   await page.goto("/new/");
-  await page.getByRole("button", { name: "Исполнение и финансы" }).click();
-  await expect(page.locator(".gpr-workspace")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Загрузить бюджет" })).toBeDisabled();
-  await page.getByLabel("Финансовый договор").selectOption("41");
-  await expect(page.getByRole("button", { name: "Загрузить бюджет" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Загрузить плановый ДДС" })).toBeEnabled();
-  await page.getByRole("button", { name: "График работ", exact: true }).click();
+  await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "ГПР" })).toBeVisible();
+  await expect(page.getByText(/Здесь находятся только календарный план/)).toBeVisible();
+  await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  const dds = page.getByRole("tabpanel", { name: "ДДС" });
+  await expect(page.getByRole("tabpanel", { name: "ГПР" })).toBeHidden();
+  await expect(dds.getByRole("button", { name: "Загрузить бюджет" })).toBeDisabled();
+  await dds.getByLabel("Финансовый договор").selectOption("41");
+  await expect(dds.getByRole("button", { name: "Загрузить бюджет" })).toBeEnabled();
+  await expect(dds.getByRole("button", { name: "Загрузить плановый ДДС" })).toBeEnabled();
+  await page.getByRole("tab", { name: "ГПР", exact: true }).click();
   await expect(page.locator(".gpr-workspace")).toBeVisible();
   await expect(page.getByText(/Здесь находятся только календарный план/)).toBeVisible();
-  await page.getByRole("button", { name: "Исполнение и финансы" }).click();
-  await page.getByRole("button", { name: "Проверить и использовать" }).click();
-  await page.getByLabel("Этап ГПР счёта").selectOption("72");
-  await page.getByLabel("Строка бюджета счёта").selectOption("81");
-  await page.getByRole("button", { name: "Подтвердить и создать предложение" }).click();
+  await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await dds.getByRole("button", { name: "Проверить и использовать" }).click();
+  await dds.getByLabel("Этап ГПР счёта").selectOption("72");
+  await dds.getByLabel("Строка бюджета счёта").selectOption("81");
+  await dds.getByRole("button", { name: "Подтвердить и создать предложение" }).click();
 
-  await page.getByRole("tab", { name: "Детализация" }).click();
-  await page.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await dds.getByRole("tab", { name: "Детализация" }).click();
+  await dds.getByRole("button", { name: "Подтвердить", exact: true }).click();
   let paymentPrompt = 0;
   page.on("dialog", async dialog => {
     if (dialog.type() === "prompt") {
@@ -125,19 +129,19 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
     }
     await dialog.accept();
   });
-  await page.getByRole("button", { name: "Оплата", exact: true }).click();
-  await expect(page.getByText("paid", { exact: true })).toBeVisible();
+  await dds.getByRole("button", { name: "Оплата", exact: true }).click();
+  await expect(dds.getByText("paid", { exact: true })).toBeVisible();
 
-  await page.getByLabel("Тип финансовой записи").selectOption("act");
-  await page.getByPlaceholder("Название").fill("Акт монтажа");
-  await page.getByPlaceholder("Сумма, ₽").fill("25000");
-  await page.getByPlaceholder("Номер акта").fill("ACT-84");
-  await page.getByLabel("Строка бюджета для акта").selectOption("81");
-  await page.getByRole("button", { name: "Создать предложение" }).click();
-  await page.getByRole("button", { name: "Подтвердить", exact: true }).click();
-  await page.getByRole("button", { name: "Подписать", exact: true }).click();
+  await dds.getByLabel("Тип финансовой записи").selectOption("act");
+  await dds.getByPlaceholder("Название").fill("Акт монтажа");
+  await dds.getByPlaceholder("Сумма, ₽").fill("25000");
+  await dds.getByPlaceholder("Номер акта").fill("ACT-84");
+  await dds.getByLabel("Строка бюджета для акта").selectOption("81");
+  await dds.getByRole("button", { name: "Создать предложение" }).click();
+  await dds.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await dds.getByRole("button", { name: "Подписать", exact: true }).click();
 
-  await expect(page.getByText(/законтрактовано 30[\s ]?000,00 ₽/i)).toBeVisible();
-  await expect(page.getByText(/факт работ 25[\s ]?000,00 ₽/i)).toBeVisible();
+  await expect(dds.getByText(/законтрактовано 30[\s ]?000,00 ₽/i)).toBeVisible();
+  await expect(dds.getByText(/факт работ 25[\s ]?000,00 ₽/i)).toBeVisible();
   expect(mock.unexpected).toEqual([]);
 });

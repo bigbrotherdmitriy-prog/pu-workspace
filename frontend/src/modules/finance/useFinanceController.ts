@@ -328,6 +328,29 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
+  async function mutateCashFlowPlan(id: number, operation: "edit" | "move" | "copy", plannedDate: string,
+                                    plannedAmount: number, expectedRecordVersion: number) {
+    const result = await api<{ mutation_id: number; result_id: number; record_version: number }>(
+      `/execution/cash-flow/${id}/plan-mutations`, {
+        method: "POST",
+        body: JSON.stringify({
+          operation, planned_date: plannedDate, planned_amount: plannedAmount,
+          expected_record_version: expectedRecordVersion,
+          idempotency_key: crypto.randomUUID(),
+        }),
+      },
+    );
+    setNotice(operation === "copy" ? "Плановая сумма скопирована. Факт не изменён." : "План ДДС обновлён. Факт не изменён.");
+    await loadFinance();
+    return result;
+  }
+
+  async function undoCashFlowPlanMutation(mutationId: number) {
+    await api(`/execution/cash-flow/plan-mutations/${mutationId}/undo`, { method: "POST" });
+    setNotice("Последнее изменение плана ДДС отменено.");
+    await loadFinance();
+  }
+
   async function confirmFinance(kind: string, id: number, status: string) {
     try {
       await api(`/execution/${kind}/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
@@ -433,6 +456,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
+    updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }
