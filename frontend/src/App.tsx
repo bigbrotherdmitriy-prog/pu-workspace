@@ -3524,7 +3524,7 @@ export function App() {
               setBudgetLineId={setFinanceBudgetLineId}
               setBaselineId={setFinanceBaselineId}
               onEditInvoice={editInvoiceExtraction}
-              onConfirmInvoice={() => void confirmInvoiceExtraction()}
+              onConfirmInvoice={() => void confirmInvoiceExtraction().then(() => setFinanceEditorOpen(false))}
               onRejectInvoice={() => void rejectInvoiceExtraction()}
               onRetryInvoiceAi={() => void retryInvoiceAiAnalysis()}
               invoiceAiRetrying={invoiceAiRetrying}
@@ -3535,7 +3535,7 @@ export function App() {
                 setFinanceStructuredRows([]);
               }}
               onImport={() => void importStructuredFinance()}
-              onAdd={() => void addFinanceItem()}
+              onAdd={() => void addFinanceItem().then(() => setFinanceEditorOpen(false))}
               onConfirm={(kind, id, status) =>
                 void confirmFinance(kind, id, status)
               }
