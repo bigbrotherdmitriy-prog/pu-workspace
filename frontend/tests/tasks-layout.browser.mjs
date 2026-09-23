@@ -27,6 +27,16 @@ try {
     await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     await page.goto(`${origin}/tests/fixtures/tasks-layout.html`);
     await page.locator(".task-body strong").waitFor();
+    const taskInformation = page.locator(".task-information");
+    assert.match(await taskInformation.textContent(), /Приоритет\s*Высокий/);
+    assert.match(await taskInformation.textContent(), /Участники\s*Александра/);
+    assert.match(await taskInformation.textContent(), /Описание\s*Требуется ручная проверка/);
+    assert.match(await taskInformation.textContent(), /Источник\s*Проекты\/Генподряд/);
+    if (width <= 760) assert.equal(
+      await taskInformation.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+      1,
+      `${width}: task information is not a single mobile column`,
+    );
     await page.locator(".task-body strong").hover();
     await page.waitForTimeout(800); // Previous unsolicited bubble appeared after 550 ms.
     assert.equal(await page.getByRole("tooltip").count(), 0, `${width}: unsolicited tooltip`);
