@@ -337,6 +337,29 @@ export class StorageApi {
         next_cursor: null,
       } });
     }
+    const readinessMatch = path.match(/^\/api\/v54\/projects\/(\d+)\/autonomy-readiness$/);
+    if (method === "GET" && readinessMatch) {
+      const readinessProjectId = Number(readinessMatch[1]);
+      return this.fulfill(route, { body: {
+        project_id: readinessProjectId,
+        observed_at: "2026-09-23T07:00:00Z",
+        overall: { status: "OFF", blockers: ["runtime_disabled"], warnings: [] },
+        runtime: { state: "disabled", pilot_enabled: false, producer_enabled: false,
+          notification_enabled: false, scope_matches: false, component_alignment: "unverified" },
+        policy: { revision: 1, hash_prefix: "synthetic", enabled: false,
+          task_mode: "CONFIRM", notification_mode: "CONFIRM", external_message_mode: "CONFIRM",
+          authority_epoch: 1, valid_until: "2026-09-24T07:00:00Z", ttl_seconds: 86400,
+          ready: false, history: [{ revision: 1, enabled: false }] },
+        authority: { state: "inactive", membership_role: "manager", ready: false },
+        mailbox: { state: "disabled", ready: false, valid: false, producer_ready: false },
+        quotas: {
+          task_hourly: { used: 0, limit: 3 },
+          notification_project_hourly: { used: 0, limit: 3 },
+          notification_recipient_daily: { max_used: 0, limit: 10 },
+        },
+        operations: { actions: {}, receipts: {}, jobs: {}, incidents: [] },
+      } });
+    }
     if (method === "GET" && /^\/projects\/\d+\/source-folders\/discover$/.test(path)) {
       if (this.discoveryReply) return this.fulfill(route, this.discoveryReply(url));
       const selected = url.searchParams.get("provider");

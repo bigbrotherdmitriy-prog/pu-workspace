@@ -56,6 +56,7 @@ import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/l
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
+import type { AutonomyReadiness } from "./modules/settings/AutonomyReadinessPanel";
 import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
@@ -490,6 +491,7 @@ export function App() {
     [googleState, setGoogleState] = useState<GoogleState | null>(null),
     [aiPolicy, setAiPolicy] = useState<AIProjectPolicy | null>(null),
     [processingQueue, setProcessingQueue] = useState<ProcessingQueue | null>(null),
+    [autonomyReadiness, setAutonomyReadiness] = useState<AutonomyReadiness | null>(null),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
     [busyProposal, setBusyProposal] = useState(0),
@@ -545,6 +547,17 @@ export function App() {
   const documentRequestRef = useRef(0);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
   const offlineSync = useOfflineSync(currentUser?.id || 0, projectId, () => { void load(); });
+  useEffect(() => {
+    let current = true;
+    if (!ready || !projectId || active !== "Настройки") {
+      setAutonomyReadiness(null);
+      return () => { current = false; };
+    }
+    api(`/api/v54/projects/${projectId}/autonomy-readiness`)
+      .then((value) => { if (current && value?.overall?.status) setAutonomyReadiness(value); })
+      .catch(() => { if (current) setAutonomyReadiness(null); });
+    return () => { current = false; };
+  }, [active, projectId, ready]);
 
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
@@ -3859,6 +3872,7 @@ export function App() {
           members={members}
           aiPolicy={aiPolicy}
           processingQueue={processingQueue}
+          autonomyReadiness={autonomyReadiness}
           onPolicyChange={setAiPolicy}
           onSavePolicy={() => void saveAIPolicy()}
           onRetrySnapshot={(id) => void retrySnapshot(id)}
