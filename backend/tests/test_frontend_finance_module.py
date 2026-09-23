@@ -36,7 +36,8 @@ def test_dds_workspace_mirrors_reference_workbook_views():
     module = (ROOT / "frontend" / "src" / "modules" / "finance" / "DdsWorkspace.tsx").read_text(encoding="utf-8")
 
     assert "ДДС по месяцам" in module
-    assert "Календарь (вид ГПР)" in module
+    assert "Таблица ДДС" in module
+    assert 'useState<Tab>("calendar")' in module
     assert "Детализация" in module
     assert "Сводка" in module
     assert "object_name" in module

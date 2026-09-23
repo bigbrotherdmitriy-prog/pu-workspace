@@ -110,13 +110,15 @@ def test_clone_baseline_remaps_hierarchy_and_predecessors(db_session, user_facto
     user = user_factory(is_admin=True)
     source = ScheduleBaseline(
         project_id=7, created_by_user_id=user.id, name="ГПР v1", version=1,
-        status="approved", note="Исходная версия",
+        status="approved", note="Исходная версия", source_format="mpp",
+        source_sha256="b" * 64,
     )
     db_session.add(source)
     db_session.flush()
     root = ScheduleItem(
         project_id=7, baseline_id=source.id, title="Подготовка", sort_order=1,
         duration_days=3, planned_start=date(2026, 9, 1), planned_finish=date(2026, 9, 3),
+        source_name="ГПР 02.09.2026.mpp",
     )
     db_session.add(root)
     db_session.flush()
@@ -133,10 +135,14 @@ def test_clone_baseline_remaps_hierarchy_and_predecessors(db_session, user_facto
     assert result["version"] == 2
     assert result["status"] == "draft"
     assert result["source_baseline_id"] == source.id
+    cloned_baseline = db_session.get(ScheduleBaseline, result["id"])
+    assert cloned_baseline.source_format == "mpp"
+    assert cloned_baseline.source_sha256 == "b" * 64
     cloned = list(db_session.query(ScheduleItem).filter(
         ScheduleItem.baseline_id == result["id"],
     ).order_by(ScheduleItem.sort_order))
     assert len(cloned) == 2
+    assert cloned[0].source_name == "ГПР 02.09.2026.mpp"
     assert cloned[1].parent_id == cloned[0].id
     assert cloned[1].predecessor_ids == f"{cloned[0].id}FS+2д"
 
@@ -189,7 +195,7 @@ def test_overview_keeps_a_corrupt_import_visible_for_repair(db_session, user_fac
     db_session.flush()
     task = ScheduleItem(
         project_id=91, baseline_id=baseline.id, title="Повреждённая связь", sort_order=1,
-        duration_days=1,
+        duration_days=1, source_name="Старый импорт MPP.mpp",
     )
     db_session.add(task)
     db_session.flush()
@@ -199,6 +205,8 @@ def test_overview_keeps_a_corrupt_import_visible_for_repair(db_session, user_fac
     result = overview(91, db_session, user)
 
     assert result["baselines"][0]["analysis_warning"] == "Зависимости образуют цикл"
+    assert result["baselines"][0]["source_file_name"] == "Старый импорт MPP.mpp"
+    assert result["baselines"][0]["source_sha256"] == "a" * 64
     assert result["schedule"][0]["id"] == task.id
     assert result["schedule"][0]["is_critical"] is False
 
@@ -214,11 +222,11 @@ def test_reimport_repairs_legacy_self_dependencies_in_place(db_session, user_fac
     db_session.flush()
     first = ScheduleItem(
         project_id=92, baseline_id=baseline.id, title="Подготовка", sort_order=1,
-        duration_days=1, source_excerpt="MPP task UID 10",
+        duration_days=1, source_name="old-plan.mpp", source_excerpt="MPP task UID 10",
     )
     second = ScheduleItem(
         project_id=92, baseline_id=baseline.id, title="Монтаж", sort_order=2,
-        duration_days=1, source_excerpt="MPP task UID 20",
+        duration_days=1, source_name="old-plan.mpp", source_excerpt="MPP task UID 20",
     )
     db_session.add_all([first, second])
     db_session.flush()
@@ -239,7 +247,43 @@ def test_reimport_repairs_legacy_self_dependencies_in_place(db_session, user_fac
     assert result["duplicate"] is True
     assert result["repaired"] is True
     assert result["baseline_id"] == baseline.id
+    assert first.source_name == "plan.mpp"
+    assert second.source_name == "plan.mpp"
     assert second.predecessor_ids == f"{first.id}FS"
+
+
+def test_reimport_same_mpp_rebinds_the_visible_source_filename_without_a_second_baseline(
+    db_session, user_factory,
+):
+    user = user_factory(is_admin=True)
+    digest = hashlib.sha256(b"MPP").hexdigest()
+    baseline = ScheduleBaseline(
+        project_id=93, created_by_user_id=user.id, name="ГПР", version=1,
+        status="draft", source_format="mpp", source_sha256=digest,
+    )
+    db_session.add(baseline)
+    db_session.flush()
+    source_row = ScheduleItem(
+        project_id=93, baseline_id=baseline.id, title="Работа", sort_order=1,
+        duration_days=1, source_name="черновик.mpp", source_excerpt="MPP task UID 10",
+    )
+    db_session.add(source_row)
+    db_session.flush()
+
+    result = import_mpp(
+        MppImportRequest(project_id=93, filename="ГПР 02.09.2026.mpp", content_base64="TVBQ"),
+        db_session, user,
+    )
+
+    assert result == {
+        "baseline_id": baseline.id,
+        "version": 1,
+        "created": 1,
+        "duplicate": True,
+        "repaired": False,
+    }
+    assert source_row.source_name == "ГПР 02.09.2026.mpp"
+    assert db_session.query(ScheduleBaseline).filter_by(project_id=93).count() == 1
 
 
 def test_linked_budget_committed_is_idempotent_and_ignores_cancelled_entries():

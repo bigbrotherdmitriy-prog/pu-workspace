@@ -5,7 +5,7 @@ import type { FinanceOverview } from "./types";
 
 const finance = {
   baselines: [
-    { id: 10, contract_id: 4, name: "ГПР 02.09.2026", version: 2, status: "draft" },
+    { id: 10, contract_id: 4, name: "ГПР 02.09.2026", version: 2, status: "draft", source_format: "mpp", source_file_name: "ГПР 02.09.2026.mpp", source_sha256: "abcdef1234567890" },
     { id: 9, contract_id: 4, name: "Утверждённый ГПР", version: 1, status: "approved" },
   ],
   schedule: [
@@ -25,6 +25,8 @@ describe("GprWorkspace", () => {
 
     expect(screen.getByText("Монтаж")).toBeInTheDocument();
     expect(screen.getByText("Критический путь")).toBeInTheDocument();
+    expect(screen.getByText("ГПР 02.09.2026.mpp")).toBeInTheDocument();
+    expect(screen.getByText(/SHA-256 abcdef123456/)).toBeInTheDocument();
     expect(screen.getByLabelText("Связи задач")).toBeInTheDocument();
     expect(screen.getAllByText("0 дн.").length).toBeGreaterThan(0);
     expect(screen.getByText("+1 дн.")).toBeInTheDocument();

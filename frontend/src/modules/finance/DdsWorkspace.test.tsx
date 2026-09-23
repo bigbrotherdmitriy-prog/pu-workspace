@@ -16,14 +16,21 @@ describe("DdsWorkspace", () => {
   it("shows every workbook view and recalculates summaries from detail rows", () => {
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
+    expect(screen.getByRole("tab", { name: "Таблица ДДС" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Статья ДДС")).toBeInTheDocument();
+    expect(screen.getByText("Итого за 2026, RUB")).toBeInTheDocument();
+    expect(screen.getByText("Платежи — всего")).toBeInTheDocument();
+    expect(screen.getByText("Расходы по месяцам")).toBeInTheDocument();
+    expect(screen.getByText("Баланс накопленным итогом")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "ДДС по месяцам" }));
     expect(screen.getByText("январь 2026 г.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.getByText("Оплата этапа")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Сводка" }));
     expect(screen.getByText("По объектам")).toBeInTheDocument();
     expect(screen.getByText("Расходы по статьям")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Календарь (вид ГПР)" }));
-    expect(screen.getByText("ДУБНА")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
+    expect(screen.getByText("Дубна — всего поступлений")).toBeInTheDocument();
   });
 
   it("confirms selected proposed operations in one callback", () => {
@@ -65,9 +72,9 @@ describe("DdsWorkspace", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Экспорт: Таблица ДДС" }));
+    fireEvent.click(screen.getByRole("tab", { name: "ДДС по месяцам" }));
     fireEvent.click(screen.getByRole("button", { name: "Экспорт: ДДС по месяцам" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Календарь (вид ГПР)" }));
-    fireEvent.click(screen.getByRole("button", { name: "Экспорт: Календарь (вид ГПР)" }));
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     fireEvent.click(screen.getByRole("button", { name: "Экспорт: Детализация" }));
     fireEvent.click(screen.getByRole("tab", { name: "Сводка" }));
@@ -84,7 +91,7 @@ describe("DdsWorkspace", () => {
     const onUndoPlanMutation = vi.fn().mockResolvedValue(undefined);
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} onUndoPlanMutation={onUndoPlanMutation} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Календарь (вид ГПР)" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
     const input = screen.getByLabelText("План Щиты 2026-02");
     fireEvent.change(input, { target: { value: "450" } });
     fireEvent.blur(input);
@@ -111,8 +118,9 @@ describe("DdsWorkspace", () => {
     render(<DdsWorkspace finance={mixed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
 
     expect(screen.getByLabelText("Валюта ДДС")).toHaveValue("RUB");
+    fireEvent.click(screen.getByRole("tab", { name: "ДДС по месяцам" }));
     expect(screen.getByText("Факт, RUB")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Календарь (вид ГПР)" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
     expect(screen.queryByLabelText("План Этап 1 2026-01")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Валюта ДДС"), { target: { value: "USD" } });
     expect(screen.getByLabelText("План USD invoice 2026-02")).toBeInTheDocument();
@@ -126,7 +134,7 @@ describe("DdsWorkspace", () => {
     ] } as FinanceOverview;
     render(<DdsWorkspace finance={monthEnd} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Календарь (вид ГПР)" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
     const input = screen.getByLabelText("План Щиты 2026-01");
     fireEvent.dragStart(input.parentElement!);
     fireEvent.drop(input.closest("tr")!.querySelectorAll("td")[3]);

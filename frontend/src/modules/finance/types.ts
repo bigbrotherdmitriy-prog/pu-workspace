@@ -29,6 +29,8 @@ export type FinanceOverview = {
     status: string;
     note?: string;
     source_format?: string;
+    source_file_name?: string;
+    source_sha256?: string;
     analysis_warning?: string;
   }[];
   schedule: {

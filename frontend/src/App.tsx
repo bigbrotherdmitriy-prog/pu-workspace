@@ -522,6 +522,7 @@ export function App() {
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
   const [gprDdsTab, setGprDdsTab] = useState<GprDdsTab>("gpr");
+  const [financeEditorOpen, setFinanceEditorOpen] = useState(false);
   const [focusedScheduleItemId, setFocusedScheduleItemId] = useState(0);
   const [contractDropStatus, setContractDropStatus] = useState("");
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
@@ -547,6 +548,9 @@ export function App() {
     confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
     updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
+  useEffect(() => {
+    if (active === "ГПР и ДДС" && (invoiceExtractionProposal || financeStructuredPreview)) setFinanceEditorOpen(true);
+  }, [active, invoiceExtractionProposal, financeStructuredPreview]);
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
@@ -3384,18 +3388,19 @@ export function App() {
       />
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (
-        <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
+        <section className={`module-overlay gpr-dds-overlay ${collapsed ? "collapsed" : ""}`}>
           <div className="module-page gpr-dds-page">
           <GprDdsWorkspace
             tab={active === "Исполнение и финансы" ? "dds" : active === "График работ" ? "gpr" : gprDdsTab}
             onTabChange={(tab) => { setGprDdsTab(tab); if (active !== "ГПР и ДДС") setActive("ГПР и ДДС"); }}
+            onClose={() => setActive("Обзор")}
             gpr={<>
             <GprContractContext contracts={contracts} selectedContractId={selectedFinanceContractId} onSelectContract={setSelectedFinanceContractId} />
             <GprWorkspace
               projectId={projectId}
               finance={finance}
               selectedContractId={selectedFinanceContractId}
-              onPrepare={prepareFinanceItem}
+              onPrepare={(kind, baselineId) => { prepareFinanceItem(kind, baselineId); setFinanceEditorOpen(true); }}
               onUpdateTask={updateScheduleTask}
               onBulkUpdate={bulkUpdateSchedule}
               onCloneBaseline={cloneScheduleBaseline}
@@ -3403,7 +3408,7 @@ export function App() {
               focusTaskId={focusedScheduleItemId}
               onOpenCashFlow={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("dds"); }}
             />
-            <FinanceOperations
+            {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
               finance={finance}
               preview={null}
               selectedRows={financeStructuredRows}
@@ -3441,10 +3446,10 @@ export function App() {
               includeEditor={active === "График работ" || (active === "ГПР и ДДС" && gprDdsTab === "gpr")}
               includeRegisters={false}
               editorScope="gpr"
-            />
+            /></div>}
             </>}
             dds={<>
-            <FinanceModule
+            {active !== "ГПР и ДДС" && <FinanceModule
               finance={finance}
               candidates={financeCandidates}
               contracts={contracts}
@@ -3456,11 +3461,11 @@ export function App() {
               onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
               onOpenSchedule={() => setGprDdsTab("gpr")}
               onReload={() => void loadFinance()}
-            />
+            />}
             <DdsWorkspace
               finance={finance}
               selectedContractId={selectedFinanceContractId}
-              onPrepare={prepareFinanceItem}
+              onPrepare={(kind) => { prepareFinanceItem(kind); setFinanceEditorOpen(true); }}
               onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
               onConfirmMany={confirmFinanceMany}
               onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
@@ -3472,9 +3477,9 @@ export function App() {
               focusScheduleItemId={focusedScheduleItemId}
               onOpenSchedule={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("gpr"); }}
               onDropInvoices={uploadDdsInvoices}
-              onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); }}
+              onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
-            <FinanceOperations
+            {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
               finance={finance}
               preview={financeStructuredPreview}
               selectedRows={financeStructuredRows}
@@ -3528,7 +3533,7 @@ export function App() {
               includeScheduleRegister={false}
               includeCashFlowRegister={false}
               editorScope="finance"
-            />
+            /></div>}
             </>}
           />
           </div>
