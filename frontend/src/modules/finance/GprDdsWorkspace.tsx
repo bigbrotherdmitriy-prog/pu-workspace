@@ -15,12 +15,12 @@ type Props = {
 export function GprDdsWorkspace({ tab, onTabChange, onClose, gpr, dds }: Props) {
   return <div className="gpr-dds-unified">
     <header className="gpr-dds-unified-head">
-      <div><span className="eyebrow">ЕДИНЫЙ ПЛАН ПРОЕКТА</span><h1>ГПР и ДДС</h1></div>
-      <div className="gpr-dds-primary-tabs" role="tablist" aria-label="ГПР и ДДС">
+      <div className="gpr-dds-title"><span>ЕДИНЫЙ ПЛАН ПРОЕКТА</span><h1>ГПР и ДДС</h1></div>
+      {onClose && <button type="button" className="gpr-dds-close" aria-label="Закрыть ГПР и ДДС" onClick={onClose}><X /> К проекту</button>}
+      <nav className="gpr-dds-primary-tabs" role="tablist" aria-label="ГПР и ДДС">
         <button type="button" role="tab" aria-selected={tab === "gpr"} className={tab === "gpr" ? "active" : ""} onClick={() => onTabChange("gpr")}><CalendarRange /> ГПР</button>
         <button type="button" role="tab" aria-selected={tab === "dds"} className={tab === "dds" ? "active" : ""} onClick={() => onTabChange("dds")}><Wallet /> ДДС</button>
-        {onClose && <button type="button" className="gpr-dds-close" aria-label="Закрыть ГПР и ДДС" onClick={onClose}><X /> К проекту</button>}
-      </div>
+      </nav>
     </header>
     <div className="gpr-dds-panel" role="tabpanel" aria-label="ГПР" hidden={tab !== "gpr"}>{gpr}</div>
     <div className="gpr-dds-panel" role="tabpanel" aria-label="ДДС" hidden={tab !== "dds"}>{dds}</div>

@@ -4,11 +4,9 @@ import { Login } from "./auth/Login";
 import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
 import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
-import { FinanceModule } from "./modules/finance/FinanceModule";
 import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
 import { GprWorkspace } from "./modules/finance/GprWorkspace";
 import { GprDdsWorkspace, type GprDdsTab } from "./modules/finance/GprDdsWorkspace";
-import { GprContractContext } from "./modules/finance/GprContractContext";
 import { FinanceOperations } from "./modules/finance/FinanceOperations";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
@@ -3395,11 +3393,12 @@ export function App() {
             onTabChange={(tab) => { setGprDdsTab(tab); if (active !== "ГПР и ДДС") setActive("ГПР и ДДС"); }}
             onClose={() => setActive("Обзор")}
             gpr={<>
-            <GprContractContext contracts={contracts} selectedContractId={selectedFinanceContractId} onSelectContract={setSelectedFinanceContractId} />
             <GprWorkspace
               projectId={projectId}
               finance={finance}
+              contracts={contracts}
               selectedContractId={selectedFinanceContractId}
+              onSelectContract={setSelectedFinanceContractId}
               onPrepare={(kind, baselineId) => { prepareFinanceItem(kind, baselineId); setFinanceEditorOpen(true); }}
               onUpdateTask={updateScheduleTask}
               onBulkUpdate={bulkUpdateSchedule}
@@ -3449,19 +3448,6 @@ export function App() {
             /></div>}
             </>}
             dds={<>
-            {active !== "ГПР и ДДС" && <FinanceModule
-              finance={finance}
-              candidates={financeCandidates}
-              contracts={contracts}
-              selectedContractId={selectedFinanceContractId}
-              onSelectContract={setSelectedFinanceContractId}
-              onPrepare={prepareFinanceItem}
-              onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
-              onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
-              onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
-              onOpenSchedule={() => setGprDdsTab("gpr")}
-              onReload={() => void loadFinance()}
-            />}
             <DdsWorkspace
               finance={finance}
               selectedContractId={selectedFinanceContractId}
@@ -3479,19 +3465,6 @@ export function App() {
               onDropInvoices={uploadDdsInvoices}
               onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
-            {active === "ГПР и ДДС" && <FinanceModule
-              finance={finance}
-              candidates={financeCandidates}
-              contracts={contracts}
-              selectedContractId={selectedFinanceContractId}
-              onSelectContract={setSelectedFinanceContractId}
-              onPrepare={prepareFinanceItem}
-              onUseCandidate={useFinanceCandidate}
-              onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
-              onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
-              onOpenSchedule={() => setGprDdsTab("gpr")}
-              onReload={() => void loadFinance()}
-            />}
             {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
               finance={finance}
               preview={financeStructuredPreview}
