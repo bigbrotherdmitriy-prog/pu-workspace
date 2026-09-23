@@ -22,6 +22,11 @@ function effectLabel(label: string, status: string | undefined): string {
   } as Record<string, string>)[status || "not_requested"] || "неизвестно"}`;
 }
 
+function priorityLabel(priority: string): string {
+  return ({ critical: "Критический", high: "Высокий", normal: "Обычный", low: "Низкий" } as Record<string, string>)[priority]
+    || priority.replaceAll("_", " ").replace(/^./, (letter) => letter.toLocaleUpperCase("ru-RU"));
+}
+
 export type TaskHistoryRow = {
   action: string; old_status?: string; new_status?: string; result_note?: string;
   completion_document_name?: string; details?: string; changed_by: string; changed_at: string;
@@ -65,16 +70,21 @@ export function TasksModule(props: Props) {
       <div className="task-body">
         <strong>{task.title}</strong>
         {task.offline_pending && <span className="task-offline-pending">Ожидает синхронизации</span>}
-        <p>{task.source_file_name} · {task.assignee_name} · эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
+        <dl className="task-information" aria-label={`Сведения о задаче ${task.title}`}>
+          <div><dt>Приоритет</dt><dd><span className={`task-priority-label ${task.priority}`}>{priorityLabel(task.priority)}</span></dd></div>
+          <div><dt>Участники</dt><dd>{task.assignee_name || "Не назначены"}</dd></div>
+          <div className="task-information-wide"><dt>Описание</dt><dd className="task-description">{task.description || "Описание не указано"}</dd></div>
+          <div className="task-information-wide"><dt>Источник</dt><dd>{task.source_file_name || "Источник не указан"}</dd></div>
+        </dl>
+        <p className="task-confidence">Эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
         <small>Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
         {task.needs_review && <p className="task-review-warning">Требуется ручная проверка по документу-источнику.</p>}
-        {task.description && <p className="task-description">{task.description}</p>}
         {task.due_date_adjusted && <p className="task-review-warning">
           {task.original_obligation_due_date
             ? `Срок скорректирован, исходное обязательство было до ${task.original_obligation_due_date}.`
             : "Срок скорректирован, в исходном обязательстве срок не указан."}
         </p>}
-        <small className="task-source-excerpt">{task.source_excerpt}</small>
+        {task.source_excerpt && <small className="task-source-excerpt"><b>Фрагмент источника</b>{task.source_excerpt}</small>}
       </div>
       <div className="task-meta"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{effectLabel("Google Tasks", task.provider_effects?.task.status)} · {effectLabel("Calendar", task.provider_effects?.calendar.status)}</span></div>
       <div className="task-actions">

@@ -38,6 +38,16 @@ try {
       await page.goto(`${origin}/tests/fixtures/documents-layout.html`);
       await page.locator(".document-register > button").first().waitFor();
 
+      const documentInformation = page.locator(".document-information");
+      assert.match(await documentInformation.textContent(), /Описание\s*Синтетическая сводка/);
+      assert.match(await documentInformation.textContent(), /Источник\s*Рабочая копия Google Диска/);
+      assert.match(await documentInformation.textContent(), /Статус\s*Проанализирован/);
+      if (width <= 760) assert.equal(
+        await documentInformation.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+        1,
+        `${width}: document information is not a single mobile column`,
+      );
+
       assert.equal(await page.locator(".document-register > button").count(), 462, `${width}: fixture count`);
       await page.getByPlaceholder("Поиск по названию или сводке").fill("Уникальный план-график № 321");
       assert.equal(await page.locator(".document-register > button").count(), 1, `${width}: search result count`);

@@ -144,7 +144,9 @@ def product_world(tmp_path):
             organization_id=1, project_id=10, principal_kind="user", principal_id="2",
             scope=PILOT_SCOPE, membership_role="owner", permissions=sorted(PILOT_OPERATIONS),
             state="active", authority_epoch=1, record_version=1,
-            valid_until=NOW + timedelta(hours=48), updated_at=NOW,
+            # API wiring intentionally reads the wall clock. Keep this shared synthetic
+            # authority valid beyond the fixed scenario dates so the suite cannot expire.
+            valid_until=NOW + timedelta(days=3650), updated_at=NOW,
         ))
         db.flush()
         credential = IntegrationCredential(
