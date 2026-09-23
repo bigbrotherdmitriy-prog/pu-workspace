@@ -3479,6 +3479,19 @@ export function App() {
               onDropInvoices={uploadDdsInvoices}
               onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
+            {active === "ГПР и ДДС" && <FinanceModule
+              finance={finance}
+              candidates={financeCandidates}
+              contracts={contracts}
+              selectedContractId={selectedFinanceContractId}
+              onSelectContract={setSelectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onUseCandidate={useFinanceCandidate}
+              onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
+              onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
+              onOpenSchedule={() => setGprDdsTab("gpr")}
+              onReload={() => void loadFinance()}
+            />}
             {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
               finance={finance}
               preview={financeStructuredPreview}
