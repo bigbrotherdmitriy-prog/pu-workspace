@@ -32,6 +32,7 @@ from app.api.provider_actions import router as provider_actions_router
 from app.api.jobs import router as jobs_router
 from app.api.evidence import router as evidence_router
 from app.api.autonomy_policy import router as autonomy_policy_router
+from app.api.autonomy_readiness import router as autonomy_readiness_router
 from app.api.v54_sandbox_acceptance import router as v54_sandbox_acceptance_router
 from app.api.mobile_sync import router as mobile_sync_router
 
@@ -165,6 +166,7 @@ app.include_router(provider_actions_router)
 app.include_router(jobs_router)
 app.include_router(evidence_router)
 app.include_router(autonomy_policy_router)
+app.include_router(autonomy_readiness_router)
 app.include_router(v54_sandbox_acceptance_router)
 app.include_router(mobile_sync_router)
 app.include_router(google_drive_router)

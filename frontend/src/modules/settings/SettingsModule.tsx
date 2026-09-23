@@ -1,6 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 import { PasswordChangeCard } from "./PasswordChangeCard";
 import { CompanyProfileCard } from "./CompanyProfileCard";
+import { AutonomyReadinessPanel, type AutonomyReadiness } from "./AutonomyReadinessPanel";
 
 export type AIProjectPolicy = {
   project_id: number;
@@ -26,6 +27,7 @@ type Props = {
   members: Array<{ membership_id: number; name: string; email: string; role: string }>;
   aiPolicy: AIProjectPolicy | null;
   processingQueue: ProcessingQueue | null;
+  autonomyReadiness: AutonomyReadiness | null;
   onPolicyChange: (policy: AIProjectPolicy) => void;
   onSavePolicy: () => void;
   onRetrySnapshot: (id: number) => void;
@@ -48,6 +50,7 @@ export function SettingsModule(props: Props) {
       </section>
       <PasswordChangeCard onChanged={props.onPasswordChanged} />
       <CompanyProfileCard editable={Boolean(props.currentUser?.is_admin)} />
+      {props.autonomyReadiness && <AutonomyReadinessPanel data={props.autonomyReadiness} />}
       <section className="card span-settings">
         <div className="card-head"><div><h2>AI и защита данных</h2><p>Что разрешено передавать внешней модели для выбранного проекта</p></div></div>
         {props.aiPolicy && <div className="form-grid">
