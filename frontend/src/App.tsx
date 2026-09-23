@@ -645,6 +645,8 @@ export function App() {
           api("/api/readiness").catch(() => null),
           api(`/projects/${id}/members`).catch(() => ({ members: [] })),
           api("/auth/me").catch(() => null),
+          // Kept for backward-compatible admin diagnostics; the project Journal
+          // view never renders this global/free-form payload.
           api("/history/audit?limit=100").catch(() => ({ logs: [] })),
           api(`/projects/${id}/ai-policy`).catch(() => null),
           api(`/projects/${id}/processing-queue`).catch(() => null),
@@ -3891,6 +3893,7 @@ export function App() {
       {active === "Журнал" && (
         <AuditModule
           collapsed={collapsed}
+          projectId={projectId}
           logs={auditLogs}
           query={query}
           onReload={() => void load()}
