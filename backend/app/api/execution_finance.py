@@ -1036,6 +1036,14 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
             # and schedule in the project.  Keep it visible and explain how to
             # repair it by importing the original MPP again.
             baseline_warnings[baseline.id] = str(exc.detail)
+    source_file_by_baseline = {
+        baseline.id: next(
+            (item.source_name for item in schedule
+             if item.baseline_id == baseline.id and item.source_name and item.source_name.casefold().endswith(".mpp")),
+            baseline.name if baseline.source_format == "mpp" else None,
+        )
+        for baseline in baselines
+    }
     confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}]
     relevant_cash = [x for x in cash if x.status in {"approved", "paid", "received"}]
     currencies = sorted({x.currency for x in confirmed_budget} | {x.currency for x in relevant_cash}) or ["RUB"]
@@ -1078,7 +1086,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
                     "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note,
-                       "source_format": x.source_format, "analysis_warning": baseline_warnings.get(x.id)} for x in baselines],
+                       "source_format": x.source_format, "source_file_name": source_file_by_baseline[x.id],
+                       "source_sha256": x.source_sha256, "analysis_warning": baseline_warnings.get(x.id)} for x in baselines],
         "schedule": [{"id": x.id, "baseline_id": x.baseline_id, "title": x.title, "sort_order": x.sort_order,
                       "parent_id": x.parent_id, "duration_days": x.duration_days, "is_milestone": x.is_milestone,
                       "predecessor_ids": x.predecessor_ids, "constraint_type": x.constraint_type, "constraint_date": x.constraint_date,
@@ -1341,7 +1350,17 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
         existing_rows = list(db.scalars(select(ScheduleItem).where(
             ScheduleItem.baseline_id == existing.id,
         ).order_by(ScheduleItem.sort_order, ScheduleItem.id)))
+        current_source_name = next((row.source_name for row in existing_rows if row.source_name), existing.name)
+        source_name_changed = current_source_name != payload.filename
+        if source_name_changed:
+            for row in existing_rows:
+                if row.source_name:
+                    row.source_name = payload.filename
         if not _has_self_dependency(existing_rows):
+            if source_name_changed:
+                _audit(db, "mpp_source_file_rebound", "schedule_baseline", existing.id, user.id,
+                       f"sha256={digest[:12]}")
+                db.commit()
             return {"baseline_id": existing.id, "version": existing.version,
                     "created": len(existing_rows), "duplicate": True, "repaired": False}
 
@@ -1456,6 +1475,8 @@ def clone_baseline(baseline_id: int, payload: BaselineClone, db: Session = Depen
         version=version,
         status="draft",
         note=note,
+        source_format=source.source_format,
+        source_sha256=source.source_sha256,
     )
     db.add(clone)
     db.flush()

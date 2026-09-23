@@ -15,4 +15,15 @@ describe("GprDdsWorkspace", () => {
     fireEvent.click(screen.getByRole("tab", { name: "ДДС" }));
     expect(onTabChange).toHaveBeenCalledWith("dds");
   });
+
+  it("offers exactly two primary tabs and returns to the project", () => {
+    const onClose = vi.fn();
+    render(<GprDdsWorkspace tab="dds" onTabChange={vi.fn()} onClose={onClose} gpr={<p>GPR state</p>} dds={<p>DDS state</p>} />);
+
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "ГПР" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "ДДС" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть ГПР и ДДС" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
