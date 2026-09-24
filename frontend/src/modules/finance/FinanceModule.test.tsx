@@ -92,4 +92,25 @@ describe("finance document ingress", () => {
     expect(screen.getByRole("button", { name: "Загрузить бюджет" })).toBeEnabled();
     expect(screen.queryByText("Мастер запуска исполнения")).toBeNull();
   });
+
+  it("keeps detected document cards collapsed when DDS opens", () => {
+    render(<FinanceModule
+      embedded
+      finance={null}
+      candidates={[{ document_id: 11, name: "Счёт.pdf", kind: "invoice", score: 80, reasons: [], hints: {}, source: "drive", originals_changed: false, already_linked: false }]}
+      contracts={[{ id: 7, number: "Д-7", title: "Монтаж" }]}
+      selectedContractId={7}
+      onSelectContract={vi.fn()}
+      onPrepare={vi.fn()}
+      onUseCandidate={vi.fn()}
+      onUpload={vi.fn()}
+      onUploadFinance={vi.fn()}
+      onOpenSchedule={vi.fn()}
+      onReload={vi.fn()}
+    />);
+
+    const details = screen.getByText("Найденные документы").closest("details");
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Загрузить плановый ДДС" })).toBeEnabled();
+  });
 });

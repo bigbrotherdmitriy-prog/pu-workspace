@@ -13,6 +13,17 @@ const finance = {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("DdsWorkspace", () => {
+  it("imports a planned DDS workbook from the main DDS header", () => {
+    const onImportCashFlow = vi.fn();
+    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onImportCashFlow={onImportCashFlow} />);
+    const workbook = new File(["dds"], "для PU ДДС.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+    expect(screen.getByRole("button", { name: "Импортировать плановый ДДС" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Импорт планового ДДС"), { target: { files: [workbook] } });
+
+    expect(onImportCashFlow).toHaveBeenCalledWith([workbook]);
+  });
+
   it("cancels an unlinked invoice only after confirmation and waits for persistence", async () => {
     let finish!: () => void;
     const onConfirm = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
