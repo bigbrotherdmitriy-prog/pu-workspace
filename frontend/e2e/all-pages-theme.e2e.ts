@@ -1,5 +1,4 @@
 import { expect, test, settled } from "./storage-fixtures";
-import { writeFile } from "node:fs/promises";
 
 const pages = ["Рабочий центр", "Сегодня", "Письма", "Задачи", "AI Secretary", "Проекты", "Запуск проекта", "Договоры", "Документы", "Центр знаний", "Риски и решения", "Обязательства", "ГПР и ДДС", "ДДС", "Аналитика", "Предложения", "Совещания", "Уведомления", "Интеграции", "Журнал", "Настройки"];
 
@@ -69,7 +68,6 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
     if (name === "ГПР и ДДС" || name === "ДДС") await page.getByRole("button", { name: "Закрыть ГПР и ДДС" }).click();
   }
   await info.attach("contrast-audit", { body: JSON.stringify(results, null, 2), contentType: "application/json" });
-  await writeFile(info.outputPath("contrast.json"), JSON.stringify(results, null, 2));
   expect(results.flatMap((r: any) => r.issues.map((i: any) => ({ page: r.name, ...i })))).toEqual([]);
 });
 
