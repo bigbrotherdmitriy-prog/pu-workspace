@@ -1,0 +1,210 @@
+/* Shared reading contract for every module, including fullscreen workspaces.
+   Always pair foreground and surface; never invert document previews or charts. */
+:root[data-display-theme] {
+  --pu-surface: var(--read-surface);
+  --pu-canvas: var(--read-canvas);
+  --pu-border: var(--read-rule);
+  --pu-muted: var(--read-muted);
+  --pu-ink: var(--read-text);
+  --pu-ink-soft: var(--read-muted);
+  --pu-paper: var(--read-surface);
+  --pu-concrete: var(--read-canvas);
+  --pu-rule: var(--read-rule);
+  --pu-rule-soft: var(--read-rule);
+  --pu-label: var(--read-muted);
+  --pu6-paper: var(--read-surface);
+  --pu6-paper-raised: var(--read-surface);
+  --pu6-paper-soft: var(--read-secondary);
+  --pu6-graphite: var(--read-text);
+  --pu6-graphite-soft: var(--read-muted);
+  --pu6-muted: var(--read-muted);
+  --pu6-line: var(--read-rule);
+  --v9-paper-strong: var(--read-surface);
+  --v9-ink-soft: var(--read-muted);
+  --v9-rule-strong: var(--read-rule);
+}
+:root[data-display-theme="light"] { --read-accent: #4e6354; --read-danger: #88474c; --read-warn: #745a2f; }
+
+/* Controls need their own foreground: native dark color-scheme otherwise
+   supplies pale text on the historical explicit white button backgrounds. */
+:root[data-display-theme] :is(.shell, [role="dialog"]) :is(button, input, select, textarea) {
+  color: var(--read-text); background: var(--read-surface); border-color: var(--read-rule);
+  text-shadow: none;
+}
+:root[data-display-theme] :is(.shell, [role="dialog"]) :is(input, textarea)::placeholder { color: var(--read-muted); opacity: 1; }
+:root[data-display-theme] :is(.shell, [role="dialog"]) :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--read-accent); outline-offset: 2px;
+}
+:root[data-display-theme] :is(.shell, [role="dialog"]) button:not(:disabled):hover { background-color: var(--read-accent-fill); }
+:root[data-display-theme] :is(.shell, [role="dialog"]) button:disabled { color: var(--read-muted); background-color: var(--read-secondary); }
+:root[data-display-theme] :is(.shell, [role="dialog"]) :is(button.active, button.selected, button[aria-selected="true"], button[aria-pressed="true"]) {
+  color: var(--read-text); background: var(--read-accent-fill); border-color: var(--read-accent);
+}
+:root[data-display-theme] .shell :is(label, .settings-grid span, .settings-facts span) { color: var(--read-muted); }
+
+/* Panels that used fixed light colors instead of the shared tokens. */
+:root[data-display-theme] .shell :is(
+  .module-overlay, .documents-overlay, .projects-overlay, .secretary-overlay,
+  .gpr-dds-unified, .gpr-dds-unified-head, .gpr-dds-editor-modal,
+  .gpr-contract-context, .gpr-editor, .gpr-bulk, .gpr-note, .dds-note, .dds-summary,
+  .finance-operations, .finance-chain-guide, .finance-metrics article,
+  .integrations-command, .launch-hero, .launch-mode-confirm, .launch-step-number,
+  .contract-project-root, .contract-project-count, .contract-scheme-file-drop,
+  .contract-application-drop, .contract-finance-drops label, .contract-scheme-detail,
+  .contract-scheme-documents > button, .metrics article, .mobile-upload-sheet,
+  .mobile-sync-conflict, .mobile-sync-versions, .mail-sidebar, .mail-list, .mail-detail
+  , .governance-overview > div, .gpr-context-bar, .gpr-primary-empty
+) {
+  color: var(--read-text); background: var(--read-surface); border-color: var(--read-rule); box-shadow: none;
+}
+:root[data-display-theme] .shell :is(
+  .gpr-dds-unified-head, .gpr-toolbar, .gpr-timescale, .gpr-editor, .gpr-note,
+  .gpr-contract-context, .dds-head, .dds-filters, .dds-note, .dds-summary,
+  .integrations-command, .launch-hero, .launch-step, .launch-next,
+  .contract-project-root, .contract-scheme-file-drop, .contract-scheme-detail,
+  .finance-operations, .finance-metrics, .metrics, .settings-page
+  , .governance-overview, .gpr-context-bar, .gpr-primary-empty
+) :is(h1, h2, h3, p, span, small, strong, b, label) { color: var(--read-text); }
+
+:root[data-display-theme] .shell :is(th, .gpr-timescale, .gpr-toolbar) {
+  color: var(--read-text); background: var(--read-secondary); border-color: var(--read-rule);
+}
+:root[data-display-theme] .shell :is(td, .gpr-chart-row) { color: var(--read-text); border-color: var(--read-rule); }
+:root[data-display-theme] .shell :is(tbody tr.selected td, tbody tr:hover td, .gpr-chart-row.selected) {
+  color: var(--read-text); background: var(--read-accent-fill);
+}
+:root[data-display-theme] .shell .gpr-timescale span { border-color: var(--read-rule); }
+:root[data-display-theme] .shell .gpr-timeline {
+  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--gpr-grid, 84px) - 1px), var(--read-rule) calc(var(--gpr-grid, 84px) - 1px), var(--read-rule) var(--gpr-grid, 84px));
+}
+:root[data-display-theme] .shell .gpr-dds-primary-tabs button[aria-selected="true"] { border-bottom-color: var(--read-accent); }
+:root[data-display-theme] .shell :is(.gpr-collapse, .gpr-tree) { color: var(--read-muted); background: transparent; }
+:root[data-display-theme] .shell .gpr-diamond { background: var(--read-accent); }
+:root[data-display-theme] .shell .gpr-links path { stroke: var(--read-muted); }
+:root[data-display-theme] .shell .gpr-links path.critical { stroke: var(--read-danger); }
+:root[data-display-theme] .shell .gpr-links marker path { fill: var(--read-muted); stroke: none; }
+
+/* Distinct severity colors remain semantic rather than becoming white boxes. */
+:root[data-display-theme] .shell :is(.error, .mobile-upload-error) { color: var(--read-danger); background: var(--read-danger-fill); }
+:root[data-display-theme] .shell :is(.notice, .contract-drop-feedback) { color: var(--read-accent); background: var(--read-accent-fill); }
+:root[data-display-theme] .shell :is(.attention, .contract-scheme-hint, .mobile-upload-warning) { color: var(--read-warn); background: var(--read-warn-fill); }
+:root[data-display-theme] .shell :is(.launch-eyebrow, .launch-progress strong) { color: var(--read-accent); }
+
+/* These dialogs are portalled to body, outside .shell. */
+:root[data-display-theme] :is(.contract-bulk-dialog, .contract-document-modal, .mail-settings-dialog, .mail-composer, .project-search-dialog, .mobile-upload-sheet) {
+  color: var(--read-text); background: var(--read-surface); border-color: var(--read-rule);
+}
+:root[data-display-theme] :is(.contract-bulk-dialog, .contract-document-modal, .mail-settings-dialog, .project-search-dialog) :is(h1, h2, h3, p, label, small) { color: var(--read-text); }
+:root[data-display-theme] :is(.contract-bulk-dialog, .contract-document-modal, .mail-settings-dialog) header { background: var(--read-secondary); color: var(--read-text); }
+:root[data-display-theme] .shell :is(.management-intro > span, .proposal-intro > span, .integration-card .connected, .contract-scheme-drop-hint) {
+  color: var(--read-accent); background: var(--read-accent-fill); border-color: var(--read-rule);
+}
+:root[data-display-theme] .shell .autonomy-state-off { color: var(--read-muted); background: var(--read-secondary); }
+:root[data-display-theme] .shell :is(.contract-chain-status span, .contract-number, .contract-status, .contract-tree-level) {
+  color: var(--read-text); background: var(--read-secondary);
+}
+:root[data-display-theme] .shell :is(.contract-chain-status b, .contract-node-open span) { color: var(--read-accent); }
+:root[data-display-theme] .shell :is(.dds-intake, .dds-intake-toolbar, .dds-intake-candidates > summary, .invoice-evidence, .finance-candidates article, .gpr-import-preview, .contract-edit-form) {
+  color: var(--read-text); background: var(--read-secondary); border-color: var(--read-rule);
+}
+:root[data-display-theme] .shell :is(.dds-intake, .invoice-evidence, .finance-candidates, .gpr-import-preview, .contract-edit-form) :is(span, strong, small, p, label) { color: var(--read-text); }
+:root[data-display-theme] .shell .dds-calendar :is(.group, .dds-expense-total, .dds-balance, .operation) td {
+  color: var(--read-text); background: var(--read-secondary);
+}
+:root[data-display-theme] .shell .dds-calendar .group.inflow td { background: var(--read-accent-fill); }
+:root[data-display-theme] .shell .dds-calendar .dds-balance td { background: var(--read-warn-fill); }
+:root[data-display-theme] .shell .dds-calendar .dds-balance .negative { color: var(--read-danger); }
+:root[data-display-theme] .shell :is(.gpr-editor button, .dds-head-actions button:not(.secondary), .finance-entry button, .structured-import button:not(.secondary)) {
+  color: var(--read-text); background: var(--read-button); border-color: var(--read-accent);
+}
+
+/* Mail chrome follows the app. Message HTML/editor content keeps its own
+   document colors; changing those would alter the sender's presentation. */
+:root[data-display-theme] .shell :is(.mail-client-header, .mail-layout, .mail-folders, .mail-thread-list, .mail-search, .mail-reading-pane, .mail-reading-head, .mail-context-strip, .mail-thread-messages article, .mail-composer-toolbar, .mail-settings-body, .mail-ai-summary) {
+  color: var(--read-text); background: var(--read-surface); border-color: var(--read-rule);
+}
+:root[data-display-theme] .shell :is(.mail-client-header, .mail-thread-copy, .mail-reading-head, .mail-message-head, .mail-settings-body) :is(h2, p, strong, small, span, b, label) { color: var(--read-text); }
+:root[data-display-theme] .shell :is(.mail-thread-row.selected, .mail-thread-row:hover) { color: var(--read-text); background: var(--read-accent-fill); }
+:root[data-display-theme] .shell :is(.mail-context-strip small, .mail-thread-row time, .mail-thread-messages article > header small, .mail-thread-messages article > header time, .mail-ai-summary small) { color: var(--read-muted); }
+:root[data-display-theme] .shell :is(.mail-thread-messages summary, .mail-ai-summary > svg) { color: var(--read-accent); }
+:root[data-display-theme] .shell .mail-connection.ready { color: var(--read-accent); background: var(--read-accent-fill); }
+:root[data-display-theme] .shell :is(.mail-provider-warning, .mail-connection.offline) { color: var(--read-warn); background: var(--read-warn-fill); }
+:root[data-display-theme] .shell :is(.gpr-dds-unified-head, .mail-client-header) { height: auto; position: static; flex-shrink: 0; }
+:root[data-display-theme] .shell > aside nav button { background: transparent; border-color: transparent; }
+:root[data-display-theme] .shell > aside nav button:is(.active, :hover) { color: var(--read-text); background: var(--read-accent-fill); }
+:root[data-display-theme] .shell :is(.daily-briefing-metrics > span, .document-register-tools, .document-quick-filters button span, .inbox-toolbar, .project-card, .project-metrics span) {
+  color: var(--read-text); background: var(--read-secondary); border-color: var(--read-rule);
+}
+:root[data-display-theme] .shell :is(.daily-briefing-metrics, .document-filter-row, .inbox-toolbar, .project-card) :is(span, small, strong, b) { color: var(--read-text); }
+:root[data-display-theme] .shell .document-search > span { color: var(--read-muted); }
+:root[data-display-theme] .shell .daily-briefing-heading .all-clear { color: var(--read-accent); background: var(--read-accent-fill); }
+
+/* The remembered theme also applies before authentication. */
+:root[data-display-theme] .login-page { color: var(--read-text); background: var(--read-canvas); }
+:root[data-display-theme] .login-card { color: var(--read-text); background: var(--read-surface); border-color: var(--read-rule); }
+:root[data-display-theme] .login-card :is(h1, label, input) { color: var(--read-text); }
+:root[data-display-theme] .login-card :is(p, a) { color: var(--read-muted); }
+:root[data-display-theme] .login-card :is(input, button) { background: var(--read-button); color: var(--read-text); border-color: var(--read-rule); }
+:root[data-display-theme] .login-card :is(input, button, a):focus-visible { outline: 2px solid var(--read-accent); outline-offset: 2px; }
+
+/* Gantt dependency coordinates use 36px rows in GprWorkspace. Generic form
+   heights must not expand the table while leaving the chart at 36px. */
+:root[data-display-theme] .shell .gpr-grid :is(th, td) { box-sizing: border-box; height: 36px; padding: 4px 9px; line-height: 18px; }
+:root[data-display-theme] .shell .gpr-grid input[type="checkbox"] { width: 14px; height: 14px; min-height: 0; margin: 0; padding: 0; }
+:root[data-display-theme] .shell .gpr-collapse { width: 18px; height: 18px; min-height: 0; padding: 0; }
+:root[data-display-theme] .shell :is(.gpr-chart-row, .gpr-timescale, .gpr-timescale span) { box-sizing: border-box; height: 36px; }
+:root[data-display-theme] .shell .gpr-timeline { padding-top: 36px; }
+
+:root[data-display-theme] .shell .contract-scheme-head { height: auto; position: static; color: var(--read-text); background: var(--read-surface); }
+:root[data-display-theme] .shell .contract-scheme-scroll {
+  background-color: var(--read-secondary);
+  background-image: radial-gradient(var(--read-rule) 1px, transparent 1px);
+}
+:root[data-display-theme] .shell .contract-scheme-node { background: var(--read-surface); }
+
+/* Restore structural rules that were only present in obsolete, unimported
+   theme files. These layouts must not depend on which palette is active. */
+.governance-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.governance-overview > div { display: grid; gap: 8px; padding: 20px; border: 1px solid var(--read-rule); border-radius: 10px; }
+.governance-overview strong { font-size: 30px; line-height: 1.2; }
+:root[data-display-theme] .shell .integrations-command { position: static; height: auto; display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between; padding: 24px; }
+.integrations-command > div:first-child { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 240px; }
+.integrations-command-icon { display: grid; place-items: center; flex: none; }
+.integrations-command h2 { margin: 4px 0 8px; }
+.integrations-command p { margin: 0; }
+.integrations-command-stats { display: flex; flex-wrap: wrap; gap: 16px; }
+.integrations-command-stats > span { display: grid; gap: 6px; min-width: 70px; }
+.integrations-command-stats b { font-size: 24px; }
+.integrations-command-stats button { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+.integrations-command-stats svg { width: 18px; }
+.integrations-section-title { display: flex; align-items: center; gap: 14px; margin: 24px 0 14px; }
+.integrations-section-title :is(h3, p) { margin: 4px 0; }
+@media (max-width: 760px) {
+  .governance-overview { grid-template-columns: 1fr; }
+  :root[data-display-theme] .shell .integrations-command { padding: 16px; }
+}
+:root[data-display-theme] .shell :is(.today-metrics, .today-quick, .launch-step, .launch-next) svg { color: var(--read-accent); }
+@media (max-width: 900px) {
+  /* Keep the second Gantt pane reachable in the fullscreen mobile workspace. */
+  :root[data-display-theme] .shell .gpr-dds-page .gpr-split { overflow: auto; }
+}
+.analytics-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.digest-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.digest-settings > :is(div, p, button) { grid-column: 1 / -1; }
+.digest-settings label { display: grid; gap: 8px; }
+.digest-settings label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+:root[data-display-theme] .shell .digest-settings input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 0; }
+.digest-settings :is(input:not([type="checkbox"]), select) { min-width: 0; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--read-rule); border-radius: 6px; }
+.digest-settings > button { min-height: 40px; padding: 8px 14px; justify-self: start; border: 1px solid var(--read-rule); border-radius: 6px; }
+.digest-quiet-hours { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-grid { display: grid; gap: 14px; }
+.form-grid label { display: grid; gap: 7px; }
+.form-grid input:not([type="checkbox"]):not([type="radio"]) { width: 100%; min-width: 0; height: 40px; padding: 8px 10px; border: 1px solid var(--read-rule); border-radius: 6px; }
+.form-grid label:has(input:is([type="checkbox"], [type="radio"])) { display: flex; align-items: center; }
+.form-grid input:is([type="checkbox"], [type="radio"]) { width: 18px; height: 18px; min-height: 0; margin: 0; padding: 0; }
+.form-grid button { justify-self: start; min-height: 40px; padding: 8px 14px; border: 1px solid var(--read-rule); border-radius: 6px; }
+@media (max-width: 760px) { .digest-settings, .analytics-metrics { grid-template-columns: 1fr; } }
+
+@media (forced-colors: active) {
+  :root[data-display-theme] { --read-surface: Canvas; --read-secondary: Canvas; --read-text: CanvasText; --read-muted: CanvasText; --read-rule: ButtonText; --read-accent: Highlight; --read-accent-fill: Canvas; }
+}
