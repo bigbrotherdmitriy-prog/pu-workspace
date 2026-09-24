@@ -10,6 +10,7 @@ import "./interface-v4.css";
 import "./interface-v6-workspace.css";
 import "./interface-v9-control-room.css";
 import "./reading-comfort.css";
+import "./project-hq-theme.css";
 import { applyDisplayPreference } from "./modules/settings/ComfortControls";
 
 applyDisplayPreference();

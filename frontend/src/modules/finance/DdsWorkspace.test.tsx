@@ -10,9 +10,56 @@ const finance = {
   ],
 } as FinanceOverview;
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("DdsWorkspace", () => {
+  it("cancels an unlinked invoice only after confirmation and waits for persistence", async () => {
+    let finish!: () => void;
+    const onConfirm = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const unlinked = { ...finance, cash_flow: [{ ...finance.cash_flow[1], source_document_id: 90, contract_id: undefined }] } as FinanceOverview;
+    const props = { finance: unlinked, selectedContractId: 0, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
+    const { rerender } = render(<DdsWorkspace {...props} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    const button = screen.getByRole("button", { name: "Отменить операцию Щиты" });
+    fireEvent.click(button);
+    expect(onConfirm).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(button);
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("Щиты"));
+    expect(onConfirm).toHaveBeenCalledWith("cash-flow", 2, "cancelled");
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(button).toBeEnabled());
+    rerender(<DdsWorkspace {...props} finance={{ ...unlinked, cash_flow: [{ ...unlinked.cash_flow[0], status: "cancelled" }] }} />);
+    expect(screen.queryByRole("button", { name: "Отменить операцию Щиты" })).not.toBeInTheDocument();
+    expect(screen.getByText("cancelled")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Сводка" }));
+    expect(screen.queryByText(/400/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer cancellation for settled or cancelled operations", () => {
+    const closed = { ...finance, cash_flow: [
+      { ...finance.cash_flow[0], status: "received", actual_date: "2026-01-30", actual_amount: 1000 },
+      { ...finance.cash_flow[1], status: "paid", actual_date: "2026-02-10", actual_amount: 400 },
+      { ...finance.cash_flow[1], id: 3, status: "cancelled" },
+    ] } as FinanceOverview;
+    render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    expect(screen.queryByRole("button", { name: /Отменить операцию/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps an operation available for retry when cancellation fails", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn().mockRejectedValue(new Error("offline"))} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отменить операцию Этап 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось отменить операцию");
+    expect(screen.getByRole("button", { name: "Отменить операцию Этап 1" })).toBeEnabled();
+  });
+
   it("shows every workbook view and recalculates summaries from detail rows", () => {
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
@@ -143,13 +190,15 @@ describe("DdsWorkspace", () => {
     expect(onMutatePlan).toHaveBeenCalledWith(2, "move", "2026-02-28", 400, 3);
   });
 
-  it("accepts invoice PDFs through the DDS drop zone", () => {
-    const onDropInvoices = vi.fn();
+  it("accepts invoice PDFs through the DDS drop zone after explicit upload", () => {
+    const onDropInvoices = vi.fn().mockResolvedValue([]);
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onDropInvoices={onDropInvoices} />);
     const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
-    const zone = screen.getByText("Перетащите сюда счёт PDF").closest(".dds-invoice-drop")!;
+    const zone = screen.getByText("Перетащите сюда счета PDF — один или несколько").closest(".dds-invoice-drop")!;
     fireEvent.drop(zone, { dataTransfer: { files: [file] } });
-    expect(onDropInvoices).toHaveBeenCalledWith([file]);
+    expect(onDropInvoices).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и разобрать (1)" }));
+    expect(onDropInvoices).toHaveBeenCalledWith([file], expect.any(Function));
   });
 
   it("exports a full DDS register and the generic additional-expenses slice", () => {

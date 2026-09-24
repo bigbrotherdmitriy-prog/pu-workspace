@@ -7,9 +7,33 @@ import { useFinanceController } from "./useFinanceController";
 vi.mock("../../api/client", () => ({ api: vi.fn() }));
 
 afterEach(cleanup);
-beforeEach(() => vi.mocked(api).mockReset());
+beforeEach(() => { vi.mocked(api).mockReset(); });
 
 describe("uploaded finance document routing", () => {
+  it("persists DDS cancellation through the status API and reloads finance", async () => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(api).mockResolvedValue({ cash_flow: [] });
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    await act(async () => { await result.current.confirmFinance("cash-flow", 2, "cancelled"); });
+    expect(api).toHaveBeenNthCalledWith(1, "/execution/cash-flow/2/status", {
+      method: "PATCH", body: JSON.stringify({ status: "cancelled" }),
+    });
+    expect(api).toHaveBeenCalledWith(expect.stringContaining("project_id=7"));
+    expect(setNotice).toHaveBeenCalledWith("Операция отменена и исключена из расчётов. История сохранена.");
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("shows a server refusal without reporting cancellation as successful", async () => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(api).mockImplementation(async () => { throw new Error("Недостаточно прав"); });
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    await result.current.confirmFinance("cash-flow", 2, "cancelled");
+    expect(setNotice).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenCalledWith("Недостаточно прав");
+  });
+
   it("opens invoice review only for the exact document returned by the upload job", async () => {
     const setNotice = vi.fn();
     const setError = vi.fn();

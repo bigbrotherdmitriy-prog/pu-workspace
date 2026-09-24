@@ -53,6 +53,7 @@ import { clearOfflineData } from "./offline/db";
 import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine";
 import { useOfflineSync } from "./offline/useOfflineSync";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
+import { uploadInvoiceBatch } from "./modules/finance/invoiceUploadTransport";
 import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
 import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
@@ -61,6 +62,7 @@ import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
 import { OverdueMetric } from "./modules/dashboard/OverdueMetric";
+import { ProjectIsometric } from "./modules/dashboard/ProjectIsometric";
 import { ComfortControls } from "./modules/settings/ComfortControls";
 import {
   Activity,
@@ -1051,21 +1053,10 @@ export function App() {
     } catch (reason) { setError((reason as Error).message); }
   }
 
-  async function uploadDdsInvoices(files: File[]) {
-    const supported = files.filter((file) => file.type === "application/pdf" || file.name.toLocaleLowerCase().endsWith(".pdf"));
-    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
-    if (!supported.length) { setError("Перетащите счёт в формате PDF."); return; }
-    if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
-    try {
-      setError(""); setNotice(`Загружаю и анализирую счетов: ${supported.length}…`);
-      const payload = await Promise.all(supported.slice(0, 20).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
-      const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
-      const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
-      if (!completed.documents.length) throw new Error("Не удалось извлечь текст счёта");
-      await load();
-      await reviewUploadedFinanceDocuments(completed.documents);
-      setGprDdsTab("dds"); setActive("ГПР и ДДС");
-    } catch (reason) { setError((reason as Error).message); }
+  async function uploadDdsInvoices(files: File[], onProgress: (message: string) => void) {
+    const result = await uploadInvoiceBatch(projectId, files, onProgress);
+    await loadFinance();
+    return result;
   }
   async function importBulkContracts(proposals: BulkContractProposal[]): Promise<number> {
     const createdByDocument = new Map<number, number>();
@@ -2968,10 +2959,20 @@ export function App() {
                       <span><i /> ДДС и обязательства</span>
                     </div>
                   </div>
+                  <ProjectIsometric
+                    onDocuments={() => setActive("Документы")}
+                    onSchedule={() => { setGprDdsTab("gpr"); setActive("ГПР и ДДС"); }}
+                    onFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
+                  />
                   <div className={`dashboard-focus ${summary?.attention ? "needs-attention" : "clear"}`}>
                     <span>{summary?.attention ? "Требует решения" : "Контур стабилен"}</span>
                     <strong>{String(summary?.attention || 0).padStart(2, "0")}</strong>
                     <p>{summary?.attention ? "контрольных пунктов" : "критичных пунктов"}</p>
+                    <nav className="hq-live-controls" aria-label="Показатели штаба">
+                      <button onClick={() => { setTaskFilter("overdue"); setActive("Задачи"); }}><span>Просроченные задачи</span><b>{summary?.overdue_tasks || 0}</b></button>
+                      <button onClick={() => setActive("Риски и решения")}><span>Открытые риски</span><b>{summary?.open_risks || 0}</b></button>
+                      <button onClick={() => setActive("Риски и решения")}><span>Ждут решения</span><b>{summary?.pending_decisions || 0}</b></button>
+                    </nav>
                     <button onClick={() => setActive(summary?.attention ? "Риски и решения" : "Сегодня")}>
                       {summary?.attention ? "Перейти к разбору" : "Открыть план"} <ArrowRight />
                     </button>
@@ -3464,10 +3465,11 @@ export function App() {
               embedded
             />
             <DdsWorkspace
+              key={projectId}
               finance={finance}
               selectedContractId={selectedFinanceContractId}
               onPrepare={(kind) => { prepareFinanceItem(kind); setFinanceEditorOpen(true); }}
-              onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
+              onConfirm={confirmFinance}
               onConfirmMany={confirmFinanceMany}
               onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
               onLinkControls={(id, contractId, scheduleItemId, budgetLineId) =>
@@ -3478,6 +3480,7 @@ export function App() {
               focusScheduleItemId={focusedScheduleItemId}
               onOpenSchedule={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("gpr"); }}
               onDropInvoices={uploadDdsInvoices}
+              onReviewInvoice={(documentId) => reviewUploadedFinanceDocuments([documentId])}
               onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
             {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations

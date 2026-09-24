@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, CheckCheck, Download, ListFilter, Plus, RotateCcw, Search, Upload } from "lucide-react";
+import { CalendarRange, CheckCheck, Download, ListFilter, Plus, RotateCcw, Search } from "lucide-react";
+import { InvoiceBatchUpload, type InvoiceBatchUploadProps } from "./InvoiceBatchUpload";
 import { formatMoney } from "../../utils/numberFormat";
 import type { FinanceOverview } from "./types";
 
@@ -7,7 +8,7 @@ type Props = {
   finance: FinanceOverview | null;
   selectedContractId: number;
   onPrepare: (kind: "cash-in" | "cash-out") => void;
-  onConfirm: (kind: string, id: number, status: string) => void;
+  onConfirm: (kind: string, id: number, status: string) => void | Promise<void>;
   onConfirmMany: (kind: string, ids: number[], status: string) => void | Promise<void>;
   onConfirmPayment: (id: number, amount: number) => void;
   onLinkControls: (id: number, contractId: number, scheduleItemId: number, budgetLineId: number) => void | Promise<void>;
@@ -15,7 +16,8 @@ type Props = {
   onUndoPlanMutation?: (mutationId: number) => Promise<void>;
   onOpenSchedule?: (scheduleItemId: number) => void;
   focusScheduleItemId?: number;
-  onDropInvoices?: (files: File[]) => void | Promise<void>;
+  onDropInvoices?: InvoiceBatchUploadProps["onUpload"];
+  onReviewInvoice?: InvoiceBatchUploadProps["onReview"];
   onPrepareAdditionalExpense?: () => void;
 };
 
@@ -71,7 +73,7 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onLinkControls, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onPrepareAdditionalExpense }: Props) {
+export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onLinkControls, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense }: Props) {
   const [tab, setTab] = useState<Tab>("calendar");
   const [objectFilter, setObjectFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -81,12 +83,26 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
   const [query, setQuery] = useState("");
   const [selectedProposed, setSelectedProposed] = useState<Set<number>>(new Set());
   const [confirmingMany, setConfirmingMany] = useState(false);
+  const [cancellingIds, setCancellingIds] = useState<Set<number>>(new Set());
+  const [cancelError, setCancelError] = useState("");
+  async function cancelOperation(row: CashRow) {
+    if (cancellingIds.has(row.id)) return;
+    if (!window.confirm(`Отменить операцию «${row.title}» на ${formatMoney(amount(row))} ${row.currency || "RUB"}? Она будет исключена из расчётов ДДС. Запись и история сохранятся.`)) return;
+    setCancelError("");
+    setCancellingIds((current) => new Set(current).add(row.id));
+    try {
+      await onConfirm("cash-flow", row.id, "cancelled");
+    } catch {
+      setCancelError("Не удалось отменить операцию. Обновите данные и попробуйте снова.");
+    } finally {
+      setCancellingIds((current) => { const next = new Set(current); next.delete(row.id); return next; });
+    }
+  }
   const [linkDrafts, setLinkDrafts] = useState<Record<number, { scheduleItemId: number; budgetLineId: number }>>({});
   const [currency, setCurrency] = useState("");
   const [dragSourceId, setDragSourceId] = useState(0);
   const [pendingDrop, setPendingDrop] = useState<{ row: CashRow; month: string } | null>(null);
   const [undoStack, setUndoStack] = useState<number[]>([]);
-  const [dropActive, setDropActive] = useState(false);
   const allRows = useMemo<CashRow[]>(() => (finance?.cash_flow || [])
     .filter((row) => !selectedContractId || row.contract_id === selectedContractId)
     .map((row) => ({
@@ -230,11 +246,6 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     await onUndoPlanMutation(mutationId);
     setUndoStack((current) => current.slice(0, -1));
   };
-  const dropInvoices = (files: File[]) => {
-    const pdf = files.filter((file) => file.type === "application/pdf" || file.name.toLocaleLowerCase().endsWith(".pdf"));
-    if (pdf.length) void onDropInvoices?.(pdf);
-    else window.alert("Перетащите счёт в формате PDF.");
-  };
   const planCell = (row: CashRow, key: string) => {
     const active = monthKey(row.planned_date) === key;
     const editable = row.status === "proposed" && !row.actual_date && Number(row.actual_amount) === 0;
@@ -304,9 +315,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       <div><span className="eyebrow">ПЛАТЁЖНЫЙ КАЛЕНДАРЬ</span><h2>Движение денежных средств</h2><p>Все представления считаются из единой детализации. План и факт хранятся и показываются раздельно.</p></div>
       <div className="dds-head-actions"><button className="secondary" type="button" disabled={!undoStack.length} onClick={() => void undoLast()}><RotateCcw /> Отменить</button><button className="secondary" type="button" onClick={() => exportView()}><Download /> Экспорт: {tabs.find((item) => item.id === tab)?.label}</button><button className="secondary" type="button" onClick={() => exportView("details")}><Download /> Полный ДДС</button><button className="secondary" type="button" onClick={exportAdditionalExpenses}><Download /> Дополнительные расходы</button><button className="secondary" type="button" onClick={() => onPrepare("cash-in")}><Plus /> Приход</button><button type="button" onClick={() => onPrepare("cash-out")}><Plus /> Расход</button>{onPrepareAdditionalExpense && <button type="button" onClick={onPrepareAdditionalExpense}><Plus /> Доп. расход</button>}</div>
     </div>
-    <div className={`dds-invoice-drop ${dropActive ? "active" : ""}`} onDragOver={(event) => { event.preventDefault(); setDropActive(true); }} onDragLeave={() => setDropActive(false)} onDrop={(event) => { event.preventDefault(); setDropActive(false); dropInvoices(Array.from(event.dataTransfer.files)); }}>
-      <Upload /><div><strong>Перетащите сюда счёт PDF</strong><small>После OCR появится черновик. Статью затрат и плановую дату оплаты выбирает пользователь; платёж автоматически не подтверждается.</small></div>
-    </div>
+    {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice} />}
     <div className="dds-tabs" role="tablist" aria-label="Разделы ДДС">{tabs.map((item) => <button type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
     <div className="dds-filters">
       <label><ListFilter /><select aria-label="Фильтр по объекту" value={objectFilter} onChange={(event) => setObjectFilter(event.target.value)}><option value="all">Все объекты</option>{objects.map((object) => <option key={object}>{object}</option>)}</select></label>
@@ -336,6 +345,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       return <tr id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td>{index + 1}</td><td>{dateFormat.format(new Date(`${row.planned_date}T00:00:00Z`))}</td><td>{monthLong.format(monthDate(monthKey(row.planned_date)))}</td><td>{row.object}</td><td>{row.category}</td><td><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money">{formatMoney(amount(row))}</td><td className="money">{row.actual_date ? `${formatMoney(actualAmount(row))} · ${dateFormat.format(new Date(`${row.actual_date}T00:00:00Z`))}` : "—"}</td><td>{row.note}</td><td>{row.status}</td><td>{row.schedule_item_id ? <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button> : "—"}</td><td className="dds-row-actions">
         {row.status === "proposed" && row.direction === "outflow" && row.source_document_id && !controlsComplete ? <div className="dds-control-links"><select aria-label={`Этап ГПР для ${row.title}`} value={draft.scheduleItemId} onChange={(event) => setLinkDraft(row.id, { scheduleItemId: Number(event.target.value) })}><option value={0}>Этап ГПР</option>{options.schedule.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><select aria-label={`Строка бюджета для ${row.title}`} value={draft.budgetLineId} onChange={(event) => setLinkDraft(row.id, { budgetLineId: Number(event.target.value) })}><option value={0}>Строка бюджета</option>{options.budget.map((item) => <option value={item.id} key={item.id}>{item.description}</option>)}</select><button type="button" disabled={!options.contractId || !draft.scheduleItemId || !draft.budgetLineId} onClick={() => onLinkControls(row.id, options.contractId, draft.scheduleItemId, draft.budgetLineId)}>Связать с контролями</button></div> : row.status === "proposed" && <button type="button" onClick={() => onConfirm("cash-flow", row.id, "approved")}>Подтвердить</button>}
         {row.status === "approved" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}
+        {["proposed", "approved"].includes(row.status) && !row.actual_date && !Number(row.actual_amount) && <button className="secondary" type="button" aria-label={`Отменить операцию ${row.title}`} disabled={cancellingIds.has(row.id)} onClick={() => void cancelOperation(row)}>{cancellingIds.has(row.id) ? "Отменяем…" : "Отменить операцию"}</button>}
       </td></tr>;
     })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}
 
@@ -343,6 +353,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       <section><h3>По объектам</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Объект</th><th>План прихода, {selectedCurrency}</th><th>План расхода, {selectedCurrency}</th><th>Плановый поток, {selectedCurrency}</th></tr></thead><tbody>{objectSummary.map((item) => <tr key={item.object}><td>{item.object}</td><td className="money positive">{formatMoney(item.inflow)}</td><td className="money">{formatMoney(item.outflow)}</td><td className={`money ${item.net < 0 ? "negative" : "positive"}`}>{formatMoney(item.net)}</td></tr>)}<tr className="total"><td>ИТОГО</td><td className="money">{formatMoney(totals.inflow)}</td><td className="money">{formatMoney(totals.outflow)}</td><td className="money">{formatMoney(totals.net)}</td></tr></tbody></table></div></section>
       <section><h3>Расходы по статьям</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Статья затрат</th><th>План, {selectedCurrency}</th><th>Доля, %</th></tr></thead><tbody>{categorySummary.map((item) => <tr key={item.category}><td>{item.category}</td><td className="money">{formatMoney(item.value)}</td><td><div className="dds-share"><span style={{ width: `${Math.max(3, item.share * 100)}%` }}></span></div>{(item.share * 100).toFixed(1)}%</td></tr>)}<tr className="total"><td>ИТОГО расходы</td><td className="money">{formatMoney(totals.outflow)}</td><td>100%</td></tr></tbody></table></div></section>
     </div>}
+    {cancelError && <p role="alert">{cancelError}</p>}
     <footer className="dds-note"><CalendarRange /> Плановые суммы используются до подтверждения факта. Отменённые операции не входят в расчёты.</footer>
   </section>;
 }
