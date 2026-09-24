@@ -123,6 +123,10 @@ class MppImportRequest(BaseModel):
     filename: str = Field(min_length=5, max_length=500)
     content_base64: str
     baseline_id: int | None = None
+    create_cash_flow_proposals: bool = False
+    cash_flow_currency: str = "RUB"
+
+    _cash_flow_currency = field_validator("cash_flow_currency", mode="before")(_strict_currency)
 
 
 MAX_MPP_BYTES = 25 * 1024 * 1024
@@ -170,6 +174,63 @@ def _mpp_uid(item: ScheduleItem) -> str | None:
 
 def _has_self_dependency(items: list[ScheduleItem]) -> bool:
     return any(item.id in _schedule_predecessor_ids(item.predecessor_ids) for item in items)
+
+
+def _mpp_cost_rows(tasks) -> list:
+    return [
+        row for row in tasks
+        if not row.is_summary and row.cost is not None and row.cost > 0
+        and (row.planned_finish is not None or row.planned_start is not None)
+    ]
+
+
+def _create_mpp_cash_flow_proposals(
+    db: Session, *, payload: MppImportRequest, digest: str, tasks, imported: dict[str, ScheduleItem], user: User,
+) -> list[int]:
+    if not payload.create_cash_flow_proposals:
+        return []
+    created: list[int] = []
+    for row in _mpp_cost_rows(tasks):
+        schedule_item = imported.get(row.external_uid)
+        if schedule_item is None:
+            continue
+        source_name = f"mpp:{digest}:{row.external_uid}"
+        existing = db.scalar(select(CashFlowEntry.id).where(
+            CashFlowEntry.project_id == payload.project_id,
+            CashFlowEntry.source_name == source_name,
+        ))
+        if existing is not None:
+            continue
+        amount = _money(row.cost, allow_zero=False)
+        item = CashFlowEntry(
+            project_id=payload.project_id,
+            contract_id=payload.contract_id,
+            schedule_item_id=schedule_item.id,
+            direction="outflow",
+            title=row.title[:500],
+            planned_date=row.planned_finish or row.planned_start,
+            planned_amount=amount,
+            currency=payload.cash_flow_currency,
+            category="Прочее",
+            note="Стоимость задачи из Microsoft Project; требует проверки",
+            status="proposed",
+            source_name=source_name,
+            source_excerpt=(
+                f"{payload.filename}; MPP task UID {row.external_uid}; "
+                f"cost={amount} {payload.cash_flow_currency}; "
+                f"date={row.planned_finish or row.planned_start}"
+            ),
+        )
+        db.add(item)
+        db.flush()
+        created.append(item.id)
+    if created:
+        _audit(
+            db, "mpp_cash_flow_proposals_created", "schedule_baseline",
+            next(iter(imported.values())).baseline_id, user.id,
+            f"count={len(created)}; currency={payload.cash_flow_currency}; sha256={digest[:12]}",
+        )
+    return created
 
 
 def _apply_mpp_relationships(tasks, imported: dict[str, ScheduleItem]) -> None:
@@ -356,6 +417,18 @@ class StatusUpdate(BaseModel):
     )
 
 
+class StructuredRowOverride(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    planned_date: date | None = None
+    amount: Decimal | None = Field(default=None, gt=0)
+    direction: str | None = Field(default=None, pattern="^(inflow|outflow)$")
+    category: str | None = Field(default=None, min_length=1, max_length=200)
+
+    _amount_money = field_validator("amount", mode="before")(
+        lambda value: None if value is None else _money(value, allow_zero=False)
+    )
+
+
 class StructuredImportRequest(BaseModel):
     project_id: int
     contract_id: int | None = None
@@ -363,6 +436,8 @@ class StructuredImportRequest(BaseModel):
     baseline_id: int | None = None
     direction: str = Field(default="outflow", pattern="^(inflow|outflow)$")
     source_rows: list[int] = Field(min_length=1, max_length=500)
+    row_overrides: dict[int, StructuredRowOverride] = Field(default_factory=dict)
+    plan_year: int | None = Field(default=None, ge=2000, le=2100)
     expected_document_version_id: int | None = None
     expected_document_sha256: str | None = Field(default=None, pattern="^[0-9a-f]{64}$")
 
@@ -1198,13 +1273,13 @@ def _import_date(value: str | None) -> date | None:
 
 
 @router.get("/documents/{document_id}/structured-preview")
-def structured_preview(document_id: int, project_id: int, kind: str,
+def structured_preview(document_id: int, project_id: int, kind: str, plan_year: int | None = None,
                        db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     if kind not in {"schedule", "budget", "cash-flow"}:
         raise HTTPException(422, "Поддерживаются ГПР, бюджет и ДДС")
     document, version, digest, content = _document_content(db, project_id, document_id)
-    preview = parse_structured_rows(content, kind, source_name=document.name)
+    preview = parse_structured_rows(content, kind, source_name=document.name, plan_year=plan_year)
     return {"document_id": document.id, "document_version_id": version.id, "document_sha256": digest,
             "name": document.name, "kind": kind, **preview,
             "requires_confirmation": True, "originals_changed": False}
@@ -1220,14 +1295,31 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
         raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась после preview")
     if payload.expected_document_sha256 is not None and payload.expected_document_sha256 != digest:
         raise HTTPException(409, "SOURCE_VERSION_MISMATCH: содержимое документа изменилось после preview")
-    preview = parse_structured_rows(content, payload.kind, source_name=document.name)
+    preview = parse_structured_rows(content, payload.kind, source_name=document.name, plan_year=payload.plan_year)
     if len(payload.source_rows) != len(set(payload.source_rows)):
         raise HTTPException(422, "Строки источника не должны повторяться")
-    selected = {row["source_row"]: row for row in preview["rows"] if row["source_row"] in set(payload.source_rows)}
+    selected = {
+        row.get("selection_id", row["source_row"]): row
+        for row in preview["rows"]
+        if row.get("selection_id", row["source_row"]) in set(payload.source_rows)
+    }
     if set(payload.source_rows) - set(selected):
         raise HTTPException(422, "Выбраны отсутствующие строки источника")
     if any(not row["importable"] for row in selected.values()):
         raise HTTPException(422, "Сначала исправьте строки с ошибками")
+    unknown_overrides = set(payload.row_overrides) - set(selected)
+    if unknown_overrides:
+        raise HTTPException(422, "Изменения содержат невыбранные строки")
+    for selection_id, override in payload.row_overrides.items():
+        patch = override.model_dump(exclude_none=True)
+        if "planned_date" in patch:
+            patch["planned_date"] = patch["planned_date"].isoformat()
+        if "amount" in patch:
+            patch["amount"] = str(patch["amount"])
+        for field in ("title", "category"):
+            if field in patch:
+                patch[field] = patch[field].strip()
+        selected[selection_id].update(patch)
 
     baseline = None
     if payload.kind == "schedule":
@@ -1310,6 +1402,7 @@ def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: 
     _check_contract(db, payload.project_id, payload.contract_id)
     data, digest = _decode_mpp(payload)
     tasks = _mpp_tasks(data)
+    cost_rows = _mpp_cost_rows(tasks)
     dated = [row for row in tasks if row.planned_start or row.planned_finish]
     existing_by_uid: dict[str, ScheduleItem] = {}
     if payload.baseline_id:
@@ -1336,6 +1429,14 @@ def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: 
         "changed_count": changed,
         "removed_count": sum(uid not in incoming_uids for uid in existing_by_uid),
         "preserved_actual_count": sum(row.external_uid in existing_by_uid for row in tasks),
+        "cost_task_count": len(cost_rows),
+        "cost_total": sum((row.cost for row in cost_rows), Decimal("0")),
+        "cost_currency": payload.cash_flow_currency,
+        "cost_missing_date_count": sum(
+            row.cost is not None and row.cost > 0 and not row.is_summary
+            and row.planned_start is None and row.planned_finish is None
+            for row in tasks
+        ),
     }
 
 
@@ -1360,12 +1461,22 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
                 if row.source_name:
                     row.source_name = payload.filename
         if not _has_self_dependency(existing_rows):
+            created_cash_flow: list[int] = []
+            if payload.create_cash_flow_proposals:
+                created_cash_flow = _create_mpp_cash_flow_proposals(
+                    db, payload=payload, digest=digest, tasks=_mpp_tasks(data),
+                    imported={uid: item for item in existing_rows if (uid := _mpp_uid(item))}, user=user,
+                )
             if source_name_changed:
                 _audit(db, "mpp_source_file_rebound", "schedule_baseline", existing.id, user.id,
                        f"sha256={digest[:12]}")
+            if source_name_changed or created_cash_flow:
                 db.commit()
-            return {"baseline_id": existing.id, "version": existing.version,
-                    "created": len(existing_rows), "duplicate": True, "repaired": False}
+            result = {"baseline_id": existing.id, "version": existing.version,
+                      "created": len(existing_rows), "duplicate": True, "repaired": False}
+            if payload.create_cash_flow_proposals:
+                result["cash_flow_proposals_created"] = len(created_cash_flow)
+            return result
 
         # Releases before this fix read the wrong MPXJ relation endpoint and
         # persisted every dependency as a self-reference.  The encrypted
@@ -1384,9 +1495,16 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
             raise
         _audit(db, "mpp_schedule_repaired", "schedule_baseline", existing.id, user.id,
                f"tasks={len(tasks)}; sha256={digest[:12]}")
+        created_cash_flow = _create_mpp_cash_flow_proposals(
+            db, payload=payload, digest=digest, tasks=tasks,
+            imported=existing_by_uid, user=user,
+        )
         db.commit()
-        return {"baseline_id": existing.id, "version": existing.version,
-                "created": len(existing_rows), "duplicate": True, "repaired": True}
+        result = {"baseline_id": existing.id, "version": existing.version,
+                  "created": len(existing_rows), "duplicate": True, "repaired": True}
+        if payload.create_cash_flow_proposals:
+            result["cash_flow_proposals_created"] = len(created_cash_flow)
+        return result
 
     tasks = _mpp_tasks(data)
     source_baseline = None
@@ -1430,11 +1548,15 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
     except HTTPException:
         db.rollback()
         raise
+    created_cash_flow = _create_mpp_cash_flow_proposals(
+        db, payload=payload, digest=digest, tasks=tasks, imported=imported, user=user,
+    )
     _audit(db, "mpp_schedule_imported", "schedule_baseline", baseline.id, user.id,
            f"tasks={len(tasks)}; sha256={digest[:12]}")
     db.commit()
     return {"baseline_id": baseline.id, "version": baseline.version, "created": len(tasks), "duplicate": False,
-            "preserved_actual": sum(row.external_uid in previous_by_uid for row in tasks)}
+            "preserved_actual": sum(row.external_uid in previous_by_uid for row in tasks),
+            "cash_flow_proposals_created": len(created_cash_flow)}
 
 
 @router.get("/mpp/export/{baseline_id}")

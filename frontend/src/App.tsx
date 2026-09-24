@@ -544,7 +544,7 @@ export function App() {
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
-    prepareDroppedFinanceDocument, importStructuredFinance,
+    prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
     confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
     updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
@@ -3409,7 +3409,7 @@ export function App() {
               focusTaskId={focusedScheduleItemId}
               onOpenCashFlow={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("dds"); }}
             />
-            {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
+            {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Редактор ГПР"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
               finance={finance}
               preview={null}
               selectedRows={financeStructuredRows}
@@ -3483,7 +3483,7 @@ export function App() {
               onReviewInvoice={(documentId) => reviewUploadedFinanceDocuments([documentId])}
               onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
-            {financeEditorOpen && <div className="gpr-dds-editor-modal"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
+            {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Проверка финансовых данных">{!financeStructuredPreview && !invoiceExtractionProposal && <button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button>}<FinanceOperations
               finance={finance}
               preview={financeStructuredPreview}
               selectedRows={financeStructuredRows}
@@ -3519,13 +3519,15 @@ export function App() {
               onRejectInvoice={() => void rejectInvoiceExtraction()}
               onRetryInvoiceAi={() => void retryInvoiceAiAnalysis()}
               invoiceAiRetrying={invoiceAiRetrying}
-              onCloseInvoice={() => setInvoiceExtractionProposal(null)}
+              onCloseInvoice={() => { setInvoiceExtractionProposal(null); setFinanceEditorOpen(false); }}
               onAddCostCategory={(name) => void addCostCategory(name)}
               onClosePreview={() => {
                 setFinanceStructuredPreview(null);
                 setFinanceStructuredRows([]);
+                setFinanceEditorOpen(false);
               }}
               onImport={() => void importStructuredFinance()}
+              onEditPreviewRow={editStructuredFinanceRow}
               onAdd={() => void addFinanceItem().then(() => {
                 if (financeKind === "cash-in" || financeKind === "cash-out") {
                   setFinanceEditorOpen(false);

@@ -18,6 +18,7 @@ type FinanceControllerOptions = {
 };
 
 const money = formatMoney;
+const currentPlanYear = new Date().getFullYear();
 
 export function useFinanceController({ ready, projectId, setNotice, setError }: FinanceControllerOptions) {
   const [finance, setFinance] = useState<FinanceOverview | null>(null);
@@ -63,6 +64,11 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }, [ready, projectId, selectedFinanceContractId]);
 
   function prepareFinanceItem(kind: string, baselineId = 0) {
+    // Starting a manual entry is an explicit context switch.  Do not leave a
+    // previously confirmed invoice or spreadsheet review covering the editor.
+    setInvoiceExtractionProposal(null);
+    setFinanceStructuredPreview(null);
+    setFinanceStructuredRows([]);
     setFinanceKind(kind);
     setFinanceTitle("");
     setFinanceAmount("");
@@ -79,9 +85,9 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   async function useFinanceCandidate(candidate: FinanceDocumentCandidate) {
     if (["schedule", "budget", "cash-flow"].includes(candidate.kind)) {
       try {
-        const preview = await api<FinanceStructuredPreview>(`/execution/documents/${candidate.document_id}/structured-preview?project_id=${projectId}&kind=${candidate.kind}`);
+        const preview = await api<FinanceStructuredPreview>(`/execution/documents/${candidate.document_id}/structured-preview?project_id=${projectId}&kind=${candidate.kind}&plan_year=${currentPlanYear}`);
         setFinanceStructuredPreview(preview);
-        setFinanceStructuredRows(preview.rows.filter((row: FinanceStructuredRow) => row.importable).map((row) => row.source_row));
+        setFinanceStructuredRows(preview.rows.filter((row: FinanceStructuredRow) => row.importable).map((row) => row.selection_id));
         setNotice(`Таблица «${candidate.name}» разобрана. Проверьте строки перед пакетным импортом.`);
         window.setTimeout(() => document.getElementById("structured-import")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
       } catch (error) {
@@ -221,9 +227,9 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
                                                 contractId: number) {
     setSelectedFinanceContractId(contractId);
     try {
-      const preview = await api<FinanceStructuredPreview>(`/execution/documents/${documentId}/structured-preview?project_id=${projectId}&kind=${kind}`);
+      const preview = await api<FinanceStructuredPreview>(`/execution/documents/${documentId}/structured-preview?project_id=${projectId}&kind=${kind}&plan_year=${currentPlanYear}`);
       setFinanceStructuredPreview(preview);
-      setFinanceStructuredRows(preview.rows.filter((row) => row.importable).map((row) => row.source_row));
+      setFinanceStructuredRows(preview.rows.filter((row) => row.importable).map((row) => row.selection_id));
       setNotice(`«${name}» распознан как ${kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС"}. Проверьте строки перед созданием предложений.`);
       window.setTimeout(() => document.getElementById("structured-import")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch (error) {
@@ -249,6 +255,16 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           baseline_id: baseline?.id || null,
           direction: "outflow",
           source_rows: financeStructuredRows,
+          row_overrides: Object.fromEntries(financeStructuredPreview.rows
+            .filter((row) => financeStructuredRows.includes(row.selection_id))
+            .map((row) => [row.selection_id, {
+              title: row.title,
+              planned_date: row.planned_date || undefined,
+              amount: row.amount || undefined,
+              direction: row.direction || undefined,
+              category: row.category || undefined,
+            }])),
+          plan_year: financeStructuredPreview.plan_year || null,
         }),
       });
       setFinanceStructuredPreview(null);
@@ -258,6 +274,13 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) {
       setError((error as Error).message);
     }
+  }
+
+  function editStructuredFinanceRow(selectionId: number, patch: Record<string, string>) {
+    setFinanceStructuredPreview((current) => current ? {
+      ...current,
+      rows: current.rows.map((row) => row.selection_id === selectionId ? { ...row, ...patch } : row),
+    } : current);
   }
 
   async function addFinanceItem() {
@@ -456,7 +479,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
-    prepareDroppedFinanceDocument, importStructuredFinance,
+    prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
     confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
     updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,

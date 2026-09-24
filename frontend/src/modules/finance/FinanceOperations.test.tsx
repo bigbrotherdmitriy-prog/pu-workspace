@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FinanceOperations } from "./FinanceOperations";
-import type { FinanceOverview, InvoiceExtractionProposal } from "./types";
+import type { FinanceOverview, FinanceStructuredPreview, InvoiceExtractionProposal } from "./types";
 
 
 const proposal: InvoiceExtractionProposal = {
@@ -128,5 +128,45 @@ describe("invoice extraction review", () => {
     })} />);
 
     expect(screen.getByRole("button", { name: "Повторный анализ…" })).toBeDisabled();
+  });
+});
+
+describe("monthly DDS review", () => {
+  const monthlyPreview = {
+    document_id: 90, name: "для PU ДДС.xlsx", kind: "cash-flow", mapping: {}, issues: [],
+    truncated: false, layout: "monthly_matrix", plan_year: 2026, inferred_december: true,
+    rows: [
+      { selection_id: 3003, source_row: 3, source_sheet: "ДДС", source_coordinate: "ДДС!C3", title: "Этапы Дубна", category: "Прочее", planned_date: "2026-01-31", amount: "100.00", direction: "inflow", progress: 0, issues: [], importable: true },
+      { selection_id: 3014, source_row: 3, source_sheet: "ДДС", source_coordinate: "ДДС!N3", title: "Этапы Дубна", category: "Прочее", planned_date: "2026-12-31", amount: "900.00", direction: "inflow", progress: 0, issues: [], importable: true },
+    ],
+  } as FinanceStructuredPreview;
+
+  it("keeps separate month cells selectable when they come from the same source row", () => {
+    const { rerender } = render(<FinanceOperations {...props({ invoiceProposal: null, preview: monthlyPreview, selectedRows: [3003] })} />);
+
+    expect(screen.getByText(/2026 год/)).toHaveTextContent("Колонка после ноября распознана как декабрь");
+    const review = screen.getByRole("heading", { name: "для PU ДДС.xlsx" }).closest("section");
+    expect(review).not.toBeNull();
+    const checkboxes = within(review as HTMLElement).getAllByRole("checkbox");
+    expect(checkboxes[0]).toBeChecked();
+    expect(checkboxes[1]).not.toBeChecked();
+
+    rerender(<FinanceOperations {...props({ invoiceProposal: null, preview: monthlyPreview, selectedRows: [3014] })} />);
+    const updated = within(screen.getByRole("heading", { name: "для PU ДДС.xlsx" }).closest("section") as HTMLElement).getAllByRole("checkbox");
+    expect(updated[0]).not.toBeChecked();
+    expect(updated[1]).toBeChecked();
+  });
+
+  it("lets the manager correct imported DDS fields before creating proposals", () => {
+    const onEditPreviewRow = vi.fn();
+    render(<FinanceOperations {...props({ invoiceProposal: null, preview: monthlyPreview, selectedRows: [3003], onEditPreviewRow })} />);
+
+    fireEvent.change(screen.getByLabelText("Наименование ДДС!C3"), { target: { value: "Оплата оборудования" } });
+    fireEvent.change(screen.getByLabelText("Дата ДДС!C3"), { target: { value: "2026-02-10" } });
+    fireEvent.change(screen.getByLabelText("Сумма ДДС!C3"), { target: { value: "125000" } });
+
+    expect(onEditPreviewRow).toHaveBeenCalledWith(3003, { title: "Оплата оборудования" });
+    expect(onEditPreviewRow).toHaveBeenCalledWith(3003, { planned_date: "2026-02-10" });
+    expect(onEditPreviewRow).toHaveBeenCalledWith(3003, { amount: "125000" });
   });
 });

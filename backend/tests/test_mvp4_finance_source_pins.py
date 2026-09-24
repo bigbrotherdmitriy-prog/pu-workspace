@@ -107,7 +107,10 @@ def test_structured_budget_import_preserves_source_pin(db_session, user_factory,
 
     result = structured_import(
         document.id,
-        StructuredImportRequest(project_id=project.id, kind="budget", source_rows=[2]),
+        StructuredImportRequest(
+            project_id=project.id, kind="budget", source_rows=[2],
+            row_overrides={2: {"title": "Кабель после проверки", "amount": "1250.50", "category": "Материалы"}},
+        ),
         db_session,
         user,
     )
@@ -116,6 +119,9 @@ def test_structured_budget_import_preserves_source_pin(db_session, user_factory,
     assert (row.source_document_id, row.source_document_version_id, row.source_document_sha256) == (
         document.id, version.id, _digest(version),
     )
+    assert row.description == "Кабель после проверки"
+    assert row.planned_amount == Decimal("1250.50")
+    assert row.category == "Материалы"
 
 
 def test_stale_budget_source_blocks_approval(db_session, user_factory, monkeypatch):
