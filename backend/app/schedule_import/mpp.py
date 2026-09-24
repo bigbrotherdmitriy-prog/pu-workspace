@@ -8,10 +8,37 @@ from threading import Lock
 
 
 _JVM_LOCK = Lock()
+_READER_CLASS_NAMES = (
+    "org.mpxj.reader.UniversalProjectReader",
+    "net.sf.mpxj.reader.UniversalProjectReader",
+)
 
 
 class MppImportUnavailable(RuntimeError):
     pass
+
+
+def _universal_project_reader():
+    """Load the reader across the MPXJ 16 and legacy Java namespaces."""
+    try:
+        import jpype
+        import mpxj  # noqa: F401 - registers the packaged MPXJ jars
+
+        with _JVM_LOCK:
+            if not jpype.isJVMStarted():
+                jpype.startJVM()
+
+        last_error = None
+        for class_name in _READER_CLASS_NAMES:
+            try:
+                return jpype.JClass(class_name)
+            except Exception as exc:  # JPype uses Java-specific lookup errors.
+                last_error = exc
+        raise last_error or ImportError("MPXJ reader class was not found")
+    except Exception as exc:
+        raise MppImportUnavailable(
+            "MPP parser could not be initialized; compatible MPXJ and Java 17+ are required"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -96,15 +123,7 @@ def map_mpxj_task(task) -> MppTask:
 def read_mpp_bytes(data: bytes) -> list[MppTask]:
     if not data:
         raise ValueError("MPP-файл пуст")
-    try:
-        import jpype
-        import mpxj  # noqa: F401 - registers the packaged MPXJ jars
-        with _JVM_LOCK:
-            if not jpype.isJVMStarted():
-                jpype.startJVM()
-        from net.sf.mpxj.reader import UniversalProjectReader
-    except Exception as exc:
-        raise MppImportUnavailable("MPP parser is unavailable; MPXJ and Java 17 are required") from exc
+    UniversalProjectReader = _universal_project_reader()
 
     with TemporaryDirectory(prefix="pu-mpp-") as temp_dir:
         source = Path(temp_dir) / "schedule.mpp"
