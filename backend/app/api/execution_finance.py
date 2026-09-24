@@ -1461,10 +1461,12 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
                 if row.source_name:
                     row.source_name = payload.filename
         if not _has_self_dependency(existing_rows):
-            created_cash_flow = _create_mpp_cash_flow_proposals(
-                db, payload=payload, digest=digest, tasks=_mpp_tasks(data),
-                imported={uid: item for item in existing_rows if (uid := _mpp_uid(item))}, user=user,
-            )
+            created_cash_flow: list[int] = []
+            if payload.create_cash_flow_proposals:
+                created_cash_flow = _create_mpp_cash_flow_proposals(
+                    db, payload=payload, digest=digest, tasks=_mpp_tasks(data),
+                    imported={uid: item for item in existing_rows if (uid := _mpp_uid(item))}, user=user,
+                )
             if source_name_changed:
                 _audit(db, "mpp_source_file_rebound", "schedule_baseline", existing.id, user.id,
                        f"sha256={digest[:12]}")

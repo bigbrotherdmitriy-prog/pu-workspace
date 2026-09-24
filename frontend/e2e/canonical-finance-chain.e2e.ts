@@ -133,14 +133,16 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   await expect(dds.getByText("paid", { exact: true })).toBeVisible();
 
   await dds.getByRole("button", { name: "Расход", exact: true }).click();
-  await dds.getByLabel("Тип финансовой записи").selectOption("act");
-  await dds.getByPlaceholder("Название").fill("Акт монтажа");
-  await dds.getByPlaceholder("Сумма, ₽").fill("25000");
-  await dds.getByPlaceholder("Номер акта").fill("ACT-84");
-  await dds.getByLabel("Строка бюджета для акта").selectOption("81");
-  await dds.getByRole("button", { name: "Создать предложение" }).click();
-  await dds.getByRole("button", { name: "Подтвердить", exact: true }).click();
-  await dds.getByRole("button", { name: "Подписать", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Проверка финансовых данных" });
+  await expect(editor).toBeVisible();
+  await editor.getByLabel("Тип финансовой записи").selectOption("act");
+  await editor.getByPlaceholder("Название").fill("Акт монтажа");
+  await editor.getByPlaceholder("Сумма, ₽").fill("25000");
+  await editor.getByPlaceholder("Номер акта").fill("ACT-84");
+  await editor.getByLabel("Строка бюджета для акта").selectOption("81");
+  await editor.getByRole("button", { name: "Создать предложение" }).click();
+  await editor.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await editor.getByRole("button", { name: "Подписать", exact: true }).click();
 
   await expect(dds.getByText(/законтрактовано 30[\s ]?000,00 ₽/i)).toBeVisible();
   await expect(dds.getByText(/факт работ 25[\s ]?000,00 ₽/i)).toBeVisible();

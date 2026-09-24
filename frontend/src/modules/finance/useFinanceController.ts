@@ -64,6 +64,11 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }, [ready, projectId, selectedFinanceContractId]);
 
   function prepareFinanceItem(kind: string, baselineId = 0) {
+    // Starting a manual entry is an explicit context switch.  Do not leave a
+    // previously confirmed invoice or spreadsheet review covering the editor.
+    setInvoiceExtractionProposal(null);
+    setFinanceStructuredPreview(null);
+    setFinanceStructuredRows([]);
     setFinanceKind(kind);
     setFinanceTitle("");
     setFinanceAmount("");
