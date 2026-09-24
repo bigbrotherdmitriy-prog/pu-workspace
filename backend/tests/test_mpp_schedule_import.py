@@ -1,5 +1,9 @@
+import sys
+from types import ModuleType, SimpleNamespace
+
 from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, router
-from app.schedule_import.mpp import _relation, map_mpxj_task
+from app.schedule_import import mpp as mpp_module
+from app.schedule_import.mpp import _load_mpxj_reader, _relation, map_mpxj_task
 from app.schedule_import.mspdi import build_mspdi
 from xml.etree import ElementTree
 
@@ -35,6 +39,26 @@ class Task(ValueTask):
     def getMilestone(self): return False
     def getCritical(self): return True
     def getPredecessors(self): return [Relation()]
+
+
+def test_mpxj_16_reader_bootstrap_uses_current_org_namespace(monkeypatch):
+    starts = []
+    imports = []
+    reader = object()
+    fake_jpype = ModuleType("jpype")
+    fake_jpype.isJVMStarted = lambda: False
+    fake_jpype.startJVM = lambda: starts.append(True)
+    monkeypatch.setitem(sys.modules, "jpype", fake_jpype)
+    monkeypatch.setitem(sys.modules, "mpxj", ModuleType("mpxj"))
+    monkeypatch.setattr(
+        mpp_module,
+        "import_module",
+        lambda name: imports.append(name) or SimpleNamespace(UniversalProjectReader=reader),
+    )
+
+    assert _load_mpxj_reader() is reader
+    assert starts == [True]
+    assert imports == ["org.mpxj.reader"]
 
 
 def test_mpxj_task_preserves_hierarchy_dates_critical_path_and_dependencies():

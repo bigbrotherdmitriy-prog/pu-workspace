@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date
+from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
@@ -93,18 +94,29 @@ def map_mpxj_task(task) -> MppTask:
     )
 
 
+def _load_mpxj_reader():
+    """Start the bundled MPXJ JVM once and return its v16 reader class.
+
+    MPXJ 16 moved Java packages from ``net.sf.mpxj`` to ``org.mpxj``.  The
+    Python package only registers its bundled JAR files; it does not start the
+    JVM itself, so both steps remain explicit and protected by one process lock.
+    """
+    import jpype
+    import mpxj  # noqa: F401 - registers the packaged MPXJ jars
+
+    with _JVM_LOCK:
+        if not jpype.isJVMStarted():
+            jpype.startJVM()
+    return import_module("org.mpxj.reader").UniversalProjectReader
+
+
 def read_mpp_bytes(data: bytes) -> list[MppTask]:
     if not data:
         raise ValueError("MPP-файл пуст")
     try:
-        import jpype
-        import mpxj  # noqa: F401 - registers the packaged MPXJ jars
-        with _JVM_LOCK:
-            if not jpype.isJVMStarted():
-                jpype.startJVM()
-        from net.sf.mpxj.reader import UniversalProjectReader
+        UniversalProjectReader = _load_mpxj_reader()
     except Exception as exc:
-        raise MppImportUnavailable("MPP parser is unavailable; MPXJ and Java 17 are required") from exc
+        raise MppImportUnavailable("MPP parser is unavailable; MPXJ 16 and Java 17+ are required") from exc
 
     with TemporaryDirectory(prefix="pu-mpp-") as temp_dir:
         source = Path(temp_dir) / "schedule.mpp"
