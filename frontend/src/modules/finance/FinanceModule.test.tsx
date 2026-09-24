@@ -70,4 +70,26 @@ describe("finance document ingress", () => {
     fireEvent.click(screen.getByRole("button", { name: "Открыть ГПР" }));
     expect(onOpenSchedule).toHaveBeenCalledOnce();
   });
+
+  it("keeps finance intake inside the unified DDS workspace without the legacy dashboard", () => {
+    render(<FinanceModule
+      embedded
+      finance={null}
+      candidates={[]}
+      contracts={[{ id: 7, number: "Д-7", title: "Монтаж" }]}
+      selectedContractId={7}
+      onSelectContract={vi.fn()}
+      onPrepare={vi.fn()}
+      onUseCandidate={vi.fn()}
+      onUpload={vi.fn()}
+      onUploadFinance={vi.fn()}
+      onOpenSchedule={vi.fn()}
+      onReload={vi.fn()}
+    />);
+
+    expect(screen.getByRole("region", { name: "Загрузка и разбор финансовых документов" })).toBeTruthy();
+    expect(screen.getByLabelText("Финансовый договор")).toHaveValue("7");
+    expect(screen.getByRole("button", { name: "Загрузить бюджет" })).toBeEnabled();
+    expect(screen.queryByText("Мастер запуска исполнения")).toBeNull();
+  });
 });
