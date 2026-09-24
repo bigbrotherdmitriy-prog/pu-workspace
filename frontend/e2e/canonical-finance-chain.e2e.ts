@@ -113,6 +113,7 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   await expect(page.locator(".gpr-workspace")).toBeVisible();
   await expect(page.getByText("Действующая версия ГПР", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await dds.locator("summary", { hasText: "Найденные документы" }).click();
   await dds.getByRole("button", { name: "Проверить и использовать" }).click();
   await dds.getByLabel("Этап ГПР счёта").selectOption("72");
   await dds.getByLabel("Строка бюджета счёта").selectOption("81");

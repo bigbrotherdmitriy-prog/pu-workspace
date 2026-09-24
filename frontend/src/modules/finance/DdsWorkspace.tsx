@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, CheckCheck, Download, ListFilter, Plus, RotateCcw, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CalendarRange, CheckCheck, Download, ListFilter, Plus, RotateCcw, Search, Upload } from "lucide-react";
 import { InvoiceBatchUpload, type InvoiceBatchUploadProps } from "./InvoiceBatchUpload";
 import { formatMoney } from "../../utils/numberFormat";
 import type { FinanceOverview } from "./types";
@@ -19,6 +19,7 @@ type Props = {
   onDropInvoices?: InvoiceBatchUploadProps["onUpload"];
   onReviewInvoice?: InvoiceBatchUploadProps["onReview"];
   onPrepareAdditionalExpense?: () => void;
+  onImportCashFlow?: (files: File[]) => void;
 };
 
 type Tab = "months" | "calendar" | "details" | "summary";
@@ -73,7 +74,8 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onLinkControls, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense }: Props) {
+export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onLinkControls, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
+  const cashFlowImportInput = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<Tab>("calendar");
   const [objectFilter, setObjectFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -311,9 +313,22 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
   };
 
   return <section className="card dds-workspace" id="dds-workspace">
+    <input
+      ref={cashFlowImportInput}
+      hidden
+      aria-label="Импорт планового ДДС"
+      type="file"
+      multiple
+      accept=".xlsx,.xls,.csv"
+      onChange={(event) => {
+        const files = Array.from(event.target.files || []);
+        if (files.length) onImportCashFlow?.(files);
+        event.currentTarget.value = "";
+      }}
+    />
     <div className="dds-head">
       <div><span className="eyebrow">ПЛАТЁЖНЫЙ КАЛЕНДАРЬ</span><h2>Движение денежных средств</h2><p>Все представления считаются из единой детализации. План и факт хранятся и показываются раздельно.</p></div>
-      <div className="dds-head-actions"><button className="secondary" type="button" disabled={!undoStack.length} onClick={() => void undoLast()}><RotateCcw /> Отменить</button><button className="secondary" type="button" onClick={() => exportView()}><Download /> Экспорт: {tabs.find((item) => item.id === tab)?.label}</button><button className="secondary" type="button" onClick={() => exportView("details")}><Download /> Полный ДДС</button><button className="secondary" type="button" onClick={exportAdditionalExpenses}><Download /> Дополнительные расходы</button><button className="secondary" type="button" onClick={() => onPrepare("cash-in")}><Plus /> Приход</button><button type="button" onClick={() => onPrepare("cash-out")}><Plus /> Расход</button>{onPrepareAdditionalExpense && <button type="button" onClick={onPrepareAdditionalExpense}><Plus /> Доп. расход</button>}</div>
+      <div className="dds-head-actions">{onImportCashFlow && <button type="button" disabled={!selectedContractId} title={selectedContractId ? "Загрузить Excel или CSV с плановым ДДС" : "Сначала выберите финансовый договор"} onClick={() => cashFlowImportInput.current?.click()}><Upload /> Импортировать плановый ДДС</button>}<button className="secondary" type="button" disabled={!undoStack.length} onClick={() => void undoLast()}><RotateCcw /> Отменить</button><button className="secondary" type="button" onClick={() => exportView()}><Download /> Экспорт: {tabs.find((item) => item.id === tab)?.label}</button><button className="secondary" type="button" onClick={() => exportView("details")}><Download /> Полный ДДС</button><button className="secondary" type="button" onClick={exportAdditionalExpenses}><Download /> Дополнительные расходы</button><button className="secondary" type="button" onClick={() => onPrepare("cash-in")}><Plus /> Приход</button><button type="button" onClick={() => onPrepare("cash-out")}><Plus /> Расход</button>{onPrepareAdditionalExpense && <button type="button" onClick={onPrepareAdditionalExpense}><Plus /> Доп. расход</button>}</div>
     </div>
     {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice} />}
     <div className="dds-tabs" role="tablist" aria-label="Разделы ДДС">{tabs.map((item) => <button type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
