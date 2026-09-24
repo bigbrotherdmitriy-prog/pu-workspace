@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
@@ -56,6 +57,7 @@ class MppTask:
     is_summary: bool
     is_milestone: bool
     is_critical: bool
+    cost: Decimal | None
     predecessors: list[dict[str, str | None]]
 
     def to_dict(self) -> dict:
@@ -74,6 +76,18 @@ def _date(value) -> date | None:
 
 def _task_uid(task) -> str | None:
     return str(task.getUniqueID()) if task is not None else None
+
+
+def _cost(task) -> Decimal | None:
+    getter = getattr(task, "getCost", None)
+    value = getter() if getter else None
+    if value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return amount if amount.is_finite() and amount > 0 else None
 
 
 def _relation(relation, current_task) -> dict[str, str | None]:
@@ -116,6 +130,7 @@ def map_mpxj_task(task) -> MppTask:
         is_summary=bool(task.getSummary()),
         is_milestone=bool(task.getMilestone()),
         is_critical=bool(task.getCritical()),
+        cost=_cost(task),
         predecessors=[_relation(item, task) for item in task.getPredecessors()],
     )
 

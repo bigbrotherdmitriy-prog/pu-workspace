@@ -1,6 +1,11 @@
+import base64
+
 import pytest
 
-from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, router
+from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, import_mpp, router
+from app.models.execution_finance import CashFlowEntry, ScheduleBaseline, ScheduleItem
+from app.models.organization_contract import Organization
+from app.models.project import Project
 from app.schedule_import.mpp import MppImportUnavailable, _relation, map_mpxj_task
 from app.schedule_import.mspdi import build_mspdi
 from xml.etree import ElementTree
@@ -36,6 +41,7 @@ class Task(ValueTask):
     def getSummary(self): return False
     def getMilestone(self): return False
     def getCritical(self): return True
+    def getCost(self): return Value("125400.50")
     def getPredecessors(self): return [Relation()]
 
 
@@ -50,6 +56,7 @@ def test_mpxj_task_preserves_hierarchy_dates_critical_path_and_dependencies():
     assert task.progress == 40
     assert task.duration_text == "8.0d"
     assert task.is_critical is True
+    assert str(task.cost) == "125400.50"
     assert task.predecessors == [{"external_uid": "17", "type": "FS", "lag": "0.0d"}]
 
 
@@ -145,6 +152,42 @@ def test_mpp_lag_is_normalized_for_native_gpr_dependencies():
     assert _mpp_lag_suffix("2.0d") == "+2d"
     assert _mpp_lag_suffix("-1.0d") == "-1d"
     assert _mpp_lag_suffix("2.5h") == ""
+
+
+def test_mpp_costs_create_idempotent_cash_flow_proposals_only_after_opt_in(
+    db_session, user_factory, monkeypatch,
+):
+    user = user_factory(is_admin=True)
+    organization = Organization(name="MPP cost organization")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="MPP cost project", organization_id=organization.id)
+    db_session.add(project); db_session.flush()
+    task = map_mpxj_task(Task(42))
+    monkeypatch.setattr("app.api.execution_finance._mpp_tasks", lambda _data: [task])
+    payload = MppImportRequest(
+        project_id=project.id,
+        filename="plan.mpp",
+        content_base64=base64.b64encode(b"MPP with costs").decode(),
+        create_cash_flow_proposals=True,
+        cash_flow_currency="RUB",
+    )
+
+    result = import_mpp(payload, db_session, user)
+
+    assert result["cash_flow_proposals_created"] == 1
+    assert db_session.query(ScheduleBaseline).count() == 1
+    schedule = db_session.query(ScheduleItem).one()
+    proposal = db_session.query(CashFlowEntry).one()
+    assert proposal.schedule_item_id == schedule.id
+    assert proposal.planned_amount == 125400.50
+    assert proposal.planned_date.isoformat() == "2026-09-10"
+    assert proposal.status == "proposed"
+    assert proposal.direction == "outflow"
+
+    replay = import_mpp(payload, db_session, user)
+    assert replay["duplicate"] is True
+    assert replay["cash_flow_proposals_created"] == 0
+    assert db_session.query(CashFlowEntry).count() == 1
 
 
 def test_mspdi_export_preserves_hierarchy_progress_and_dependency():

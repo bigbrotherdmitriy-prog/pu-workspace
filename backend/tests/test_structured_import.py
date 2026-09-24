@@ -8,6 +8,7 @@ def test_schedule_csv_is_mapped_to_reviewable_source_rows():
     )
     assert result["issues"] == []
     assert result["rows"][0] == {
+        "selection_id": 2,
         "source_row": 2, "source_sheet": None, "source_line": 2, "source_coordinate": "строка 2", "source_name": None,
         "title": "Монтаж", "category": "Прочее",
         "planned_start": "2026-09-01", "planned_finish": "2026-09-30",
@@ -76,3 +77,32 @@ def test_structured_import_routes_require_explicit_preview_and_import():
     paths = {route.path for route in router.routes}
     assert "/execution/documents/{document_id}/structured-preview" in paths
     assert "/execution/documents/{document_id}/structured-import" in paths
+
+
+def test_monthly_dds_matrix_uses_month_end_and_infers_blank_december_column():
+    content = (
+        "\t\tянварь\tфевраль\tмарт\tапрель\tмай\tиюнь\tиюль\tавгуст\tсентябрь\tоктябрь\tноябрь\t\t__PU_SOURCE_COORD__:ДДС:1\n"
+        "Платежи в DCI\t1000\t100\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t900\t__PU_SOURCE_COORD__:ДДС:2\n"
+        "Этапы Дубна\t1000\t100\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t900\t__PU_SOURCE_COORD__:ДДС:3\n"
+        "Городец, кнопка, материалы\t415000\t0\t415000\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t__PU_SOURCE_COORD__:ДДС:4\n"
+        "пом.116 SCADA и прогрузка\t1154000\t0\t0\t1154000\t0\t0\t0\t0\t0\t0\t0\t0\t0\t__PU_SOURCE_COORD__:ДДС:11\n"
+        "Материалы\t100\t0\t0\t0\t114\t0\t0\t0\t0\t0\t0\t0\t0\t__PU_SOURCE_COORD__:ДДС:12\n"
+        "Расходы по месяцам (DCI)\t415000\t0\t415000\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t__PU_SOURCE_COORD__:ДДС:31\n"
+        "сумма\t100\t5\t5\t5\t5\t5\t5\t5\t5\t5\t5\t5\t5\t__PU_SOURCE_COORD__:ДДС:35\n"
+    )
+
+    result = parse_structured_rows(content, "cash-flow", source_name="для PU ДДС.xlsx", plan_year=2026)
+
+    assert result["layout"] == "monthly_matrix"
+    assert result["plan_year"] == 2026
+    assert result["inferred_december"] is True
+    assert [(row["source_coordinate"], row["title"], row["planned_date"], row["amount"], row["direction"]) for row in result["rows"]] == [
+        ("ДДС!C3", "Этапы Дубна", "2026-01-31", "100.00", "inflow"),
+        ("ДДС!N3", "Этапы Дубна", "2026-12-31", "900.00", "inflow"),
+        ("ДДС!D4", "Городец, кнопка, материалы", "2026-02-28", "415000.00", "outflow"),
+        ("ДДС!E11", "пом.116 SCADA и прогрузка", "2026-03-31", "1154000.00", "outflow"),
+        ("ДДС!F12", "Материалы", "2026-04-30", "114.00", "outflow"),
+    ]
+    assert result["issues"] == ["ДДС!12: годовой итог 100.00 не равен сумме месяцев 114.00"]
+    assert len({row["selection_id"] for row in result["rows"]}) == 5
+    assert not any(row["source_row"] >= 31 for row in result["rows"])

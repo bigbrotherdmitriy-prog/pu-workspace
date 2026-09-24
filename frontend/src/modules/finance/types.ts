@@ -156,6 +156,10 @@ export type MppPreview = {
   changed_count: number;
   removed_count: number;
   preserved_actual_count: number;
+  cost_task_count: number;
+  cost_total: number;
+  cost_currency: string;
+  cost_missing_date_count: number;
 };
 
 export type FinanceDocumentCandidate = {
@@ -171,6 +175,7 @@ export type FinanceDocumentCandidate = {
 };
 
 export type FinanceStructuredRow = {
+  selection_id: number;
   source_row: number;
   source_sheet?: string;
   source_line?: number;
@@ -199,4 +204,7 @@ export type FinanceStructuredPreview = {
   rows: FinanceStructuredRow[];
   issues: string[];
   truncated: boolean;
+  layout?: "monthly_matrix";
+  plan_year?: number;
+  inferred_december?: boolean;
 };
