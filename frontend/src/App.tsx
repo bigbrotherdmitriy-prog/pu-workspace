@@ -4,6 +4,7 @@ import { Login } from "./auth/Login";
 import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
 import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
+import { FinanceModule } from "./modules/finance/FinanceModule";
 import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
 import { GprWorkspace } from "./modules/finance/GprWorkspace";
 import { GprDdsWorkspace, type GprDdsTab } from "./modules/finance/GprDdsWorkspace";
@@ -3448,6 +3449,20 @@ export function App() {
             /></div>}
             </>}
             dds={<>
+            <FinanceModule
+              finance={finance}
+              candidates={financeCandidates}
+              contracts={contracts}
+              selectedContractId={selectedFinanceContractId}
+              onSelectContract={setSelectedFinanceContractId}
+              onPrepare={prepareFinanceItem}
+              onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
+              onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
+              onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
+              onOpenSchedule={() => setGprDdsTab("gpr")}
+              onReload={() => void loadFinance()}
+              embedded
+            />
             <DdsWorkspace
               finance={finance}
               selectedContractId={selectedFinanceContractId}
