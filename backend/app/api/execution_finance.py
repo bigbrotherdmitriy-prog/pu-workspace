@@ -1472,9 +1472,11 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
                        f"sha256={digest[:12]}")
             if source_name_changed or created_cash_flow:
                 db.commit()
-            return {"baseline_id": existing.id, "version": existing.version,
-                    "created": len(existing_rows), "duplicate": True, "repaired": False,
-                    "cash_flow_proposals_created": len(created_cash_flow)}
+            result = {"baseline_id": existing.id, "version": existing.version,
+                      "created": len(existing_rows), "duplicate": True, "repaired": False}
+            if payload.create_cash_flow_proposals:
+                result["cash_flow_proposals_created"] = len(created_cash_flow)
+            return result
 
         # Releases before this fix read the wrong MPXJ relation endpoint and
         # persisted every dependency as a self-reference.  The encrypted
@@ -1498,9 +1500,11 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
             imported=existing_by_uid, user=user,
         )
         db.commit()
-        return {"baseline_id": existing.id, "version": existing.version,
-                "created": len(existing_rows), "duplicate": True, "repaired": True,
-                "cash_flow_proposals_created": len(created_cash_flow)}
+        result = {"baseline_id": existing.id, "version": existing.version,
+                  "created": len(existing_rows), "duplicate": True, "repaired": True}
+        if payload.create_cash_flow_proposals:
+            result["cash_flow_proposals_created"] = len(created_cash_flow)
+        return result
 
     tasks = _mpp_tasks(data)
     source_baseline = None
