@@ -1,5 +1,7 @@
+import pytest
+
 from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, router
-from app.schedule_import.mpp import _relation, map_mpxj_task
+from app.schedule_import.mpp import MppImportUnavailable, _relation, map_mpxj_task
 from app.schedule_import.mspdi import build_mspdi
 from xml.etree import ElementTree
 
@@ -60,6 +62,72 @@ def test_mpxj_relation_uses_the_endpoint_other_than_the_current_task():
 
     assert _relation(Relation(), current)["external_uid"] == "17"
     assert _relation(ReversedRelation(), current)["external_uid"] == "17"
+
+
+def test_mpxj_reader_prefers_the_current_org_namespace(monkeypatch):
+    import app.schedule_import.mpp as mpp_module
+
+    calls = []
+
+    class FakeJpype:
+        @staticmethod
+        def isJVMStarted(): return True
+
+        @staticmethod
+        def JClass(name):
+            calls.append(name)
+            if name == "org.mpxj.reader.UniversalProjectReader":
+                return "current-reader"
+            raise AssertionError("legacy namespace must not be consulted")
+
+    monkeypatch.setitem(__import__("sys").modules, "jpype", FakeJpype)
+    monkeypatch.setitem(__import__("sys").modules, "mpxj", object())
+
+    assert mpp_module._universal_project_reader() == "current-reader"
+    assert calls == ["org.mpxj.reader.UniversalProjectReader"]
+
+
+def test_mpxj_reader_falls_back_to_the_legacy_namespace(monkeypatch):
+    import app.schedule_import.mpp as mpp_module
+
+    calls = []
+
+    class FakeJpype:
+        @staticmethod
+        def isJVMStarted(): return True
+
+        @staticmethod
+        def JClass(name):
+            calls.append(name)
+            if name == "net.sf.mpxj.reader.UniversalProjectReader":
+                return "legacy-reader"
+            raise TypeError("class not found")
+
+    monkeypatch.setitem(__import__("sys").modules, "jpype", FakeJpype)
+    monkeypatch.setitem(__import__("sys").modules, "mpxj", object())
+
+    assert mpp_module._universal_project_reader() == "legacy-reader"
+    assert calls == [
+        "org.mpxj.reader.UniversalProjectReader",
+        "net.sf.mpxj.reader.UniversalProjectReader",
+    ]
+
+
+def test_mpxj_reader_reports_an_actionable_error_when_no_namespace_exists(monkeypatch):
+    import app.schedule_import.mpp as mpp_module
+
+    class FakeJpype:
+        @staticmethod
+        def isJVMStarted(): return True
+
+        @staticmethod
+        def JClass(_name): raise TypeError("class not found")
+
+    monkeypatch.setitem(__import__("sys").modules, "jpype", FakeJpype)
+    monkeypatch.setitem(__import__("sys").modules, "mpxj", object())
+
+    with pytest.raises(MppImportUnavailable, match=r"Java 17\+"):
+        mpp_module._universal_project_reader()
 
 
 def test_mpp_routes_and_binary_validation_are_explicit():

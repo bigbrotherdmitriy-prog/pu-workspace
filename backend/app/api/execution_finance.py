@@ -146,7 +146,10 @@ def _mpp_tasks(data: bytes):
     try:
         return read_mpp_bytes(data)
     except MppImportUnavailable as exc:
-        raise HTTPException(503, "Импорт MPP временно недоступен: на сервере требуется MPXJ и Java 17") from exc
+        raise HTTPException(
+            503,
+            "Импорт MPP временно недоступен: не удалось запустить совместимые MPXJ и Java 17+",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
