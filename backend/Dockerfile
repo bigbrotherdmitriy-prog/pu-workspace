@@ -5,6 +5,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -c "import importlib, jpype, mpxj; jpype.startJVM(); assert importlib.import_module('org.mpxj.reader').UniversalProjectReader"
 COPY app ./app
 COPY scripts ./scripts
 COPY alembic.ini ./alembic.ini
