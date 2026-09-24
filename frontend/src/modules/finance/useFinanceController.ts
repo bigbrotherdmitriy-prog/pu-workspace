@@ -354,7 +354,9 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   async function confirmFinance(kind: string, id: number, status: string) {
     try {
       await api(`/execution/${kind}/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
-      setNotice("Статус финансовой записи подтверждён и сохранён в аудите");
+      setNotice(status === "cancelled"
+        ? "Операция отменена и исключена из расчётов. История сохранена."
+        : "Статус финансовой записи подтверждён и сохранён в аудите");
       await loadFinance();
     } catch (error) { setError((error as Error).message); }
   }

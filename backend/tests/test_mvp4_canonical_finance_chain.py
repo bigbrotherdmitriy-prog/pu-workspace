@@ -212,6 +212,48 @@ def test_document_cash_flow_cannot_be_approved_before_controls_are_linked(db_ses
     assert row.status == "proposed"
 
 
+@pytest.mark.parametrize("initial_status", ["proposed", "approved"])
+def test_cancel_cash_flow_preserves_history_and_releases_budget(db_session, user_factory, initial_status):
+    user, project, contract, _stage, budget, _category, document, version = _world(db_session, user_factory)
+    row = CashFlowEntry(
+        project_id=project.id, contract_id=contract.id, budget_line_id=budget.id,
+        source_document_id=document.id, source_document_version_id=version.id,
+        direction="outflow", title="Cancel test invoice", planned_date=date(2026, 9, 25),
+        planned_amount=Decimal("300"), actual_amount=Decimal("0"),
+        currency="RUB", status=initial_status,
+    )
+    budget.committed_amount = Decimal("300")
+    db_session.add(row); db_session.flush()
+    row_id = row.id
+
+    result = update_status("cash-flow", row_id, StatusUpdate(status="cancelled"), db_session, user)
+
+    assert result["status"] == "cancelled"
+    db_session.expire_all()
+    saved = db_session.get(CashFlowEntry, row_id)
+    assert saved.status == "cancelled"
+    assert saved.source_document_id == document.id
+    assert budget.committed_amount == Decimal("0")
+    assert db_session.query(AuditLog).filter(AuditLog.entity_id == row_id).count() >= 1
+
+
+@pytest.mark.parametrize("initial_status", ["paid", "received"])
+def test_cancel_cash_flow_refuses_settled_payment(db_session, user_factory, initial_status):
+    user, project, contract, _stage, _budget, _category, _document, _version = _world(db_session, user_factory)
+    row = CashFlowEntry(
+        project_id=project.id, contract_id=contract.id,
+        direction="outflow" if initial_status == "paid" else "inflow",
+        title="Settled payment", planned_date=date(2026, 9, 25),
+        planned_amount=Decimal("300"), actual_amount=Decimal("300"),
+        actual_date=date(2026, 9, 25), currency="RUB", status=initial_status,
+    )
+    db_session.add(row); db_session.flush()
+    with pytest.raises(HTTPException) as denied:
+        update_status("cash-flow", row.id, StatusUpdate(status="cancelled"), db_session, user)
+    assert denied.value.status_code == 409
+    assert row.status == initial_status
+
+
 def test_control_links_cannot_be_changed_after_approval(db_session, user_factory):
     user, project, contract, stage, budget, _category, _document, _version = _world(db_session, user_factory)
     row = CashFlowEntry(

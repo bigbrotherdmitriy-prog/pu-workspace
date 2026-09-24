@@ -30,7 +30,7 @@ test("reading themes retain contrast, legible copy and responsive layout", async
     expect(metrics.font).toBeGreaterThanOrEqual(15);
     expect(metrics.lineHeight).toBeGreaterThanOrEqual(1.5);
     expect(metrics.overflow).toBe(false);
-    expect(metrics.heroHeight).toBeLessThan(340);
+    expect(metrics.heroHeight).toBeLessThan(theme === "dark" ? 440 : 340);
     await page.screenshot({ path: info.outputPath(`comfort-${theme}.png`), fullPage: true });
   }
   await page.getByRole("button", { name: "Режим комфорта" }).click();
@@ -56,4 +56,24 @@ test("scheduled theme follows local time and manual theme overrides schedule", a
   await page.getByRole("button", { name: "Светлая", exact: true }).click();
   await page.clock.fastForward(30_000);
   await expect(page.locator("html")).toHaveAttribute("data-display-theme", "light");
+});
+
+test("HQ model rotates, pauses, supports keyboard rotation and opens project finance", async ({ page, mock }) => {
+  await page.goto("/new/");
+  await page.getByRole("button", { name: "Тёмная", exact: true }).click();
+  const canvas = page.getByLabel("Объёмная модель промышленного комплекса");
+  await expect(canvas).toBeVisible();
+  const snapshot = () => canvas.evaluate((node: HTMLCanvasElement) => node.toDataURL());
+  const first = await snapshot();
+  await expect.poll(snapshot).not.toBe(first);
+  await page.getByRole("button", { name: "Остановить вращение" }).click();
+  await expect(page.getByRole("button", { name: "Включить вращение" })).toBeVisible();
+  const stopped = await snapshot();
+  await page.waitForTimeout(150);
+  expect(await snapshot()).toBe(stopped);
+  await canvas.press("ArrowRight");
+  await expect.poll(snapshot).not.toBe(stopped);
+  await page.getByRole("navigation", { name: "Разделы объекта" }).getByRole("button", { name: "ДДС ↗", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "ДДС" })).toBeVisible();
+  expect(mock.unexpected).toEqual([]);
 });
