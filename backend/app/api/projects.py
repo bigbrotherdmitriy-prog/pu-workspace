@@ -12,6 +12,7 @@ from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.organization_contract import Organization
 from app.models.audit_log import AuditLog
+from app.finance_money import strict_currency
 from app.models.organizer import OrganizerSession
 from app.models.document import Document
 from app.models.organization_contract import Contract
@@ -41,6 +42,9 @@ def _source_session_ready(session: OrganizerSession) -> bool:
 class ProjectCreate(BaseModel):
     name: str
     organization_id: int | None = None
+    currency: str = "RUB"
+
+    _currency = field_validator("currency", mode="before")(strict_currency)
 
 
 class ProjectUpdate(BaseModel):
@@ -53,6 +57,7 @@ class ProjectResponse(BaseModel):
     id: int
     name: str
     organization_id: int
+    currency: str
     archived_at: datetime | None = None
 
 
@@ -101,6 +106,7 @@ def list_projects(
             {
                 "id": project.id,
                 "name": project.name,
+                "currency": project.currency,
                 "archived_at": project.archived_at,
             }
             for project in projects
@@ -120,12 +126,15 @@ def create_project(
     organization_id = project.organization_id or db.scalar(select(Organization.id).order_by(Organization.id).limit(1))
     if organization_id is None or db.get(Organization, organization_id) is None:
         raise HTTPException(422, "Organization is required")
-    item = Project(name=project.name, organization_id=organization_id)
+    item = Project(name=project.name, organization_id=organization_id, currency=project.currency)
 
     db.add(item)
     db.flush()
     db.add(ProjectMember(project_id=item.id, user_id=user.id, role="owner"))
-    db.add(AuditLog(action="project_created", entity_type="project", entity_id=item.id, details=f"Project: {item.name}"))
+    db.add(AuditLog(
+        action="project_created", entity_type="project", entity_id=item.id,
+        details=f"Project: {item.name}; currency={item.currency}",
+    ))
     db.commit()
     db.refresh(item)
 

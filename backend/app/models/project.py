@@ -25,6 +25,10 @@ class Project(Base):
             "site_accuracy_m IS NULL OR site_accuracy_m BETWEEN 0 AND 100000",
             name="ck_projects_site_accuracy",
         ),
+        CheckConstraint(
+            "length(currency) = 3 AND currency = upper(currency)",
+            name="ck_projects_currency_format",
+        ),
     )
     record_version: Mapped[int] = mapped_column(server_default="1")
 
@@ -42,6 +46,13 @@ class Project(Base):
         ForeignKey("organizations.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="RUB",
+        server_default="RUB",
     )
 
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

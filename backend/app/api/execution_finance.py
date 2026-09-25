@@ -1,7 +1,7 @@
 import base64
 import binascii
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import re
@@ -15,6 +15,14 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
+from app.finance_money import (
+    MONEY_QUANTUM,
+    ProjectCurrencyError,
+    money as _money,
+    project_currency,
+    require_project_currency,
+    strict_currency as _strict_currency,
+)
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
@@ -33,35 +41,12 @@ from app.schedule_import.mspdi import build_mspdi
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
-MONEY_QUANTUM = Decimal("0.01")
-MONEY_MAX = Decimal("9999999999999999.99")
-ISO_4217_CURRENCIES = frozenset({
-    "AED", "AMD", "AUD", "AZN", "BGN", "BRL", "BYN", "CAD", "CHF", "CNY",
-    "CZK", "DKK", "EUR", "GBP", "GEL", "HKD", "HUF", "INR", "JPY", "KGS",
-    "KRW", "KZT", "MDL", "NOK", "PLN", "RON", "RSD", "RUB", "SEK", "SGD",
-    "THB", "TJS", "TRY", "UAH", "USD", "UZS", "VND", "ZAR",
-})
-
-
-def _strict_currency(value: object) -> str:
-    if not isinstance(value, str) or value not in ISO_4217_CURRENCIES:
-        raise ValueError("Валюта должна быть поддерживаемым кодом ISO 4217 в верхнем регистре")
-    return value
-
-
-def _money(value: object, *, allow_zero: bool = True) -> Decimal:
+def _require_project_currency(db: Session, project_id: int, currency: object) -> str:
     try:
-        amount = Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValueError("Некорректная денежная сумма") from exc
-    if not amount.is_finite():
-        raise ValueError("Денежная сумма должна быть конечной")
-    amount = amount.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-    if amount < 0 or (not allow_zero and amount == 0):
-        raise ValueError("Денежная сумма должна быть положительной" if not allow_zero else "Денежная сумма не может быть отрицательной")
-    if amount > MONEY_MAX:
-        raise ValueError("Денежная сумма превышает Numeric(18,2)")
-    return amount
+        return require_project_currency(db, project_id, currency)
+    except ProjectCurrencyError as exc:
+        status = 404 if str(exc) == "Проект не найден" else 422
+        raise HTTPException(status, str(exc)) from exc
 
 
 class BaselineCreate(BaseModel):
@@ -189,6 +174,7 @@ def _create_mpp_cash_flow_proposals(
 ) -> list[int]:
     if not payload.create_cash_flow_proposals:
         return []
+    _require_project_currency(db, payload.project_id, payload.cash_flow_currency)
     created: list[int] = []
     for row in _mpp_cost_rows(tasks):
         schedule_item = imported.get(row.external_uid)
@@ -319,6 +305,10 @@ class InvoiceExtractionUpdate(BaseModel):
     payment_purpose: str | None = Field(default=None, min_length=1, max_length=1000)
     planned_date: date | None = None
     target_kind: str | None = Field(default=None, pattern="^(cash_flow|budget)$")
+
+    _amount_money = field_validator("amount", mode="before")(
+        lambda value: None if value is None else _money(value, allow_zero=False)
+    )
 
 
 class InvoiceExtractionConfirm(BaseModel):
@@ -1122,9 +1112,17 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         )
         for baseline in baselines
     }
+    currency = project_currency(db, project_id)
+    currency_rows = [*budget, *cash, *procurement, *acts]
+    mismatched = [row for row in currency_rows if row.currency != currency]
+    if mismatched:
+        raise HTTPException(
+            409,
+            f"PROJECT_CURRENCY_MISMATCH: найдено записей не в валюте проекта {currency}: {len(mismatched)}",
+        )
     confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}]
     relevant_cash = [x for x in cash if x.status in {"approved", "paid", "received"}]
-    currencies = sorted({x.currency for x in confirmed_budget} | {x.currency for x in relevant_cash}) or ["RUB"]
+    currencies = [currency]
     summary_by_currency: dict[str, dict] = {}
     for currency in currencies:
         currency_budget = [x for x in confirmed_budget if x.currency == currency]
@@ -1148,16 +1146,13 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
             "cash_gap": minimum,
             "cash_gap_date": gap_date,
         }
-    mixed_currency = len(currencies) > 1
-    legacy_money = summary_by_currency[currencies[0]] if not mixed_currency else {key: None for key in (
-        "budget_planned", "budget_committed", "budget_actual", "budget_forecast",
-        "budget_variance", "cash_balance_forecast", "cash_gap", "cash_gap_date",
-    )}
+    mixed_currency = False
+    legacy_money = summary_by_currency[currency]
     today = date.today()
     delayed = [x for x in schedule if x.planned_finish and x.planned_finish < today and x.actual_progress < 100]
     late_procurement = [x for x in procurement if x.planned_delivery and x.planned_delivery < today and x.stage not in {"delivered", "accepted", "cancelled"}]
     return {
-        "summary": {**legacy_money, "currency": currencies[0] if not mixed_currency else None,
+        "summary": {**legacy_money, "currency": currency,
                     "mixed_currency": mixed_currency, "by_currency": summary_by_currency,
                     "delayed_schedule": len(delayed),
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
@@ -1290,6 +1285,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                       db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
+    import_currency = project_currency(db, payload.project_id)
     document, version, digest, content = _document_content(db, payload.project_id, document_id)
     if payload.expected_document_version_id is not None and payload.expected_document_version_id != version.id:
         raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась после preview")
@@ -1354,7 +1350,8 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                 project_id=payload.project_id, contract_id=payload.contract_id,
                 cost_category_id=category_id, category=category_name,
                 description=row["title"], planned_amount=amount,
-                forecast_amount=amount, status="proposed", source_name=source_name,
+                forecast_amount=amount, currency=import_currency,
+                status="proposed", source_name=source_name,
                 source_excerpt=row["excerpt"], source_document_id=document.id,
                 source_document_version_id=version.id, source_document_sha256=digest,
             )
@@ -1367,7 +1364,8 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
                 source_document_id=document.id, direction=row["direction"] or payload.direction,
                 source_document_version_id=version.id, source_document_sha256=digest,
                 title=row["title"], planned_date=_import_date(row["planned_date"]),
-                planned_amount=_money(row["amount"], allow_zero=False), counterparty=row["counterparty"],
+                planned_amount=_money(row["amount"], allow_zero=False),
+                currency=import_currency, counterparty=row["counterparty"],
                 object_name=row.get("object_name"), cost_category_id=category_id,
                 category=category_name, note=row.get("note"),
                 status="proposed", source_name=source_name, source_excerpt=row["excerpt"],
@@ -1994,6 +1992,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     category = _category_for_project(db, item.project_id, item.selected_cost_category_id)
     if item.amount is None or not item.payment_purpose:
         raise HTTPException(422, "Перед подтверждением укажите сумму и назначение платежа")
+    _require_project_currency(db, item.project_id, item.currency)
     current, digest = _current_document_pin(
         db, item.project_id, item.source_document_id,
         item.source_document_version_id, item.source_document_sha256,
@@ -2014,7 +2013,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
             project_id=item.project_id, contract_id=payload.contract_id,
             cost_category_id=category.id, category=category.name,
             description=item.payment_purpose, planned_amount=item.amount,
-            forecast_amount=item.amount, status="proposed",
+            forecast_amount=item.amount, currency=item.currency, status="proposed",
             source_document_id=item.source_document_id,
             source_document_version_id=item.source_document_version_id,
             source_document_sha256=item.source_document_sha256,
@@ -2076,6 +2075,7 @@ def reject_invoice_extraction(proposal_id: int, db: Session = Depends(get_db),
 @router.post("/budget")
 def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
+    _require_project_currency(db, payload.project_id, payload.currency)
     data = payload.model_dump()
     data["cost_category_id"], data["category"] = _dual_write_category(
         db, payload.project_id, payload.cost_category_id, payload.category, required=True,
@@ -2087,6 +2087,7 @@ def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: Us
 @router.post("/cash-flow")
 def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
+    _require_project_currency(db, payload.project_id, payload.currency)
     data = payload.model_dump()
     data["cost_category_id"], data["category"] = _dual_write_category(
         db, payload.project_id, payload.cost_category_id, payload.category, required=False,
@@ -2097,6 +2098,7 @@ def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), use
 @router.post("/invoice-proposals")
 def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor")
+    _require_project_currency(db, payload.project_id, payload.currency)
     if payload.direction != "outflow":
         raise HTTPException(422, "Счёт на оплату должен быть расходом ДДС")
     _check_task(db, payload.project_id, payload.task_id)
@@ -2425,12 +2427,14 @@ def payment_events(item_id: int, db: Session = Depends(get_db), user: User = Dep
 @router.post("/procurement")
 def create_procurement(payload: ProcurementCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
+    _require_project_currency(db, payload.project_id, payload.currency)
     item = ProcurementItem(**payload.model_dump()); db.add(item); db.flush(); _audit(db, "procurement_created", "procurement", item.id, user.id, "stage=request"); db.commit(); return {"id": item.id, "stage": item.stage}
 
 
 @router.post("/acts")
 def create_act(payload: ActCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
+    _require_project_currency(db, payload.project_id, payload.currency)
     _validate_act_budget_link(
         db, project_id=payload.project_id, contract_id=payload.contract_id,
         budget_line_id=payload.budget_line_id, currency=payload.currency,
@@ -2471,7 +2475,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved", "superseded"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
-    previous_status = item.status
+    status_attribute = "stage" if kind == "procurement" else "status"
+    previous_status = getattr(item, status_attribute)
     if kind == "acts" and payload.status != previous_status:
         transitions = {
             "proposed": {"approved", "rejected"},
@@ -2529,7 +2534,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         locked_budget = _lock_budget_line(db, item.budget_line_id)
         budget_actual_before = locked_budget.actual_amount
 
-    item.status = payload.status
+    setattr(item, status_attribute, payload.status)
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
     if payload.actual_date is not None:
@@ -2545,7 +2550,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             db, item.budget_line_id, budget=locked_budget,
         )
     details = f"old_status={previous_status}; status={payload.status}"
-    response = {"id": item.id, "status": item.status}
+    response = {"id": item.id, "status": getattr(item, status_attribute)}
     if kind == "acts" and locked_budget is not None and budget_projection is not None:
         remaining, overrun = budget_projection
         details += (

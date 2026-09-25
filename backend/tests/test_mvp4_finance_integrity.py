@@ -36,11 +36,12 @@ def _project(db_session, user_factory, name="MVP4"):
     return user, project
 
 
-def test_money_is_half_up_bounded_and_currency_is_strict():
-    assert CashFlowCreate(
-        project_id=1, direction="outflow", title="Счёт",
-        planned_date="2026-09-04", planned_amount="1.005", currency="RUB",
-    ).planned_amount == Decimal("1.01")
+def test_money_is_exact_to_two_decimals_bounded_and_currency_is_strict():
+    with pytest.raises(ValidationError):
+        CashFlowCreate(
+            project_id=1, direction="outflow", title="Счёт",
+            planned_date="2026-09-04", planned_amount="1.005", currency="RUB",
+        )
     with pytest.raises(ValidationError):
         CashFlowCreate(
             project_id=1, direction="outflow", title="Счёт",
@@ -53,7 +54,7 @@ def test_money_is_half_up_bounded_and_currency_is_strict():
         )
 
 
-def test_mixed_currency_overview_never_returns_a_cross_currency_total(db_session, user_factory):
+def test_mixed_currency_overview_fails_closed_for_single_currency_project(db_session, user_factory):
     user, project = _project(db_session, user_factory, "Mixed currency")
     db_session.add_all([
         BudgetLine(project_id=project.id, category="A", description="RUB", planned_amount=100,
@@ -63,12 +64,11 @@ def test_mixed_currency_overview_never_returns_a_cross_currency_total(db_session
     ])
     db_session.flush()
 
-    result = overview(project.id, db_session, user)
+    with pytest.raises(HTTPException) as error:
+        overview(project.id, db_session, user)
 
-    assert result["summary"]["mixed_currency"] is True
-    assert result["summary"]["budget_planned"] is None
-    assert result["summary"]["by_currency"]["RUB"]["budget_planned"] == Decimal("100")
-    assert result["summary"]["by_currency"]["USD"]["budget_planned"] == Decimal("2")
+    assert error.value.status_code == 409
+    assert error.value.detail.startswith("PROJECT_CURRENCY_MISMATCH:")
 
 
 def test_payment_confirmation_correction_and_reversal_are_append_only(db_session, user_factory, monkeypatch):
@@ -86,7 +86,7 @@ def test_payment_confirmation_correction_and_reversal_are_append_only(db_session
         actual_amount="100.00", actual_date="2026-09-11", idempotency_key="confirm-0001",
     ), db_session, user)
     correction = correct_payment(item.id, PaymentCorrection(
-        actual_amount="99.995", actual_date="2026-09-12", reason="Исправлен факт банка",
+        actual_amount="99.99", actual_date="2026-09-12", reason="Исправлен факт банка",
         supersedes_event_id=confirmation["payment_event_id"], idempotency_key="correct-0001",
     ), db_session, user)
     reversal = reverse_payment(item.id, PaymentReversal(
@@ -101,7 +101,7 @@ def test_payment_confirmation_correction_and_reversal_are_append_only(db_session
     events = list(db_session.query(PaymentEvent).filter_by(cash_flow_entry_id=item.id).order_by(PaymentEvent.id))
     assert [event.event_type for event in events] == ["confirmation", "correction", "reversal"]
     assert events[0].amount == Decimal("100.00")
-    assert events[1].amount == Decimal("100.00")  # 99.995, HALF_UP
+    assert events[1].amount == Decimal("99.99")
     assert events[1].supersedes_event_id == events[0].id
     assert events[2].supersedes_event_id == events[1].id
     assert reversal["status"] == "approved"
