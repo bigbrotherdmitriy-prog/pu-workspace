@@ -18,13 +18,19 @@ export type ObligationRow = {
 type Props = {
   collapsed: boolean;
   obligations: ObligationRow[];
+  filter?: "all" | "overdue";
+  onClearFilter?: () => void;
   onUpdate: (item: ObligationRow, status: string) => void;
 };
 
-export function ObligationsModule({ collapsed, obligations, onUpdate }: Props) {
+export function ObligationsModule({ collapsed, obligations, filter = "all", onClearFilter, onUpdate }: Props) {
+  const today = new Date().toISOString().slice(0, 10);
   const openCount = obligations.filter(
     (item) => !["fulfilled", "dismissed"].includes(item.status),
   ).length;
+  const visibleObligations = filter === "overdue"
+    ? obligations.filter((item) => Boolean(item.due_date && item.due_date < today) && !["fulfilled", "dismissed"].includes(item.status))
+    : obligations;
 
   return (
     <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
@@ -37,10 +43,14 @@ export function ObligationsModule({ collapsed, obligations, onUpdate }: Props) {
               Каждый вывод хранит источник и требует подтверждения.
             </p>
           </div>
-          <span>{openCount} открыто</span>
+          <span>{filter === "overdue" ? `${visibleObligations.length} просрочено` : `${openCount} открыто`}</span>
         </section>
+        {filter === "overdue" && <div className="register-filter-banner" role="status">
+          Показаны только просроченные обязательства.
+          {onClearFilter && <button type="button" onClick={onClearFilter}>Показать все</button>}
+        </div>}
         <section className="card management-list">
-          {obligations.map((item) => (
+          {visibleObligations.map((item) => (
             <article key={item.id}>
               <div>
                 <span className={`management-status ${item.status}`}>
@@ -78,7 +88,7 @@ export function ObligationsModule({ collapsed, obligations, onUpdate }: Props) {
               </div>
             </article>
           ))}
-          {!obligations.length && (
+          {!visibleObligations.length && (
             <div className="empty">
               <ClipboardCheck />
               <p>

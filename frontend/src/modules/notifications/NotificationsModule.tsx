@@ -44,6 +44,8 @@ export type ManagementDigest = {
 type Props = {
   collapsed: boolean;
   notifications: NotificationItem[];
+  unreadOnly?: boolean;
+  onClearFilter?: () => void;
   digests: ManagementDigest[];
   onRefresh: () => void;
   onMarkRead: (notification: NotificationItem) => void;
@@ -55,8 +57,9 @@ type Props = {
 
 export function NotificationsModule({
   collapsed, notifications, digests, onRefresh, onMarkRead, policy, canManagePolicy,
-  onPolicyChange, onSavePolicy,
+  onPolicyChange, onSavePolicy, unreadOnly = false, onClearFilter,
 }: Props) {
+  const visibleNotifications = unreadOnly ? notifications.filter((item) => !item.is_read) : notifications;
   return (
     <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}>
       <div className="module-page">
@@ -122,6 +125,10 @@ export function NotificationsModule({
             {canManagePolicy && <button onClick={onSavePolicy}>Сохранить настройки сводки</button>}
           </section>
         )}
+        {unreadOnly && <div className="register-filter-banner" role="status">
+          Показаны только непрочитанные уведомления.
+          {onClearFilter && <button type="button" onClick={onClearFilter}>Показать все</button>}
+        </div>}
         {!!digests.length && <section className="card digest-history" aria-label="Готовые управленческие сводки">
           <h3>Готовые сводки</h3>
           {digests.map((digest) => <article key={digest.id}>
@@ -135,7 +142,7 @@ export function NotificationsModule({
           </article>)}
         </section>}
         <section className="card notification-list">
-          {notifications.map((item) => (
+          {visibleNotifications.map((item) => (
             <article className={item.is_read ? "read" : ""} key={item.id}>
               <div className={`notification-kind ${item.kind}`}><Bell /></div>
               <div>
@@ -146,7 +153,7 @@ export function NotificationsModule({
               {!item.is_read && <button onClick={() => onMarkRead(item)}>Прочитано</button>}
             </article>
           ))}
-          {!notifications.length && (
+          {!visibleNotifications.length && (
             <div className="empty">
               <Bell />
               <p>Нажмите «Обновить контроль», чтобы собрать актуальные уведомления.</p>

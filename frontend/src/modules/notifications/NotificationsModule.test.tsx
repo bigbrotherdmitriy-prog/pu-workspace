@@ -72,4 +72,26 @@ describe("NotificationsModule digest settings", () => {
     expect(screen.getByText("risk #41 · confirmed · основание закреплено")).toBeInTheDocument();
     expect(screen.queryByText(/PRIVATE BODY/)).not.toBeInTheDocument();
   });
+
+  it("filters the register to unread notifications", () => {
+    const notification = (id: number, is_read: boolean) => ({
+      id, record_version: 1, kind: "deadline", title: `Уведомление ${id}`,
+      body: "Требует внимания", entity_type: "task", entity_id: id,
+      is_read, created_at: "2026-09-25T09:00:00Z",
+    });
+    render(<NotificationsModule
+      collapsed={false}
+      notifications={[notification(1, false), notification(2, true)]}
+      unreadOnly
+      digests={[]}
+      onRefresh={vi.fn()}
+      onMarkRead={vi.fn()}
+      policy={policy}
+      canManagePolicy
+      onPolicyChange={vi.fn()}
+      onSavePolicy={vi.fn()}
+    />);
+    expect(screen.getByText("Уведомление 1")).toBeInTheDocument();
+    expect(screen.queryByText("Уведомление 2")).not.toBeInTheDocument();
+  });
 });

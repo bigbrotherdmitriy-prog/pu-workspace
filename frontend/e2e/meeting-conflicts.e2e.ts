@@ -42,6 +42,7 @@ test("warns about the same organization resource without blocking either meeting
   await scheduledAt.fill("2026-09-26T10:00");
   await resources.selectOption("501");
   await page.getByRole("button", { name: "Запланировать" }).click();
+  await expect(page.getByRole("heading", { name: "Бронь комнаты 1" })).toBeVisible();
 
   await title.fill("Бронь комнаты 2");
   await scheduledAt.fill("2026-09-26T10:30");

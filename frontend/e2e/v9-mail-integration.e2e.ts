@@ -23,10 +23,11 @@ test("sent folder refresh requests Gmail sent mail and renders the imported resu
   await expect(page.locator(".mail-folders").getByRole("button", { name: /Отправленные/ })).toHaveClass("active");
 });
 
-test("v9 keeps the production reading surface and the rail outside the content", async ({ page, mock: _mock }) => {
+test("future-light keeps the production reading surface and the rail outside the content", async ({ page, mock: _mock }) => {
   await page.goto("/new/");
   await expect(page.getByRole("heading", { name: "Штаб управления проектом" })).toBeVisible();
-  await expect(page.locator(".dashboard-hero")).toHaveCSS("background-color", "rgb(245, 244, 240)");
+  await expect(page.locator(".shell")).toHaveClass(/future-light-dashboard/);
+  await expect(page.locator(".dashboard-hero")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const rail = await page.locator(".shell > aside").boundingBox();
   const main = await page.locator(".shell > main").boundingBox();
   expect(rail).not.toBeNull();

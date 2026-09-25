@@ -44,8 +44,17 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
       return [...document.querySelectorAll<HTMLElement>(".shell *, [role=dialog] *")].flatMap(el => {
         if (!el.checkVisibility() || el.closest("[disabled], [aria-disabled=true], svg, canvas") || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent?.trim())) return [];
         const style = getComputedStyle(el);
-        let p: Element | null = el, bg = [255, 255, 255, 1];
-        while (p) { const c = rgb(getComputedStyle(p).backgroundColor); if (c.length >= 3 && (c[3] ?? 1) === 1) { bg = c; break; } p = p.parentElement; }
+        let p: Element | null = el;
+        const layers: number[][] = [];
+        while (p) {
+          const c = rgb(getComputedStyle(p).backgroundColor);
+          if (c.length >= 3 && (c[3] ?? 1) > 0) layers.push(c);
+          p = p.parentElement;
+        }
+        const bg = layers.reverse().reduce((under, over) => {
+          const alpha = over[3] ?? 1;
+          return over.slice(0, 3).map((channel, index) => channel * alpha + under[index] * (1 - alpha));
+        }, [255, 255, 255]);
         const fg = rgb(style.color);
         const contrast = (Math.max(lum(fg), lum(bg)) + .05) / (Math.min(lum(fg), lum(bg)) + .05);
         // Conservative smoke gate; decorative text and transparent gradients need visual review too.

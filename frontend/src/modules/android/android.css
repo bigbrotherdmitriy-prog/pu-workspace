@@ -11,9 +11,9 @@
   .content { padding-bottom: calc(22px + env(safe-area-inset-bottom)); }
   .shell > aside { top: 0; height: 100dvh; padding-top: calc(14px + env(safe-area-inset-top)); padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
   .mobile-drawer-backdrop { position: fixed; inset: 0; z-index: 25; display: block; border: 0; border-radius: 0; background: rgba(5, 14, 10, .52); }
-  .android-bottom-nav { position: fixed; z-index: 90; left: 0; right: 0; bottom: 0; height: calc(62px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, 1fr); margin: 0; padding: 5px 4px env(safe-area-inset-bottom); border-top: 1px solid #d3dfd9; background: rgba(255, 255, 255, .97); box-shadow: 0 -8px 30px rgba(12, 35, 26, .1); backdrop-filter: blur(14px); }
-  .android-bottom-nav button { min-width: 0; height: 52px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 3px 1px; border: 0; border-radius: var(--pu-radius-card); background: transparent; color: #68776f; }
-  .android-bottom-nav button.active { color: #087a59; background: #e8f5ef; box-shadow: none; }
+  .android-bottom-nav { position: fixed; z-index: 90; left: 0; right: 0; bottom: 0; height: calc(62px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(6, 1fr); margin: 0; padding: 5px 4px env(safe-area-inset-bottom); border-top: 1px solid rgba(0, 229, 255, .45); background: rgba(3, 18, 31, .94); box-shadow: 0 -8px 30px rgba(0, 28, 48, .28); backdrop-filter: blur(14px); }
+  .android-bottom-nav button { min-width: 0; height: 52px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 3px 1px; border: 0; border-radius: var(--pu-radius-card); background: transparent; color: rgba(232, 250, 255, .76); }
+  .android-bottom-nav button.active { color: #00e5ff; background: rgba(0, 229, 255, .1); box-shadow: inset 0 0 14px rgba(0, 229, 255, .12); }
   .android-bottom-nav svg { width: 21px; height: 21px; }
   .android-bottom-nav span { max-width: 100%; overflow: hidden; font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
   .android-upload-fab { position: fixed; z-index: 92; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); width: 52px; height: 52px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #087a59; color: #fff; box-shadow: 0 10px 28px rgba(8, 122, 89, .34); }
