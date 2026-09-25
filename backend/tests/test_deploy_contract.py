@@ -29,3 +29,20 @@ def test_ci_runs_backend_tests_and_frontend_build():
     assert "pytest tests -q" in source
     assert "pnpm install --frozen-lockfile" in source
     assert "pnpm run build" in source
+
+
+def test_production_deploy_security_contract_survives_staging_removal():
+    legacy = (ROOT / "scripts" / "deploy-production.sh").read_text(encoding="utf-8")
+    primary = (ROOT / "scripts" / "deploy-primary-first-host.sh").read_text(encoding="utf-8")
+
+    # These are production guarantees, not staging-specific checks. Keep them
+    # explicit after the public staging workflow and its test suite are removed.
+    for source in (legacy, primary):
+        assert "set -x" not in source
+        assert "flock -n" in source
+        assert "pg_dump" in source
+        assert "rollback()" in source
+    assert "python scripts/check_public_smoke.py" in legacy
+    assert "umask 077" in primary
+    assert "candidate release must not contain an environment file" in primary
+    assert "com.pu-workspace.primary.revision" in primary
