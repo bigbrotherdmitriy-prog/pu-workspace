@@ -164,8 +164,13 @@ def test_postgres_migration_preserves_existing_notification_policy(monkeypatch):
             db.add(organization); db.flush()
             user = User(name="Migration digest user", email=f"migration-{uuid4().hex}@example.test")
             db.add(user); db.flush()
-            project = Project(name="Migration digest project", organization_id=organization.id)
-            db.add(project); db.flush()
+            # The schema is intentionally pinned to an historical revision.
+            # Insert only columns that existed at that revision instead of using
+            # the current ORM mapper (which now also includes projects.currency).
+            project_id = db.scalar(text(
+                "INSERT INTO projects (name, organization_id) "
+                "VALUES (:name, :organization_id) RETURNING id"
+            ), {"name": "Migration digest project", "organization_id": organization.id})
             # New mapped attributes are omitted from INSERT because this schema
             # intentionally represents the preceding revision.
             db.execute(text(
@@ -174,7 +179,7 @@ def test_postgres_migration_preserves_existing_notification_policy(monkeypatch):
                 "escalation_delays,channels,enabled,record_version) "
                 "VALUES (:o,:p,:u,'Europe/Moscow','09:00','22:00','07:00',CAST('[0]' AS json),"
                 "CAST('[\"in_app\"]' AS json),true,1)"
-            ), {"o": organization.id, "p": project.id, "u": user.id})
+            ), {"o": organization.id, "p": project_id, "u": user.id})
             db.commit()
         engine.dispose()
 

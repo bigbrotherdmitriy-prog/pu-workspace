@@ -125,9 +125,14 @@ def test_postgres_upgrade_preserves_nonempty_meetings(monkeypatch):
             db.add(organization); db.flush()
             actor = User(name="Migration manager", email=f"migration-{uuid4().hex}@example.test")
             db.add(actor); db.flush()
-            project = Project(name="Migration project", organization_id=organization.id)
-            db.add(project); db.flush()
-            meeting = Meeting(project_id=project.id, created_by_user_id=actor.id, title="Legacy meeting")
+            # The schema is intentionally pinned to an historical revision.
+            # Insert only columns that existed at that revision instead of using
+            # the current ORM mapper (which now also includes projects.currency).
+            project_id = db.scalar(text(
+                "INSERT INTO projects (name, organization_id) "
+                "VALUES (:name, :organization_id) RETURNING id"
+            ), {"name": "Migration project", "organization_id": organization.id})
+            meeting = Meeting(project_id=project_id, created_by_user_id=actor.id, title="Legacy meeting")
             db.add(meeting); db.commit()
             meeting_id = meeting.id
         engine.dispose()
