@@ -53,7 +53,7 @@ def test_money_is_half_up_bounded_and_currency_is_strict():
         )
 
 
-def test_mixed_currency_overview_never_returns_a_cross_currency_total(db_session, user_factory):
+def test_mixed_currency_overview_fails_closed_for_single_currency_project(db_session, user_factory):
     user, project = _project(db_session, user_factory, "Mixed currency")
     db_session.add_all([
         BudgetLine(project_id=project.id, category="A", description="RUB", planned_amount=100,
@@ -63,12 +63,11 @@ def test_mixed_currency_overview_never_returns_a_cross_currency_total(db_session
     ])
     db_session.flush()
 
-    result = overview(project.id, db_session, user)
+    with pytest.raises(HTTPException) as error:
+        overview(project.id, db_session, user)
 
-    assert result["summary"]["mixed_currency"] is True
-    assert result["summary"]["budget_planned"] is None
-    assert result["summary"]["by_currency"]["RUB"]["budget_planned"] == Decimal("100")
-    assert result["summary"]["by_currency"]["USD"]["budget_planned"] == Decimal("2")
+    assert error.value.status_code == 409
+    assert error.value.detail.startswith("PROJECT_CURRENCY_MISMATCH:")
 
 
 def test_payment_confirmation_correction_and_reversal_are_append_only(db_session, user_factory, monkeypatch):

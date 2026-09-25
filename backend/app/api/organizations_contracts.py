@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
 from app.finance_source_pins import resolve_current_document_pin
+from app.finance_money import project_currency, require_project_currency
 from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
@@ -566,7 +567,7 @@ def create_contract_budget_proposal(project_id: int, contract_id: int,
         contract_record_version=contract.record_version,
         operation="revise" if target is not None else "create",
         amount=contract.amount, advance_amount=contract.advance_amount,
-        retention_percent=contract.retention_percent, currency="RUB",
+        retention_percent=contract.retention_percent, currency=project_currency(db, project_id),
         description=f"Договор {contract.number}: {contract.title}",
         source_document_id=source["document_id"],
         source_document_version_id=source["version_id"],
@@ -646,6 +647,10 @@ def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get
     if contract is None:
         raise HTTPException(409, "Договор больше не существует")
     _assert_contract_budget_source_current(db, contract, proposal)
+    try:
+        require_project_currency(db, proposal.project_id, proposal.currency)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if proposal.selected_cost_category_id is None:
         raise HTTPException(422, "Менеджер должен выбрать категорию затрат")
     category = _contract_budget_category(db, proposal.project_id, proposal.selected_cost_category_id)

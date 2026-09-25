@@ -16,7 +16,7 @@ def _config(output=None):
 
 def test_saved_search_views_migration_is_the_single_head():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["b62f9d3a4c10"]
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["c70a00a1f001"]
     revision = scripts.get_revision("b89e7f9a5a67")
     assert revision.down_revision == "b88e7f9a4f56"
 

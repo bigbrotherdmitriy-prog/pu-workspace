@@ -29,6 +29,8 @@ from app.api.execution_finance import (
     router,
 )
 from app.models.execution_finance import ScheduleBaseline, ScheduleItem
+from app.models.organization_contract import Organization
+from app.models.project import Project
 
 
 def test_mvp4_routes_are_registered():
@@ -187,6 +189,11 @@ def test_schedule_calendar_day_boundaries_are_inclusive():
 
 def test_overview_keeps_a_corrupt_import_visible_for_repair(db_session, user_factory):
     user = user_factory(is_admin=True)
+    organization = Organization(name="Corrupt import tenant")
+    db_session.add(organization)
+    db_session.flush()
+    db_session.add(Project(id=91, name="Corrupt import", organization_id=organization.id))
+    db_session.flush()
     baseline = ScheduleBaseline(
         project_id=91, created_by_user_id=user.id, name="Старый импорт MPP", version=1,
         status="draft", source_format="mpp", source_sha256="a" * 64,

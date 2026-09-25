@@ -78,6 +78,21 @@ jobs:
           assert len(cases) == 1, f'Expected 1 PostgreSQL gate, collected {len(cases)}'
           assert not report.findall('.//skipped'), 'Contract discovery PostgreSQL gate must not skip'
           PY
+      - name: V6-00a money migration PostgreSQL gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_v6_00a_money_foundation_postgres.py \
+            --junitxml=../v6-00a-money-postgres.xml 2>&1 | tee ../v6-00a-money-postgres.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../v6-00a-money-postgres.xml').getroot()
+          cases = report.findall('.//testcase')
+          assert len(cases) == 2, f'Expected 2 V6-00a PostgreSQL gates, collected {len(cases)}'
+          assert not report.findall('.//skipped'), 'V6-00a PostgreSQL gates must not skip tests'
+          PY
       - name: Provider outbox PostgreSQL recovery races
         working-directory: backend
         env:
@@ -137,6 +152,8 @@ jobs:
             contract-budget-postgres.xml
             contract-discovery-postgres.log
             contract-discovery-postgres.xml
+            v6-00a-money-postgres.log
+            v6-00a-money-postgres.xml
             provider-outbox-postgres.log
             provider-outbox-postgres.xml
             frontend-check.log
