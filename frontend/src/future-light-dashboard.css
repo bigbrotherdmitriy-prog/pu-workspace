@@ -6,6 +6,10 @@
   background-color: #071827;
   background: #071827;
 }
+:root[data-display-theme] .future-light-dashboard > main,
+:root[data-display-theme] .future-light-dashboard > main > .content {
+  background: transparent;
+}
 .future-light-dashboard::before,
 .future-light-dashboard::after {
   content: "";
@@ -46,6 +50,13 @@
 }
 .future-light-dashboard > aside :is(strong,small,.nav-group-label) { color: #e8faff; }
 .future-light-dashboard > aside nav button { color: #e8faff; background: transparent; }
+:root[data-display-theme] .future-light-dashboard > aside :is(strong,small,.nav-group-label),
+:root[data-display-theme] .future-light-dashboard > aside nav button { color: #e8faff; }
+:root[data-display-theme] .future-light-dashboard > aside .profile {
+  color: #e8faff;
+  background: rgba(3,18,31,.62);
+}
+:root[data-display-theme] .future-light-dashboard > aside .profile small { color: rgba(232,250,255,.74); }
 .future-light-dashboard > aside nav button:hover { background: rgba(240,251,255,.12); }
 .future-light-dashboard > aside nav button.active {
   color: #e8faff;
@@ -60,6 +71,10 @@
   backdrop-filter: blur(12px);
 }
 .future-light-dashboard > main > header h1 { color: #052138; }
+:root[data-display-theme="light"] .future-light-dashboard > main > header .page-kicker,
+:root[data-display-theme="light"] .future-light-dashboard > main > header .page-kicker b { color: #0a3b55; }
+:root[data-display-theme="dark"] .future-light-dashboard > main > header .page-kicker,
+:root[data-display-theme="dark"] .future-light-dashboard > main > header .page-kicker b { color: #e8faff; }
 .future-light-dashboard > main > .mobile-sync-panel {
   margin: 10px 24px 0;
   color: #1f5775;
@@ -67,6 +82,8 @@
   background: rgba(240,251,255,.7);
   backdrop-filter: blur(12px);
 }
+:root[data-display-theme="light"] .future-light-dashboard > main > .mobile-sync-panel { color: #0a3b55; }
+:root[data-display-theme="dark"] .future-light-dashboard > main > .mobile-sync-panel { color: #e8faff; }
 .future-light-dashboard > main > .content {
   max-width: none;
   color: #e8faff;
@@ -273,6 +290,27 @@
 .future-light-dashboard .dashboard-metrics article > small { color: rgba(232,250,255,.75); }
 .future-light-dashboard .dashboard-metrics button > strong,
 .future-light-dashboard .dashboard-metrics article > strong { color: #ff9e2e; }
+:root[data-display-theme] .future-light-dashboard .dashboard-metrics button,
+:root[data-display-theme] .future-light-dashboard .dashboard-metrics article {
+  color: #e8faff;
+  background: rgba(3,18,31,.72);
+}
+:root[data-display-theme] .future-light-dashboard .dashboard-metrics :is(span,small) { color: rgba(232,250,255,.78); }
+:root[data-display-theme] .future-light-dashboard .dashboard-metrics strong { color: #ff9e2e; }
+:root[data-display-theme] .future-light-dashboard .dashboard-command-grid .empty,
+:root[data-display-theme] .future-light-dashboard .dashboard-lower-grid .empty {
+  color: #e8faff;
+  border: 1px solid rgba(13,199,255,.22);
+  background: rgba(3,18,31,.36);
+}
+:root[data-display-theme] .future-light-dashboard .dashboard-command-grid .empty svg,
+:root[data-display-theme] .future-light-dashboard .dashboard-lower-grid .empty svg { color: #79daba; }
+:root[data-display-theme] .future-light-dashboard .dashboard-control-links button {
+  color: #e8faff;
+  border-color: rgba(13,199,255,.22);
+  background: rgba(3,18,31,.52);
+}
+:root[data-display-theme] .future-light-dashboard .dashboard-control-links button :is(span,strong) { color: #e8faff; }
 .future-light-dashboard .dashboard-command-grid,
 .future-light-dashboard .dashboard-lower-grid { gap: 16px; }
 .future-light-dashboard .dashboard-command-grid .card :is(h2,strong),
@@ -280,6 +318,14 @@
 .future-light-dashboard .dashboard-command-grid .card :is(p,small),
 .future-light-dashboard .dashboard-lower-grid .card :is(p,small) { color: rgba(232,250,255,.72); }
 .future-light-dashboard .eyebrow { color: #ff9e2e; }
+:root[data-display-theme] .future-light-dashboard .dashboard-ai-facts :is(span,b) { color: rgba(232,250,255,.78); }
+:root[data-display-theme] .future-light-dashboard .dashboard-ai-facts b { color: #ff9e2e; }
+:root[data-display-theme] .future-light-dashboard .dashboard-sources-grid .source-card {
+  color: #e8faff;
+  border-color: rgba(255,97,14,.62);
+  background: rgba(3,18,31,.68);
+}
+:root[data-display-theme] .future-light-dashboard .dashboard-sources-grid .source-card :is(h2,p) { color: #e8faff; }
 .register-filter-banner {
   display: flex;
   align-items: center;
