@@ -306,6 +306,10 @@ class InvoiceExtractionUpdate(BaseModel):
     planned_date: date | None = None
     target_kind: str | None = Field(default=None, pattern="^(cash_flow|budget)$")
 
+    _amount_money = field_validator("amount", mode="before")(
+        lambda value: None if value is None else _money(value, allow_zero=False)
+    )
+
 
 class InvoiceExtractionConfirm(BaseModel):
     contract_id: int | None = None
@@ -2471,7 +2475,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
                "procurement": {"request", "ordered", "delivered", "accepted", "cancelled"}, "acts": {"approved", "signed", "paid", "rejected"},
                "baselines": {"approved", "superseded"}}[kind]
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
-    previous_status = item.status
+    status_attribute = "stage" if kind == "procurement" else "status"
+    previous_status = getattr(item, status_attribute)
     if kind == "acts" and payload.status != previous_status:
         transitions = {
             "proposed": {"approved", "rejected"},
@@ -2529,7 +2534,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         locked_budget = _lock_budget_line(db, item.budget_line_id)
         budget_actual_before = locked_budget.actual_amount
 
-    item.status = payload.status
+    setattr(item, status_attribute, payload.status)
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
     if payload.actual_date is not None:
@@ -2545,7 +2550,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             db, item.budget_line_id, budget=locked_budget,
         )
     details = f"old_status={previous_status}; status={payload.status}"
-    response = {"id": item.id, "status": item.status}
+    response = {"id": item.id, "status": getattr(item, status_attribute)}
     if kind == "acts" and locked_budget is not None and budget_projection is not None:
         remaining, overrun = budget_projection
         details += (

@@ -4,7 +4,7 @@ import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
 from app.finance_source_pins import resolve_current_document_pin
-from app.finance_money import project_currency, require_project_currency
+from app.finance_money import money as _money, project_currency, require_project_currency
 from app.models.organization_contract import Contract, ContractVersion, Organization
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
@@ -101,6 +101,10 @@ class ContractCreate(BaseModel):
     source_document_id: int | None = None
     notes: str | None = Field(default=None, max_length=5000)
 
+    _amounts = field_validator("amount", "advance_amount", mode="before")(
+        lambda value: None if value is None else _money(value)
+    )
+
 
 class ContractLinkUpdate(BaseModel):
     expected_record_version: int = Field(gt=0)
@@ -120,11 +124,19 @@ class ContractLinkUpdate(BaseModel):
         pattern="^(prime_reference|customer|revenue_subcontract|downstream_subcontract|supply)$",
     )
 
+    _amounts = field_validator("amount", "advance_amount", mode="before")(
+        lambda value: None if value is None else _money(value)
+    )
+
 
 class ContractBudgetProposalUpdate(BaseModel):
     amount: Decimal | None = Field(default=None, gt=0)
     description: str | None = Field(default=None, min_length=1, max_length=1000)
     selected_cost_category_id: int | None = None
+
+    _amount_money = field_validator("amount", mode="before")(
+        lambda value: None if value is None else _money(value, allow_zero=False)
+    )
 
 
 def _normalized(value: str | None) -> str:

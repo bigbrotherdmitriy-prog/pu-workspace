@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
@@ -26,15 +26,14 @@ def strict_currency(value: object) -> str:
 
 
 def money(value: object, *, allow_zero: bool = True) -> Decimal:
-    if isinstance(value, float):
-        raise ValueError("Денежная сумма должна передаваться десятичной строкой, а не float")
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError("Некорректная денежная сумма") from exc
     if not amount.is_finite():
         raise ValueError("Денежная сумма должна быть конечной")
-    amount = amount.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    if amount.as_tuple().exponent < -2:
+        raise ValueError("Денежная сумма должна содержать не более 2 знаков после запятой")
     if amount < 0 or (not allow_zero and amount == 0):
         raise ValueError(
             "Денежная сумма должна быть положительной"
@@ -42,7 +41,7 @@ def money(value: object, *, allow_zero: bool = True) -> Decimal:
         )
     if amount > MONEY_MAX:
         raise ValueError("Денежная сумма превышает Numeric(18,2)")
-    return amount
+    return amount.quantize(MONEY_QUANTUM)
 
 
 def to_minor_units(value: object) -> int:

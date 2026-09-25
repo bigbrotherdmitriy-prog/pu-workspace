@@ -31,13 +31,47 @@ def _project(db_session, user_factory, *, currency="RUB", project_id=None):
     return user, project
 
 
-def test_money_boundary_is_half_up_exact_and_rejects_float():
-    assert money("1.005") == Decimal("1.01")
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1500.5, Decimal("1500.50")),
+        (1500.50, Decimal("1500.50")),
+        ("1500.50", Decimal("1500.50")),
+        (1e3, Decimal("1000.00")),
+        ("9999999999999999.99", Decimal("9999999999999999.99")),
+    ],
+)
+def test_money_boundary_accepts_json_numbers_and_decimal_strings(value, expected):
+    assert money(value) == expected
+
+
+def test_money_boundary_keeps_exact_minor_units():
     assert to_minor_units("125400.50") == 12_540_050
     assert from_minor_units(12_540_050) == Decimal("125400.50")
     assert money_string("125400.5") == "125400.50"
-    with pytest.raises(ValueError, match="не float"):
-        money(1.005)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (0.1 + 0.2, "не более 2 знаков"),
+        (12.345, "не более 2 знаков"),
+        ("abc", "Некорректная"),
+        ("NaN", "конечной"),
+        ("Infinity", "конечной"),
+        ("9999999999999999.991", "не более 2 знаков"),
+        ("10000000000000000.00", "Numeric\\(18,2\\)"),
+        (-0.01, "не может быть отрицательной"),
+    ],
+)
+def test_money_boundary_rejects_ambiguous_or_out_of_range_values(value, message):
+    with pytest.raises(ValueError, match=message):
+        money(value)
+
+
+def test_money_boundary_rejects_zero_where_positive_is_required():
+    with pytest.raises(ValueError, match="положительной"):
+        money(0, allow_zero=False)
 
 
 def test_new_projects_default_to_rub_and_currency_is_strict():
