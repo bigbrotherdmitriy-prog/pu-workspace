@@ -41,6 +41,24 @@ from app.schedule_import.mspdi import build_mspdi
 
 router = APIRouter(prefix="/execution", tags=["execution-finance"])
 
+
+@router.get("/cash-flow/views")
+def cash_flow_views(project_id: int, date_from: date, date_to: date,
+                    contract_id: int | None = None, statuses: str = "approved,paid,received",
+                    include_review_rows: bool = False,
+                    db: Session = Depends(get_db), user: User = Depends(require_user)):
+    from app.cash_flow_snapshot import SnapshotError, read_snapshot
+
+    require_project_role(db, user, project_id, "viewer")
+    if contract_id is not None:
+        _check_contract(db, project_id, contract_id)
+    try:
+        return read_snapshot(db, project_id=project_id, date_from=date_from, date_to=date_to,
+                             contract_id=contract_id, statuses=tuple(statuses.split(",")),
+                             include_review_rows=include_review_rows)
+    except SnapshotError as exc:
+        raise HTTPException(exc.status_code, {"code": exc.code, "message": str(exc)}) from exc
+
 def _require_project_currency(db: Session, project_id: int, currency: object) -> str:
     try:
         return require_project_currency(db, project_id, currency)

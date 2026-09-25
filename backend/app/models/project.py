@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -31,6 +31,8 @@ class Project(Base):
         ),
     )
     record_version: Mapped[int] = mapped_column(server_default="1")
+    cash_flow_revision: Mapped[int] = mapped_column(BigInteger, server_default="0", default=0)
+    cash_flow_revision_txid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
