@@ -24,11 +24,19 @@ export type DecisionRow = {
 type Props = {
   risks: RiskRow[];
   decisions: DecisionRow[];
+  focus?: "all" | "risks" | "decisions";
+  onClearFocus?: () => void;
   onUpdateRisk: (risk: RiskRow, status: string) => void;
   onUpdateDecision: (decision: DecisionRow, status: string) => void;
 };
 
-export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecision }: Props) {
+export function GovernanceModule({ risks, decisions, focus = "all", onClearFocus, onUpdateRisk, onUpdateDecision }: Props) {
+  const visibleRisks = focus === "risks"
+    ? risks.filter((item) => !["resolved", "dismissed"].includes(item.status))
+    : risks;
+  const visibleDecisions = focus === "decisions"
+    ? decisions.filter((item) => !["executed", "dismissed"].includes(item.status))
+    : decisions;
   const pendingDecisions = decisions.filter(
     (item) => !["executed", "dismissed"].includes(item.status),
   ).length;
@@ -53,13 +61,17 @@ export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecis
       <div><span>Высокий приоритет</span><strong>{criticalRisks}</strong><small>проверить в первую очередь</small></div>
       <div><span>Решения</span><strong>{pendingDecisions}</strong><small>ожидают фиксации</small></div>
     </div>
-    <div className="governance-grid">
-    <div className="card governance-column risks-column">
+    {focus !== "all" && <div className="register-filter-banner" role="status">
+      {focus === "risks" ? "Показаны только открытые риски." : "Показаны только решения, ожидающие обработки."}
+      {onClearFocus && <button type="button" onClick={onClearFocus}>Показать всё</button>}
+    </div>}
+    <div className={`governance-grid ${focus !== "all" ? "single-filter" : ""}`}>
+    {focus !== "decisions" && <div className="card governance-column risks-column">
       <div className="card-head">
         <div><span className="eyebrow">КОНТРОЛЬ</span><h2>Риски проекта</h2><p>{risks.length} обнаружено · {openRisks} открыто</p></div>
       </div>
       <div className="governance-list">
-        {risks.map((risk) => <article key={risk.id}>
+        {visibleRisks.map((risk) => <article key={risk.id}>
           <div>
             <strong>{risk.title}</strong>
             <p>{risk.source_name} · уверенность {Math.round(risk.confidence * 100)}%</p>
@@ -75,13 +87,13 @@ export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecis
           </div>
         </article>)}
       </div>
-    </div>
-    <div className="card governance-column decisions-column">
+    </div>}
+    {focus !== "risks" && <div className="card governance-column decisions-column">
       <div className="card-head">
         <div><span className="eyebrow">РЕШЕНИЯ</span><h2>Ждут вашего выбора</h2><p>{pendingDecisions} необходимо зафиксировать</p></div>
       </div>
       <div className="governance-list">
-        {decisions.map((decision) => <article key={decision.id}>
+        {visibleDecisions.map((decision) => <article key={decision.id}>
           <div>
             <strong>{decision.question}</strong>
             <p>{decision.source_name} · уверенность {Math.round(decision.confidence * 100)}%</p>
@@ -97,6 +109,6 @@ export function GovernanceModule({ risks, decisions, onUpdateRisk, onUpdateDecis
           </div>
         </article>)}
       </div>
-    </div></div>
+    </div>}</div>
   </section>;
 }

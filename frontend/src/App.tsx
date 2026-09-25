@@ -61,8 +61,7 @@ import type { AutonomyReadiness } from "./modules/settings/AutonomyReadinessPane
 import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
 import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
-import { OverdueMetric } from "./modules/dashboard/OverdueMetric";
-import { ProjectIsometric } from "./modules/dashboard/ProjectIsometric";
+import { WorkCenterDashboard } from "./modules/dashboard/WorkCenterDashboard";
 import { ComfortControls } from "./modules/settings/ComfortControls";
 import {
   Activity,
@@ -449,6 +448,9 @@ export function App() {
       {},
     ),
     [taskFilter, setTaskFilter] = useState("open"),
+    [obligationFilter, setObligationFilter] = useState<"all" | "overdue">("all"),
+    [governanceFocus, setGovernanceFocus] = useState<"all" | "risks" | "decisions">("all"),
+    [notificationFilter, setNotificationFilter] = useState<"all" | "unread">("all"),
     [tasks, setTasks] = useState<TaskRow[]>([]),
     [completionTaskId, setCompletionTaskId] = useState(0),
     [completionNote, setCompletionNote] = useState(""),
@@ -2638,34 +2640,6 @@ export function App() {
     }
   }
   if (!ready) return <Login onDone={() => setReady(true)} />;
-  const metrics = [
-    ["Требуют внимания", summary?.attention || 0, "warn"],
-    ["Обязательства", summary?.open_obligations || 0, ""],
-    [
-      "Просрочено",
-      (summary?.overdue_tasks || 0) + (summary?.overdue_obligations || 0),
-      "danger",
-    ],
-    ["Риски", summary?.open_risks || 0, "warn"],
-    ["Ждут решения", summary?.pending_decisions || 0, ""],
-    ["Уведомления", summary?.unread_notifications || 0, ""],
-  ];
-  function openMetric(label: string) {
-    if (label === "Обязательства") {
-      setActive("Обязательства");
-      return;
-    }
-    if (label === "Просрочено") {
-      setTaskFilter("overdue");
-      setActive("Задачи");
-      return;
-    }
-    if (label === "Риски" || label === "Ждут решения" || label === "Требуют внимания") {
-      setActive("Риски и решения");
-      return;
-    }
-    if (label === "Уведомления") setActive("Уведомления");
-  }
   function openContextualAssistant(prompt: string) {
     setIncomingName(`Контекстная помощь · ${active}`);
     setIncomingText(prompt);
@@ -2738,7 +2712,7 @@ export function App() {
     }
   }
   return (
-    <div className="shell">
+    <div className={`shell ${active === "Рабочий центр" ? "future-light-dashboard" : ""}`}>
       <div className="pu-ambient" aria-hidden="true">
         <i className="pu-ambient-orb pu-ambient-orb-primary" />
         <i className="pu-ambient-orb pu-ambient-orb-secondary" />
@@ -2792,6 +2766,7 @@ export function App() {
         <header>
           <button
             className="mobile-menu icon"
+            aria-label="Открыть меню"
             onClick={() => setMobile(!mobile)}
           >
             <Menu />
@@ -2935,70 +2910,31 @@ export function App() {
             <GovernanceModule
               risks={risks}
               decisions={decisions}
+              focus={governanceFocus}
+              onClearFocus={() => setGovernanceFocus("all")}
               onUpdateRisk={(risk, status) => void updateRisk(risk, status)}
               onUpdateDecision={(decision, status) => void updateDecision(decision, status)}
             />
           ) : active === "Рабочий центр" ? (
             <>
-              <section className="dashboard-overview-deck">
-                <div className="dashboard-hero">
-                  <div className="dashboard-signal" aria-hidden="true">
-                    <i /><i /><i />
-                  </div>
-                  <div className="dashboard-hero-copy">
-                    <span className="dashboard-kicker"><Activity /> Оперативный контур · {projects.find((item) => item.id === projectId)?.name || "Текущий проект"}</span>
-                    <h2>Штаб управления проектом</h2>
-                    <p>{dailyBriefing?.next_step || (summary?.attention ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.` : "Проект под контролем. Новых критических событий нет.")}</p>
-                    <div className="dashboard-hero-actions">
-                      <button onClick={() => setActive("Сегодня")}><Route /> Открыть план дня</button>
-                      <button className="secondary" onClick={() => setActive("AI Secretary")}><Bot /> Запросить сводку</button>
-                    </div>
-                    <div className="dashboard-shift-meta" aria-label="Контур контроля проекта">
-                      <span><i /> ГПР и сроки</span>
-                      <span><i /> Договоры</span>
-                      <span><i /> ДДС и обязательства</span>
-                    </div>
-                  </div>
-                  <ProjectIsometric
-                    onDocuments={() => setActive("Документы")}
-                    onSchedule={() => { setGprDdsTab("gpr"); setActive("ГПР и ДДС"); }}
-                    onFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
-                  />
-                  <div className={`dashboard-focus ${summary?.attention ? "needs-attention" : "clear"}`}>
-                    <span>{summary?.attention ? "Требует решения" : "Контур стабилен"}</span>
-                    <strong>{String(summary?.attention || 0).padStart(2, "0")}</strong>
-                    <p>{summary?.attention ? "контрольных пунктов" : "критичных пунктов"}</p>
-                    <nav className="hq-live-controls" aria-label="Показатели штаба">
-                      <button onClick={() => { setTaskFilter("overdue"); setActive("Задачи"); }}><span>Просроченные задачи</span><b>{summary?.overdue_tasks || 0}</b></button>
-                      <button onClick={() => setActive("Риски и решения")}><span>Открытые риски</span><b>{summary?.open_risks || 0}</b></button>
-                      <button onClick={() => setActive("Риски и решения")}><span>Ждут решения</span><b>{summary?.pending_decisions || 0}</b></button>
-                    </nav>
-                    <button onClick={() => setActive(summary?.attention ? "Риски и решения" : "Сегодня")}>
-                      {summary?.attention ? "Перейти к разбору" : "Открыть план"} <ArrowRight />
-                    </button>
-                  </div>
-                </div>
-                <div className="metrics dashboard-metrics">
-                  {metrics.map(([label, value, tone]) => label === "Просрочено" ? (
-                    <OverdueMetric
-                      key={String(label)}
-                      tasks={summary?.overdue_tasks || 0}
-                      obligations={summary?.overdue_obligations || 0}
-                      onOpenTasks={() => openMetric("Просрочено")}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className={String(tone)}
-                      key={String(label)}
-                      onClick={() => openMetric(String(label))}
-                      aria-label={`Открыть раздел: ${label}`}
-                    >
-                      <span>{label}</span><strong>{value}</strong><small>В реестр <ArrowRight /></small>
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <WorkCenterDashboard
+                projectName={projects.find((item) => item.id === projectId)?.name || "Текущий проект"}
+                nextStep={dailyBriefing?.next_step}
+                summary={summary}
+                budgetActual={finance?.summary.budget_actual}
+                budgetPlanned={finance?.summary.budget_planned}
+                onOpenPlan={() => setActive("Сегодня")}
+                onAskAi={() => setActive("AI Secretary")}
+                onOpenDocuments={() => setActive("Документы")}
+                onOpenSchedule={() => { setGprDdsTab("gpr"); setActive("ГПР и ДДС"); }}
+                onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
+                onOpenObligations={() => { setObligationFilter("all"); setActive("Обязательства"); }}
+                onOpenOverdueTasks={() => { setTaskFilter("overdue"); setActive("Задачи"); }}
+                onOpenOverdueObligations={() => { setObligationFilter("overdue"); setActive("Обязательства"); }}
+                onOpenRisks={() => { setGovernanceFocus("risks"); setActive("Риски и решения"); }}
+                onOpenDecisions={() => { setGovernanceFocus("decisions"); setActive("Риски и решения"); }}
+                onOpenNotifications={() => { setNotificationFilter("unread"); setActive("Уведомления"); }}
+              />
               <div className="dashboard-command-grid">
                 <section className="card dashboard-attention-card">
                   <div className="card-head">
@@ -3357,7 +3293,17 @@ export function App() {
           ) : null}
         </section>
       </main>
-      <AndroidBottomNav active={active} onNavigate={(section) => { setActive(section); setMobile(false); }} onUpload={() => { setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }} />
+      <AndroidBottomNav
+        active={active}
+        activeFinanceTab={gprDdsTab}
+        onNavigate={(section, financeTab) => {
+          if (financeTab) setGprDdsTab(financeTab);
+          setActive(section);
+          setMobile(false);
+        }}
+        onMore={() => setMobile(true)}
+        onUpload={() => { setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }}
+      />
       <MobileDocumentUpload
         key={projectId}
         open={mobileUploadOpen}
@@ -3554,6 +3500,8 @@ export function App() {
         <ObligationsModule
           collapsed={collapsed}
           obligations={obligations}
+          filter={obligationFilter}
+          onClearFilter={() => setObligationFilter("all")}
           onUpdate={(item, status) => void updateObligation(item, status)}
         />
       )}
@@ -3605,6 +3553,8 @@ export function App() {
         <NotificationsModule
           collapsed={collapsed}
           notifications={notifications}
+          unreadOnly={notificationFilter === "unread"}
+          onClearFilter={() => setNotificationFilter("all")}
           digests={managementDigests}
           onRefresh={() => void refreshNotifications()}
           onMarkRead={(item) => void markNotification(item)}

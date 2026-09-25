@@ -44,4 +44,14 @@ describe("GovernanceModule", () => {
     expect(onUpdateDecision).toHaveBeenNthCalledWith(1, decision, "decided");
     expect(onUpdateDecision).toHaveBeenNthCalledWith(2, decision, "dismissed");
   });
+
+  it("opens a focused risk or decision register", () => {
+    const view = render(<GovernanceModule focus="risks" risks={[risk]} decisions={[decision]} onUpdateRisk={vi.fn()} onUpdateDecision={vi.fn()} />);
+    expect(screen.getByText("Показаны только открытые риски.")).toBeInTheDocument();
+    expect(screen.getByText(risk.title)).toBeInTheDocument();
+    expect(screen.queryByText(decision.question)).not.toBeInTheDocument();
+    view.rerender(<GovernanceModule focus="decisions" risks={[risk]} decisions={[decision]} onUpdateRisk={vi.fn()} onUpdateDecision={vi.fn()} />);
+    expect(screen.getByText(decision.question)).toBeInTheDocument();
+    expect(screen.queryByText(risk.title)).not.toBeInTheDocument();
+  });
 });

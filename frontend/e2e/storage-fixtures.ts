@@ -91,6 +91,7 @@ export class StorageApi {
     const method = request.method();
     if (url.origin === origin && method === "GET" && request.resourceType() !== "fetch"
       && (url.pathname === "/new/" || /^\/new\/assets\/[\w.-]+\.(js|css)$/.test(url.pathname)
+        || /^\/new\/assets\/future-light\/[\w.-]+\.(png|jpg|webm|mp4)$/.test(url.pathname)
         || ["/new/pu-icon.svg", "/new/manifest.webmanifest"].includes(url.pathname))) {
       await route.continue(); return;
     }
