@@ -2738,7 +2738,7 @@ export function App() {
     }
   }
   return (
-    <div className="shell">
+    <div className={`shell ${active === "Рабочий центр" ? "future-light-dashboard" : ""}`}>
       <div className="pu-ambient" aria-hidden="true">
         <i className="pu-ambient-orb pu-ambient-orb-primary" />
         <i className="pu-ambient-orb pu-ambient-orb-secondary" />

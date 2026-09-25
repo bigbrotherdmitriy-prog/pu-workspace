@@ -1,0 +1,638 @@
+.future-light-dashboard {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  color: #e8faff;
+  background-color: #071827;
+  background: #071827;
+}
+.future-light-dashboard::before,
+.future-light-dashboard::after {
+  content: "";
+  position: fixed;
+  z-index: -2;
+  inset: -18px;
+  pointer-events: none;
+  background: url("/new/assets/future-light/holographic-grid-background.png") center/cover no-repeat;
+}
+.future-light-dashboard::before {
+  filter: contrast(1.32) saturate(1.3) brightness(.88) sharpen(1);
+  transform: scale(1.025);
+  animation: future-background-depth 18s ease-in-out infinite alternate;
+}
+.future-light-dashboard::after {
+  z-index: -1;
+  opacity: .16;
+  background-position: calc(50% + 5px) calc(50% - 2px);
+  filter: contrast(1.45) saturate(1.8) hue-rotate(168deg);
+  mix-blend-mode: screen;
+  animation: future-background-depth-channel 18s ease-in-out infinite alternate;
+}
+@keyframes future-background-depth {
+  from { transform: scale(1.025) translate3d(-5px,-2px,0); }
+  to { transform: scale(1.055) translate3d(7px,3px,0); }
+}
+@keyframes future-background-depth-channel {
+  from { transform: scale(1.03) translate3d(7px,1px,0); }
+  to { transform: scale(1.06) translate3d(-6px,-2px,0); }
+}
+.future-light-dashboard .pu-ambient { display: none; }
+.future-light-dashboard > aside {
+  color: #e8faff;
+  border-right: 1px solid rgba(255,97,14,.42);
+  background: rgba(3,18,31,.42);
+  box-shadow: 0 0 12px rgba(255,71,5,.12);
+  backdrop-filter: blur(14px);
+}
+.future-light-dashboard > aside :is(strong,small,.nav-group-label) { color: #e8faff; }
+.future-light-dashboard > aside nav button { color: #e8faff; background: transparent; }
+.future-light-dashboard > aside nav button:hover { background: rgba(240,251,255,.12); }
+.future-light-dashboard > aside nav button.active {
+  color: #e8faff;
+  border: 1px solid rgba(51,204,255,.28);
+  background: rgba(240,251,255,.7);
+}
+.future-light-dashboard > aside nav button b { color: #ff9e2e; }
+.future-light-dashboard > main > header {
+  color: #052138;
+  border-color: rgba(51,204,255,.28);
+  background: rgba(240,251,255,.76);
+  backdrop-filter: blur(12px);
+}
+.future-light-dashboard > main > header h1 { color: #052138; }
+.future-light-dashboard > main > .mobile-sync-panel {
+  margin: 10px 24px 0;
+  color: #1f5775;
+  border-color: rgba(51,204,255,.28);
+  background: rgba(240,251,255,.7);
+  backdrop-filter: blur(12px);
+}
+.future-light-dashboard > main > .content {
+  max-width: none;
+  color: #e8faff;
+  background: transparent;
+}
+.future-light-dashboard .dashboard-overview-deck {
+  display: grid;
+  grid-template-columns: 1fr;
+  overflow: hidden;
+  border: 1px solid rgba(13,199,255,.22);
+  border-radius: 28px;
+  background: rgba(3,18,31,.035);
+  box-shadow: 0 18px 40px rgba(8,74,140,.1);
+  backdrop-filter: none;
+}
+.future-light-dashboard .dashboard-hero {
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: minmax(250px,.9fr) minmax(420px,1.9fr) minmax(260px,1fr);
+  min-height: 468px;
+  gap: 22px;
+  align-items: center;
+  padding: 24px;
+  border: 0;
+  background: transparent;
+}
+.future-light-dashboard .dashboard-hero::before,
+.future-light-dashboard .dashboard-hero::after,
+.future-light-dashboard .dashboard-signal { display: none; }
+.future-light-dashboard .dashboard-kicker { color: #79daba; }
+.future-light-dashboard .dashboard-hero h2 { color: #e8faff; font-size: clamp(30px,3vw,42px); }
+.future-light-dashboard .dashboard-hero-copy > p { color: rgba(232,250,255,.8); }
+.future-light-dashboard .dashboard-hero-actions button,
+.future-light-dashboard .dashboard-hero-actions button.secondary {
+  color: #1f5775;
+  border: 1px solid rgba(51,204,255,.28);
+  border-radius: 13px;
+  background: rgba(240,251,255,.78);
+  backdrop-filter: blur(10px);
+}
+.future-light-dashboard .dashboard-shift-meta { display: none; }
+.future-light-dashboard .project-isometric {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 410px;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 24px;
+  background: transparent;
+}
+.future-light-dashboard .project-isometric::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 8% 2% 15%;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(2,17,29,.5) 0%, rgba(2,17,29,.24) 43%, transparent 76%);
+  filter: drop-shadow(-9px 0 12px rgba(0,221,255,.16)) drop-shadow(9px 0 12px rgba(255,92,14,.13));
+}
+.future-light-dashboard .future-twin-model-wrap {
+  position: absolute;
+  inset: 20px 10px 54px;
+  display: grid;
+  place-items: center;
+  transform-origin: center;
+  animation: future-twin-levitate 12s ease-in-out infinite;
+}
+.future-light-dashboard .future-twin-webgl {
+  z-index: 1;
+  width: min(100%, 780px);
+  height: clamp(330px, 39vw, 560px);
+  animation: none;
+  filter: drop-shadow(-8px 0 9px rgba(0,218,255,.18)) drop-shadow(8px 0 9px rgba(255,83,13,.14)) drop-shadow(0 30px 32px rgba(0,16,29,.45));
+  cursor: grab;
+  touch-action: none;
+}
+.future-light-dashboard .future-twin-webgl:active { cursor: grabbing; }
+.future-light-dashboard .future-twin-webgl canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+.future-light-dashboard .future-twin-model {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: filter .2s ease;
+  will-change: transform;
+}
+.future-light-dashboard .future-twin-model:active { cursor: grabbing; }
+.future-light-dashboard .project-isometric:hover .future-twin-model-wrap { animation-play-state: paused; }
+.future-light-dashboard .project-isometric:hover .future-twin-model { filter: drop-shadow(0 14px 24px rgba(13,199,255,.16)); }
+@keyframes future-twin-levitate {
+  0%,100% { transform: translateY(0) rotate(2deg) scaleX(.96); }
+  25%,75% { transform: translateY(-12px) rotate(-2deg) scaleX(1); }
+  50% { transform: translateY(0) rotate(2deg) scaleX(.96); }
+}
+.future-light-dashboard .plant-scene-actions {
+  position: absolute;
+  z-index: 3;
+  right: 7.4%;
+  bottom: 16px;
+  left: 7.4%;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.future-light-dashboard .plant-scene-actions button {
+  width: 136px;
+  min-height: 46px;
+  display: inline-flex;
+  flex: 0 0 136px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 18px;
+  border: 1px solid rgba(255,99,15,.82);
+  border-radius: 23px;
+  color: #f5fbff;
+  background: rgba(3,14,23,.14);
+  box-shadow: 0 0 8px rgba(255,71,5,.12);
+  backdrop-filter: blur(12px);
+  font-size: 15px;
+  font-weight: 650;
+  pointer-events: auto;
+}
+.future-light-dashboard .plant-scene-actions button i {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: #ff630f;
+  box-shadow: 0 0 9px rgba(255,71,5,.58);
+}
+.future-light-dashboard .plant-scene-actions button:hover,
+.future-light-dashboard .plant-scene-actions button:focus-visible {
+  border-color: #ff7a2c;
+  background: rgba(3,14,23,.26);
+  box-shadow: 0 0 16px rgba(255,71,5,.28);
+  outline: none;
+}
+.future-light-dashboard .project-isometric figcaption {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  color: rgba(232,250,255,.62);
+  font-size: 10px;
+  text-align: center;
+  pointer-events: none;
+}
+.future-light-dashboard .dashboard-focus {
+  color: #e8faff;
+  border-color: rgba(255,97,14,.62);
+  border-radius: 16px;
+  background: rgba(3,18,31,.22);
+  box-shadow: 0 0 18px rgba(255,71,5,.2);
+  backdrop-filter: blur(12px);
+}
+.future-light-dashboard .dashboard-focus > span,
+.future-light-dashboard .dashboard-focus > p { color: rgba(232,250,255,.75); }
+.future-light-dashboard .dashboard-focus > strong { color: #ff6b8a; }
+.future-light-dashboard .hq-live-controls button {
+  color: #e8faff;
+  border-color: rgba(255,97,14,.62);
+  background: rgba(3,18,31,.22);
+}
+.future-light-dashboard .dashboard-metrics {
+  grid-column: 1;
+  grid-row: 2;
+  grid-template-columns: repeat(7,minmax(120px,1fr));
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid rgba(13,199,255,.22);
+  border-left: 0;
+  background: transparent;
+}
+.future-light-dashboard .dashboard-metrics button,
+.future-light-dashboard .dashboard-metrics article,
+.future-light-dashboard .dashboard-command-grid > .card,
+.future-light-dashboard .dashboard-lower-grid > .card {
+  color: #e8faff;
+  border: 1px solid rgba(255,97,14,.62);
+  border-radius: 18px;
+  background: rgba(3,18,31,.22);
+  box-shadow: 0 0 18px rgba(255,71,5,.16);
+  backdrop-filter: blur(12px);
+}
+.future-light-dashboard .dashboard-metrics button > span,
+.future-light-dashboard .dashboard-metrics article > span,
+.future-light-dashboard .dashboard-metrics button > small,
+.future-light-dashboard .dashboard-metrics article > small { color: rgba(232,250,255,.75); }
+.future-light-dashboard .dashboard-metrics button > strong,
+.future-light-dashboard .dashboard-metrics article > strong { color: #ff9e2e; }
+.future-light-dashboard .dashboard-command-grid,
+.future-light-dashboard .dashboard-lower-grid { gap: 16px; }
+.future-light-dashboard .dashboard-command-grid .card :is(h2,strong),
+.future-light-dashboard .dashboard-lower-grid .card :is(h2,strong) { color: #e8faff; }
+.future-light-dashboard .dashboard-command-grid .card :is(p,small),
+.future-light-dashboard .dashboard-lower-grid .card :is(p,small) { color: rgba(232,250,255,.72); }
+.future-light-dashboard .eyebrow { color: #ff9e2e; }
+@media (max-width:1320px) {
+  .future-light-dashboard .dashboard-hero { grid-template-columns:minmax(250px,.9fr) minmax(390px,1.5fr) minmax(230px,.85fr); }
+}
+@media (max-width:1100px) {
+  .future-light-dashboard .dashboard-hero { grid-template-columns:1fr 1fr; height:auto; }
+  .future-light-dashboard .project-isometric { grid-column:1/-1; grid-row:2; }
+  .future-light-dashboard .dashboard-focus { grid-column:2; grid-row:1; }
+  .future-light-dashboard .dashboard-metrics { grid-template-columns:repeat(4,minmax(120px,1fr)); overflow-x:auto; }
+}
+@media (max-width:760px) {
+  .future-light-dashboard .dashboard-hero { display:flex; flex-direction:column; padding:18px; }
+  .future-light-dashboard .dashboard-hero-copy,
+  .future-light-dashboard .dashboard-focus,
+  .future-light-dashboard .project-isometric { width:100%; }
+  .future-light-dashboard .project-isometric { height:330px; }
+  .future-light-dashboard .plant-scene-actions { right:10px; left:10px; }
+  .future-light-dashboard .plant-scene-actions button { width:118px; flex-basis:118px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .future-light-dashboard .future-twin-model-wrap { animation:none; }
+}
+
+.future-model-preview {
+  min-height:100vh;
+  padding:24px;
+  color:#e8faff;
+  background:
+    linear-gradient(rgba(229,247,255,.06),rgba(3,18,31,.1)),
+    url("/new/assets/future-light/holographic-grid-background.png") center/cover fixed;
+}
+.future-model-preview > header {
+  position:static;
+  height:auto;
+  display:block;
+  padding:0 0 18px;
+  color:#e8faff;
+  border:0;
+  background:transparent;
+}
+.future-model-preview > header small { color:#ff9e2e; font-weight:800; letter-spacing:.12em; }
+.future-model-preview > header h1 { margin:6px 0; color:#e8faff; font-size:28px; }
+.future-model-preview > header p { margin:0; color:rgba(232,250,255,.76); }
+.future-model-preview .dashboard-overview-deck { max-width:1600px; margin:0 auto; }
+.future-model-preview .dashboard-hero-copy h2 { color:#e8faff; }
+.future-model-preview .dashboard-hero-copy p { color:rgba(232,250,255,.78); }
+
+.future-preview-shell { display:grid; grid-template-columns:244px 1fr; min-height:100vh; }
+.future-preview-sidebar { position:sticky; top:0; height:100vh; display:flex; flex-direction:column; gap:12px; padding:20px 18px; border-right:1px solid rgba(255,97,14,.42); background:rgba(3,18,31,.42); backdrop-filter:blur(14px); }
+.future-preview-brand { display:flex; align-items:center; gap:11px; }
+.future-preview-brand > b { width:40px; height:40px; display:grid; place-items:center; border-radius:13px; color:#e8faff; background:linear-gradient(135deg,#248cf5,#40e3ed); }
+.future-preview-brand span { display:grid; }
+.future-preview-brand small { color:#e8faff; font-size:9px; }
+.future-preview-sidebar nav { display:grid; gap:3px; margin:0; overflow:auto; }
+.future-preview-sidebar nav button { min-height:34px; display:flex; align-items:center; gap:11px; padding:0 12px; border:0; border-radius:11px; color:#e8faff; background:transparent; text-align:left; }
+.future-preview-sidebar nav button.active { border:1px solid rgba(51,204,255,.28); background:rgba(240,251,255,.7); }
+.future-preview-sidebar nav i { width:7px; height:7px; border-radius:50%; background:#9fe8ff; }
+.future-preview-sidebar > small { margin-top:auto; color:#e8faff; }
+.future-preview-shell > main { min-width:0; }
+.future-preview-header { position:sticky; top:0; z-index:5; height:72px; display:flex; align-items:center; justify-content:space-between; padding:0 26px; color:#052138; border-bottom:1px solid rgba(51,204,255,.28); background:rgba(240,251,255,.76); backdrop-filter:blur(12px); }
+.future-preview-header h1 { margin:3px 0 0; color:#052138; font-size:20px; }
+.future-preview-header small { color:#0b56b7; font-weight:700; }
+.future-preview-header > div:last-child { display:flex; align-items:center; gap:10px; }
+.future-preview-header button,.future-preview-header b { padding:10px 15px; border:1px solid rgba(51,204,255,.28); border-radius:13px; color:#0b56b7; background:rgba(240,251,255,.7); }
+.future-preview-content { display:grid; gap:16px; padding:20px 24px 30px; }
+.future-preview-sync { min-height:52px; display:flex; align-items:center; gap:10px; padding:0 16px; border:1px solid rgba(51,204,255,.28); border-radius:16px; color:#1f5775; background:rgba(240,251,255,.7); backdrop-filter:blur(12px); }
+.future-preview-sync strong { flex:1; }
+.future-preview-sync button { padding:9px 14px; border:1px solid rgba(51,204,255,.28); border-radius:13px; color:#0b56b7; background:rgba(240,251,255,.7); }
+.future-preview-insight { margin:12px 0; padding:14px; border:1px solid rgba(255,97,14,.62); border-radius:16px; background:rgba(3,18,31,.22); backdrop-filter:blur(10px); }
+.future-preview-insight small { color:#ff9e2e; }
+.future-preview-insight p { margin:7px 0 0; }
+.future-preview-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.future-preview-cards article { min-height:118px; display:grid; align-content:start; gap:7px; padding:17px 18px; border:1px solid rgba(255,97,14,.62); border-radius:20px; color:#e8faff; background:rgba(3,18,31,.22); backdrop-filter:blur(12px); }
+.future-preview-cards small { color:#ff9e2e; font-weight:800; }
+.future-preview-cards strong { font-size:18px; }
+.future-preview-cards span { font-size:12px; }
+@media(max-width:900px){.future-preview-shell{grid-template-columns:1fr}.future-preview-sidebar{display:none}.future-preview-header>div:last-child{display:none}.future-preview-cards{grid-template-columns:1fr}}
+
+/* ===== Рабочий центр: правки по макету Figma «PU Workspace — Рабочий центр (редизайн)» ===== */
+/* Контраст: затемняющий слой поверх фона и более плотное стекло. */
+.future-preview-shell::after { content:""; position:fixed; inset:0; z-index:-1; pointer-events:none; background:linear-gradient(90deg,rgba(3,18,31,.55),rgba(3,18,31,.72)); opacity:1; mix-blend-mode:normal; animation:none; filter:none; }
+.future-preview-shell .future-preview-sidebar { z-index:20; background:rgba(3,18,31,.6); }
+.future-preview-shell .future-preview-brand { position:relative; padding-bottom:14px; }
+.future-preview-shell .future-preview-sidebar nav { flex:1 1 auto; align-content:start; grid-auto-rows:36px; gap:2px; }
+.future-preview-shell .future-preview-sidebar nav button { font-size:13.5px; font-weight:600; }
+.future-preview-shell .future-preview-sidebar nav button.active { color:#052138; font-weight:700; }
+.future-preview-shell .future-preview-sidebar nav button:focus-visible,
+.future-preview-shell button:focus-visible { outline:2px solid #33ccff; outline-offset:2px; }
+.future-preview-shell .fl-system-status { color:#79daba; font-weight:600; }
+.future-preview-shell .future-preview-insight,
+.future-preview-shell .future-preview-cards article,
+.future-preview-shell .dashboard-metrics button { background:rgba(3,18,31,.62); }
+.future-preview-shell .dashboard-overview-deck { background:rgba(3,18,31,.35); }
+.future-preview-shell .future-preview-cards span { font-size:13px; color:rgba(232,250,255,.8); }
+.future-preview-shell .dashboard-metrics.fl-metrics { grid-template-columns:repeat(5,minmax(120px,1fr)); }
+.future-preview-shell .dashboard-metrics button > span { font-size:12px; font-weight:600; color:rgba(232,250,255,.82); }
+
+/* Шапка */
+.future-preview-shell .future-preview-header { gap:12px; }
+.future-preview-shell .fl-header-title { flex:1; min-width:0; }
+.future-preview-shell .fl-header-actions { display:flex; align-items:center; gap:10px; }
+.future-preview-shell .fl-header-actions-mobile,
+.future-preview-shell .fl-burger,
+.future-preview-shell .fl-sidebar-close,
+.future-preview-shell .fl-project-mobile,
+.future-preview-shell .fl-tabbar,
+.future-preview-shell .future-preview-header > div.fl-header-actions-mobile { display:none; }
+.fl-icon { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.future-preview-shell .fl-icon-button { width:40px; height:40px; place-items:center; padding:0; border:0; border-radius:12px; color:#052138; background:transparent; cursor:pointer; }
+.future-preview-shell .fl-online-dot { width:10px; height:10px; border-radius:50%; background:#79daba; box-shadow:0 0 8px rgba(121,218,186,.8); }
+
+/* Строка синхронизации */
+.future-preview-shell .future-preview-sync { padding:6px 8px 6px 16px; }
+.future-preview-shell .future-preview-sync .fl-sync-text { flex:1; min-width:0; display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.future-preview-shell .future-preview-sync .fl-sync-text > span { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.future-preview-shell .future-preview-sync strong { flex:none; }
+
+/* Подпись под 3D-моделью больше не перекрывается кнопками ГПР/ДДС */
+.future-preview-shell .plant-scene-actions { bottom:26px; }
+.future-preview-shell .project-isometric figcaption { bottom:0; font-size:11px; color:rgba(232,250,255,.7); }
+
+/* Карточка «Требует решения» */
+.future-preview-shell .fl-focus { display:grid; gap:10px; align-self:center; padding:20px; color:#e8faff; border:1px solid rgba(255,97,14,.62); border-radius:18px; background:rgba(3,18,31,.6); box-shadow:0 0 18px rgba(255,71,5,.2); backdrop-filter:blur(12px); }
+.future-preview-shell .fl-focus-kicker { font-size:11px; font-weight:800; letter-spacing:.06em; color:rgba(232,250,255,.75); }
+.future-preview-shell .fl-focus-total { display:flex; align-items:baseline; gap:10px; }
+.future-preview-shell .fl-focus-total strong { font-size:48px; line-height:1; font-weight:800; color:#ff6b8a; }
+.future-preview-shell .fl-focus-total span { font-size:14px; color:rgba(232,250,255,.82); }
+.future-preview-shell .fl-focus ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
+.future-preview-shell .fl-focus li { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid rgba(255,97,14,.5); border-radius:12px; background:rgba(3,18,31,.5); font-size:13px; }
+.future-preview-shell .fl-focus li b { color:#ff9e2e; font-size:14px; }
+.future-preview-shell .fl-focus-action { justify-self:start; padding:10px 15px; border:1px solid rgba(51,204,255,.28); border-radius:13px; color:#0b56b7; background:rgba(240,251,255,.78); font-weight:600; cursor:pointer; }
+
+/* Планшет */
+@media (max-width:1100px) {
+  .future-preview-shell .fl-focus { grid-column:2; grid-row:1; }
+  .future-preview-shell .dashboard-metrics.fl-metrics { grid-template-columns:repeat(3,minmax(120px,1fr)); overflow:visible; }
+}
+
+/* Мобильная версия: бургер-меню, выезжающая боковая панель, нижние вкладки */
+@media (max-width:900px) {
+  .future-preview-shell .future-preview-sidebar { display:flex; position:fixed; top:0; bottom:0; left:0; width:min(300px,84vw); height:100dvh; transform:translateX(-105%); transition:transform .22s ease; box-shadow:12px 0 32px rgba(0,8,16,.5); background:rgba(3,18,31,.94); }
+  .future-preview-shell.menu-open .future-preview-sidebar { transform:none; }
+  .future-preview-shell .fl-sidebar-close { display:inline-grid; margin-left:auto; color:#e8faff; }
+  .future-preview-shell .fl-backdrop { position:fixed; inset:0; z-index:15; background:rgba(0,8,16,.55); }
+  .future-preview-shell .future-preview-header { height:auto; min-height:64px; padding:10px 12px; }
+  .future-preview-shell .fl-burger { display:inline-grid; }
+  .future-preview-shell .fl-header-actions { display:none; }
+  .future-preview-shell .future-preview-header > div.fl-header-actions-mobile { display:flex; align-items:center; gap:6px; }
+  .future-preview-shell .fl-header-actions-mobile .fl-icon-button { display:inline-grid; color:#0b56b7; }
+  .future-preview-shell .fl-header-title small { display:none; }
+  .future-preview-shell .fl-project-mobile { display:block; padding:0; border:0; background:none; color:#0b56b7; font-size:11px; font-weight:700; }
+  .future-preview-shell .future-preview-header h1 { margin:1px 0 0; font-size:18px; }
+  .future-preview-shell .future-preview-content { padding:14px 16px calc(88px + env(safe-area-inset-bottom)); gap:14px; }
+  .future-preview-shell .future-preview-sync { padding:6px 6px 6px 14px; }
+  .future-preview-shell .future-preview-sync .fl-sync-text { display:grid; gap:1px; }
+  .future-preview-shell .future-preview-sync .fl-sync-text > span { font-size:11px; }
+  .future-preview-shell .future-preview-sync button { font-size:0; }
+  .future-preview-shell .future-preview-sync button::after { content:"Обновить"; font-size:14px; }
+  .future-preview-shell .dashboard-metrics.fl-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); overflow:visible; }
+  .future-preview-shell .dashboard-metrics.fl-metrics button:last-child { grid-column:1/-1; }
+  .future-preview-shell .fl-tabbar { position:fixed; z-index:10; right:0; bottom:0; left:0; display:grid; grid-template-columns:repeat(6,1fr); padding:8px 6px calc(8px + env(safe-area-inset-bottom)); border-top:1px solid rgba(255,97,14,.42); background:rgba(3,18,31,.92); backdrop-filter:blur(14px); }
+  .future-preview-shell .fl-tabbar button { display:grid; justify-items:center; gap:3px; min-height:48px; padding:4px 0; border:0; background:none; color:rgba(232,250,255,.8); font-size:10.5px; font-weight:500; cursor:pointer; }
+  .future-preview-shell .fl-tabbar button.active { color:#ff9e2e; font-weight:700; }
+}
+@media (max-width:760px) {
+  .future-preview-shell .dashboard-hero-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .future-preview-shell .dashboard-hero-actions button { padding:11px 8px; font-size:14px; white-space:nowrap; }
+  .future-preview-shell .fl-focus { width:100%; box-sizing:border-box; }
+  .future-preview-shell .plant-scene-actions button { flex:1 1 0; width:auto; }
+  .future-preview-shell .project-isometric figcaption { font-size:10.5px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .future-preview-shell .future-preview-sidebar { transition:none; }
+}
+
+/* ===== v2: глубокий чёткий фон (параллакс-слои), вращающаяся модель, неоновая палитра ===== */
+.future-preview-shell {
+  --mx:0; --my:0;
+  --neon-cyan:#00e5ff; --neon-blue:#2f7bff; --neon-orange:#ff7a1a; --neon-magenta:#ff2bd6; --neon-violet:#8b5cff; --neon-lime:#b6ff3b; --neon-pink:#ff4f8b;
+  --ink:#effcff; --ink-dim:rgba(239,252,255,.74);
+  --glass:rgba(4,14,30,.52); --glass-strong:rgba(4,12,26,.72);
+  --edge:linear-gradient(135deg,rgba(0,229,255,.9),rgba(139,92,255,.7) 45%,rgba(255,43,214,.6) 70%,rgba(255,122,26,.9));
+}
+/* Фон: без размытия и затемнения, повышенная резкость и насыщенность, двигается глубже всех слоёв */
+.future-preview-shell.future-light-dashboard::before {
+  inset:-40px;
+  animation:none;
+  filter:contrast(1.28) saturate(1.55) brightness(1.02);
+  transform:translate3d(calc(var(--mx) * -10px), calc(var(--my) * -8px), 0) scale(1.06);
+}
+.future-preview-shell.future-light-dashboard::after {
+  inset:0; animation:none; filter:none; opacity:1; mix-blend-mode:normal;
+  background:radial-gradient(ellipse at 50% 42%, transparent 55%, rgba(2,6,16,.55) 100%);
+}
+.fl-depth { position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; perspective:900px; }
+.fl-depth > div { position:absolute; will-change:transform; }
+.fl-depth-far { inset:0; background:
+  radial-gradient(circle at 18% 22%, rgba(0,229,255,.22), transparent 32%),
+  radial-gradient(circle at 84% 18%, rgba(255,43,214,.18), transparent 30%),
+  radial-gradient(circle at 70% 88%, rgba(255,122,26,.2), transparent 34%);
+  mix-blend-mode:screen; transform:translate3d(calc(var(--mx) * -18px), calc(var(--my) * -14px), 0); }
+.fl-depth-beams { inset:-10%; background:
+  linear-gradient(100deg, transparent 38%, rgba(0,229,255,.16) 46%, transparent 52%),
+  linear-gradient(80deg, transparent 58%, rgba(255,122,26,.14) 64%, transparent 70%);
+  mix-blend-mode:screen; animation:fl-beams 9s ease-in-out infinite alternate;
+  transform:translate3d(calc(var(--mx) * -30px), calc(var(--my) * -20px), 0); }
+.fl-depth-grid { left:-25%; right:-25%; bottom:-6vh; height:52vh; opacity:.55; mix-blend-mode:screen;
+  background:
+    linear-gradient(rgba(0,229,255,.55) 1px, transparent 1px) 0 0/100% 46px,
+    linear-gradient(90deg, rgba(255,43,214,.45) 1px, transparent 1px) 0 0/64px 100%;
+  -webkit-mask-image:linear-gradient(to top, #000 10%, transparent 92%); mask-image:linear-gradient(to top, #000 10%, transparent 92%);
+  transform-origin:50% 100%;
+  transform:translate3d(calc(var(--mx) * -46px), 0, 0) rotateX(64deg);
+  animation:fl-grid 3.2s linear infinite; }
+.fl-depth-dust { inset:-10%; opacity:.7; mix-blend-mode:screen;
+  background:
+    radial-gradient(circle, rgba(0,229,255,.9) 0 1.2px, transparent 1.6px) 0 0/140px 140px,
+    radial-gradient(circle, rgba(255,122,26,.85) 0 1.1px, transparent 1.5px) 60px 90px/190px 190px,
+    radial-gradient(circle, rgba(255,43,214,.8) 0 1px, transparent 1.4px) 120px 30px/230px 230px;
+  animation:fl-dust 40s linear infinite;
+  transform:translate3d(calc(var(--mx) * -70px), calc(var(--my) * -48px), 0); }
+@keyframes fl-grid { to { background-position:0 46px, 0 0; } }
+@keyframes fl-dust { to { background-position:0 -140px, 60px -100px, 120px -200px; } }
+@keyframes fl-beams { from { opacity:.6; } to { opacity:1; } }
+
+/* Стекло: прозрачнее и почти без размытия, чтобы фон оставался резким; неоновая кромка-градиент */
+.future-preview-shell :is(.future-preview-insight,.future-preview-cards article,.dashboard-metrics button,.fl-focus,.fl-focus li) {
+  border:1px solid transparent;
+  background:linear-gradient(var(--glass),var(--glass)) padding-box, var(--edge) border-box;
+  backdrop-filter:blur(4px) saturate(1.4);
+}
+.future-preview-shell .dashboard-overview-deck { border:1px solid rgba(0,229,255,.35); background:rgba(3,10,24,.22); box-shadow:0 0 0 1px rgba(255,43,214,.12) inset, 0 0 40px rgba(0,229,255,.12); }
+.future-preview-shell .future-preview-cards article { box-shadow:0 0 22px rgba(139,92,255,.22); }
+
+/* Шапка, меню, строка синхронизации — тёмное стекло с неоновыми линиями */
+.future-preview-shell .future-preview-header { color:var(--ink); background:rgba(3,10,24,.55); border-bottom:1px solid transparent; border-image:linear-gradient(90deg,var(--neon-cyan),var(--neon-violet),var(--neon-orange)) 1; backdrop-filter:blur(8px); }
+.future-preview-shell .future-preview-header h1 { color:var(--ink); text-shadow:0 0 14px rgba(0,229,255,.45); }
+.future-preview-shell .future-preview-header small,
+.future-preview-shell .fl-project-mobile { color:var(--neon-cyan); }
+.future-preview-shell .fl-header-actions :is(button,b) { color:var(--ink); border:1px solid rgba(0,229,255,.55); background:rgba(0,229,255,.08); box-shadow:0 0 12px rgba(0,229,255,.22); }
+.future-preview-shell .fl-header-actions b { color:var(--neon-lime); border-color:rgba(182,255,59,.6); box-shadow:0 0 12px rgba(182,255,59,.3); }
+.future-preview-shell .fl-icon-button,
+.future-preview-shell .fl-header-actions-mobile .fl-icon-button { color:var(--ink); }
+.future-preview-shell .fl-online-dot { background:var(--neon-lime); box-shadow:0 0 10px var(--neon-lime); }
+.future-preview-shell .future-preview-sidebar { background:rgba(3,10,24,.62); border-right:1px solid transparent; border-image:linear-gradient(180deg,var(--neon-cyan),var(--neon-magenta),var(--neon-orange)) 1; backdrop-filter:blur(8px); }
+.future-preview-shell .future-preview-brand > b { background:linear-gradient(135deg,var(--neon-cyan),var(--neon-violet) 55%,var(--neon-magenta)); box-shadow:0 0 18px rgba(0,229,255,.55); }
+.future-preview-shell .future-preview-sidebar nav i { background:var(--neon-cyan); box-shadow:0 0 6px var(--neon-cyan); }
+.future-preview-shell .future-preview-sidebar nav button:nth-child(3n+2) i { background:var(--neon-orange); box-shadow:0 0 6px var(--neon-orange); }
+.future-preview-shell .future-preview-sidebar nav button:nth-child(3n) i { background:var(--neon-magenta); box-shadow:0 0 6px var(--neon-magenta); }
+.future-preview-shell .future-preview-sidebar nav button:hover { background:rgba(0,229,255,.1); }
+.future-preview-shell .future-preview-sidebar nav button.active { color:#02101e; border:0; background:linear-gradient(90deg,var(--neon-cyan),#7ff3ff); box-shadow:0 0 18px rgba(0,229,255,.55); }
+.future-preview-shell .future-preview-sidebar nav button.active i { background:#02101e; box-shadow:none; }
+.future-preview-shell .fl-system-status { color:var(--neon-lime); text-shadow:0 0 8px rgba(182,255,59,.6); }
+.future-preview-shell .future-preview-sync { color:var(--ink); border:1px solid rgba(182,255,59,.45); background:rgba(3,10,24,.5); box-shadow:0 0 16px rgba(182,255,59,.14); backdrop-filter:blur(6px); }
+.future-preview-shell .future-preview-sync strong { color:var(--neon-lime); }
+.future-preview-shell .future-preview-sync .fl-sync-text > span { color:var(--ink-dim); }
+.future-preview-shell .future-preview-sync button { color:#02101e; border:0; font-weight:700; background:linear-gradient(90deg,var(--neon-lime),#e4ff9a); box-shadow:0 0 14px rgba(182,255,59,.45); }
+
+/* Герой: объёмный заголовок (стерео-сдвиг голубой/оранжевый, как в 3D-очках) */
+.future-preview-shell .dashboard-kicker { color:var(--neon-cyan); text-shadow:0 0 10px rgba(0,229,255,.6); }
+.future-preview-shell .dashboard-hero h2 { color:#fff; text-shadow:-2px 0 0 rgba(0,229,255,.75), 2px 0 0 rgba(255,43,214,.6), 0 0 26px rgba(0,229,255,.35); }
+.future-preview-shell .dashboard-hero-copy > p { color:var(--ink-dim); }
+.future-preview-shell .future-preview-insight small { color:var(--neon-orange); text-shadow:0 0 8px rgba(255,122,26,.6); }
+.future-preview-shell .dashboard-hero-actions button { color:#02101e; border:0; font-weight:700; background:linear-gradient(90deg,var(--neon-cyan),#8cf6ff); box-shadow:0 0 16px rgba(0,229,255,.5); }
+.future-preview-shell .dashboard-hero-actions button + button { color:#fff; background:linear-gradient(90deg,var(--neon-violet),var(--neon-magenta)); box-shadow:0 0 16px rgba(255,43,214,.45); }
+
+/* Модель: неоновое «гало» под объектом */
+.future-preview-shell .fl-model-glow { position:absolute; z-index:0; left:12%; right:12%; bottom:64px; height:38%; pointer-events:none; border-radius:50%;
+  background:radial-gradient(ellipse at 35% 60%, rgba(0,229,255,.45), transparent 60%), radial-gradient(ellipse at 70% 55%, rgba(255,122,26,.4), transparent 60%);
+  filter:blur(18px); animation:fl-glow 4s ease-in-out infinite alternate; }
+@keyframes fl-glow { from { opacity:.55; transform:scaleX(.94); } to { opacity:1; transform:scaleX(1.04); } }
+.future-preview-shell .future-twin-webgl { filter:drop-shadow(0 24px 30px rgba(0,10,24,.6)); cursor:grab; }
+.future-preview-shell .future-twin-webgl:active { cursor:grabbing; }
+.future-preview-shell .plant-scene-actions button { color:#fff; border:1px solid var(--neon-orange); background:rgba(255,122,26,.14); box-shadow:0 0 16px rgba(255,122,26,.5), inset 0 0 12px rgba(255,122,26,.2); text-shadow:0 0 8px rgba(255,122,26,.8); }
+.future-preview-shell .plant-scene-actions button + button { border-color:var(--neon-cyan); background:rgba(0,229,255,.12); box-shadow:0 0 16px rgba(0,229,255,.5), inset 0 0 12px rgba(0,229,255,.2); text-shadow:0 0 8px rgba(0,229,255,.8); }
+.future-preview-shell .plant-scene-actions button + button i { background:var(--neon-cyan); box-shadow:0 0 9px var(--neon-cyan); }
+
+/* «Требует решения» */
+.future-preview-shell .fl-focus { box-shadow:0 0 26px rgba(255,79,139,.3); }
+.future-preview-shell .fl-focus-total strong { color:var(--neon-pink); text-shadow:0 0 18px rgba(255,79,139,.8); }
+.future-preview-shell .fl-focus li:nth-child(1) b { color:var(--neon-orange); }
+.future-preview-shell .fl-focus li:nth-child(2) b { color:var(--neon-lime); }
+.future-preview-shell .fl-focus li:nth-child(3) b { color:var(--neon-magenta); }
+.future-preview-shell .fl-focus-action { color:#fff; border:0; background:linear-gradient(90deg,var(--neon-pink),var(--neon-orange)); box-shadow:0 0 16px rgba(255,79,139,.5); }
+
+/* Показатели и карточки: у каждого свой неон */
+.future-preview-shell .fl-metrics button:nth-child(1) { --tone:var(--neon-cyan); }
+.future-preview-shell .fl-metrics button:nth-child(2) { --tone:var(--neon-orange); }
+.future-preview-shell .fl-metrics button:nth-child(3) { --tone:var(--neon-lime); }
+.future-preview-shell .fl-metrics button:nth-child(4) { --tone:var(--neon-violet); }
+.future-preview-shell .fl-metrics button:nth-child(5) { --tone:var(--neon-magenta); }
+.future-preview-shell .fl-metrics button { background:linear-gradient(var(--glass),var(--glass)) padding-box, linear-gradient(135deg,var(--tone),transparent 70%) border-box; box-shadow:0 0 18px color-mix(in srgb,var(--tone) 30%,transparent); }
+.future-preview-shell .fl-metrics button > strong { color:var(--tone); text-shadow:0 0 12px var(--tone); }
+.future-preview-shell .future-preview-cards article:nth-child(1) small { color:var(--neon-orange); }
+.future-preview-shell .future-preview-cards article:nth-child(2) small { color:var(--neon-cyan); }
+.future-preview-shell .future-preview-cards article:nth-child(3) small { color:var(--neon-magenta); }
+.future-preview-shell .future-preview-cards small { text-shadow:0 0 8px currentColor; }
+.future-preview-shell .fl-tabbar { background:rgba(3,10,24,.82); border-top:1px solid transparent; border-image:linear-gradient(90deg,var(--neon-cyan),var(--neon-magenta),var(--neon-orange)) 1; }
+.future-preview-shell .fl-tabbar button.active { color:var(--neon-cyan); text-shadow:0 0 8px rgba(0,229,255,.8); }
+
+@media (max-width:900px) {
+  .future-preview-shell .future-preview-sidebar { background:rgba(3,10,24,.94); }
+  .future-preview-shell .fl-depth-grid { height:38vh; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .fl-depth > div, .future-preview-shell .fl-model-glow { animation:none !important; transform:none !important; }
+}
+.future-preview-shell .project-isometric { height:460px; }
+.future-preview-shell .future-twin-model-wrap { inset:0 0 78px; }
+.future-preview-shell .plant-scene-actions { bottom:24px; }
+@media (max-width:760px) { .future-preview-shell .project-isometric { height:340px; } .future-preview-shell .future-twin-model-wrap { inset:0 0 70px; } }
+
+/* ===== v3: палитра из двух неонов — голубой (основной) и оранжевый (внимание) ===== */
+.future-preview-shell {
+  --neon-magenta:#2f9bff; --neon-violet:#1f6fff; --neon-lime:#00e5ff; --neon-pink:#ff7a1a;
+  --edge:linear-gradient(135deg,rgba(0,229,255,.95),rgba(0,229,255,.25) 45%,rgba(255,122,26,.25) 60%,rgba(255,122,26,.9));
+}
+.fl-depth-far { background:
+  radial-gradient(circle at 18% 22%, rgba(0,229,255,.22), transparent 32%),
+  radial-gradient(circle at 84% 18%, rgba(47,155,255,.16), transparent 30%),
+  radial-gradient(circle at 70% 88%, rgba(255,122,26,.18), transparent 34%); }
+.fl-depth-grid { background:
+    linear-gradient(rgba(0,229,255,.55) 1px, transparent 1px) 0 0/100% 46px,
+    linear-gradient(90deg, rgba(0,229,255,.35) 1px, transparent 1px) 0 0/64px 100%; }
+.fl-depth-dust { background:
+    radial-gradient(circle, rgba(0,229,255,.9) 0 1.2px, transparent 1.6px) 0 0/140px 140px,
+    radial-gradient(circle, rgba(255,122,26,.8) 0 1.1px, transparent 1.5px) 60px 90px/190px 190px,
+    radial-gradient(circle, rgba(170,240,255,.7) 0 1px, transparent 1.4px) 120px 30px/230px 230px; }
+.future-preview-shell .future-preview-header,
+.future-preview-shell .fl-tabbar { border-image:linear-gradient(90deg,var(--neon-cyan),rgba(0,229,255,.2) 60%,var(--neon-orange)) 1; }
+.future-preview-shell .future-preview-sidebar { border-image:linear-gradient(180deg,var(--neon-cyan),rgba(0,229,255,.15) 60%,var(--neon-orange)) 1; }
+.future-preview-shell .future-preview-brand > b { background:linear-gradient(135deg,#28a8ff,var(--neon-cyan)); }
+.future-preview-shell .future-preview-sidebar nav button i,
+.future-preview-shell .future-preview-sidebar nav button:nth-child(3n+2) i,
+.future-preview-shell .future-preview-sidebar nav button:nth-child(3n) i { background:var(--neon-cyan); box-shadow:0 0 6px var(--neon-cyan); }
+.future-preview-shell .future-preview-sidebar nav button.active i { background:#02101e; box-shadow:none; }
+.future-preview-shell .fl-header-actions b { color:var(--neon-cyan); border-color:rgba(0,229,255,.55); box-shadow:0 0 12px rgba(0,229,255,.25); }
+.future-preview-shell .fl-online-dot { background:var(--neon-cyan); box-shadow:0 0 10px var(--neon-cyan); }
+.future-preview-shell .fl-system-status { color:var(--neon-cyan); text-shadow:0 0 8px rgba(0,229,255,.6); }
+.future-preview-shell .future-preview-sync { border-color:rgba(0,229,255,.45); box-shadow:0 0 16px rgba(0,229,255,.14); }
+.future-preview-shell .future-preview-sync strong { color:var(--neon-cyan); }
+.future-preview-shell .future-preview-sync button { background:linear-gradient(90deg,var(--neon-cyan),#8cf6ff); box-shadow:0 0 14px rgba(0,229,255,.45); }
+.future-preview-shell .dashboard-hero h2 { text-shadow:-2px 0 0 rgba(0,229,255,.7), 2px 0 0 rgba(255,122,26,.55), 0 0 26px rgba(0,229,255,.3); }
+.future-preview-shell .dashboard-hero-actions button + button { color:var(--neon-cyan); background:rgba(3,10,24,.7); border:1px solid rgba(0,229,255,.7); box-shadow:0 0 14px rgba(0,229,255,.3); }
+.future-preview-shell .future-preview-cards article { box-shadow:0 0 22px rgba(0,229,255,.16); }
+.future-preview-shell .fl-focus { box-shadow:0 0 26px rgba(255,122,26,.28); }
+.future-preview-shell .fl-focus-total strong { color:var(--neon-orange); text-shadow:0 0 18px rgba(255,122,26,.75); }
+.future-preview-shell .fl-focus li:nth-child(1) b,
+.future-preview-shell .fl-focus li:nth-child(3) b { color:var(--neon-orange); }
+.future-preview-shell .fl-focus li:nth-child(2) b { color:var(--neon-cyan); }
+.future-preview-shell .fl-focus-action { background:linear-gradient(90deg,var(--neon-orange),#ffab5c); box-shadow:0 0 16px rgba(255,122,26,.5); color:#1a0800; }
+/* Показатели: голубой по умолчанию, оранжевый — только там, где требует внимания */
+.future-preview-shell .fl-metrics button:nth-child(n) { --tone:var(--neon-cyan); }
+.future-preview-shell .fl-metrics button:nth-child(2) { --tone:var(--neon-orange); }
+.future-preview-shell .future-preview-cards article:nth-child(1) small { color:var(--neon-orange); }
+.future-preview-shell .future-preview-cards article:nth-child(2) small,
+.future-preview-shell .future-preview-cards article:nth-child(3) small { color:var(--neon-cyan); }
