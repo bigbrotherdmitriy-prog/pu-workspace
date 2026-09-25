@@ -15,7 +15,6 @@ REPO = 'bigbrotherdmitriy-prog/pu-workspace'
 CHECKS = {
     'test-and-build',
     'docker-smoke',
-    'staging-preflight',
     'package-and-secrets',
     'python-dependencies',
     'frontend-dependencies',

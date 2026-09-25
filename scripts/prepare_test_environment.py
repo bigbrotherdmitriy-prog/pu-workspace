@@ -15,8 +15,8 @@ def main():
     if not 1024 <= args.port <= 65535 or args.port == 3000:
         parser.error('choose a non-production port between 1024 and 65535')
     target = Path(args.output)
-    if target.name not in {'.env.ci', '.env.staging'}:
-        parser.error('output must be .env.ci or .env.staging')
+    if target.name != '.env.ci':
+        parser.error('output must be .env.ci')
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     values = {
         'POSTGRES_PASSWORD': secrets.token_hex(24),
@@ -27,11 +27,10 @@ def main():
         'PU_RELEASE_REVISION': revision,
         'PU_TEST_PORT': str(args.port),
     }
-    if target.name == '.env.ci':
-        values.update({
-            'PU_LOCAL_UPLOAD_CI_RUNTIME': 'true',
-            'PU_LOCAL_UPLOAD_STAGING_ROOT': '/var/lib/pu-workspace-ci-staging',
-        })
+    values.update({
+        'PU_LOCAL_UPLOAD_CI_RUNTIME': 'true',
+        'PU_LOCAL_UPLOAD_STAGING_ROOT': '/var/lib/pu-workspace-ci-staging',
+    })
     with target.open('x', encoding='utf-8') as output:
         output.write(''.join(f'{key}={value}\n' for key, value in values.items()))
     if os.name != 'nt':

@@ -12,8 +12,8 @@ from urllib.request import build_opener, HTTPCookieProcessor, Request
 
 def environment(path):
     file = Path(path)
-    if file.name not in {'.env.ci', '.env.staging'}:
-        raise ValueError('Only dedicated test environment files are accepted')
+    if file.name != '.env.ci':
+        raise ValueError('Only the dedicated CI environment file is accepted')
     return dict(line.split('=', 1) for line in file.read_text().splitlines() if line and not line.startswith('#'))
 
 

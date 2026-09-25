@@ -36,3 +36,10 @@ def test_test_environment_cannot_read_production_env(tmp_path):
     path.write_text('APP_SECRET_KEY=must-not-be-read')
     with pytest.raises(ValueError):
         script('check_ci_smoke').environment(path)
+
+
+def test_test_environment_rejects_retired_staging_env(tmp_path):
+    path = tmp_path / '.env.staging'
+    path.write_text('PU_TEST_PORT=3010')
+    with pytest.raises(ValueError):
+        script('check_ci_smoke').environment(path)

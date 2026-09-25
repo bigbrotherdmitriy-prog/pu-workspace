@@ -57,6 +57,7 @@ def test_ci_compose_explicitly_uses_private_shared_staging_volume():
     generator = (root / "scripts" / "prepare_test_environment.py").read_text(
         encoding="utf-8",
     )
-    assert "if target.name == '.env.ci':" in generator
+    assert "if target.name != '.env.ci':" in generator
+    assert "output must be .env.ci" in generator
     assert "'PU_LOCAL_UPLOAD_CI_RUNTIME': 'true'" in generator
     assert "'PU_LOCAL_UPLOAD_STAGING_ROOT': '/var/lib/pu-workspace-ci-staging'" in generator
