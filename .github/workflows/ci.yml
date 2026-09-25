@@ -41,6 +41,20 @@ jobs:
       - name: Apply migrations to clean PostgreSQL
         working-directory: backend
         run: alembic -c alembic.ini upgrade head
+      - name: DDS snapshot PostgreSQL consistency gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_cash_flow_snapshot_postgres.py \
+            --junitxml=../dds-snapshot-postgres.xml 2>&1 | tee ../dds-snapshot-postgres.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../dds-snapshot-postgres.xml').getroot()
+          assert len(report.findall('.//testcase')) == 6, 'Expected 6 DDS snapshot PostgreSQL gates'
+          assert not report.findall('.//skipped'), 'DDS snapshot PostgreSQL gates must not skip'
+          PY
       - name: Backend and contract tests
         working-directory: backend
         env:
@@ -92,20 +106,6 @@ jobs:
           cases = report.findall('.//testcase')
           assert len(cases) == 2, f'Expected 2 V6-00a PostgreSQL gates, collected {len(cases)}'
           assert not report.findall('.//skipped'), 'V6-00a PostgreSQL gates must not skip tests'
-          PY
-      - name: DDS snapshot PostgreSQL consistency gates
-        working-directory: backend
-        env:
-          PYTHONPATH: .
-        run: |
-          set -o pipefail
-          pytest -q -rA tests/test_cash_flow_snapshot_postgres.py \
-            --junitxml=../dds-snapshot-postgres.xml 2>&1 | tee ../dds-snapshot-postgres.log
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-          report = ET.parse('../dds-snapshot-postgres.xml').getroot()
-          assert len(report.findall('.//testcase')) == 6, 'Expected 6 DDS snapshot PostgreSQL gates'
-          assert not report.findall('.//skipped'), 'DDS snapshot PostgreSQL gates must not skip'
           PY
       - name: Provider outbox PostgreSQL recovery races
         working-directory: backend
@@ -168,6 +168,8 @@ jobs:
             contract-discovery-postgres.xml
             v6-00a-money-postgres.log
             v6-00a-money-postgres.xml
+            dds-snapshot-postgres.log
+            dds-snapshot-postgres.xml
             provider-outbox-postgres.log
             provider-outbox-postgres.xml
             frontend-check.log

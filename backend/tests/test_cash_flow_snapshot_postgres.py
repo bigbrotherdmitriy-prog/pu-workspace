@@ -32,8 +32,9 @@ def pg(monkeypatch):
     try:
         command.upgrade(config, "c70a00a1f001")
         with engine.begin() as conn:
-            conn.execute(text("INSERT INTO organizations(id,name) VALUES (1,'Snapshot org')"))
-            conn.execute(text("INSERT INTO projects(id,name,organization_id) VALUES (1,'One',1),(2,'Two',1)"))
+            # Historical migration already seeds organization id=1.
+            conn.execute(text("INSERT INTO organizations(id,name) VALUES (9701,'Snapshot org')"))
+            conn.execute(text("INSERT INTO projects(id,name,organization_id) VALUES (1,'One',9701),(2,'Two',9701)"))
             conn.execute(text("""INSERT INTO cash_flow_entries
                 (id,project_id,title,direction,planned_date,planned_amount,actual_amount,currency,status)
                 VALUES (1,1,'Legacy','outflow','2026-01-01',1500.50,0,'RUB','approved')"""))
