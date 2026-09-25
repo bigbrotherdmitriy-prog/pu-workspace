@@ -75,7 +75,15 @@ docker build \
 Run as the owner of the root. Supply a verified PostgreSQL `pg_dump -Fc` only on
 the first activation:
 
+Always start from the exact release directory, **not `/root`**. Switching user
+with `runuser` does not necessarily change the working directory; an inaccessible
+inherited `/root` caused a permission failure during the V6-00a deployment.
+Do not patch the deploy script or leave a temporary wrapper in the release.
+When invoking from a root shell, first `cd` to the release, then use the deploy
+account that owns the primary root (currently `pu-staging` on the approved host).
+
 ```sh
+cd /opt/pu-workspace-primary/releases/<full-commit-sha>
 scripts/deploy-primary-first-host.sh \
   /opt/pu-workspace-primary \
   /opt/pu-workspace-primary/releases/<full-commit-sha> \
