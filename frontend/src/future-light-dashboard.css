@@ -696,3 +696,159 @@
 .future-preview-shell .future-preview-cards article:nth-child(1) small { color:var(--neon-orange); }
 .future-preview-shell .future-preview-cards article:nth-child(2) small,
 .future-preview-shell .future-preview-cards article:nth-child(3) small { color:var(--neon-cyan); }
+
+/* ===== v4: продакшен-экран «Рабочий центр» получает то же оформление, что и превью =====
+   Раньше весь неон/глубина были написаны только под .future-preview-shell, а на продакшене
+   контейнер имеет класс .future-light-dashboard — поэтому экран выглядел тускло. */
+.future-light-dashboard {
+  --mx:0; --my:0;
+  --neon-cyan:#00e5ff; --neon-blue:#2f7bff; --neon-orange:#ff7a1a;
+  --neon-magenta:#2f9bff; --neon-violet:#1f6fff; --neon-lime:#00e5ff; --neon-pink:#ff7a1a;
+  --ink:#effcff; --ink-dim:rgba(239,252,255,.74);
+  --glass:rgba(4,14,30,.52); --glass-strong:rgba(4,12,26,.72);
+  --edge:linear-gradient(135deg,rgba(0,229,255,.95),rgba(0,229,255,.25) 45%,rgba(255,122,26,.25) 60%,rgba(255,122,26,.9));
+}
+
+/* Фон: чёткий и яркий, без затемняющей анимации */
+.future-light-dashboard::before {
+  inset:-40px;
+  animation:none;
+  filter:contrast(1.3) saturate(1.55) brightness(1.06);
+  transform:translate3d(calc(var(--mx) * -10px), calc(var(--my) * -8px), 0) scale(1.06);
+}
+.future-light-dashboard::after {
+  inset:0;
+  animation:none;
+  filter:none;
+  opacity:1;
+  mix-blend-mode:normal;
+  background:radial-gradient(ellipse at 50% 42%, transparent 58%, rgba(2,6,16,.5) 100%);
+}
+
+/* Стекло карточек: прозрачное, с неоновой кромкой */
+.future-light-dashboard :is(.future-preview-insight,.dashboard-metrics button,.fl-focus,.fl-focus li,.card,article.card) {
+  background:linear-gradient(var(--glass),var(--glass)) padding-box, var(--edge) border-box;
+  border:1px solid transparent;
+  backdrop-filter:blur(6px);
+}
+.future-light-dashboard .dashboard-overview-deck {
+  border:1px solid rgba(0,229,255,.35);
+  background:rgba(3,10,24,.22);
+  box-shadow:0 0 40px rgba(0,229,255,.12);
+}
+
+/* Шапка и боковое меню */
+.future-light-dashboard > main > header {
+  color:var(--ink);
+  background:rgba(3,10,24,.62);
+  border-bottom:1px solid transparent;
+  border-image:linear-gradient(90deg,var(--neon-cyan),rgba(0,229,255,.2) 60%,var(--neon-orange)) 1;
+  backdrop-filter:blur(8px);
+  /* шапка больше не наезжает сама на себя */
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap; row-gap:8px;
+}
+.future-light-dashboard > main > header :is(h1,h2) { color:var(--ink); text-shadow:0 0 14px rgba(0,229,255,.45); min-width:0; }
+.future-light-dashboard > main > header > * { min-width:0; }
+.future-light-dashboard > aside {
+  background:rgba(3,10,24,.66);
+  border-right:1px solid transparent;
+  border-image:linear-gradient(180deg,var(--neon-cyan),rgba(0,229,255,.15) 60%,var(--neon-orange)) 1;
+  backdrop-filter:blur(8px);
+  box-shadow:none;
+}
+/* Подсвечен только активный пункт */
+.future-light-dashboard > aside nav button.active {
+  color:#02101e;
+  border:0;
+  background:linear-gradient(90deg,var(--neon-cyan),#7ff3ff);
+  box-shadow:0 0 18px rgba(0,229,255,.55);
+}
+.future-light-dashboard > aside nav button:not(.active) {
+  color:var(--ink);
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+.future-light-dashboard > aside nav button:not(.active):hover { background:rgba(0,229,255,.1); }
+
+/* Герой */
+.future-light-dashboard .dashboard-kicker { color:var(--neon-cyan); text-shadow:0 0 10px rgba(0,229,255,.6); }
+.future-light-dashboard .dashboard-hero h2 {
+  color:#fff;
+  text-shadow:-2px 0 0 rgba(0,229,255,.7), 2px 0 0 rgba(255,122,26,.55), 0 0 26px rgba(0,229,255,.3);
+}
+.future-light-dashboard .dashboard-hero-copy > p { color:var(--ink-dim); }
+.future-light-dashboard .dashboard-hero-actions button {
+  color:#02101e; border:0; font-weight:700;
+  background:linear-gradient(90deg,var(--neon-cyan),#8cf6ff);
+  box-shadow:0 0 16px rgba(0,229,255,.5);
+}
+.future-light-dashboard .dashboard-hero-actions button + button {
+  color:var(--neon-cyan);
+  background:rgba(3,10,24,.7);
+  border:1px solid rgba(0,229,255,.7);
+  box-shadow:0 0 14px rgba(0,229,255,.3);
+}
+
+/* Переключатель темы не должен лежать поверх героя */
+.future-light-dashboard .dashboard-hero :is(.theme-switch,.comfort-controls,[data-theme-switch]) { display:none; }
+
+/* Модель: крупнее, целиком в кадре, неоновое гало */
+.future-light-dashboard .project-isometric { height:520px; }
+.future-light-dashboard .future-twin-model-wrap { inset:0 0 78px; }
+.future-light-dashboard .future-twin-webgl { filter:drop-shadow(0 24px 30px rgba(0,10,24,.6)); cursor:grab; }
+.future-light-dashboard .future-twin-webgl:active { cursor:grabbing; }
+.future-light-dashboard .fl-model-glow {
+  position:absolute; z-index:0; left:10%; right:10%; bottom:64px; height:38%;
+  pointer-events:none; border-radius:50%;
+  background:radial-gradient(ellipse at center, rgba(0,229,255,.34), rgba(255,122,26,.16) 45%, transparent 72%);
+  filter:blur(18px);
+}
+.future-light-dashboard .plant-scene-actions { bottom:24px; }
+.future-light-dashboard .plant-scene-actions button {
+  color:#fff; border:1px solid var(--neon-orange);
+  background:rgba(255,122,26,.14);
+  box-shadow:0 0 16px rgba(255,122,26,.5), inset 0 0 12px rgba(255,122,26,.2);
+  text-shadow:0 0 8px rgba(255,122,26,.8);
+}
+.future-light-dashboard .plant-scene-actions button + button {
+  border-color:var(--neon-cyan);
+  background:rgba(0,229,255,.12);
+  box-shadow:0 0 16px rgba(0,229,255,.5), inset 0 0 12px rgba(0,229,255,.2);
+  text-shadow:0 0 8px rgba(0,229,255,.8);
+}
+
+/* «Требует решения» */
+.future-light-dashboard .fl-focus { box-shadow:0 0 26px rgba(255,122,26,.28); }
+.future-light-dashboard .fl-focus-total strong { color:var(--neon-orange); text-shadow:0 0 18px rgba(255,122,26,.75); }
+.future-light-dashboard .fl-focus-action {
+  color:#1a0800; border:0;
+  background:linear-gradient(90deg,var(--neon-orange),#ffab5c);
+  box-shadow:0 0 16px rgba(255,122,26,.5);
+}
+
+/* Показатели */
+.future-light-dashboard .dashboard-metrics button { --tone:var(--neon-cyan); }
+.future-light-dashboard .dashboard-metrics button:nth-child(2) { --tone:var(--neon-orange); }
+.future-light-dashboard .dashboard-metrics button {
+  min-width:0;
+  background:linear-gradient(var(--glass),var(--glass)) padding-box, linear-gradient(135deg,var(--tone),transparent 70%) border-box;
+  box-shadow:0 0 18px color-mix(in srgb,var(--tone) 30%,transparent);
+}
+.future-light-dashboard .dashboard-metrics button > strong { color:var(--tone); text-shadow:0 0 12px var(--tone); }
+
+/* Мобильная версия: убираем горизонтальную прокрутку */
+.future-light-dashboard :is(.card,article,section,.grid,.doc-list) { min-width:0; }
+.future-light-dashboard .doc-list { grid-template-columns:minmax(0,1fr); }
+.future-light-dashboard .doc-list > * { min-width:0; }
+.future-light-dashboard .doc-list :is(a,b,strong,span,small,p) { overflow-wrap:anywhere; word-break:break-word; }
+@media (max-width:760px) {
+  .future-light-dashboard { overflow-x:hidden; }
+  .future-light-dashboard .project-isometric { height:360px; }
+  .future-light-dashboard .future-twin-model-wrap { inset:0 0 70px; }
+  .future-light-dashboard .dashboard-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .future-light-dashboard .dashboard-metrics button { min-width:0; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .future-light-dashboard::before, .future-light-dashboard::after { animation:none !important; transform:none !important; }
+}

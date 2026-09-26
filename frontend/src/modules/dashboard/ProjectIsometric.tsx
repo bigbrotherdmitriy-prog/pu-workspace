@@ -44,6 +44,9 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
     video.loop = true;
     video.playsInline = true;
     video.preload = "auto";
+    // Вращение в 2 раза медленнее.
+    video.playbackRate = 0.5;
+    video.defaultPlaybackRate = 0.5;
     video.crossOrigin = "anonymous";
     video.setAttribute("playsinline", "");
 
@@ -72,10 +75,9 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
       renderer.setSize(width, height, false);
       // Сохраняем пропорции видео 16:9 внутри блока.
       const videoAspect = 16 / 9, boxAspect = width / height;
-      // Объект занимает ~65% кадра — увеличиваем, обрезая пустые чёрные поля.
-      const zoom = 1.12;
-      plane.scale.set((boxAspect > videoAspect ? videoAspect / boxAspect : 1) * zoom, (boxAspect > videoAspect ? 1 : boxAspect / videoAspect) * zoom, 1);
-      plane.position.y = 0.07;
+      // Кадр вписывается целиком (contain) — края модели не обрезаются.
+      plane.scale.set(boxAspect > videoAspect ? videoAspect / boxAspect : 1, boxAspect > videoAspect ? 1 : boxAspect / videoAspect, 1);
+      plane.position.y = 0;
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -83,7 +85,7 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const start = () => { if (!reducedMotion.matches) video.play().catch(() => undefined); };
-    video.addEventListener("loadeddata", start, { once: true });
+    video.addEventListener("loadeddata", () => { video.playbackRate = 0.5; start(); }, { once: true });
     video.addEventListener("error", () => setFallback(true), { once: true });
 
     // Поворот пальцем/мышью: перетаскивание прокручивает «вертушку», после отпускания вращение продолжается.
@@ -132,6 +134,5 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
       <button type="button" onClick={onSchedule}><i aria-hidden="true" />ГПР</button>
       <button type="button" onClick={onFinance}><i aria-hidden="true" />ДДС</button>
     </nav>
-    <figcaption>Модель вращается сама · потяните, чтобы повернуть</figcaption>
   </figure>;
 }
