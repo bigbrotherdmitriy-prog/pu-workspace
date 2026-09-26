@@ -749,6 +749,7 @@
 .future-light-dashboard .doc-list :is(a,b,strong,span,small,p){overflow-wrap:anywhere;word-break:break-word;}
 @media (max-width:900px){
   .future-light-dashboard .dashboard-hero{grid-template-columns:minmax(0,1fr);}
+  .future-light-dashboard .dashboard-hero-copy{padding:14px 16px;}
 }
 @media (max-width:760px){
   .future-light-dashboard{overflow-x:hidden;}
