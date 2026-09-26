@@ -104,7 +104,11 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
     host.addEventListener("pointercancel", up);
 
     let frame = 0;
-    const animate = () => { renderer.render(scene, camera); frame = requestAnimationFrame(animate); };
+    const animate = () => {
+      renderer.render(scene, camera);
+      if (video.readyState >= 2) renderer.domElement.dataset.frameReady = "true";
+      frame = requestAnimationFrame(animate);
+    };
     animate();
 
     return () => {

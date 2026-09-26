@@ -2712,14 +2712,15 @@ export function App() {
     }
   }
   return (
-    <div className={`shell ${active === "Рабочий центр" ? "future-light-dashboard" : ""}`}>
+    <div className={`shell ${active === "Рабочий центр" ? "future-light-dashboard future-preview-shell" : ""}`}>
+      {active === "Рабочий центр" && <div className="fl-depth" aria-hidden="true"><div className="fl-depth-far" /><div className="fl-depth-beams" /><div className="fl-depth-grid" /><div className="fl-depth-dust" /></div>}
       <div className="pu-ambient" aria-hidden="true">
         <i className="pu-ambient-orb pu-ambient-orb-primary" />
         <i className="pu-ambient-orb pu-ambient-orb-secondary" />
         <i className="pu-ambient-grid" />
       </div>
       <aside
-        className={`${collapsed ? "collapsed" : ""} ${mobile ? "mobile-open" : ""}`}
+        className={`${active === "Рабочий центр" ? "future-preview-sidebar" : ""} ${collapsed ? "collapsed" : ""} ${mobile ? "mobile-open" : ""}`}
       >
         <div className="sidebar-head">
           <div className="brand-mark">PU</div>
@@ -2763,7 +2764,7 @@ export function App() {
       </aside>
       {mobile && <button className="mobile-drawer-backdrop" aria-label="Закрыть меню" onClick={() => setMobile(false)} />}
       <main>
-        <header>
+        <header className={active === "Рабочий центр" ? "future-preview-header" : undefined}>
           <button
             className="mobile-menu icon"
             aria-label="Открыть меню"
@@ -2858,7 +2859,7 @@ export function App() {
           }}
         />}
         <section className="content">
-          <ComfortControls />
+          {active !== "Рабочий центр" && <ComfortControls />}
           {error && <div className="error">{error}</div>}
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (

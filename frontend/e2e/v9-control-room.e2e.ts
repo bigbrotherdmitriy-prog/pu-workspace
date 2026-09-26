@@ -6,7 +6,7 @@ test("working center renders the structural engineering control room", async ({ 
   const deck = page.locator(".dashboard-overview-deck");
   await expect(deck).toBeVisible();
   await expect(deck.getByRole("heading", { name: "Штаб управления проектом" })).toBeVisible();
-  await expect(deck.locator(".dashboard-focus")).toContainText("Контур стабилен");
+  await expect(deck.getByLabel("Требует решения")).toContainText("КОНТУР СТАБИЛЕН");
   await expect(deck.locator(".dashboard-metrics")).toBeVisible();
   await expect(page.locator("aside .nav-group")).toHaveCount(4);
 

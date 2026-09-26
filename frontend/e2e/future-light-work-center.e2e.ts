@@ -46,18 +46,31 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await expect(deck.getByRole("heading", { name: "Штаб управления проектом" })).toBeVisible();
   await expect(deck.getByLabel("Требует решения").locator("strong")).toHaveText("15");
   await expect(deck.getByText("43%", { exact: true })).toBeVisible();
+  await expect(page.locator(".future-preview-shell")).toBeVisible();
+  await expect(page.locator(".project-switcher select")).toHaveCSS("color", "rgb(239, 252, 255)");
+  await expect(deck.getByLabel("Краткая сводка")).toContainText("15 контрольных пунктов");
+  await expect(page.getByText("Кассовых разрывов нет.", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Комфорт чтения")).toHaveCount(0);
+  const heroBackground = await deck.locator(".dashboard-hero").evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(heroBackground).toBe("rgba(0, 0, 0, 0)");
   await expect(deck.locator(".future-twin-model-wrap canvas")).toBeVisible();
+  await expect(deck.locator(".future-twin-model-wrap canvas")).toHaveAttribute("data-frame-ready", "true");
+  const navBoxes = await page.locator(".shell > aside nav button").evaluateAll(elements => elements.map(el => {
+    const rect = el.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom };
+  }));
+  for (let i = 1; i < navBoxes.length; i++) expect(navBoxes[i].top).toBeGreaterThanOrEqual(navBoxes[i - 1].bottom);
 
   const values = await deck.locator(".hq-live-controls b").allTextContents();
   expect(values.map(Number).reduce((sum, value) => sum + value, 0)).toBe(15);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await testInfo.attach("future-light-1440", {
-    body: await page.screenshot({ fullPage: true, animations: "disabled" }),
+    body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await settled(page);
+  await expect(page.locator(".project-switcher select")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Основная мобильная навигация" })).toBeVisible();
   await page.getByRole("button", { name: "Открыть всё меню" }).click();
   await expect(page.locator(".shell > aside nav")).toBeVisible();
@@ -71,7 +84,7 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await testInfo.attach("future-light-390", {
-    body: await page.screenshot({ fullPage: true, animations: "disabled" }),
+    body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   });
 });

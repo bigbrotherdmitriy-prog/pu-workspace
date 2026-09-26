@@ -24,6 +24,19 @@ function props() {
 }
 
 describe("WorkCenterDashboard", () => {
+  it("uses the reference summary with live data, never the mock cash-flow claim", () => {
+    const callbacks = props();
+    const view = render(<WorkCenterDashboard {...callbacks} />);
+    expect(screen.getByLabelText("Краткая сводка")).toHaveTextContent("15 контрольных пунктов");
+    expect(screen.queryByText(/Кассовых разрывов нет/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Спросить AI" }));
+    fireEvent.click(screen.getByRole("button", { name: "Разобрать сейчас →" }));
+    expect(callbacks.onAskAi).toHaveBeenCalledOnce();
+    expect(callbacks.onOpenPlan).toHaveBeenCalledOnce();
+    view.rerender(<WorkCenterDashboard {...callbacks} summary={null} />);
+    expect(screen.getByLabelText("Краткая сводка")).toHaveTextContent("загружается");
+    expect(screen.getByLabelText("Требует решения")).toHaveTextContent("ЗАГРУЗКА СВОДКИ");
+  });
   it("keeps the five-row attention breakdown equal to summary.attention", () => {
     const rows = attentionBreakdown(summary);
     expect(rows).toHaveLength(5);

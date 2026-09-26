@@ -13,6 +13,8 @@ import "./reading-comfort.css";
 import "./project-hq-theme.css";
 import "./workspace-surfaces.css";
 import "./future-light-dashboard.css";
+import "./claude-work-center-reference.css";
+import "./work-center-integration.css";
 import { applyDisplayPreference } from "./modules/settings/ComfortControls";
 
 applyDisplayPreference();
