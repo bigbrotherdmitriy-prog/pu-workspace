@@ -47,6 +47,7 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await expect(deck.getByLabel("Требует решения").locator("strong")).toHaveText("15");
   await expect(deck.getByText("43%", { exact: true })).toBeVisible();
   await expect(page.locator(".future-preview-shell")).toBeVisible();
+  await expect(page.locator(".project-switcher select")).toHaveCSS("color", "rgb(239, 252, 255)");
   await expect(deck.getByLabel("Краткая сводка")).toContainText("15 контрольных пунктов");
   await expect(page.getByText("Кассовых разрывов нет.", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Комфорт чтения")).toHaveCount(0);

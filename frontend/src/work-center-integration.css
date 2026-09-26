@@ -10,6 +10,8 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard :is(.sidebar-collapse,.profile button) { background: transparent; color: #e8faff; border: 1px solid #00e5ff55; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .search :is(button,kbd) { background: transparent; color: #b7d1db; border: 0; box-shadow: none; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions input::placeholder { color: #b7d1db; }
+/* Existing reading-comfort inputs use !important; override only this dark header. */
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions :is(input,select) { color: #effcff !important; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard {
   grid-template-columns: 244px minmax(0, 1fr);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
