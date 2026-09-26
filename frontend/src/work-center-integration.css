@@ -1,0 +1,124 @@
+/* Adapters between the reference layout and existing, live application controls.
+   Deliberately scoped: finance, mail, settings and their themes are unaffected. */
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card { color: #e8faff; background: rgba(3,18,31,.56); border-color: #00e5ff55; border-radius: 20px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card button { color: #e8faff; background: rgba(3,18,31,.65); border: 1px solid #00e5ff55; border-radius: 12px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card .quick button { padding: 14px; margin-bottom: 8px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card :is(h2,strong) { color: #e8faff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card :is(p,small) { color: #b7d1db; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card :is(.notice,.empty) { color: #e8faff; background: rgba(3,18,31,.65); border: 1px solid #00e5ff55; border-radius: 14px; box-shadow: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .content .card :is(.notice.warning,.attention) { color: #e8faff; background: rgba(113,51,4,.55); border: 1px solid #ff9b4055; border-radius: 14px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard :is(.sidebar-collapse,.profile button) { background: transparent; color: #e8faff; border: 1px solid #00e5ff55; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .search :is(button,kbd) { background: transparent; color: #b7d1db; border: 0; box-shadow: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions input::placeholder { color: #b7d1db; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard {
+  grid-template-columns: 244px minmax(0, 1fr);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  --mx: 0;
+  --my: 0;
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard:has(> aside.collapsed) { grid-template-columns: 78px minmax(0,1fr); }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content { min-width: 0; background: transparent; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside { width: 244px; padding: 20px 18px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside.collapsed { width: 78px; padding: 20px 10px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .sidebar-head { height: auto; min-height: 54px; padding: 0 0 14px; gap: 10px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .sidebar-brand-copy { min-width: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .sidebar-head strong { color: #effcff; font-size: 14px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .sidebar-head small { color: #e8faff; font-size: 9px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .brand-mark { width: 40px; height: 40px; border-radius: 13px; background: linear-gradient(135deg,#28a8ff,#00e5ff); color: white; box-shadow: 0 0 18px #00e5ff88; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .nav-group-label { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-sidebar nav { display: flex; flex-direction: column; grid-auto-rows: auto; gap: 2px; margin: 0; padding: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-sidebar .nav-group { flex-shrink: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside .nav-group { display: grid; gap: 2px; border: 0; padding: 0; margin: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside nav button { height: 36px; min-height: 36px; border: 0; padding: 0 12px; gap: 11px; border-radius: 11px; font-size: 13.5px; box-shadow: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside:not(.collapsed) nav button svg { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside:not(.collapsed) nav button::before { content: ""; position: static; width: 7px; height: 7px; flex: 0 0 7px; border: 0; border-radius: 50%; background: #00e5ff; box-shadow: 0 0 6px #00e5ff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside nav button.active { background: linear-gradient(90deg,#00e5ff,#7ff3ff); color: #02101e; box-shadow: 0 0 18px #00e5ff88; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside nav button.active::before { background: #02101e; box-shadow: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .profile { padding: 12px 0 0; background: transparent; font-size: 11px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .profile .avatar { width: 28px; height: 28px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-header { height: 72px; min-height: 72px; padding: 0 26px; gap: 16px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-heading { min-width: 0; flex: 1 1 180px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-kicker { max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #00e5ff; font-size: 11px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-kicker b,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-kicker i,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-heading > p { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-heading h1 { margin: 3px 0 0; font-size: 20px; color: #effcff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions { min-width: 0; gap: 8px; flex: 0 1 auto; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .install-app,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-team { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .search { width: clamp(150px,16vw,240px); }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions :is(.search,.project-switcher,select,button,.connection-status) { color: #effcff; background: rgba(0,229,255,.08); border: 1px solid rgba(0,229,255,.55); border-radius: 13px; box-shadow: 0 0 12px rgba(0,229,255,.15); }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions input { color: #effcff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher { min-width: 0; max-width: 230px; padding: 0 8px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher > span,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher > svg { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher select { width: 100%; max-width: 215px; min-width: 0; border: 0; box-shadow: none; background: transparent; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard select option { color: #effcff; background: #071827; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel { margin: 20px 24px 0; border: 1px solid rgba(0,229,255,.45); border-radius: 16px; padding: 6px 8px 6px 16px; background: rgba(3,10,24,.5); color: #00e5ff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel button { background: linear-gradient(90deg,#00e5ff,#8cf6ff); color: #02101e; border: 0; border-radius: 13px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content { padding: 16px 24px 30px; max-width: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-overview-deck { display: grid; grid-template-columns: minmax(0,1fr); border-radius: 28px; background: rgba(3,10,24,.22); }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.65fr) minmax(0,1fr); gap: 22px; min-height: 468px; padding: 24px; background: transparent; border: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy { min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-kicker { font-size: 11px; letter-spacing: 0; color: #00e5ff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-kicker svg { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero h2 { margin: 20px 0 14px; font-size: clamp(30px,3vw,42px); line-height: 1.08; max-width: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy p { font-size: 14px; line-height: 1.55; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-insight { margin: 12px 0 24px; padding: 14px; border-radius: 16px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions button { padding: 12px 16px; min-height: 44px; border-radius: 13px; font-size: 13px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions svg { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions .secondary { color: #00e5ff; background: rgba(3,10,24,.7); border: 1px solid rgba(0,229,255,.7); }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-isometric { height: 460px; padding: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-twin-model-wrap { inset: 0 0 78px; width: 100%; height: auto; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .plant-scene-actions { bottom: 24px; left: 4%; right: 4%; gap: 12px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .plant-scene-actions button { flex: 1 1 0; width: auto; min-width: 0; border-radius: 23px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus { min-width: 0; padding: 20px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus-total { flex-wrap: wrap; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .hq-live-controls { display: grid; gap: 8px; margin: 0; padding: 0; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .hq-live-controls button { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 40px; height: auto; padding: 10px 12px; border: 1px solid rgba(0,229,255,.45); border-radius: 12px; background: rgba(3,18,31,.5); color: #e8faff; font-size: 12px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .hq-live-controls b { color: #ff7a1a; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus-action { min-height: 40px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics { grid-template-columns: repeat(5,minmax(0,1fr)); background: transparent; border-left: 0; padding: 12px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics button { display: block; min-height: 95px; padding: 16px; text-align: left; border-radius: 18px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics strong { display: block; margin-top: 9px; font-size: 30px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics small { display: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-command-grid,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-lower-grid { margin-top: 16px; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .android-bottom-nav { background: rgba(3,10,24,.92); border-top: 1px solid #00e5ff88; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .android-bottom-nav button { color: #e8faff; background: transparent; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .android-bottom-nav button.active { color: #00e5ff; }
+@media (max-width: 1100px) {
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus { grid-area: 1 / 2; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-isometric { grid-area: 2 / 1 / auto / -1; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .search { display: none; }
+}
+@media (max-width: 900px) {
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard,
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard:has(> aside.collapsed) { display: block; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside { position: fixed; left: 0; width: min(300px,84vw); transform: translateX(-105%); }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside.mobile-open { transform: none; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-menu { display: grid; flex: 0 0 40px; color: #effcff; background: transparent; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-header { height: auto; min-height: 64px; padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-heading { flex: 1 1 180px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .connection-status { margin-right: auto; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher { flex: 1; max-width: 230px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content { padding: 14px 16px calc(88px + env(safe-area-inset-bottom)); }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel { margin: 14px 16px 0; }
+}
+@media (max-width: 760px) {
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero { display: flex; flex-direction: column; padding: 18px; min-height: 0; gap: 16px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy,
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus,
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-isometric { width: 100%; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero h2 { font-size: 30px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions button { padding: 11px 8px; font-size: 12px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-isometric { height: 340px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics button:last-child { grid-column: 1 / -1; }
+}

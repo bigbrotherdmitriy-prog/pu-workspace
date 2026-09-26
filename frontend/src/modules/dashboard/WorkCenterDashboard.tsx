@@ -73,26 +73,30 @@ export function WorkCenterDashboard({
     <section className="dashboard-overview-deck">
       <div className="dashboard-hero">
         <div className="dashboard-hero-copy">
-          <span className="dashboard-kicker"><Activity /> Оперативный контур · {projectName || "Текущий проект"}</span>
+          <span className="dashboard-kicker" title={projectName || "Текущий проект"}><Activity /> AI Secretary · контекст проекта</span>
           <h2>Штаб управления проектом</h2>
           <p>{nextStep || (summary?.attention
             ? `Сначала разберите ${summary.attention} пунктов, требующих вашего решения.`
             : "Проект под контролем. Новых критических событий нет.")}</p>
+          <div className="future-preview-insight" aria-label="Краткая сводка">
+            <small>КРАТКАЯ СВОДКА</small>
+            <p>{summary ? `${summary.attention} контрольных пунктов требуют решения.` : "Сводка проекта загружается."}</p>
+          </div>
           <div className="dashboard-hero-actions">
             <button type="button" onClick={onOpenPlan}><Route /> Открыть план дня</button>
-            <button type="button" className="secondary" onClick={onAskAi}><Bot /> Запросить сводку</button>
+            <button type="button" className="secondary" onClick={onAskAi}><Bot /> Спросить AI</button>
           </div>
         </div>
         <ProjectIsometric onDocuments={onOpenDocuments} onSchedule={onOpenSchedule} onFinance={onOpenFinance} />
-        <aside className={`dashboard-focus ${summary?.attention ? "needs-attention" : "clear"}`} aria-label="Требует решения">
-          <span>{summary?.attention ? "Требует решения" : "Контур стабилен"}</span>
-          <strong>{String(summary?.attention || 0).padStart(2, "0")}</strong>
-          <p>контрольных пунктов</p>
+        <aside className="fl-focus" aria-label="Требует решения">
+          <span className="fl-focus-kicker">{summary ? (summary.attention ? "ТРЕБУЕТ РЕШЕНИЯ" : "КОНТУР СТАБИЛЕН") : "ЗАГРУЗКА СВОДКИ"}</span>
+          <div className="fl-focus-total"><strong>{summary?.attention ?? "—"}</strong><span>контрольных пунктов</span></div>
           <nav className="hq-live-controls" aria-label="Разбивка контрольных пунктов">
             {focusRows.map((row) => <button type="button" key={row.target} onClick={focusActions[row.target]}>
               <span>{row.label}</span><b>{row.value}</b>
             </button>)}
           </nav>
+          <button type="button" className="fl-focus-action" onClick={onOpenPlan}>Разобрать сейчас →</button>
         </aside>
       </div>
       <div className="metrics dashboard-metrics fl-metrics">
