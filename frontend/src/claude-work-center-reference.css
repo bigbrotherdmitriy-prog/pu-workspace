@@ -9,12 +9,12 @@
 
 :root[data-display-theme] .future-light-dashboard.future-light-dashboard::after { z-index: -1; opacity: 0.16; background-position: calc(50% + 5px) calc(50% - 2px); filter: contrast(1.45) saturate(1.8) hue-rotate(168deg); mix-blend-mode: screen; animation: 18s ease-in-out 0s infinite alternate none running future-background-depth-channel; }
 
-@keyframes future-background-depth { 
+@keyframes future-background-depth {
   0% { transform: scale(1.025) translate3d(-5px, -2px, 0px); }
   100% { transform: scale(1.055) translate3d(7px, 3px, 0px); }
 }
 
-@keyframes future-background-depth-channel { 
+@keyframes future-background-depth-channel {
   0% { transform: scale(1.03) translate3d(7px, 1px, 0px); }
   100% { transform: scale(1.06) translate3d(-6px, -2px, 0px); }
 }
@@ -77,7 +77,7 @@
 
 :root[data-display-theme] .future-light-dashboard.future-light-dashboard .project-isometric:hover .future-twin-model { filter: drop-shadow(rgba(13, 199, 255, 0.16) 0px 14px 24px); }
 
-@keyframes future-twin-levitate { 
+@keyframes future-twin-levitate {
   0%, 100% { transform: translateY(0px) rotate(2deg) scaleX(0.96); }
   25%, 75% { transform: translateY(-12px) rotate(-2deg) scaleX(1); }
   50% { transform: translateY(0px) rotate(2deg) scaleX(0.96); }
@@ -352,15 +352,15 @@
 
 :root[data-display-theme] .shell.future-preview-shell .fl-depth-dust { inset: -10%; opacity: 0.7; mix-blend-mode: screen; background: radial-gradient(circle, rgba(0, 229, 255, 0.9) 0px, rgba(0, 229, 255, 0.9) 1.2px, transparent 1.6px) 0px 0px / 140px 140px, radial-gradient(circle, rgba(255, 122, 26, 0.85) 0px, rgba(255, 122, 26, 0.85) 1.1px, transparent 1.5px) 60px 90px / 190px 190px, radial-gradient(circle, rgba(255, 43, 214, 0.8) 0px, rgba(255, 43, 214, 0.8) 1px, transparent 1.4px) 120px 30px / 230px 230px; animation: 40s linear 0s infinite normal none running fl-dust; transform: translate3d(calc(var(--mx) * -70px),calc(var(--my) * -48px),0); }
 
-@keyframes fl-grid { 
+@keyframes fl-grid {
   100% { background-position: 0px 46px, 0px 0px; }
 }
 
-@keyframes fl-dust { 
+@keyframes fl-dust {
   100% { background-position: 0px -140px, 60px -100px, 120px -200px; }
 }
 
-@keyframes fl-beams { 
+@keyframes fl-beams {
   0% { opacity: 0.6; }
   100% { opacity: 1; }
 }
@@ -423,7 +423,7 @@
 
 :root[data-display-theme] .shell.future-preview-shell .fl-model-glow { position: absolute; z-index: 0; left: 12%; right: 12%; bottom: 64px; height: 38%; pointer-events: none; border-radius: 50%; background: radial-gradient(at 35% 60%, rgba(0, 229, 255, 0.45), transparent 60%), radial-gradient(at 70% 55%, rgba(255, 122, 26, 0.4), transparent 60%); filter: blur(18px); animation: 4s ease-in-out 0s infinite alternate none running fl-glow; }
 
-@keyframes fl-glow { 
+@keyframes fl-glow {
   0% { opacity: 0.55; transform: scaleX(0.94); }
   100% { opacity: 1; transform: scaleX(1.04); }
 }
