@@ -65,7 +65,7 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-kicker { font-size: 11px; letter-spacing: 0; color: #00e5ff; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-kicker svg { display: none; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero h2 { margin: 20px 0 14px; font-size: clamp(30px,3vw,42px); line-height: 1.08; max-width: none; }
-:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy p { font-size: 14px; line-height: 1.55; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy p { font-size: 15px; line-height: 1.55; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-insight { margin: 12px 0 24px; padding: 14px; border-radius: 16px; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions button { padding: 12px 16px; min-height: 44px; border-radius: 13px; font-size: 13px; }
@@ -90,6 +90,11 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .android-bottom-nav { background: rgba(3,10,24,.92); border-top: 1px solid #00e5ff88; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .android-bottom-nav button { color: #e8faff; background: transparent; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .android-bottom-nav button.active { color: #00e5ff; }
+/* Solid fallback matches the brightest controls when gradients cannot render. */
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > aside nav button.active,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel button,
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-actions button:not(.secondary) { background-color: #00e5ff; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus-action { background-color: #ff7a1a; }
 @media (max-width: 1100px) {
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero { grid-template-columns: repeat(2,minmax(0,1fr)); }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .fl-focus { grid-area: 1 / 2; }

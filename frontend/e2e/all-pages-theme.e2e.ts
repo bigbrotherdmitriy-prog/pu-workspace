@@ -16,6 +16,9 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
     summary: { budget_planned: 0, budget_committed: 0, budget_actual: 0, budget_forecast: 0, budget_variance: 0, cash_balance_forecast: -30000, cash_gap: 30000, cash_gap_date: "2026-09-25", delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 1, unlinked_invoices: 0 },
   } }));
   await page.goto("/new/");
+  // The reference Work Center has no reading-controls toolbar. Change the
+  // application theme on a regular screen, then audit every screen as before.
+  await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: theme === "dark" ? "Тёмная" : "Светлая", exact: true }).click();
   const results: unknown[] = [];
   for (const [index, name] of pages.entries()) {

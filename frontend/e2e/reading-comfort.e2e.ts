@@ -8,7 +8,9 @@ test("reading themes retain contrast, legible copy and responsive layout", async
   await page.goto("/new/");
   await expect(page.locator(".dashboard-overview-deck")).toBeVisible();
   for (const theme of ["light", "dark"]) {
+    await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
     await page.getByRole("button", { name: theme === "light" ? "Светлая" : "Тёмная", exact: true }).click();
+    await page.locator("aside nav").getByRole("button", { name: "Рабочий центр", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-display-theme", theme);
     const metrics = await page.evaluate(() => {
       const style = getComputedStyle(document.querySelector(".dashboard-hero-copy > p")!);
@@ -32,15 +34,18 @@ test("reading themes retain contrast, legible copy and responsive layout", async
     expect(metrics.heroHeight).toBeLessThan(520);
     await page.screenshot({ path: info.outputPath(`comfort-${theme}.png`), fullPage: true });
   }
+  await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: "Режим комфорта" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-comfort", "true");
   await page.reload();
+  await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await expect(page.getByRole("button", { name: "Режим комфорта" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("html")).toHaveAttribute("data-display-theme", "dark");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("group", { name: "Тема интерфейса" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("comfort-mobile.png"), fullPage: true });
+  await page.getByRole("navigation", { name: "Основная мобильная навигация" }).getByRole("button", { name: "Центр", exact: true }).click();
   await page.getByRole("button", { name: "Открыть план дня", exact: true }).click();
   await expect(page.locator(".page-heading h1")).toHaveText("Сегодня");
 });
@@ -48,6 +53,7 @@ test("reading themes retain contrast, legible copy and responsive layout", async
 test("scheduled theme follows local time and manual theme overrides schedule", async ({ page, mock: _mock }) => {
   await page.clock.install({ time: new Date(2026, 8, 5, 19, 59, 50) });
   await page.goto("/new/");
+  await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: "По времени", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-display-theme", "light");
   await page.clock.fastForward(30_000);
@@ -59,7 +65,9 @@ test("scheduled theme follows local time and manual theme overrides schedule", a
 
 test("HQ video model renders live frames and opens project finance", async ({ page, mock }) => {
   await page.goto("/new/");
+  await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: "Тёмная", exact: true }).click();
+  await page.locator("aside nav").getByRole("button", { name: "Рабочий центр", exact: true }).click();
   const model = page.getByLabel("Вращающаяся модель центра обработки данных");
   await expect(model).toBeVisible();
   const canvas = model.locator("canvas");
