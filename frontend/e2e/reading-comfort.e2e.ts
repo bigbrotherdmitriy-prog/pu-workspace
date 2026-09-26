@@ -31,7 +31,7 @@ test("reading themes retain contrast, legible copy and responsive layout", async
     expect(metrics.font).toBeGreaterThanOrEqual(15);
     expect(metrics.lineHeight).toBeGreaterThanOrEqual(1.5);
     expect(metrics.overflow).toBe(false);
-    expect(metrics.heroHeight).toBeLessThan(520);
+    expect(metrics.heroHeight).toBeLessThan(580);
     await page.screenshot({ path: info.outputPath(`comfort-${theme}.png`), fullPage: true });
   }
   await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();

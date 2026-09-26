@@ -761,3 +761,43 @@
 @media (prefers-reduced-motion:reduce){
   .future-light-dashboard::before,.future-light-dashboard::after{animation:none!important;transform:none!important;}
 }
+
+/* v5: довести экран до эталона */
+/* Переключатель темы — компактной строкой над героем, не поверх картинки */
+.future-light-dashboard .display-preferences{
+  display:flex; justify-content:flex-end; align-items:center; gap:6px;
+  margin:0 0 10px; padding:6px 10px; border-radius:12px;
+  background:rgba(3,10,24,.55); border:1px solid rgba(0,229,255,.18);
+  backdrop-filter:blur(6px);
+}
+.future-light-dashboard .display-preferences button{
+  padding:4px 10px; font-size:12px; line-height:1.2; border-radius:9px;
+  color:var(--ink-dim); border:1px solid rgba(0,229,255,.28);
+  background:rgba(3,10,24,.45); box-shadow:none;
+}
+.future-light-dashboard .display-preferences button[aria-pressed="true"]{
+  color:#02101e; border-color:transparent;
+  background:linear-gradient(90deg,var(--neon-cyan),#8cf6ff);
+}
+/* Подложка под текстом героя */
+.future-light-dashboard .dashboard-hero-copy{
+  padding:18px 20px!important; border-radius:18px!important;
+  background:linear-gradient(90deg,rgba(2,8,20,.74),rgba(2,8,20,.44))!important;
+  backdrop-filter:blur(4px)!important;
+}
+/* Карточка «Требует решения» не обрезается */
+.future-light-dashboard .dashboard-hero{
+  grid-template-columns:minmax(300px,1fr) minmax(400px,1.3fr) minmax(300px,.95fr)!important;
+  gap:18px!important; padding-right:18px!important;
+}
+.future-light-dashboard .dashboard-focus,
+.future-light-dashboard .fl-focus{ min-width:0; overflow:visible; }
+.future-light-dashboard .dashboard-focus *,
+.future-light-dashboard .fl-focus *{ min-width:0; }
+@media (max-width:1280px){
+  .future-light-dashboard .dashboard-hero{grid-template-columns:minmax(260px,1fr) minmax(0,1.2fr) minmax(280px,.9fr)!important;}
+}
+@media (max-width:900px){
+  .future-light-dashboard .dashboard-hero{grid-template-columns:minmax(0,1fr)!important;padding-right:0!important;}
+  .future-light-dashboard .dashboard-hero-copy{padding:14px 16px!important;}
+}
