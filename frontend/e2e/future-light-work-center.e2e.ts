@@ -69,6 +69,7 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
 
   await page.setViewportSize({ width: 390, height: 844 });
   await settled(page);
+  await expect(page.locator(".project-switcher select")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Основная мобильная навигация" })).toBeVisible();
   await page.getByRole("button", { name: "Открыть всё меню" }).click();
   await expect(page.locator(".shell > aside nav")).toBeVisible();

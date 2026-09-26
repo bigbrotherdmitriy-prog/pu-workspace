@@ -109,9 +109,9 @@
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-menu { display: grid; flex: 0 0 40px; color: #effcff; background: transparent; }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-header { height: auto; min-height: 64px; padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .page-heading { flex: 1 1 180px; }
-  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .future-preview-header > .header-actions { display: flex; width: 100%; justify-content: flex-end; flex-wrap: wrap; }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .header-actions .connection-status { margin-right: auto; }
-  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher { flex: 1; max-width: 230px; }
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher { display: flex; flex: 1; max-width: 230px; }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content { padding: 14px 16px calc(88px + env(safe-area-inset-bottom)); }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel { margin: 14px 16px 0; }
 }
