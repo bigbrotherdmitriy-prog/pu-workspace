@@ -50,9 +50,28 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await expect(page.locator(".project-switcher select")).toHaveCSS("color", "rgb(239, 252, 255)");
   await expect(deck.getByLabel("Краткая сводка")).toContainText("15 контрольных пунктов");
   await expect(page.getByText("Кассовых разрывов нет.", { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel("Комфорт чтения")).toHaveCount(0);
+  await expect(page.getByLabel("Комфорт чтения")).toBeVisible();
   const heroBackground = await deck.locator(".dashboard-hero").evaluate(el => getComputedStyle(el).backgroundColor);
   expect(heroBackground).toBe("rgba(0, 0, 0, 0)");
+  const v5Layout = await page.evaluate(() => {
+    const preferences = document.querySelector<HTMLElement>(".display-preferences")!;
+    const hero = document.querySelector<HTMLElement>(".dashboard-hero")!;
+    const heroCopy = document.querySelector<HTMLElement>(".dashboard-hero-copy")!;
+    const focus = document.querySelector<HTMLElement>(".fl-focus")!;
+    const preferencesBox = preferences.getBoundingClientRect();
+    const heroBox = hero.getBoundingClientRect();
+    const focusBox = focus.getBoundingClientRect();
+    return {
+      preferencesDisplay: getComputedStyle(preferences).display,
+      preferencesAboveHero: preferencesBox.bottom <= heroBox.top,
+      heroCopyBackground: getComputedStyle(heroCopy).backgroundImage,
+      focusInsideViewport: focusBox.right <= document.documentElement.clientWidth,
+    };
+  });
+  expect(v5Layout.preferencesDisplay).toBe("flex");
+  expect(v5Layout.preferencesAboveHero).toBe(true);
+  expect(v5Layout.heroCopyBackground).not.toBe("none");
+  expect(v5Layout.focusInsideViewport).toBe(true);
   await expect(deck.locator(".future-twin-model-wrap canvas")).toBeVisible();
   await expect(deck.locator(".future-twin-model-wrap canvas")).toHaveAttribute("data-frame-ready", "true");
   const navBoxes = await page.locator(".shell > aside nav button").evaluateAll(elements => elements.map(el => {
@@ -81,6 +100,7 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await page.getByRole("button", { name: "Закрыть ГПР и ДДС" }).click();
   await page.getByRole("navigation", { name: "Основная мобильная навигация" }).getByRole("button", { name: "Центр" }).click();
   await expect(deck).toBeVisible();
+  await expect(deck.locator(".dashboard-hero")).toHaveCSS("display", "flex");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await testInfo.attach("future-light-390", {

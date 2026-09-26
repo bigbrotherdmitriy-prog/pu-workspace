@@ -2859,7 +2859,7 @@ export function App() {
           }}
         />}
         <section className="content">
-          {active !== "Рабочий центр" && <ComfortControls />}
+          <ComfortControls />
           {error && <div className="error">{error}</div>}
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
