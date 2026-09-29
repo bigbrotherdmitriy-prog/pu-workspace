@@ -65,7 +65,7 @@ jobs:
       - name: Mailbox authority real PostgreSQL CAS gate
         working-directory: backend
         run: |
-          pytest -q tests/test_mailbox_authority_renewal_postgres.py --junitxml=../mailbox-renewal.xml
+          python -m pytest -q tests/test_mailbox_authority_renewal_postgres.py --junitxml=../mailbox-renewal.xml
           python - <<'PY'
           import xml.etree.ElementTree as ET
           report = ET.parse('../mailbox-renewal.xml').getroot()
