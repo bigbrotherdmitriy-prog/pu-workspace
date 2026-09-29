@@ -40,7 +40,8 @@ class TelegramChannelAdapter:
             if payload.get("status") == "healthy":
                 return AdapterHealth(ready=True, detail="relay healthy")
             error = str(payload.get("last_error") or "relay degraded")
-            detail = "polling conflict: another bot process is active" if "409 Conflict" in error else "relay degraded"
+            conflict = payload.get("last_error_status") == 409 or "409 Conflict" in error
+            detail = "polling conflict: another bot process is active" if conflict else "relay degraded"
             return AdapterHealth(ready=False, detail=detail)
         except Exception:
             return AdapterHealth(ready=False, detail="relay is unreachable")

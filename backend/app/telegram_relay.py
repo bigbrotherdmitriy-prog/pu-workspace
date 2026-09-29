@@ -19,7 +19,54 @@ _poll_state = {
     "last_update_id": None,
     "delivered_updates": 0,
     "last_error": None,
+    "last_error_at": None,
+    "last_error_operation": None,
+    "last_error_type": None,
+    "last_error_status": None,
+    "errors_total": 0,
+    "consecutive_errors": 0,
+    "recoveries_total": 0,
+    "last_recovered_at": None,
 }
+
+# A successful getUpdates poll can take 25 seconds. A pending backend delivery
+# has a separate 120-second timeout and must not make a stale poll look healthy.
+POLL_FRESHNESS_SECONDS = 90
+
+_send_state = {
+    "successes_total": 0, "errors_total": 0,
+    "last_success_at": None, "last_error_at": None,
+    "last_error_type": None, "last_error_status": None,
+}
+
+
+def _record_poll_failure(operation: str, exc: Exception) -> float:
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    _poll_state.update(
+        last_error=f"{operation}: {type(exc).__name__}" + (f" HTTP {status}" if status else ""),
+        last_error_at=_utc_now(), last_error_operation=operation,
+        last_error_type=type(exc).__name__, last_error_status=status,
+        errors_total=_poll_state["errors_total"] + 1,
+        consecutive_errors=_poll_state["consecutive_errors"] + 1,
+    )
+    # Never log request URLs, tokens, response bodies, or message content.
+    print(f"[TELEGRAM POLLING] {_poll_state['last_error']}", flush=True)
+    return min(30, 3 * 2 ** min(_poll_state["consecutive_errors"] - 1, 4))
+
+
+def _record_poll_success() -> None:
+    if _poll_state["consecutive_errors"]:
+        _poll_state["recoveries_total"] += 1
+        _poll_state["last_recovered_at"] = _utc_now()
+    _poll_state.update(last_poll_at=_utc_now(), last_error=None, consecutive_errors=0)
+
+
+def _require_telegram_ok(response: httpx.Response) -> dict:
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise ValueError("telegram_response_not_ok")
+    return payload
 
 
 def _utc_now() -> str:
@@ -54,18 +101,24 @@ async def _poll_updates() -> None:
         telegram_options["transport"] = httpx.AsyncHTTPTransport(local_address="::")
     async with httpx.AsyncClient(**telegram_options) as telegram, httpx.AsyncClient(timeout=120.0) as backend:
         # Long polling and webhooks are mutually exclusive. Keep queued updates.
-        response = await telegram.post(f"{api}/deleteWebhook", json={"drop_pending_updates": False})
-        response.raise_for_status()
+        initialized = False
         while True:
+            operation = "deleteWebhook" if not initialized else "getUpdates"
             try:
+                if not initialized:
+                    response = await telegram.post(f"{api}/deleteWebhook", json={"drop_pending_updates": False})
+                    _require_telegram_ok(response)
+                    initialized = True
+                operation = "getUpdates"
                 params = {"timeout": 25, "allowed_updates": '["message","edited_message"]'}
                 if offset is not None:
                     params["offset"] = offset
                 response = await telegram.get(f"{api}/getUpdates", params=params)
-                response.raise_for_status()
-                _poll_state["last_poll_at"] = _utc_now()
-                _poll_state["last_error"] = None
-                for update in response.json().get("result", []):
+                updates = _require_telegram_ok(response)["result"]
+                if not isinstance(updates, list):
+                    raise ValueError("invalid_updates")
+                for update in updates:
+                    operation = "backend_webhook"
                     delivered = await backend.post(
                         backend_url,
                         json=update,
@@ -75,13 +128,11 @@ async def _poll_updates() -> None:
                     offset = int(update["update_id"]) + 1
                     _poll_state["last_update_id"] = int(update["update_id"])
                     _poll_state["delivered_updates"] += 1
+                _record_poll_success()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                safe_error = _safe_error(exc)
-                _poll_state["last_error"] = f"{exc.__class__.__name__}: {safe_error[:200]}"
-                print(f"[TELEGRAM POLLING] {exc.__class__.__name__}: {safe_error[:300]}", flush=True)
-                await asyncio.sleep(3)
+                await asyncio.sleep(_record_poll_failure(operation, exc))
 
 
 @asynccontextmanager
@@ -101,9 +152,17 @@ app = FastAPI(title="PU Workspace Telegram Relay", lifespan=lifespan)
 
 @app.get("/health")
 def health():
+    enabled = _polling_enabled()
+    last = _poll_state["last_poll_at"]
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() if last else None
+    fresh = age is not None and 0 <= age <= POLL_FRESHNESS_SECONDS
     return {
-        "status": "healthy" if _poll_state["last_error"] is None else "degraded",
-        "polling_enabled": _polling_enabled(),
+        "status": "healthy" if enabled and fresh and _poll_state["last_error"] is None else "degraded",
+        "polling_enabled": enabled,
+        "poll_age_seconds": age,
+        "poll_freshness_seconds": POLL_FRESHNESS_SECONDS,
+        "history_scope": "current_process",
+        "outbound": dict(_send_state),
         **_poll_state,
     }
 
@@ -136,12 +195,22 @@ def _get_with_retry(client: httpx.Client, url: str, **kwargs) -> httpx.Response:
 def send(payload: SendRequest, x_relay_secret: str | None = Header(default=None)):
     _check(x_relay_secret)
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    with _client() as client:
-        request_with_retry(
-            client, "POST", f"https://api.telegram.org/bot{token}/sendMessage",
-            policy=RATE_LIMIT_ONLY_RETRY,
-            json={"chat_id": payload.chat_id, "text": payload.message[:4000]},
+    try:
+        with _client() as client:
+            response = request_with_retry(
+                client, "POST", f"https://api.telegram.org/bot{token}/sendMessage",
+                policy=RATE_LIMIT_ONLY_RETRY,
+                json={"chat_id": payload.chat_id, "text": payload.message[:4000]},
+            )
+            _require_telegram_ok(response)
+    except (httpx.HTTPError, ValueError) as exc:
+        _send_state.update(
+            errors_total=_send_state["errors_total"] + 1,
+            last_error_at=_utc_now(), last_error_type=type(exc).__name__,
+            last_error_status=exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
         )
+        raise HTTPException(502, "Telegram delivery was not confirmed") from None
+    _send_state.update(successes_total=_send_state["successes_total"] + 1, last_success_at=_utc_now())
     return {"ok": True}
 
 
