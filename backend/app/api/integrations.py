@@ -7,10 +7,29 @@ from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.integrations.catalog import GOOGLE_CAPABILITIES, project_integration_catalog
 from app.mailbox_identity.dto import MailboxRolloutResult, MailboxRolloutTransition
+from app.mailbox_identity.dto import MailboxAuthorityRenewal
+from app.mailbox_identity.authority import renew_project_mailbox_authority
 from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
 from app.models.user import User
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
+
+
+@router.post("/mailbox-authority/renew")
+def renew_mailbox_authority(
+    command: MailboxAuthorityRenewal, response: Response,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db), user: User = Depends(require_user),
+):
+    try:
+        result = renew_project_mailbox_authority(
+            db, command, actor=user, expected_version=_if_match_version(if_match))
+        db.commit()
+    except (MailboxConflict, ValueError):
+        db.rollback()
+        raise HTTPException(409, "resource_unavailable") from None
+    response.headers["ETag"] = f'"{result["authority_version"]}"'
+    return result
 
 
 def _if_match_version(value: str) -> int:

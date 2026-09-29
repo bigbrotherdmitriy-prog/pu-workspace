@@ -2,9 +2,20 @@ from typing import Literal
 
 from uuid import UUID
 
-from pydantic import Field, StrictBool, StrictInt, StrictStr, model_validator
+from pydantic import AwareDatetime, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from app.core.v54_refs import StrictDTO
+
+
+class MailboxAuthorityRenewal(StrictDTO):
+    organization_id: StrictInt = Field(gt=0)
+    project_id: StrictInt = Field(gt=0)
+    mail_connection_id: UUID
+    credential_generation: StrictInt = Field(gt=0)
+    binding_epoch: StrictInt = Field(gt=0)
+    valid_until: AwareDatetime
+    approval: Literal["CONFIRM"]
+    reason: Literal["owner_confirmed_project_reconnect"]
 
 
 class ReconciliationEvidencePin(StrictDTO):

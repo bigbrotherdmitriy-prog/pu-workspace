@@ -215,14 +215,19 @@ class MailboxIdentityService:
             runtime = type("RolloutRuntime", (), {
                 "organization_id": command.organization_id,
                 "mail_connection_id": command.mail_connection_id,
+                "generation": command.credential_generation,
             })()
-            require_mailbox_authority(
+            token = db.get(GoogleOAuthToken, generation.google_token_id)
+            authority = require_mailbox_authority(
                 db,
                 runtime=runtime,
                 actor=actor,
                 permission="rollout",
                 expected_version=command.authority_version,
+                project_id=token.project_id if token else None,
             )
+            if authority.scope_project_id is not None and command.flag in {"primary_read", "actions"}:
+                _fail()
         except ValueError:
             _fail()
 
@@ -337,6 +342,7 @@ class MailboxIdentityService:
         runtime = type("CohortRuntime", (), {
             "organization_id": organization_id,
             "mail_connection_id": mail_connection_id,
+            "generation": credential_generation,
         })()
         try:
             require_mailbox_authority(
@@ -345,6 +351,7 @@ class MailboxIdentityService:
                 actor=actor,
                 permission="rollout",
                 expected_version=authority_version,
+                project_id=project_id,
             )
         except ValueError:
             _fail()
@@ -539,7 +546,7 @@ class MailboxIdentityService:
         if not msg or msg.organization_id != runtime.organization_id:
             _fail()
         _project_access(db, actor, organization_id=msg.organization_id, project_id=msg.project_id)
-        authority = require_mailbox_authority(db, runtime=runtime, actor=actor, permission="ingest")
+        authority = require_mailbox_authority(db, runtime=runtime, actor=actor, permission="ingest", project_id=msg.project_id)
         identity = db.get(ConnectionIdentity, runtime.identity_id)
         mail = db.get(MailConnection, runtime.mail_connection_id)
         provider_message_id, _thread_id = provider_locator(source)
