@@ -119,7 +119,8 @@ def _credential_owner_project_matches(db, *, runtime: MailboxRuntime, project_id
     return bool(token and token.project_id == project_id)
 
 
-def require_mailbox_authority(db, *, runtime, actor: User, permission: str, expected_version=None):
+def require_mailbox_authority(db, *, runtime, actor: User, permission: str, expected_version=None,
+                              project_id=None):
     """Actor is trusted server context and is intentionally absent from request DTOs."""
     if not actor or not actor.id or db.get(User, actor.id) is not actor:
         _deny()
@@ -128,13 +129,32 @@ def require_mailbox_authority(db, *, runtime, actor: User, permission: str, expe
         MailboxAuthorityState.mail_connection_id == runtime.mail_connection_id,
         MailboxAuthorityState.principal_kind == "user",
         MailboxAuthorityState.principal_id == str(actor.id),
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     valid_until = _aware(row.valid_until) if row else None
     if (not row or row.state != "active" or not isinstance(row.permissions, list)
             or permission not in row.permissions or not valid_until
             or valid_until <= datetime.now(timezone.utc)
             or (expected_version is not None and row.authority_version != expected_version)):
         _deny()
+    if row.scope_project_id is not None or row.scope_credential_generation is not None:
+        from app.models.project import Project
+        from app.models.project_member import ProjectMember
+        project = db.get(Project, project_id) if project_id is not None else None
+        role = db.scalar(select(ProjectMember.role).where(
+            ProjectMember.project_id == project_id, ProjectMember.user_id == actor.id))
+        current_generation = db.scalar(select(ConnectionIdentity.credential_generation)
+            .join(MailConnection, MailConnection.identity_id == ConnectionIdentity.id)
+            .where(MailConnection.id == runtime.mail_connection_id,
+                   MailConnection.organization_id == row.organization_id,
+                   ConnectionIdentity.organization_id == row.organization_id,
+                   ConnectionIdentity.state == "verified", MailConnection.state == "active"))
+        if (permission not in {"ingest", "read", "rollout"}
+                or project_id != row.scope_project_id
+                or getattr(runtime, "generation", None) != row.scope_credential_generation
+                or current_generation != row.scope_credential_generation
+                or not project or project.organization_id != row.organization_id
+                or project.archived_at is not None or role != "owner"):
+            _deny()
     return row
 
 
@@ -274,7 +294,7 @@ def runtime_for_message(db, message: Message, *, actor: User, action=False):
     if not runtime.flags.primary_read or (action and not runtime.flags.actions):
         _deny()
     require_mailbox_authority(db, runtime=runtime, actor=actor,
-                              permission="action" if action else "read")
+                              permission="action" if action else "read", project_id=message.project_id)
     return MailboxRuntime(**{**runtime.__dict__,
         "provider_message_id": provider_message_id, "provider_thread_id": provider_thread_id,
         "source_reference_id": source.id, "source_version_id": source_version.id,
@@ -345,9 +365,9 @@ def shadow_observe_gmail_message(db, *, runtime: MailboxRuntime, message: Messag
     if (not runtime.flags.shadow_write or runtime.flags.pilot_write
             or message.organization_id != runtime.organization_id):
         _deny()
-    require_mailbox_authority(db, runtime=runtime, actor=actor, permission="ingest")
+    require_mailbox_authority(db, runtime=runtime, actor=actor, permission="ingest", project_id=message.project_id)
     if runtime.flags.shadow_read_compare:
-        require_mailbox_authority(db, runtime=runtime, actor=actor, permission="read")
+        require_mailbox_authority(db, runtime=runtime, actor=actor, permission="read", project_id=message.project_id)
     source, version = observe_gmail_message(
         db,
         runtime=runtime,
