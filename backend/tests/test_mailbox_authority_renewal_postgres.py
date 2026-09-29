@@ -25,6 +25,9 @@ def test_concurrent_renewals_have_one_winner_and_one_audit():
     url = make_url(os.environ["DATABASE_URL"])
     assert url.get_backend_name() == "postgresql" and url.host in {"localhost", "127.0.0.1", "::1"}
     assert url.database == "pu_workspace_test" and not url.query
+    # Match the application's installed psycopg 3 driver, not SQLAlchemy's
+    # legacy psycopg2 default for a bare postgresql:// CI URL.
+    url = url.set(drivername="postgresql+psycopg")
     schema = "mailbox_renew_" + uuid4().hex
     admin = create_engine(url, hide_parameters=True)
     engine = create_engine(url, hide_parameters=True)
