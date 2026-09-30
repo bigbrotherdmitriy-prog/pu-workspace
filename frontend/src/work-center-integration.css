@@ -63,7 +63,7 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content { padding: 16px 24px 30px; max-width: none; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-overview-deck { display: grid; grid-template-columns: minmax(0,1fr); border-radius: 28px; background: rgba(3,10,24,.22); }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.65fr) minmax(0,1fr); gap: 22px; min-height: 468px; padding: 24px; background: transparent; border: 0; }
-:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy { min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero-copy { min-width: 0; border: 0; box-shadow: none; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-kicker { font-size: 11px; letter-spacing: 0; color: #00e5ff; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-kicker svg { display: none; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-hero h2 { margin: 20px 0 14px; font-size: clamp(30px,3vw,42px); line-height: 1.08; max-width: none; }
@@ -128,4 +128,15 @@
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-isometric { height: 340px; }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .dashboard-metrics button:last-child { grid-column: 1 / -1; }
+}
+
+/* PU-43: text backdrop belongs to the last-loaded screen stylesheet. */
+.future-light-dashboard .dashboard-hero .dashboard-hero-copy{
+  padding:18px 20px;
+  border-radius:18px;
+  background:linear-gradient(90deg,rgba(2,8,20,.78),rgba(2,8,20,.46));
+  backdrop-filter:blur(4px);
+}
+@media (max-width:900px){
+  .future-light-dashboard .dashboard-hero .dashboard-hero-copy{padding:14px 16px;}
 }
