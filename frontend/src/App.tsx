@@ -822,8 +822,6 @@ export function App() {
       setYandexMailDialogOpen(false);
       setNotice("Яндекс Почта подключена только для чтения. Отправка и AUTO не включены.");
       await loadIntegrations();
-    } catch (e) {
-      setError((e as Error).message);
     } finally {
       setYandexMailBusy(false);
     }
