@@ -60,7 +60,7 @@ def clear_owner_context_confirmation(message: Message) -> None:
     message.context_confirmed_authority_epoch = None
 
 
-def owner_context_confirmation_state(db, message: Message) -> str:
+def _owner_context_confirmation_state(message: Message, member, authority, now) -> str:
     values = (
         message.context_confirmed_by_user_id,
         message.context_confirmed_by_user_at,
@@ -73,18 +73,6 @@ def owner_context_confirmation_state(db, message: Message) -> str:
         return "invalid"
     if message.context_confirmed_context_version != message.context_version:
         return "stale_context"
-    member = db.scalar(select(ProjectMember).where(
-        ProjectMember.project_id == message.project_id,
-        ProjectMember.user_id == message.context_confirmed_by_user_id,
-    ))
-    authority = db.scalar(select(AuthorityState).where(
-        AuthorityState.organization_id == message.organization_id,
-        AuthorityState.project_id == message.project_id,
-        AuthorityState.principal_kind == "user",
-        AuthorityState.principal_id == str(message.context_confirmed_by_user_id),
-        AuthorityState.scope == PILOT_SCOPE,
-    ))
-    now = datetime.now(timezone.utc)
     valid_until = authority.valid_until if authority is not None else None
     if valid_until is not None and valid_until.tzinfo is None:
         valid_until = valid_until.replace(tzinfo=timezone.utc)
@@ -95,6 +83,36 @@ def owner_context_confirmation_state(db, message: Message) -> str:
             or "context.confirm" not in (authority.permissions or [])):
         return "stale_authority"
     return "confirmed_current"
+
+
+def owner_context_confirmation_states(db, messages: list[Message]) -> dict[int, str]:
+    """Read current owner proofs for a page in two queries, with no cached authority."""
+    owners = {row.context_confirmed_by_user_id for row in messages
+              if row.context_confirmed_by_user_id is not None}
+    projects = {row.project_id for row in messages}
+    organizations = {row.organization_id for row in messages}
+    members = {}
+    authorities = {}
+    if owners:
+        members = {(row.project_id, row.user_id): row for row in db.scalars(
+            select(ProjectMember).where(ProjectMember.project_id.in_(projects),
+                                        ProjectMember.user_id.in_(owners)))}
+        authorities = {(row.organization_id, row.project_id, row.principal_id): row
+                       for row in db.scalars(select(AuthorityState).where(
+                           AuthorityState.organization_id.in_(organizations),
+                           AuthorityState.project_id.in_(projects),
+                           AuthorityState.principal_kind == "user",
+                           AuthorityState.principal_id.in_({str(owner) for owner in owners}),
+                           AuthorityState.scope == PILOT_SCOPE))}
+    now = datetime.now(timezone.utc)
+    return {row.id: _owner_context_confirmation_state(
+        row, members.get((row.project_id, row.context_confirmed_by_user_id)),
+        authorities.get((row.organization_id, row.project_id, str(row.context_confirmed_by_user_id))), now,
+    ) for row in messages}
+
+
+def owner_context_confirmation_state(db, message: Message) -> str:
+    return owner_context_confirmation_states(db, [message])[message.id]
 
 
 def require_current_owner_context_confirmation(db, message: Message) -> None:
