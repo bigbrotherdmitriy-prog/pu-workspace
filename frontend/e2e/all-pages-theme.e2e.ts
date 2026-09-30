@@ -35,14 +35,39 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
     await page.waitForLoadState("networkidle");
     await settled(page);
     if (name === "Риски и решения") await expect(page.locator(".governance-overview")).toHaveCSS("display", "grid");
-    if (name === "Договоры") await expect(page.locator(".contract-scheme-head")).toHaveCSS("background-color", theme === "dark" ? "rgb(16, 36, 60)" : "rgb(245, 244, 240)");
+    if (name === "Договоры") {
+      // The header is transparent by design. Audit the opaque reading surface
+      // and table cells, including the owner's approved lighter dark palette.
+      const surface = await page.evaluate(theme => {
+        const probe = document.createElement("span");
+        probe.style.backgroundColor = theme === "dark"
+          ? "color-mix(in srgb, rgb(16, 36, 60) 88%, white)"
+          : "rgb(245, 244, 240)";
+        document.body.append(probe);
+        const background = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return background;
+      }, theme);
+      const workspace = page.locator(".contract-workspace");
+      await expect(workspace).toHaveCSS("background-color", surface);
+      await expect(workspace).toHaveCSS("color", theme === "dark" ? "rgb(226, 232, 240)" : "rgb(65, 68, 63)");
+      await expect(workspace.getByRole("table", { name: "Реестр договоров" })).toBeVisible();
+      await expect(workspace.locator(".contract-register-row td").first()).toHaveCSS("background-color", surface);
+    }
     if (name === "Интеграции") {
       const head = await page.locator(".integrations-command").boundingBox();
       const copy = await page.locator(".integrations-command p").boundingBox();
       expect(copy!.y + copy!.height).toBeLessThanOrEqual(head!.y + head!.height);
     }
     const issues = await page.evaluate(() => {
-      const rgb = (s: string) => (s.match(/[\d.]+/g) || []).map(Number);
+      const rgb = (s: string) => {
+        const channels = (s.match(/[\d.]+/g) || []).map(Number);
+        // Chromium preserves color-mix() as color(srgb ...): those RGB
+        // channels are normalized to 0–1, whereas rgb()/rgba() use 0–255.
+        return s.startsWith("color(srgb ")
+          ? channels.map((channel, index) => index < 3 ? channel * 255 : channel)
+          : channels;
+      };
       const lum = (c: number[]) => c.slice(0, 3).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((s, v, i) => s + v * [.2126, .7152, .0722][i], 0);
       return [...document.querySelectorAll<HTMLElement>(".shell *, [role=dialog] *")].flatMap(el => {
         if (!el.checkVisibility() || el.closest("[disabled], [aria-disabled=true], svg, canvas") || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent?.trim())) return [];
