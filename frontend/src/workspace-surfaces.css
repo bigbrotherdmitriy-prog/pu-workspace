@@ -237,6 +237,18 @@
   color: #041522;
   background: var(--finance-neon);
 }
+
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-drag-handle,
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-delete-plan,
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-group-drag {
+  border-color: rgba(83, 214, 255, .55);
+  background: rgba(18, 76, 110, .72);
+  color: #80eaff;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-delete-plan {
+  border-color: rgba(255, 127, 127, .48);
+  color: #ffaaaa;
+}
 :root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table {
   color: var(--finance-text);
   background: var(--finance-row);

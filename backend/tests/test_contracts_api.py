@@ -92,6 +92,22 @@ def test_payment_schedule_is_extracted_only_with_explicit_date_and_amount():
     ]
 
 
+def test_payment_schedule_does_not_join_building_code_date_to_specification_price():
+    collapsed_pdf = (
+        "Оплата производится после подписания договора. "
+        "Стены должны соответствовать СНиП 31.01.2003. "
+        "Приложение № 1: дверь 2 шт 145 000,00 руб., сумма 290 000,00 руб."
+    )
+
+    assert _payment_schedule_candidates(collapsed_pdf) == []
+
+
+def test_payment_schedule_rejects_a_standard_reference_even_in_payment_clause():
+    assert _payment_schedule_candidates(
+        "Оплата 290 000,00 руб. после проверки по ГОСТ 31.01.2003."
+    ) == []
+
+
 def test_contract_analysis_uses_existing_safe_document_text():
     document = Document(
         project_id=1,

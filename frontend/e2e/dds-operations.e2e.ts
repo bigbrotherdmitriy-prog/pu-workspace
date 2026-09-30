@@ -36,20 +36,52 @@ test("cancels an unlinked DDS proposal with confirmation and persists after relo
   await page.goto("/new/");
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
-  await page.getByRole("tab", { name: "Детализация", exact: true }).click();
   page.once("dialog", dialog => dialog.dismiss());
-  await page.getByRole("button", { name: "Отменить операцию Тестовый счёт" }).click();
+  await page.getByRole("button", { name: "Удалить операцию Тестовый счёт" }).click();
   expect(mutations).toBe(0);
   page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("button", { name: "Отменить операцию Тестовый счёт" }).click();
-  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Удалить операцию Тестовый счёт" }).click();
+  await expect(page.getByText("Тестовый счёт", { exact: true })).toHaveCount(0);
   expect(mutations).toBe(1);
-  await expect(page.getByRole("button", { name: "Отменить операцию Тестовый счёт" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Удалить операцию Тестовый счёт" })).toHaveCount(0);
   await page.reload();
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "Детализация", exact: true }).click();
+  await expect(page.getByText("Тестовый счёт", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Фильтр по статусу").selectOption("cancelled");
   await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+  expect(mock.unexpected).toEqual([]);
+});
+
+test("moves an aggregated DDS cell to another month with the visible handle", async ({ page, mock }) => {
+  const rows = [
+    { id: 31, direction: "outflow", title: "ЭМ Щиты", planned_date: "2026-02-10", planned_amount: 400, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1, object_name: "Общие", category: "Оборудование" },
+    { id: 32, direction: "outflow", title: "эм щиты", planned_date: "2026-02-18", planned_amount: 100, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1, object_name: "Общие", category: "Оборудование" },
+  ];
+  const mutations: Array<{ id: number; body: Record<string, unknown> }> = [];
+  await page.route("**/execution/overview?*", route => route.fulfill({ json: {
+    cash_flow: rows, budget: [], baselines: [], schedule: [], acts: [], procurement: [], summary: {},
+  } }));
+  await page.route("**/execution/cash-flow/*/plan-mutations", async route => {
+    const id = Number(route.request().url().split("/").at(-2));
+    mutations.push({ id, body: route.request().postDataJSON() });
+    await route.fulfill({ json: { mutation_id: 100 + id, result_id: id, record_version: 2 } });
+  });
+
+  await page.goto("/new/");
+  await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  const row = page.locator("tr.operation", { has: page.getByText("ЭМ Щиты", { exact: true }) });
+  await page.getByRole("button", { name: "Перенести ЭМ Щиты, 2 операций из 2026-02" }).dragTo(row.locator("td").nth(4));
+  await expect(page.getByRole("dialog", { name: "Действие с плановой суммой" })).toBeVisible();
+  await page.getByRole("button", { name: "Переместить", exact: true }).click();
+
+  await expect.poll(() => mutations.length).toBe(2);
+  expect(mutations.map(item => [item.id, item.body.operation, item.body.planned_date])).toEqual([
+    [31, "move", "2026-03-10"],
+    [32, "move", "2026-03-18"],
+  ]);
   expect(mock.unexpected).toEqual([]);
 });
 

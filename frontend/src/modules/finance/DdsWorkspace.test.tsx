@@ -32,7 +32,7 @@ describe("DdsWorkspace", () => {
     const props = { finance: unlinked, selectedContractId: 0, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
     const { rerender } = render(<DdsWorkspace {...props} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
-    const button = screen.getByRole("button", { name: "Отменить операцию Щиты" });
+    const button = screen.getByRole("button", { name: "Удалить операцию Щиты" });
     fireEvent.click(button);
     expect(onConfirm).not.toHaveBeenCalled();
     confirm.mockReturnValue(true);
@@ -45,7 +45,9 @@ describe("DdsWorkspace", () => {
     finish();
     await waitFor(() => expect(button).toBeEnabled());
     rerender(<DdsWorkspace {...props} finance={{ ...unlinked, cash_flow: [{ ...unlinked.cash_flow[0], status: "cancelled" }] }} />);
-    expect(screen.queryByRole("button", { name: "Отменить операцию Щиты" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Удалить операцию Щиты" })).not.toBeInTheDocument();
+    expect(screen.queryByText("cancelled")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Фильтр по статусу"), { target: { value: "all" } });
     expect(screen.getByText("cancelled")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Сводка" }));
     expect(screen.queryByText(/400/)).not.toBeInTheDocument();
@@ -59,16 +61,16 @@ describe("DdsWorkspace", () => {
     ] } as FinanceOverview;
     render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
-    expect(screen.queryByRole("button", { name: /Отменить операцию/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Удалить операцию/ })).not.toBeInTheDocument();
   });
 
   it("keeps an operation available for retry when cancellation fails", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn().mockRejectedValue(new Error("offline"))} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
-    fireEvent.click(screen.getByRole("button", { name: "Отменить операцию Этап 1" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось отменить операцию");
-    expect(screen.getByRole("button", { name: "Отменить операцию Этап 1" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить операцию Этап 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось удалить операцию");
+    expect(screen.getByRole("button", { name: "Удалить операцию Этап 1" })).toBeEnabled();
   });
 
   it("shows every workbook view and recalculates summaries from detail rows", () => {
@@ -176,14 +178,14 @@ describe("DdsWorkspace", () => {
     fireEvent.blur(input);
     expect(onMutatePlan).toHaveBeenCalledWith(2, "edit", "2026-02-10", 450, 3);
 
-    fireEvent.dragStart(input.parentElement!);
+    fireEvent.dragStart(screen.getByRole("button", { name: "Перенести Щиты из 2026-02" }));
     const operationRow = input.closest("tr")!;
     fireEvent.drop(operationRow.querySelectorAll("td")[2]);
     fireEvent.click(screen.getByRole("button", { name: "Переместить" }));
     expect(onMutatePlan).toHaveBeenCalledWith(2, "move", "2026-01-10", 400, 3);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Отменить" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Отменить" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Отменить перенос" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Отменить перенос" }));
     await waitFor(() => expect(onUndoPlanMutation).toHaveBeenCalledWith(81));
   });
 
@@ -215,11 +217,44 @@ describe("DdsWorkspace", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
     const input = screen.getByLabelText("План Щиты 2026-01");
-    fireEvent.dragStart(input.parentElement!);
+    fireEvent.dragStart(screen.getByRole("button", { name: "Перенести Щиты из 2026-01" }));
     fireEvent.drop(input.closest("tr")!.querySelectorAll("td")[3]);
     fireEvent.click(screen.getByRole("button", { name: "Переместить" }));
 
     expect(onMutatePlan).toHaveBeenCalledWith(2, "move", "2026-02-28", 400, 3);
+  });
+
+  it("moves every operation in an aggregated month cell by its visible drag handle", async () => {
+    const onMutatePlan = vi.fn().mockResolvedValue({ mutation_id: 91 });
+    const repeatedCosts = { ...finance, cash_flow: [
+      finance.cash_flow[0],
+      { ...finance.cash_flow[1], title: "ЭМ Щиты", planned_date: "2026-02-10", planned_amount: 400 },
+      { ...finance.cash_flow[1], id: 3, title: "эм щиты", planned_date: "2026-02-18", planned_amount: 100 },
+      { ...finance.cash_flow[1], id: 4, title: "ЭМ Щиты", planned_date: "2026-03-05", planned_amount: 600 },
+    ] } as FinanceOverview;
+    render(<DdsWorkspace finance={repeatedCosts} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
+
+    fireEvent.dragStart(screen.getByRole("button", { name: "Перенести ЭМ Щиты, 2 операций из 2026-02" }));
+    const row = screen.getByText("ЭМ Щиты", { exact: true }).closest("tr")!;
+    fireEvent.drop(row.querySelectorAll("td")[5]);
+    fireEvent.click(screen.getByRole("button", { name: "Переместить" }));
+
+    await waitFor(() => expect(onMutatePlan).toHaveBeenCalledTimes(2));
+    expect(onMutatePlan).toHaveBeenNthCalledWith(1, 2, "move", "2026-04-10", 400, 3);
+    expect(onMutatePlan).toHaveBeenNthCalledWith(2, 3, "move", "2026-04-18", 100, 3);
+  });
+
+  it("deletes a proposed plan directly from the calendar and hides it after reload", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const props = { finance, selectedContractId: 4, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
+    const { rerender } = render(<DdsWorkspace {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить операцию Щиты" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Удалить операцию «Щиты»"));
+    expect(onConfirm).toHaveBeenCalledWith("cash-flow", 2, "cancelled");
+    rerender(<DdsWorkspace {...props} finance={{ ...finance, cash_flow: [finance.cash_flow[0], { ...finance.cash_flow[1], status: "cancelled" }] }} />);
+    await waitFor(() => expect(screen.queryByText("Щиты", { exact: true })).not.toBeInTheDocument());
   });
 
   it("accepts invoice PDFs through the DDS drop zone after explicit upload", () => {

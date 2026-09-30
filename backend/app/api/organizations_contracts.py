@@ -942,12 +942,20 @@ def _rank_contract_documents(db: Session, project_id: int, row: Contract) -> lis
 def _payment_schedule_candidates(content: str) -> list[dict]:
     """Extract conservative payment proposals; never marks anything as paid."""
     candidates: list[dict] = []
-    for line in (part.strip() for part in content.splitlines() if part.strip()):
-        if not re.search(r"плат[её]ж|оплат|аванс", line, re.IGNORECASE):
+    # PDF extractors sometimes collapse the whole document into one physical
+    # line.  Treat punctuation as a semantic boundary too: otherwise a payment
+    # word in one clause can be paired with a building-code date and a price
+    # from a remote specification table.
+    fragments = re.split(r"(?:[;!?]|(?<!\d)\.(?=\s+[^\d])|[\r\n]+)", content)
+    for fragment in (part.strip() for part in fragments if part.strip()):
+        if not re.search(r"плат[её]ж|оплат|аванс", fragment, re.IGNORECASE):
             continue
-        date_match = re.search(r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)", line)
-        amount_matches = re.findall(r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:₽|руб(?:\.|лей)?)", line, re.IGNORECASE)
+        date_match = re.search(r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)", fragment)
+        amount_matches = re.findall(r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:₽|руб(?:\.|лей)?)", fragment, re.IGNORECASE)
         if not date_match or not amount_matches:
+            continue
+        reference_prefix = fragment[max(0, date_match.start() - 24):date_match.start()]
+        if re.search(r"(?:СНиП|ГОСТ|СП)\s*$", reference_prefix, re.IGNORECASE):
             continue
         try:
             planned_date = date(int(date_match.group(3)), int(date_match.group(2)), int(date_match.group(1)))
@@ -956,7 +964,7 @@ def _payment_schedule_candidates(content: str) -> list[dict]:
             continue
         if amount <= 0:
             continue
-        candidates.append({"planned_date": planned_date, "amount": amount, "excerpt": line[:1000]})
+        candidates.append({"planned_date": planned_date, "amount": amount, "excerpt": fragment[:1000]})
     unique: dict[tuple[date, Decimal], dict] = {}
     for item in candidates:
         unique[(item["planned_date"], item["amount"])] = item
