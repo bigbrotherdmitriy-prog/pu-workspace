@@ -620,7 +620,6 @@ export function App() {
     picker.close();
     rememberProject(id);
     setActive("Рабочий центр");
-    await load(id);
   }
 
   async function load(preferredProjectId?: number) {
@@ -647,7 +646,6 @@ export function App() {
           inboxData,
           proposalData,
           contractData,
-          allStats,
           google,
           health,
           team,
@@ -675,13 +673,6 @@ export function App() {
             proposals: [],
           })),
           api(`/projects/${id}/contracts`).catch(() => ({ contracts: [] })),
-          Promise.all(
-            p.projects.map(async (item: Project) => ({
-              id: item.id,
-              summary: (await api(`/dashboard/project?project_id=${item.id}`))
-                .summary,
-            })),
-          ),
           api(`/projects/${id}/google/status`).catch(() => null),
           api("/api/readiness").catch(() => null),
           api(`/projects/${id}/members`).catch(() => ({ members: [] })),
@@ -713,9 +704,6 @@ export function App() {
         setInbox(inboxData.messages);
         setProposals(proposalData.proposals);
         setContracts(contractData.contracts);
-        setProjectStats(
-          Object.fromEntries(allStats.map((item) => [item.id, item.summary])),
-        );
         setGoogleState(google);
         setAiPolicy(policy);
         setProcessingQueue(queue);
@@ -2300,6 +2288,19 @@ export function App() {
   useEffect(() => {
     if (ready && projectId && active === "Интеграции") loadIntegrations();
   }, [ready, projectId, active]);
+  useEffect(() => {
+    if (!ready || active !== "Проекты" || projects.length === 0) return;
+    let current = true;
+    void Promise.all(projects.map(async (item: Project) => ({
+      id: item.id,
+      summary: (await api(`/dashboard/project?project_id=${item.id}`)).summary,
+    }))).then((items) => {
+      if (current) setProjectStats(Object.fromEntries(items.map((item) => [item.id, item.summary])));
+    }).catch((loadError) => {
+      if (current) setError((loadError as Error).message);
+    });
+    return () => { current = false; };
+  }, [ready, active, projects]);
   useEffect(() => {
     if (!ready || !projectId || active !== "Письма") return;
     if (!yandexMailConnected && !googleState?.gmail_authorized) return;
