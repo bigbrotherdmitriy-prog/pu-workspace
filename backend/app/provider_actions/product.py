@@ -162,6 +162,8 @@ def _gmail_material(db, draft: ResponseDraft, actor_id: int) -> _Material:
     actor = _require_human_manager(db, project.id, actor_id)
     _require_human_manager(db, project.id, draft.approved_by_user_id)
     source = db.get(Message, draft.message_id) if draft.message_id else None
+    if source is not None and (source.source_external_id or "").startswith("gmail-read:"):
+        raise ProviderActionError("mailbox_scope_mismatch")
     recipients = _addresses(draft.recipient_to) or _addresses(parseaddr(source.source_sender)[1] if source else "")
     if not recipients or any(address.count("@") != 1 or "\r" in address or "\n" in address
                              for address in (*recipients, *_addresses(draft.recipient_cc), *_addresses(draft.recipient_bcc))):

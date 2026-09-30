@@ -173,6 +173,7 @@ def _message_payload(db: Session, row: Message) -> dict:
         "contract_id": row.contract_id,
         "provider": "google_workspace" if row.source_url and "mail.google.com" in row.source_url else row.source_type,
         "direction": "outgoing" if row.source_type == "email_outgoing" else "incoming",
+        "ordinary_read_only": (row.source_external_id or "").startswith("gmail-read:"),
         "thread_id": row.source_thread_id or f"message:{row.id}",
         "subject": str(_json(row.mail_headers_json, {}).get("subject") or row.source_name),
         "sender": row.source_sender,
@@ -537,6 +538,8 @@ def move_mail_message(message_id: int, payload: MailMoveRequest,
         raise HTTPException(404, "Mail message not found")
     require_project_role(db, user, row.project_id, "editor")
     external_id = str(row.source_external_id or "").strip()
+    if external_id.startswith("gmail-read:"):
+        raise HTTPException(409, "gmail_ordinary_read_has_no_provider_actions")
     if not external_id:
         raise HTTPException(409, "mail_provider_identity_missing")
     adapter = mailbox_adapter_for_project(row.project_id, db)
