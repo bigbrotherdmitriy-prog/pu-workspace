@@ -1065,17 +1065,17 @@ export function App() {
     } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Загрузка не завершена: ${message}`); setError(message); }
   }
   async function uploadContractApplications(files: File[], contractId: number) {
-    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
-    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
-    if (!supported.length) { setError("Выберите приложение в PDF, Word, Excel, CSV либо фото/скан JPG, PNG или TIFF."); return; }
+    const accepted = files.slice(0, 50);
+    const oversized = accepted.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
+    if (!accepted.length) { setError("Выберите хотя бы один файл приложения к договору."); return; }
     if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
-      setError(""); setNotice(`Загружаю приложения к договору: ${supported.length}…`);
-      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
+      setError(""); setNotice(`Загружаю приложения к договору: ${accepted.length}…`);
+      const payload = await Promise.all(accepted.map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
       const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
       const documentIds = completed.documents;
-      if (!documentIds.length) throw new Error("Текст приложений не извлечён");
+      if (!documentIds.length) throw new Error("Файлы приложений не сохранены");
       const expected = contracts.find((item) => item.id === contractId)?.record_version;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds }) });
