@@ -118,6 +118,199 @@
   color: var(--read-text); background: var(--read-button); border-color: var(--read-accent);
 }
 
+/* The unified GPR/DDS workspace keeps a brighter blue control-room surface in
+   dark mode. This prevents historical white table cells from washing out text
+   and gives every inner tab the same readable visual hierarchy. */
+:root[data-display-theme="dark"] .shell .gpr-dds-unified {
+  --finance-panel: #12314d;
+  --finance-panel-raised: #173b59;
+  --finance-row: #102b46;
+  --finance-row-alt: #143652;
+  --finance-grid: rgba(92, 211, 255, .38);
+  --finance-grid-strong: rgba(105, 217, 255, .76);
+  --finance-text: #eafaff;
+  --finance-muted: #afd6e7;
+  --finance-neon: #69d9ff;
+  background: #0c263f;
+}
+:root[data-display-theme] .shell .module-overlay.gpr-dds-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+:root[data-display-theme] .shell .gpr-dds-overlay > .gpr-dds-page,
+:root[data-display-theme] .shell .gpr-dds-overlay .gpr-dds-unified {
+  width: 100vw;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+}
+:root[data-display-theme] .shell .gpr-dds-unified .dds-head {
+  display: grid;
+  grid-template-columns: minmax(250px, 340px) minmax(0, 1fr);
+  align-items: start;
+}
+:root[data-display-theme] .shell .gpr-dds-unified .dds-head-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(
+  .gpr-dds-panel, .gpr-workspace, .dds-workspace, .dds-head, .dds-filters,
+  .dds-intake, .dds-intake-toolbar, .dds-intake-candidates > summary,
+  .dds-table-wrap, .dds-summary, .gpr-head, .gpr-toolbar, .gpr-grid,
+  .gpr-chart, .gpr-timeline, .gpr-editor, .dds-note, .finance-import-hub,
+  .finance-import-actions article, .finance-candidates article
+) {
+  color: var(--finance-text);
+  background-color: var(--finance-panel);
+  border-color: var(--finance-grid);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(.dds-head, .dds-filters, .dds-intake-toolbar, .gpr-head, .gpr-toolbar) {
+  background: linear-gradient(180deg, #183d5b, #12314d);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(.gpr-dds-panel, .dds-table-wrap, .gpr-grid, .gpr-chart) {
+  scrollbar-color: #69d9ff #0b2239;
+  scrollbar-width: thin;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(.dds-head p, .dds-filters span, .dds-empty, .dds-note, .gpr-head p) {
+  color: var(--finance-muted);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-tabs {
+  background: #102d48;
+  border-bottom-color: var(--finance-grid);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-tabs button {
+  color: #baddeb;
+  background: transparent;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-tabs button:is(.active, [aria-selected="true"]) {
+  color: var(--finance-neon);
+  background: rgba(32, 130, 180, .22);
+  border-bottom-color: var(--finance-neon);
+  box-shadow: inset 0 -1px 0 var(--finance-neon);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(input, select, textarea, button.secondary) {
+  color: var(--finance-text);
+  background-color: #163955;
+  border-color: var(--finance-grid);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(.dds-invoice-drop, .finance-import-hint, .dds-intake-candidates) {
+  color: var(--finance-text);
+  background: #153853;
+  border-color: var(--finance-grid);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified :is(.dds-invoice-drop small, .finance-import-hint, .finance-import-actions article small) {
+  color: var(--finance-muted);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-note {
+  color: var(--finance-muted);
+  background: #143650;
+  border-top-color: var(--finance-grid);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-share {
+  background: #0b2239;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-share span {
+  background: linear-gradient(90deg, #1c9fd2, var(--finance-neon));
+  box-shadow: 0 0 8px rgba(105, 217, 255, .48);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-drop-choice {
+  color: var(--finance-text);
+  background: linear-gradient(90deg, #194565, #133651);
+  border-color: var(--finance-neon);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28), inset 0 0 0 1px rgba(105, 217, 255, .2);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-drop-choice strong {
+  color: #eafaff;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-drop-choice button {
+  color: #eafaff;
+  background: #1a4f70;
+  border: 1px solid var(--finance-grid-strong);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-drop-choice button:hover {
+  color: #041522;
+  background: var(--finance-neon);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table {
+  color: var(--finance-text);
+  background: var(--finance-row);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table th {
+  color: #dff8ff;
+  background: #183f5e;
+  border-color: var(--finance-grid) !important;
+  box-shadow: inset 0 -1px 0 rgba(105, 217, 255, .34);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table tbody td {
+  color: var(--finance-text);
+  background: var(--finance-row);
+  border-color: var(--finance-grid) !important;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table tbody tr:nth-child(even) td {
+  background: var(--finance-row-alt);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table :is(th, td):first-child {
+  color: #dff8ff;
+  background: #173a57;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table tbody tr:hover td {
+  color: #fff;
+  background: #1b5274;
+  box-shadow: inset 0 1px 0 var(--finance-grid-strong), inset 0 -1px 0 var(--finance-grid-strong);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--finance-neon), inset 0 1px 0 var(--finance-grid-strong), inset 0 -1px 0 var(--finance-grid-strong);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table .positive { color: #8df5d0; }
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table .negative { color: #ffb7c5; }
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table .total td,
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-table .total td:first-child {
+  color: #f2fdff;
+  background: linear-gradient(90deg, #1b5578, #174663);
+  border-top: 1px solid var(--finance-neon) !important;
+  box-shadow: inset 0 1px 0 rgba(105, 217, 255, .35);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-monthly-table tbody td:first-child {
+  color: #bcefff;
+  font-weight: 800;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-calendar .group.inflow td {
+  background: #17516a;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-calendar :is(.group.outflow, .dds-expense-total) td {
+  background: #254b6b;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .dds-calendar .dds-balance td {
+  background: #42516a;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .gpr-grid :is(th, td),
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .gpr-chart-row {
+  color: var(--finance-text);
+  background: var(--finance-row);
+  border-color: var(--finance-grid) !important;
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .gpr-grid tbody tr:nth-child(even) td {
+  background: var(--finance-row-alt);
+}
+:root[data-display-theme="dark"] .shell .gpr-dds-unified .gpr-grid tbody tr:is(:hover, .selected) td {
+  background: #1b5274;
+  box-shadow: inset 0 1px 0 var(--finance-grid-strong), inset 0 -1px 0 var(--finance-grid-strong);
+}
+@media (max-width: 900px) {
+  :root[data-display-theme] .shell .gpr-dds-unified .dds-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root[data-display-theme] .shell .gpr-dds-unified .dds-head-actions {
+    justify-content: flex-start;
+  }
+}
+
 /* Mail chrome follows the app. Message HTML/editor content keeps its own
    document colors; changing those would alter the sender's presentation. */
 :root[data-display-theme] .shell :is(.mail-client-header, .mail-layout, .mail-folders, .mail-thread-list, .mail-search, .mail-reading-pane, .mail-reading-head, .mail-context-strip, .mail-thread-messages article, .mail-composer-toolbar, .mail-settings-body, .mail-ai-summary) {
