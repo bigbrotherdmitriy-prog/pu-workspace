@@ -42,4 +42,23 @@ describe("YandexMailConnectionDialog", () => {
 
     expect(onSubmit).toHaveBeenCalledWith("mailbox@example.test", "manager-filled-password");
   });
+
+  it("shows a connection error inside the dialog and clears the rejected password", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("Яндекс отклонил авторизацию. Код обращения: test-request-id"));
+    render(<YandexMailConnectionDialog
+      open
+      initialEmail="mailbox@example.test"
+      busy={false}
+      onClose={vi.fn()}
+      onSubmit={onSubmit}
+    />);
+
+    const password = screen.getByLabelText("Пароль приложения «Почта»") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "rejected-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подключить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("test-request-id");
+    expect(password).toHaveValue("");
+    expect(password).toHaveFocus();
+  });
 });
