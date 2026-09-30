@@ -64,7 +64,15 @@ test("proposes one contract total and manager confirms it into budget", async ({
 
   await page.goto("/new/");
   await page.getByRole("button", { name: "Договоры", exact: true }).click();
-  await page.getByRole("button", { name: "Предложить бюджет по договору" }).click();
+  await expect(page.getByRole("table", { name: "Реестр договоров" })).toBeVisible();
+  await expect(page.locator(".contract-register-row").filter({ hasText: "C-41" })).toContainText("100 000,00 ₽");
+  // Financial actions are intentionally outside the compact daily table.
+  // Open the same advanced card that a manager uses before proposing a budget.
+  const advanced = page.locator(".contract-advanced-list");
+  await advanced.locator("summary").click();
+  await expect(advanced).toHaveAttribute("open", "");
+  const card = advanced.locator(".contract-card").filter({ has: page.locator(".contract-number", { hasText: "C-41" }) });
+  await card.getByRole("button", { name: "Предложить бюджет по договору" }).click();
   await expect(page.getByText("Предложение строки бюджета")).toBeVisible();
   await expect(page.getByText(/Аванс 20[\s ]?000,00 ₽; удержание 5% — справочно/)).toBeVisible();
   await page.getByLabel("Категория предложения бюджета").selectOption("91");

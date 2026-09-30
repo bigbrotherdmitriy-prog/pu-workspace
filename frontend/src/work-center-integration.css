@@ -160,3 +160,118 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .yandex-mail-dialog > header h2{
   color:#e9f6ff;
 }
+
+/* PU-49: daily contract work is a full-width table with files under each row. */
+:root[data-display-theme] .shell .contract-workspace {
+  --contract-surface:var(--read-surface); --contract-soft:var(--read-secondary); --contract-selected:var(--read-accent-fill);
+  --contract-line:var(--read-rule); --contract-text:var(--read-text); --contract-muted:var(--read-muted); --contract-accent:var(--read-accent);
+  position:relative; display:grid; gap:14px; min-width:0; padding:18px;
+  border:1px solid var(--contract-line); border-radius:14px; background:var(--contract-surface); color:var(--contract-text); box-shadow:none;
+}
+:root[data-display-theme="dark"] .shell .contract-workspace {
+  --contract-surface:color-mix(in srgb,var(--read-surface) 88%,white);
+  --contract-soft:color-mix(in srgb,var(--read-secondary) 88%,white);
+  --contract-selected:color-mix(in srgb,var(--read-accent-fill) 92%,white);
+  --contract-muted:color-mix(in srgb,var(--read-muted) 80%,white);
+  --contract-line:color-mix(in srgb,var(--read-rule) 80%,white);
+}
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-head { position:static; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:0; height:auto; padding:0; border:0; background:transparent; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-head h2 { margin:0; font-size:16px; color:var(--contract-text); }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-tools button,:root[data-display-theme] .shell .contract-workspace .contract-upload-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:36px; padding:7px 10px; border:1px solid var(--contract-line); border-radius:8px; background:var(--contract-surface); color:var(--contract-text); font-size:12px; font-weight:600; cursor:pointer; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-tools svg { width:16px; height:16px; flex:none; }
+:root[data-display-theme] .shell .contract-workspace .contract-upload-button { background:var(--contract-selected); color:var(--contract-accent); }
+:root[data-display-theme] .shell .contract-workspace .contract-bulk-launch { display:block; min-width:0; margin:0; padding:0; border:0; background:transparent; box-shadow:none; }
+:root[data-display-theme] .shell .contract-workspace .contract-bulk-launch>div { display:none; }
+:root[data-display-theme] .shell .contract-workspace .contract-upload-button input,:root[data-display-theme] .shell .contract-workspace .contract-application-drop input,:root[data-display-theme] .shell .contract-workspace .contract-finance-drops input { position:absolute; width:1px; height:1px; padding:0; opacity:0; overflow:hidden; }
+:root[data-display-theme] .shell .contract-workspace :is(.contract-upload-button,.contract-application-drop,.contract-finance-drops label):focus-within { outline:2px solid var(--contract-accent); outline-offset:3px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table-wrap { min-width:0; overflow:hidden; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:0 0 14px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-toolbar label { display:flex; align-items:center; gap:8px; flex:1; min-width:180px; max-width:520px; padding:0 11px; border:1px solid var(--contract-line); border-radius:8px; background:var(--contract-soft); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-toolbar svg { width:17px; height:17px; flex:none; color:var(--contract-muted); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-toolbar input { width:100%; min-width:0; min-height:38px; padding:0; border:0; background:transparent; color:var(--contract-text); font:inherit; font-size:13px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-toolbar select { width:auto; min-width:130px; min-height:38px; padding:0 10px; border:1px solid var(--contract-line); border-radius:8px; background:var(--contract-surface); color:var(--contract-text); font-size:13px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-toolbar option { background:var(--contract-surface); color:var(--contract-text); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-count { margin-left:auto; color:var(--contract-muted); font-size:12px; white-space:nowrap; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table { width:100%; table-layout:fixed; margin:0; border-collapse:collapse; font-size:13px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th { padding:11px 12px; border-bottom:1px solid var(--contract-line); background:var(--contract-soft); color:var(--contract-muted); text-align:left; font-size:11px; font-weight:600; text-transform:none; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th:nth-child(1) { width:31%; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th:nth-child(2) { width:22%; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th:nth-child(3) { width:16%; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th:nth-child(4) { width:12%; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th:nth-child(5) { width:12%; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table th:nth-child(6) { width:7%; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table td { padding:14px 12px; vertical-align:top; border-bottom:1px solid var(--contract-line); color:var(--contract-text); background:var(--contract-surface); overflow-wrap:anywhere; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-row:hover td { background:var(--contract-soft); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-row.selected td { background:var(--contract-selected); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-table td>small { display:block; margin-top:5px; color:var(--contract-muted); font-size:11px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-open { display:inline-flex; align-items:center; gap:6px; max-width:100%; min-height:26px; margin:0 0 3px; padding:0; border:0; border-radius:3px; background:transparent; color:var(--contract-accent); text-align:left; font-size:13px; font-weight:700; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-open svg { width:14px; height:14px; flex:none; transition:transform .15s; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-open[aria-expanded="true"] svg { transform:rotate(180deg); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-name>span { display:block; line-height:1.5; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-amount { font-variant-numeric:tabular-nums; font-weight:600; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-deadline { color:var(--contract-muted); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-status { display:inline-block; padding:4px 7px; border-radius:5px; background:var(--contract-soft); color:var(--contract-muted); font-size:11px; font-weight:600; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-status.active { color:#267052; background:#e6f4ec; }
+:root[data-display-theme="dark"] .shell .contract-workspace .contract-register-status.active { color:#9ad9b8; background:#214037; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-files { display:inline-flex; align-items:center; gap:5px; min-height:30px; padding:3px 5px; border:0; border-radius:5px; background:transparent; color:var(--contract-accent); font-size:13px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-files svg { width:16px; height:16px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-expanded>td { padding:0; background:var(--contract-selected); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-detail { min-width:0; padding:16px 20px 18px; background:var(--contract-selected); }
+:root[data-display-theme] .shell .contract-workspace .contract-register-doc-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-doc-head h3 { margin:0; color:var(--contract-text); font-size:13px; }
+:root[data-display-theme] .shell .contract-workspace .contract-application-drop { display:inline-flex; align-items:center; gap:6px; margin:0; padding:6px 9px; border:1px solid var(--contract-line); border-radius:7px; background:var(--contract-surface); color:var(--contract-accent); font-size:12px; cursor:pointer; }
+:root[data-display-theme] .shell .contract-workspace .contract-application-drop svg { width:15px; height:15px; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents>button { display:flex; gap:9px; align-items:center; min-width:0; padding:10px 12px; border:1px solid var(--contract-line); border-radius:8px; background:var(--contract-surface); color:var(--contract-text); text-align:left; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents>button svg { width:18px; height:18px; flex:none; color:var(--contract-accent); }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents>button span { min-width:0; overflow-wrap:anywhere; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents strong { display:block; white-space:normal; overflow:visible; text-overflow:clip; font-size:12px; font-weight:600; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents small,:root[data-display-theme] .shell .contract-workspace .contract-scheme-documents p { color:var(--contract-muted); font-size:11px; }
+:root[data-display-theme] .shell .contract-workspace .contract-row-actions { margin-top:14px; }
+:root[data-display-theme] .shell .contract-workspace .contract-row-actions>summary { width:fit-content; padding:5px 0; color:var(--contract-muted); font-size:12px; cursor:pointer; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-link label { display:grid; gap:6px; padding-top:12px; color:var(--contract-muted); font-size:12px; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-link select { width:100%; min-width:0; max-width:460px; min-height:36px; padding:0 10px; border:1px solid var(--contract-line); border-radius:7px; background:var(--contract-surface); color:var(--contract-text); }
+:root[data-display-theme] .shell .contract-workspace .contract-finance-drops { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:12px; }
+:root[data-display-theme] .shell .contract-workspace .contract-finance-drops label { display:flex; gap:8px; min-width:0; padding:10px; border:1px solid var(--contract-line); border-radius:8px; background:var(--contract-surface); color:var(--contract-text); cursor:pointer; }
+:root[data-display-theme] .shell .contract-workspace .contract-finance-drops small { color:var(--contract-muted); }
+:root[data-display-theme] .shell .contract-workspace .contract-finance-confirmation { color:var(--contract-muted); font-size:12px; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-delete-zone { flex-wrap:wrap; }
+:root[data-display-theme] .shell .contract-workspace .contract-scheme-delete-zone button { max-width:100%; white-space:normal; }
+:root[data-display-theme] .shell .contract-workspace .contract-register-empty { display:grid; justify-items:center; gap:8px; padding:36px 16px; text-align:center; color:var(--contract-muted); }
+:root[data-display-theme] .shell .contract-workspace .contract-drop-overlay { position:absolute; pointer-events:none; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; gap:12px; border:2px dashed var(--contract-accent); border-radius:14px; background:var(--contract-selected); color:var(--contract-accent); }
+:root[data-display-theme] .shell .contracts-page .contract-create { display:block; margin:0 0 10px; padding:0; border-radius:10px; box-shadow:none; }
+:root[data-display-theme] .shell .contracts-page .contract-create>summary { width:fit-content; padding:10px 14px; color:var(--read-text); font-size:13px; font-weight:600; cursor:pointer; }
+:root[data-display-theme] .shell .contracts-page .contract-create[open]>div { padding:12px 16px; }
+:root[data-display-theme] .shell .contracts-page .contract-create h2 { font-size:16px; }
+:root[data-display-theme] .shell .contracts-page .contract-create p { font-size:12px; }
+:root[data-display-theme] .shell .contract-advanced-list { margin-top:14px; border:1px solid var(--read-rule); border-radius:10px; background:var(--read-surface); overflow:hidden; }
+:root[data-display-theme] .shell .contract-advanced-list>summary { padding:12px 16px; color:var(--read-muted); font-size:12px; font-weight:600; cursor:pointer; }
+:root[data-display-theme] .shell .contract-advanced-list[open]>summary { border-bottom:1px solid var(--read-rule); }
+:root[data-display-theme] .shell .contract-advanced-list>.contract-project-root,:root[data-display-theme] .shell .contract-advanced-list>.contract-card,:root[data-display-theme] .shell .contract-advanced-list>.empty { margin-left:14px; margin-right:14px; }
+@media(max-width:1050px) {
+  :root[data-display-theme] .shell .contract-workspace { padding:14px; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-table { font-size:12px; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-table :is(th,td) { padding:12px 8px; }
+}
+@media(max-width:900px) {
+  :root[data-display-theme] .shell .contract-workspace .contract-register-table,:root[data-display-theme] .shell .contract-workspace .contract-register-table tbody { display:block; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); padding:12px; border-bottom:1px solid var(--contract-line); background:var(--contract-surface); }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-row.selected { background:var(--contract-selected); }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-table .contract-register-row td { display:block; min-width:0; padding:6px 0; border:0; background:transparent; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-row td:first-child { grid-column:1/-1; margin-bottom:6px; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-row td:not(:first-child):before { display:block; margin-bottom:4px; content:attr(data-label); color:var(--contract-muted); font-size:10px; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-expanded,:root[data-display-theme] .shell .contract-workspace .contract-register-expanded>td { display:block; width:100%; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-expanded>td { padding:0; }
+}
+@media(max-width:600px) {
+  :root[data-display-theme] .shell .contract-workspace { padding:12px; }
+  :root[data-display-theme] .shell .contract-workspace .contract-scheme-head { align-items:flex-start; }
+  :root[data-display-theme] .shell .contract-workspace .contract-scheme-tools { width:100%; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-toolbar label { width:100%; flex-basis:100%; min-width:0; max-width:none; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-toolbar select { min-width:0; flex:1; max-width:100%; }
+  :root[data-display-theme] .shell .contract-workspace .contract-register-detail { padding:14px 12px; }
+  :root[data-display-theme] .shell .contract-workspace .contract-scheme-documents { grid-template-columns:1fr; }
+  :root[data-display-theme] .shell .contract-workspace .contract-finance-drops { grid-template-columns:1fr; }
+}
