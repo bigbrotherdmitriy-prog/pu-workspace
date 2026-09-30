@@ -90,6 +90,24 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
         detail="connected" if yandex_connected else ("authorization required" if yandex_configured else "provider is not configured"),
     ))
 
+    yandex_mail = db.scalar(select(IntegrationCredential).where(
+        IntegrationCredential.project_id == project_id,
+        IntegrationCredential.provider == "yandex_mail",
+        IntegrationCredential.capability == "channel",
+        IntegrationCredential.access_token.is_not(None),
+    ))
+    result.append(IntegrationStatus(
+        key="yandex_mail:channel",
+        provider="yandex_mail",
+        capability="channel",
+        name="Яндекс Почта",
+        description="Входящие письма по IMAP без удаления и отправки",
+        available=True,
+        connected=bool(yandex_mail),
+        action="sync" if yandex_mail else "configure",
+        detail=(f"{yandex_mail.account_email} · только чтение" if yandex_mail else "требуется пароль приложения"),
+    ))
+
     telegram = TelegramChannelAdapter().health()
     ai_provider = configured_ai_provider()
     ai = ai_provider.health()

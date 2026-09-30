@@ -15,6 +15,7 @@ import { AttentionPanel } from "./modules/attention/AttentionPanel";
 import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState } from "./modules/ai-secretary/messageWorkflow";
 import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
 import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
+import { YandexMailConnectionDialog } from "./modules/integrations/YandexMailConnectionDialog";
 import { ContractsModule } from "./modules/contracts/ContractsModule";
 import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
 import { buildContractTree } from "./modules/contracts/contractTree";
@@ -502,6 +503,9 @@ export function App() {
     [busyAll, setBusyAll] = useState(false),
     [gmailSyncing, setGmailSyncing] = useState(false),
     [gmailSyncStatus, setGmailSyncStatus] = useState(""),
+    [mailSyncProvider, setMailSyncProvider] = useState(""),
+    [yandexMailDialogOpen, setYandexMailDialogOpen] = useState(false),
+    [yandexMailBusy, setYandexMailBusy] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
   const [obligations, setObligations] = useState<ObligationRow[]>([]),
@@ -530,6 +534,7 @@ export function App() {
   const [contractDropStatus, setContractDropStatus] = useState("");
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
+  const yandexMailConnected = integrationItems.some((item) => item.provider === "yandex_mail" && item.capability === "channel" && item.connected);
   const [copyCleanupResults, setCopyCleanupResults] = useState<Record<number, { count: number; message: string }>>({});
   const picker = useStoragePicker<DriveFolder>(projectId, projectIdRef);
   const { folders, setFolders, busyFolder, setBusyFolder } = picker;
@@ -793,12 +798,34 @@ export function App() {
   }
   async function connectStorageProvider(provider: string) {
     picker.close();
+    if (provider === "yandex_mail") {
+      setYandexMailDialogOpen(true);
+      return;
+    }
     if (provider !== "yandex_disk") return connectGoogle();
     try {
       const result = await api(`/projects/${projectId}/yandex/auth`);
       window.location.href = result.authorization_url;
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+  async function connectYandexMail(email: string, appPassword: string) {
+    if (!projectId || yandexMailBusy) return;
+    try {
+      setError("");
+      setYandexMailBusy(true);
+      await api(`/projects/${projectId}/yandex-mail`, {
+        method: "PUT",
+        body: JSON.stringify({ email, app_password: appPassword }),
+      });
+      setYandexMailDialogOpen(false);
+      setNotice("Яндекс Почта подключена только для чтения. Отправка и AUTO не включены.");
+      await loadIntegrations();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setYandexMailBusy(false);
     }
   }
   async function openProviderSources(provider: string) {
@@ -810,6 +837,7 @@ export function App() {
     try {
       if (!options.silent) setError("");
       setGmailSyncing(true);
+      setMailSyncProvider("google_workspace");
       if (!options.silent) setGmailSyncStatus(options.folder
         ? "Получаю до 25 последних писем выбранной папки…"
         : "Получаю последние письма за 7 дней…");
@@ -830,6 +858,34 @@ export function App() {
     } finally {
       setGmailSyncing(false);
     }
+  }
+  async function syncYandexMail() {
+    if (gmailSyncing || !projectId) return;
+    try {
+      setError("");
+      setGmailSyncing(true);
+      setMailSyncProvider("yandex_mail");
+      setGmailSyncStatus("Получаю до 25 последних писем Яндекс Почты за 7 дней…");
+      const result = await api(`/projects/${projectId}/yandex-mail/sync`, {
+        method: "POST",
+        body: JSON.stringify({ days: 7, max_results: 25 }),
+      });
+      const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Ошибок: ${result.failed}.`;
+      setGmailSyncStatus(message);
+      setNotice(`Яндекс Почта: ${message}`);
+      await load();
+    } catch (e) {
+      const message = (e as Error).message;
+      setGmailSyncStatus(`Не удалось получить письма: ${message}`);
+      setError(message);
+    } finally {
+      setGmailSyncing(false);
+    }
+  }
+  async function syncMailProvider(provider: string) {
+    if (provider === "yandex_mail") return syncYandexMail();
+    return syncGmail();
   }
   function openGmailResults() {
     setActive("AI Secretary");
@@ -3848,7 +3904,8 @@ export function App() {
           systemState={systemState}
           gmailSyncing={gmailSyncing}
           gmailSyncStatus={gmailSyncStatus}
-          onSyncGmail={() => void syncGmail()}
+          syncingProvider={mailSyncProvider}
+          onSyncChannel={(provider) => void syncMailProvider(provider)}
           onSelectFolder={(provider) => void openProviderSources(provider)}
           onConnectProvider={(provider) => void connectStorageProvider(provider)}
           onLocalUpload={() => { setNotice(""); setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }}
@@ -3888,7 +3945,7 @@ export function App() {
           mode={active === "Письма" ? "mail" : "secretary"}
           attentionCount={inbox.filter(messageNeedsAttention).length}
           syncing={gmailSyncing}
-          onSync={() => void syncGmail()}
+          onSync={() => void (yandexMailConnected ? syncYandexMail() : syncGmail())}
         >
             {active === "Письма" && <div className="mail-view-tabs">
               <button className={mailView === "inbox" ? "selected" : ""} onClick={() => setMailView("inbox")}>Входящие</button>
@@ -3917,7 +3974,7 @@ export function App() {
               }))}
               syncing={gmailSyncing}
               syncStatus={gmailSyncStatus}
-              onSync={(folder) => syncGmail({ folder })}
+              onSync={(folder) => yandexMailConnected ? syncYandexMail() : syncGmail({ folder })}
               onOpenContacts={() => setMailView("companies")}
               onNotice={setNotice}
               onError={setError}
@@ -4501,6 +4558,13 @@ export function App() {
       {(active === "Документы" || active === "Центр знаний") && (
         <DocumentsModule collapsed={collapsed} knowledgeMode={active === "Центр знаний"} documents={visibleDocuments} selected={selectedDocument} onSelect={(item) => void openDocument(item)} projectId={projectId} onOcrComplete={() => { setNotice("Повторное OCR завершено. Реестр и связи обновлены."); void load(); }} onAddImportantDocument={() => { setLocalUploadPurpose("documents"); setMobileUploadOpen(true); }} onOpenProjectFolder={() => setActive("Запуск проекта")} />
       )}
+      <YandexMailConnectionDialog
+        open={yandexMailDialogOpen}
+        initialEmail={currentUser?.email || ""}
+        busy={yandexMailBusy}
+        onClose={() => setYandexMailDialogOpen(false)}
+        onSubmit={connectYandexMail}
+      />
       <ContextualAssistant section={active} onAsk={openContextualAssistant} />
     </div>
   );
