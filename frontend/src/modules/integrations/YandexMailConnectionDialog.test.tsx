@@ -23,4 +23,23 @@ describe("YandexMailConnectionDialog", () => {
 
     expect(onSubmit).toHaveBeenCalledWith("mailbox@example.test", "app-password-123");
   });
+
+  it("submits a password injected into the field by a password manager", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<YandexMailConnectionDialog
+      open
+      initialEmail="mailbox@example.test"
+      busy={false}
+      onClose={vi.fn()}
+      onSubmit={onSubmit}
+    />);
+
+    const password = screen.getByLabelText("Пароль приложения «Почта»") as HTMLInputElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    valueSetter?.call(password, "manager-filled-password");
+
+    fireEvent.click(screen.getByRole("button", { name: "Подключить" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("mailbox@example.test", "manager-filled-password");
+  });
 });
