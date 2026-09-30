@@ -163,18 +163,10 @@
 
 /* PU-49: daily contract work is a full-width table with files under each row. */
 :root[data-display-theme] .shell .contract-workspace {
-  --contract-surface:#fff; --contract-soft:#f6f8fb; --contract-selected:#edf4ff;
-  --contract-line:#e1e7ef; --contract-text:#202e43; --contract-muted:#66758a; --contract-accent:#275dc3;
-  position:relative; display:grid; gap:14px; min-width:0; padding:18px;
-  border:1px solid var(--contract-line); border-radius:14px; background:var(--contract-surface); color:var(--contract-text); box-shadow:none;
-}
-:root[data-display-theme="dark"] .shell .contract-workspace {
-  --contract-surface:#102237; --contract-soft:#142a42; --contract-selected:#173755;
-  --contract-line:#2d4660; --contract-text:#e1ebf5; --contract-muted:#a1b2c6; --contract-accent:#82c9ff;
-}
-:root[data-comfort="true"] .shell .contract-workspace {
   --contract-surface:var(--read-surface); --contract-soft:var(--read-secondary); --contract-selected:var(--read-accent-fill);
   --contract-line:var(--read-rule); --contract-text:var(--read-text); --contract-muted:var(--read-muted); --contract-accent:var(--read-accent);
+  position:relative; display:grid; gap:14px; min-width:0; padding:18px;
+  border:1px solid var(--contract-line); border-radius:14px; background:var(--contract-surface); color:var(--contract-text); box-shadow:none;
 }
 :root[data-display-theme] .shell .contract-workspace .contract-scheme-head { position:static; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:0; height:auto; padding:0; border:0; background:transparent; }
 :root[data-display-theme] .shell .contract-workspace .contract-scheme-head h2 { margin:0; font-size:16px; color:var(--contract-text); }
