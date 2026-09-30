@@ -168,6 +168,12 @@
   position:relative; display:grid; gap:14px; min-width:0; padding:18px;
   border:1px solid var(--contract-line); border-radius:14px; background:var(--contract-surface); color:var(--contract-text); box-shadow:none;
 }
+:root[data-display-theme="dark"] .shell .contract-workspace {
+  --contract-surface:color-mix(in srgb,var(--read-surface) 88%,white);
+  --contract-soft:color-mix(in srgb,var(--read-secondary) 88%,white);
+  --contract-selected:color-mix(in srgb,var(--read-accent-fill) 92%,white);
+  --contract-line:color-mix(in srgb,var(--read-rule) 80%,white);
+}
 :root[data-display-theme] .shell .contract-workspace .contract-scheme-head { position:static; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:0; height:auto; padding:0; border:0; background:transparent; }
 :root[data-display-theme] .shell .contract-workspace .contract-scheme-head h2 { margin:0; font-size:16px; color:var(--contract-text); }
 :root[data-display-theme] .shell .contract-workspace .contract-scheme-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
