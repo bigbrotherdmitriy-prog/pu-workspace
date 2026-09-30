@@ -1,7 +1,8 @@
 .yandex-mail-backdrop { position:fixed; inset:0; z-index:1250; display:grid; place-items:center; padding:20px; background:rgba(3,12,24,.72); backdrop-filter:blur(4px); }
 .yandex-mail-dialog { width:min(560px,100%); display:grid; gap:17px; padding:22px; border:1px solid #285372; border-radius:18px; background:#0c2238; color:#e9f6ff; box-shadow:0 28px 90px #0009; }
-.yandex-mail-dialog header { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; }
-.yandex-mail-dialog header>span { display:grid; place-items:center; width:44px; height:44px; border-radius:13px; background:#ffcc00; color:#211b00; }
+.yandex-mail-dialog>header { position:static; z-index:auto; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; width:auto; height:auto; min-height:0; padding:0; border:0; background:transparent; color:inherit; box-shadow:none; }
+.yandex-mail-dialog>header>span { display:grid; place-items:center; width:44px; height:44px; border-radius:13px; background:#ffcc00; color:#211b00; }
+.yandex-mail-dialog>header h2 { color:inherit; }
 .yandex-mail-dialog h2,.yandex-mail-dialog p { margin:0; }
 .yandex-mail-dialog header small,.yandex-mail-dialog p,.yandex-mail-security { color:#afc5d7; }
 .yandex-mail-dialog label { display:grid; gap:7px; font-weight:700; }
