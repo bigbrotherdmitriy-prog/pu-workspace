@@ -44,6 +44,33 @@ describe("ContractScheme", () => {
     expect(onDropApplications).toHaveBeenCalledWith([file], 3);
   });
 
+  it("offers a picker and accepts legacy or unknown application extensions", () => {
+    const onDropApplications = vi.fn();
+    const { container } = render(<ContractScheme projectId={9} contracts={[
+      { id: 3, number: "Д-3", title: "Договор", contract_kind: "customer" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropApplications={onDropApplications} />);
+    fireEvent.click(container.querySelector(".contract-node-open")!);
+    const picker = container.querySelector<HTMLInputElement>('[aria-label="Выбрать приложения к договору"]')!;
+    expect(picker.accept).toBe("");
+    const legacy = new File(["legacy"], "Разрешение.doc", { type: "application/msword" });
+    const engineering = new File(["model"], "Модель.ifc", { type: "application/octet-stream" });
+    fireEvent.change(picker, { target: { files: [legacy, engineering] } });
+    expect(onDropApplications).toHaveBeenCalledWith([legacy, engineering], 3);
+  });
+
+  it("accepts Windows Explorer application drops exposed through DataTransfer.items", () => {
+    const onDropApplications = vi.fn();
+    const { container } = render(<ContractScheme projectId={9} contracts={[
+      { id: 3, number: "Д-3", title: "Договор", contract_kind: "customer" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropApplications={onDropApplications} />);
+    fireEvent.click(container.querySelector(".contract-node-open")!);
+    const legacy = new File(["legacy"], "Разрешение.doc", { type: "application/msword" });
+    fireEvent.drop(container.querySelector(".contract-application-drop")!, {
+      dataTransfer: { files: [], items: [{ kind: "file", getAsFile: () => legacy }] },
+    });
+    expect(onDropApplications).toHaveBeenCalledWith([legacy], 3);
+  });
+
   it("routes dropped GPR, budget and DDS files through the selected contract", () => {
     const onDropFinance = vi.fn();
     const { container } = render(<ContractScheme projectId={10} contracts={[

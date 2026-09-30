@@ -35,6 +35,7 @@ ALLOWED_RESULT_KEYS = frozenset({
     "processed", "skipped", "tasks", "risks", "decisions", "drafts", "documents",
 })
 DEFAULT_ALLOWED_MIME_TYPES = frozenset({
+    "application/octet-stream",
     "application/msword",
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -47,6 +48,15 @@ DEFAULT_ALLOWED_MIME_TYPES = frozenset({
     "text/csv",
     "text/markdown",
     "text/plain",
+})
+
+# Browser file pickers commonly report specialized engineering and legacy
+# document formats as application/octet-stream.  They are safe to preserve as
+# inert project evidence, but executable/script payloads must never enter this
+# generic document ingestion path.
+BLOCKED_BINARY_EXTENSIONS = frozenset({
+    "bat", "cmd", "com", "dll", "exe", "jar", "js", "jse", "msi",
+    "ps1", "scr", "vbe", "vbs", "wsf", "wsh",
 })
 
 
@@ -275,11 +285,6 @@ class LocalUploadBusinessProcessor:
         from app.task_engine import create_tasks_from_files
 
         text = extract_text(content, record.mime_type, record.display_name)
-        if not text:
-            return {
-                "processed": 0, "skipped": 1, "tasks": 0,
-                "risks": 0, "decisions": 0, "drafts": 0, "documents": [],
-            }
         item = DriveFile(
             id=f"local:{record.staging_id}",
             name=record.display_name,
@@ -291,6 +296,12 @@ class LocalUploadBusinessProcessor:
         )
         files = [item]
         documents = index_documents(session, record.scope.project_id, files, "local_upload")
+        if not text:
+            return {
+                "processed": 1, "skipped": 0, "tasks": 0,
+                "risks": 0, "decisions": 0, "drafts": 0,
+                "documents": [int(row.id) for row in documents],
+            }
         tasks = create_tasks_from_files(
             session, record.scope.project_id, None, files, source_type="local_upload",
         )
@@ -382,6 +393,9 @@ def admit_candidate(
     name = safe_display_name(display_name)
     mime = canonical_mime(mime_type)
     if mime not in allowed_mime_types:
+        raise LocalUploadAdmissionDenied("unsupported_mime_type")
+    extension = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    if mime == "application/octet-stream" and extension in BLOCKED_BINARY_EXTENSIONS:
         raise LocalUploadAdmissionDenied("unsupported_mime_type")
     if not isinstance(content, bytes):
         raise LocalUploadAdmissionDenied("invalid_content_stream")
