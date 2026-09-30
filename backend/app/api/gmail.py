@@ -392,13 +392,19 @@ def sync_gmail_read(project_id: int, payload: GmailSyncRequest,
                 (Message.mail_connection_id == connection.mail_connection_id)
                 & (Message.provider_message_id == external_id),
                 (Message.source_type == "email") & (Message.source_external_id == receipt_id),
+                (Message.source_type == "email") & Message.mail_connection_id.is_(None)
+                & (Message.source_external_id == external_id),
             ),
         ))
         if existing is not None:
-            if existing.project_id == project_id:
+            account_is_bound = (existing.mail_connection_id == connection.mail_connection_id
+                                or existing.source_external_id == receipt_id)
+            if existing.project_id == project_id and account_is_bound:
                 skipped += 1
             else:
                 excluded += 1
+            # Unbound legacy rows do not prove an account: neither reconcile nor
+            # duplicate them by guessing a mailbox, even in the same project.
             continue  # Never move, backfill, analyze or modify an existing row.
         subject = headers.get("subject") or "Письмо без темы"
         routed_id, confidence, evidence = project_candidate(db, project_id, f"{subject}\n{content}")

@@ -176,6 +176,24 @@ def test_explicit_ordinary_receipt_cannot_use_legacy_action_fallback(world, monk
     with pytest.raises(HTTPException) as exc:
         move_mail_message(row.id, MailMoveRequest(destination="trash"), w.db, w.user)
     assert exc.value.status_code == 409
+    from app.provider_actions.product import _gmail_material
+    from app.provider_actions.contracts import ProviderActionError
+    draft = SimpleNamespace(project_id=w.a.id, message_id=row.id, approved_revision=1,
+        revision=1, approved_by_user_id=w.user.id, attachments_json="[]")
+    with pytest.raises(ProviderActionError, match="mailbox_scope_mismatch"):
+        _gmail_material(w.db, draft, w.user.id)
+
+
+def test_legacy_unbound_mail_is_not_guessed_or_duplicated(world, monkeypatch):
+    w = world
+    legacy = Message(organization_id=w.org.id, project_id=w.a.id, created_by_user_id=w.user.id,
+        source_type="email", source_external_id="m1", source_name="Legacy",
+        content="old owner content", summary="old owner summary", context_evidence="unverified")
+    w.db.add(legacy); w.db.commit()
+    provider(monkeypatch, w, [item()])
+    assert sync(w)["excluded"] == 1
+    assert len(list(w.db.scalars(select(Message)))) == 1
+    assert legacy.mail_connection_id is None and legacy.summary == "old owner summary"
 
 
 def test_unverified_credentials_denied_before_provider(world, monkeypatch):
