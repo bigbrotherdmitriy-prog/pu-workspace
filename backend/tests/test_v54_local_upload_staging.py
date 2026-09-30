@@ -245,6 +245,70 @@ def test_legacy_doc_admission_routes_to_existing_antiword_extractor(monkeypatch)
     assert not Path(calls[0][1]).exists()
 
 
+def test_unknown_document_extension_is_preserved_but_executable_is_rejected():
+    candidate = admit_candidate(
+        "Модель.ifc", "application/octet-stream", b"inert model data",
+        max_file_bytes=1024,
+        allowed_mime_types=local_staging.DEFAULT_ALLOWED_MIME_TYPES,
+    )
+    assert candidate.display_name == "Модель.ifc"
+    assert candidate.mime_type == "application/octet-stream"
+
+    with pytest.raises(LocalUploadAdmissionDenied, match="unsupported_mime_type"):
+        admit_candidate(
+            "payload.exe", "application/octet-stream", b"binary",
+            max_file_bytes=1024,
+            allowed_mime_types=local_staging.DEFAULT_ALLOWED_MIME_TYPES,
+        )
+
+
+def test_business_processor_indexes_file_when_text_extraction_is_empty(monkeypatch):
+    from app import document_engine, governance_engine, response_engine, task_engine
+    from app.organizer_engine import content
+
+    indexed = []
+    monkeypatch.setattr(content, "extract_text", lambda *_args: "")
+
+    def index_documents(_session, project_id, files, source):
+        indexed.append((project_id, files, source))
+        return [SimpleNamespace(id=42)]
+
+    monkeypatch.setattr(document_engine, "index_documents", index_documents)
+    monkeypatch.setattr(
+        task_engine, "create_tasks_from_files",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("empty file must not create tasks")),
+    )
+    monkeypatch.setattr(
+        response_engine, "create_response_drafts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("empty file must not create drafts")),
+    )
+    monkeypatch.setattr(
+        governance_engine, "create_governance_items",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("empty file must not create governance")),
+    )
+    record = SimpleNamespace(
+        staging_id="1" * 32,
+        scope=UploadScope(owner_id=1, project_id=17),
+        display_name="Разрешение.doc",
+        mime_type="application/msword",
+        checksum="2" * 64,
+        size=128,
+    )
+
+    result = LocalUploadBusinessProcessor().process(
+        object(), record=record, content=b"legacy binary", operation_key="test",
+    )
+
+    assert result == {
+        "processed": 1, "skipped": 0, "tasks": 0, "risks": 0,
+        "decisions": 0, "drafts": 0, "documents": [42],
+    }
+    assert indexed[0][0] == 17
+    assert indexed[0][1][0].name == "Разрешение.doc"
+    assert indexed[0][1][0].content_text == ""
+    assert indexed[0][2] == "local_upload"
+
+
 def test_stage_encrypts_and_job_payload_is_metadata_only(tmp_path, monkeypatch):
     runtime, _, captured, queued, secret = stage_secret(tmp_path, monkeypatch)
     assert queued == EnqueuedUpload(queued.staging_id, 71, "queued")
