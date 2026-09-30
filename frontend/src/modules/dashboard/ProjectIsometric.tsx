@@ -25,10 +25,45 @@ const fragmentShader = `
 export function ProjectIsometric({ onSchedule, onFinance }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [fallback, setFallback] = useState(false);
+  const [mediaEnabled, setMediaEnabled] = useState(false);
+  const [modelReady, setModelReady] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
+    if (!host || navigator.userAgent.includes("jsdom")) return;
+
+    let idleHandle: number | undefined;
+    let timerHandle: number | undefined;
+    const schedule = () => {
+      const idleWindow = window as Window & {
+        requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
+      if (idleWindow.requestIdleCallback) {
+        idleHandle = idleWindow.requestIdleCallback(() => setMediaEnabled(true), { timeout: 1_500 });
+      } else {
+        timerHandle = window.setTimeout(() => setMediaEnabled(true), 800);
+      }
+    };
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      schedule();
+    }, { rootMargin: "160px" });
+    observer.observe(host);
+
+    return () => {
+      observer.disconnect();
+      if (idleHandle !== undefined) {
+        (window as Window & { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback?.(idleHandle);
+      }
+      if (timerHandle !== undefined) window.clearTimeout(timerHandle);
+    };
+  }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !mediaEnabled) return;
 
     // jsdom has a canvas element but no WebGL implementation. Use the poster in
     // unit tests; real browsers still exercise the video shader path.
@@ -43,7 +78,7 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
     video.muted = true;
     video.loop = true;
     video.playsInline = true;
-    video.preload = "auto";
+    video.preload = "metadata";
     // Вращение в 2 раза медленнее.
     video.playbackRate = 0.5;
     video.defaultPlaybackRate = 0.5;
@@ -85,7 +120,11 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const start = () => { if (!reducedMotion.matches) video.play().catch(() => undefined); };
-    video.addEventListener("loadeddata", () => { video.playbackRate = 0.5; start(); }, { once: true });
+    video.addEventListener("loadeddata", () => {
+      video.playbackRate = 0.5;
+      setModelReady(true);
+      start();
+    }, { once: true });
     video.addEventListener("error", () => setFallback(true), { once: true });
 
     // Поворот пальцем/мышью: перетаскивание прокручивает «вертушку», после отпускания вращение продолжается.
@@ -127,12 +166,12 @@ export function ProjectIsometric({ onSchedule, onFinance }: Props) {
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, []);
+  }, [mediaEnabled]);
 
   return <figure className="project-isometric" aria-label="Интерактивная модель центра обработки данных">
     <div className="fl-model-glow" aria-hidden="true" />
     <div className="future-twin-model-wrap future-twin-webgl" ref={hostRef} role="img" aria-label="Вращающаяся модель центра обработки данных">
-      {fallback && <img className="future-twin-model" src={POSTER_ASSET} alt="Модель центра обработки данных" />}
+      {(!modelReady || fallback) && <img className="future-twin-model" src={POSTER_ASSET} alt="Модель центра обработки данных" />}
     </div>
     <nav className="plant-scene-actions" aria-label="Разделы объекта">
       <button type="button" onClick={onSchedule}><i aria-hidden="true" />ГПР</button>
