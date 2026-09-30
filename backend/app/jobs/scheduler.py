@@ -8,7 +8,7 @@ from threading import Event
 from datetime import datetime, timezone
 
 from app.automations.ai_secretary import enabled as ai_enabled, interval_seconds as ai_interval
-from app.automations.gmail import enabled as gmail_enabled, interval_seconds as gmail_interval
+from app.automations.gmail import background_sweep_enabled as gmail_enabled, interval_seconds as gmail_interval
 from app.automations.notifications import enabled as notifications_enabled, interval_seconds as notifications_interval
 from app.database import SessionLocal
 from app.jobs.queue import enqueue, touch_service
