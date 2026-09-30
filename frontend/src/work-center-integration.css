@@ -140,3 +140,21 @@
 @media (max-width:900px){
   .future-light-dashboard .dashboard-hero .dashboard-hero-copy{padding:14px 16px;}
 }
+
+/* PU-46: final theme ownership for the Yandex Mail dialog header. */
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .yandex-mail-dialog > header{
+  position:static;
+  z-index:auto;
+  width:auto;
+  height:auto;
+  min-height:0;
+  padding:0;
+  border:0;
+  background:#0c2238;
+  color:#e9f6ff;
+  box-shadow:none;
+  backdrop-filter:none;
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .yandex-mail-dialog > header h2{
+  color:#e9f6ff;
+}
