@@ -71,6 +71,88 @@ def test_mpxj_relation_uses_the_endpoint_other_than_the_current_task():
     assert _relation(ReversedRelation(), current)["external_uid"] == "17"
 
 
+@pytest.mark.parametrize("relation_type", ["FS", "SS", "FF", "SF"])
+def test_mpxj_modern_relation_preserves_predecessor_type_and_lag(relation_type):
+    class ModernRelation:
+        def getPredecessorTask(self): return ValueTask(17)
+        def getSuccessorTask(self): return ValueTask(42)
+        def getType(self): return Value(relation_type)
+        def getLag(self): return Value("-2.0d")
+
+    assert _relation(ModernRelation(), ValueTask(42)) == {
+        "external_uid": "17", "type": relation_type, "lag": "-2.0d",
+    }
+
+
+@pytest.mark.parametrize("predecessor", [None, 42])
+def test_mpxj_modern_relation_does_not_replace_missing_or_self_predecessor(predecessor):
+    class ModernRelation(Relation):
+        def getPredecessorTask(self):
+            return ValueTask(predecessor) if predecessor is not None else None
+        def getSourceTask(self): raise AssertionError("modern API must take priority")
+        def getTargetTask(self): raise AssertionError("modern API must take priority")
+        def getLag(self): return None
+
+    assert _relation(ModernRelation(), ValueTask(42)) == {
+        "external_uid": None, "type": "FS", "lag": None,
+    }
+
+
+def test_installed_mpxj_java_relation_maps_real_predecessor():
+    from app.schedule_import.mpp import _universal_project_reader
+
+    _universal_project_reader()  # Missing/broken production parser must fail, not skip.
+    import jpype
+
+    project = jpype.JClass("org.mpxj.ProjectFile")()
+    predecessor = project.addTask()
+    predecessor.setName("Подготовка")
+    successor = project.addTask()
+    successor.setName("Монтаж")
+    successor.addPredecessor(
+        jpype.JClass("org.mpxj.Relation$Builder")().predecessorTask(predecessor)
+    )
+
+    task = map_mpxj_task(successor)
+    assert task.predecessors == [{
+        "external_uid": str(predecessor.getUniqueID()), "type": "FS", "lag": "0.0d",
+    }]
+    assert task.predecessors[0]["external_uid"] != task.external_uid
+
+
+def test_installed_mpxj_reader_imports_schedule_with_dependencies(tmp_path):
+    from datetime import date
+    from app.schedule_import.mpp import _universal_project_reader
+
+    reader = _universal_project_reader()
+    import jpype
+
+    # Generate a non-confidential fixture with the installed Java writer, then
+    # exercise the real reader + mapper used by binary MPP preview/import.
+    project = jpype.JClass("org.mpxj.ProjectFile")()
+    predecessor = project.addTask()
+    predecessor.setName("Подготовка")
+    successor = project.addTask()
+    successor.setName("Монтаж")
+    successor.setStart(jpype.JClass("java.time.LocalDateTime").of(2026, 9, 5, 8, 0))
+    successor.addPredecessor(
+        jpype.JClass("org.mpxj.Relation$Builder")().predecessorTask(predecessor).lag(
+            jpype.JClass("org.mpxj.Duration").getInstance(
+                jpype.JDouble(2), jpype.JClass("org.mpxj.TimeUnit").DAYS,
+            )
+        )
+    )
+    source = tmp_path / "regression.xml"
+    jpype.JClass("org.mpxj.mspdi.MSPDIWriter")().write(project, str(source))
+    project = reader().read(str(source))
+    tasks = {str(task.getName()): map_mpxj_task(task) for task in project.getTasks()
+             if task.getName() is not None}
+    assert tasks["Монтаж"].planned_start == date(2026, 9, 5)
+    assert tasks["Монтаж"].predecessors == [{
+        "external_uid": tasks["Подготовка"].external_uid, "type": "FS", "lag": "2.0d",
+    }]
+
+
 def test_mpxj_reader_prefers_the_current_org_namespace(monkeypatch):
     import app.schedule_import.mpp as mpp_module
 
