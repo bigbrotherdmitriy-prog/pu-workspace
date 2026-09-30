@@ -160,3 +160,101 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .yandex-mail-dialog > header h2{
   color:#e9f6ff;
 }
+
+/* PU-49: the contract register is the daily-working view; the free canvas is optional. */
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace{
+  gap:16px;
+  padding:20px;
+  border:1px solid rgba(75,184,231,.34);
+  border-radius:20px;
+  background:rgba(5,22,39,.9);
+  color:#edf8ff;
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace .contract-scheme-head{
+  padding:0;
+  background:transparent;
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace .contract-scheme-head p{color:#9fb5c7;}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace .contract-scheme-tools button{
+  min-height:40px;
+  border-color:#285675;
+  border-radius:11px;
+  background:#102b43;
+  color:#d9effc;
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace .contract-scheme-tools button.selected{
+  border-color:#43c9f4;
+  background:#165177;
+  color:#fff;
+  box-shadow:0 0 0 2px rgba(67,201,244,.14);
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace .contract-scheme-file-drop{
+  margin:0;
+  padding:13px 16px;
+  border-color:#286487;
+  background:#0b2942;
+  color:#dff7ff;
+}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace .contract-scheme-file-drop small{color:#9fb8ca;}
+.contract-register-layout{display:grid;grid-template-columns:minmax(330px,420px) minmax(0,1fr);gap:16px;min-height:520px;}
+.contract-register-list,.contract-register-detail{min-width:0;border:1px solid #294d68;border-radius:16px;background:#0a2035;overflow:hidden;}
+.contract-register-list{display:grid;grid-template-rows:auto auto minmax(0,1fr);}
+.contract-register-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px;padding:14px;border-bottom:1px solid #294d68;}
+.contract-register-toolbar label{display:flex;align-items:center;gap:8px;min-width:0;padding:0 11px;border:1px solid #376481;border-radius:10px;background:#06192b;}
+.contract-register-toolbar svg{width:17px;flex:none;color:#62d6ff;}
+.contract-register-toolbar input,.contract-register-toolbar select{width:100%;min-width:0;min-height:40px;border:0;background:transparent;color:#edf8ff;font:inherit;outline:0;}
+.contract-register-toolbar select{padding:0 10px;border:1px solid #376481;border-radius:10px;background:#06192b;color-scheme:dark;}
+.contract-register-toolbar option{background:#071827;color:#edf8ff;}
+.contract-register-count{padding:9px 15px;color:#94adbf;font-size:12px;border-bottom:1px solid #203f58;}
+.contract-register-count strong{color:#62d6ff;}
+.contract-register-rows{overflow:auto;padding:8px;}
+.contract-register-row{--row-accent:#43c9f4;position:relative;margin-left:min(calc(var(--contract-depth) * 18px),72px);border:1px solid transparent;border-radius:12px;background:#0d2941;transition:.15s ease;}
+.contract-register-row+.contract-register-row{margin-top:6px;}
+.contract-register-row[data-kind="downstream_subcontract"]{--row-accent:#ff9c36;}
+.contract-register-row[data-kind="supply"]{--row-accent:#b5a2ff;}
+.contract-register-row:hover,.contract-register-row.selected{border-color:var(--row-accent);background:#123652;}
+.contract-register-row.selected{box-shadow:inset 3px 0 0 var(--row-accent);}
+.contract-register-open{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:9px;align-items:center;width:100%;padding:11px 42px 11px 11px;border:0;text-align:left;background:transparent;color:#edf8ff;cursor:pointer;}
+.contract-register-open>span:nth-child(2){display:grid;gap:2px;min-width:0;}
+.contract-register-open small{color:var(--row-accent);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;}
+.contract-register-open strong,.contract-register-open b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.contract-register-open strong{font-size:15px;}
+.contract-register-open b{color:#aebfce;font-size:12px;font-weight:600;}
+.contract-register-open em{padding:4px 7px;border-radius:99px;background:#183f5d;color:#bfeeff;font-size:10px;font-style:normal;white-space:nowrap;}
+.contract-register-branch{color:var(--row-accent);font-weight:900;}
+.contract-register-delete{position:absolute;right:8px;top:50%;display:grid;place-items:center;width:30px;height:30px;padding:7px;transform:translateY(-50%);border:0;border-radius:8px;background:transparent;color:#9db1c0;cursor:pointer;}
+.contract-register-delete:hover{background:#652738;color:#ffd8df;}
+.contract-register-detail{padding:20px;overflow:auto;}
+.contract-register-detail-head{display:flex;justify-content:space-between;gap:16px;padding-bottom:16px;border-bottom:1px solid #294d68;}
+.contract-register-detail-head h3,.contract-register-detail-head p{margin:4px 0 0;}
+.contract-register-detail-head p{color:#9fb5c7;}
+.contract-register-status{align-self:flex-start;padding:5px 9px;border-radius:99px;background:#164d45;color:#91f1d4;font-size:11px;text-transform:uppercase;}
+.contract-register-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0;}
+.contract-register-facts div{padding:12px;border:1px solid #294d68;border-radius:11px;background:#0d2941;}
+.contract-register-facts dt{color:#87a2b6;font-size:10px;text-transform:uppercase;letter-spacing:.06em;}
+.contract-register-facts dd{margin:5px 0 0;color:#effaff;font-weight:700;}
+.contract-register-link label{display:grid;gap:6px;color:#9fb5c7;font-size:12px;}
+.contract-register-link select{min-height:42px;padding:0 11px;border:1px solid #376481;border-radius:10px;background:#071b2d;color:#edf8ff;color-scheme:dark;}
+.contract-register-detail h4{margin:20px 0 9px;}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-register-detail :is(.contract-scheme-documents>button,.contract-application-drop,.contract-finance-drops label){border-color:#315875;background:#0d2941;color:#e8f7ff;}
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-register-detail :is(.contract-scheme-documents small,.contract-application-drop small,.contract-finance-drops small){color:#9fb5c7;}
+.contract-register-empty{display:grid;place-items:center;align-content:center;gap:7px;min-height:220px;padding:24px;text-align:center;color:#8fa9bc;}
+.contract-register-empty svg{width:30px;color:#55c9f2;}
+@media(max-width:1050px){.contract-register-layout{grid-template-columns:1fr;}.contract-register-list{max-height:430px;}.contract-register-facts{grid-template-columns:1fr 1fr;}}
+@media(max-width:700px){
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .contract-workspace{padding:14px;border-radius:15px;}
+  .contract-workspace .contract-scheme-head{display:grid;}
+  .contract-workspace .contract-scheme-tools{display:grid;grid-template-columns:1fr 1fr;}
+  .contract-register-toolbar{grid-template-columns:1fr;}
+  .contract-register-facts{grid-template-columns:1fr;}
+  .contract-register-open{grid-template-columns:18px minmax(0,1fr);}
+  .contract-register-open em{display:none;}
+}
+.contract-advanced-list{margin-top:14px;border:1px solid rgba(93,201,255,.22);border-radius:14px;background:rgba(5,21,39,.58);overflow:hidden}
+.contract-advanced-list>summary{display:flex;align-items:center;gap:10px;padding:14px 18px;color:#b8d2e4;font-weight:800;cursor:pointer;list-style:none;user-select:none}
+.contract-advanced-list>summary::-webkit-details-marker{display:none}
+.contract-advanced-list>summary:before{content:"+";display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:#123b59;color:#69dbff;font-size:18px}
+.contract-advanced-list[open]>summary{border-bottom:1px solid rgba(93,201,255,.18)}
+.contract-advanced-list[open]>summary:before{content:"−"}
+.contract-advanced-list>.contract-project-root,.contract-advanced-list>.contract-card,.contract-advanced-list>.empty{margin-left:14px;margin-right:14px}
+.contract-advanced-list>.contract-project-root{margin-top:14px}

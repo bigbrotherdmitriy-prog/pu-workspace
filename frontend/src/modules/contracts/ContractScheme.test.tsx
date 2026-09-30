@@ -1,21 +1,35 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ContractScheme } from "./ContractScheme";
 
 describe("ContractScheme", () => {
+  it("opens as a compact register and filters contracts without showing the canvas", () => {
+    const { container } = render(<ContractScheme projectId={6} contracts={[
+      { id: 1, number: "ГП-1", title: "Генподряд", counterparty: "Заказчик", contract_kind: "prime_reference" },
+      { id: 2, number: "СП-2", title: "Монтаж", counterparty: "Исполнитель", contract_kind: "downstream_subcontract", parent_contract_id: 1 },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} />);
+
+    expect(within(container).getByRole("heading", { name: "Реестр договоров" })).toBeInTheDocument();
+    expect(container.querySelector(".contract-scheme-scroll")).not.toBeInTheDocument();
+    fireEvent.change(within(container).getByLabelText("Поиск договоров"), { target: { value: "Исполнитель" } });
+    expect(within(container).getByText("СП-2")).toBeInTheDocument();
+    expect(within(container).getByText("Найдено:").parentElement).toHaveTextContent("2");
+  });
+
   it("connects parent to child and opens linked documents", () => {
     const onConnect = vi.fn();
     const onOpenDocument = vi.fn();
-    render(<ContractScheme projectId={7} contracts={[
+    const { container } = render(<ContractScheme projectId={7} contracts={[
       { id: 1, number: "ГП-1", title: "Генподряд", contract_kind: "prime_reference" },
       { id: 2, number: "СП-2", title: "Наш договор", contract_kind: "revenue_subcontract", linked_documents: [{ id: 9, name: "Договор.pdf" }] },
     ]} onConnect={onConnect} onOpenDocument={onOpenDocument} />);
-    fireEvent.click(screen.getByRole("button", { name: /Связать договоры/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Генподряд ГП-1/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Наш договор СП-2/ }));
+    fireEvent.click(within(container).getByRole("button", { name: "Схема связей" }));
+    fireEvent.click(within(container).getByRole("button", { name: /Связать договоры/ }));
+    fireEvent.click(within(container).getByRole("button", { name: /Генподряд ГП-1/ }));
+    fireEvent.click(within(container).getByRole("button", { name: /Наш договор СП-2/ }));
     expect(onConnect).toHaveBeenCalledWith(1, 2);
-    fireEvent.click(screen.getByRole("button", { name: /Наш договор СП-2/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Договор.pdf/ }));
+    fireEvent.click(within(container).getByRole("button", { name: /Наш договор СП-2/ }));
+    fireEvent.click(within(container).getByRole("button", { name: /Договор.pdf/ }));
     expect(onOpenDocument).toHaveBeenCalledWith(9);
   });
 
@@ -25,6 +39,7 @@ describe("ContractScheme", () => {
       { id: 1, number: "ГП-1", title: "Генподряд", contract_kind: "prime_reference" },
       { id: 2, number: "СП-2", title: "Исполнитель", contract_kind: "downstream_subcontract", parent_contract_id: 1 },
     ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} />);
+    fireEvent.click(within(container).getByRole("button", { name: "Схема связей" }));
     const nodes = Array.from(container.querySelectorAll<HTMLElement>(".contract-scheme-node"));
     expect(`${nodes[0].style.left}:${nodes[0].style.top}`).not.toBe(`${nodes[1].style.left}:${nodes[1].style.top}`);
     expect(screen.getByText("← ГП-1")).toBeInTheDocument();

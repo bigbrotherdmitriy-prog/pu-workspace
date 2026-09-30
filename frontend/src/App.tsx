@@ -3729,6 +3729,8 @@ export function App() {
                 onDropFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
                 operationStatus={contractDropStatus}
               />
+              <details className="contract-advanced-list">
+                <summary>Расширенное редактирование карточек</summary>
               <header className="contract-project-root">
                 <FolderKanban />
                 <div><span>ПРОЕКТ · КОРЕНЬ ДЕРЕВА</span><h2>{projects.find((project) => project.id === projectId)?.name || "Выбранный проект"}</h2><p>Все договоры проекта собраны в единую цепочку подчинённости</p></div>
@@ -3925,6 +3927,7 @@ export function App() {
                   <p>В проекте пока нет договоров.</p>
                 </div>
               )}
+              </details>
             </section>
         </ContractsModule>
       )}
