@@ -91,6 +91,13 @@ def test_v54_workflow_is_branch_scoped_and_has_safe_artifact():
     )
     assert upload["with"]["path"] == "v54-runtime-artifacts/protocol.json"
     assert "backend/app/react_dist" not in text
+    steps = parsed["jobs"]["runtime"]["steps"]
+    names = [step.get("name") for step in steps]
+    parser_index = names.index("Prepare production-compatible MPP parser runtime")
+    assert names.index("Install pinned backend dependencies") < parser_index
+    assert parser_index < names.index("Run isolated migration, A/B/C, corpus and process faults")
+    assert "default-jre-headless" in steps[parser_index]["run"]
+    assert "_universal_project_reader()" in steps[parser_index]["run"]
 
 
 def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
