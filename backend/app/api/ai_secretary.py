@@ -397,20 +397,8 @@ def _create_completion_suggestions(db: Session, row: Message) -> list[TaskComple
 @router.get("/inbox")
 def inbox(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
-    project = db.get(Project, project_id)
-    if user.is_admin:
-        accessible_project_ids = list(db.scalars(select(Project.id).where(Project.organization_id == project.organization_id)))
-    else:
-        accessible_project_ids = list(db.scalars(
-            select(ProjectMember.project_id).join(Project, Project.id == ProjectMember.project_id).where(
-                ProjectMember.user_id == user.id,
-                Project.organization_id == project.organization_id,
-            )
-        ))
     rows = list(db.scalars(select(Message).where(
-        Message.organization_id == project.organization_id,
-        Message.project_id.in_(accessible_project_ids),
-        (Message.project_id == project_id) | (Message.context_confirmed.is_(False)),
+        Message.project_id == project_id,
     ).order_by(Message.created_at.desc(), Message.id.desc()).limit(200)))
     return {"messages": [_message_payload(db, row, actor=user) for row in rows], "count": len(rows)}
 

@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 import app.models  # noqa: F401
-from app.api.ai_secretary import BulkContextConfirmation, IncomingMessage, ingest_message, router as secretary_router
+from app.api.ai_secretary import BulkContextConfirmation, IncomingMessage, inbox, ingest_message, router as secretary_router
 from app.api.tasks import router as task_router
 from app.database import Base
 from app.models.organization_contract import Organization
@@ -84,6 +84,35 @@ def test_nonactionable_machine_message_is_filtered_but_retained():
         assert result["drafts"] == []
         assert result["risks"] == []
         assert "Служебное письмо без действий" in result["summary"]
+
+
+def test_inbox_is_strictly_scoped_to_selected_project():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        organization = Organization(name="Тестовая организация")
+        user = User(name="Оператор", email="operator@example.test")
+        db.add_all([organization, user])
+        db.flush()
+        selected = Project(name="Выбранный проект", organization_id=organization.id)
+        other = Project(name="Другой проект", organization_id=organization.id)
+        db.add_all([selected, other])
+        db.flush()
+        db.add_all([
+            ProjectMember(project_id=selected.id, user_id=user.id, role="owner"),
+            ProjectMember(project_id=other.id, user_id=user.id, role="owner"),
+        ])
+        db.commit()
+
+        ingest_message(IncomingMessage(
+            project_id=selected.id, source_name="Selected", content="Selected project message",
+        ), db, user)
+        ingest_message(IncomingMessage(
+            project_id=other.id, source_name="Other", content="Unconfirmed other project message",
+        ), db, user)
+
+        result = inbox(selected.id, db, user)
+        assert [message["project_id"] for message in result["messages"]] == [selected.id]
 
 
 def test_bulk_context_confirmation_dedicated_payload():
