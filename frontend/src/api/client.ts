@@ -39,7 +39,8 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
         ...options.headers,
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(
       `Сервер недоступен. Проверьте соединение и повторите попытку. Код обращения: ${requestId}`,
       null,
