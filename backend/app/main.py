@@ -43,6 +43,7 @@ from app.api.drive import router as drive_router
 from app.api.google_drive import router as google_drive_router
 from app.api.mvp1_google_oauth import router as mvp1_google_oauth_router
 from app.api.yandex_disk import router as yandex_disk_router
+from app.api.yandex_mail import router as yandex_mail_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
 from app.models import (
@@ -158,6 +159,7 @@ app.include_router(project_search_router)
 app.include_router(saved_search_views_router)
 app.include_router(execution_finance_router)
 app.include_router(gmail_router)
+app.include_router(yandex_mail_router)
 app.include_router(ai_policy_router)
 app.include_router(analytics_router)
 app.include_router(integrations_router)

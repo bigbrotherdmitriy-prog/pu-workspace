@@ -8,7 +8,7 @@ export type IntegrationItem = {
   description: string;
   available: boolean;
   connected: boolean;
-  action?: "oauth" | "sync" | "select_source" | "local_upload" | "ai_policy";
+  action?: "oauth" | "configure" | "sync" | "select_source" | "local_upload" | "ai_policy";
   detail?: string;
 };
 
@@ -25,7 +25,8 @@ type Props = {
   systemState: SystemState | null;
   gmailSyncing: boolean;
   gmailSyncStatus: string;
-  onSyncGmail: () => void;
+  syncingProvider: string;
+  onSyncChannel: (provider: string) => void;
   onSelectFolder: (provider: string) => void;
   onConnectProvider: (provider: string) => void;
   onLocalUpload: () => void;
@@ -47,7 +48,8 @@ export function IntegrationsModule({
   systemState,
   gmailSyncing,
   gmailSyncStatus,
-  onSyncGmail,
+  syncingProvider,
+  onSyncChannel,
   onSelectFolder,
   onConnectProvider,
   onLocalUpload,
@@ -89,19 +91,19 @@ export function IntegrationsModule({
                 {item.connected ? "Готово" : item.available ? "Не подключено" : "Недоступно"}
               </span>
               {item.action === "sync" && item.connected ? (
-                <button onClick={onSyncGmail} disabled={gmailSyncing}>
-                  {gmailSyncing ? "Получаю…" : "Получить письма"}
+                <button onClick={() => onSyncChannel(item.provider)} disabled={gmailSyncing}>
+                  {gmailSyncing && syncingProvider === item.provider ? "Получаю…" : "Получить письма"}
                 </button>
               ) : item.action === "select_source" && item.connected ? (
                 <button onClick={() => onSelectFolder(item.provider)}>Выбрать папку</button>
-              ) : item.action === "oauth" ? (
+              ) : item.action === "oauth" || item.action === "configure" ? (
                 <button onClick={() => onConnectProvider(item.provider)} disabled={!item.available}>{item.connected ? "Переподключить" : "Подключить"}</button>
               ) : item.action === "local_upload" ? (
                 <button onClick={onLocalUpload} disabled={!item.available}>Загрузить папку</button>
               ) : item.action === "ai_policy" ? (
                 <button onClick={onOpenAIPolicy}>Политика AI</button>
               ) : null}
-              {item.action === "sync" && gmailSyncStatus && (
+              {item.action === "sync" && item.provider === syncingProvider && gmailSyncStatus && (
                 <div className="integration-sync-result">
                   <small>{gmailSyncStatus}</small>
                   {!gmailSyncing && <button onClick={onOpenGmailResults}>Открыть AI Secretary</button>}
