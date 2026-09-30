@@ -876,15 +876,20 @@ export function App() {
       setGmailSyncStatus(message);
       if (!options.silent || result.processed > 0) setNotice(`Gmail: ${message}`);
       if (result.processed > 0 || !options.silent) await load();
-      if (projectIdRef.current === requestedProjectId && !options.silent) await loadIntegrations();
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (projectIdRef.current !== requestedProjectId) return;
       const message = (e as Error).message;
       setGmailSyncStatus(`Не удалось получить письма: ${message}`);
       if (!options.silent) setError(message);
-      const google = await api(`/projects/${requestedProjectId}/google/status`).catch(() => null);
-      if (google && projectIdRef.current === requestedProjectId) setGoogleState(google);
+      const [google, catalog] = await Promise.all([
+        api(`/projects/${requestedProjectId}/google/status`).catch(() => null),
+        api(`/integrations/project?project_id=${requestedProjectId}`).catch(() => null),
+      ]);
+      if (projectIdRef.current === requestedProjectId) {
+        if (google) setGoogleState(google);
+        if (catalog) setIntegrationItems(catalog.adapters);
+      }
     } finally {
       if (mailSyncAbortRef.current === controller) {
         mailSyncAbortRef.current = null;
