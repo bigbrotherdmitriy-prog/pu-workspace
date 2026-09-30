@@ -188,8 +188,9 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       <div className="contract-scheme-documents">{selected.linked_documents?.map((document) => <button key={document.id} onClick={() => onOpenDocument(document.id)}><FileText /><span><strong>{document.name}</strong><small>{document.source || "Документ проекта"}</small></span></button>)}
         {!selected.linked_documents?.length && <p>Документы ещё не привязаны. Добавьте документ-источник в карточке договора ниже.</p>}
       </div>
-      <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropApplications?.(files, selected.id); }}>
-        <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите приложения, графики, спецификации и дополнительные соглашения — включая фото и сканы. Они будут проверены вместе с договором.</small></span>
+      <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = filesFromTransfer(event.dataTransfer); if (files.length) onDropApplications?.(files, selected.id); }}>
+        <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите файлы сюда или нажмите для выбора. Документы любых расширений до 10 МБ сохранятся; поддерживаемые форматы дополнительно пройдут распознавание.</small></span>
+        <input aria-label="Выбрать приложения к договору" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropApplications?.(files, selected.id); event.currentTarget.value = ""; }} />
       </label>
       <div className="contract-finance-drops">
         {([['schedule', 'ГПР', 'Этапы и сроки'], ['budget', 'Бюджет', 'Смета и план затрат'], ['cash-flow', 'ДДС', 'Платёжный календарь']] as const).map(([kind, title, hint]) =>

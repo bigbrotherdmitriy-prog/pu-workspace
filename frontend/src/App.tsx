@@ -589,6 +589,7 @@ export function App() {
   }, [active, invoiceExtractionProposal, financeStructuredPreview]);
   const loadSequenceRef = useRef(0);
   const documentRequestRef = useRef(0);
+  const mailSyncAbortRef = useRef<AbortController | null>(null);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
   const offlineSync = useOfflineSync(currentUser?.id || 0, projectId, () => { void load(); });
   useEffect(() => {
@@ -862,6 +863,10 @@ export function App() {
   }
   async function syncGmail(options: { silent?: boolean; folder?: MailFolderKind } = {}) {
     if (gmailSyncing || !projectId) return;
+    const requestedProjectId = projectId;
+    mailSyncAbortRef.current?.abort();
+    const controller = new AbortController();
+    mailSyncAbortRef.current = controller;
     try {
       if (!options.silent) setError("");
       setGmailSyncing(true);
@@ -869,10 +874,12 @@ export function App() {
       if (!options.silent) setGmailSyncStatus(options.folder
         ? "Получаю до 25 последних писем выбранной папки…"
         : "Получаю последние письма за 7 дней…");
-      const result = await api(`/projects/${projectId}/gmail/sync`, {
+      const result = await api(`/projects/${requestedProjectId}/gmail/sync`, {
         method: "POST",
         body: JSON.stringify(mailSyncRequest(options.folder)),
+        signal: controller.signal,
       });
+      if (projectIdRef.current !== requestedProjectId) return;
       const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const reclassified = Number(result.reclassified || 0);
       const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Перенесено в фильтр: ${reclassified}. Ошибок: ${result.failed}.`;
@@ -880,35 +887,49 @@ export function App() {
       if (!options.silent || result.processed > 0) setNotice(`Gmail: ${message}`);
       if (result.processed > 0 || !options.silent) await load();
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       const message = (e as Error).message;
       setGmailSyncStatus(`Не удалось получить письма: ${message}`);
       if (!options.silent) setError(message);
     } finally {
-      setGmailSyncing(false);
+      if (mailSyncAbortRef.current === controller) {
+        mailSyncAbortRef.current = null;
+        setGmailSyncing(false);
+      }
     }
   }
   async function syncYandexMail() {
     if (gmailSyncing || !projectId) return;
+    const requestedProjectId = projectId;
+    mailSyncAbortRef.current?.abort();
+    const controller = new AbortController();
+    mailSyncAbortRef.current = controller;
     try {
       setError("");
       setGmailSyncing(true);
       setMailSyncProvider("yandex_mail");
       setGmailSyncStatus("Получаю до 25 последних писем Яндекс Почты за 7 дней…");
-      const result = await api(`/projects/${projectId}/yandex-mail/sync`, {
+      const result = await api(`/projects/${requestedProjectId}/yandex-mail/sync`, {
         method: "POST",
         body: JSON.stringify({ days: 7, max_results: 25 }),
+        signal: controller.signal,
       });
+      if (projectIdRef.current !== requestedProjectId) return;
       const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Ошибок: ${result.failed}.`;
       setGmailSyncStatus(message);
       setNotice(`Яндекс Почта: ${message}`);
       await load();
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       const message = (e as Error).message;
       setGmailSyncStatus(`Не удалось получить письма: ${message}`);
       setError(message);
     } finally {
-      setGmailSyncing(false);
+      if (mailSyncAbortRef.current === controller) {
+        mailSyncAbortRef.current = null;
+        setGmailSyncing(false);
+      }
     }
   }
   async function syncMailProvider(provider: string) {
@@ -1093,17 +1114,17 @@ export function App() {
     } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Загрузка не завершена: ${message}`); setError(message); }
   }
   async function uploadContractApplications(files: File[], contractId: number) {
-    const supported = files.filter((file) => /\.(pdf|docx?|xlsx?|txt|csv|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
-    const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
-    if (!supported.length) { setError("Выберите приложение в PDF, Word, Excel, CSV либо фото/скан JPG, PNG или TIFF."); return; }
+    const accepted = files.slice(0, 50);
+    const oversized = accepted.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
+    if (!accepted.length) { setError("Выберите хотя бы один файл приложения к договору."); return; }
     if (oversized) { setError(`${oversized.name}: файл больше 10 МБ`); return; }
     try {
-      setError(""); setNotice(`Загружаю приложения к договору: ${supported.length}…`);
-      const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
+      setError(""); setNotice(`Загружаю приложения к договору: ${accepted.length}…`);
+      const payload = await Promise.all(accepted.map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
       const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
       const documentIds = completed.documents;
-      if (!documentIds.length) throw new Error("Текст приложений не извлечён");
+      if (!documentIds.length) throw new Error("Файлы приложений не сохранены");
       const expected = contracts.find((item) => item.id === contractId)?.record_version;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds }) });
@@ -2282,14 +2303,20 @@ export function App() {
     if (ready && projectId && active === "Интеграции") loadIntegrations();
   }, [ready, projectId, active]);
   useEffect(() => {
-    if (!ready || !projectId || !googleState?.gmail_authorized) return;
-    const initial = window.setTimeout(() => syncGmail({ silent: true }), 12000);
-    const timer = window.setInterval(() => syncGmail({ silent: true }), 5 * 60 * 1000);
+    if (!ready || !projectId || active !== "Письма") return;
+    if (!yandexMailConnected && !googleState?.gmail_authorized) return;
+    const syncCurrentProjectMail = () => {
+      if (yandexMailConnected) void syncYandexMail();
+      else void syncGmail({ silent: true });
+    };
+    const initial = window.setTimeout(syncCurrentProjectMail, 1000);
+    const timer = window.setInterval(syncCurrentProjectMail, 5 * 60 * 1000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
+      mailSyncAbortRef.current?.abort();
     };
-  }, [ready, projectId, googleState?.gmail_authorized]);
+  }, [ready, projectId, active, yandexMailConnected, googleState?.gmail_authorized]);
   useEffect(() => {
     if (!ready || !snapshots.some((item) => item.status === "building")) return;
     const timer = window.setInterval(load, 5000);

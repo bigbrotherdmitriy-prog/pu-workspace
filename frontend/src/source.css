@@ -391,10 +391,11 @@
 .contract-scheme-file-drop input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
 .contract-scheme.drop-active { box-shadow:0 0 0 4px rgba(7,134,95,.15); }
 .contract-drop-feedback { margin:-4px 0 12px; padding:9px 12px; border-radius:9px; background:#eaf7f3; color:#13745f; font-weight:700; }
-.contract-application-drop { display:flex; align-items:center; gap:10px; margin-top:14px; padding:14px; border:2px dashed #81b9a5; border-radius:12px; color:#176b53; background:#f1faf6; }
+.contract-application-drop { position:relative; display:flex; align-items:center; gap:10px; margin-top:14px; padding:14px; border:2px dashed #81b9a5; border-radius:12px; color:#176b53; background:#f1faf6; cursor:pointer; }
 .contract-application-drop svg { width:22px; flex:none; }
 .contract-application-drop span { display:grid; gap:4px; }
 .contract-application-drop small { color:#60776e; }
+.contract-application-drop input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
 .contract-finance-drops { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:10px; }
 .contract-finance-drops label { display:flex; align-items:center; gap:8px; padding:12px; border:1px dashed #77a99a; border-radius:10px; color:#145f4b; background:#f7fbf9; cursor:copy; }
 .contract-finance-drops svg { width:19px; flex:none; }
