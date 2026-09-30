@@ -8,9 +8,9 @@ def test_finance_workspaces_are_extracted_from_app_monolith():
     app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     module = (ROOT / "frontend" / "src" / "modules" / "finance" / "FinanceModule.tsx").read_text(encoding="utf-8")
 
-    assert 'from "./modules/finance/GprDdsWorkspace"' in app
-    assert 'from "./modules/finance/GprWorkspace"' in app
-    assert 'from "./modules/finance/DdsWorkspace"' in app
+    assert 'import("./modules/finance/GprDdsWorkspace")' in app
+    assert 'import("./modules/finance/GprWorkspace")' in app
+    assert 'import("./modules/finance/DdsWorkspace")' in app
     assert "<GprDdsWorkspace" in app
     assert "<GprWorkspace" in app
     assert "<DdsWorkspace" in app
