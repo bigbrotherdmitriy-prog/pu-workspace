@@ -79,7 +79,7 @@ export function ContractsModule({
             <input aria-label="Аванс, ₽" type="number" min="0" step="0.01" value={advanceAmount} onChange={(event) => onAdvanceAmountChange(event.target.value)} placeholder="Аванс, ₽" />
             <input aria-label="Удержание, %" type="number" min="0" max="100" step="0.01" value={retentionPercent} onChange={(event) => onRetentionPercentChange(event.target.value)} placeholder="Удержание, %" />
             <label>Дата подписания<input aria-label="Дата подписания договора" type="date" value={signedAt} onChange={(event) => onSignedAtChange(event.target.value)} /></label>
-            <button disabled={!number.trim() || !title.trim() || (!["prime_reference", "customer"].includes(kind) && !parentContractId)} onClick={onCreate}>Добавить</button>
+            <button disabled={!number.trim() || !title.trim() || (!["prime_reference", "customer"].includes(kind) && !parentContractId)} onClick={onCreate}>Добавить договор</button>
           </div>
         </details>
         {children}

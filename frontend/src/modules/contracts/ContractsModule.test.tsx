@@ -56,14 +56,14 @@ describe("ContractsModule", () => {
     expect(screen.getByLabelText("Аванс, ₽")).toHaveValue(0);
     expect(screen.getByLabelText("Удержание, %")).toHaveValue(5);
     expect(screen.getByLabelText("Дата подписания договора")).toHaveValue("2026-08-31");
-    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Добавить договор" }));
     expect(onCreate).toHaveBeenCalledOnce();
   });
 
   it.each([{ number: " " }, { title: " " }, { kind: "revenue_subcontract" as const }])("preserves required-field validation for %j", (overrides) => {
     const onCreate = renderModule(overrides);
     fireEvent.click(screen.getByText("Создать договор"));
-    const createButton = screen.getByRole("button", { name: "Добавить" });
+    const createButton = screen.getByRole("button", { name: "Добавить договор" });
     expect(createButton).toBeDisabled();
     fireEvent.click(createButton);
     expect(onCreate).not.toHaveBeenCalled();
