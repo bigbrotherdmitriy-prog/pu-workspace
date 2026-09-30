@@ -1,45 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy as reactLazy, Suspense, useEffect, useRef, useState } from "react";
+import type { ComponentProps, ComponentType } from "react";
 import { api, ApiError } from "./api/client";
 import { Login } from "./auth/Login";
 import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
 import { useStoragePicker } from "./modules/integrations/useStoragePicker";
 import { useFinanceController } from "./modules/finance/useFinanceController";
-import { FinanceModule } from "./modules/finance/FinanceModule";
-import { DdsWorkspace } from "./modules/finance/DdsWorkspace";
-import { GprWorkspace } from "./modules/finance/GprWorkspace";
-import { GprDdsWorkspace, type GprDdsTab } from "./modules/finance/GprDdsWorkspace";
-import { FinanceOperations } from "./modules/finance/FinanceOperations";
+import type { GprDdsTab } from "./modules/finance/GprDdsWorkspace";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { AttentionPanel } from "./modules/attention/AttentionPanel";
 import { messageWorkflowClass, messageWorkflowLabel, type MessageWorkflowState } from "./modules/ai-secretary/messageWorkflow";
-import { ProjectLaunchWizard } from "./modules/project-launch/ProjectLaunchWizard";
-import { IntegrationsModule, type IntegrationItem, type SystemState } from "./modules/integrations/IntegrationsModule";
-import { YandexMailConnectionDialog } from "./modules/integrations/YandexMailConnectionDialog";
-import { ContractsModule } from "./modules/contracts/ContractsModule";
-import { ContractDocumentPicker } from "./modules/contracts/ContractDocumentPicker";
+import type { IntegrationItem, SystemState } from "./modules/integrations/IntegrationsModule";
 import { buildContractTree } from "./modules/contracts/contractTree";
-import { ContractScheme, type SchemeDocument } from "./modules/contracts/ContractScheme";
+import type { SchemeDocument } from "./modules/contracts/ContractScheme";
 import { requestContractDeletionConfirmation } from "./modules/contracts/contractDeletion";
-import { ContractBulkImportWizard, type BulkContractCandidate, type BulkContractProposal, type ContractDiscoveryProgress } from "./modules/contracts/ContractBulkImportWizard";
-import { NotificationsModule, type ManagementDigest, type NotificationItem, type NotificationPolicy } from "./modules/notifications/NotificationsModule";
-import { TodayModule } from "./modules/today/TodayModule";
-import { InboxModule } from "./modules/inbox/InboxModule";
+import type { BulkContractCandidate, BulkContractProposal, ContractDiscoveryProgress } from "./modules/contracts/ContractBulkImportWizard";
+import type { ManagementDigest, NotificationItem, NotificationPolicy } from "./modules/notifications/NotificationsModule";
 import { messageNeedsAttention } from "./modules/inbox/messageAttention";
 import {
   inboxTaskDelivery, type ProviderEffect, type ProviderEffects,
 } from "./modules/inbox/providerTaskState";
-import { MailClientModule } from "./modules/mail/MailClientModule";
 import { mailSyncRequest } from "./modules/mail/mailSyncRequest";
 import type { MailFolderKind } from "./modules/mail/types";
 import { EmailCompensationCard, type EmailCompensationOffer } from "./modules/inbox/EmailCompensationCard";
 import { EvidencePanel, type EvidenceRef } from "./modules/evidence/EvidencePanel";
-import { DocumentsModule, type DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
-import { ProposalsModule, type Proposal, type ProposalAction } from "./modules/proposals/ProposalsModule";
-import { AuditModule, type AuditRow } from "./modules/audit/AuditModule";
-import { ObligationsModule, type ObligationRow } from "./modules/obligations/ObligationsModule";
+import type { DocumentCard as DocumentDetailModel } from "./modules/documents/DocumentsModule";
+import type { Proposal, ProposalAction } from "./modules/proposals/ProposalsModule";
+import type { AuditRow } from "./modules/audit/AuditModule";
+import type { ObligationRow } from "./modules/obligations/ObligationsModule";
 import {
-  MeetingsModule,
   type BookableResourceRow,
   type MeetingAuthorityState,
   type MeetingProposal,
@@ -55,14 +44,13 @@ import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine
 import { useOfflineSync } from "./offline/useOfflineSync";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
 import { uploadInvoiceBatch } from "./modules/finance/invoiceUploadTransport";
-import { ContactsModule, type ProjectContact } from "./modules/contacts/ContactsModule";
-import { AnalyticsModule, type ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
-import { SettingsModule, type AIProjectPolicy, type ProcessingQueue } from "./modules/settings/SettingsModule";
+import type { ProjectContact } from "./modules/contacts/ContactsModule";
+import type { ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
+import type { AIProjectPolicy, ProcessingQueue } from "./modules/settings/SettingsModule";
 import type { AutonomyReadiness } from "./modules/settings/AutonomyReadinessPanel";
-import { TasksModule, type TaskHistoryRow, type TaskRow } from "./modules/tasks/TasksModule";
-import { GovernanceModule, type DecisionRow, type RiskRow } from "./modules/governance/GovernanceModule";
+import type { TaskHistoryRow, TaskRow } from "./modules/tasks/TasksModule";
+import type { DecisionRow, RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
-import { WorkCenterDashboard } from "./modules/dashboard/WorkCenterDashboard";
 import { ComfortControls } from "./modules/settings/ComfortControls";
 import {
   Activity,
@@ -97,6 +85,46 @@ import {
   Trash2,
   TimerReset,
 } from "lucide-react";
+
+function lazy<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>): T {
+  const Component = reactLazy(loader);
+  function RouteChunk(props: ComponentProps<T>) {
+    return (
+      <Suspense fallback={<div className="app-route-loading" role="status">Загружаю экран…</div>}>
+        <Component {...props} />
+      </Suspense>
+    );
+  }
+  return RouteChunk as T;
+}
+
+const FinanceModule = lazy(() => import("./modules/finance/FinanceModule").then((m) => ({ default: m.FinanceModule })));
+const DdsWorkspace = lazy(() => import("./modules/finance/DdsWorkspace").then((m) => ({ default: m.DdsWorkspace })));
+const GprWorkspace = lazy(() => import("./modules/finance/GprWorkspace").then((m) => ({ default: m.GprWorkspace })));
+const GprDdsWorkspace = lazy(() => import("./modules/finance/GprDdsWorkspace").then((m) => ({ default: m.GprDdsWorkspace })));
+const FinanceOperations = lazy(() => import("./modules/finance/FinanceOperations").then((m) => ({ default: m.FinanceOperations })));
+const ProjectLaunchWizard = lazy(() => import("./modules/project-launch/ProjectLaunchWizard").then((m) => ({ default: m.ProjectLaunchWizard })));
+const IntegrationsModule = lazy(() => import("./modules/integrations/IntegrationsModule").then((m) => ({ default: m.IntegrationsModule })));
+const YandexMailConnectionDialog = lazy(() => import("./modules/integrations/YandexMailConnectionDialog").then((m) => ({ default: m.YandexMailConnectionDialog })));
+const ContractsModule = lazy(() => import("./modules/contracts/ContractsModule").then((m) => ({ default: m.ContractsModule })));
+const ContractDocumentPicker = lazy(() => import("./modules/contracts/ContractDocumentPicker").then((m) => ({ default: m.ContractDocumentPicker })));
+const ContractScheme = lazy(() => import("./modules/contracts/ContractScheme").then((m) => ({ default: m.ContractScheme })));
+const ContractBulkImportWizard = lazy(() => import("./modules/contracts/ContractBulkImportWizard").then((m) => ({ default: m.ContractBulkImportWizard })));
+const NotificationsModule = lazy(() => import("./modules/notifications/NotificationsModule").then((m) => ({ default: m.NotificationsModule })));
+const TodayModule = lazy(() => import("./modules/today/TodayModule").then((m) => ({ default: m.TodayModule })));
+const InboxModule = lazy(() => import("./modules/inbox/InboxModule").then((m) => ({ default: m.InboxModule })));
+const MailClientModule = lazy(() => import("./modules/mail/MailClientModule").then((m) => ({ default: m.MailClientModule })));
+const DocumentsModule = lazy(() => import("./modules/documents/DocumentsModule").then((m) => ({ default: m.DocumentsModule })));
+const ProposalsModule = lazy(() => import("./modules/proposals/ProposalsModule").then((m) => ({ default: m.ProposalsModule })));
+const AuditModule = lazy(() => import("./modules/audit/AuditModule").then((m) => ({ default: m.AuditModule })));
+const ObligationsModule = lazy(() => import("./modules/obligations/ObligationsModule").then((m) => ({ default: m.ObligationsModule })));
+const MeetingsModule = lazy(() => import("./modules/meetings/MeetingsModule").then((m) => ({ default: m.MeetingsModule })));
+const ContactsModule = lazy(() => import("./modules/contacts/ContactsModule").then((m) => ({ default: m.ContactsModule })));
+const AnalyticsModule = lazy(() => import("./modules/analytics/AnalyticsModule").then((m) => ({ default: m.AnalyticsModule })));
+const SettingsModule = lazy(() => import("./modules/settings/SettingsModule").then((m) => ({ default: m.SettingsModule })));
+const TasksModule = lazy(() => import("./modules/tasks/TasksModule").then((m) => ({ default: m.TasksModule })));
+const GovernanceModule = lazy(() => import("./modules/governance/GovernanceModule").then((m) => ({ default: m.GovernanceModule })));
+const WorkCenterDashboard = lazy(() => import("./modules/dashboard/WorkCenterDashboard").then((m) => ({ default: m.WorkCenterDashboard })));
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
