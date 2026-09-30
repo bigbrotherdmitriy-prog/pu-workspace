@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./styles.css";
@@ -18,7 +18,13 @@ import "./work-center-integration.css";
 import { applyDisplayPreference } from "./modules/settings/ComfortControls";
 
 applyDisplayPreference();
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <Suspense fallback={<div className="app-route-loading" role="status">Загружаю экран…</div>}>
+      <App />
+    </Suspense>
+  </React.StrictMode>,
+);
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
