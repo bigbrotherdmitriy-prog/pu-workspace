@@ -11,13 +11,17 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.ai_secretary import IncomingMessage, ingest_message, project_candidate
 from app.api.project_contacts import contact_for_sender, discover_contact_from_message
 from app.integrations.google_workspace import google_workspace_for_project
 from app.integrations.google_workspace import google_workspace_for_mailbox
+from app.integrations.gmail_read import RECEIPT_PREFIX, record_read_result, resolve_project_gmail_read
+from app.models.project_contact import ProjectContact
+from google.auth.exceptions import RefreshError
+from googleapiclient.errors import HttpError
 from app.mailbox_identity.runtime import (
     observe_gmail_message,
     require_mailbox_authority,
@@ -334,6 +338,112 @@ def _backfill_automated_messages_for_user(db: Session, user: User) -> int:
 def sync_gmail(project_id: int, payload: GmailSyncRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "editor")
     return sync_gmail_project(project_id, db, user, query=payload.query, max_results=payload.max_results)
+
+
+@router.post("/projects/{project_id}/gmail/read-sync")
+def sync_gmail_read(project_id: int, payload: GmailSyncRequest,
+                    db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Explicit ordinary read: no pilot fallback, analysis, sends or AUTO origin."""
+    require_project_role(db, user, project_id, "editor")
+    connection = resolve_project_gmail_read(db, project_id)
+    try:
+        # Exact selected-project credential, even when another project uses the
+        # same Google subject. Only list/get are invoked on the provider.
+        service = google_workspace_for_mailbox(connection.token_id, db).service("gmail", "v1")
+        messages = service.users().messages()
+        page = messages.list(userId="me", q=payload.query, maxResults=payload.max_results).execute()
+        refs = page.get("messages", [])
+        if not isinstance(refs, list) or len(refs) > payload.max_results:
+            raise ValueError("invalid_provider_page")
+        items = []
+        for ref in refs:
+            external_id = ref.get("id", "")
+            if not isinstance(external_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", external_id):
+                raise ValueError("invalid_provider_message_id")
+            item = messages.get(userId="me", id=external_id, format="full").execute()
+            if item.get("id") != external_id:
+                raise ValueError("provider_identity_mismatch")
+            headers = _headers(item.get("payload", {}))
+            content = _message_text(item.get("payload", {})) or item.get("snippet", "")
+            items.append((external_id, item, headers, content))
+    except Exception as exc:
+        db.rollback()
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        code = ("gmail_provider_authorization_failed" if isinstance(exc, RefreshError) or status == 401
+                else "gmail_provider_scope_denied" if isinstance(exc, HttpError) and status == 403
+                else "gmail_provider_unavailable")
+        record_read_result(db, connection, code=code)
+        db.commit()
+        raise HTTPException(502, code) from None
+
+    # Recheck own rotation/revocation and membership after network I/O. Locked
+    # identity also serializes dedup across projects sharing this mailbox.
+    current = resolve_project_gmail_read(db, project_id, lock=True)
+    require_project_role(db, user, project_id, "editor")
+    if current != connection:
+        db.rollback()
+        raise HTTPException(409, "gmail_connection_changed_retry_required")
+    processed = skipped = excluded = 0
+    for external_id, item, headers, content in items:
+        receipt_id = f"{RECEIPT_PREFIX}{connection.mail_connection_id}:{external_id}"
+        existing = db.scalar(select(Message).where(
+            Message.organization_id == connection.organization_id,
+            or_(
+                (Message.mail_connection_id == connection.mail_connection_id)
+                & (Message.provider_message_id == external_id),
+                (Message.source_type == "email") & (Message.source_external_id == receipt_id),
+            ),
+        ))
+        if existing is not None:
+            if existing.project_id == project_id:
+                skipped += 1
+            else:
+                excluded += 1
+            continue  # Never move, backfill, analyze or modify an existing row.
+        subject = headers.get("subject") or "Письмо без темы"
+        routed_id, confidence, evidence = project_candidate(db, project_id, f"{subject}\n{content}")
+        sender = headers.get("from", "")
+        sender_email = parseaddr(sender)[1].casefold()
+        contacts = list(db.scalars(select(ProjectContact).where(
+            ProjectContact.organization_id == connection.organization_id,
+            ProjectContact.mail_connection_id == connection.mail_connection_id,
+            ProjectContact.normalized_email == sender_email,
+            ProjectContact.active.is_(True), ProjectContact.confirmed.is_(True),
+            ProjectContact.resolution_state.in_(("confirmed", "corrected")),
+        ))) if sender_email else []
+        # Multiple project matches or contacts never become a fallback import.
+        if (confidence == 0.40 or len(contacts) > 1
+                or (contacts and contacts[0].project_id != project_id)
+                or (confidence >= 0.90 and routed_id != project_id)):
+            excluded += 1
+            continue
+        if confidence < 0.90:
+            if not contacts:
+                excluded += 1
+                continue
+            confidence, evidence = 0.95, "Подтверждённый контакт проекта в этом почтовом подключении"
+        bulk = _bulk_email_reason(headers, item.get("labelIds", []), subject, content)
+        row = Message(
+            organization_id=connection.organization_id, project_id=project_id,
+            created_by_user_id=user.id, source_type="email", source_external_id=receipt_id,
+            source_name=subject[:1000], source_sender=sender[:1000],
+            source_thread_id=str(item.get("threadId") or "")[:500],
+            source_url=f"https://mail.google.com/mail/u/0/#all/{external_id}",
+            content=content, summary=bulk or "Требуется подтверждение контекста; только чтение",
+            context_confidence=confidence, context_evidence=evidence,
+            context_confirmed=False, analysis_required=not bool(bulk),
+            status="filtered" if bulk else "needs_context_confirmation",
+            attachments_json=json.dumps(_attachments(item.get("payload", {})), ensure_ascii=False),
+            mail_headers_json=json.dumps(headers, ensure_ascii=False),
+            mail_labels_json=json.dumps(item.get("labelIds", [])),
+        )
+        db.add(row)
+        db.flush()
+        processed += 1
+    counts = dict(processed=processed, skipped=skipped, excluded=excluded, failed=0, reclassified=0)
+    record_read_result(db, connection, code="ok", counts=counts)
+    db.commit()
+    return {**counts, "project_id": project_id, "mode": "ordinary_read", "auto_enabled": False}
 
 
 def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:

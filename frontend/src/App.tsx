@@ -220,6 +220,7 @@ type GoogleState = {
   tasks_authorized: boolean;
   calendar_authorized: boolean;
   gmail_authorized: boolean;
+  gmail_sync_available?: boolean;
 };
 type CurrentUser = {
   id: number;
@@ -723,6 +724,7 @@ export function App() {
   }
   async function loadIntegrations() {
     if (!projectId) return;
+    const requestedProjectId = projectId;
     try {
       setError("");
       const [google, health, catalog] = await Promise.all([
@@ -730,10 +732,12 @@ export function App() {
         api("/api/readiness"),
         api(`/integrations/project?project_id=${projectId}`),
       ]);
+      if (projectIdRef.current !== requestedProjectId) return;
       setGoogleState(google);
       setSystemState(health);
       setIntegrationItems(catalog.adapters);
     } catch (e) {
+      if (projectIdRef.current !== requestedProjectId) return;
       setError((e as Error).message);
     }
   }
@@ -860,7 +864,7 @@ export function App() {
       if (!options.silent) setGmailSyncStatus(options.folder
         ? "Получаю до 25 последних писем выбранной папки…"
         : "Получаю последние письма за 7 дней…");
-      const result = await api(`/projects/${requestedProjectId}/gmail/sync`, {
+      const result = await api(`/projects/${requestedProjectId}/gmail/read-sync`, {
         method: "POST",
         body: JSON.stringify(mailSyncRequest(options.folder)),
         signal: controller.signal,
@@ -868,15 +872,19 @@ export function App() {
       if (projectIdRef.current !== requestedProjectId) return;
       const checkedAt = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const reclassified = Number(result.reclassified || 0);
-      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Перенесено в фильтр: ${reclassified}. Ошибок: ${result.failed}.`;
+      const message = `Проверено ${checkedAt}. Новых: ${result.processed}. Уже загружено: ${result.skipped}. Не отнесено к этому проекту: ${Number(result.excluded || 0)}. Перенесено в фильтр: ${reclassified}. Ошибок: ${result.failed}.`;
       setGmailSyncStatus(message);
       if (!options.silent || result.processed > 0) setNotice(`Gmail: ${message}`);
       if (result.processed > 0 || !options.silent) await load();
+      if (projectIdRef.current === requestedProjectId && !options.silent) await loadIntegrations();
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
+      if (projectIdRef.current !== requestedProjectId) return;
       const message = (e as Error).message;
       setGmailSyncStatus(`Не удалось получить письма: ${message}`);
       if (!options.silent) setError(message);
+      const google = await api(`/projects/${requestedProjectId}/google/status`).catch(() => null);
+      if (google && projectIdRef.current === requestedProjectId) setGoogleState(google);
     } finally {
       if (mailSyncAbortRef.current === controller) {
         mailSyncAbortRef.current = null;
@@ -2303,7 +2311,7 @@ export function App() {
   }, [ready, active, projects]);
   useEffect(() => {
     if (!ready || !projectId || active !== "Письма") return;
-    if (!yandexMailConnected && !googleState?.gmail_authorized) return;
+    if (!yandexMailConnected && !googleState?.gmail_sync_available) return;
     const syncCurrentProjectMail = () => {
       if (yandexMailConnected) void syncYandexMail();
       else void syncGmail({ silent: true });
@@ -2315,7 +2323,7 @@ export function App() {
       window.clearInterval(timer);
       mailSyncAbortRef.current?.abort();
     };
-  }, [ready, projectId, active, yandexMailConnected, googleState?.gmail_authorized]);
+  }, [ready, projectId, active, yandexMailConnected, googleState?.gmail_sync_available]);
   useEffect(() => {
     if (!ready || !snapshots.some((item) => item.status === "building")) return;
     const timer = window.setInterval(load, 5000);

@@ -7,6 +7,7 @@ type RawDraft = Omit<MailDraft, "to" | "cc" | "bcc" | "safe_error" | "receipt" |
   receipt?: { external_message_id?: string | null; sent_at?: string | null } | null;
 };
 type RawMessage = {
+  ordinary_read_only?: boolean;
   id: number; project_id: number; contract_id?: number | null; direction: "incoming" | "outgoing";
   thread_id: string; subject: string; sender?: string | null; content: string; summary?: string;
   headers?: { to?: string; cc?: string }; attachments?: MailMessage["attachments"];
@@ -55,6 +56,7 @@ function message(raw: RawMessage): MailMessage {
   const sender = raw.sender || "Отправитель не указан";
   return {
     id: raw.id, project_id: raw.project_id, contract_id: raw.contract_id,
+    ordinary_read_only: raw.ordinary_read_only,
     thread_id: raw.thread_id, direction: raw.direction, sender: { email: sender },
     to: addresses(raw.headers?.to), cc: addresses(raw.headers?.cc), subject: raw.subject,
     preview: raw.summary || plainPreview(raw.content), content: raw.content,
