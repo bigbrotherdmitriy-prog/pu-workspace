@@ -131,7 +131,7 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type Project = { id: number; name: string; archived_at?: string };
+type Project = { id: number; name: string; archived_at?: string; currency?: string };
 type ProjectStats = {
   attention: number;
   open_tasks: number;
@@ -235,7 +235,7 @@ type ContractRow = {
   counterparty?: string;
   contract_kind?: "prime_reference" | "customer" | "revenue_subcontract" | "downstream_subcontract" | "supply";
   parent_contract_id?: number;
-  amount?: number;
+  amount?: number | string;
   advance_amount?: number;
   retention_percent?: number;
   warranty_until?: string;
@@ -3702,16 +3702,17 @@ export function App() {
           onCreate={() => void createContract()}
         >
             <section className="contract-list">
-              <ContractBulkImportWizard
+              <ContractScheme
+                actions={<ContractBulkImportWizard
                 documents={documentRows}
                 contracts={contracts}
                 onFindCandidates={findContractCandidates}
                 onImport={importBulkContracts}
                 incomingProposals={droppedContractProposals}
                 onIncomingConsumed={() => setDroppedContractProposals([])}
-              />
-              <ContractScheme
+                />}
                 projectId={projectId}
+                currency={projects.find((project) => project.id === projectId)?.currency || "RUB"}
                 contracts={contracts}
                 onConnect={(parentId, childId) => {
                   const child = contracts.find((item) => item.id === childId);

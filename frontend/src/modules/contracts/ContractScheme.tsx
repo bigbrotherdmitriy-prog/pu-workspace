@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, FileText, FileUp, Link2, ListTree, Move, Network, Search, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Archive, ChevronDown, FileText, FileUp, Link2, ListTree, Move, Network, Search, Trash2, X } from "lucide-react";
 import { buildContractTree } from "./contractTree";
 
 export type SchemeDocument = { id: number; name: string; source?: string; source_url?: string };
@@ -11,6 +11,7 @@ export type SchemeContract = {
   contract_kind?: string;
   parent_contract_id?: number;
   status?: string;
+  amount?: number | string | null;
   linked_documents?: SchemeDocument[];
 };
 
@@ -27,6 +28,8 @@ type Props = {
   onDropApplications?: (files: File[], contractId: number) => void;
   onDropFinance?: (files: File[], contractId: number, kind: "schedule" | "budget" | "cash-flow") => void;
   operationStatus?: string;
+  currency?: string;
+  actions?: ReactNode;
 };
 
 const nodeWidth = 230;
@@ -68,7 +71,20 @@ function kindLabel(kind?: string) {
   return "Заказчик";
 }
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus }: Props) {
+// Decimal strings from the API stay strings: displaying a NUMERIC(18,2) amount
+// must not lose cents by converting it to a JavaScript number.
+function contractAmount(amount: SchemeContract["amount"], currency: string) {
+  if (amount === undefined || amount === null) return "Не указана";
+  const text = typeof amount === "number" ? amount.toFixed(2) : amount;
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(text);
+  if (!match) return "Не указана";
+  const whole = match[2].replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+  return `${match[1]}${whole},${(match[3] || "").padEnd(2, "0")} ${currency === "RUB" ? "₽" : currency}`;
+}
+
+const statusLabels: Record<string, string> = { draft: "Черновик", active: "Действует", completed: "Завершён", terminated: "Расторгнут", archived: "В архиве" };
+
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus, currency = "RUB", actions }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [view, setView] = useState<"register" | "scheme">("register");
   const [query, setQuery] = useState("");
@@ -83,8 +99,18 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
   const hierarchy = contracts.map((item) => `${item.id}:${item.parent_contract_id || 0}`).sort().join("|");
 
   useEffect(() => {
+    setSelectedId(null);
+    setQuery("");
+    setKindFilter("all");
+    setConnectingFrom(null);
+    setDropTargetId(null);
+    setDropFeedback("");
+  }, [projectId]);
+
+  useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
-    const restored = saved ? JSON.parse(saved) as Record<number, Point> : {};
+    let restored: Record<number, Point> = {};
+    try { restored = saved ? JSON.parse(saved) as Record<number, Point> : {}; } catch { /* Ignore damaged local layout preferences. */ }
     const previous = layoutRef.current;
     const hierarchyChanged = previous?.storageKey === storageKey && previous.hierarchy !== hierarchy;
     setPositions(hierarchyChanged ? defaultPositions(contracts) : restoreWithoutOverlaps(contracts, restored));
@@ -95,12 +121,16 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     if (contracts.length) window.localStorage.setItem(storageKey, JSON.stringify(positions));
   }, [storageKey, positions, contracts.length]);
 
-  const registerRows = useMemo(() => buildContractTree(contracts, query).filter(({ item }) =>
-    kindFilter === "all" || (item.contract_kind || "customer") === kindFilter,
-  ), [contracts, query, kindFilter]);
+  const registerRows = useMemo(() => {
+    const term = query.trim().toLocaleLowerCase("ru-RU");
+    return contracts.filter((item) =>
+      (kindFilter === "all" || (item.contract_kind || "customer") === kindFilter)
+      && (!term || [item.number, item.title, item.counterparty].some((value) => value?.toLocaleLowerCase("ru-RU").includes(term))),
+    );
+  }, [contracts, query, kindFilter]);
   const explicitlySelected = contracts.find((item) => item.id === selectedId);
   const selected = view === "register"
-    ? registerRows.find(({ item }) => item.id === selectedId)?.item || registerRows[0]?.item
+    ? registerRows.find((item) => item.id === selectedId)
     : explicitlySelected;
   const canvasHeight = Math.max(390, ...Object.values(positions).map((point) => point.y + nodeHeight + 45));
   const canvasWidth = Math.max(900, ...Object.values(positions).map((point) => point.x + nodeWidth + 45));
@@ -121,7 +151,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
 
   function deliverFiles(files: File[], parentContractId?: number) {
     if (!files.length) {
-      setDropFeedback("Файл не получен. Перетащите его из Проводника или нажмите на зелёную область и выберите вручную.");
+      setDropFeedback("Файл не получен. Перетащите его из Проводника или нажмите «Загрузить договор» и выберите вручную.");
       return;
     }
     setDropFeedback(`Получено файлов: ${files.length}. Передаю на загрузку и анализ…`);
@@ -145,77 +175,85 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     deliverFiles(files, parentContractId);
   }
 
-  const detailPanel = selected && <div className="contract-register-detail">
-    <div className="contract-register-detail-head">
-      <div><span className="eyebrow">{kindLabel(selected.contract_kind)}</span><h3>{selected.number}</h3><p>{selected.title}</p></div>
-      <b className={`contract-register-status ${selected.status || "active"}`}>{{ draft: "Черновик", active: "Действует", completed: "Завершён", terminated: "Расторгнут", archived: "В архиве" }[selected.status || "active"] || selected.status}</b>
+  const detailPanel = selected && <div className="contract-register-detail" id={`contract-files-${projectId}-${selected.id}`}>
+    <div className="contract-register-doc-head"><h3>Документы · {selected.linked_documents?.length || 0}</h3>
+      {onDropApplications && <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = filesFromTransfer(event.dataTransfer); if (files.length) onDropApplications(files, selected.id); }}>
+        <FileUp /><span>Добавить файл</span>
+        <input aria-label="Выбрать приложения к договору" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropApplications(files, selected.id); event.currentTarget.value = ""; }} />
+      </label>}
     </div>
-    <dl className="contract-register-facts">
-      <div><dt>Контрагент</dt><dd>{selected.counterparty || "Не указан"}</dd></div>
-      <div><dt>Вышестоящий договор</dt><dd>{selected.parent_contract_id ? contracts.find((item) => item.id === selected.parent_contract_id)?.number || `№${selected.parent_contract_id}` : "Корневой договор"}</dd></div>
-      <div><dt>Документы</dt><dd>{selected.linked_documents?.length || 0}</dd></div>
-    </dl>
+    <div className="contract-scheme-documents">{selected.linked_documents?.map((document) => <button key={document.id} onClick={() => onOpenDocument(document.id)}><FileText /><span><strong>{document.name}</strong><small>{document.source || "Документ проекта"}</small></span></button>)}
+      {!selected.linked_documents?.length && <p>Документы ещё не привязаны.</p>}
+    </div>
+    <details className="contract-row-actions"><summary>Действия с договором</summary>
     <div className="contract-register-link">
-      <label><span>Подчинить договору</span><select defaultValue="" onChange={(event) => { const parentId = Number(event.target.value); if (parentId) onConnect(parentId, selected.id); event.currentTarget.value = ""; }}>
+      <label><span>Подчинить договору</span><select aria-label="Вышестоящий договор" defaultValue="" onChange={(event) => { const parentId = Number(event.target.value); if (parentId) onConnect(parentId, selected.id); event.currentTarget.value = ""; }}>
         <option value="">Выберите вышестоящий договор</option>
         {contracts.filter((item) => item.id !== selected.id).map((item) => <option value={item.id} key={item.id}>{item.number} — {item.counterparty || item.title}</option>)}
       </select></label>
     </div>
-    <h4>Привязанные документы</h4>
-    <div className="contract-scheme-documents">{selected.linked_documents?.map((document) => <button key={document.id} onClick={() => onOpenDocument(document.id)}><FileText /><span><strong>{document.name}</strong><small>{document.source || "Документ проекта"}</small></span></button>)}
-      {!selected.linked_documents?.length && <p>Документы ещё не привязаны.</p>}
-    </div>
-    <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = filesFromTransfer(event.dataTransfer); if (files.length) onDropApplications?.(files, selected.id); }}>
-      <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите файлы или нажмите для выбора</small></span>
-      <input aria-label="Выбрать приложения к договору" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropApplications?.(files, selected.id); event.currentTarget.value = ""; }} />
-    </label>
+    {onDropFinance && <>
     <div className="contract-finance-drops">
       {([['schedule', 'ГПР', 'Этапы и сроки'], ['budget', 'Бюджет', 'Смета и план затрат'], ['cash-flow', 'ДДС', 'Платёжный календарь']] as const).map(([kind, title, hint]) =>
-        <label key={kind} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropFinance?.(files, selected.id, kind); }}>
+        <label key={kind} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = filesFromTransfer(event.dataTransfer); if (files.length) onDropFinance(files, selected.id, kind); }}>
           <FileUp /><span><strong>{title}</strong><small>{hint}</small></span>
+          <input aria-label={`Загрузить ${title} к договору`} type="file" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropFinance(files, selected.id, kind); event.currentTarget.value = ""; }} />
         </label>)}
     </div>
-    {onDelete && <div className="contract-scheme-delete-zone">
+    <p className="contract-finance-confirmation">После анализа откроется предварительный просмотр. ГПР, бюджет и ДДС изменятся только после вашего подтверждения.</p>
+    </>}
+    {(onDelete || onArchive) && <div className="contract-scheme-delete-zone">
       {onArchive && selected.status !== "archived" && <button className="secondary" onClick={() => onArchive(selected)}><Archive /> Архивировать договор</button>}
-      <button className="danger" onClick={() => onDelete(selected)}><Trash2 /> Удалить договор</button>
+      {onDelete && <button className="danger" onClick={() => onDelete(selected)}><Trash2 /> Удалить договор</button>}
     </div>}
+    </details>
   </div>;
 
-  return <section className={`card contract-scheme contract-workspace ${dropTargetId === -1 ? "drop-active" : ""}`} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) setDropTargetId(-1); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={(event) => acceptDrop(event)}>
-    <header className="contract-scheme-head">
-      <div><span className="eyebrow">ДОГОВОРНЫЙ КОНТУР</span><h2>{view === "register" ? "Реестр договоров" : "Схема связей"}</h2><p>{view === "register" ? "Быстрый поиск, структура и документы без горизонтальной прокрутки." : "Дополнительный режим для визуальной настройки подчинённости."}</p></div>
+  return <section className={`card contract-scheme contract-workspace ${dropTargetId === -1 ? "drop-active" : ""}`} onDragEnter={(event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (event.dataTransfer.types.includes("Files")) setDropTargetId(target?.closest(".contract-register-row, .contract-scheme-node, .contract-application-drop, .contract-finance-drops") ? null : -1);
+  }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetId(null); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={(event) => acceptDrop(event)}>
+    <div className="contract-scheme-head">
+      <h2>{view === "register" ? "Реестр договоров" : "Схема связей"}</h2>
       <div className="contract-scheme-tools">
-        <button className={view === "register" ? "selected" : "secondary"} onClick={() => setView("register")}><ListTree /> Реестр</button>
-        <button className={view === "scheme" ? "selected" : "secondary"} onClick={() => setView("scheme")}><Network /> Схема связей</button>
+        {view === "scheme" && <button className="secondary" onClick={() => { setView("register"); setConnectingFrom(null); }}><ListTree /> К таблице</button>}
+        {view === "register" && <button className="secondary" onClick={() => setView("scheme")}><Network /> Схема связей</button>}
+        {actions}
+        <label className="contract-upload-button"><FileUp /> Загрузить договор
+          <input aria-label="Выбрать файлы договоров" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,image/png,image/jpeg,image/tiff,image/bmp,image/webp" multiple onChange={(event) => { deliverFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} />
+        </label>
         {view === "scheme" && <><button className={connectingFrom !== null ? "selected" : ""} onClick={() => setConnectingFrom(connectingFrom === null ? -1 : null)}><Link2 /> {connectingFrom === null ? "Связать договоры" : connectingFrom === -1 ? "Выберите вышестоящий" : "Теперь выберите подчинённый"}</button>
         <button className="secondary" onClick={() => setPositions(defaultPositions(contracts))}><Network /> Выровнять</button></>}
       </div>
-    </header>
-    <label className={`contract-scheme-file-drop ${dropTargetId === -1 ? "active" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDropTargetId(-1); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropTargetId(-1); }} onDragLeave={() => setDropTargetId(null)} onDrop={(event) => acceptDrop(event)}>
-      <FileUp /><span><strong>Перетащите сюда договор из Проводника</strong><small>PDF, Word, Excel, CSV или фото/скан JPG, PNG, TIFF до 10 МБ · либо нажмите и выберите файл</small></span>
-      <input aria-label="Выбрать файлы договоров" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,image/png,image/jpeg,image/tiff,image/bmp,image/webp" multiple onChange={(event) => { deliverFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} />
-    </label>
+    </div>
+    {dropTargetId === -1 && <div className="contract-drop-overlay" onDragLeave={() => setDropTargetId(null)} onDrop={(event) => acceptDrop(event)}><FileUp /> Отпустите файлы, чтобы загрузить договор</div>}
     {(operationStatus || dropFeedback) && <p className="contract-drop-feedback" role="status">{operationStatus || dropFeedback}</p>}
-    {view === "register" && <div className="contract-register-layout">
-      <div className="contract-register-list">
+    {view === "register" && <div className="contract-register-table-wrap">
         <div className="contract-register-toolbar">
           <label><Search /><input aria-label="Поиск договоров" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Номер, название или контрагент" /></label>
           <select aria-label="Фильтр типа договора" value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
             <option value="all">Все типы</option><option value="prime_reference">Генподряд</option><option value="customer">Заказчик</option><option value="revenue_subcontract">Наш договор</option><option value="downstream_subcontract">Субподрядчики</option><option value="supply">Поставщики</option>
           </select>
+          <span className="contract-register-count">Найдено: <strong>{registerRows.length}</strong></span>
         </div>
-        <div className="contract-register-count">Найдено: <strong>{registerRows.length}</strong></div>
-        <div className="contract-register-rows">
-          {registerRows.map(({ item, depth, hasChildren }) => <article className={`contract-register-row ${selected?.id === item.id ? "selected" : ""}`} data-kind={item.contract_kind || "customer"} style={{ "--contract-depth": depth } as React.CSSProperties} key={item.id}>
-            <button className="contract-register-open" onClick={() => setSelectedId(item.id)} aria-label={`${kindLabel(item.contract_kind)} ${item.number} ${item.counterparty || item.title}`}>
-              <span className="contract-register-branch">{depth ? "└" : "●"}</span><span><small>{kindLabel(item.contract_kind)}{hasChildren ? " · есть подчинённые" : ""}</small><strong>{item.number}</strong><b>{item.counterparty || item.title}</b></span><em>{item.linked_documents?.length || 0} док.</em>
-            </button>
-            {onDelete && <button className="contract-register-delete" aria-label={`Удалить договор ${item.number}`} onClick={() => onDelete(item)}><Trash2 /></button>}
-          </article>)}
-          {!registerRows.length && <div className="contract-register-empty"><Search /><strong>Ничего не найдено</strong><span>Измените запрос или фильтр.</span></div>}
-        </div>
-      </div>
-      {detailPanel || <div className="contract-register-empty"><FileText /><strong>Выберите договор</strong><span>Справа появятся документы и действия.</span></div>}
+        <table className="contract-register-table" aria-label="Реестр договоров">
+          <thead><tr><th scope="col">Договор</th><th scope="col">Контрагент</th><th scope="col">Сумма</th><th scope="col">Срок окончания</th><th scope="col">Статус</th><th scope="col">Файлы</th></tr></thead>
+          <tbody>{registerRows.map((item) => {
+            const expanded = selected?.id === item.id;
+            const toggle = () => setSelectedId(expanded ? null : item.id);
+            return <Fragment key={item.id}><tr className={`contract-register-row ${expanded ? "selected" : ""}`} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDropTargetId(item.id); }} onDrop={(event) => acceptDrop(event, item.id)}>
+              <td data-label="Договор" className="contract-register-name"><button className="contract-register-open" aria-label={`${kindLabel(item.contract_kind)} ${item.number} ${item.title}`} aria-expanded={expanded} aria-controls={expanded ? `contract-files-${projectId}-${item.id}` : undefined} onClick={toggle}>{item.number}<ChevronDown /></button><span>{item.title}</span>
+                {item.parent_contract_id && <small>К договору {contracts.find((parent) => parent.id === item.parent_contract_id)?.number || `№${item.parent_contract_id}`}</small>}
+              </td>
+              <td data-label="Контрагент"><span>{item.counterparty || "Не указан"}</span><small>{kindLabel(item.contract_kind)}</small></td>
+              <td data-label="Сумма" className="contract-register-amount">{contractAmount(item.amount, currency)}</td>
+              <td data-label="Срок окончания" className="contract-register-deadline"><span title="Срок окончания пока не указан">Не указан</span></td>
+              <td data-label="Статус"><span className={`contract-register-status ${item.status || "active"}`}>{statusLabels[item.status || "active"] || item.status}</span></td>
+              <td data-label="Файлы"><button className="contract-register-files" aria-label={`Документы договора ${item.number}: ${item.linked_documents?.length || 0}`} aria-expanded={expanded} onClick={toggle}><FileText />{item.linked_documents?.length || 0}</button></td>
+            </tr>{expanded && <tr className="contract-register-expanded"><td colSpan={6}>{detailPanel}</td></tr>}</Fragment>;
+          })}</tbody>
+        </table>
+        {!registerRows.length && <div className="contract-register-empty"><Search /><strong>{contracts.length ? "Ничего не найдено" : "Договоров пока нет"}</strong><span>{contracts.length ? "Измените запрос или фильтр." : "Загрузите договор или создайте его вручную."}</span></div>}
     </div>}
     {view === "scheme" && <div className="contract-scheme-scroll">
       <div className={`contract-scheme-canvas ${dropTargetId === -1 ? "drop-active" : ""}`} style={{ width: canvasWidth, height: canvasHeight }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (event.target === event.currentTarget) setDropTargetId(-1); }} onDragLeave={(event) => { if (event.target === event.currentTarget) setDropTargetId(null); }} onDrop={(event) => acceptDrop(event)} onPointerMove={(event) => {
@@ -251,27 +289,8 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     {connectingFrom && connectingFrom > 0 && <p className="contract-scheme-hint">Выбран вышестоящий договор №{contracts.find((item) => item.id === connectingFrom)?.number}. Теперь нажмите на подчинённый блок.</p>}
     {selected && <aside className="contract-scheme-detail">
       <button className="icon-button" aria-label="Закрыть договор" onClick={() => setSelectedId(null)}><X /></button>
-      <span className="eyebrow">{kindLabel(selected.contract_kind)}</span><h3>{selected.number} — {selected.title}</h3><p>{selected.counterparty || "Контрагент не указан"}</p>
-      <h4>Привязанные документы</h4>
-      <div className="contract-scheme-documents">{selected.linked_documents?.map((document) => <button key={document.id} onClick={() => onOpenDocument(document.id)}><FileText /><span><strong>{document.name}</strong><small>{document.source || "Документ проекта"}</small></span></button>)}
-        {!selected.linked_documents?.length && <p>Документы ещё не привязаны. Добавьте документ-источник в карточке договора ниже.</p>}
-      </div>
-      <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = filesFromTransfer(event.dataTransfer); if (files.length) onDropApplications?.(files, selected.id); }}>
-        <FileUp /><span><strong>Приложения к этому договору</strong><small>Перетащите файлы сюда или нажмите для выбора. Документы любых расширений до 10 МБ сохранятся; поддерживаемые форматы дополнительно пройдут распознавание.</small></span>
-        <input aria-label="Выбрать приложения к договору" type="file" multiple onChange={(event) => { const files = Array.from(event.target.files || []); if (files.length) onDropApplications?.(files, selected.id); event.currentTarget.value = ""; }} />
-      </label>
-      <div className="contract-finance-drops">
-        {([['schedule', 'ГПР', 'Этапы и сроки'], ['budget', 'Бюджет', 'Смета и план затрат'], ['cash-flow', 'ДДС', 'Платёжный календарь']] as const).map(([kind, title, hint]) =>
-          <label key={kind} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = Array.from(event.dataTransfer.files || []); if (files.length) onDropFinance?.(files, selected.id, kind); }}>
-            <FileUp /><span><strong>{title}</strong><small>{hint}</small></span>
-          </label>)}
-      </div>
-      <p className="contract-finance-confirmation">После анализа откроется предварительный просмотр. Строки ГПР, бюджета и ДДС создаются только после вашего подтверждения.</p>
-      {onDelete && <div className="contract-scheme-delete-zone">
-        <p><strong>Архивирование и удаление</strong><small>Архив сохраняет все связи. Физическое удаление доступно только для договора без зависимостей.</small></p>
-        {onArchive && selected.status !== "archived" && <button className="secondary" onClick={() => onArchive(selected)}><Archive /> Архивировать договор</button>}
-        <button className="danger" onClick={() => onDelete(selected)}><Trash2 /> Удалить договор</button>
-      </div>}
+      <h3>{selected.number} — {selected.title}</h3>
+      {detailPanel}
     </aside>}</>}
   </section>;
 }
