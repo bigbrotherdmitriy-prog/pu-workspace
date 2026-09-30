@@ -8,6 +8,7 @@
 .yandex-mail-dialog label { display:grid; gap:7px; font-weight:700; }
 .yandex-mail-dialog input { min-height:44px; box-sizing:border-box; border:1px solid #37607d; border-radius:10px; padding:10px 12px; background:#071a2c; color:#fff; }
 .yandex-mail-dialog input:focus { outline:2px solid #52c8ff; outline-offset:2px; }
+.yandex-mail-error { padding:11px 13px; border:1px solid #ff6475; border-radius:10px; background:#431e2a; color:#ffd9de; font-size:.92rem; line-height:1.4; }
 .yandex-mail-dialog .icon-button { border:0; background:transparent; color:#d9edfa; }
 .yandex-mail-security { display:flex; align-items:flex-start; gap:9px; font-size:.9rem; }
 .yandex-mail-security svg { width:20px; flex:none; color:#50dcac; }

@@ -12,11 +12,13 @@ type Props = {
 
 export function YandexMailConnectionDialog({ open, initialEmail, busy, onClose, onSubmit }: Props) {
   const [email, setEmail] = useState(initialEmail);
+  const [submitError, setSubmitError] = useState("");
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
       setEmail(initialEmail);
+      setSubmitError("");
       if (passwordRef.current) passwordRef.current.value = "";
     }
   }, [open, initialEmail]);
@@ -26,8 +28,17 @@ export function YandexMailConnectionDialog({ open, initialEmail, busy, onClose, 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const appPassword = passwordRef.current?.value ?? "";
-    await onSubmit(email.trim(), appPassword);
-    if (passwordRef.current) passwordRef.current.value = "";
+    setSubmitError("");
+    try {
+      await onSubmit(email.trim(), appPassword);
+      if (passwordRef.current) passwordRef.current.value = "";
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Не удалось подключить Яндекс Почту.");
+      if (passwordRef.current) {
+        passwordRef.current.value = "";
+        passwordRef.current.focus();
+      }
+    }
   }
 
   return <div className="yandex-mail-backdrop" role="presentation">
@@ -46,6 +57,7 @@ export function YandexMailConnectionDialog({ open, initialEmail, busy, onClose, 
         <span>Пароль приложения «Почта»</span>
         <input ref={passwordRef} name="app_password" type="password" autoComplete="new-password" required minLength={8} placeholder="Не основной пароль" />
       </label>
+      {submitError && <div className="yandex-mail-error" role="alert">{submitError}</div>}
       <div className="yandex-mail-security"><ShieldCheck /><span>Пароль проверяется у Яндекса и хранится в зашифрованном виде. SMTP и AUTO не включаются.</span></div>
       <footer>
         <button type="button" className="secondary" onClick={onClose} disabled={busy}>Отмена</button>
