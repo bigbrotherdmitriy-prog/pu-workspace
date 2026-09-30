@@ -53,6 +53,10 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
       await expect(workspace).toHaveCSS("color", theme === "dark" ? "rgb(226, 232, 240)" : "rgb(65, 68, 63)");
       await expect(workspace.getByRole("table", { name: "Реестр договоров" })).toBeVisible();
       await expect(workspace.locator(".contract-register-row td").first()).toHaveCSS("background-color", surface);
+      // Audit the selected row and its expanded files/actions too: their
+      // highlighted background must keep secondary text readable.
+      await workspace.locator(".contract-register-open").first().click();
+      await expect(workspace.locator(".contract-register-detail")).toBeVisible();
     }
     if (name === "Интеграции") {
       const head = await page.locator(".integrations-command").boundingBox();

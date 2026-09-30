@@ -172,6 +172,7 @@
   --contract-surface:color-mix(in srgb,var(--read-surface) 88%,white);
   --contract-soft:color-mix(in srgb,var(--read-secondary) 88%,white);
   --contract-selected:color-mix(in srgb,var(--read-accent-fill) 92%,white);
+  --contract-muted:color-mix(in srgb,var(--read-muted) 88%,white);
   --contract-line:color-mix(in srgb,var(--read-rule) 80%,white);
 }
 :root[data-display-theme] .shell .contract-workspace .contract-scheme-head { position:static; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:0; height:auto; padding:0; border:0; background:transparent; }
