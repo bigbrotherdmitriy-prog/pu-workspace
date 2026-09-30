@@ -10,7 +10,7 @@ def test_finance_operations_are_extracted_from_app_shell() -> None:
     app = APP.read_text(encoding="utf-8")
     operations = OPERATIONS.read_text(encoding="utf-8")
 
-    assert 'from "./modules/finance/FinanceOperations"' in app
+    assert 'import("./modules/finance/FinanceOperations")' in app
     assert "<FinanceOperations" in app
     assert "structured-import" not in app
     assert "finance-entry" not in app
