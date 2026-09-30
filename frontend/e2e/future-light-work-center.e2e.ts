@@ -71,6 +71,10 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   expect(v5Layout.preferencesDisplay).toBe("flex");
   expect(v5Layout.preferencesAboveHero).toBe(true);
   expect(v5Layout.heroCopyBackground).not.toBe("none");
+  // PU-43: assert the text panel itself, never its .dashboard-hero parent.
+  await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("background-image", "linear-gradient(90deg, rgba(2, 8, 20, 0.78), rgba(2, 8, 20, 0.46))");
+  await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("padding", "18px 20px");
+  await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("border-radius", "18px");
   expect(v5Layout.focusInsideViewport).toBe(true);
   await expect(deck.locator(".future-twin-model-wrap canvas")).toBeVisible();
   await expect(deck.locator(".future-twin-model-wrap canvas")).toHaveAttribute("data-frame-ready", "true");
@@ -101,6 +105,8 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await page.getByRole("navigation", { name: "Основная мобильная навигация" }).getByRole("button", { name: "Центр" }).click();
   await expect(deck).toBeVisible();
   await expect(deck.locator(".dashboard-hero")).toHaveCSS("display", "flex");
+  await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("background-image", "linear-gradient(90deg, rgba(2, 8, 20, 0.78), rgba(2, 8, 20, 0.46))");
+  await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("padding", "14px 16px");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await testInfo.attach("future-light-390", {

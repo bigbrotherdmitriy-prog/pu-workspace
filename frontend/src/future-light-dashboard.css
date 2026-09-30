@@ -779,12 +779,7 @@
   color:#02101e; border-color:transparent;
   background:linear-gradient(90deg,var(--neon-cyan),#8cf6ff);
 }
-/* Подложка под текстом героя */
-.future-light-dashboard .dashboard-hero-copy{
-  padding:18px 20px!important; border-radius:18px!important;
-  background:linear-gradient(90deg,rgba(2,8,20,.74),rgba(2,8,20,.44))!important;
-  backdrop-filter:blur(4px)!important;
-}
+/* Hero-copy backdrop is owned by the final work-center-integration.css. */
 /* Карточка «Требует решения» не обрезается */
 .future-light-dashboard .dashboard-hero{
   grid-template-columns:minmax(300px,1fr) minmax(400px,1.3fr) minmax(300px,.95fr)!important;
@@ -799,5 +794,4 @@
 }
 @media (max-width:900px){
   .future-light-dashboard .dashboard-hero{grid-template-columns:minmax(0,1fr)!important;padding-right:0!important;}
-  .future-light-dashboard .dashboard-hero-copy{padding:14px 16px!important;}
 }
