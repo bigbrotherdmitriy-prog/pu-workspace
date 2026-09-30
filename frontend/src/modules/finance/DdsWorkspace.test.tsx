@@ -82,6 +82,8 @@ describe("DdsWorkspace", () => {
     expect(screen.getByText("Баланс накопленным итогом")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "ДДС по месяцам" }));
     expect(screen.getByText("январь 2026 г.")).toBeInTheDocument();
+    expect(screen.getByRole("table")).toHaveClass("dds-monthly-table");
+    expect(screen.getByRole("table").parentElement).toHaveClass("dds-months");
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.getByText("Оплата этапа")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Сводка" }));
