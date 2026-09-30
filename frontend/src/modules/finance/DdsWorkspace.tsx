@@ -28,6 +28,11 @@ type CashRow = NonNullable<FinanceOverview>["cash_flow"][number] & {
   category: string;
   note: string;
 };
+type CalendarRowGroup = {
+  key: string;
+  title: string;
+  items: CashRow[];
+};
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "months", label: "ДДС по месяцам" },
@@ -52,6 +57,22 @@ function amount(row: CashRow) {
 
 function actualAmount(row: CashRow) {
   return row.actual_date ? Number(row.actual_amount) : 0;
+}
+
+function normalizedCalendarLabel(value: string) {
+  return value.trim().replace(/\s+/gu, " ").toLocaleLowerCase("ru-RU");
+}
+
+function groupCalendarRows(rows: CashRow[]): CalendarRowGroup[] {
+  const groups = new Map<string, CalendarRowGroup>();
+  rows.forEach((row) => {
+    const title = row.title.trim() || row.title;
+    const key = [row.object, row.direction, normalizedCalendarLabel(row.category), normalizedCalendarLabel(title)].join("\u0000");
+    const existing = groups.get(key);
+    if (existing) existing.items.push(row);
+    else groups.set(key, { key, title, items: [row] });
+  });
+  return Array.from(groups.values());
 }
 
 function directionLabel(direction: string) {
@@ -102,7 +123,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
   }
   const [linkDrafts, setLinkDrafts] = useState<Record<number, { scheduleItemId: number; budgetLineId: number }>>({});
   const [currency, setCurrency] = useState("");
-  const [dragSourceId, setDragSourceId] = useState(0);
+  const dragSourceIdRef = useRef(0);
   const [pendingDrop, setPendingDrop] = useState<{ row: CashRow; month: string } | null>(null);
   const [undoStack, setUndoStack] = useState<number[]>([]);
   const allRows = useMemo<CashRow[]>(() => (finance?.cash_flow || [])
@@ -240,7 +261,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
     const day = Math.min(Number(pendingDrop.row.planned_date.slice(8, 10)) || 1, lastDay);
     await mutatePlan(pendingDrop.row, operation, `${pendingDrop.month}-${String(day).padStart(2, "0")}`, amount(pendingDrop.row));
-    setPendingDrop(null); setDragSourceId(0);
+    setPendingDrop(null); dragSourceIdRef.current = 0;
   };
   const undoLast = async () => {
     const mutationId = undoStack[undoStack.length - 1];
@@ -252,15 +273,38 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     const active = monthKey(row.planned_date) === key;
     const editable = row.status === "proposed" && !row.actual_date && Number(row.actual_amount) === 0;
     return <td className={`money dds-plan-cell ${active ? "filled" : ""}`} key={key}
-      onDragOver={(event) => { if (dragSourceId && dragSourceId !== row.id) return; event.preventDefault(); }}
-      onDrop={(event) => { event.preventDefault(); const source = visibleRows.find((item) => item.id === dragSourceId); if (source && monthKey(source.planned_date) !== key) setPendingDrop({ row: source, month: key }); }}>
-      {active && editable ? <div draggable onDragStart={() => setDragSourceId(row.id)} onDragEnd={() => setDragSourceId(0)}>
+      onDragOver={(event) => { if (dragSourceIdRef.current && dragSourceIdRef.current !== row.id) return; event.preventDefault(); }}
+      onDrop={(event) => { event.preventDefault(); const source = visibleRows.find((item) => item.id === dragSourceIdRef.current) || row; if (monthKey(source.planned_date) !== key) setPendingDrop({ row: source, month: key }); }}>
+      {active && editable ? <div draggable onDragStart={() => { dragSourceIdRef.current = row.id; }} onDragEnd={() => { dragSourceIdRef.current = 0; }}>
         <input aria-label={`План ${row.title} ${key}`} type="number" min="0.01" step="0.01" defaultValue={amount(row)}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
           onBlur={(event) => { const value = Number(event.target.value); if (Number.isFinite(value) && value > 0 && value !== amount(row)) void mutatePlan(row, "edit", row.planned_date, value); }} />
       </div> : active ? <span title="Подтверждённый план неизменяем; используйте корректировку">{formatMoney(amount(row))}</span> : "—"}
       {active && actualAmount(row) > 0 && <small>факт {formatMoney(actualAmount(row))}</small>}
     </td>;
+  };
+  const groupedPlanCell = (group: CalendarRowGroup, key: string) => {
+    if (group.items.length === 1) return planCell(group.items[0], key);
+    const matching = group.items.filter((row) => monthKey(row.planned_date) === key && row.status !== "cancelled");
+    if (matching.length === 1) return planCell(matching[0], key);
+    if (!matching.length) return <td className="money dds-plan-cell" key={key}
+      onDragOver={(event) => { if (dragSourceIdRef.current) event.preventDefault(); }}
+      onDrop={(event) => { event.preventDefault(); const source = visibleRows.find((item) => item.id === dragSourceIdRef.current); if (source && group.items.some((item) => item.id === source.id) && monthKey(source.planned_date) !== key) setPendingDrop({ row: source, month: key }); }}>—</td>;
+    const planned = matching.reduce((sum, row) => sum + amount(row), 0);
+    const actual = matching.reduce((sum, row) => sum + actualAmount(row), 0);
+    return <td className="money dds-plan-cell filled" key={key}>
+      <span title={`Сумма ${matching.length} операций`}>{formatMoney(planned)}</span>
+      <small>{matching.length} операций</small>
+      {actual > 0 && <small>факт {formatMoney(actual)}</small>}
+    </td>;
+  };
+  const calendarOperationRow = (group: CalendarRowGroup) => {
+    const scheduleIds = Array.from(new Set(group.items.map((row) => row.schedule_item_id).filter((id): id is number => Boolean(id))));
+    return <tr className="operation" id={`dds-row-${scheduleIds[0] || 0}`} key={group.key}>
+      <td className="operation-title">{group.title}{scheduleIds.map((id) => <button type="button" className="dds-schedule-link" key={id} onClick={() => onOpenSchedule?.(id)}>ГПР #{id}</button>)}</td>
+      <td className="money">{formatMoney(rowTotal(group.items))}</td>
+      {months.map((key) => groupedPlanCell(group, key))}
+    </tr>;
   };
   const exportView = (target: Tab = tab) => {
     const suffix = new Date().toISOString().slice(0, 10);
@@ -280,7 +324,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
           const matching = objectRows.filter((row) => row.category === category);
           if (!matching.length) return;
           data.push(["Статья", category, "", ...months.map((key) => matching.filter((row) => monthKey(row.planned_date) === key).reduce((sum, row) => sum + amount(row), 0)), matching.reduce((sum, row) => sum + amount(row), 0)]);
-          matching.forEach((row) => data.push(["Операция", row.title, directionLabel(row.direction), ...months.map((key) => monthKey(row.planned_date) === key ? amount(row) : ""), amount(row)]));
+          groupCalendarRows(matching).forEach((group) => data.push(["Операция", group.title, directionLabel(group.items[0].direction), ...months.map((key) => rowMonthTotal(group.items, key) || ""), rowTotal(group.items)]));
         });
       });
       downloadCsv(`ДДС_календарь_${suffix}.csv`, data);
@@ -347,8 +391,8 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
 
     {tab === "calendar" && <div className="dds-calendar-shell">{pendingDrop && <div className="dds-drop-choice" role="dialog" aria-label="Действие с плановой суммой"><strong>{pendingDrop.row.title}: {monthLong.format(monthDate(monthKey(pendingDrop.row.planned_date)))} → {monthLong.format(monthDate(pendingDrop.month))}</strong><button type="button" onClick={() => void applyDrop("move")}>Переместить</button><button type="button" className="secondary" onClick={() => void applyDrop("copy")}>Копировать</button><button type="button" className="secondary" onClick={() => setPendingDrop(null)}>Отмена</button></div>}<div className="dds-table-wrap dds-calendar" onWheel={(event) => { if (event.shiftKey) event.currentTarget.scrollLeft += event.deltaY; }}><table className="dds-table dds-template"><thead><tr><th>Статья ДДС</th><th>Итого за {calendarYearLabel}, {selectedCurrency}</th>{months.map((key) => <th key={key}>{monthLong.format(monthDate(key)).replace(/\s+\d{4}.*/, "")}</th>)}</tr></thead><tbody>
       <tr className="group inflow primary"><td>Платежи — всего</td><td className="money">{formatMoney(totals.inflow)}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(byMonth.find((item) => item.key === key)?.inflow || 0)}</td>)}</tr>
-      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "inflow"); if (!items.length) return []; return [<tr className="group inflow" key={`in-${object}`}><td>{object} — всего поступлений</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...items.map((row) => <tr className="operation" id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td className="operation-title">{row.title}{row.schedule_item_id && <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button>}</td><td className="money">{formatMoney(amount(row))}</td>{months.map((key) => planCell(row, key))}</tr>)]; })}
-      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "outflow"); if (!items.length) return []; return [<tr className="group outflow" key={`out-${object}`}><td>{object} — всего затрат</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...items.map((row) => <tr className="operation" id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td className="operation-title">{row.title}{row.schedule_item_id && <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button>}</td><td className="money">{formatMoney(amount(row))}</td>{months.map((key) => planCell(row, key))}</tr>)]; })}
+      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "inflow"); if (!items.length) return []; return [<tr className="group inflow" key={`in-${object}`}><td>{object} — всего поступлений</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items).map(calendarOperationRow)]; })}
+      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "outflow"); if (!items.length) return []; return [<tr className="group outflow" key={`out-${object}`}><td>{object} — всего затрат</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items).map(calendarOperationRow)]; })}
       <tr className="dds-expense-total"><td>Расходы по месяцам</td><td className="money">{formatMoney(totals.outflow)}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(byMonth.find((item) => item.key === key)?.outflow || 0)}</td>)}</tr>
       <tr className="dds-balance"><td>Баланс накопленным итогом</td><td className="money">{formatMoney(totals.net)}</td>{months.map((key) => <td className={`money ${(cumulative[key] || 0) < 0 ? "negative" : ""}`} key={key}>{formatMoney(cumulative[key] || 0)}</td>)}</tr>
     </tbody></table>{!visibleRows.length && <p className="dds-empty">Календарь появится после добавления операций.</p>}</div></div>}
