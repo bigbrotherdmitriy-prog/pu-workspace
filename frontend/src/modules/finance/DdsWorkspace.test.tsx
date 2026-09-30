@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DdsWorkspace } from "./DdsWorkspace";
 import type { FinanceOverview } from "./types";
@@ -142,6 +142,25 @@ describe("DdsWorkspace", () => {
     expect(click).toHaveBeenCalledTimes(4);
     expect(revokeObjectUrl).toHaveBeenCalledTimes(4);
     click.mockRestore();
+  });
+
+  it("combines equal cost names into one calendar row and sums every month", () => {
+    const repeatedCosts = { ...finance, cash_flow: [
+      finance.cash_flow[0],
+      { ...finance.cash_flow[1], title: "ЭМ Щиты", planned_date: "2026-02-10", planned_amount: 400 },
+      { ...finance.cash_flow[1], id: 3, title: "  эм   щиты ", planned_date: "2026-02-18", planned_amount: 100 },
+      { ...finance.cash_flow[1], id: 4, title: "ЭМ Щиты", planned_date: "2026-03-05", planned_amount: 600 },
+    ] } as FinanceOverview;
+
+    render(<DdsWorkspace finance={repeatedCosts} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+
+    const titles = screen.getAllByText("ЭМ Щиты", { exact: true });
+    expect(titles).toHaveLength(1);
+    const row = titles[0].closest("tr")!;
+    expect(within(row).getByText(/1\s?100,00/)).toBeInTheDocument();
+    expect(within(row).getByTitle("Сумма 2 операций")).toHaveTextContent(/500,00/);
+    expect(within(row).getByText("2 операций")).toBeInTheDocument();
+    expect(within(row).getByLabelText("План ЭМ Щиты 2026-03")).toHaveValue(600);
   });
 
   it("edits, moves, copies and undoes only a proposed plan cell", async () => {

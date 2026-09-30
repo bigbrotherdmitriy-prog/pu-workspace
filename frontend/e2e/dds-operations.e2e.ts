@@ -1,5 +1,26 @@
 import { expect, test } from "./storage-fixtures";
 
+test("combines repeated DDS cost names and distributes their sums by month", async ({ page, mock }) => {
+  await page.route("**/execution/overview?*", route => route.fulfill({ json: {
+    cash_flow: [
+      { id: 31, direction: "outflow", title: "ЭМ Щиты", planned_date: "2026-02-10", planned_amount: 400, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1, object_name: "Общие", category: "Оборудование" },
+      { id: 32, direction: "outflow", title: " эм   щиты ", planned_date: "2026-02-18", planned_amount: 100, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1, object_name: "Общие", category: "Оборудование" },
+      { id: 33, direction: "outflow", title: "ЭМ Щиты", planned_date: "2026-03-05", planned_amount: 600, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1, object_name: "Общие", category: "Оборудование" },
+    ], budget: [], baselines: [], schedule: [], acts: [], procurement: [], summary: {},
+  } }));
+
+  await page.goto("/new/");
+  await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+
+  const costRows = page.locator("tr.operation", { has: page.getByText("ЭМ Щиты", { exact: true }) });
+  await expect(costRows).toHaveCount(1);
+  await expect(costRows).toContainText("1 100,00 ₽");
+  await expect(costRows.getByTitle("Сумма 2 операций")).toContainText("500,00 ₽");
+  await expect(costRows.getByLabel("План ЭМ Щиты 2026-03")).toHaveValue("600");
+  expect(mock.unexpected).toEqual([]);
+});
+
 test("cancels an unlinked DDS proposal with confirmation and persists after reload", async ({ page, mock }) => {
   const row = { id: 9, direction: "outflow", title: "Тестовый счёт", planned_date: "2026-09-21", planned_amount: 1234.56, actual_amount: 0, currency: "RUB", status: "proposed", source_document_id: 90, record_version: 1 };
   let mutations = 0;
