@@ -17,6 +17,7 @@ from app.core.auth import require_project_role, require_user
 from app.integrations.google_workspace import credentials_for_project as _adapter_credentials_for_project
 from app.mailbox_identity.oauth import OIDCVerificationError, verified_google_subject
 from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
+from app.integrations.gmail_read import project_gmail_read_status
 
 
 router = APIRouter(
@@ -224,6 +225,7 @@ def google_status(
         )
     )
 
+    gmail_read = project_gmail_read_status(db, project_id)
     return {
         "project_id": project_id,
         "authorized": bool(
@@ -235,6 +237,10 @@ def google_status(
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.send",
         }.issubset(set((token.scopes or "").split()))),
+        "gmail_sync_available": gmail_read["available"] and all(os.getenv(key) for key in (
+            "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI")),
+        "gmail_read_state": gmail_read["state"],
+        "gmail_read_detail": gmail_read["detail"],
     }
 
 

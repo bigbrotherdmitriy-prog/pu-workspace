@@ -599,10 +599,11 @@ export function MailClientModule({
           <div className="mail-reading-head">
             <div><span className="eyebrow">ЦЕПОЧКА · {selectedThread.messages.length}</span><h2>{selectedThread.subject}</h2><p>{selectedThread.participants.map((item) => item.name || item.email).join(", ")}</p></div>
             <div className="mail-reading-actions">
-              <button disabled={!capabilities.can_reply} onClick={() => openComposer("reply")}><Reply />Ответить</button>
-              <button disabled={!capabilities.can_reply_all} onClick={() => openComposer("reply_all")}><ReplyAll />Всем</button>
-              <button disabled={!capabilities.can_forward} onClick={() => openComposer("forward")}><ChevronRight />Переслать</button>
-              {selectedMessage.direction === "incoming" && (folder === "spam" || folder === "trash"
+              <button disabled={selectedMessage.ordinary_read_only || !capabilities.can_reply} onClick={() => openComposer("reply")}><Reply />Ответить</button>
+              <button disabled={selectedMessage.ordinary_read_only || !capabilities.can_reply_all} onClick={() => openComposer("reply_all")}><ReplyAll />Всем</button>
+              <button disabled={selectedMessage.ordinary_read_only || !capabilities.can_forward} onClick={() => openComposer("forward")}><ChevronRight />Переслать</button>
+              {selectedMessage.ordinary_read_only && <small>Только чтение · без отправки и AUTO</small>}
+              {!selectedMessage.ordinary_read_only && selectedMessage.direction === "incoming" && (folder === "spam" || folder === "trash"
                 ? <button onClick={() => void moveMessage(selectedMessage, "inbox")}><Inbox />Во входящие</button>
                 : <>
                   <button title="Убрать из входящих" onClick={() => void moveMessage(selectedMessage, "archive")}><Archive />Архив</button>
@@ -629,7 +630,7 @@ export function MailClientModule({
               ? <small>Контекст для AUTO явно подтверждён владельцем</small>
               : <button
                   type="button"
-                  disabled={!selectedMessage.context_confirmed || !selectedMessage.contract_id}
+                  disabled={selectedMessage.ordinary_read_only || !selectedMessage.context_confirmed || !selectedMessage.contract_id}
                   onClick={() => void confirmContextForAuto(selectedMessage)}
                 >Подтвердить контекст для AUTO</button>}
           </div>
@@ -687,7 +688,7 @@ export function MailClientModule({
         <button className="secondary" disabled={Boolean(busy)} onClick={() => setComposer(null)}>Закрыть</button>
         <button className="secondary" disabled={Boolean(busy) || !composer.dirty && Boolean(composer.draft)} onClick={() => void saveDraft()}>{busy === "save" ? "Сохраняю…" : "Сохранить черновик"}</button>
         <button disabled={Boolean(busy) || !composer.draft || composer.dirty || composer.draft.status !== "draft"} onClick={() => void approveDraft()}>{busy === "approve" ? "Подтверждаю…" : "Подтвердить текущую версию"}</button>
-        <button className="send" disabled={Boolean(busy) || !approvedCurrent || !capabilities.can_send || !capabilities.versioned_approval} onClick={() => setConfirmSend(true)}><Send />Отправить</button>
+        <button className="send" disabled={Boolean(busy) || composer.replyTo?.ordinary_read_only || !approvedCurrent || !capabilities.can_send || !capabilities.versioned_approval} onClick={() => setConfirmSend(true)}><Send />Отправить</button>
       </footer>
     </div>}
 

@@ -11,6 +11,30 @@ const items: IntegrationItem[] = [
 afterEach(cleanup);
 
 describe("IntegrationsModule", () => {
+  it.each([
+    ["Нужно проверить", false, "sync", true],
+    ["Ошибка чтения", false, "oauth", false],
+    ["Чтение проверено", true, "sync", true],
+  ] as const)("shows truthful Gmail status: %s", (label, connected, action, syncAvailable) => {
+    const onSyncChannel = vi.fn();
+    render(<IntegrationsModule collapsed={false} systemState={null}
+      items={[{ key: "gmail", provider: "google_workspace", capability: "channel", name: "Gmail",
+        description: "Только чтение", available: true, connected, action,
+        sync_available: syncAvailable, status_label: label }]}
+      gmailSyncing={false} gmailSyncStatus="" syncingProvider=""
+      onSyncChannel={onSyncChannel} onSelectFolder={vi.fn()} onConnectProvider={vi.fn()}
+      onLocalUpload={vi.fn()} onOpenAIPolicy={vi.fn()} onOpenGmailResults={vi.fn()} onReload={vi.fn()} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText("Готово")).not.toBeInTheDocument();
+    if (syncAvailable) {
+      screen.getByRole("button", { name: "Получить письма" }).click();
+      expect(onSyncChannel).toHaveBeenCalledWith("google_workspace");
+    } else {
+      expect(screen.queryByRole("button", { name: "Получить письма" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Подключить" })).toBeInTheDocument();
+    }
+  });
+
   it("presents integrations as a connection contour with status totals", () => {
     const onConnectProvider = vi.fn();
     render(<IntegrationsModule

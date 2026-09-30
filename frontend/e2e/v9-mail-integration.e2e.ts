@@ -8,8 +8,10 @@ test("sent folder refresh requests Gmail sent mail and renders the imported resu
   const sent = { id: 602, project_id: 2, direction: "outgoing", thread_id: "synthetic-sent",
     subject: "Синтетическое отправленное", sender: "operator@example.test", content: "Проверка без отправки.",
     headers: { to: "recipient@example.test" }, status: "completed", context_confirmed: true,
-    attachments: [], drafts: [], created_at: "2026-08-01T10:00:00Z" };
-  mock.hold(url => url.pathname === "/projects/2/gmail/sync").release({ body: { processed: 1, skipped: 0, failed: 0 } });
+    attachments: [], drafts: [], ordinary_read_only: true, created_at: "2026-08-01T10:00:00Z" };
+  mock.hold(url => url.pathname === "/projects/2/gmail/read-sync").release({ body: {
+    processed: 1, skipped: 0, failed: 0, excluded: 0, mode: "ordinary_read", auto_enabled: false,
+  } });
   mock.hold(url => url.pathname === "/mail/projects/2/threads" && url.searchParams.get("folder") === "sent")
     .release({ body: { threads: [{ thread_id: sent.thread_id, latest: sent }], next_cursor: null } });
   mock.hold(url => url.pathname === "/mail/projects/2/threads/synthetic-sent")
@@ -18,9 +20,11 @@ test("sent folder refresh requests Gmail sent mail and renders the imported resu
   await expect(page.getByRole("heading", { name: sent.subject })).toBeVisible();
   const writes = mock.requests.filter(row => row.method !== "GET");
   expect(writes).toHaveLength(1);
-  expect(writes[0].path).toBe("/projects/2/gmail/sync");
+  expect(writes[0].path).toBe("/projects/2/gmail/read-sync");
   expect(JSON.parse(writes[0].body!)).toEqual({ query: "in:sent", max_results: 25 });
   await expect(page.locator(".mail-folders").getByRole("button", { name: /Отправленные/ })).toHaveClass("active");
+  await expect(page.getByText("Только чтение · без отправки и AUTO")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ответить", exact: true })).toBeDisabled();
 });
 
 test("future-light keeps the production reading surface and the rail outside the content", async ({ page, mock: _mock }) => {

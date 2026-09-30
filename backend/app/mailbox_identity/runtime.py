@@ -235,6 +235,9 @@ def _evidence_is_current(db, decision, source, source_version):
 
 
 def runtime_for_message(db, message: Message, *, actor: User, action=False):
+    # Ordinary-read receipts cannot masquerade as legacy action/AUTO origins.
+    if (message.source_external_id or "").startswith("gmail-read:"):
+        _deny()
     if not message.mail_connection_id:
         if message.origin_version > 1:
             _deny()

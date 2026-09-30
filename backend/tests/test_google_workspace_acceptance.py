@@ -122,14 +122,29 @@ def test_capability_gating_requires_every_scope_for_each_google_surface(
     assert statuses["calendar"].connected is True
     assert statuses["channel"].connected is False
     assert statuses["channel"].action == "oauth"
-    assert statuses["channel"].detail == "authorization required"
+    assert statuses["channel"].detail == "gmail_verified_connection_required"
 
     token.scopes += f" {GMAIL_SEND}"
     db_session.commit()
 
     gmail = _status_by_capability(db_session, project.id)["channel"]
-    assert gmail.connected is True
-    assert gmail.action == "sync"
+    assert gmail.connected is False and gmail.action == "oauth"
+    # Neither read nor send scopes prove a successful mailbox read. A signed
+    # subject enables the ordinary read button, but the status stays unchecked.
+    from datetime import datetime, timezone
+    from app.mailbox_identity.service import MailboxIdentityService
+    from app.integrations.gmail_read import resolve_project_gmail_read, record_read_result
+    MailboxIdentityService().bind_verified_google_subject(db_session,
+        organization_id=project.organization_id, google_token_id=token.id,
+        subject="signed-synthetic-subject", now=datetime.now(timezone.utc))
+    token.scopes = " ".join((DRIVE, TASKS, CALENDAR, GMAIL_READ))
+    db_session.commit()
+    gmail = _status_by_capability(db_session, project.id)["channel"]
+    assert gmail.connected is False and gmail.sync_available is True and gmail.action == "sync"
+    assert gmail.status_label == "Нужно проверить"
+    record_read_result(db_session, resolve_project_gmail_read(db_session, project.id), code="ok")
+    db_session.commit()
+    assert _status_by_capability(db_session, project.id)["channel"].connected is True
 
 
 def test_capabilities_fail_closed_without_provider_configuration(db_session, monkeypatch):
