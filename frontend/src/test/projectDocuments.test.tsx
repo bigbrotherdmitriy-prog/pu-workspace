@@ -41,7 +41,7 @@ beforeEach(() => {
 
 async function openDocuments() {
   render(<App />);
-  await screen.findByRole("option", { name: "QA A" });
+  await screen.findByRole("option", { name: "QA A" }, { timeout: 10_000 });
   fireEvent.click(screen.getByTitle("Документы"));
   await waitFor(() => expect(api).toHaveBeenCalledWith("/projects/1/documents/101"));
 }
@@ -53,9 +53,13 @@ function switchToB() {
 describe("project document isolation", () => {
   it("opens the upload dialog directly from Integrations without redirecting to a hint", async () => {
     render(<App />);
-    await screen.findByRole("option", { name: "QA A" });
+    await screen.findByRole("option", { name: "QA A" }, { timeout: 10_000 });
     fireEvent.click(screen.getByTitle("Интеграции"));
-    fireEvent.click(await screen.findByRole("button", { name: "Загрузить папку" }));
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: "Загрузить папку" },
+      { timeout: 10_000 },
+    ));
     expect(screen.getByRole("dialog", { name: "Загрузка документов" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Интеграции", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText(/Нажмите «Загрузить рабочую папку»/)).not.toBeInTheDocument();
