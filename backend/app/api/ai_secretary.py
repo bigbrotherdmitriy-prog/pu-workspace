@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 import json
 import re
@@ -17,6 +18,7 @@ from app.governance_engine import create_governance_items
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.external_resource import ExternalResourceLink
 from app.models.organization_contract import Contract
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -29,6 +31,7 @@ from app.models.job import BackgroundJob
 from app.jobs.queue import enqueue, update_cooperative_progress
 from app.models.user import User
 from app.models.v54_pilot import DeadlineClaim
+from app.models.v54_provider_action import ProviderAction
 from app.core.v54_refs import VersionPin
 from app.models.automation_rule import AutomationRule, AutomationRun
 from app.automation_engine import next_monthly_date, prepare_rule_run
@@ -49,6 +52,7 @@ from app.owner_context_confirmation import (
     clear_owner_context_confirmation,
     confirm_owner_context_for_auto,
     owner_context_confirmation_state,
+    owner_context_confirmation_states,
 )
 
 router = APIRouter(prefix="/ai-secretary", tags=["ai-secretary"])
@@ -171,27 +175,107 @@ def project_candidate(db: Session, fallback_project_id: int, content: str, user:
     return fallback_project_id, 0.55, "Проект по содержанию не определён; требуется подтверждение"
 
 
+@dataclass
+class _MessageRelations:
+    tasks: list = field(default_factory=list)
+    drafts: list = field(default_factory=list)
+    risks: list = field(default_factory=list)
+    completion_rows: list = field(default_factory=list)
+    imported: dict = field(default_factory=dict)
+    evidence_pins: list = field(default_factory=list)
+    external_links: dict = field(default_factory=dict)
+    effect_states: dict = field(default_factory=dict)
+    actor_role: str | None = None
+    owner_confirmation_state: str = "not_confirmed"
+
+
+def _inbox_relations(db: Session, rows: list[Message], actor: User,
+                     action_provider: str) -> dict[int, _MessageRelations]:
+    """Load a project page's related records once rather than once per message."""
+    if not rows:
+        return {}
+    project_id = rows[0].project_id
+    related = {row.id: _MessageRelations() for row in rows}
+    message_ids = list(related)
+    tasks = list(db.scalars(select(Task).where(
+        Task.project_id == project_id, Task.message_id.in_(message_ids),
+    ).order_by(Task.id)))
+    for task in tasks:
+        related[task.message_id].tasks.append(task)
+    for draft in db.scalars(select(ResponseDraft).where(
+        ResponseDraft.project_id == project_id, ResponseDraft.message_id.in_(message_ids),
+    ).order_by(ResponseDraft.id)):
+        related[draft.message_id].drafts.append(draft)
+    source_ids = {f"message:{row.id}": row.id for row in rows}
+    for risk in db.scalars(select(Risk).where(
+        Risk.project_id == project_id, Risk.source_id.in_(source_ids),
+    ).order_by(Risk.id)):
+        related[source_ids[risk.source_id]].risks.append(risk)
+    for suggestion, task in db.execute(select(TaskCompletionSuggestion, Task).join(
+        Task, Task.id == TaskCompletionSuggestion.task_id,
+    ).where(TaskCompletionSuggestion.message_id.in_(message_ids),
+            TaskCompletionSuggestion.project_id == project_id, Task.project_id == project_id,
+    ).order_by(TaskCompletionSuggestion.confidence.desc(), TaskCompletionSuggestion.id)):
+        related[suggestion.message_id].completion_rows.append((suggestion, task))
+    attachment_ids = {item["document_external_id"] for row in rows
+                      for item in json.loads(row.attachments_json or "[]")
+                      if item.get("document_external_id")}
+    imported = {document.external_id: document.id for document in db.scalars(select(Document).where(
+        Document.project_id == project_id, Document.external_id.in_(attachment_ids),
+    ))} if attachment_ids else {}
+    for message_id, pins in db.execute(select(DeadlineClaim.message_id, DeadlineClaim.evidence_pins).where(
+        DeadlineClaim.organization_id == rows[0].organization_id,
+        DeadlineClaim.message_id.in_(message_ids),
+    ).order_by(DeadlineClaim.revision.desc())):
+        related[message_id].evidence_pins.append(pins)
+    links = { (link.entity_id, link.resource_type): link for link in db.scalars(
+        select(ExternalResourceLink).where(ExternalResourceLink.project_id == project_id,
+            ExternalResourceLink.entity_type == "task", ExternalResourceLink.entity_id.in_([task.id for task in tasks]),
+            ExternalResourceLink.provider == action_provider,
+            ExternalResourceLink.resource_type.in_(("task", "calendar_event")),
+        ))} if tasks else {}
+    action_ids = {f"google-{kind}-{task.id}" for task in tasks for kind in ("task", "calendar")}
+    requested = set(db.scalars(select(ProviderAction.action_id).where(
+        ProviderAction.action_id.in_(action_ids),
+    ))) if action_ids else set()
+    states = {task.id: task_effect_states(db, task.id)
+              if any(f"google-{kind}-{task.id}" in requested for kind in ("task", "calendar"))
+              else {kind: {"status": "not_requested", "external_id": None}
+                    for kind in ("task", "calendar")}
+              for task in tasks}
+    role = db.scalar(select(ProjectMember.role).where(
+        ProjectMember.project_id == project_id, ProjectMember.user_id == actor.id,
+    )) if not actor.is_admin else None
+    owner_states = owner_context_confirmation_states(db, rows)
+    for row in rows:
+        item = related[row.id]
+        item.imported, item.external_links, item.effect_states = imported, links, states
+        item.actor_role = role
+        item.owner_confirmation_state = owner_states[row.id]
+    return related
+
+
 def _message_payload(db: Session, row: Message, action_provider: str | None = None,
-                     actor: User | None = None) -> dict:
+                     actor: User | None = None, related: _MessageRelations | None = None) -> dict:
     action_provider = action_provider or configured_action_adapter(row.project_id, db).provider
-    actor_role = db.scalar(select(ProjectMember.role).where(
+    actor_role = related.actor_role if related is not None else db.scalar(select(ProjectMember.role).where(
         ProjectMember.project_id == row.project_id,
         ProjectMember.user_id == actor.id,
     )) if actor is not None and not actor.is_admin else None
     can_prepare_external_action = bool(
         actor is not None and (actor.is_admin or actor_role in {"manager", "owner"})
     )
-    tasks = list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
-    drafts = list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
-    risks = list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
-    completion_rows = db.execute(select(TaskCompletionSuggestion, Task).join(Task, Task.id == TaskCompletionSuggestion.task_id).where(
+    tasks = related.tasks if related is not None else list(db.scalars(select(Task).where(Task.message_id == row.id).order_by(Task.id)))
+    drafts = related.drafts if related is not None else list(db.scalars(select(ResponseDraft).where(ResponseDraft.message_id == row.id).order_by(ResponseDraft.id)))
+    risks = related.risks if related is not None else list(db.scalars(select(Risk).where(Risk.project_id == row.project_id, Risk.source_id == f"message:{row.id}").order_by(Risk.id)))
+    completion_rows = related.completion_rows if related is not None else db.execute(select(TaskCompletionSuggestion, Task).join(Task, Task.id == TaskCompletionSuggestion.task_id).where(
         TaskCompletionSuggestion.message_id == row.id,
         TaskCompletionSuggestion.project_id == row.project_id,
         Task.project_id == row.project_id,
     ).order_by(TaskCompletionSuggestion.confidence.desc(), TaskCompletionSuggestion.id)).all()
     attachments = json.loads(row.attachments_json or "[]")
     attachment_ids = [item["document_external_id"] for item in attachments if item.get("document_external_id")]
-    imported = {
+    imported = related.imported if related is not None else {
         document.external_id: document.id
         for document in db.scalars(select(Document).where(
             Document.project_id == row.project_id,
@@ -211,17 +295,17 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         external_task_id = external_id_for(
             db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="task", legacy_id=task.google_task_id,
-        )
+        ) if related is None else _batch_external_id(related, task.id, "task", task.google_task_id)
         external_calendar_id = external_id_for(
             db, entity_type="task", entity_id=task.id, provider=action_provider,
             resource_type="calendar_event", legacy_id=task.google_calendar_event_id,
-        )
+        ) if related is None else _batch_external_id(related, task.id, "calendar_event", task.google_calendar_event_id)
         task_payloads.append({
             "id": task.id, "record_version": task.record_version,
             "title": task.title, "due_date": task.due_date, "confidence": task.confidence,
             "external_action_status": task.external_action_status, "google_task_id": external_task_id,
             "google_calendar_event_id": external_calendar_id,
-            "provider_effects": task_effect_states(db, task.id),
+            "provider_effects": related.effect_states[task.id] if related is not None else task_effect_states(db, task.id),
             "external_resources": [
                 *([{"provider": action_provider, "resource_type": "task", "external_id": external_task_id}] if external_task_id else []),
                 *([{"provider": action_provider, "resource_type": "calendar_event", "external_id": external_calendar_id}] if external_calendar_id else []),
@@ -229,10 +313,11 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         })
     evidence_refs = []
     seen_evidence = set()
-    for pins in db.scalars(select(DeadlineClaim.evidence_pins).where(
+    pins_rows = related.evidence_pins if related is not None else db.scalars(select(DeadlineClaim.evidence_pins).where(
         DeadlineClaim.organization_id == row.organization_id,
         DeadlineClaim.message_id == row.id,
-    ).order_by(DeadlineClaim.revision.desc())):
+    ).order_by(DeadlineClaim.revision.desc()))
+    for pins in pins_rows:
         if not isinstance(pins, list):
             continue
         for value in pins:
@@ -259,7 +344,7 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
         "context_confirmed_by_user_at": row.context_confirmed_by_user_at,
         "context_confirmed_context_version": row.context_confirmed_context_version,
         "context_confirmed_authority_epoch": row.context_confirmed_authority_epoch,
-        "auto_context_confirmation_state": owner_context_confirmation_state(db, row),
+        "auto_context_confirmation_state": related.owner_confirmation_state if related is not None else owner_context_confirmation_state(db, row),
         "status": row.status, "created_at": row.created_at,
         "analysis_required": row.analysis_required,
         "workflow_state": workflow_state, "workflow_reason": workflow_reason,
@@ -283,6 +368,11 @@ def _message_payload(db: Session, row: Message, action_provider: str | None = No
                                    for suggestion, task in completion_rows],
         "evidence_refs": evidence_refs,
     }
+
+
+def _batch_external_id(related: _MessageRelations, task_id: int, kind: str, legacy_id: str | None):
+    link = related.external_links.get((task_id, kind))
+    return link.external_id if link is not None and link.sync_status != "deleted" else legacy_id
 
 
 def _message_workflow_state(row: Message, *, tasks: list[Task], drafts: list[ResponseDraft],
@@ -400,7 +490,10 @@ def inbox(project_id: int, db: Session = Depends(get_db), user: User = Depends(r
     rows = list(db.scalars(select(Message).where(
         Message.project_id == project_id,
     ).order_by(Message.created_at.desc(), Message.id.desc()).limit(200)))
-    return {"messages": [_message_payload(db, row, actor=user) for row in rows], "count": len(rows)}
+    action_provider = configured_action_adapter(project_id, db).provider
+    related = _inbox_relations(db, rows, user, action_provider)
+    return {"messages": [_message_payload(db, row, actor=user, action_provider=action_provider,
+                                          related=related[row.id]) for row in rows], "count": len(rows)}
 
 
 @router.patch("/inbox/{message_id}/status")

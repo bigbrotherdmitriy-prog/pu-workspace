@@ -573,8 +573,13 @@ def _apply_invoice_extraction_fields(
 
 def _finance_document_score(name: str, content: str, kind: str) -> tuple[int, list[str]]:
     """Explainably classify an extracted project document without changing it."""
-    normalized_name = re.sub(r"\s+", " ", name.casefold().replace("_", " "))
-    normalized_text = re.sub(r"\s+", " ", content[:120_000].casefold())
+    normalized_name = " ".join(name.casefold().replace("_", " ").split())
+    normalized_text = " ".join(content[:120_000].casefold().split())
+    return _finance_document_score_normalized(normalized_name, normalized_text, kind)
+
+
+def _finance_document_score_normalized(normalized_name: str, normalized_text: str,
+                                     kind: str) -> tuple[int, list[str]]:
     score = 0
     reasons: list[str] = []
     for marker, weight in _DOCUMENT_KIND_MARKERS[kind]:
@@ -1238,12 +1243,15 @@ def document_candidates(project_id: int, contract_id: int | None = None,
         (DocumentVersion.version_number == Document.current_version),
     ).where(Document.project_id == project_id).order_by(Document.id.desc())).all()
     candidates = []
+    content_by_id = {}
     for document, extracted_content in rows:
         content = "\n".join(part.strip() for part in (document.summary, document.notes, extracted_content)
                             if part and part.strip())
+        normalized_name = " ".join(document.name.casefold().replace("_", " ").split())
+        normalized_text = " ".join(content[:120_000].casefold().split())
         ranked = []
         for kind in _DOCUMENT_KIND_MARKERS:
-            score, reasons = _finance_document_score(document.name, content, kind)
+            score, reasons = _finance_document_score_normalized(normalized_name, normalized_text, kind)
             if score:
                 ranked.append((score, kind, reasons))
         if not ranked:
@@ -1259,12 +1267,15 @@ def document_candidates(project_id: int, contract_id: int | None = None,
             "kind": kind,
             "score": score,
             "reasons": reasons,
-            "hints": _finance_document_hints(document.name, content),
             "already_linked": document.id in linked_document_ids,
             "originals_changed": False,
         })
+        content_by_id[document.id] = content[:120_000]
     candidates.sort(key=lambda item: (item["already_linked"], -item["score"], item["name"].casefold()))
-    return {"project_id": project_id, "contract_id": contract_id, "candidates": candidates[:100],
+    page = candidates[:100]
+    for candidate in page:
+        candidate["hints"] = _finance_document_hints(candidate["name"], content_by_id[candidate["document_id"]])
+    return {"project_id": project_id, "contract_id": contract_id, "candidates": page,
             "requires_confirmation": True, "originals_changed": False}
 
 
