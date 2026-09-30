@@ -64,7 +64,7 @@ describe("ContractScheme", () => {
     const { container } = render(<ContractScheme projectId={9} contracts={[
       { id: 3, number: "Д-3", title: "Договор", contract_kind: "customer" },
     ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropApplications={onDropApplications} />);
-    fireEvent.click(container.querySelector(".contract-node-open")!);
+    fireEvent.click(container.querySelector(".contract-register-open")!);
     const picker = container.querySelector<HTMLInputElement>('[aria-label="Выбрать приложения к договору"]')!;
     expect(picker.accept).toBe("");
     const legacy = new File(["legacy"], "Разрешение.doc", { type: "application/msword" });
@@ -78,7 +78,7 @@ describe("ContractScheme", () => {
     const { container } = render(<ContractScheme projectId={9} contracts={[
       { id: 3, number: "Д-3", title: "Договор", contract_kind: "customer" },
     ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropApplications={onDropApplications} />);
-    fireEvent.click(container.querySelector(".contract-node-open")!);
+    fireEvent.click(container.querySelector(".contract-register-open")!);
     const legacy = new File(["legacy"], "Разрешение.doc", { type: "application/msword" });
     fireEvent.drop(container.querySelector(".contract-application-drop")!, {
       dataTransfer: { files: [], items: [{ kind: "file", getAsFile: () => legacy }] },
@@ -91,7 +91,7 @@ describe("ContractScheme", () => {
     const { container } = render(<ContractScheme projectId={10} contracts={[
       { id: 4, number: "СП-4", title: "Субподряд", contract_kind: "downstream_subcontract" },
     ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} onDropFinance={onDropFinance} />);
-    fireEvent.click(container.querySelector(".contract-node-open")!);
+    fireEvent.click(container.querySelector(".contract-register-open")!);
     const file = new File(["work;date\nЭтап;2026-09-01"], "ГПР.csv", { type: "text/csv" });
     fireEvent.drop(container.querySelector(".contract-finance-drops label")!, { dataTransfer: { files: [file] } });
     expect(onDropFinance).toHaveBeenCalledWith([file], 4, "schedule");

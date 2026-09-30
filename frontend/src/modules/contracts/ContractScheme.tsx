@@ -148,7 +148,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
   const detailPanel = selected && <div className="contract-register-detail">
     <div className="contract-register-detail-head">
       <div><span className="eyebrow">{kindLabel(selected.contract_kind)}</span><h3>{selected.number}</h3><p>{selected.title}</p></div>
-      <b className={`contract-register-status ${selected.status || "active"}`}>{selected.status || "active"}</b>
+      <b className={`contract-register-status ${selected.status || "active"}`}>{{ draft: "Черновик", active: "Действует", completed: "Завершён", terminated: "Расторгнут", archived: "В архиве" }[selected.status || "active"] || selected.status}</b>
     </div>
     <dl className="contract-register-facts">
       <div><dt>Контрагент</dt><dd>{selected.counterparty || "Не указан"}</dd></div>
@@ -207,7 +207,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
         <div className="contract-register-count">Найдено: <strong>{registerRows.length}</strong></div>
         <div className="contract-register-rows">
           {registerRows.map(({ item, depth, hasChildren }) => <article className={`contract-register-row ${selected?.id === item.id ? "selected" : ""}`} data-kind={item.contract_kind || "customer"} style={{ "--contract-depth": depth } as React.CSSProperties} key={item.id}>
-            <button className="contract-register-open contract-node-open" onClick={() => setSelectedId(item.id)} aria-label={`${kindLabel(item.contract_kind)} ${item.number} ${item.counterparty || item.title}`}>
+            <button className="contract-register-open" onClick={() => setSelectedId(item.id)} aria-label={`${kindLabel(item.contract_kind)} ${item.number} ${item.counterparty || item.title}`}>
               <span className="contract-register-branch">{depth ? "└" : "●"}</span><span><small>{kindLabel(item.contract_kind)}{hasChildren ? " · есть подчинённые" : ""}</small><strong>{item.number}</strong><b>{item.counterparty || item.title}</b></span><em>{item.linked_documents?.length || 0} док.</em>
             </button>
             {onDelete && <button className="contract-register-delete" aria-label={`Удалить договор ${item.number}`} onClick={() => onDelete(item)}><Trash2 /></button>}
