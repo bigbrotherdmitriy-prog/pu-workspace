@@ -57,7 +57,9 @@
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher > span,
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher > svg { display: none; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher select { width: 100%; max-width: 215px; min-width: 0; border: 0; box-shadow: none; background: transparent; }
-:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard select option { color: #effcff; background: #071827; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher select { color-scheme: dark; color: #effcff !important; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher select option { color: #effcff !important; background-color: #071827 !important; }
+:root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .project-switcher select option:checked { color: #fff !important; background-color: #18588a !important; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel { margin: 20px 24px 0; border: 1px solid rgba(0,229,255,.45); border-radius: 16px; padding: 6px 8px 6px 16px; background: rgba(3,10,24,.5); color: #00e5ff; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard .mobile-sync-panel button { background: linear-gradient(90deg,#00e5ff,#8cf6ff); color: #02101e; border: 0; border-radius: 13px; }
 :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content { padding: 16px 24px 30px; max-width: none; }

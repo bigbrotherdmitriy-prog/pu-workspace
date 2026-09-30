@@ -11,7 +11,19 @@ from app.models.project import Project
 def test_gmail_automation_is_opt_in_outside_compose():
     with patch.dict("os.environ", {}, clear=True):
         assert gmail.enabled() is False
+        assert gmail.background_sweep_enabled() is False
         assert gmail.interval_seconds() == 300
+
+
+def test_all_project_sweep_requires_separate_explicit_opt_in():
+    with patch.dict("os.environ", {"GMAIL_AUTO_SYNC_ENABLED": "true"}, clear=True):
+        assert gmail.enabled() is True
+        assert gmail.background_sweep_enabled() is False
+    with patch.dict("os.environ", {
+        "GMAIL_AUTO_SYNC_ENABLED": "true",
+        "GMAIL_BACKGROUND_SWEEP_ENABLED": "true",
+    }, clear=True):
+        assert gmail.background_sweep_enabled() is True
 
 
 def test_gmail_automation_interval_has_safe_minimum():

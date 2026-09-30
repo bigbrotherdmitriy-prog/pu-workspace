@@ -30,6 +30,13 @@ def enabled() -> bool:
     return os.getenv("GMAIL_AUTO_SYNC_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def background_sweep_enabled() -> bool:
+    """Require a separate opt-in before scanning every connected project."""
+    return enabled() and os.getenv(
+        "GMAIL_BACKGROUND_SWEEP_ENABLED", "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def interval_seconds() -> int:
     return max(60, int(os.getenv("GMAIL_AUTO_SYNC_INTERVAL_SECONDS", "300")))
 

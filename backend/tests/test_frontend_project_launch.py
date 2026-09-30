@@ -8,7 +8,7 @@ def test_project_launch_is_a_separate_frontend_module():
     app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     wizard = (ROOT / "frontend" / "src" / "modules" / "project-launch" / "ProjectLaunchWizard.tsx").read_text(encoding="utf-8")
 
-    assert 'from "./modules/project-launch/ProjectLaunchWizard"' in app
+    assert 'import("./modules/project-launch/ProjectLaunchWizard")' in app
     assert '[Route, "Запуск проекта"]' in app
     assert 'active === "Запуск проекта"' in app
     assert 'active === "Рабочий центр" ? (' in app
