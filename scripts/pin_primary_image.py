@@ -23,7 +23,7 @@ def pin_image(path: Path, image: str, revision: str) -> None:
     mode = stat.S_IMODE(path.stat().st_mode)
     if os.name != "nt" and (mode not in (0o600, 0o400) or path.stat().st_uid != os.geteuid()):
         raise ValueError("runtime file must be private and owned by the deploy account")
-    updated = re.sub(r"(?m)^PRIMARY_IMAGE=.*$", "PRIMARY_IMAGE=" + image, original)
+    updated = re.sub(r"(?m)^([ \t]*)PRIMARY_IMAGE=.*$", r"\g<1>PRIMARY_IMAGE=" + image, original)
     if updated == original:
         return
     descriptor, temporary_name = tempfile.mkstemp(prefix=".image-pin.", dir=path.parent)

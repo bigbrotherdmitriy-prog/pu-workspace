@@ -220,5 +220,9 @@ def test_retained_image_pin_changes_only_image_and_survives_removed_old_tag(tmp_
     pin.pin_image(path, IMAGE, REVISION)
     assert path.read_text() == original.replace("PRIMARY_IMAGE=obsolete:deleted-tag", "PRIMARY_IMAGE=" + IMAGE)
     pin.pin_image(path, IMAGE, REVISION)
+    spaced = original.replace("PRIMARY_IMAGE=", "  PRIMARY_IMAGE=")
+    path.write_text(spaced)
+    pin.pin_image(path, IMAGE, REVISION)
+    assert path.read_text() == spaced.replace("PRIMARY_IMAGE=obsolete:deleted-tag", "PRIMARY_IMAGE=" + IMAGE)
     with pytest.raises(ValueError, match="retained runtime"):
         pin.pin_image(path, IMAGE, "c" * 40)
