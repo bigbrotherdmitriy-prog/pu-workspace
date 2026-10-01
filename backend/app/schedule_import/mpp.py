@@ -91,26 +91,23 @@ def _cost(task) -> Decimal | None:
 
 
 def _relation(relation, current_task) -> dict[str, str | None]:
-    """Return the task at the other end of a predecessor relation.
-
-    MPXJ exposes a relation from the task currently being inspected to its
-    predecessor.  Using ``getSourceTask`` unconditionally therefore turns
-    every imported dependency into a self-reference for affected MPP files.
-    Picking the endpoint which is not the current task is stable across MPXJ
-    relation orientations and also keeps the adapter easy to fake in tests.
-    """
+    """Read MPXJ 16's semantic predecessor API, retaining legacy support."""
     current_uid = _task_uid(current_task)
-    source = relation.getSourceTask()
-    target = relation.getTargetTask()
-    source_uid = _task_uid(source)
-    target_uid = _task_uid(target)
-    predecessor_uid = target_uid if source_uid == current_uid else source_uid
+    predecessor_getter = getattr(relation, "getPredecessorTask", None)
+    if predecessor_getter is not None:
+        predecessor_uid = _task_uid(predecessor_getter())
+    else:
+        # Legacy relations can expose either source/target orientation.
+        source_uid = _task_uid(relation.getSourceTask())
+        target_uid = _task_uid(relation.getTargetTask())
+        predecessor_uid = target_uid if source_uid == current_uid else source_uid
     if predecessor_uid == current_uid:
         predecessor_uid = None
+    lag = relation.getLag()
     return {
         "external_uid": predecessor_uid,
         "type": str(relation.getType()),
-        "lag": str(relation.getLag()) if relation.getLag() is not None else None,
+        "lag": str(lag) if lag is not None else None,
     }
 
 
