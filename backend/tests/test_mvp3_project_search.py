@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -304,7 +304,13 @@ def test_literal_wildcards_are_escaped_and_types_are_allowlisted(db_session, use
 
 
 def test_filters_apply_server_side_to_contract_counterparty_and_dates(db_session, user_factory):
+    today = datetime.now(timezone.utc).date()
     world = _world(db_session, user_factory)
+    world["contract"].signed_at = today
+    world["document"].source_modified_at = datetime.combine(today, datetime.min.time(), timezone.utc)
+    world["task"].due_date = today
+    world["obligation"].due_date = today
+    db_session.commit()
     result = service.project_search(
         db_session,
         project_id=world["project"].id,
@@ -313,8 +319,8 @@ def test_filters_apply_server_side_to_contract_counterparty_and_dates(db_session
             types=("contract", "document", "task", "obligation", "risk", "decision", "message"),
             contract_id=world["contract"].id,
             counterparty="синтетика",
-            date_from=date(2026, 8, 1),
-            date_to=date(2026, 9, 30),
+            date_from=today - timedelta(days=1),
+            date_to=today + timedelta(days=1),
         ),
         limit=100,
     )
@@ -324,7 +330,7 @@ def test_filters_apply_server_side_to_contract_counterparty_and_dates(db_session
     assert all(item["contract_id"] == world["contract"].id for item in result["items"])
 
     with pytest.raises(SearchValidationError, match="invalid_date_range"):
-        SearchFilters(date_from=date(2026, 9, 2), date_to=date(2026, 9, 1))
+        SearchFilters(date_from=today + timedelta(days=1), date_to=today)
 
 
 def test_cursor_is_signed_bound_to_actor_project_and_filters_and_is_stable(db_session, user_factory):
