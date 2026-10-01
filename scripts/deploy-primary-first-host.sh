@@ -89,6 +89,17 @@ docker image inspect "$CANDIDATE_IMAGE" >/dev/null 2>&1 || fail "candidate image
 IMAGE_REVISION=$(docker image inspect "$CANDIDATE_IMAGE" \
   --format '{{ index .Config.Labels "com.pu-workspace.primary.revision" }}' 2>/dev/null || true)
 [ "$IMAGE_REVISION" = "$REVISION" ] || fail "candidate image is not labelled with the release revision"
+CANDIDATE_IMAGE=$(docker image inspect "$CANDIDATE_IMAGE" --format '{{.Id}}')
+# From this point use the immutable ID, not a mutable tag. This validates the
+# source-built frontend without starting its entrypoint or contacting any DB.
+STATIC_STAMP=$(date -u +%Y%m%dT%H%M%SZ)-$$
+[ ! -L "$ROOT/static-receipts" ] || fail "static receipts directory must not be a symlink"
+install -d -m 700 "$ROOT/static-receipts"
+[ "$(readlink -f "$ROOT/static-receipts")" = "$ROOT/static-receipts" ] || fail "static receipts escape primary root"
+python3 "$RELEASE_DIR/scripts/verify_image_static.py" \
+  --image "$CANDIDATE_IMAGE" --expected-image-id "$CANDIDATE_IMAGE" \
+  --revision "$REVISION" \
+  --receipt "$ROOT/static-receipts/${REVISION}-${STATIC_STAMP}-image.json"
 
 install -d -m 700 "$ROOT/releases" "$RUNTIME_DIR" "$BACKUP_DIR"
 for directory in "$ROOT/releases" "$RUNTIME_DIR" "$BACKUP_DIR"; do
@@ -113,6 +124,21 @@ local_smoke() {
     --port "$PORT" --expected-release "$(basename "$release")"
 }
 
+static_smoke() {
+  static_release=$1
+  static_image=$2
+  static_mode=$3
+  legacy_option=
+  if [ "$static_mode" = rollback ]; then legacy_option=--legacy-image; fi
+  # Legacy extraction is allowed only for the retained previous release.
+  python3 "$RELEASE_DIR/scripts/verify_image_static.py" \
+    --image "$static_image" --expected-image-id "$static_image" \
+    --revision "$(basename "$static_release")" \
+    --loopback-url "http://127.0.0.1:$PORT" \
+    --receipt "$ROOT/static-receipts/$(basename "$static_release")-${STATIC_STAMP}-${static_mode}.json" \
+    $legacy_option
+}
+
 if [ "$PREVIOUS_RELEASE" = "$RELEASE_DIR" ]; then
   [ -s "$RUNTIME_ENV" ] || fail "active release runtime environment is missing"
   compose --profile cutover config --format json | python3 "$RELEASE_DIR/scripts/validate_primary_compose.py" \
@@ -120,6 +146,7 @@ if [ "$PREVIOUS_RELEASE" = "$RELEASE_DIR" ]; then
     --volume "$VOLUME_NAME" --container-prefix "$CONTAINER_PREFIX"
   echo "primary candidate $REVISION is already active; running loopback smoke only"
   local_smoke "$RELEASE_DIR"
+  static_smoke "$RELEASE_DIR" "$CANDIDATE_IMAGE" candidate
   exit 0
 fi
 
@@ -129,6 +156,26 @@ if [ -n "$PREVIOUS_RELEASE" ]; then
   PREVIOUS_ENV=$RUNTIME_DIR/$PREVIOUS_REVISION/.env.primary
   [ -s "$PREVIOUS_ENV" ] || fail "previous private runtime environment is missing"
   PREVIOUS_OPTION=$PREVIOUS_ENV
+  PREVIOUS_IMAGE=$(python3 - "$RELEASE_DIR" "$PREVIOUS_ENV" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + '/scripts')
+from render_primary_environment import read_env
+print(read_env(__import__('pathlib').Path(sys.argv[2]))['PRIMARY_IMAGE'])
+PY
+  )
+  # The running previous backend is authoritative if a retained tag was moved.
+  RUNNING_PREVIOUS_IMAGE=$(docker inspect "$CONTAINER_PREFIX-backend" --format '{{.Image}}' 2>/dev/null || true)
+  if [ -n "$RUNNING_PREVIOUS_IMAGE" ]; then
+    PREVIOUS_IMAGE=$RUNNING_PREVIOUS_IMAGE
+  else
+    PREVIOUS_IMAGE=$(docker image inspect "$PREVIOUS_IMAGE" --format '{{.Id}}')
+  fi
+  python3 "$RELEASE_DIR/scripts/verify_image_static.py" \
+    --image "$PREVIOUS_IMAGE" --expected-image-id "$PREVIOUS_IMAGE" \
+    --revision "$PREVIOUS_REVISION" --legacy-image \
+    --receipt "$ROOT/static-receipts/${PREVIOUS_REVISION}-${STATIC_STAMP}-rollback-image.json"
+  python3 "$RELEASE_DIR/scripts/pin_primary_image.py" \
+    --env "$PREVIOUS_ENV" --image "$PREVIOUS_IMAGE" --revision "$PREVIOUS_REVISION"
 fi
 if [ -n "$PREVIOUS_OPTION" ]; then
   python3 "$RELEASE_DIR/scripts/render_primary_environment.py" \
@@ -265,8 +312,14 @@ rollback() {
       echo "ROLLBACK FAILED: previous release could not be started" >&2
       exit "$code"
     fi
+    [ "$(docker inspect "$CONTAINER_PREFIX-backend" --format '{{.Image}}')" = "$PREVIOUS_IMAGE" ] \
+      || { echo "ROLLBACK FAILED: backend image identity differs" >&2; exit "$code"; }
     if ! local_smoke "$PREVIOUS_RELEASE"; then
       echo "ROLLBACK FAILED: previous release failed loopback smoke" >&2
+      exit "$code"
+    fi
+    if ! static_smoke "$PREVIOUS_RELEASE" "$PREVIOUS_IMAGE" rollback; then
+      echo "ROLLBACK FAILED: previous release static integrity check failed" >&2
       exit "$code"
     fi
     echo "primary application rollback verified: release=$OLD_REVISION" >&2
@@ -291,6 +344,7 @@ LOCAL_UPLOAD_VOLUME_KEY=$(docker volume inspect "$LOCAL_UPLOAD_VOLUME_NAME" \
 
 echo "[6/6] running read-only loopback smoke; no public host is contacted"
 local_smoke "$RELEASE_DIR"
+static_smoke "$RELEASE_DIR" "$CANDIDATE_IMAGE" candidate
 
 SWITCHED=false
 trap - INT TERM HUP EXIT

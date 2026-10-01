@@ -180,26 +180,43 @@ def check_authenticated_session(base_url: str, email: str, password: str) -> dic
         request("auth/logout", {})
 
 
+def check_image_public(base_url: str, expected_release: str | None = None,
+                       image_root: Path = Path("/app/app/react_dist"),
+                       manifest_path: Path = Path("/app/frontend-build-manifest.json")) -> dict:
+    # Image mode is fail-closed, even when API readiness alone is green.
+    image_index = image_root / "index.html"
+    if not image_index.is_file() or not manifest_path.is_file():
+        raise RuntimeError("candidate frontend index/manifest is missing")
+    from verify_image_static import manifest_tools, verify_http
+    manifest = json.loads(manifest_path.read_bytes())
+    expected_release = expected_release or manifest["revision"]
+    manifest_tools.validate_manifest(manifest, image_root, expected_release)
+    if manifest["build_mode"] != "production":
+        raise RuntimeError("public smoke requires a production frontend manifest")
+    image_match = re.search(r'<script[^>]+src="([^"]+\.js)"', image_index.read_text(encoding="utf-8"))
+    if not image_match:
+        raise RuntimeError("candidate SPA JavaScript asset was not found")
+    result = check_public(base_url, expected_asset=image_match.group(1).rsplit("/", 1)[-1],
+                          expected_release=expected_release)
+    result["static_files"] = len(verify_http(manifest["files"], base_url))
+    result["frontend_revision"] = manifest["revision"]
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("base_url", nargs="?", default="https://pu-workspace.duckdns.org/")
     parser.add_argument("--staging-authenticated", action="store_true")
+    parser.add_argument("--host-generic", action="store_true", help="Explicit non-image availability check; not production release acceptance")
     args = parser.parse_args()
     base_url = args.base_url
     try:
-        expected_asset = None
-        image_index = Path("/app/app/react_dist/index.html")
-        if image_index.is_file():
-            image_html = image_index.read_text(encoding="utf-8")
-            image_match = re.search(r'<script[^>]+src="([^"]+\.js)"', image_html)
-            if not image_match:
-                raise RuntimeError("candidate SPA JavaScript asset was not found")
-            expected_asset = image_match.group(1).rsplit("/", 1)[-1]
-        result = check_public(
-            base_url,
-            expected_asset=expected_asset,
-            expected_release=os.getenv("PU_EXPECTED_RELEASE", "").strip() or None,
-        )
+        expected_release = os.getenv("PU_EXPECTED_RELEASE", "").strip() or None
+        if args.host_generic:
+            result = check_public(base_url, expected_release=expected_release)
+            result["scope"] = "generic availability only; not image/release acceptance"
+        else:
+            result = check_image_public(base_url, expected_release)
         token = os.getenv("PU_WORKSPACE_TOKEN", "").strip()
         if token:
             result["authenticated"] = check_authenticated_flow(base_url, token)
