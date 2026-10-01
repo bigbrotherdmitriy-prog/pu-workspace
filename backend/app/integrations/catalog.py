@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.ai import configured_ai_provider
 from app.integrations.google_workspace import google_workspace_for_project
+from app.integrations.gmail_read import project_gmail_read_status
 from app.integrations.telegram import TelegramChannelAdapter
 from app.local_upload_staging import local_upload_runtime_ready
 from app.models.integration_credential import IntegrationCredential
@@ -20,7 +21,7 @@ GOOGLE_CAPABILITIES = (
     (
         "channel",
         "Gmail",
-        "Входящие письма и подтверждаемая отправка",
+        "Входящие письма выбранного проекта; обычное чтение без AUTO",
         frozenset({
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.send",
@@ -40,6 +41,8 @@ class IntegrationStatus:
     connected: bool
     action: str | None = None
     detail: str = ""
+    sync_available: bool | None = None
+    status_label: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -50,6 +53,7 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
     google = google_workspace_for_project(project_id, db)
     google_health = google.health()
     google_scopes = google.authorized_scopes()
+    gmail_read = project_gmail_read_status(db, project_id)
     result = [
         IntegrationStatus(
             key=f"google_workspace:{capability}",
@@ -58,15 +62,18 @@ def project_integration_catalog(project_id: int, db: Session) -> list[Integratio
             name=name,
             description=description,
             available=google.configured(),
-            connected=google_health.ready and required_scopes.issubset(google_scopes),
+            connected=(google.configured() and gmail_read["connected"] if capability == "channel"
+                       else google_health.ready and required_scopes.issubset(google_scopes)),
             action=(
-                "sync" if capability == "channel" and google_health.ready and required_scopes.issubset(google_scopes)
+                "sync" if capability == "channel" and google.configured() and gmail_read["available"]
                 else "select_source" if capability == "storage" and google_health.ready and required_scopes.issubset(google_scopes)
                 else "oauth"
             ),
-            detail="scope granted" if google_health.ready and required_scopes.issubset(google_scopes) else (
+            detail=(gmail_read["detail"] if google.configured() else "provider is not configured") if capability == "channel" else "scope granted" if google_health.ready and required_scopes.issubset(google_scopes) else (
                 "authorization required" if google.configured() else "provider is not configured"
             ),
+            sync_available=google.configured() and gmail_read["available"] if capability == "channel" else None,
+            status_label=(gmail_read["label"] if google.configured() else "Недоступно") if capability == "channel" else None,
         )
         for capability, name, description, required_scopes in GOOGLE_CAPABILITIES
     ]

@@ -43,6 +43,7 @@ export type MailDraft = {
 };
 
 export type MailMessage = {
+  ordinary_read_only?: boolean;
   id: number;
   project_id: number;
   contract_id?: number | null;

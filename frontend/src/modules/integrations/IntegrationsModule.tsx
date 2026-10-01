@@ -8,6 +8,8 @@ export type IntegrationItem = {
   description: string;
   available: boolean;
   connected: boolean;
+  sync_available?: boolean | null;
+  status_label?: string | null;
   action?: "oauth" | "configure" | "sync" | "select_source" | "local_upload" | "ai_policy";
   detail?: string;
 };
@@ -88,9 +90,9 @@ export function IntegrationsModule({
               </div>
               <span className={item.connected ? "connected" : ""}>
                 {item.connected ? <CheckCircle2 /> : <CircleDashed />}
-                {item.connected ? "Готово" : item.available ? "Не подключено" : "Недоступно"}
+                {item.status_label || (item.connected ? "Готово" : item.available ? "Не подключено" : "Недоступно")}
               </span>
-              {item.action === "sync" && item.connected ? (
+              {item.action === "sync" && (item.sync_available ?? item.connected) ? (
                 <button onClick={() => onSyncChannel(item.provider)} disabled={gmailSyncing}>
                   {gmailSyncing && syncingProvider === item.provider ? "Получаю…" : "Получить письма"}
                 </button>

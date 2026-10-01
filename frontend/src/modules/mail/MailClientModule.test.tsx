@@ -41,6 +41,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("ordinary-read receipts expose no provider mutation or AUTO controls", async () => {
+  const receipt = { ...message, ordinary_read_only: true };
+  const receiptThread = { ...thread, messages: [receipt] };
+  const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [receiptThread] }),
+    thread: vi.fn().mockResolvedValue(receiptThread) });
+  renderClient(client);
+  await screen.findByText("Только чтение · без отправки и AUTO");
+  expect(screen.getByRole("button", { name: "Ответить" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Подтвердить контекст для AUTO" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Удалить" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Архив" })).not.toBeInTheDocument();
+  expect(client.moveMessage).not.toHaveBeenCalled();
+  expect(client.confirmContextForAuto).not.toHaveBeenCalled();
+});
+
 function mockClient(overrides: Record<string, unknown> = {}) {
   return {
     capabilities: vi.fn().mockResolvedValue(capabilities),
