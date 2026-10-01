@@ -10,7 +10,7 @@ pytest==9.1.1
 alembic==1.16.5
 cryptography==50.0.1
 httpx==0.28.1
-pypdf==6.16.2
+pypdf==6.19.0
 xlrd==2.0.2
 mpxj==16.5.0
 JPype1==1.6.0
