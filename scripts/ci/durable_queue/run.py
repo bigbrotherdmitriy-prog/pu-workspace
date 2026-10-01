@@ -90,7 +90,8 @@ def main():
 
     def build_context(prefix):
         # Only tracked source files; never send .git, local .env or other worktrees.
-        paths = command(["git", "ls-files", "-z", "--", prefix]).decode().split("\0")
+        selectors = ["backend", "frontend", ".dockerignore"] if prefix == "application" else [prefix]
+        paths = command(["git", "ls-files", "-z", "--", *selectors]).decode().split("\0")
         content = io.BytesIO()
         # Buildx sniffs only 1024 stdin bytes. A leading PAX mtime record
         # consumes that window before the first file header. Compression magic
@@ -99,8 +100,10 @@ def main():
             for relative in filter(None, paths):
                 path = Path(relative)
                 assert path.name != ".env"
-                name = path.relative_to("backend").as_posix() if prefix == "backend" else path.as_posix()
-                archive.add(ROOT / path, arcname=name, recursive=False)
+                # Stage 1 keeps old assets tracked, but they are not build inputs.
+                if "react_dist" in path.parts or "node_modules" in path.parts:
+                    continue
+                archive.add(ROOT / path, arcname=path.as_posix(), recursive=False)
         return content.getvalue()
 
     assert not any(inventory()), "project already exists"
@@ -146,7 +149,11 @@ def main():
 
         try:
             compose("config", "--quiet")
-            command(["docker", "build", "-t", base, "-"], data=build_context("backend"), timeout=900)
+            command([
+                "docker", "build", "--file", "backend/Dockerfile", "--target", "runtime",
+                "--build-arg", f"PU_RELEASE_REVISION={revision}",
+                "--build-arg", "PU_BUILD_MODE=production", "-t", base, "-",
+            ], data=build_context("application"), timeout=1200)
             command(["docker", "build", "--build-arg", f"BASE_IMAGE={base}", "-f", "scripts/ci/durable_queue/Dockerfile", "-t", image, "-"], data=build_context("scripts"), timeout=120)
             compose("up", "-d", "--wait", "--wait-timeout", "90", "db")
             compose("run", "--rm", "--no-deps", "api1", "alembic", "-c", "alembic.ini", "upgrade", "head")

@@ -37,6 +37,19 @@ jobs:
         run: docker compose config --quiet
       - name: Build and start isolated stack
         run: docker compose up --build -d --wait --wait-timeout 180
+      - name: Verify image-derived frontend manifest and every HTTP asset
+        run: |
+          set -euo pipefail
+          mkdir -p ci-reports
+          container=$(docker compose ps -q backend)
+          image=$(docker inspect "$container" --format '{{.Config.Image}}')
+          image_id=$(docker inspect "$container" --format '{{.Image}}')
+          revision=$(git rev-parse HEAD)
+          port=$(sed -n 's/^PU_TEST_PORT=//p' .env.ci)
+          python scripts/verify_image_static.py \
+            --image "$image" --expected-image-id "$image_id" --revision "$revision" \
+            --loopback-url "http://127.0.0.1:$port" \
+            --receipt ci-reports/frontend-static-verification.json
       - name: Verify migration head and runtime flow
         run: |
           docker compose exec -T backend alembic heads | grep -Fx 'c70a0090f001 (head)'

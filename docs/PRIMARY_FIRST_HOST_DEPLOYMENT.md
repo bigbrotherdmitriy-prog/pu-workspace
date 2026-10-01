@@ -64,10 +64,11 @@ already be loaded or built locally. Pin both artifacts explicitly:
 printf '%s\n' '<full-commit-sha>' > \
   /opt/pu-workspace-primary/releases/<full-commit-sha>/.pu-primary-release
 chmod 400 /opt/pu-workspace-primary/releases/<full-commit-sha>/.pu-primary-release
-docker build \
-  --label com.pu-workspace.primary.revision=<full-commit-sha> \
-  -t app-backend:<full-commit-sha> \
-  /opt/pu-workspace-primary/releases/<full-commit-sha>/backend
+cd /opt/pu-workspace-primary/releases/<full-commit-sha>
+docker build -f backend/Dockerfile --target runtime \
+  --build-arg PU_RELEASE_REVISION=<full-commit-sha> \
+  --build-arg PU_BUILD_MODE=production \
+  -t app-backend:<full-commit-sha> .
 ```
 
 ## Candidate activation
@@ -98,7 +99,10 @@ omit it as well; the script detects the existing dedicated volume, creates and
 test-restores a backup, then performs the application switch.
 
 Success means the database and backend are healthy and the loopback smoke
-reports the expected full commit SHA. Workers and the scheduler intentionally
+reports the expected full commit SHA. The candidate manifest and **all** static
+files have also been verified against the immutable image ID and the loopback
+HTTP server. A new image without a valid manifest fails before database start.
+Workers and the scheduler intentionally
 remain stopped. It does **not** mean the public cutover is complete.
 
 ## Verification and cutover boundary
@@ -129,3 +133,84 @@ docker compose --profile cutover --env-file \
   -f /opt/pu-workspace-primary/current/infra/primary/docker-compose.yml \
   -p puw-primary-next up -d --no-build --wait worker scheduler
 ```
+
+## Stage 1: image-built frontend and public integrity gate
+
+See [approved ADR](architecture/ADR-REACT-DIST-IMAGE-BUILD-RU.md).
+`backend/app/react_dist` is still tracked during stage 1, but both build
+contexts exclude it. The Node stage builds only frontend sources with the frozen
+lockfile. Generated output is copied after backend sources, and the complete
+manifest is stored at `/app/frontend-build-manifest.json`, outside `/new/`.
+
+Record the source archive SHA-256 and image ID before activation; save the image
+artifact and the previous image ID before any switch. Do not replace a previously
+accepted image/receipt with another build of the same SHA. Preserve at least the
+current and two previous accepted image/receipt/archive/runtime sets. Database
+backup and test restoration remain mandatory and are performed by the first-host
+script on updates. No schema change is introduced by this packaging change.
+
+After approved cutover/start of both workers and the scheduler, run the following
+as the deploy account **from the candidate release directory**. `image_id` must
+be the already recorded candidate image ID, not a tag resolved after cutover:
+
+```sh
+python3 scripts/verify_image_static.py \
+  --image "$image_id" --expected-image-id "$image_id" \
+  --revision "$release_sha" --archive-sha256 "$archive_sha256" \
+  --base-url https://puworkspace.ru --compose-project puw-primary-next \
+  --receipt "/opt/pu-workspace-primary/static-receipts/${release_sha}-https.json"
+```
+
+This gate checks exactly one backend, two durable workers and one scheduler on
+the same immutable image and SHA; `GMAIL_AUTO_SYNC_ENABLED=true` on each; public
+`/api/status`; `readiness ready:true` and every required check; HTTP 200 without
+redirects, valid TLS, identity encoding, MIME type, size and SHA-256 for **every**
+manifest file (including videos, lazy chunks and service worker). For `index.html`
+the requested URL is `/new/`. The reference is extracted from the exact image
+using a disposable container that is **never started**, not from Git or a local
+frontend build. Receipts are private, created exclusively, and never overwritten.
+
+Any readiness/image/static failure stops the rollout. Restore the previous full
+artifact, not just the symlink or frontend. Do not retry by bypassing checks:
+
+```sh
+sh scripts/rollback-primary-release.sh \
+  /opt/pu-workspace-primary "$previous_release" "$previous_image_id" \
+  puw-primary-next 3020 https://puworkspace.ru
+```
+
+The rollback script refuses an unproven schema combination, restores all four
+applications on the saved exact image and old private runtime environment,
+and rechecks public readiness and all hashes. It never performs DB downgrade or
+changes Gmail/AUTO/access-control flags. For a pre-stage-1 image without a manifest,
+only the explicit legacy rollback mode extracts its whole static tree and makes
+an external inventory; it never falls back to `react_dist` in Git. Keep the new
+verifier release directory available even after the symlink is restored.
+The retained runtime `PRIMARY_IMAGE` alone is atomically pinned to the accepted
+image ID, so later Compose invocations cannot switch back to an old mutable tag.
+No secret or execution/access-control flag is modified by this pin.
+
+If rollback fails or the schema/image is unavailable, report the failure; do not
+rebuild an old commit and call it the old accepted artifact. The known consequence
+of a separately authorized authority migration downgrade (revoked scoped rights
+and increased authority version) is unaffected; this script does not do it.
+
+Browser/service-worker cache acceptance remains a separate visual check after
+the byte-integrity gate. Stage 2 (untracking generated output) is not authorized
+until an actual stage-1 rollout and legacy rollback acceptance are recorded.
+
+## Local development and CI
+
+Local Compose builds the same recipe from the repository root with explicit
+`development/local-dev` identity by default. Such images cannot pass production
+verification. Alternatively run Vite dev separately, or build locally before
+serving the Python `/new/` app; during stage 1 do not commit generated changes in
+the tracked `react_dist`. Production requires `PU_BUILD_MODE=production` and a
+full lowercase 40-character revision.
+
+CI uses the canonical `backend/Dockerfile` testing target, sharing runtime tools,
+fresh static files and manifest with production; it adds test fixtures only.
+Docker smoke extracts that image and verifies every asset through its isolated
+loopback gateway. The retained `Dockerfile.ci` mirrors the canonical recipe for
+compatibility; a contract test prevents divergence. Incremental/hotfix recipes
+that inherit `app-backend:latest` are not standard source-built releases.

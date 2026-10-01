@@ -21,7 +21,11 @@ x-app: &app
   image: ${PU_TEST_IMAGE_REPOSITORY:-pu-workspace-test}:${PU_RELEASE_REVISION:?set tested commit}
   build:
     context: .
-    dockerfile: Dockerfile.ci
+    dockerfile: backend/Dockerfile
+    target: testing
+    args:
+      PU_RELEASE_REVISION: ${PU_RELEASE_REVISION:?set tested commit}
+      PU_BUILD_MODE: production
   environment: *environment
 
 services:

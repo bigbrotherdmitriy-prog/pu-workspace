@@ -37,13 +37,22 @@ def test_stdin_context_is_recognizable_with_fractional_mtime(tmp_path, monkeypat
     (tmp_path / "backend").mkdir()
     dockerfile = tmp_path / "backend/Dockerfile"
     dockerfile.write_bytes(b"FROM scratch\n")
+    legacy_static = tmp_path / "backend/app/react_dist/index.html"
+    legacy_static.parent.mkdir(parents=True)
+    legacy_static.write_bytes(b"must not enter the source-only context")
     os.utime(dockerfile, (1700000000.125, 1700000000.125))
     captured = []
 
     def command(args, **kwargs):
         if args[:2] == ["git", "ls-files"]:
-            return subprocess.CompletedProcess(args, 0, b"backend/Dockerfile\0", b"")
+            assert args[-3:] == ["backend", "frontend", ".dockerignore"]
+            return subprocess.CompletedProcess(
+                args, 0, b"backend/Dockerfile\0backend/app/react_dist/index.html\0", b""
+            )
         if args[:2] == ["docker", "build"]:
+            assert args[args.index("--file") + 1] == "backend/Dockerfile"
+            assert "PU_RELEASE_REVISION=" + "a" * 40 in args
+            assert "PU_BUILD_MODE=production" in args
             captured.append(kwargs["input"])
             return subprocess.CompletedProcess(args, 1, b"", b"controlled stop before Docker")
         return subprocess.CompletedProcess(args, 0, b"a" * 40 if args[:2] == ["git", "rev-parse"] else b"", b"")
@@ -53,8 +62,8 @@ def test_stdin_context_is_recognizable_with_fractional_mtime(tmp_path, monkeypat
         runtime.main()
     data = captured[0]
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
-        assert archive.getnames() == ["Dockerfile"]
-        assert archive.extractfile("Dockerfile").read() == b"FROM scratch\n"
+        assert archive.getnames() == ["backend/Dockerfile"]
+        assert archive.extractfile("backend/Dockerfile").read() == b"FROM scratch\n"
     header = data[:1024]
     if header.startswith((b"\x1f\x8b\x08", b"BZh", b"\xfd7zXZ\x00")):
         recognized = True

@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - docker-compose.yml
+      - backend/Dockerfile
+      - .dockerignore
+      - frontend/scripts/write-build-info.mjs
       - backend/app/core/readiness.py
       - backend/scripts/preflight.py
       - .github/workflows/root-compose-startup.yml
@@ -20,6 +23,7 @@ jobs:
       COMPOSE_FILE: docker-compose.yml
       GMAIL_AUTO_SYNC_ENABLED: "false"
       AI_SECRETARY_AUTOMATION_ENABLED: "false"
+      PU_BUILD_MODE: production
     steps:
       - uses: actions/checkout@v6
         with:
