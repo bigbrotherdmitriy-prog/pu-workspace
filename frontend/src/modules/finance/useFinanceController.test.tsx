@@ -1,13 +1,215 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../../api/client";
 import { useFinanceController } from "./useFinanceController";
+import type { FinanceDocumentCandidate, FinanceOverview } from "./types";
 
 vi.mock("../../api/client", () => ({ api: vi.fn() }));
 
 afterEach(cleanup);
 beforeEach(() => { vi.mocked(api).mockReset(); });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+const overview: FinanceOverview = {
+  summary: { budget_planned: 0, budget_committed: 0, budget_actual: 0, budget_forecast: 0,
+    budget_variance: 0, cash_balance_forecast: 0, cash_gap: 0, delayed_schedule: 0,
+    late_procurement: 0, acts_pending: 0, pending_payments: 0, unlinked_invoices: 0 },
+  baselines: [], schedule: [], budget: [], cash_flow: [], procurement: [], acts: [],
+};
+const candidate: FinanceDocumentCandidate = {
+  document_id: 91, name: "plan.xlsx", source: "upload", kind: "cash-flow", score: 98,
+  reasons: [], hints: {}, already_linked: false, originals_changed: false,
+};
+const categories = [{ id: 1, name: "ФОТ", is_active: true, sort_order: 1 }];
+
+describe("project-scoped independent finance loading", () => {
+  it("clears the previous contract and project-bound editor state before loading another project", async () => {
+    const pending = deferred<unknown>();
+    const setError = vi.fn();
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path.includes("project_id=18")) return pending.promise;
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [candidate] };
+      return { categories };
+    });
+    const { result, rerender } = renderHook(({ projectId }) => useFinanceController({
+      ready: true, projectId, setNotice: vi.fn(), setError,
+    }), { initialProps: { projectId: 17 } });
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+    act(() => {
+      result.current.setSelectedFinanceContractId(321);
+      result.current.setFinanceScheduleItemId(41);
+      result.current.setFinanceBudgetLineId(42);
+      result.current.setFinanceSourceDocumentId(43);
+      result.current.setFinanceBaselineId(44);
+      result.current.setFinanceTitle("Старый проект");
+      result.current.setFinanceAmount("123");
+      result.current.setFinanceStructuredRows([1]);
+    });
+    await waitFor(() => expect(api).toHaveBeenCalledWith(expect.stringContaining("contract_id=321")));
+    rerender({ projectId: 18 });
+    expect(result.current.selectedFinanceContractId).toBe(0);
+    expect(result.current.finance).toBeNull();
+    expect(result.current.financeCandidates).toEqual([]);
+    expect(result.current.costCategories).toEqual([]);
+    expect(result.current.financeScheduleItemId).toBe(0);
+    expect(result.current.financeBudgetLineId).toBe(0);
+    expect(result.current.financeSourceDocumentId).toBe(0);
+    expect(result.current.financeBaselineId).toBe(0);
+    expect(result.current.financeTitle).toBe("");
+    expect(result.current.financeAmount).toBe("");
+    expect(result.current.financeStructuredRows).toEqual([]);
+    const newRequests = vi.mocked(api).mock.calls.map(([path]) => path).filter(path => path.includes("project_id=18"));
+    expect(newRequests.length).toBeGreaterThan(0);
+    expect(newRequests.every(path => !path.includes("contract_id="))).toBe(true);
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it.each(["overview", "document-candidates", "cost-categories"])(
+    "loads the other two blocks even when %s fails", async (failedBlock) => {
+      const setError = vi.fn();
+      vi.mocked(api).mockImplementation(async (path) => {
+        if (path.startsWith(`/execution/${failedBlock}`)) throw new Error("Недоступен блок");
+        if (path.startsWith("/execution/overview")) return overview;
+        if (path.startsWith("/execution/document-candidates")) return { candidates: [candidate] };
+        return { categories };
+      });
+      const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 17,
+        setNotice: vi.fn(), setError }));
+      await act(async () => result.current.loadFinance());
+      expect(result.current.finance).toEqual(failedBlock === "overview" ? null : overview);
+      expect(result.current.financeCandidates).toEqual(failedBlock === "document-candidates" ? [] : [candidate]);
+      expect(result.current.costCategories).toEqual(failedBlock === "cost-categories" ? [] : categories);
+      expect(setError).toHaveBeenCalledWith(expect.stringContaining("Недоступен блок"));
+    },
+  );
+
+  it("publishes each completed block without waiting for a pending sibling", async () => {
+    const pending = deferred<unknown>();
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return pending.promise;
+      return { categories };
+    });
+    const { result } = renderHook(() => useFinanceController({ ready: true, projectId: 17,
+      setNotice: vi.fn(), setError: vi.fn() }));
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+    expect(result.current.costCategories).toEqual(categories);
+    expect(result.current.financeCandidates).toEqual([]);
+    await act(async () => pending.resolve({ candidates: [candidate] }));
+    expect(result.current.financeCandidates).toEqual([candidate]);
+  });
+
+  it("ignores old-project successes and errors after switching away and back", async () => {
+    const oldOverview = deferred<unknown>();
+    const oldSuggestions = deferred<unknown>();
+    const oldCategories = deferred<unknown>();
+    const setError = vi.fn();
+    let firstLoad = true;
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (firstLoad) {
+        if (path.startsWith("/execution/overview")) return oldOverview.promise;
+        if (path.startsWith("/execution/document-candidates")) return oldSuggestions.promise;
+        firstLoad = false;
+        return oldCategories.promise;
+      }
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [candidate] };
+      return { categories };
+    });
+    const { result, rerender } = renderHook(({ projectId }) => useFinanceController({ ready: true,
+      projectId, setNotice: vi.fn(), setError }), { initialProps: { projectId: 17 } });
+    rerender({ projectId: 18 });
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+    rerender({ projectId: 17 });
+    await waitFor(() => expect(result.current.financeCandidates).toEqual([candidate]));
+    await act(async () => {
+      oldOverview.resolve({ ...overview, cash_flow: [{ id: 999 }] });
+      oldSuggestions.resolve({ candidates: [] });
+      oldCategories.reject(new Error("Старая ошибка"));
+    });
+    expect(result.current.finance).toEqual(overview);
+    expect(result.current.financeCandidates).toEqual([candidate]);
+    expect(result.current.costCategories).toEqual(categories);
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("ignores an earlier reload in the same project after a newer reload finishes", async () => {
+    const older = deferred<unknown>();
+    let requestCount = 0;
+    vi.mocked(api).mockImplementation(async (path) => {
+      requestCount += 1;
+      if (requestCount <= 3) return older.promise;
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [candidate] };
+      return { categories };
+    });
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 17,
+      setNotice: vi.fn(), setError: vi.fn() }));
+    let first!: Promise<void>;
+    act(() => { first = result.current.loadFinance(); });
+    await act(async () => result.current.loadFinance());
+    await act(async () => { older.resolve({ candidates: [], categories: [] }); await first; });
+    expect(result.current.finance).toEqual(overview);
+    expect(result.current.financeCandidates).toEqual([candidate]);
+    expect(result.current.costCategories).toEqual(categories);
+  });
+
+  it("does not reopen a late structured preview after switching projects", async () => {
+    const pending = deferred<unknown>();
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(api).mockImplementation(async () => pending.promise);
+    const { result, rerender } = renderHook(({ projectId }) => useFinanceController({ ready: false,
+      projectId, setNotice, setError }), { initialProps: { projectId: 17 } });
+    let review!: Promise<void>;
+    act(() => { review = result.current.useFinanceCandidate(candidate); });
+    rerender({ projectId: 18 });
+    await act(async () => {
+      pending.resolve({ document_id: 91, name: "old.xlsx", kind: "cash-flow", rows: [], issues: [], mapping: {}, truncated: false });
+      await review;
+    });
+    expect(result.current.financeStructuredPreview).toBeNull();
+    expect(setNotice).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it.each(["invoice", "uploaded-candidates", "dropped-preview"])(
+    "ignores late %s document state after switching projects", async (flow) => {
+      const pending = deferred<unknown>();
+      const setNotice = vi.fn();
+      const setError = vi.fn();
+      vi.mocked(api).mockImplementation(async () => pending.promise);
+      const { result, rerender } = renderHook(({ projectId }) => useFinanceController({ ready: false,
+        projectId, setNotice, setError }), { initialProps: { projectId: 17 } });
+      let review!: Promise<void>;
+      act(() => {
+        review = flow === "invoice" ? result.current.useFinanceCandidate({ ...candidate, kind: "invoice" })
+          : flow === "uploaded-candidates" ? result.current.reviewUploadedFinanceDocuments([91])
+          : result.current.prepareDroppedFinanceDocument(91, "old.xlsx", "cash-flow", 321);
+      });
+      rerender({ projectId: 18 });
+      await act(async () => {
+        pending.resolve({ id: 12, document_id: 91, name: "old.xlsx", rows: [], candidates: [candidate] });
+        await review;
+      });
+      expect(result.current.invoiceExtractionProposal).toBeNull();
+      expect(result.current.financeStructuredPreview).toBeNull();
+      expect(result.current.financeCandidates).toEqual([]);
+      expect(result.current.selectedFinanceContractId).toBe(0);
+      expect(setNotice).not.toHaveBeenCalled();
+      expect(setError).not.toHaveBeenCalled();
+      expect(api).toHaveBeenCalledTimes(1);
+    },
+  );
+});
 
 describe("uploaded finance document routing", () => {
   it("persists DDS cancellation through the status API and reloads finance", async () => {
