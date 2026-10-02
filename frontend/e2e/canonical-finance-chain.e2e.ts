@@ -8,6 +8,7 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
     currency: "RUB", status: "approved",
   };
   const cashFlow: Record<string, unknown>[] = [];
+  let confirmationBatches = 0;
   const acts: Record<string, unknown>[] = [];
   const proposal: Record<string, unknown> = {
     id: 501, project_id: 2, source_document_id: 601,
@@ -70,12 +71,17 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
         source_document_id: 601, direction: "outflow", title: "Материалы",
         planned_date: "2026-09-25", planned_amount: 30000, actual_amount: 0,
         category: "Прямые", note: "Материалы", status: "proposed",
+        entry_kind: "invoice_commitment", record_version: 1, confirmation_allowed: true,
       });
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(proposal) });
     }
-    if (request.method() === "PATCH" && url.pathname === "/execution/cash-flow/82/status") {
-      cashFlow[0].status = "approved"; budget.committed_amount = 30000;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ id: 82, status: "approved" }) });
+    if (request.method() === "POST" && url.pathname === "/execution/cash-flow/confirm-batch") {
+      expect(JSON.parse(request.postData() || "{}")).toEqual({ project_id: 2,
+        items: [{ id: 82, expected_record_version: 1 }] });
+      confirmationBatches += 1;
+      cashFlow[0].status = "approved"; cashFlow[0].record_version = 2; budget.committed_amount = 30000;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ atomic: true,
+        confirmed_count: 1, rows: [{ id: 82, status: "approved", entry_kind: "invoice_commitment", record_version: 2 }] }) });
     }
     if (request.method() === "POST" && url.pathname === "/execution/cash-flow/82/confirm-payment") {
       cashFlow[0].status = "paid"; cashFlow[0].actual_amount = 30000;
@@ -121,6 +127,8 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
 
   await dds.getByRole("tab", { name: "Детализация" }).click();
   await dds.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await expect(dds.getByText("approved", { exact: true })).toBeVisible();
+  expect(confirmationBatches).toBe(1);
   let paymentPrompt = 0;
   page.on("dialog", async dialog => {
     if (dialog.type() === "prompt") {
