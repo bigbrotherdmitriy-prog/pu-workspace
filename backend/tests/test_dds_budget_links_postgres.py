@@ -44,7 +44,10 @@ def pg_world(monkeypatch):
             world = build_world(db, user)
             request = payload(world)
             identifiers = [row.id for row in world.rows]
-            yield engine, world.document.id, user.id, request, identifiers, config
+            context = engine, world.document.id, user.id, request, identifiers, config
+        # The migration gate drops FK constraints. No fixture session may keep
+        # read locks on their referenced tables while that DDL is running.
+        yield context
     finally:
         engine.dispose()
         with base.begin() as connection:
