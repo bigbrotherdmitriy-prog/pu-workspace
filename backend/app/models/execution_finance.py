@@ -177,6 +177,33 @@ class DdsArticleBudgetOperation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DdsBudgetLinkOperation(Base):
+    """Immutable receipt for an owner-confirmed batch of legacy budget links."""
+
+    __tablename__ = "dds_budget_link_operations"
+    __table_args__ = (
+        UniqueConstraint("project_id", "idempotency_key", name="uq_dds_budget_link_operation_key"),
+        CheckConstraint("budget_revision > 0", name="ck_dds_budget_link_revision"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), index=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id", ondelete="RESTRICT"))
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    source_document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="RESTRICT"))
+    source_document_version_id: Mapped[int] = mapped_column(ForeignKey("document_versions.id", ondelete="RESTRICT"))
+    source_document_sha256: Mapped[str] = mapped_column(String(64))
+    currency: Mapped[str] = mapped_column(String(3))
+    budget_period: Mapped[int] = mapped_column(Integer)
+    budget_revision: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    preview_hash: Mapped[str] = mapped_column(String(64))
+    result_json: Mapped[str] = mapped_column(Text)
+    snapshot_json: Mapped[str] = mapped_column(Text)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class CashFlowPlanMutation(Base):
     """Idempotent receipt for spreadsheet-like edits of proposed DDS rows."""
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import type { CostCategory } from "./types";
+import { ExistingBudgetLinksPanel } from "./ExistingBudgetLinksPanel";
 
 type Props = { projectId: number; contractId: number; documentId: number; planYear: number;
   categories: CostCategory[]; onApplied: () => void };
@@ -31,6 +32,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
   const [operation, setOperation] = useState<Operation | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [linksRefresh, setLinksRefresh] = useState(0);
   const pending = useRef(false);
   const sequence = useRef(0);
   const key = `${projectId}:${contractId}:${documentId}:${planYear}`;
@@ -88,7 +90,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
         method: "POST", body: JSON.stringify({ ...payload, idempotency_key: attempt.current.id }),
       });
       if (context.current !== captured) return;
-      setOperation(result); onApplied();
+      setOperation(result); setLinksRefresh((value) => value + 1); onApplied();
     } catch (caught) {
       if (context.current === captured) setError((caught as Error).message);
     } finally {
@@ -101,7 +103,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
     const captured = context.current; setBusy(true); setError("");
     try {
       const result = await api<Operation>(`/execution/article-budget-operations/${operation.operation_id}/undo`, { method: "POST" });
-      if (context.current === captured) { setOperation(result); onApplied(); }
+      if (context.current === captured) { setOperation(result); setLinksRefresh((value) => value + 1); onApplied(); }
     } catch (caught) {
       if (context.current === captured) setError((caught as Error).message);
     } finally { if (context.current === captured) setBusy(false); }
@@ -137,7 +139,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
         {preview.existing_expense_difference != null && <p>Текущие расходы: {preview.existing_expense_total}; отличие от бюджета: {preview.existing_expense_difference}. Суммы не подгоняются.</p>}
         <div className="structured-table"><table><thead><tr><th>ID / источник</th><th>Статья / сумма / дата</th><th>Статус / версия</th><th>Связи до → предложение</th></tr></thead><tbody>
           {preview.existing_rows.map((row) => <tr key={row.id}><td>#{row.id} · {row.source_coordinate}</td><td>{row.title}<br />{row.amount} · {row.planned_date}{row.source_difference !== null && row.source_difference !== "0.00" && <p>Ручное отличие: {row.source_difference}</p>}</td>
-            <td>{row.status} · v{row.record_version}</td><td>{row.current_budget_line_id ?? "нет"} → {row.proposed_budget_line_id ? `#${row.proposed_budget_line_id}` : row.proposed_article_id ? `статья ${row.proposed_article_id}` : "не определено"}. Применение недоступно.</td></tr>)}
+            <td>{row.status} · v{row.record_version}</td><td>{row.current_budget_line_id ?? "нет"} → {row.proposed_budget_line_id ? `#${row.proposed_budget_line_id}` : row.proposed_article_id ? `статья ${row.proposed_article_id}` : "не определено"}. Связи применяются отдельно ниже.</td></tr>)}
         </tbody></table></div>
       </details>
     </>}
@@ -145,5 +147,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
       {operation && <><span>Операция #{operation.operation_id}: {operation.undone ? "отменена, история сохранена" : `proposed; бюджет: ${operation.created_budget_ids.length}, новый ДДС: ${operation.created_cash_flow_ids.length}`}</span>
         {!operation.undone && <button type="button" disabled={busy} className="secondary" onClick={() => void undo()}>Отменить эту операцию</button>}</>}
     </div>
+    <ExistingBudgetLinksPanel projectId={projectId} contractId={contractId} documentId={documentId}
+      planYear={year} budgetRevision={revision} refreshToken={linksRefresh} onApplied={onApplied} />
   </section>;
 }
