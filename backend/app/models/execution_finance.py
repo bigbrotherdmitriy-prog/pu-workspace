@@ -78,6 +78,11 @@ class BudgetLine(Base):
         ),
     )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    line_kind: Mapped[str] = mapped_column(String(30), default="legacy_unclassified", server_default="legacy_unclassified")
+    budget_period: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    budget_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    article_normalized_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    record_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
     cost_category_id: Mapped[int | None] = mapped_column(
@@ -107,6 +112,12 @@ class BudgetLine(Base):
 class CashFlowEntry(Base):
     __tablename__ = "cash_flow_entries"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    entry_kind: Mapped[str] = mapped_column(String(30), default="legacy_unclassified", server_default="legacy_unclassified")
+    matrix_article_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    matrix_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    matrix_operation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dds_article_budget_operations.id", ondelete="RESTRICT"), nullable=True,
+    )
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
     schedule_item_id: Mapped[int | None] = mapped_column(ForeignKey("schedule_items.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -135,6 +146,35 @@ class CashFlowEntry(Base):
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DdsArticleBudgetOperation(Base):
+    """Persistent receipt for a confirmed new import, never a legacy backfill."""
+
+    __tablename__ = "dds_article_budget_operations"
+    __table_args__ = (
+        UniqueConstraint("project_id", "idempotency_key", name="uq_dds_article_operation_key"),
+        UniqueConstraint("project_id", "contract_id", "source_document_version_id", "mode",
+                         "budget_period", "budget_revision", name="uq_dds_article_operation_source"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), index=True)
+    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id", ondelete="RESTRICT"))
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    source_document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="RESTRICT"))
+    source_document_version_id: Mapped[int] = mapped_column(ForeignKey("document_versions.id", ondelete="RESTRICT"))
+    source_document_sha256: Mapped[str] = mapped_column(String(64))
+    mode: Mapped[str] = mapped_column(String(30))
+    budget_period: Mapped[int] = mapped_column(Integer)
+    budget_revision: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    preview_hash: Mapped[str] = mapped_column(String(64))
+    algorithm_version: Mapped[str] = mapped_column(String(60))
+    result_json: Mapped[str] = mapped_column(Text)
+    snapshot_json: Mapped[str] = mapped_column(Text)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CashFlowPlanMutation(Base):

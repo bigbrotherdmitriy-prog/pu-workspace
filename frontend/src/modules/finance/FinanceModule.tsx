@@ -40,6 +40,18 @@ export function FinanceModule({ finance, candidates, contracts, selectedContract
   );
   const financialContracts = contracts.filter((item) => item.contract_kind !== "prime_reference");
   const contract = financialContracts.find((item) => item.id === selectedContractId);
+  const existingSourceIds = Array.from(new Set(finance?.cash_flow
+    .filter((item) => item.contract_id === selectedContractId && item.source_document_id)
+    .map((item) => item.source_document_id as number) || []));
+  const existingSources = existingSourceIds.length > 0 && <details className="dds-intake-candidates">
+    <summary>Ранее загруженные источники ДДС — preview без изменения записей</summary>
+    <p>Для месячной матрицы здесь доступен бюджет из статей. Старые суммы и связи не применяются повторно.</p>
+    <div className="dds-intake-actions">{existingSourceIds.map((id) => <button type="button" key={id}
+      onClick={() => onUseCandidate({ document_id: id, name: `Документ #${id}`, kind: "cash-flow", source: "existing",
+        score: 100, reasons: ["Источник существующих записей ДДС"], hints: {}, already_linked: true, originals_changed: false })}>
+      Проверить источник ДДС #{id}
+    </button>)}</div>
+  </details>;
   const baselineIds = new Set(finance?.baselines.filter((item) => item.contract_id === selectedContractId).map((item) => item.id) || []);
   const scheduleCount = finance?.schedule.filter((item) => baselineIds.has(item.baseline_id)).length || 0;
   const budgetCount = finance?.budget.filter((item) => item.contract_id === selectedContractId).length || 0;
@@ -63,6 +75,7 @@ export function FinanceModule({ finance, candidates, contracts, selectedContract
       </div>
     </div>
     {!contract && <p className="finance-import-hint">Выберите финансовый договор — после этого загрузка бюджета и планового ДДС станет доступна.</p>}
+    {existingSources}
     <details className="dds-intake-candidates">
       <summary>Найденные документы <span>{visibleCandidates.length ? `${visibleCandidates.length} к проверке — открыть при необходимости` : "нет новых предложений"}</span></summary>
       <div className="finance-candidate-summary"><strong>Всего: {candidates.length}</strong><span>ГПР: {candidateCounts.schedule || 0}</span><span>Бюджеты: {candidateCounts.budget || 0}</span><span>ДДС: {candidateCounts["cash-flow"] || 0}</span><span>Счета: {candidateCounts.invoice || 0}</span><span>Акты: {candidateCounts.act || 0}</span></div>

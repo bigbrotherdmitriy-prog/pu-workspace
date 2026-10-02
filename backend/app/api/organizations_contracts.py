@@ -670,6 +670,7 @@ def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get
     if proposal.operation == "create":
         budget = BudgetLine(
             project_id=proposal.project_id, contract_id=proposal.contract_id,
+            line_kind="contract_control",
             cost_category_id=category.id, category=category.name,
             description=proposal.description, planned_amount=proposal.amount,
             committed_amount=Decimal("0"), actual_amount=Decimal("0"),
