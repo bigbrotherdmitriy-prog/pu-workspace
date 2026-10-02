@@ -87,6 +87,20 @@ jobs:
           assert len(cases) == 2, f'Expected 2 PostgreSQL gates, collected {len(cases)}'
           assert not report.findall('.//skipped'), 'Contract budget PostgreSQL gates must not skip tests'
           PY
+      - name: DDS article budget PostgreSQL gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_dds_article_budget_postgres.py \
+            --junitxml=../dds-article-budget-postgres.xml 2>&1 | tee ../dds-article-budget-postgres.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../dds-article-budget-postgres.xml').getroot()
+          assert len(report.findall('.//testcase')) == 3, 'Expected 3 DDS article budget PostgreSQL gates'
+          assert not report.findall('.//skipped'), 'DDS article budget PostgreSQL gates must not skip'
+          PY
       - name: Contract discovery durable PostgreSQL gate
         working-directory: backend
         env:
@@ -174,6 +188,8 @@ jobs:
             pytest.log
             contract-budget-postgres.log
             contract-budget-postgres.xml
+            dds-article-budget-postgres.log
+            dds-article-budget-postgres.xml
             contract-discovery-postgres.log
             contract-discovery-postgres.xml
             v6-00a-money-postgres.log

@@ -27,7 +27,7 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.execution_finance import (
-    AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, CostCategory, InvoiceExtractionProposal,
+    AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, ContractBudgetProposal, CostCategory, InvoiceExtractionProposal,
     PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
 )
 from app.models.organization_contract import Contract
@@ -36,6 +36,10 @@ from app.models.task import Task
 from app.models.user import User
 from app.invoice_extraction import InvoiceFields, extract_invoice_fields
 from app.structured_import import parse_structured_rows
+from app.dds_article_budget import (
+    ArticleBudgetPreviewRequest, ArticleBudgetApplyRequest,
+    preview_article_budget, apply_article_budget, undo_article_budget, confirmed_budget_for_totals,
+)
 from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
 from app.schedule_import.mspdi import build_mspdi
 
@@ -795,7 +799,8 @@ def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, de
 def _linked_budget_committed(rows: list[CashFlowEntry]) -> Decimal:
     return sum(
         (row.planned_amount for row in rows
-         if row.direction == "outflow" and row.status in {"approved", "paid"}),
+         if row.direction == "outflow" and row.status in {"approved", "paid"}
+         and getattr(row, "entry_kind", "legacy_unclassified") != "plan_forecast"),
         Decimal("0"),
     )
 
@@ -1143,7 +1148,11 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
             409,
             f"PROJECT_CURRENCY_MISMATCH: найдено записей не в валюте проекта {currency}: {len(mismatched)}",
         )
-    confirmed_budget = [x for x in budget if x.status in {"approved", "active", "closed"}]
+    known_control_ids = set(db.scalars(select(ContractBudgetProposal.created_budget_line_id).where(
+        ContractBudgetProposal.project_id == project_id,
+        ContractBudgetProposal.created_budget_line_id.is_not(None),
+    )))
+    confirmed_budget = confirmed_budget_for_totals(budget, known_control_ids)
     relevant_cash = [x for x in cash if x.status in {"approved", "paid", "received"}]
     currencies = [currency]
     summary_by_currency: dict[str, dict] = {}
@@ -1193,6 +1202,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                       **schedule_cpm.get(x.id, {"total_float": 0, "is_critical": False,
                                                 "constraint_violation": False})} for x in schedule],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "cost_category_id": x.cost_category_id,
+                    "line_kind": x.line_kind, "budget_period": x.budget_period,
+                    "budget_revision": x.budget_revision, "record_version": x.record_version,
                     "category": x.category, "description": x.description,
                     "source_document_id": x.source_document_id,
                     "source_document_version_id": x.source_document_version_id,
@@ -1202,6 +1213,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "overrun_amount": max(x.actual_amount - x.planned_amount, Decimal("0")),
                     "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
+                        "entry_kind": x.entry_kind,
                         "budget_line_id": x.budget_line_id, "task_id": x.task_id,
                         "source_document_id": x.source_document_id,
                         "source_document_version_id": x.source_document_version_id,
@@ -1333,6 +1345,9 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
     if any(not row["importable"] for row in selected.values()):
         raise HTTPException(422, "Сначала исправьте строки с ошибками")
     unknown_overrides = set(payload.row_overrides) - set(selected)
+    matrix_expenses_selected = preview.get("layout") == "monthly_matrix" and any(
+        row.get("direction") != "inflow" for row in selected.values()
+    )
     if unknown_overrides:
         raise HTTPException(422, "Изменения содержат невыбранные строки")
     for selection_id, override in payload.row_overrides.items():
@@ -1345,6 +1360,9 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
             if field in patch:
                 patch[field] = patch[field].strip()
         selected[selection_id].update(patch)
+
+    if matrix_expenses_selected or (preview.get("layout") == "monthly_matrix" and any(row.get("direction") != "inflow" for row in selected.values())):
+        raise HTTPException(409, "ARTICLE_BUDGET_PREVIEW_REQUIRED: матричные расходы создаются через preview бюджета из статей")
 
     baseline = None
     if payload.kind == "schedule":
@@ -1410,6 +1428,24 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
     db.commit()
     return {"document_id": document.id, "kind": payload.kind, "created_ids": created,
             "created": len(created), "status": "proposed", "originals_changed": False}
+
+
+@router.post("/documents/{document_id}/article-budget-preview")
+def article_budget_preview(document_id: int, payload: ArticleBudgetPreviewRequest,
+                           db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """POST for structured parameters; read-only, including existing DDS links."""
+    return preview_article_budget(document_id, payload, db, user)
+
+
+@router.post("/documents/{document_id}/article-budget-import")
+def article_budget_import(document_id: int, payload: ArticleBudgetApplyRequest,
+                          db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return apply_article_budget(document_id, payload, db, user)
+
+
+@router.post("/article-budget-operations/{operation_id}/undo")
+def article_budget_undo(operation_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return undo_article_budget(operation_id, db, user)
 
 
 @router.post("/baselines")
@@ -2181,6 +2217,7 @@ def link_cash_flow_controls(item_id: int, payload: CashFlowControlLinks,
     item.contract_id = payload.contract_id
     item.schedule_item_id = payload.schedule_item_id
     item.budget_line_id = payload.budget_line_id
+    item.record_version += 1
     after = {
         "contract_id": item.contract_id,
         "schedule_item_id": item.schedule_item_id,
@@ -2323,6 +2360,9 @@ def undo_cash_flow_plan_mutation(mutation_id: int, db: Session = Depends(get_db)
 @router.post("/cash-flow/{item_id}/confirm-payment")
 def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
     item = _locked_cash_flow(db, item_id)
+    if item.entry_kind == "plan_forecast":
+        require_project_role(db, user, item.project_id, "manager")
+        raise HTTPException(409, "FORECAST_CONVERSION_REQUIRED: прогноз не является счётом или платёжным обязательством")
     require_project_role(db, user, item.project_id, "manager")
     paid_status = "received" if item.direction == "inflow" else "paid"
     currency = payload.currency or item.currency
@@ -2494,10 +2534,7 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "procurement": ProcurementItem, "acts": AcceptanceAct, "baselines": ScheduleBaseline}
     model = models.get(kind)
     if model is None: raise HTTPException(404, "Unsupported register")
-    item = (
-        db.scalar(select(AcceptanceAct).where(AcceptanceAct.id == item_id).with_for_update())
-        if kind == "acts" else db.get(model, item_id)
-    )
+    item = db.scalar(select(model).where(model.id == item_id).with_for_update().execution_options(populate_existing=True))
     if item is None: raise HTTPException(404, "Item not found")
     require_project_role(db, user, item.project_id, "manager")
     allowed = {"budget": {"approved", "active", "closed", "rejected"}, "cash-flow": {"approved", "cancelled"},
@@ -2564,6 +2601,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         budget_actual_before = locked_budget.actual_amount
 
     setattr(item, status_attribute, payload.status)
+    if kind in {"budget", "cash-flow"}:
+        item.record_version += 1
     if hasattr(item, "approved_at") and payload.status == "approved": item.approved_at = datetime.now(timezone.utc)
     if payload.actual_amount is not None and hasattr(item, "actual_amount"): item.actual_amount = payload.actual_amount
     if payload.actual_date is not None:

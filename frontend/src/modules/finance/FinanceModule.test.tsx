@@ -5,6 +5,17 @@ import { FinanceModule } from "./FinanceModule";
 
 afterEach(cleanup);
 
+it("offers read-only reopening of already imported sources without another upload", () => {
+  const onUseCandidate = vi.fn();
+  render(<FinanceModule embedded finance={{ baselines: [], schedule: [], budget: [], acts: [],
+    cash_flow: [{ id: 1101, contract_id: 801, source_document_id: 901 }] } as never}
+    candidates={[]} contracts={[{ id: 801, number: "TEST-BUDGET-001", title: "Synthetic contract" }]} selectedContractId={801}
+    onSelectContract={vi.fn()} onPrepare={vi.fn()} onUseCandidate={onUseCandidate}
+    onUpload={vi.fn()} onUploadFinance={vi.fn()} onOpenSchedule={vi.fn()} onReload={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Проверить источник ДДС #901" }));
+  expect(onUseCandidate).toHaveBeenCalledWith(expect.objectContaining({ document_id: 901, kind: "cash-flow", already_linked: true }));
+});
+
 describe("finance document ingress", () => {
   it("offers a direct invoice or act upload entrypoint", () => {
     const onUpload = vi.fn();

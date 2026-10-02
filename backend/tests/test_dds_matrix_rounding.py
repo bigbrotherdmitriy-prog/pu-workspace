@@ -5,13 +5,14 @@ import pytest
 from app.structured_import import parse_structured_rows
 
 
+# Synthetic controls preserve the rounding invariants, not customer values.
 MONTHS = (
     "январь", "февраль", "март", "апрель", "май", "июнь",
     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
 )
 
 
-def matrix(values, *, annual="0", title="ФОТ", months=MONTHS, row=12, limit=500):
+def matrix(values, *, annual="0", title="Тестовая статья", months=MONTHS, row=12, limit=500):
     content = (
         "\t".join(("Статья", "Годовой итог", *months, "__PU_SOURCE_COORD__:ДДС:1"))
         + "\n"
@@ -27,16 +28,16 @@ def allocate(values):
     return allocate_monthly_amounts(values)
 
 
-def test_fot_largest_remainder_preserves_total_and_shows_every_adjustment():
-    result = matrix(["1594090.8333333333"] * 12, annual="19129090")
-    assert [row["amount"] for row in result["rows"]] == ["1594090.84"] * 4 + ["1594090.83"] * 8
-    assert sum(Decimal(row["amount"]) for row in result["rows"]) == Decimal("19129090.00")
+def test_synthetic_largest_remainder_preserves_total_and_shows_every_adjustment():
+    result = matrix(["83.33333333333333"] * 12, annual="1000")
+    assert [row["amount"] for row in result["rows"]] == ["83.34"] * 4 + ["83.33"] * 8
+    assert sum(Decimal(row["amount"]) for row in result["rows"]) == Decimal("1000.00")
     article = result["articles"][0]
-    assert article["monthly_total"] == "19129090.00"
+    assert article["monthly_total"] == "1000.00"
     assert article["annual_difference"] == "0.00"
     assert article["rounding_algorithm"] == "largest_remainder_half_even_v1"
     assert [cell["adjustment"] for cell in article["months"]] == ["0.01"] * 4 + ["0.00"] * 8
-    assert all(cell["raw_amount"] == "1594090.8333333333" for cell in article["months"])
+    assert all(cell["raw_amount"] == "83.33333333333333" for cell in article["months"])
 
 
 def test_ties_use_month_then_source_column_not_input_traversal():
@@ -66,21 +67,21 @@ def test_rounding_does_not_depend_on_global_decimal_precision_or_rounding():
     with localcontext() as context:
         context.prec = 6
         context.rounding = ROUND_UP
-        result = matrix(["1594090.8333333333"] * 12, annual="19129090")
-    assert [row["amount"] for row in result["rows"]] == ["1594090.84"] * 4 + ["1594090.83"] * 8
+        result = matrix(["833333.3333333333"] * 12, annual="10000000")
+    assert [row["amount"] for row in result["rows"]] == ["833333.34"] * 4 + ["833333.33"] * 8
 
 
-def test_yearly_control_does_not_replace_months_or_spread_14000_difference():
+def test_yearly_control_does_not_replace_months_or_spread_control_difference():
     values = ["0"] * 12
-    values[0], values[6] = "2378718", "14000"
-    result = matrix(values, annual="2378718", title="Материалы для ЭМ и АСДУ (Городец)")
-    assert result["issues"] == ["ДДС!12: годовой итог 2378718.00 не равен сумме месяцев 2392718.00"]
-    assert [row["amount"] for row in result["rows"]] == ["2378718.00", "14000.00"]
+    values[0], values[6] = "300", "14"
+    result = matrix(values, annual="300", title="Материалы (Объект-Б)")
+    assert result["issues"] == ["ДДС!12: годовой итог 300.00 не равен сумме месяцев 314.00"]
+    assert [row["amount"] for row in result["rows"]] == ["300.00", "14.00"]
     assert all(row["importable"] for row in result["rows"])
     article = result["articles"][0]
-    assert article["monthly_total"] == "2392718.00"
-    assert article["annual_total"] == "2378718.00"
-    assert article["annual_difference"] == "-14000.00"
+    assert article["monthly_total"] == "314.00"
+    assert article["annual_total"] == "300.00"
+    assert article["annual_difference"] == "-14.00"
     assert article["annual_coordinate"] == "ДДС!B12"
     assert article["months"][6]["source_coordinate"] == "ДДС!I12"
     assert all(cell["adjustment"] == "0.00" for cell in article["months"])

@@ -3555,6 +3555,8 @@ export function App() {
               onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
             {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Проверка финансовых данных">{!financeStructuredPreview && !invoiceExtractionProposal && <button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button>}<FinanceOperations
+              projectId={projectId}
+              onArticleBudgetApplied={() => void loadFinance()}
               finance={finance}
               preview={financeStructuredPreview}
               selectedRows={financeStructuredRows}
