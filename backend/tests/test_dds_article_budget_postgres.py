@@ -1,4 +1,4 @@
-"""Required CI gates, isolated schemas only; never connect to production."""
+"""Required CI gates with synthetic data in isolated schemas, never production."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -118,7 +118,7 @@ def test_additive_migration_keeps_legacy_finances_and_refuses_history_loss(monke
         with engine.begin() as connection:
             connection.execute(text("INSERT INTO organizations(id,name) VALUES(9801,'DDS org')"))
             connection.execute(text("INSERT INTO projects(id,name,organization_id) VALUES(9801,'DDS project',9801)"))
-            connection.execute(text("INSERT INTO cash_flow_entries(id,project_id,direction,title,planned_date,planned_amount,actual_amount,currency,status) VALUES(9801,9801,'outflow','Legacy','2026-01-31',14811906.53,0,'RUB','proposed')"))
+            connection.execute(text("INSERT INTO cash_flow_entries(id,project_id,direction,title,planned_date,planned_amount,actual_amount,currency,status) VALUES(9801,9801,'outflow','Legacy','2026-01-31',999.98,0,'RUB','proposed')"))
             before = connection.execute(text("SELECT planned_amount,actual_amount,planned_date,status,budget_line_id,schedule_item_id,record_version FROM cash_flow_entries WHERE id=9801")).one()
         command.upgrade(config, "head")
         with engine.begin() as connection:

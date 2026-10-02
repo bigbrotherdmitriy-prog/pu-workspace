@@ -15,15 +15,16 @@ from app.models.project import Project
 
 @pytest.fixture
 def world(db_session, user_factory, monkeypatch):
+    # Synthetic source and entities; no production identifiers or amounts.
     user = user_factory(is_admin=True)
     org = Organization(name="Matrix budget")
     db_session.add(org); db_session.flush()
     project = Project(name="Budget", organization_id=org.id, currency="RUB")
     db_session.add(project); db_session.flush()
-    contract = Contract(project_id=project.id, number="25", title="Contract")
+    contract = Contract(project_id=project.id, number="TEST-BUDGET-001", title="Contract")
     category = CostCategory(organization_id=org.id, name="Материалы", normalized_name="материалы")
     db_session.add_all([contract, category]); db_session.flush()
-    content = "Статья\tГодовой итог\tянварь\tфевраль\tмарт\nМатериалы (Городец)\t10\t1\t2\t3\nЭтапы Дубна\t20\t20\t0\t0\n"
+    content = "Статья\tГодовой итог\tянварь\tфевраль\tмарт\nМатериалы (Объект-Б)\t10\t1\t2\t3\nЭтапы Объект-А\t20\t20\t0\t0\n"
     document = Document(project_id=project.id, name="ДДC.xlsx", source="local_upload", status="analyzed", current_version=1)
     db_session.add(document); db_session.flush()
     version = DocumentVersion(document_id=document.id, version_number=1, content=content)
@@ -134,7 +135,7 @@ def test_stale_preview_fails_atomically(world, field):
     elif field == "source":
         version.content += "changed"
     else:
-        db.add(CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow", title="Материалы (Городец)",
+        db.add(CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow", title="Материалы (Объект-Б)",
                              planned_date=date(2026, 1, 31), planned_amount=Decimal("1"), currency="RUB",
                              source_document_id=document.id, source_document_version_id=version.id,
                              source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest()))
@@ -147,9 +148,9 @@ def test_stale_preview_fails_atomically(world, field):
 def add_budget(world, **overrides):
     db, _, project, contract, category, document, version = world
     values = dict(project_id=project.id, contract_id=contract.id, cost_category_id=category.id,
-                  category=category.name, description="Материалы (Городец)", planned_amount=Decimal("6"),
+                  category=category.name, description="Материалы (Объект-Б)", planned_amount=Decimal("6"),
                   forecast_amount=Decimal("6"), line_kind="analytical_expense", budget_period=2026,
-                  budget_revision=1, article_normalized_name="материалы (городец)", currency="RUB",
+                  budget_revision=1, article_normalized_name="материалы (объект-б)", currency="RUB",
                   source_document_id=document.id, source_document_version_id=version.id,
                   source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest())
     values.update(overrides)
@@ -167,9 +168,9 @@ def test_ambiguous_exact_names_block_instead_of_selecting_first(world):
 
 def test_normalization_preserves_punctuation_and_city(world):
     normalize = service().normalize_article
-    assert normalize("  МАТЕРИАЛЫ\u00a0（Городец） ") == "материалы (городец)"
-    assert normalize("Материалы (Городец)") != normalize("Материалы Городец")
-    assert normalize("Материалы (Городец)") != normalize("Материалы (Дубна)")
+    assert normalize("  МАТЕРИАЛЫ\u00a0（Объект-Б） ") == "материалы (объект-б)"
+    assert normalize("Материалы (Объект-Б)") != normalize("Материалы Объект-Б")
+    assert normalize("Материалы (Объект-Б)") != normalize("Материалы (Объект-А)")
 
 
 def test_unknown_project_currency_fails_closed_with_explicit_code(world):
@@ -196,7 +197,7 @@ def test_existing_compatible_budget_is_reused_without_adding_money(world):
 def test_existing_cash_rows_are_preview_only_and_keep_manual_changes(world):
     db, _, project, contract, _, document, version = world
     line = add_budget(world)
-    row = CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow", title="Материалы (Городец)",
+    row = CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow", title="Материалы (Объект-Б)",
                         planned_date=date(2026, 1, 31), planned_amount=Decimal("0.98"), currency="RUB",
                         source_document_id=document.id, source_document_version_id=version.id,
                         source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest(),
@@ -213,7 +214,7 @@ def test_existing_cash_rows_are_preview_only_and_keep_manual_changes(world):
 
 def test_forecast_import_refuses_duplicate_existing_cash_rows(world):
     db, _, project, contract, _, document, version = world
-    db.add(CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow", title="Материалы (Городец)",
+    db.add(CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow", title="Материалы (Объект-Б)",
                         planned_date=date(2026, 1, 31), planned_amount=Decimal("1"), currency="RUB",
                         source_document_id=document.id, source_document_version_id=version.id,
                         source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest()))
@@ -330,14 +331,15 @@ def test_forecast_is_not_commitment_and_cannot_be_paid_as_an_invoice(world):
 
 
 def test_all_77_existing_rows_remain_byte_for_byte_semantically_unchanged(world):
+    # Keep batch coverage; all 77 rows and the edited row are synthetic.
     db, _, project, contract, _, document, version = world
     for identifier in range(1, 78):
         db.add(CashFlowEntry(id=identifier, project_id=project.id, contract_id=contract.id,
-                            direction="outflow", title="Материалы (Городец)",
-                            planned_date=date(2026, 1, 31), planned_amount=Decimal("0.98" if identifier == 29 else "1.00"),
+                            direction="outflow", title="Материалы (Объект-Б)",
+                            planned_date=date(2026, 1, 31), planned_amount=Decimal("0.98" if identifier == 11 else "1.00"),
                             source_document_id=document.id, source_document_version_id=version.id,
                             source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest(),
-                            record_version=2 if identifier == 29 else 1, source_name="ДДC.xlsx, C2"))
+                            record_version=2 if identifier == 11 else 1, source_name="ДДC.xlsx, C2"))
     db.flush()
     before = [service()._snapshot(row) for row in db.scalars(select(CashFlowEntry).order_by(CashFlowEntry.id))]
     proposal = preview(world)
@@ -345,7 +347,7 @@ def test_all_77_existing_rows_remain_byte_for_byte_semantically_unchanged(world)
     result = apply(world, proposal)
     after = [service()._snapshot(row) for row in db.scalars(select(CashFlowEntry).order_by(CashFlowEntry.id))]
     assert before == after and result["existing_rows_changed"] == 0
-    assert db.get(CashFlowEntry, 29).planned_amount == Decimal("0.98")
+    assert db.get(CashFlowEntry, 11).planned_amount == Decimal("0.98")
 
 
 def test_all_four_snapshot_views_share_monthly_and_annual_forecast_totals(world):
