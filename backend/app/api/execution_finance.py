@@ -5,9 +5,10 @@ from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import re
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -39,6 +40,7 @@ from app.structured_import import parse_structured_rows
 from app.dds_article_budget import (
     ArticleBudgetPreviewRequest, ArticleBudgetApplyRequest,
     preview_article_budget, apply_article_budget, undo_article_budget, confirmed_budget_for_totals,
+    normalize_article,
 )
 from app.dds_budget_links import (
     BudgetLinkPreviewRequest, BudgetLinkApplyRequest, preview_budget_links,
@@ -424,13 +426,40 @@ class ActCreate(BaseModel):
 
 
 class StatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     status: str = Field(min_length=2, max_length=30)
+    expected_record_version: int | None = Field(default=None, ge=1)
     actual_amount: Decimal | None = Field(default=None, ge=0)
     actual_date: date | None = None
 
     _actual_money = field_validator("actual_amount", mode="before")(
         lambda value: None if value is None else _money(value)
     )
+
+
+class CashFlowConfirmationItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: int = Field(gt=0)
+    expected_record_version: int = Field(ge=1)
+
+
+class CashFlowBatchConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: int = Field(gt=0)
+    items: list[CashFlowConfirmationItem] = Field(min_length=1, max_length=1000)
+
+    @field_validator("items")
+    @classmethod
+    def unique_ids(cls, items):
+        if len({item.id for item in items}) != len(items):
+            raise ValueError("DUPLICATE_CASH_FLOW_IDS")
+        return items
+
+
+class ForecastInvoiceConversion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_record_version: int = Field(ge=1)
+    schedule_item_id: int | None = Field(default=None, gt=0)
 
 
 class StructuredRowOverride(BaseModel):
@@ -660,6 +689,98 @@ def _validate_invoice_control_chain(
     if budget.currency != currency:
         raise HTTPException(422, "Валюта счёта не совпадает с валютой строки бюджета")
     return contract, schedule_item, budget
+
+
+def _lock_confirmation_dependencies(db: Session, rows: list[CashFlowEntry]) -> None:
+    """Stable lock order; pins and budget scope cannot change during approval."""
+    contract_ids = {r.contract_id for r in rows if r.contract_id is not None}
+    list(db.scalars(select(Contract).where(Contract.id.in_(contract_ids)).order_by(Contract.id)
+                    .with_for_update().execution_options(populate_existing=True)))
+    budgets = list(db.scalars(select(BudgetLine).where(BudgetLine.id.in_(
+        {r.budget_line_id for r in rows if r.budget_line_id is not None})).order_by(BudgetLine.id)
+        .with_for_update().execution_options(populate_existing=True)))
+    sources = [*rows, *budgets]
+    for model, attribute in ((Document, "source_document_id"), (DocumentVersion, "source_document_version_id")):
+        identifiers = {getattr(r, attribute) for r in sources if getattr(r, attribute) is not None}
+        list(db.scalars(select(model).where(model.id.in_(identifiers)).order_by(model.id)
+                        .with_for_update().execution_options(populate_existing=True)))
+
+
+def _cash_confirmation_plan(db: Session, item: CashFlowEntry, cache: dict | None = None) -> dict:
+    """§27.1 exception is proven from the pinned matrix, never a client flag."""
+    if item.status != "proposed":
+        raise HTTPException(409, "STATUS_NOT_PROPOSED: подтверждать можно только предложение")
+    if item.actual_date is not None or item.actual_amount != 0:
+        raise HTTPException(409, "PLAN_HAS_ACTUAL: запись уже содержит факт")
+    _require_project_currency(db, item.project_id, item.currency)
+    if item.contract_id is not None:
+        _check_contract(db, item.project_id, item.contract_id)
+    kind = item.entry_kind
+    if kind not in {"legacy_unclassified", "plan_forecast", "invoice_commitment"}:
+        raise HTTPException(422, "CASH_TYPE_UNSUPPORTED")
+    parsed = None
+    if item.source_document_id is not None:
+        pin = assert_document_pin_current(db, item.project_id, item.source_document_id,
+            item.source_document_version_id, item.source_document_sha256)
+        if kind in {"legacy_unclassified", "plan_forecast"} and item.direction == "outflow":
+            cache = cache if cache is not None else {}
+            key = (pin.version.id, pin.sha256, item.planned_date.year)
+            if key not in cache:
+                cache[key] = parse_structured_rows(pin.version.content or "", "cash-flow",
+                    source_name=pin.document.name, plan_year=item.planned_date.year)
+            parsed = cache[key]
+    matrix = parsed is not None and parsed.get("layout") == "monthly_matrix"
+    if kind == "plan_forecast" or (kind == "legacy_unclassified" and matrix):
+        if not matrix or parsed.get("blocking_issues"):
+            raise HTTPException(422, "MATRIX_PROVENANCE_REQUIRED: прогноз требует матричного источника")
+        if item.contract_id is None or item.budget_line_id is None:
+            raise HTTPException(422, "FORECAST_CONTROL_REQUIRED: прогноз требует договор и бюджет")
+        budget = db.get(BudgetLine, item.budget_line_id)
+        if (budget is None or budget.project_id != item.project_id or budget.contract_id != item.contract_id
+                or budget.currency != item.currency or budget.line_kind != "analytical_expense"
+                or budget.budget_period != item.planned_date.year or budget.status not in {"proposed", "approved", "active"}
+                or normalize_article(budget.description) != normalize_article(item.title)):
+            raise HTTPException(422, "FORECAST_BUDGET_SCOPE_MISMATCH")
+        if budget.source_document_id is None:
+            raise HTTPException(409, "BUDGET_SOURCE_PIN_MISSING")
+        assert_document_pin_current(db, item.project_id, budget.source_document_id,
+                                    budget.source_document_version_id, budget.source_document_sha256)
+        articles = [a for a in parsed.get("articles", []) if a["direction"] == "outflow"
+                    and normalize_article(a["title"]) == normalize_article(item.title)]
+        if len(articles) != 1:
+            raise HTTPException(422, "MATRIX_ARTICLE_UNRESOLVED")
+        coordinate = (item.source_name or "").rsplit(", ", 1)[-1]
+        cells = [c for c in articles[0]["months"] if c["source_coordinate"] == coordinate]
+        if not cells and "!" not in coordinate:
+            cells = [c for c in articles[0]["months"] if c["source_coordinate"].rsplit("!", 1)[-1] == coordinate]
+        if len(cells) != 1 or int(cells[0]["month"]) != item.planned_date.month:
+            raise HTTPException(422, "MATRIX_SOURCE_CELL_MISMATCH")
+        if item.schedule_item_id is not None:
+            _validate_invoice_control_chain(db, project_id=item.project_id, contract_id=item.contract_id,
+                schedule_item_id=item.schedule_item_id, budget_line_id=item.budget_line_id, currency=item.currency)
+        return {"entry_kind": "plan_forecast", "matrix_article_id": articles[0]["source_row"],
+                "matrix_month": item.planned_date.month}
+    if item.direction == "outflow" or kind == "invoice_commitment":
+        _validate_invoice_control_chain(db, project_id=item.project_id, contract_id=item.contract_id,
+            schedule_item_id=item.schedule_item_id, budget_line_id=item.budget_line_id, currency=item.currency)
+    return {}
+
+
+def _cash_confirmation_error(exc: HTTPException) -> dict:
+    message = str(exc.detail)
+    prefix = message.split(":", 1)[0]
+    code = prefix if re.fullmatch(r"[A-Z][A-Z0-9_]+", prefix) else "CONTROL_CHAIN_REQUIRED"
+    return {"code": code, "message": message, "http_status": exc.status_code}
+
+
+def _cash_confirmation_metadata(db: Session, item: CashFlowEntry, cache: dict) -> dict:
+    try:
+        plan = _cash_confirmation_plan(db, item, cache)
+        return {"confirmation_allowed": True, "confirmation_kind": plan.get("entry_kind", item.entry_kind),
+                "confirmation_error": None}
+    except HTTPException as exc:
+        return {"confirmation_allowed": False, "confirmation_kind": item.entry_kind,
+                "confirmation_error": _cash_confirmation_error(exc)}
 
 
 def _current_document_pin(
@@ -1123,6 +1244,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     schedule = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id).order_by(ScheduleItem.baseline_id, ScheduleItem.sort_order, ScheduleItem.id)))
     budget = list(db.scalars(select(BudgetLine).where(BudgetLine.project_id == project_id).order_by(BudgetLine.id.desc())))
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
+    confirmation_cache: dict = {}
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
     acts = list(db.scalars(select(AcceptanceAct).where(AcceptanceAct.project_id == project_id).order_by(AcceptanceAct.act_date.desc(), AcceptanceAct.id.desc())))
     schedule_cpm: dict[int, dict[str, int | bool]] = {}
@@ -1192,8 +1314,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "mixed_currency": mixed_currency, "by_currency": summary_by_currency,
                     "delayed_schedule": len(delayed),
                     "late_procurement": len(late_procurement), "acts_pending": len([x for x in acts if x.status in {"proposed", "approved"}]),
-                    "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved"]),
-                    "unlinked_invoices": len([x for x in cash if x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
+                    "pending_payments": len([x for x in cash if x.direction == "outflow" and x.status == "approved" and x.entry_kind != "plan_forecast"]),
+                    "unlinked_invoices": len([x for x in cash if x.entry_kind != "plan_forecast" and x.source_document_id and (not x.contract_id or not x.schedule_item_id or not x.budget_line_id)])},
         "baselines": [{"id": x.id, "contract_id": x.contract_id, "name": x.name, "version": x.version, "status": x.status, "note": x.note,
                        "source_format": x.source_format, "source_file_name": source_file_by_baseline[x.id],
                        "source_sha256": x.source_sha256, "analysis_warning": baseline_warnings.get(x.id)} for x in baselines],
@@ -1227,7 +1349,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                         "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
                         "actual_amount": x.actual_amount, "currency": x.currency, "counterparty": x.counterparty,
                        "object_name": x.object_name, "category": x.category, "note": x.note,
-                        "status": x.status, "record_version": x.record_version} for x in cash],
+                        "status": x.status, "record_version": x.record_version,
+                        **_cash_confirmation_metadata(db, x, confirmation_cache)} for x in cash],
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
                           "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
                           "planned_amount": x.planned_amount, "actual_amount": x.actual_amount, "currency": x.currency} for x in procurement],
@@ -2218,7 +2341,7 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
     )
     data["source_document_version_id"] = pin_version_id
     data["source_document_sha256"] = pin_sha256
-    item = CashFlowEntry(**data, status="proposed")
+    item = CashFlowEntry(**data, status="proposed", entry_kind="invoice_commitment")
     db.add(item); db.flush()
     _audit(db, "invoice_cash_flow_proposed", "cash_flow", item.id, user.id,
            f"contract={payload.contract_id}; schedule={payload.schedule_item_id}; task={payload.task_id}; "
@@ -2390,10 +2513,19 @@ def undo_cash_flow_plan_mutation(mutation_id: int, db: Session = Depends(get_db)
 @router.post("/cash-flow/{item_id}/confirm-payment")
 def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
     item = _locked_cash_flow(db, item_id)
-    if item.entry_kind == "plan_forecast":
-        require_project_role(db, user, item.project_id, "manager")
-        raise HTTPException(409, "FORECAST_CONVERSION_REQUIRED: прогноз не является счётом или платёжным обязательством")
     require_project_role(db, user, item.project_id, "manager")
+    if item.entry_kind == "legacy_unclassified" and item.source_document_id is not None:
+        pin = assert_document_pin_current(db, item.project_id, item.source_document_id,
+            item.source_document_version_id, item.source_document_sha256)
+        parsed = parse_structured_rows(pin.version.content or "", "cash-flow", source_name=pin.document.name,
+                                       plan_year=item.planned_date.year)
+        if parsed.get("layout") == "monthly_matrix":
+            raise HTTPException(409, "FORECAST_CONVERSION_REQUIRED: сначала подтвердите тип матричного прогноза и полную тройку")
+    if item.entry_kind == "plan_forecast":
+        raise HTTPException(409, "FORECAST_CONVERSION_REQUIRED: прогноз не является счётом или платёжным обязательством")
+    if item.entry_kind == "invoice_commitment":
+        _validate_invoice_control_chain(db, project_id=item.project_id, contract_id=item.contract_id,
+            schedule_item_id=item.schedule_item_id, budget_line_id=item.budget_line_id, currency=item.currency)
     paid_status = "received" if item.direction == "inflow" else "paid"
     currency = payload.currency or item.currency
     if currency != item.currency:
@@ -2559,6 +2691,107 @@ def create_act(payload: ActCreate, db: Session = Depends(get_db), user: User = D
     return {"id": item.id, "status": item.status}
 
 
+@router.post("/cash-flow/confirm-batch")
+def confirm_cash_flow_batch(payload: CashFlowBatchConfirmation, db: Session = Depends(get_db),
+                            user: User = Depends(require_user)):
+    """Validate every row under locks, then commit statuses and audits once."""
+    require_project_role(db, user, payload.project_id, "manager")
+    reports: list[dict] = []
+    commit_started = False
+    try:
+        with db.no_autoflush:
+            ids = [r.id for r in payload.items]
+            rows = list(db.scalars(select(CashFlowEntry).where(
+                CashFlowEntry.project_id == payload.project_id, CashFlowEntry.id.in_(ids))
+                .order_by(CashFlowEntry.id).with_for_update().execution_options(populate_existing=True)))
+            by_id = {r.id: r for r in rows}
+            _lock_confirmation_dependencies(db, rows)
+            cache: dict = {}
+            plans: dict[int, dict] = {}
+            errors: list[int] = []
+            for expected in payload.items:
+                item = by_id.get(expected.id)
+                try:
+                    if item is None:
+                        raise HTTPException(404, "CASH_FLOW_NOT_FOUND: запись не найдена в выбранном проекте")
+                    if item.record_version != expected.expected_record_version:
+                        raise HTTPException(409, "CASH_FLOW_VERSION_MISMATCH: запись изменилась после загрузки")
+                    plans[item.id] = _cash_confirmation_plan(db, item, cache)
+                    reports.append({"id": item.id, "code": "NOT_APPLIED", "status": item.status,
+                                    "message": "Строка проверена; пакет ещё не применён"})
+                except HTTPException as exc:
+                    reports.append({"id": expected.id, **_cash_confirmation_error(exc)})
+                    errors.append(exc.status_code)
+            if errors:
+                status = 409 if 409 in errors else 422
+                raise HTTPException(status, {"code": "CASH_FLOW_BATCH_REJECTED", "atomic": True,
+                    "confirmed_count": 0, "rows": reports})
+            batch_id = str(uuid4())
+            for item in rows:
+                old_kind = item.entry_kind
+                for attribute, value in plans[item.id].items():
+                    setattr(item, attribute, value)
+                item.status = "approved"
+                item.record_version += 1
+                _audit(db, "cash-flow_status_updated", "cash-flow", item.id, user.id,
+                    f"batch={batch_id}; atomic=true; old_status=proposed; status=approved; "
+                    f"old_entry_kind={old_kind}; entry_kind={item.entry_kind}; version={item.record_version}")
+            db.flush()
+            for budget_id in sorted({r.budget_line_id for r in rows if r.budget_line_id is not None}):
+                _refresh_budget_from_cash_flow(db, budget_id)
+            result = {"atomic": True, "batch_id": batch_id, "confirmed_count": len(rows),
+                "rows": [{"id": by_id[r.id].id, "status": "approved", "code": "CONFIRMED",
+                    "entry_kind": by_id[r.id].entry_kind, "record_version": by_id[r.id].record_version}
+                    for r in payload.items]}
+        commit_started = True
+        db.commit()
+        return result
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, {"code": "CASH_FLOW_BATCH_OUTCOME_UNKNOWN" if commit_started else "CASH_FLOW_BATCH_WRITE_FAILED",
+            "atomic": True, "confirmed_count": None if commit_started else 0,
+            "rows": [{"id": r.id, "code": "RESULT_UNKNOWN" if commit_started else "NOT_APPLIED",
+                      "message": "Проверьте ДДС и аудит перед повтором" if commit_started else "Пакет отменён: ошибка сохранения"}
+                     for r in payload.items]}) from exc
+
+
+@router.post("/cash-flow/{item_id}/convert-to-invoice")
+def convert_forecast_to_invoice(item_id: int, payload: ForecastInvoiceConversion,
+                                db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Explicit conversion; a forecast is never paid or committed implicitly."""
+    try:
+        item = _locked_cash_flow(db, item_id)
+        require_project_role(db, user, item.project_id, "manager")
+        _lock_confirmation_dependencies(db, [item])
+        if item.record_version != payload.expected_record_version:
+            raise HTTPException(409, "CASH_FLOW_VERSION_MISMATCH")
+        if item.entry_kind != "plan_forecast" or item.status not in {"proposed", "approved"}:
+            raise HTTPException(409, "FORECAST_REQUIRED")
+        if item.actual_date is not None or item.actual_amount != 0:
+            raise HTTPException(409, "PLAN_HAS_ACTUAL")
+        schedule_id = payload.schedule_item_id or item.schedule_item_id
+        if item.contract_id is None or item.budget_line_id is None or schedule_id is None:
+            raise HTTPException(422, "CONTROL_CHAIN_REQUIRED: для счёта нужны договор, этап ГПР и бюджет")
+        _validate_invoice_control_chain(db, project_id=item.project_id, contract_id=item.contract_id,
+            schedule_item_id=schedule_id, budget_line_id=item.budget_line_id, currency=item.currency)
+        _assert_cash_flow_source_current(db, item, None, None)
+        item.schedule_item_id = schedule_id
+        item.entry_kind = "invoice_commitment"
+        item.record_version += 1
+        _refresh_budget_from_cash_flow(db, item.budget_line_id)
+        _audit(db, "cash_flow_forecast_converted", "cash-flow", item.id, user.id,
+            f"entry_kind=invoice_commitment; schedule={schedule_id}; budget={item.budget_line_id}; version={item.record_version}")
+        result = {"id": item.id, "entry_kind": item.entry_kind, "status": item.status, "record_version": item.record_version}
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.patch("/{kind}/{item_id}/status")
 def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "procurement": ProcurementItem, "acts": AcceptanceAct, "baselines": ScheduleBaseline}
@@ -2588,15 +2821,12 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             )
     if kind == "cash-flow" and item.status in {"paid", "received"} and payload.status != item.status:
         raise HTTPException(409, "Подтверждённый платёж изменяется только корректировкой или сторно")
-    if (
-        kind == "cash-flow" and payload.status == "approved"
-        and item.direction == "outflow" and item.source_document_id is not None
-    ):
-        _validate_invoice_control_chain(
-            db, project_id=item.project_id, contract_id=item.contract_id,
-            schedule_item_id=item.schedule_item_id,
-            budget_line_id=item.budget_line_id, currency=item.currency,
-        )
+    confirmation_plan = {}
+    if kind == "cash-flow" and payload.expected_record_version is not None and item.record_version != payload.expected_record_version:
+        raise HTTPException(409, "CASH_FLOW_VERSION_MISMATCH")
+    if kind == "cash-flow" and payload.status == "approved":
+        _lock_confirmation_dependencies(db, [item])
+        confirmation_plan = _cash_confirmation_plan(db, item)
     if kind == "cash-flow" and (payload.actual_amount is not None or payload.actual_date is not None):
         raise HTTPException(422, "Фактическая сумма и дата задаются только платёжным событием")
     if kind == "budget" and payload.status != "rejected" and item.source_document_id is not None:
@@ -2630,6 +2860,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
         locked_budget = _lock_budget_line(db, item.budget_line_id)
         budget_actual_before = locked_budget.actual_amount
 
+    for attribute, value in confirmation_plan.items():
+        setattr(item, attribute, value)
     setattr(item, status_attribute, payload.status)
     if kind in {"budget", "cash-flow"}:
         item.record_version += 1
@@ -2648,6 +2880,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
             db, item.budget_line_id, budget=locked_budget,
         )
     details = f"old_status={previous_status}; status={payload.status}"
+    if kind == "cash-flow":
+        details += f"; entry_kind={item.entry_kind}; version={item.record_version}"
     response = {"id": item.id, "status": getattr(item, status_attribute)}
     if kind == "acts" and locked_budget is not None and budget_projection is not None:
         remaining, overrun = budget_projection

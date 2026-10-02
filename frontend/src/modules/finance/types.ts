@@ -67,6 +67,10 @@ export type FinanceOverview = {
   }[];
   cash_flow: {
     id: number;
+    entry_kind?: string;
+    confirmation_allowed?: boolean;
+    confirmation_kind?: string;
+    confirmation_error?: { code: string; message: string; http_status: number } | null;
     contract_id?: number;
     schedule_item_id?: number;
     budget_line_id?: number;

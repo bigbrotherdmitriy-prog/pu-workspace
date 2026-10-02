@@ -13,6 +13,37 @@ const finance = {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("DdsWorkspace", () => {
+  it("shows per-row rejection and keeps the whole selection after an atomic failure", async () => {
+    const error = Object.assign(new Error("Пакет отклонён"), { details: { rows: [
+      { id: 2, code: "CASH_FLOW_VERSION_MISMATCH", message: "Запись изменилась" }] } });
+    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()}
+      onConfirmMany={vi.fn().mockRejectedValue(error)} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать операцию Щиты" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить выбранные (1)" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("CASH_FLOW_VERSION_MISMATCH");
+    expect(screen.getByRole("checkbox", { name: "Выбрать операцию Щиты" })).toBeChecked();
+  });
+
+  it("does not offer payment for an approved forecast", () => {
+    const row = { ...finance.cash_flow[1], status: "approved", entry_kind: "plan_forecast" };
+    render(<DdsWorkspace finance={{ ...finance, cash_flow: [row] } as FinanceOverview} selectedContractId={4}
+      onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    expect(screen.queryByRole("button", { name: "Оплата" })).not.toBeInTheDocument();
+    expect(screen.getByText("Прогноз")).toBeInTheDocument();
+  });
+  it("allows a proven matrix forecast without a schedule and labels it as forecast", () => {
+    const row = { ...finance.cash_flow[1], source_document_id: 90, budget_line_id: 72,
+      confirmation_allowed: true, confirmation_kind: "plan_forecast", entry_kind: "legacy_unclassified" };
+    render(<DdsWorkspace finance={{ ...finance, cash_flow: [row] } as FinanceOverview} selectedContractId={4}
+      onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    expect(screen.getByRole("checkbox", { name: "Выбрать операцию Щиты" })).toBeInTheDocument();
+    expect(screen.getByText("Прогноз")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Подтвердить" })).toBeEnabled();
+    expect(screen.queryByLabelText("Этап ГПР для Щиты")).not.toBeInTheDocument();
+  });
   it("imports a planned DDS workbook from the main DDS header", () => {
     const onImportCashFlow = vi.fn();
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onImportCashFlow={onImportCashFlow} />);

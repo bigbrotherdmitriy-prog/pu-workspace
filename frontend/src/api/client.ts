@@ -4,6 +4,7 @@ export class ApiError extends Error {
     public status: number | null,
     public requestId: string,
     public code?: string,
+    public details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -56,7 +57,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     const message = detail.includes(responseRequestId)
       ? detail
       : `${detail}. Код обращения: ${responseRequestId}`;
-    throw new ApiError(message, response.status, responseRequestId, code);
+    throw new ApiError(message, response.status, responseRequestId, code, body.detail);
   }
   return body as T;
 }
