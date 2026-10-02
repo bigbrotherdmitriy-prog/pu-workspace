@@ -30,7 +30,7 @@ def pg_world(monkeypatch):
     schema = "dds_links_" + uuid4().hex
     with base.begin() as connection:
         connection.execute(CreateSchema(schema))
-    scoped = make_url(url).update_query_dict({"options": f"-csearch_path={schema}"})
+    scoped = make_url(url).update_query_dict({"options": f"-csearch_path={schema} -clock_timeout=10s"})
     engine = create_engine(scoped, hide_parameters=True, connect_args={"connect_timeout": 5})
     backend = Path(__file__).resolve().parents[1]
     config = Config(str(backend / "alembic.ini"))
