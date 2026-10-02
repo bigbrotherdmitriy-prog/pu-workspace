@@ -31,6 +31,18 @@
   color: var(--read-text); background: var(--read-surface); border-color: var(--read-rule);
   text-shadow: none;
 }
+/* Native popup items do not paint the select's surface. Pair their own colors
+   in every module/dialog, rather than relying on the OS's white popup fallback. */
+:root[data-display-theme] :is(.shell, [role="dialog"]) select { color-scheme: inherit; }
+:root[data-display-theme] :is(.shell, [role="dialog"]) select :is(option, optgroup) {
+  color: var(--read-text); background-color: var(--read-surface);
+}
+:root[data-display-theme] :is(.shell, [role="dialog"]) select option:checked {
+  color: var(--read-text); background-color: var(--read-accent-fill);
+}
+:root[data-display-theme] :is(.shell, [role="dialog"]) select :is(option, optgroup):disabled {
+  color: var(--read-muted);
+}
 :root[data-display-theme] :is(.shell, [role="dialog"]) :is(input, textarea)::placeholder { color: var(--read-muted); opacity: 1; }
 :root[data-display-theme] :is(.shell, [role="dialog"]) :is(button, input, select, textarea):focus-visible {
   outline: 2px solid var(--read-accent); outline-offset: 2px;
