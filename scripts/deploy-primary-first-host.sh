@@ -206,7 +206,10 @@ atomic_current() {
   temporary=$ROOT/.current.$$.tmp
   [ ! -e "$temporary" ] && [ ! -L "$temporary" ] || fail "temporary current link already exists"
   ln -s "$target" "$temporary"
+  selected_started_at=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
   mv -Tf "$temporary" "$CURRENT_LINK"
+  printf 'PRIMARY_CURRENT_SELECTED started_at=%s completed_at=%s release=%s\n' \
+    "$selected_started_at" "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" "$target"
 }
 
 compose --profile cutover config --format json | python3 "$RELEASE_DIR/scripts/validate_primary_compose.py" \

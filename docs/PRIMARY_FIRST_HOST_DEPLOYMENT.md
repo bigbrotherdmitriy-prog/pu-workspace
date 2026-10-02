@@ -154,11 +154,13 @@ as the deploy account **from the candidate release directory**. `image_id` must
 be the already recorded candidate image ID, not a tag resolved after cutover:
 
 ```sh
+verification_stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 python3 scripts/verify_image_static.py \
   --image "$image_id" --expected-image-id "$image_id" \
   --revision "$release_sha" --archive-sha256 "$archive_sha256" \
   --base-url https://puworkspace.ru --compose-project puw-primary-next \
-  --receipt "/opt/pu-workspace-primary/static-receipts/${release_sha}-https.json"
+  --readiness-attempts 25 --readiness-interval 5 --readiness-timeout 180 \
+  --receipt "/opt/pu-workspace-primary/static-receipts/${release_sha}-${verification_stamp}-https.json"
 ```
 
 This gate checks exactly one backend, two durable workers and one scheduler on
@@ -169,6 +171,37 @@ manifest file (including videos, lazy chunks and service worker). For `index.htm
 the requested URL is `/new/`. The reference is extracted from the exact image
 using a disposable container that is **never started**, not from Git or a local
 frontend build. Receipts are private, created exclusively, and never overwritten.
+
+Compose `--wait` is not a durable heartbeat gate. The verifier waits only when
+`ready:false` has a nonempty failed-required set consisting exclusively of
+`durable_workers` and/or `durable_scheduler`. Defaults are at most 25 attempts,
+5-second pauses (at most 120 seconds of pauses), and a 180-second monotonic wall
+deadline. Each API request still has a maximum 30-second timeout, shortened to
+the remaining deadline. Every attempt checks public HTTP 200 and the exact
+backend revision again. Late readiness, exhausted limits, schema/database/config
+failures, wrong revision, malformed responses, auth, TLS, redirects or network
+failures stop the gate; they are not retried. All four exact-image components
+and Gmail flags are checked again after the wait, before static acceptance.
+
+The private receipt is reserved before verification and records **success and
+failure**. Inspect exit status and `verified:true`, not mere file existence.
+Failure evidence includes stage/reason, bounded API status/body projections,
+request times and elapsed durations, readiness attempts and failed required
+checks. Static evidence distinguishes `not_started`, partial verification and
+complete success, with expected/observed sizes and SHA-256 where bytes were read.
+Arbitrary response extras, secret values, cookies and raw HTML are not recorded;
+body hashes and truncation flags identify bounded error responses instead.
+An existing receipt is never overwritten, and inability to save diagnostics
+does not permit acceptance. Use a new stamp for every invocation. Retain the
+deploy log together with receipts: `PRIMARY_CURRENT_SELECTED` records UTC bounds
+around atomic symlink replacement so future cutover-to-request timing can be
+measured. SIGKILL/power loss cannot guarantee a completed final receipt.
+
+No static request is retried or accepted partially: the original full-file
+inventory, TLS, no-redirect, identity-encoding, MIME, size and SHA-256 criteria
+remain mandatory. The [01.10 failure investigation](audits/pr109-readiness-failure-2026-10-02.md)
+documents the startup heartbeat race and the unmeasured historical candidate
+public bytes; current rollback acceptance does not prove past candidate integrity.
 
 Any readiness/image/static failure stops the rollout. Restore the previous full
 artifact, not just the symlink or frontend. Do not retry by bypassing checks:
