@@ -5,10 +5,13 @@ import io
 import re
 from calendar import monthrange
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_EVEN, localcontext
 
 
 SOURCE_COORDINATE_MARKER = "__PU_SOURCE_COORD__"
+MATRIX_ROUNDING_ALGORITHM = "largest_remainder_half_even_v1"
+MATRIX_MONEY_MAX = Decimal("9999999999999999.99")
+MATRIX_QUANTUM = Decimal("0.01")
 
 MONTH_ALIASES = {
     "январь": 1, "января": 1, "янв": 1,
@@ -104,6 +107,62 @@ def _excel_column(index: int) -> str:
     return result
 
 
+def _matrix_decimal(value: str) -> Decimal:
+    """Read raw matrix money without stripping invalid/ambiguous characters."""
+    raw = value.strip().replace("\u00a0", " ").replace("\u202f", " ")
+    if not raw:
+        return Decimal("0")
+    if len(raw) > 128:
+        raise ValueError("слишком длинное числовое значение")
+    if " " in raw:
+        if not re.fullmatch(r"[+]?\d{1,3}(?: \d{3})+(?:[.,]\d+)?", raw):
+            raise ValueError("неоднозначная сумма")
+        raw = raw.replace(" ", "")
+    if not re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?(?:[eE][+-]?\d{1,3})?", raw):
+        raise ValueError("не распознана однозначная десятичная сумма")
+    amount = Decimal(raw.replace(",", "."))
+    _validate_matrix_decimal(amount)
+    return amount
+
+
+def _validate_matrix_decimal(amount: Decimal) -> None:
+    if not amount.is_finite() or amount < 0 or amount > MATRIX_MONEY_MAX:
+        raise ValueError("сумма должна быть неотрицательной и помещаться в Numeric(18,2)")
+    if abs(amount.as_tuple().exponent) > 128 or len(amount.as_tuple().digits) > 128:
+        raise ValueError("неподдерживаемая точность суммы")
+
+
+def allocate_monthly_amounts(cells: list[tuple[int, int, Decimal]]) -> dict[int, Decimal]:
+    """Round an article once and allocate cents; ties use month, then column."""
+    if len({column for _, column, _ in cells}) != len(cells):
+        raise ValueError("повтор исходной колонки")
+    with localcontext() as context:
+        context.prec = 512
+        context.rounding = ROUND_HALF_EVEN
+        for month, column, amount in cells:
+            if not 1 <= month <= 12 or column < 0:
+                raise ValueError("неверная координата месяца")
+            _validate_matrix_decimal(amount)
+        total = sum((amount for _, _, amount in cells), Decimal("0"))
+        _validate_matrix_decimal(total)
+        target = total.quantize(MATRIX_QUANTUM)
+        _validate_matrix_decimal(target)
+        floors = {column: (amount * 100).to_integral_value(rounding=ROUND_FLOOR)
+                  for _, column, amount in cells}
+        remaining = int(target * 100 - sum(floors.values(), Decimal("0")))
+        ranked = sorted(
+            ((month, column, amount) for month, column, amount in cells if amount > 0),
+            key=lambda cell: (-(cell[2] * 100 - floors[cell[1]]), cell[0], cell[1]),
+        )
+        if not 0 <= remaining <= len(ranked):
+            raise ValueError("не удалось распределить остаток")
+        for _, column, _ in ranked[:remaining]:
+            floors[column] += 1
+        result = {column: (cents / 100).quantize(MATRIX_QUANTUM) for column, cents in floors.items()}
+        assert sum(result.values(), Decimal("0")) == target
+        return result
+
+
 def _monthly_cash_flow(
     matrix: list[tuple[list[str], str | None, int, int]],
     *,
@@ -130,11 +189,11 @@ def _monthly_cash_flow(
     november_columns = [column for column, month in month_columns.items() if month == 11]
     if set(month_columns.values()) == set(range(1, 12)) and len(november_columns) == 1:
         december_column = november_columns[0] + 1
-        if all(month != 12 for month in month_columns.values()):
+        if december_column < len(headers) and not headers[december_column].strip():
             has_values = any(
                 source_sheet == header_sheet
                 and december_column < len(cells)
-                and _amount(cells[december_column]) not in {None, "0", "0.0", "0.00"}
+                and bool(cells[december_column].strip())
                 for cells, source_sheet, _source_row, _source_line in matrix[header_index + 1:]
             )
             if has_values:
@@ -142,16 +201,25 @@ def _monthly_cash_flow(
                 inferred_december = True
 
     issues: list[str] = []
+    blocking_issues: list[str] = []
+    if len(set(month_columns.values())) != len(month_columns):
+        blocking_issues.append("В заголовке месячной матрицы повторяется месяц")
     if plan_year is None:
         issues.append("Для месячного плана ДДС не указан год")
+        blocking_issues.extend(issues)
+    elif not 2000 <= plan_year <= 2100:
+        blocking_issues.append("Год месячного плана должен быть в диапазоне 2000–2100")
+    if blocking_issues:
         return {
             "headers": headers, "mapping": {}, "rows": [], "issues": issues,
-            "truncated": False, "layout": "monthly_matrix", "plan_year": None,
+            "blocking_issues": blocking_issues, "articles": [],
+            "truncated": False, "layout": "monthly_matrix", "plan_year": plan_year,
             "inferred_december": inferred_december,
         }
 
     first_month_column = min(month_columns)
     rows: list[dict] = []
+    articles: list[dict] = []
     candidates = matrix[header_index + 1:]
     if header_sheet:
         candidates = [candidate for candidate in candidates if candidate[1] == header_sheet]
@@ -165,25 +233,68 @@ def _monthly_cash_flow(
             break
         if not title or normalized_title.startswith(("итого", "всего", "платежи в dci")):
             continue
-        annual_amount = _amount(cells[first_month_column - 1]) if first_month_column > 0 and first_month_column - 1 < len(cells) else None
-        monthly_total = sum((
-            Decimal(value)
-            for column in month_columns
-            if column < len(cells) and (value := _amount(cells[column])) is not None
-        ), Decimal("0"))
-        if annual_amount is not None and abs(Decimal(annual_amount) - monthly_total) > Decimal("0.01"):
-            coordinate = f"{source_sheet}!{source_row}" if source_sheet else f"строка {source_row}"
-            issues.append(
-                f"{coordinate}: годовой итог {Decimal(annual_amount).quantize(Decimal('0.01'))} "
-                f"не равен сумме месяцев {monthly_total.quantize(Decimal('0.01'))}"
-            )
-        for column, month in sorted(month_columns.items(), key=lambda item: item[1]):
-            if column >= len(cells):
+        def coordinate_for(column: int) -> str:
+            coordinate = f"{_excel_column(column)}{source_row}"
+            return f"{source_sheet}!{coordinate}" if source_sheet else coordinate
+
+        direction = _direction(title) or ("inflow" if normalized_title.startswith("этапы ") else "outflow")
+        article = {
+            "article_id": source_line, "title": title, "source_row": source_row,
+            "source_sheet": source_sheet, "source_line": source_line,
+            "source_coordinate": f"{source_sheet}!{source_row}" if source_sheet else f"строка {source_row}",
+            "direction": direction, "monthly_total": None, "annual_total": None,
+            "annual_difference": None,
+            "annual_coordinate": coordinate_for(first_month_column - 1) if first_month_column > 0 else None,
+            "rounding_algorithm": MATRIX_ROUNDING_ALGORITHM, "months": [],
+            "issues": [], "importable": True, "preview_complete": True,
+        }
+        articles.append(article)
+        raw_cells: list[tuple[int, int, Decimal]] = []
+        for column, month in sorted(month_columns.items(), key=lambda item: (item[1], item[0])):
+            try:
+                raw_cells.append((month, column, _matrix_decimal(cells[column] if column < len(cells) else "")))
+            except (ValueError, InvalidOperation) as exc:
+                article["issues"].append(f"{coordinate_for(column)}: {exc}")
+        annual_amount = None
+        if 0 < first_month_column <= len(cells) and cells[first_month_column - 1].strip():
+            try:
+                annual_amount = _matrix_decimal(cells[first_month_column - 1])
+            except (ValueError, InvalidOperation) as exc:
+                article["issues"].append(f"{article['annual_coordinate']}: {exc}")
+        if not article["issues"]:
+            try:
+                allocated = allocate_monthly_amounts(raw_cells)
+            except (ValueError, InvalidOperation) as exc:
+                article["issues"].append(f"{article['source_coordinate']}: {exc}")
+        if article["issues"]:
+            article["importable"] = False
+            blocking_issues.extend(article["issues"])
+            continue
+        with localcontext() as context:
+            context.prec = 512
+            context.rounding = ROUND_HALF_EVEN
+            monthly_total = sum((value for _, _, value in raw_cells), Decimal("0")).quantize(MATRIX_QUANTUM)
+            article["monthly_total"] = str(monthly_total)
+            if annual_amount is not None:
+                annual_total = annual_amount.quantize(MATRIX_QUANTUM)
+                article["annual_total"] = str(annual_total)
+                article["annual_difference"] = str(annual_total - monthly_total)
+                if annual_total != monthly_total:
+                    issues.append(
+                        f"{article['source_coordinate']}: годовой итог {annual_total} "
+                        f"не равен сумме месяцев {monthly_total}"
+                    )
+            for month, column, raw_amount in raw_cells:
+                ordinary = raw_amount.quantize(MATRIX_QUANTUM)
+                article["months"].append({
+                    "month": month, "source_column": column, "source_coordinate": coordinate_for(column),
+                    "raw_amount": str(raw_amount), "ordinary_amount": str(ordinary),
+                    "amount": str(allocated[column]), "adjustment": str(allocated[column] - ordinary),
+                })
+        for month, column, raw_amount in raw_cells:
+            if allocated[column] <= 0:
                 continue
-            amount = _amount(cells[column])
-            if amount is None or Decimal(amount) <= 0:
-                continue
-            amount = str(Decimal(amount).quantize(Decimal("0.01")))
+            amount = str(allocated[column])
             planned_date = date(plan_year, month, monthrange(plan_year, month)[1]).isoformat()
             coordinate = f"{_excel_column(column)}{source_row}"
             if source_sheet:
@@ -195,6 +306,8 @@ def _monthly_cash_flow(
                 "source_line": source_line,
                 "source_coordinate": coordinate,
                 "source_name": source_name,
+                "matrix_article_id": source_line,
+                "matrix_month": month,
                 "title": title,
                 "category": "Прочее",
                 "planned_start": None,
@@ -204,22 +317,27 @@ def _monthly_cash_flow(
                 "counterparty": None,
                 "object_name": None,
                 "note": title,
-                "direction": _direction(title) or ("inflow" if normalized_title.startswith("этапы ") else "outflow"),
+                "direction": direction,
                 "progress": 0.0,
                 "issues": [],
                 "importable": True,
                 "excerpt": f"{title} | {plan_year}-{month:02d} | {amount}"[:2000],
             })
-            if len(rows) >= limit:
-                break
-        if len(rows) >= limit:
-            break
+    truncated = len(rows) > limit
+    if truncated:
+        kept_ids = {row["selection_id"] for row in rows[:limit]}
+        for article in articles:
+            article_rows = [row for row in rows if row["matrix_article_id"] == article["article_id"]]
+            article["preview_complete"] = all(row["selection_id"] in kept_ids for row in article_rows)
+        blocking_issues.append("Предпросмотр усечён: бюджет нельзя создавать по неполному набору месяцев")
     return {
         "headers": headers,
         "mapping": {"row_title": "title", "month_columns": "planned_date + amount"},
-        "rows": rows,
-        "issues": issues,
-        "truncated": len(rows) >= limit,
+        "rows": rows[:limit],
+        "issues": issues + blocking_issues,
+        "blocking_issues": blocking_issues,
+        "articles": articles,
+        "truncated": truncated,
         "layout": "monthly_matrix",
         "plan_year": plan_year,
         "inferred_december": inferred_december,
