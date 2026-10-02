@@ -3,6 +3,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 
 vi.mock("../../api/client", () => ({ api: vi.fn() }));
+// This suite isolates budget creation; the separate links panel has its own
+// read-only/confirmation/CAS/undo component tests.
+vi.mock("./ExistingBudgetLinksPanel", () => ({ ExistingBudgetLinksPanel: () => null }));
 const mockApi = vi.mocked(api);
 afterEach(cleanup);
 

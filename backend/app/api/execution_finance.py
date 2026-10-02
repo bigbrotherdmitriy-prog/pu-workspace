@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -39,6 +39,10 @@ from app.structured_import import parse_structured_rows
 from app.dds_article_budget import (
     ArticleBudgetPreviewRequest, ArticleBudgetApplyRequest,
     preview_article_budget, apply_article_budget, undo_article_budget, confirmed_budget_for_totals,
+)
+from app.dds_budget_links import (
+    BudgetLinkPreviewRequest, BudgetLinkApplyRequest, preview_budget_links,
+    apply_budget_links, list_budget_link_operations, undo_budget_links,
 )
 from app.schedule_import.mpp import MppImportUnavailable, read_mpp_bytes
 from app.schedule_import.mspdi import build_mspdi
@@ -1446,6 +1450,32 @@ def article_budget_import(document_id: int, payload: ArticleBudgetApplyRequest,
 @router.post("/article-budget-operations/{operation_id}/undo")
 def article_budget_undo(operation_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     return undo_article_budget(operation_id, db, user)
+
+
+@router.post("/documents/{document_id}/budget-links-preview")
+def budget_links_preview(document_id: int, payload: BudgetLinkPreviewRequest,
+                         db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return preview_budget_links(document_id, payload, db, user)
+
+
+@router.post("/documents/{document_id}/budget-links-apply")
+def budget_links_apply(document_id: int, payload: BudgetLinkApplyRequest,
+                       db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return apply_budget_links(document_id, payload, db, user)
+
+
+@router.get("/documents/{document_id}/budget-link-operations")
+def budget_link_operations(document_id: int, project_id: int = Query(gt=0), contract_id: int = Query(gt=0),
+                           plan_year: int = Query(ge=2000, le=2100), budget_revision: int = Query(ge=1, le=10000),
+                           db: Session = Depends(get_db), user: User = Depends(require_user)):
+    payload = BudgetLinkPreviewRequest(project_id=project_id, contract_id=contract_id,
+                                       plan_year=plan_year, budget_revision=budget_revision)
+    return list_budget_link_operations(document_id, payload, db, user)
+
+
+@router.post("/budget-link-operations/{operation_id}/undo")
+def budget_links_undo(operation_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    return undo_budget_links(operation_id, db, user)
 
 
 @router.post("/baselines")
