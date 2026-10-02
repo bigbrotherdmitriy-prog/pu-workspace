@@ -72,6 +72,35 @@ def test_preview_does_not_write_and_uses_months_not_annual(world):
     assert before == (db.query(BudgetLine).count(), db.query(CashFlowEntry).count())
 
 
+def test_budget_preview_includes_truncated_header_december_without_changing_existing_cash(world):
+    db, _, project, contract, _, document, version = world
+    months = ("январь", "февраль", "март", "апрель", "май", "июнь",
+              "июль", "август", "сентябрь", "октябрь", "ноябрь")
+    version.content = (
+        "\t".join(("Статья", "Годовой итог", *months, "__PU_SOURCE_COORD__:ДДС:1"))
+        + "\n"
+        + "\t".join(("ФОТ тестового проекта", "1000", *(["83.33333333333333"] * 12),
+                     "__PU_SOURCE_COORD__:ДДС:2")) + "\n"
+    )
+    row = CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="outflow",
+                        title="ФОТ тестового проекта", planned_date=date(2026, 12, 31),
+                        planned_amount=Decimal("83.33"), currency="RUB",
+                        source_document_id=document.id, source_document_version_id=version.id,
+                        source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest(),
+                        source_name="ДДC.xlsx, N2")
+    db.add(row); db.flush()
+    before = service()._snapshot(row)
+    result = preview(world)
+    assert result["expense_total"] == "1000.00"
+    assert result["warnings"] == [] and result["conflicts"] == []
+    assert len(result["articles"][0]["months"]) == 12
+    match = result["existing_rows"][0]
+    assert match["id"] == row.id and match["source_difference"] == "0.00"
+    assert match["apply_allowed"] is False
+    assert service()._snapshot(row) == before
+    assert db.query(CashFlowEntry).count() == 1 and db.query(BudgetLine).count() == 0
+
+
 def test_creation_is_distinct_from_approval_and_never_creates_cash_in_budget_only_mode(world):
     db = world[0]
     result = apply(world)
