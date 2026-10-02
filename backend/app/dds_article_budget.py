@@ -386,6 +386,11 @@ def confirmed_budget_for_totals(rows, known_control_ids=()):
     if any(counts[(key, revision)] > 1 for key, revision in latest.items()):
         raise HTTPException(409, "ARTICLE_AMBIGUOUS: несколько подтверждённых статей одной ревизии")
     analytical_contracts = {(key[0], key[1]) for key in latest}
+    if any(row.line_kind == "legacy_unclassified" and row.id not in known_control_ids
+           and (row.contract_id, row.currency) in analytical_contracts for row in confirmed):
+        # Old rows have no reliable type/period. Do not guess whether they are
+        # control totals or expenses, and do not silently double the budget.
+        raise HTTPException(409, "BUDGET_SCOPE_UNKNOWN: определите тип старых бюджетных строк")
     return [row for row in confirmed if
             (row.line_kind == "analytical_expense" and row.budget_revision == latest[(row.contract_id, row.currency, row.budget_period, normalize_article(row.description))])
             or (row.line_kind == "legacy_unclassified" and row.id not in known_control_ids)

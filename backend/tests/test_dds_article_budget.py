@@ -271,6 +271,17 @@ def test_duplicate_confirmed_article_never_doubles_the_summary(world):
         overview(world[2].id, world[0], world[1])
 
 
+def test_unclassified_legacy_budget_cannot_be_added_to_analytical_totals(world):
+    from app.api.execution_finance import overview
+    analytical = add_budget(world, status="approved")
+    legacy = add_budget(world, status="approved", line_kind="legacy_unclassified",
+                        budget_period=None, budget_revision=None, planned_amount=Decimal("100"))
+    with pytest.raises(HTTPException, match="BUDGET_SCOPE_UNKNOWN"):
+        overview(world[2].id, world[0], world[1])
+    # An exact saved proposal FK is proof of a control total, not a name guess.
+    assert service().confirmed_budget_for_totals([analytical, legacy], {legacy.id}) == [analytical]
+
+
 def test_closed_article_is_not_reused_for_new_forecasts(world):
     add_budget(world, status="closed")
     result = preview(world, mode="import_forecast")
