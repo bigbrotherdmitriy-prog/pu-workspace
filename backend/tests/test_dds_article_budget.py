@@ -172,6 +172,13 @@ def test_normalization_preserves_punctuation_and_city(world):
     assert normalize("Материалы (Городец)") != normalize("Материалы (Дубна)")
 
 
+def test_unknown_project_currency_fails_closed_with_explicit_code(world):
+    world[2].currency = "???"
+    world[0].flush()
+    with pytest.raises(HTTPException, match="PROJECT_CURRENCY_INVALID"):
+        preview(world)
+
+
 @pytest.mark.parametrize("overrides", [{"budget_period": 2027}, {"budget_revision": 2}, {"currency": "USD"}])
 def test_matching_never_crosses_period_revision_or_currency(world, overrides):
     add_budget(world, **overrides)

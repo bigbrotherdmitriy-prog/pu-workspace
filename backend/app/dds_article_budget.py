@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role
-from app.finance_money import ProjectCurrencyError, project_currency
+from app.finance_money import project_currency
 from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
 from app.models.audit_log import AuditLog
 from app.models.document import Document
@@ -94,7 +94,7 @@ def _preview(document_id, payload, db):
         raise HTTPException(422, "CONTRACT_SCOPE_MISMATCH: выберите финансовый договор проекта")
     try:
         currency = project_currency(db, project.id)
-    except ProjectCurrencyError as exc:
+    except ValueError as exc:
         raise HTTPException(422, f"PROJECT_CURRENCY_INVALID: {exc}") from exc
     pin = resolve_current_document_pin(db, project.id, document_id)
     parsed = parse_structured_rows(pin.version.content or "", "cash-flow", source_name=pin.document.name,

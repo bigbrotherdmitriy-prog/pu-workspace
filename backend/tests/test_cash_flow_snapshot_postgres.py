@@ -38,7 +38,9 @@ def pg(monkeypatch):
             conn.execute(text("""INSERT INTO cash_flow_entries
                 (id,project_id,title,direction,planned_date,planned_amount,actual_amount,currency,status)
                 VALUES (1,1,'Legacy','outflow','2026-01-01',1500.50,0,'RUB','approved')"""))
-        command.upgrade(config, "c70a00a2f001")
+        # Keep dirty data from before the revision trigger, but run the current
+        # ORM snapshot against the complete current application schema.
+        command.upgrade(config, "head")
         yield engine, config
     finally:
         engine.dispose()
@@ -64,7 +66,7 @@ def test_revision_migration_backfill_and_reversible_downgrade(pg):
     command.downgrade(config, "c70a00a1f001")
     with engine.connect() as conn:
         assert str(conn.execute(text("SELECT planned_amount FROM cash_flow_entries WHERE id=1")).scalar_one()) == "1500.50"
-    command.upgrade(config, "c70a00a2f001")
+    command.upgrade(config, "head")
     assert revisions(engine) == [0, 0]
 
 
