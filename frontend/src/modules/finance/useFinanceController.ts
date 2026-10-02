@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
 import type {
@@ -25,7 +25,11 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [financeCandidates, setFinanceCandidates] = useState<FinanceDocumentCandidate[]>([]);
   const [financeStructuredPreview, setFinanceStructuredPreview] = useState<FinanceStructuredPreview | null>(null);
   const [financeStructuredRows, setFinanceStructuredRows] = useState<number[]>([]);
-  const [selectedFinanceContractId, setSelectedFinanceContractId] = useState(0);
+  const [selectedFinanceContract, setSelectedFinanceContract] = useState({ projectId, id: 0 });
+  // A contract from the previous project must never reach the next request,
+  // including the render before the project-reset effect has run.
+  const selectedFinanceContractId = selectedFinanceContract.projectId === projectId
+    ? selectedFinanceContract.id : 0;
   const [financeKind, setFinanceKind] = useState("budget");
   const [financeTitle, setFinanceTitle] = useState("");
   const [financeAmount, setFinanceAmount] = useState("");
@@ -41,26 +45,81 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [costCategories, setCostCategories] = useState<CostCategory[]>([]);
   const [invoiceExtractionProposal, setInvoiceExtractionProposal] = useState<InvoiceExtractionProposal | null>(null);
   const [invoiceAiRetrying, setInvoiceAiRetrying] = useState(false);
+  const projectContext = useRef({ projectId });
+  if (projectContext.current.projectId !== projectId) projectContext.current = { projectId };
+  const loadSequence = useRef(0);
+  const loadContext = useRef({ projectId, contractId: selectedFinanceContractId, ready });
+  if (loadContext.current.projectId !== projectId
+      || loadContext.current.contractId !== selectedFinanceContractId
+      || loadContext.current.ready !== ready) {
+    loadContext.current = { projectId, contractId: selectedFinanceContractId, ready };
+  }
+
+  function setSelectedFinanceContractId(id: number) {
+    if (loadContext.current.projectId === projectId) setSelectedFinanceContract({ projectId, id });
+  }
+
+  function captureProject() {
+    const context = projectContext.current;
+    return () => context.projectId === projectId && projectContext.current === context;
+  }
+
+  useLayoutEffect(() => {
+    setSelectedFinanceContractId(0);
+    setFinance(null);
+    setFinanceCandidates([]);
+    setCostCategories([]);
+    setFinanceStructuredPreview(null);
+    setFinanceStructuredRows([]);
+    setInvoiceExtractionProposal(null);
+    setInvoiceAiRetrying(false);
+    setFinanceKind("budget");
+    setFinanceTitle("");
+    setFinanceAmount("");
+    setFinanceDate("");
+    setFinanceExtra("");
+    setFinanceObject("");
+    setFinanceCategory("");
+    setFinanceNote("");
+    setFinanceSourceDocumentId(0);
+    setFinanceScheduleItemId(0);
+    setFinanceBudgetLineId(0);
+    setFinanceBaselineId(0);
+  }, [projectId]);
 
   async function loadFinance() {
-    if (!projectId) return;
-    try {
-      const contractQuery = selectedFinanceContractId ? `&contract_id=${selectedFinanceContractId}` : "";
-      const [overview, suggestions, categoryResult] = await Promise.all([
-        api<FinanceOverview>(`/execution/overview?project_id=${projectId}`),
-        api<{ candidates: FinanceDocumentCandidate[] }>(`/execution/document-candidates?project_id=${projectId}${contractQuery}`),
-        api<{ categories: CostCategory[] }>(`/execution/cost-categories?project_id=${projectId}`),
-      ]);
-      setFinance(overview);
-      setFinanceCandidates(suggestions.candidates || []);
-      setCostCategories(categoryResult.categories || []);
-    } catch (error) {
-      setError((error as Error).message);
+    if (!projectId || loadContext.current.projectId !== projectId) return;
+    const context = loadContext.current;
+    const sequence = ++loadSequence.current;
+    const current = () => loadContext.current === context && loadSequence.current === sequence;
+    const errors: string[] = [];
+    const contractQuery = selectedFinanceContractId ? `&contract_id=${selectedFinanceContractId}` : "";
+    async function loadBlock<T>(path: string, apply: (value: T) => void, clear: () => void, label: string) {
+      try {
+        const value = await api<T>(path);
+        if (current()) apply(value);
+      } catch (error) {
+        if (!current()) return;
+        clear();
+        errors.push(`${label}: ${error instanceof Error ? error.message : "Не удалось загрузить"}`);
+        setError(errors.join("; "));
+      }
     }
+    // Each block publishes its own response immediately. A slow or failed
+    // sibling neither hides successful data nor leaves failed data stale.
+    await Promise.allSettled([
+      loadBlock<FinanceOverview>(`/execution/overview?project_id=${projectId}`,
+        setFinance, () => setFinance(null), "Финансовый обзор"),
+      loadBlock<{ candidates: FinanceDocumentCandidate[] }>(`/execution/document-candidates?project_id=${projectId}${contractQuery}`,
+        value => setFinanceCandidates(value.candidates || []), () => setFinanceCandidates([]), "Финансовые документы"),
+      loadBlock<{ categories: CostCategory[] }>(`/execution/cost-categories?project_id=${projectId}`,
+        value => setCostCategories(value.categories || []), () => setCostCategories([]), "Статьи затрат"),
+    ]);
   }
 
   useEffect(() => {
     if (ready && projectId) void loadFinance();
+    return () => { loadSequence.current += 1; };
   }, [ready, projectId, selectedFinanceContractId]);
 
   function prepareFinanceItem(kind: string, baselineId = 0) {
@@ -83,15 +142,18 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   async function useFinanceCandidate(candidate: FinanceDocumentCandidate) {
+    const current = captureProject();
+    if (!current()) return;
     if (["schedule", "budget", "cash-flow"].includes(candidate.kind)) {
       try {
         const preview = await api<FinanceStructuredPreview>(`/execution/documents/${candidate.document_id}/structured-preview?project_id=${projectId}&kind=${candidate.kind}&plan_year=${currentPlanYear}`);
+        if (!current()) return;
         setFinanceStructuredPreview(preview);
         setFinanceStructuredRows(preview.rows.filter((row: FinanceStructuredRow) => row.importable).map((row) => row.selection_id));
         setNotice(`Таблица «${candidate.name}» разобрана. Проверьте строки перед пакетным импортом.`);
         window.setTimeout(() => document.getElementById("structured-import")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
       } catch (error) {
-        setError((error as Error).message);
+        if (current()) setError((error as Error).message);
       }
       return;
     }
@@ -101,11 +163,12 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           method: "POST",
           body: JSON.stringify({ project_id: projectId, target_kind: "cash_flow" }),
         });
+        if (!current()) return;
         setInvoiceExtractionProposal(proposal);
         setNotice(`Счёт «${candidate.name}» разобран. Проверьте сумму, назначение и категорию перед подтверждением.`);
         window.setTimeout(() => document.getElementById("invoice-extraction-review")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
       } catch (error) {
-        setError((error as Error).message);
+        if (current()) setError((error as Error).message);
       }
       return;
     }
@@ -120,6 +183,8 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   async function reviewUploadedFinanceDocuments(documentIds: number[]) {
+    const current = captureProject();
+    if (!current()) return;
     const requested = new Set(documentIds);
     if (!requested.size) {
       setNotice("Файл обработан, но финансовый документ не был создан. Проверьте качество распознавания.");
@@ -129,6 +194,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       const suggestions = await api<{ candidates: FinanceDocumentCandidate[] }>(
         `/execution/document-candidates?project_id=${projectId}`,
       );
+      if (!current()) return;
       const candidates = suggestions.candidates || [];
       setFinanceCandidates(candidates);
       const uploaded = candidates.filter((candidate) => requested.has(candidate.document_id));
@@ -142,7 +208,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       }
       setNotice("Документ загружен, но не распознан как счёт, акт, ГПР, бюджет или ДДС. Он сохранён в документах проекта.");
     } catch (error) {
-      setError((error as Error).message);
+      if (current()) setError((error as Error).message);
     }
   }
 
@@ -225,15 +291,18 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   async function prepareDroppedFinanceDocument(documentId: number, name: string,
                                                 kind: "schedule" | "budget" | "cash-flow",
                                                 contractId: number) {
+    const current = captureProject();
+    if (!current()) return;
     setSelectedFinanceContractId(contractId);
     try {
       const preview = await api<FinanceStructuredPreview>(`/execution/documents/${documentId}/structured-preview?project_id=${projectId}&kind=${kind}&plan_year=${currentPlanYear}`);
+      if (!current()) return;
       setFinanceStructuredPreview(preview);
       setFinanceStructuredRows(preview.rows.filter((row) => row.importable).map((row) => row.selection_id));
       setNotice(`«${name}» распознан как ${kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС"}. Проверьте строки перед созданием предложений.`);
       window.setTimeout(() => document.getElementById("structured-import")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch (error) {
-      setError((error as Error).message);
+      if (current()) setError((error as Error).message);
     }
   }
 
