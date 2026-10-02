@@ -256,7 +256,7 @@ def _monthly_cash_flow(
             except (ValueError, InvalidOperation) as exc:
                 article["issues"].append(f"{coordinate_for(column)}: {exc}")
         annual_amount = None
-        if first_month_column > 0 and cells[first_month_column - 1].strip():
+        if 0 < first_month_column <= len(cells) and cells[first_month_column - 1].strip():
             try:
                 annual_amount = _matrix_decimal(cells[first_month_column - 1])
             except (ValueError, InvalidOperation) as exc:

@@ -153,3 +153,10 @@ def test_labelled_annual_column_after_november_is_not_inferred_as_december():
     assert result["inferred_december"] is False
     assert len(result["rows"]) == 11
     assert result["articles"][0]["monthly_total"] == "11.00"
+
+
+def test_short_trailing_row_returns_preview_instead_of_index_error():
+    content = "Статья\tИтого\tянварь\tфевраль\tмарт\nМатериалы\t6\t1\t2\t3\nПримечание\n"
+    result = parse_structured_rows(content, "cash-flow", plan_year=2026)
+    assert result["articles"][0]["monthly_total"] == "6.00"
+    assert len(result["rows"]) == 3
