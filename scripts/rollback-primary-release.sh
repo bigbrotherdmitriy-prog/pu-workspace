@@ -83,7 +83,10 @@ docker compose --profile cutover --env-file "$OLD_ENV" \
 [ ! -e "$LINK" ] && [ ! -L "$LINK" ] || fail "temporary current link exists"
 ln -s "$PREVIOUS_RELEASE" "$LINK"
 OWNED_LINK=true
+SELECTED_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
 mv -Tf "$LINK" "$ROOT/current"
+printf 'PRIMARY_CURRENT_SELECTED started_at=%s completed_at=%s release=%s\n' \
+  "$SELECTED_STARTED_AT" "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" "$PREVIOUS_RELEASE"
 docker compose --profile cutover --env-file "$OLD_ENV" \
   -f "$PREVIOUS_RELEASE/infra/primary/docker-compose.yml" -f "$OVERRIDE" \
   -p "$PROJECT" up -d --no-build --force-recreate --wait --wait-timeout 180 backend worker scheduler
