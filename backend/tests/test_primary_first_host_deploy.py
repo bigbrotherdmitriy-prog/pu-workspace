@@ -262,6 +262,16 @@ def test_primary_deploy_shell_syntax():
     assert result.returncode == 0, result.stderr
 
 
+def test_current_switch_logs_utc_bounds_without_changing_atomic_cutover():
+    for name, current in (("deploy-primary-first-host.sh", '"$CURRENT_LINK"'),
+                          ("rollback-primary-release.sh", '"$ROOT/current"')):
+        source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+        switch = source.index("mv -Tf")
+        assert "date -u +%Y-%m-%dT%H:%M:%S.%NZ" in source[:switch]
+        assert current in source[switch:source.index("\n", switch)]
+        assert "PRIMARY_CURRENT_SELECTED started_at=%s completed_at=%s release=%s" in source[switch:]
+
+
 def test_primary_compose_json_fixture_is_serializable():
     model, *_ = compose_model()
     assert json.loads(json.dumps(model))["services"]["db"]["container_name"].endswith("-db")
