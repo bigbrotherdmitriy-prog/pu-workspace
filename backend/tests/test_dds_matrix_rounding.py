@@ -40,6 +40,43 @@ def test_synthetic_largest_remainder_preserves_total_and_shows_every_adjustment(
     assert all(cell["raw_amount"] == "83.33333333333333" for cell in article["months"])
 
 
+@pytest.mark.parametrize("months", [MONTHS[:11], MONTHS[:11] + ("",)])
+def test_unlabelled_december_is_included_in_the_full_article_total(months):
+    result = matrix(["0"] * 11 + ["12.34"], annual="12.34", months=months)
+    assert result["inferred_december"] is True
+    assert result["blocking_issues"] == [] and result["issues"] == []
+    article = result["articles"][0]
+    assert article["monthly_total"] == "12.34"
+    assert len(article["months"]) == 12
+    assert article["months"][-1]["source_coordinate"] == "ДДС!N12"
+    assert [(row["planned_date"], row["amount"]) for row in result["rows"]] == [
+        ("2026-12-31", "12.34"),
+    ]
+
+
+@pytest.mark.parametrize("months", [MONTHS[:11], MONTHS[:11] + ("",)])
+def test_rounding_preserves_article_total_including_unlabelled_december(months):
+    result = matrix(["0.004"] * 11 + ["1.006"], annual="1.05", months=months)
+    article = result["articles"][0]
+    assert article["monthly_total"] == "1.05"
+    assert sum(Decimal(cell["amount"]) for cell in article["months"]) == Decimal("1.05")
+    assert sum(Decimal(row["amount"]) for row in result["rows"]) == Decimal("1.05")
+    assert article["months"][-1]["month"] == 12
+    assert article["months"][-1]["amount"] == "1.01"
+    assert article["annual_difference"] == "0.00"
+
+
+@pytest.mark.parametrize("months", [MONTHS[:11], MONTHS[:11] + ("",)])
+def test_synthetic_payroll_control_reconciles_all_twelve_months(months):
+    result = matrix(["83.33333333333333"] * 12, annual="1000",
+                    title="ФОТ тестового проекта", months=months)
+    assert [row["amount"] for row in result["rows"]] == ["83.34"] * 4 + ["83.33"] * 8
+    article = result["articles"][0]
+    assert article["monthly_total"] == "1000.00"
+    assert article["annual_difference"] == "0.00"
+    assert result["issues"] == []
+
+
 def test_ties_use_month_then_source_column_not_input_traversal():
     cells = [(3, 4, Decimal("0.005")), (1, 2, Decimal("0.005")), (2, 3, Decimal("0.005"))]
     assert allocate(cells) == {2: Decimal("0.01"), 3: Decimal("0.01"), 4: Decimal("0.00")}
@@ -142,8 +179,9 @@ def test_comma_and_grouped_spaces_preserve_raw_decimal_precision():
     assert result["rows"][0]["amount"] == "1234.00"
 
 
-def test_invalid_value_in_unlabelled_december_cannot_be_ignored():
-    result = matrix(["1"] * 11 + ["NaN"], months=MONTHS[:11] + ("",))
+@pytest.mark.parametrize("months", [MONTHS[:11], MONTHS[:11] + ("",)])
+def test_invalid_value_in_unlabelled_december_cannot_be_ignored(months):
+    result = matrix(["1"] * 11 + ["NaN"], months=months)
     assert result["blocking_issues"]
     assert "ДДС!N12" in result["blocking_issues"][0]
     assert result["rows"] == []
@@ -153,6 +191,21 @@ def test_labelled_annual_column_after_november_is_not_inferred_as_december():
     result = matrix(["1"] * 11 + ["100"], annual="11", months=MONTHS[:11] + ("Годовой итог",))
     assert result["inferred_december"] is False
     assert len(result["rows"]) == 11
+    assert result["articles"][0]["monthly_total"] == "11.00"
+
+
+def test_other_sheet_values_do_not_infer_december_in_a_short_header():
+    content = (
+        "\t".join(("Статья", "Годовой итог", *MONTHS[:11], "__PU_SOURCE_COORD__:ДДС:1"))
+        + "\n"
+        + "\t".join(("Материалы", "11", *(["1"] * 11), "__PU_SOURCE_COORD__:ДДС:2"))
+        + "\n"
+        + "\t".join(("Иной лист", "100", *(["0"] * 11), "100", "__PU_SOURCE_COORD__:Примечания:2"))
+        + "\n"
+    )
+    result = parse_structured_rows(content, "cash-flow", plan_year=2026)
+    assert result["inferred_december"] is False
+    assert len(result["articles"]) == 1
     assert result["articles"][0]["monthly_total"] == "11.00"
 
 

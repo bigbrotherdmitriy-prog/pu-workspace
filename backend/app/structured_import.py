@@ -189,7 +189,9 @@ def _monthly_cash_flow(
     november_columns = [column for column, month in month_columns.items() if month == 11]
     if set(month_columns.values()) == set(range(1, 12)) and len(november_columns) == 1:
         december_column = november_columns[0] + 1
-        if december_column < len(headers) and not headers[december_column].strip():
+        # Extraction may omit the trailing empty header while retaining body cells.
+        # Never infer December over an explicitly labelled annual/other column.
+        if december_column >= len(headers) or not headers[december_column].strip():
             has_values = any(
                 source_sheet == header_sheet
                 and december_column < len(cells)
