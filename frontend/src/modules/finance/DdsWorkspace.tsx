@@ -214,10 +214,10 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     return { category, value, share: totals.outflow ? value / totals.outflow : 0 };
   }).filter((item) => item.value > 0).sort((a, b) => b.value - a.value);
 
-  const canConfirm = (row: CashRow) => row.status === "proposed" && (
+  const canConfirm = (row: CashRow) => row.status === "proposed" && (row.confirmation_allowed ?? (
     row.direction !== "outflow" || !row.source_document_id
     || Boolean(row.contract_id && row.schedule_item_id && row.budget_line_id)
-  );
+  ));
   const proposedRows = visibleRows.filter(canConfirm);
   const selectedVisibleIds = proposedRows.filter((row) => selectedProposed.has(row.id)).map((row) => row.id);
   const allVisibleProposedSelected = proposedRows.length > 0 && selectedVisibleIds.length === proposedRows.length;
@@ -232,20 +232,31 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
     proposedRows.forEach((row) => allVisibleProposedSelected ? next.delete(row.id) : next.add(row.id));
     return next;
   });
-  const confirmSelected = async () => {
-    if (!selectedVisibleIds.length || confirmingMany) return;
+  const [confirmationReport, setConfirmationReport] = useState<{ id: number; code: string; message?: string }[]>([]);
+  const [confirmationError, setConfirmationError] = useState("");
+  useEffect(() => { setConfirmationReport([]); setConfirmationError(""); }, [selectedContractId]);
+  const confirmRows = async (ids: number[]) => {
+    if (!ids.length || confirmingMany) return;
     setConfirmingMany(true);
+    setConfirmationReport([]); setConfirmationError("");
     try {
-      await onConfirmMany("cash-flow", selectedVisibleIds, "approved");
+      await onConfirmMany("cash-flow", ids, "approved");
+      setConfirmationReport(ids.map(id => ({ id, code: "CONFIRMED", message: "План подтверждён; факт не создан" })));
       setSelectedProposed((current) => {
         const next = new Set(current);
-        selectedVisibleIds.forEach((id) => next.delete(id));
+        ids.forEach((id) => next.delete(id));
         return next;
       });
+    } catch (error) {
+      const failure = error as Error & { details?: { rows?: { id: number; code: string; message?: string }[] } };
+      setConfirmationError(failure.message);
+      setConfirmationReport(failure.details?.rows || ids.map(id => ({ id, code: "RESULT_UNKNOWN",
+        message: "Результат неизвестен. Проверьте обновлённый ДДС и аудит перед повтором." })));
     } finally {
       setConfirmingMany(false);
     }
   };
+  const confirmSelected = () => confirmRows(selectedVisibleIds);
   const mutatePlan = async (row: CashRow, operation: "edit" | "move" | "copy", plannedDate: string, plannedAmount: number, remember = true) => {
     if (!onMutatePlan) return;
     if (row.status !== "proposed" || row.actual_date || Number(row.actual_amount) !== 0) {
@@ -436,13 +447,13 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       <tr className="dds-balance"><td>Баланс накопленным итогом</td><td className="money">{formatMoney(totals.net)}</td>{months.map((key) => <td className={`money ${(cumulative[key] || 0) < 0 ? "negative" : ""}`} key={key}>{formatMoney(cumulative[key] || 0)}</td>)}</tr>
     </tbody></table>{!visibleRows.length && <p className="dds-empty">Календарь появится после добавления операций.</p>}</div></div>}
 
-    {tab === "details" && <div className="dds-table-wrap">{proposedRows.length > 0 && <div className="dds-head-actions"><button className="secondary" type="button" onClick={toggleAllProposed}>{allVisibleProposedSelected ? "Снять выбор" : "Выбрать предложенные"}</button><button type="button" disabled={!selectedVisibleIds.length || confirmingMany} onClick={confirmSelected}><CheckCheck /> {confirmingMany ? "Подтверждаем…" : `Подтвердить выбранные (${selectedVisibleIds.length})`}</button></div>}<table className="dds-table"><thead><tr><th><input type="checkbox" aria-label="Выбрать все предложенные операции" checked={allVisibleProposedSelected} disabled={!proposedRows.length} onChange={toggleAllProposed} /></th><th>№</th><th>Плановая дата</th><th>Месяц</th><th>Объект</th><th>Статья</th><th>Тип операции</th><th>План, {selectedCurrency}</th><th>Факт, {selectedCurrency}</th><th>Описание операции</th><th>Статус</th><th>Связь</th><th></th></tr></thead><tbody>{visibleRows.map((row, index) => {
+    {tab === "details" && <div className="dds-table-wrap">{confirmationReport.length > 0 && <section aria-label="Результат подтверждения ДДС" role={confirmationError ? "alert" : "status"}><p>{confirmationError || `Подтверждено записей: ${confirmationReport.length}. Факт не создавался.`}</p><table className="dds-table"><thead><tr><th>ID ДДС</th><th>Результат</th><th>Причина</th></tr></thead><tbody>{confirmationReport.map(result => <tr key={result.id}><td>{result.id}</td><td>{result.code}</td><td>{result.message || "—"}</td></tr>)}</tbody></table></section>}{proposedRows.length > 0 && <div className="dds-head-actions"><button className="secondary" type="button" onClick={toggleAllProposed}>{allVisibleProposedSelected ? "Снять выбор" : "Выбрать предложенные"}</button><button type="button" disabled={!selectedVisibleIds.length || confirmingMany} onClick={confirmSelected}><CheckCheck /> {confirmingMany ? "Подтверждаем…" : `Подтвердить выбранные (${selectedVisibleIds.length})`}</button></div>}<table className="dds-table"><thead><tr><th><input type="checkbox" aria-label="Выбрать все предложенные операции" checked={allVisibleProposedSelected} disabled={!proposedRows.length} onChange={toggleAllProposed} /></th><th>№</th><th>Плановая дата</th><th>Месяц</th><th>Объект</th><th>Статья</th><th>Тип операции</th><th>План, {selectedCurrency}</th><th>Факт, {selectedCurrency}</th><th>Описание операции</th><th>Статус</th><th>Связь</th><th></th></tr></thead><tbody>{visibleRows.map((row, index) => {
       const controlsComplete = Boolean(row.contract_id && row.schedule_item_id && row.budget_line_id);
       const options = linkOptions(row);
       const draft = linkDrafts[row.id] || { scheduleItemId: row.schedule_item_id || 0, budgetLineId: row.budget_line_id || 0 };
-      return <tr id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td>{index + 1}</td><td>{dateFormat.format(new Date(`${row.planned_date}T00:00:00Z`))}</td><td>{monthLong.format(monthDate(monthKey(row.planned_date)))}</td><td>{row.object}</td><td>{row.category}</td><td><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money">{formatMoney(amount(row))}</td><td className="money">{row.actual_date ? `${formatMoney(actualAmount(row))} · ${dateFormat.format(new Date(`${row.actual_date}T00:00:00Z`))}` : "—"}</td><td>{row.note}</td><td>{row.status}</td><td>{row.schedule_item_id ? <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button> : "—"}</td><td className="dds-row-actions">
-        {row.status === "proposed" && row.direction === "outflow" && row.source_document_id && !controlsComplete ? <div className="dds-control-links"><select aria-label={`Этап ГПР для ${row.title}`} value={draft.scheduleItemId} onChange={(event) => setLinkDraft(row.id, { scheduleItemId: Number(event.target.value) })}><option value={0}>Этап ГПР</option>{options.schedule.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><select aria-label={`Строка бюджета для ${row.title}`} value={draft.budgetLineId} onChange={(event) => setLinkDraft(row.id, { budgetLineId: Number(event.target.value) })}><option value={0}>Строка бюджета</option>{options.budget.map((item) => <option value={item.id} key={item.id}>{item.description}</option>)}</select><button type="button" disabled={!options.contractId || !draft.scheduleItemId || !draft.budgetLineId} onClick={() => onLinkControls(row.id, options.contractId, draft.scheduleItemId, draft.budgetLineId)}>Связать с контролями</button></div> : row.status === "proposed" && <button type="button" onClick={() => onConfirm("cash-flow", row.id, "approved")}>Подтвердить</button>}
-        {row.status === "approved" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}
+      return <tr id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td>{index + 1}</td><td>{dateFormat.format(new Date(`${row.planned_date}T00:00:00Z`))}</td><td>{monthLong.format(monthDate(monthKey(row.planned_date)))}</td><td>{row.object}</td><td>{row.category}</td><td><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money">{formatMoney(amount(row))}</td><td className="money">{row.actual_date ? `${formatMoney(actualAmount(row))} · ${dateFormat.format(new Date(`${row.actual_date}T00:00:00Z`))}` : "—"}</td><td>{row.note}</td><td>{row.status}{(row.entry_kind === "plan_forecast" || row.confirmation_kind === "plan_forecast") && <small> · <span>Прогноз</span></small>}{row.status === "proposed" && row.confirmation_error && <small> · {row.confirmation_error.message}</small>}</td><td>{row.schedule_item_id ? <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button> : "—"}</td><td className="dds-row-actions">
+        {row.status === "proposed" && row.direction === "outflow" && row.source_document_id && !controlsComplete && !canConfirm(row) ? <div className="dds-control-links"><select aria-label={`Этап ГПР для ${row.title}`} value={draft.scheduleItemId} onChange={(event) => setLinkDraft(row.id, { scheduleItemId: Number(event.target.value) })}><option value={0}>Этап ГПР</option>{options.schedule.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><select aria-label={`Строка бюджета для ${row.title}`} value={draft.budgetLineId} onChange={(event) => setLinkDraft(row.id, { budgetLineId: Number(event.target.value) })}><option value={0}>Строка бюджета</option>{options.budget.map((item) => <option value={item.id} key={item.id}>{item.description}</option>)}</select><button type="button" disabled={!options.contractId || !draft.scheduleItemId || !draft.budgetLineId} onClick={() => onLinkControls(row.id, options.contractId, draft.scheduleItemId, draft.budgetLineId)}>Связать с контролями</button></div> : row.status === "proposed" && <button type="button" disabled={!canConfirm(row) || confirmingMany} onClick={() => void confirmRows([row.id])}>Подтвердить</button>}
+        {row.status === "approved" && row.entry_kind !== "plan_forecast" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}
         {["proposed", "approved"].includes(row.status) && !row.actual_date && !Number(row.actual_amount) && <button className="secondary" type="button" aria-label={`Удалить операцию ${row.title}`} disabled={cancellingIds.has(row.id)} onClick={() => void cancelOperation(row)}><Trash2 />{cancellingIds.has(row.id) ? "Удаляем…" : "Удалить из ДДС"}</button>}
       </td></tr>;
     })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}

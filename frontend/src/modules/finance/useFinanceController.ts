@@ -484,6 +484,28 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   async function confirmFinanceMany(kind: string, ids: number[], status: string) {
+    if (kind === "cash-flow") {
+      try {
+        if (status !== "approved") throw new Error("Пакет ДДС поддерживает только подтверждение плана");
+        const selected = ids.map(id => finance?.cash_flow.find(row => row.id === id));
+        if (selected.some(row => !row)) throw new Error("Состав ДДС изменился. Обновите экран перед подтверждением.");
+        const result = await api<{ atomic: boolean; confirmed_count: number; rows: { id: number; status: string }[] }>(
+          "/execution/cash-flow/confirm-batch", { method: "POST", body: JSON.stringify({ project_id: projectId,
+            items: selected.map(row => ({ id: row!.id, expected_record_version: row!.record_version })) }) });
+        if (!result.atomic || result.confirmed_count !== ids.length || result.rows.length !== ids.length
+          || result.rows.some(row => row.status !== "approved" || !ids.includes(row.id))) {
+          throw new Error("Ответ подтверждения неясен. Обновите экран и проверьте аудит; не повторяйте вслепую.");
+        }
+        if (projectContext.current.projectId === projectId) {
+          setNotice(`Атомарно подтверждено записей: ${result.confirmed_count}. Фактические платежи не создавались.`);
+          await loadFinance();
+        }
+        return;
+      } catch (error) {
+        if (projectContext.current.projectId === projectId) setError((error as Error).message);
+        throw error;
+      }
+    }
     try {
       await Promise.all(ids.map((id) => api(`/execution/${kind}/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) })));
       setNotice(`Подтверждено записей: ${ids.length}. Изменения сохранены в аудите.`);

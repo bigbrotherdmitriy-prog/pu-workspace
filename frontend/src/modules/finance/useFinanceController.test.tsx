@@ -29,6 +29,26 @@ const candidate: FinanceDocumentCandidate = {
 };
 const categories = [{ id: 1, name: "ФОТ", is_active: true, sort_order: 1 }];
 
+describe("atomic DDS confirmation", () => {
+  it("sends one versioned request for all selected cash-flow rows", async () => {
+    const cash = [1, 2].map(id => ({ id, contract_id: 4, direction: "inflow", title: `Synthetic ${id}`,
+      planned_date: "2035-01-31", planned_amount: 10, actual_amount: 0, currency: "RUB", status: "proposed", record_version: id + 2 }));
+    vi.mocked(api).mockImplementation(async path => path.startsWith("/execution/overview")
+      ? { ...overview, cash_flow: cash } : path === "/execution/cash-flow/confirm-batch"
+        ? { atomic: true, confirmed_count: 2, rows: cash.map(r => ({ id: r.id, status: "approved" })) }
+        : path.startsWith("/execution/document-candidates") ? { candidates: [] } : { categories });
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice: vi.fn(), setError: vi.fn() }));
+    await act(async () => result.current.loadFinance());
+    vi.mocked(api).mockClear();
+    await act(async () => result.current.confirmFinanceMany("cash-flow", [1, 2], "approved"));
+    const writes = vi.mocked(api).mock.calls.filter(([, init]) => init?.method);
+    expect(writes).toHaveLength(1);
+    expect(writes[0][0]).toBe("/execution/cash-flow/confirm-batch");
+    expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ project_id: 7,
+      items: [{ id: 1, expected_record_version: 3 }, { id: 2, expected_record_version: 4 }] });
+  });
+});
+
 describe("project-scoped independent finance loading", () => {
   it("clears the previous contract and project-bound editor state before loading another project", async () => {
     const pending = deferred<unknown>();

@@ -115,6 +115,20 @@ jobs:
           assert len(report.findall('.//testcase')) == 5, 'Expected 5 DDS budget links PostgreSQL gates'
           assert not report.findall('.//skipped'), 'DDS budget links PostgreSQL gates must not skip'
           PY
+      - name: DDS atomic confirmation PostgreSQL gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_dds_confirmation_postgres.py \
+            --junitxml=../dds-confirmation-postgres.xml 2>&1 | tee ../dds-confirmation-postgres.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../dds-confirmation-postgres.xml').getroot()
+          assert len(report.findall('.//testcase')) == 3, 'Expected 3 DDS confirmation PostgreSQL gates'
+          assert not report.findall('.//skipped'), 'DDS confirmation PostgreSQL gates must not skip'
+          PY
       - name: Contract discovery durable PostgreSQL gate
         working-directory: backend
         env:
@@ -206,6 +220,8 @@ jobs:
             dds-article-budget-postgres.xml
             dds-budget-links-postgres.log
             dds-budget-links-postgres.xml
+            dds-confirmation-postgres.log
+            dds-confirmation-postgres.xml
             contract-discovery-postgres.log
             contract-discovery-postgres.xml
             v6-00a-money-postgres.log
