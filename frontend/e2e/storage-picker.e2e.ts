@@ -128,9 +128,6 @@ test("10 real reload restores project, saved folder, snapshot and job", async ({
 
 for (const endpoint of ["discovery", "confirmation"] as const) {
   test(`11 ${endpoint} 409 requires explicit reopen, no retry loop`, async ({ page, mock }) => {
-    // runFor executes every virtual frame and exceeded the 30-second budget in CI.
-    // Give these two scenarios time without shortening the no-retry observation.
-    test.setTimeout(60_000);
     const conflict = { status: 409, body: { detail: "Selected storage connection changed" } };
     if (endpoint === "discovery") mock.discoveryReply = () => conflict;
     else mock.confirmReply = conflict;
@@ -139,9 +136,18 @@ for (const endpoint of ["discovery", "confirmation"] as const) {
     await expect(picker(page).getByRole("alert")).toContainText("Переоткройте выбор папки");
     await expect(picker(page).getByRole("button", { name: "Переоткрыть выбор" })).toBeVisible();
     await expect(picker(page).getByRole("button", { name: "Выбрать текущую папку" })).toHaveCount(0);
+    // Keep the root picker state/timers alive, but unmount the unrelated animated dashboard.
+    // runFor must observe every timer, not spend the CI budget rendering virtual WebGL frames.
+    await page.getByRole("button", { name: "Документы", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Документы", exact: true }).first()).toBeVisible();
     await test.step("Observe all 16 virtual seconds without automatic retries", async () => {
       await page.clock.runFor(16_000);
     });
+    expect(mock.count("/discover")).toBe(1);
+    expect(mock.count("/snapshot-queue")).toBe(endpoint === "confirmation" ? 1 : 0);
+    await page.getByRole("button", { name: "Рабочий центр", exact: true }).click();
+    await expect(picker(page).getByRole("alert")).toContainText("Переоткройте выбор папки");
+    await expect(picker(page).getByRole("button", { name: "Выбрать текущую папку" })).toHaveCount(0);
     expect(mock.count("/discover")).toBe(1);
     expect(mock.count("/snapshot-queue")).toBe(endpoint === "confirmation" ? 1 : 0);
     mock.discoveryReply = undefined; mock.confirmReply = undefined;
