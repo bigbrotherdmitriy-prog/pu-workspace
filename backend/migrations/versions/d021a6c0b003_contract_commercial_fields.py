@@ -2,6 +2,7 @@
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 revision = "d021a6c0b003"
@@ -30,7 +31,11 @@ def upgrade():
         "performed_from IS NULL OR performed_to IS NULL OR performed_from <= performed_to",
     )
     for table in _SNAPSHOT_TABLES:
-        op.add_column(table, sa.Column("vat_snapshot", sa.JSON(none_as_null=True), nullable=True))
+        # Full-row PostgreSQL revision comparisons require an equality operator;
+        # JSONB has one, while JSON does not. SQLite keeps its generic JSON type.
+        op.add_column(table, sa.Column("vat_snapshot", sa.JSON(none_as_null=True).with_variant(
+            JSONB(none_as_null=True), "postgresql",
+        ), nullable=True))
 
 
 def downgrade():

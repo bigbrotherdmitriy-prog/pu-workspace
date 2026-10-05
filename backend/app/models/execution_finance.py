@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -70,7 +71,7 @@ class CostCategory(Base):
 
 class BudgetLine(Base):
     __tablename__ = "budget_lines"
-    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True)
     __table_args__ = (
         CheckConstraint(
             "(source_document_version_id IS NULL AND source_document_sha256 IS NULL) OR "
@@ -112,7 +113,7 @@ class BudgetLine(Base):
 
 class CashFlowEntry(Base):
     __tablename__ = "cash_flow_entries"
-    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     entry_kind: Mapped[str] = mapped_column(String(30), default="legacy_unclassified", server_default="legacy_unclassified")
     matrix_article_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -232,7 +233,7 @@ class CashFlowPlanMutation(Base):
 
 class InvoiceExtractionProposal(Base):
     __tablename__ = "invoice_extraction_proposals"
-    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True)
     __table_args__ = (
         UniqueConstraint(
             "project_id", "source_document_version_id",
@@ -296,7 +297,7 @@ class InvoiceExtractionProposal(Base):
 
 class ContractBudgetProposal(Base):
     __tablename__ = "contract_budget_proposals"
-    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True)
     __table_args__ = (
         UniqueConstraint("contract_id", "contract_record_version", name="uq_contract_budget_proposal_version"),
         CheckConstraint("operation IN ('create','revise')", name="ck_contract_budget_proposal_operation"),
@@ -366,7 +367,7 @@ class ProcurementItem(Base):
 
 class AcceptanceAct(Base):
     __tablename__ = "acceptance_acts"
-    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True)
     __table_args__ = (
         CheckConstraint(
             "(source_document_version_id IS NULL AND source_document_sha256 IS NULL) OR "
@@ -406,7 +407,7 @@ class PaymentEvent(Base):
     """
 
     __tablename__ = "payment_events"
-    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    vat_snapshot: Mapped[dict | None] = mapped_column(JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True)
     __table_args__ = (
         UniqueConstraint("cash_flow_entry_id", "idempotency_key", name="uq_payment_event_idempotency"),
     )

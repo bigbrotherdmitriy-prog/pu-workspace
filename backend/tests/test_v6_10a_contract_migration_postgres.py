@@ -103,14 +103,19 @@ def test_postgres_upgrade_preserves_legacy_money_history_and_default_only_downgr
     "UPDATE contracts SET vat_mode='rate',vat_rate=0 WHERE id=9101",
     "UPDATE contracts SET performed_from='2026-01-01' WHERE id=9101",
     "UPDATE contracts SET performed_to='2026-12-31' WHERE id=9101",
-    "UPDATE budget_lines SET vat_snapshot=CAST('{}' AS json) WHERE id=9101",
-    "UPDATE budget_lines SET vat_snapshot=CAST('null' AS json) WHERE id=9101",
+    "UPDATE budget_lines SET vat_snapshot=CAST('{}' AS jsonb) WHERE id=9101",
+    "UPDATE budget_lines SET vat_snapshot=CAST('null' AS jsonb) WHERE id=9101",
 ])
 def test_postgres_downgrade_refuses_populated_new_data(commercial_migration_pg, statement):
     engine, config = commercial_migration_pg
     command.upgrade(config, "d021a6c0b003")
     with engine.begin() as connection:
         connection.execute(text(statement))
+        if "CAST('null' AS jsonb)" in statement:
+            assert connection.scalar(text(
+                "SELECT vat_snapshot IS NOT NULL AND jsonb_typeof(vat_snapshot)='null' "
+                "FROM budget_lines WHERE id=9101"
+            )) is True
     with pytest.raises(RuntimeError, match="CONTRACT_COMMERCIAL_DOWNGRADE_BLOCKED"):
         command.downgrade(config, "d021a6c0b002")
     assert "vat_mode" in {column["name"] for column in inspect(engine).get_columns("contracts")}
@@ -163,3 +168,47 @@ def test_postgres_http_vat_date_edit_keeps_huge_contract_money_exact(commercial_
         row = db.get(Contract, 9101)
         assert (row.amount, row.advance_amount) == (Decimal(amount), Decimal(advance))
         assert row.vat_mode == "none" and row.performed_to.isoformat() == "2027-02-03"
+
+
+def test_postgres_jsonb_snapshot_preserves_full_row_noop_and_vat_change_revision(commercial_migration_pg):
+    engine, config = commercial_migration_pg
+    command.upgrade(config, "d021a6c0b003")
+    for table in ("budget_lines", "cash_flow_entries", "acceptance_acts", "payment_events",
+                  "contract_budget_proposals", "invoice_extraction_proposals"):
+        column = next(column for column in inspect(engine).get_columns(table) if column["name"] == "vat_snapshot")
+        assert str(column["type"]) == "JSONB"
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO cash_flow_entries(id,project_id,title,direction,planned_date,"
+            "planned_amount,actual_amount,currency,status) VALUES "
+            "(9101,9101,'Synthetic VAT revision','outflow','2026-01-01',71.23,0,'RUB','proposed')"
+        ))
+
+    def revision():
+        with engine.connect() as connection:
+            return connection.scalar(text("SELECT cash_flow_revision FROM projects WHERE id=9101"))
+
+    before = revision()
+    # Every write below is a separate committed transaction: the trigger's txid
+    # deduplication must not hide an unintended bump or suppress a real change.
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE cash_flow_entries SET title=title WHERE id=9101"))
+    assert revision() == before
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE cash_flow_entries SET vat_snapshot=CAST('{\"mode\":\"rate\",\"rate\":\"0.00\"}' AS jsonb) WHERE id=9101"
+        ))
+    assert revision() == before + 1
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE cash_flow_entries SET title=title WHERE id=9101"))
+    assert revision() == before + 1
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE cash_flow_entries SET vat_snapshot=CAST('{\"rate\":\"0.00\",\"mode\":\"rate\"}' AS jsonb) WHERE id=9101"
+        ))
+    assert revision() == before + 1
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE cash_flow_entries SET vat_snapshot=CAST('{\"mode\":\"none\",\"rate\":null}' AS jsonb) WHERE id=9101"
+        ))
+    assert revision() == before + 2

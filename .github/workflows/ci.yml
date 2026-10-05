@@ -171,7 +171,7 @@ jobs:
           import xml.etree.ElementTree as ET
           report = ET.parse('../v6-10a-contract-migration.xml').getroot()
           cases = report.findall('.//testcase')
-          assert len(cases) == 12, f'Expected 12 V6-10a PostgreSQL gates, collected {len(cases)}'
+          assert len(cases) == 13, f'Expected 13 V6-10a PostgreSQL gates, collected {len(cases)}'
           assert not report.findall('.//skipped'), 'V6-10a PostgreSQL migration gates must not skip'
           PY
       - name: V6-10a VAT snapshot real PostgreSQL CAS and replay gates
