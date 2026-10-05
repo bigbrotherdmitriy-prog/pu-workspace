@@ -15,6 +15,7 @@ import "./workspace-surfaces.css";
 import "./future-light-dashboard.css";
 import "./claude-work-center-reference.css";
 import "./work-center-integration.css";
+import "./application-feedback.css";
 import { applyDisplayPreference } from "./modules/settings/ComfortControls";
 
 applyDisplayPreference();

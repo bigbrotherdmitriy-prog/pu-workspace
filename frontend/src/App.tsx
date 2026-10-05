@@ -1,4 +1,5 @@
 import { lazy as reactLazy, Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ComponentProps, ComponentType } from "react";
 import { api, ApiError } from "./api/client";
 import { Login } from "./auth/Login";
@@ -268,7 +269,9 @@ type ContractBudgetDraft = { amount: string; description: string; categoryId: nu
 type ContractEditDraft = {
   number: string; title: string; counterparty: string; amount: string;
   advanceAmount: string; retentionPercent: string; signedAt: string; status: string;
+  expectedRecordVersion: number;
 };
+type ContractEditFeedback = { message: string; conflict?: boolean; latest?: ContractRow; comparing?: boolean };
 type AnalysisResult = {
   status: string;
   mode?: string;
@@ -469,6 +472,8 @@ export function App() {
     [contractCatalogOpen, setContractCatalogOpen] = useState<Record<number, boolean>>({}),
     [contractStructureDrafts, setContractStructureDrafts] = useState<Record<number, { kind: string; parentId: number }>>({}),
     [contractEditDrafts, setContractEditDrafts] = useState<Record<number, ContractEditDraft>>({}),
+    [contractEditFeedback, setContractEditFeedback] = useState<Record<number, ContractEditFeedback>>({}),
+    [contractEditSaving, setContractEditSaving] = useState<Record<number, boolean>>({}),
     [contractBudgetDrafts, setContractBudgetDrafts] = useState<Record<number, ContractBudgetDraft>>({}),
     [contractSourceCandidates, setContractSourceCandidates] = useState<Record<number, ContractSourceCandidate[]>>({}),
     [droppedContractProposals, setDroppedContractProposals] = useState<BulkContractProposal[]>([]),
@@ -572,7 +577,7 @@ export function App() {
   const sourceProvider = picker.context?.provider;
   const sourceBreadcrumbs = picker.breadcrumbs;
   const {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceAiRetrying,
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceConfirmationError, invoiceConfirming, invoiceAiRetrying,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
@@ -586,9 +591,11 @@ export function App() {
     updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   useEffect(() => {
-    if (active === "ГПР и ДДС" && (invoiceExtractionProposal || financeStructuredPreview)) setFinanceEditorOpen(true);
+    if (active === "ГПР и ДДС" && (invoiceExtractionProposal?.requires_confirmation || financeStructuredPreview)) setFinanceEditorOpen(true);
   }, [active, invoiceExtractionProposal, financeStructuredPreview]);
   const loadSequenceRef = useRef(0);
+  const contractProjectEpochRef = useRef(0);
+  const contractSaveRequestsRef = useRef(new Set<number>());
   const documentRequestRef = useRef(0);
   const mailSyncAbortRef = useRef<AbortController | null>(null);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
@@ -607,6 +614,12 @@ export function App() {
 
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
+      ++contractProjectEpochRef.current;
+      contractSaveRequestsRef.current.clear();
+      setContractEditDrafts({});
+      setContractEditFeedback({});
+      setContractEditSaving({});
+      setFinanceEditorOpen(false);
       ++documentRequestRef.current;
       setQuery("");
       setDocumentRows([]);
@@ -1113,6 +1126,9 @@ export function App() {
     } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Загрузка не завершена: ${message}`); setError(message); }
   }
   async function uploadContractApplications(files: File[], contractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     const accepted = files.slice(0, 50);
     const oversized = accepted.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
     if (!accepted.length) { setError("Выберите хотя бы один файл приложения к договору."); return; }
@@ -1120,20 +1136,43 @@ export function App() {
     try {
       setError(""); setNotice(`Загружаю приложения к договору: ${accepted.length}…`);
       const payload = await Promise.all(accepted.map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
+      if (!current()) return;
       const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
+      if (!current()) return;
       const documentIds = completed.documents;
       if (!documentIds.length) throw new Error("Файлы приложений не сохранены");
       const expected = contracts.find((item) => item.id === contractId)?.record_version;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
-      await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds }) });
+      const attached = await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds }) });
+      if (!current()) return;
+      await synchronizeAttachedContract(contractId, attached.record_version, requestedProjectId, epoch);
+      if (!current()) return;
       const checked = await api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" });
+      if (!current()) return;
       const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
       setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
       await load();
-    } catch (reason) { setError((reason as Error).message); }
+    } catch (reason) { if (current()) setError((reason as Error).message); }
+  }
+  async function synchronizeAttachedContract(contractId: number, recordVersion: number | undefined, requestedProjectId: number, epoch: number) {
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
+    if (!current()) return;
+    if (Number.isInteger(recordVersion) && Number(recordVersion) > 0) {
+      setContracts((rows) => rows.map((row) => row.id === contractId && row.record_version < Number(recordVersion)
+        ? { ...row, record_version: Number(recordVersion) } : row));
+    }
+    // Also refresh history and linked documents. Older server responses may lack the version.
+    const response = await api<{ contracts: ContractRow[] }>(`/projects/${requestedProjectId}/contracts`);
+    if (!current()) return;
+    const latest = response.contracts.find((row) => row.id === contractId);
+    if (!latest) throw new Error("Документ прикреплён, но актуальная карточка договора не загружена. Обновите карточку.");
+    setContracts((rows) => rows.map((row) => row.id === contractId && row.record_version <= latest.record_version ? latest : row));
   }
   async function uploadContractFinance(files: File[], contractId: number, kind: "schedule" | "budget" | "cash-flow") {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     const supported = files.filter((file) => /\.(xlsx?|csv|docx?|pdf|txt|png|jpe?g|tiff?|bmp|webp)$/i.test(file.name));
     const oversized = supported.find((file) => file.size > MAX_DROPPED_CONTRACT_BYTES);
     if (!supported.length) { setError("Выберите Excel, CSV, Word, PDF либо фото/скан JPG, PNG или TIFF."); return; }
@@ -1142,21 +1181,27 @@ export function App() {
       const label = kind === "schedule" ? "ГПР" : kind === "budget" ? "бюджет" : "ДДС";
       setError(""); setNotice(`Загружаю и разбираю ${label}: ${supported.length} файл(ов)…`);
       const payload = await Promise.all(supported.slice(0, 50).map(async (file) => ({ path: file.name, mime_type: localUploadMimeType(file), content_base64: await fileBase64(file) })));
+      if (!current()) return;
       const uploaded = await api("/local-upload/analyze", { method: "POST", body: JSON.stringify({ project_id: projectId, files: payload }) });
       const completed = await awaitLocalUploadJobs(projectId, uploaded.jobs || [], setNotice);
+      if (!current()) return;
       const documentIds = completed.documents;
       if (!documentIds.length) throw new Error(`Не удалось извлечь таблицу ${label}`);
       const expected = contracts.find((item) => item.id === contractId)?.record_version;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
-      await api(`/projects/${projectId}/contracts/${contractId}/documents`, {
+      const attached = await api(`/projects/${projectId}/contracts/${contractId}/documents`, {
         method: "POST",
         body: JSON.stringify({ expected_record_version: expected, document_ids: documentIds, role: kind === "cash-flow" ? "cash_flow" : kind }),
       });
+      if (!current()) return;
+      await synchronizeAttachedContract(contractId, attached.record_version, requestedProjectId, epoch);
+      if (!current()) return;
       await prepareDroppedFinanceDocument(documentIds[0], supported[0].name, kind, contractId);
+      if (!current()) return;
       setGprDdsTab(kind === "schedule" ? "gpr" : "dds");
       setActive("ГПР и ДДС");
       await loadFinance();
-    } catch (reason) { setError((reason as Error).message); }
+    } catch (reason) { if (current()) setError((reason as Error).message); }
   }
 
   async function uploadDdsInvoices(files: File[], onProgress: (message: string) => void) {
@@ -1234,19 +1279,26 @@ export function App() {
     }
   }
   function beginContractEdit(item: ContractRow) {
+    setContractEditFeedback((current) => ({ ...current, [item.id]: { message: "" } }));
     setContractEditDrafts((current) => ({ ...current, [item.id]: {
       number: item.number, title: item.title, counterparty: item.counterparty || "",
       amount: item.amount?.toString() || "", advanceAmount: item.advance_amount?.toString() || "",
       retentionPercent: item.retention_percent?.toString() || "", signedAt: item.signed_at?.slice(0, 10) || "",
-      status: item.status,
+      status: item.status, expectedRecordVersion: item.record_version,
     } }));
   }
   async function saveContractEdit(contractId: number) {
     const draft = contractEditDrafts[contractId];
-    if (!draft?.number.trim() || !draft.title.trim()) return;
+    if (!draft?.number.trim() || !draft.title.trim() || contractSaveRequestsRef.current.has(contractId) || contractEditFeedback[contractId]?.conflict) return;
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
+    contractSaveRequestsRef.current.add(contractId);
+    setContractEditSaving((rows) => ({ ...rows, [contractId]: true }));
+    setContractEditFeedback((rows) => ({ ...rows, [contractId]: { message: "" } }));
     try {
       setError("");
-      const expected = contracts.find((item) => item.id === contractId)?.record_version;
+      const expected = draft.expectedRecordVersion;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
       await api(`/projects/${projectId}/contracts/${contractId}`, {
         method: "PATCH",
@@ -1259,10 +1311,40 @@ export function App() {
           signed_at: draft.signedAt || null, status: draft.status,
         }),
       });
+      if (!current()) return;
       setContractEditDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
       setNotice("Договор обновлён. Связанные документы, ГПР, бюджет и ДДС сохранены.");
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      if (!current()) return;
+      const message = e instanceof Error ? e.message : "Не удалось сохранить договор.";
+      const conflict = e instanceof ApiError && e.status === 409;
+      setContractEditFeedback((rows) => ({ ...rows, [contractId]: { message, conflict } }));
+      setError(message);
+    } finally {
+      if (current()) {
+        contractSaveRequestsRef.current.delete(contractId);
+        setContractEditSaving((rows) => ({ ...rows, [contractId]: false }));
+      }
+    }
+  }
+  async function compareContractEdit(contractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
+    setContractEditFeedback((rows) => ({ ...rows, [contractId]: { ...rows[contractId], comparing: true } }));
+    try {
+      const response = await api<{ contracts: ContractRow[] }>(`/projects/${requestedProjectId}/contracts`);
+      if (!current()) return;
+      const latest = response.contracts.find((row) => row.id === contractId);
+      if (!latest) throw new Error("Договор отсутствует в текущем списке. Черновик сохранён.");
+      setContracts((rows) => rows.map((row) => row.id === contractId && row.record_version <= latest.record_version ? latest : row));
+      setContractEditFeedback((rows) => ({ ...rows, [contractId]: { ...rows[contractId], latest, comparing: false } }));
+    } catch (e) {
+      if (current()) setContractEditFeedback((rows) => ({ ...rows, [contractId]: {
+        ...rows[contractId], message: e instanceof Error ? e.message : "Не удалось загрузить сравнение.", comparing: false,
+      } }));
+    }
   }
   async function proposeContractBudget(contractId: number) {
     try {
@@ -2967,7 +3049,7 @@ export function App() {
                 </span>
               ))}
             </div>
-            <button className="icon" onClick={() => load()}>
+            <button className="icon" aria-label="Обновить данные проекта" onClick={() => load()}>
               <RefreshCw />
             </button>
           </div>
@@ -2981,9 +3063,11 @@ export function App() {
             void offlineSync.resolve(id, resolution).catch((reason) => setError((reason as Error).message));
           }}
         />}
+        {error && createPortal(<div className="app-feedback-layer"><div className="app-error-banner" role="alert" aria-label="Ошибка операции">
+          <span>{error}</span><button type="button" aria-label="Закрыть сообщение об ошибке" onClick={() => setError("")}>×</button>
+        </div></div>, document.body)}
         <section className="content">
           <ComfortControls />
-          {error && <div className="error">{error}</div>}
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
             <TodayModule
@@ -3554,7 +3638,11 @@ export function App() {
               onImportCashFlow={(files) => void uploadContractFinance(files, selectedFinanceContractId, "cash-flow")}
               onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
             />
-            {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Проверка финансовых данных">{!financeStructuredPreview && !invoiceExtractionProposal && <button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button>}<FinanceOperations
+            {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Проверка финансовых данных">
+              <fieldset className="finance-editor-fields" disabled={invoiceConfirming}>
+              {invoiceConfirming && <p className="form-operation-pending" role="status">Подтверждаю счёт…</p>}
+              {invoiceConfirmationError && <div className="form-operation-error" role="alert">{invoiceConfirmationError}</div>}
+              {!financeStructuredPreview && !invoiceExtractionProposal && <button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button>}<FinanceOperations
               projectId={projectId}
               onArticleBudgetApplied={() => void loadFinance()}
               finance={finance}
@@ -3588,7 +3676,7 @@ export function App() {
               setBudgetLineId={setFinanceBudgetLineId}
               setBaselineId={setFinanceBaselineId}
               onEditInvoice={editInvoiceExtraction}
-              onConfirmInvoice={() => void confirmInvoiceExtraction().then(() => setFinanceEditorOpen(false))}
+              onConfirmInvoice={() => void confirmInvoiceExtraction().then((confirmed) => { if (confirmed) setFinanceEditorOpen(false); })}
               onRejectInvoice={() => void rejectInvoiceExtraction()}
               onRetryInvoiceAi={() => void retryInvoiceAiAnalysis()}
               invoiceAiRetrying={invoiceAiRetrying}
@@ -3616,7 +3704,7 @@ export function App() {
               includeScheduleRegister={false}
               includeCashFlowRegister={false}
               editorScope="finance"
-            /></div>}
+            /></fieldset></div>}
             </>}
           />
           </div>
@@ -3843,25 +3931,49 @@ export function App() {
                       </div>}
                       {contractEditDrafts[item.id] ? (() => {
                         const draft = contractEditDrafts[item.id];
-                        const change = (field: keyof ContractEditDraft, value: string) => setContractEditDrafts((current) => ({
+                        const feedback = contractEditFeedback[item.id];
+                        const saving = contractEditSaving[item.id];
+                        const change = (field: Exclude<keyof ContractEditDraft, "expectedRecordVersion">, value: string) => setContractEditDrafts((current) => ({
                           ...current, [item.id]: { ...current[item.id], [field]: value },
                         }));
-                        return <div className="contract-edit-form">
+                        return <div className="contract-edit-form" role="form" aria-label={`Редактирование договора ${item.number}`}>
                           <strong>Редактирование договора</strong>
-                          <input value={draft.number} onChange={(event) => change("number", event.target.value)} placeholder="Номер договора" />
-                          <input value={draft.title} onChange={(event) => change("title", event.target.value)} placeholder="Название" />
-                          <input value={draft.counterparty} onChange={(event) => change("counterparty", event.target.value)} placeholder="Контрагент" />
-                          <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => change("amount", event.target.value)} placeholder="Сумма договора, ₽" />
-                          <input type="number" min="0" step="0.01" value={draft.advanceAmount} onChange={(event) => change("advanceAmount", event.target.value)} placeholder="Аванс, ₽" />
-                          <input type="number" min="0" max="100" step="0.01" value={draft.retentionPercent} onChange={(event) => change("retentionPercent", event.target.value)} placeholder="Удержание, %" />
-                          <label>Дата подписания<input type="date" value={draft.signedAt} onChange={(event) => change("signedAt", event.target.value)} /></label>
-                          <select value={draft.status} onChange={(event) => change("status", event.target.value)}>
+                          <small>Версия открытого черновика: {draft.expectedRecordVersion}</small>
+                          {feedback?.message && <div className="form-operation-error" role="alert">
+                            {feedback.message}
+                            {feedback.conflict && <p>Договор изменился после открытия редактора. Введённые значения сохранены. Автоматической перезаписи нет: загрузите текущую карточку и сравните изменения.</p>}
+                          </div>}
+                          {feedback?.conflict && <button type="button" className="secondary" disabled={feedback.comparing} onClick={() => void compareContractEdit(item.id)}>
+                            {feedback.comparing ? "Загружаю текущую карточку…" : "Загрузить текущую карточку для сравнения"}
+                          </button>}
+                          {feedback?.latest && <section className="contract-edit-comparison" role="region" aria-label="Сравнение версий договора">
+                            <strong>Черновик v{draft.expectedRecordVersion} / текущая карточка v{feedback.latest.record_version}</strong>
+                            <table><thead><tr><th>Поле</th><th>Ваш черновик</th><th>Текущая карточка</th></tr></thead><tbody>
+                              {([
+                                ["Номер", draft.number, feedback.latest.number], ["Название", draft.title, feedback.latest.title],
+                                ["Контрагент", draft.counterparty, feedback.latest.counterparty], ["Сумма", draft.amount, feedback.latest.amount],
+                                ["Аванс", draft.advanceAmount, feedback.latest.advance_amount], ["Удержание, %", draft.retentionPercent, feedback.latest.retention_percent],
+                                ["Дата подписания", draft.signedAt, feedback.latest.signed_at?.slice(0, 10)], ["Статус", draft.status, feedback.latest.status],
+                              ] as const).map(([label, edited, latest]) => <tr key={label}><th>{label}</th><td>{edited === "" ? "—" : edited}</td><td>{latest ?? "—"}</td></tr>)}
+                            </tbody></table>
+                            <button type="button" className="secondary" onClick={() => {
+                              if (window.confirm("Заменить введённый черновик текущей карточкой? Несохранённые значения будут потеряны.")) beginContractEdit(feedback.latest!);
+                            }}>Начать заново с текущей версии</button>
+                          </section>}
+                          <input disabled={saving} value={draft.number} onChange={(event) => change("number", event.target.value)} placeholder="Номер договора" />
+                          <input disabled={saving} value={draft.title} onChange={(event) => change("title", event.target.value)} placeholder="Название" />
+                          <input disabled={saving} value={draft.counterparty} onChange={(event) => change("counterparty", event.target.value)} placeholder="Контрагент" />
+                          <input disabled={saving} type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => change("amount", event.target.value)} placeholder="Сумма договора, ₽" />
+                          <input disabled={saving} type="number" min="0" step="0.01" value={draft.advanceAmount} onChange={(event) => change("advanceAmount", event.target.value)} placeholder="Аванс, ₽" />
+                          <input disabled={saving} type="number" min="0" max="100" step="0.01" value={draft.retentionPercent} onChange={(event) => change("retentionPercent", event.target.value)} placeholder="Удержание, %" />
+                          <label>Дата подписания<input disabled={saving} type="date" value={draft.signedAt} onChange={(event) => change("signedAt", event.target.value)} /></label>
+                          <select disabled={saving} value={draft.status} onChange={(event) => change("status", event.target.value)}>
                             <option value="draft">Черновик</option><option value="active">Действует</option>
                             <option value="completed">Завершён</option><option value="terminated">Расторгнут</option><option value="archived">В архиве</option>
                           </select>
                           <div className="contract-edit-actions">
-                            <button className="secondary" onClick={() => setContractEditDrafts((current) => { const next = { ...current }; delete next[item.id]; return next; })}>Отмена</button>
-                            <button disabled={!draft.number.trim() || !draft.title.trim()} onClick={() => void saveContractEdit(item.id)}>Сохранить изменения</button>
+                            <button className="secondary" disabled={saving} onClick={() => setContractEditDrafts((current) => { const next = { ...current }; delete next[item.id]; return next; })}>Отмена</button>
+                            <button disabled={saving || Boolean(feedback?.conflict) || !draft.number.trim() || !draft.title.trim()} onClick={() => void saveContractEdit(item.id)}>{saving ? "Сохраняю…" : "Сохранить изменения"}</button>
                           </div>
                         </div>;
                       })() : <div className="contract-record-actions">

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../../api/client";
 import { useFinanceController } from "./useFinanceController";
-import type { FinanceDocumentCandidate, FinanceOverview } from "./types";
+import type { FinanceDocumentCandidate, FinanceOverview, InvoiceExtractionProposal } from "./types";
 
 vi.mock("../../api/client", () => ({ api: vi.fn() }));
 
@@ -28,6 +28,320 @@ const candidate: FinanceDocumentCandidate = {
   reasons: [], hints: {}, already_linked: false, originals_changed: false,
 };
 const categories = [{ id: 1, name: "ФОТ", is_active: true, sort_order: 1 }];
+const invoiceProposal: InvoiceExtractionProposal = {
+  id: 17, project_id: 7, source_document_id: 91,
+  source_document_version_id: 1, source_document_sha256: "a".repeat(64),
+  amount: 125, currency: "RUB", counterparty: "Synthetic supplier",
+  payment_purpose: "Synthetic materials", selected_cost_category_id: 1,
+  planned_date: "2035-01-31", confidence: 0.9, extraction_method: "regex",
+  target_kind: "cash_flow", status: "proposed", requires_confirmation: true,
+};
+
+describe("invoice confirmation outcomes", () => {
+  it("returns false for a PATCH refusal and preserves the edited proposal without confirming", async () => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(api).mockRejectedValueOnce(new Error("Synthetic PATCH refusal"));
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    const edited = { ...invoiceProposal, amount: 321, payment_purpose: "Synthetic edited purpose" };
+    act(() => {
+      result.current.setInvoiceExtractionProposal(edited);
+      result.current.setSelectedFinanceContractId(4);
+      result.current.setFinanceScheduleItemId(41);
+      result.current.setFinanceBudgetLineId(42);
+    });
+
+    let confirmed = false;
+    await act(async () => { confirmed = await result.current.confirmInvoiceExtraction(); });
+
+    expect(confirmed).toBe(false);
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(api).toHaveBeenCalledWith("/execution/invoice-extraction-proposals/17", {
+      method: "PATCH", body: JSON.stringify({ selected_cost_category_id: 1, amount: 321,
+        counterparty: "Synthetic supplier", payment_purpose: "Synthetic edited purpose",
+        planned_date: "2035-01-31", target_kind: "cash_flow" }),
+    });
+    expect(result.current.invoiceExtractionProposal).toEqual(edited);
+    expect(result.current.financeScheduleItemId).toBe(41);
+    expect(result.current.financeBudgetLineId).toBe(42);
+    expect(result.current.invoiceConfirmationError).toBe("Synthetic PATCH refusal");
+    expect(result.current.invoiceConfirming).toBe(false);
+    expect(setError).toHaveBeenCalledWith("Synthetic PATCH refusal");
+    expect(setNotice).not.toHaveBeenCalled();
+  });
+
+  it("returns false for a confirm refusal without replacing edited fields or publishing success", async () => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const edited = { ...invoiceProposal, counterparty: "Synthetic edited supplier", amount: 321 };
+    vi.mocked(api).mockResolvedValueOnce(invoiceProposal)
+      .mockRejectedValueOnce(new Error("Synthetic confirm refusal"));
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    act(() => {
+      result.current.setInvoiceExtractionProposal(edited);
+      result.current.setSelectedFinanceContractId(4);
+      result.current.setFinanceScheduleItemId(41);
+      result.current.setFinanceBudgetLineId(42);
+    });
+
+    let confirmed = false;
+    await act(async () => { confirmed = await result.current.confirmInvoiceExtraction(); });
+
+    expect(confirmed).toBe(false);
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(api).toHaveBeenNthCalledWith(2, "/execution/invoice-extraction-proposals/17/confirm", {
+      method: "POST", body: JSON.stringify({ contract_id: 4, schedule_item_id: 41, budget_line_id: 42 }),
+    });
+    expect(result.current.invoiceExtractionProposal).toEqual(edited);
+    expect(result.current.financeScheduleItemId).toBe(41);
+    expect(result.current.financeBudgetLineId).toBe(42);
+    expect(result.current.invoiceConfirmationError).toBe("Synthetic confirm refusal");
+    expect(result.current.invoiceConfirming).toBe(false);
+    expect(setError).toHaveBeenCalledWith("Synthetic confirm refusal");
+    expect(setNotice).not.toHaveBeenCalled();
+  });
+
+  it("clears the previous inline error on retry and returns true after confirmation succeeds", async () => {
+    const patch = deferred<unknown>();
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const confirmedProposal = { ...invoiceProposal, status: "confirmed" as const, requires_confirmation: false,
+      created_cash_flow_id: 81 };
+    vi.mocked(api).mockRejectedValueOnce(new Error("Synthetic first refusal"));
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+    await act(async () => { await result.current.confirmInvoiceExtraction(); });
+    expect(result.current.invoiceConfirmationError).toBe("Synthetic first refusal");
+    expect(result.current.invoiceConfirming).toBe(false);
+    vi.mocked(api).mockClear();
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === "/execution/invoice-extraction-proposals/17") return patch.promise;
+      if (path === "/execution/invoice-extraction-proposals/17/confirm") return confirmedProposal;
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [] };
+      return { categories };
+    });
+
+    let confirmation!: Promise<boolean>;
+    act(() => { confirmation = result.current.confirmInvoiceExtraction(); });
+    expect(result.current.invoiceConfirmationError).toBe("");
+    expect(result.current.invoiceConfirming).toBe(true);
+    let confirmed = false;
+    await act(async () => { patch.resolve(invoiceProposal); confirmed = await confirmation; });
+
+    expect(confirmed).toBe(true);
+    expect(result.current.invoiceExtractionProposal).toEqual(confirmedProposal);
+    expect(result.current.invoiceConfirmationError).toBe("");
+    expect(result.current.finance).toEqual(overview);
+    expect(setNotice).toHaveBeenCalledWith("Счёт подтверждён человеком; финансовая строка создана как предложение.");
+    expect(api).toHaveBeenCalledTimes(5);
+    expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method)).toHaveLength(2);
+  });
+
+  it.each(["missing", "other-project"])("returns false without writes for a %s proposal", async (invalid) => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    if (invalid === "other-project") {
+      act(() => result.current.setInvoiceExtractionProposal({ ...invoiceProposal, project_id: 8 }));
+    }
+
+    let confirmed = false;
+    await act(async () => { confirmed = await result.current.confirmInvoiceExtraction(); });
+
+    expect(confirmed).toBe(false);
+    expect(api).not.toHaveBeenCalled();
+    expect(setNotice).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it.each(["success", "failure"])("ignores a late PATCH %s after switching away and back", async (outcome) => {
+    const patch = deferred<unknown>();
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(api).mockImplementation(async () => patch.promise);
+    const { result, rerender } = renderHook(({ projectId }) => useFinanceController({ ready: false,
+      projectId, setNotice, setError }), { initialProps: { projectId: 7 } });
+    act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+    let confirmation!: Promise<boolean>;
+    act(() => { confirmation = result.current.confirmInvoiceExtraction(); });
+    rerender({ projectId: 8 });
+    rerender({ projectId: 7 });
+    let confirmed = false;
+    await act(async () => {
+      if (outcome === "success") patch.resolve(invoiceProposal);
+      else patch.reject(new Error("Synthetic old project refusal"));
+      confirmed = await confirmation;
+    });
+
+    expect(confirmed).toBe(false);
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(result.current.invoiceExtractionProposal).toBeNull();
+    expect(result.current.invoiceConfirmationError).toBe("");
+    expect(setNotice).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it.each(["invoice-review", "manual-entry"])("does not confirm after PATCH when a new %s has started in the same project", async (next) => {
+    const patch = deferred<unknown>();
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const nextProposal = { ...invoiceProposal, id: 18, source_document_id: 92 };
+    vi.mocked(api).mockImplementation(async () => patch.promise);
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+    let confirmation!: Promise<boolean>;
+    act(() => { confirmation = result.current.confirmInvoiceExtraction(); });
+    act(() => {
+      if (next === "invoice-review") result.current.setInvoiceExtractionProposal(nextProposal);
+      else result.current.prepareFinanceItem("cash-out");
+    });
+
+    let confirmed = false;
+    await act(async () => { patch.resolve(invoiceProposal); confirmed = await confirmation; });
+
+    expect(confirmed).toBe(false);
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(result.current.invoiceExtractionProposal).toEqual(next === "invoice-review" ? nextProposal : null);
+    expect(result.current.invoiceConfirmationError).toBe("");
+    expect(setNotice).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  describe.each(["invoice-review", "manual-entry"])("a new %s during confirmation in the same project", (next) => {
+    it.each(["success", "failure"])("ignores the previous review's late %s", async (outcome) => {
+      const confirmationResponse = deferred<unknown>();
+      const setNotice = vi.fn();
+      const setError = vi.fn();
+      const nextProposal = { ...invoiceProposal, id: 18, source_document_id: 92,
+        counterparty: "Synthetic next supplier" };
+      const confirmedProposal = { ...invoiceProposal, status: "confirmed" as const, requires_confirmation: false,
+        created_cash_flow_id: 81 };
+      vi.mocked(api).mockResolvedValueOnce(invoiceProposal)
+        .mockImplementationOnce(async () => confirmationResponse.promise);
+      const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+      act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+      let confirmation!: Promise<boolean>;
+      act(() => { confirmation = result.current.confirmInvoiceExtraction(); });
+      await waitFor(() => expect(api).toHaveBeenCalledTimes(2));
+      act(() => {
+        if (next === "invoice-review") result.current.setInvoiceExtractionProposal(nextProposal);
+        else {
+          result.current.prepareFinanceItem("cash-out");
+          result.current.setFinanceTitle("Synthetic new manual entry");
+          result.current.setFinanceAmount("456");
+        }
+      });
+
+      let confirmed = false;
+      await act(async () => {
+        if (outcome === "success") confirmationResponse.resolve(confirmedProposal);
+        else confirmationResponse.reject(new Error("Synthetic previous review refusal"));
+        confirmed = await confirmation;
+      });
+
+      expect(confirmed).toBe(false);
+      expect(api).toHaveBeenCalledTimes(2);
+      expect(result.current.invoiceExtractionProposal).toEqual(next === "invoice-review" ? nextProposal : null);
+      if (next === "manual-entry") {
+        expect(result.current.financeTitle).toBe("Synthetic new manual entry");
+        expect(result.current.financeAmount).toBe("456");
+      }
+      expect(result.current.invoiceConfirmationError).toBe("");
+      expect(setNotice).not.toHaveBeenCalled();
+      expect(setError).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(["success", "failure"])("preserves edits to the current invoice made before a late confirm %s", async (outcome) => {
+    const confirmationResponse = deferred<unknown>();
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const edited = { ...invoiceProposal, payment_purpose: "Synthetic new purpose" };
+    vi.mocked(api).mockResolvedValueOnce(invoiceProposal)
+      .mockImplementationOnce(async () => confirmationResponse.promise);
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+    let confirmation!: Promise<boolean>;
+    act(() => { confirmation = result.current.confirmInvoiceExtraction(); });
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(2));
+    act(() => result.current.editInvoiceExtraction({ payment_purpose: edited.payment_purpose }));
+
+    let confirmed = false;
+    await act(async () => {
+      if (outcome === "success") confirmationResponse.resolve({ ...invoiceProposal, status: "confirmed" });
+      else confirmationResponse.reject(new Error("Synthetic previous field refusal"));
+      confirmed = await confirmation;
+    });
+
+    expect(confirmed).toBe(false);
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(result.current.invoiceExtractionProposal).toEqual(edited);
+    expect(result.current.invoiceConfirmationError).toBe("");
+    expect(setNotice).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("declines a simultaneous confirmation before render and releases the request lock after success", async () => {
+    const patch = deferred<unknown>();
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    const confirmedProposal = { ...invoiceProposal, status: "confirmed" as const, requires_confirmation: false,
+      created_cash_flow_id: 81 };
+    vi.mocked(api).mockImplementation(async path => {
+      if (path === "/execution/invoice-extraction-proposals/17") return patch.promise;
+      if (path === "/execution/invoice-extraction-proposals/17/confirm") return confirmedProposal;
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [] };
+      return { categories };
+    });
+    const { result } = renderHook(() => useFinanceController({ ready: false, projectId: 7, setNotice, setError }));
+    act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+    let first!: Promise<boolean>;
+    let repeated!: Promise<boolean>;
+    act(() => {
+      first = result.current.confirmInvoiceExtraction();
+      repeated = result.current.confirmInvoiceExtraction();
+    });
+
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(result.current.invoiceConfirming).toBe(true);
+    await act(async () => { expect(await repeated).toBe(false); });
+    expect(result.current.invoiceConfirming).toBe(true);
+    await act(async () => { patch.resolve(invoiceProposal); expect(await first).toBe(true); });
+
+    expect(result.current.invoiceConfirming).toBe(false);
+    expect(result.current.invoiceExtractionProposal).toEqual(confirmedProposal);
+    expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method)).toHaveLength(2);
+    expect(setNotice).toHaveBeenCalledTimes(1);
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it.each(["invoice-review", "manual-entry", "project"])("clears a previous confirmation error for a new %s", async (next) => {
+    const setNotice = vi.fn();
+    const setError = vi.fn();
+    vi.mocked(api).mockRejectedValueOnce(new Error("Synthetic previous refusal"));
+    const { result, rerender } = renderHook(({ projectId }) => useFinanceController({ ready: false,
+      projectId, setNotice, setError }), { initialProps: { projectId: 7 } });
+    act(() => result.current.setInvoiceExtractionProposal(invoiceProposal));
+    await act(async () => { await result.current.confirmInvoiceExtraction(); });
+    expect(result.current.invoiceConfirmationError).toBe("Synthetic previous refusal");
+
+    if (next === "invoice-review") {
+      const nextProposal = { ...invoiceProposal, id: 18, source_document_id: 92 };
+      vi.mocked(api).mockResolvedValueOnce(nextProposal);
+      await act(async () => { await result.current.useFinanceCandidate({ ...candidate, document_id: 92, kind: "invoice" }); });
+      expect(result.current.invoiceExtractionProposal).toEqual(nextProposal);
+    } else if (next === "manual-entry") {
+      act(() => result.current.prepareFinanceItem("cash-out"));
+      expect(result.current.invoiceExtractionProposal).toBeNull();
+    } else {
+      rerender({ projectId: 8 });
+      expect(result.current.invoiceExtractionProposal).toBeNull();
+    }
+    expect(result.current.invoiceConfirmationError).toBe("");
+  });
+});
 
 describe("atomic DDS confirmation", () => {
   it("sends one versioned request for all selected cash-flow rows", async () => {
