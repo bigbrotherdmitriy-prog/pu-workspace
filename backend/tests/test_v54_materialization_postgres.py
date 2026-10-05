@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models
 from app.database import Base
+from app.schema import CURRENT_SCHEMA_REVISION
 from app.core.v54_permissions import SourceEvidenceError
 from app.staging.contracts import KekRef
 from app.staging.lifecycle import LifecycleAuthority, MaterializationLifecycle
@@ -112,7 +113,7 @@ def test_postgres_materialization_migration_on_explicit_empty_database(monkeypat
     try:
         command.upgrade(config, "head")
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "d021a6c0b002"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_SCHEMA_REVISION
             assert "v54_materializations" in inspect(connection).get_table_names()
     finally:
         engine.dispose()

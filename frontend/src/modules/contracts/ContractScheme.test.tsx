@@ -27,6 +27,17 @@ function fileTransfer(files: File[]) {
 }
 
 describe("ContractScheme", () => {
+  it("opens the shared details from register and scheme and uses execution end for the deadline", () => {
+    const { container } = render(<ContractScheme projectId={6} contracts={[
+      { id: 1, number: "SYN-1", title: "Synthetic", performed_to: "2026-12-31", warranty_until: "2027-12-31" },
+    ]} onConnect={vi.fn()} onOpenDocument={vi.fn()} renderDetails={(contract) => <p>Shared details {contract.id}</p>} />);
+    expect(contractRow(container, "SYN-1").querySelector(".contract-register-deadline")).toHaveTextContent("31.12.2026");
+    expandContract(container, "SYN-1");
+    expect(within(container).getByText("Shared details 1")).toBeInTheDocument();
+    fireEvent.click(within(container).getByRole("button", { name: "Схема связей" }));
+    expect(within(container).getByText("Shared details 1")).toBeInTheDocument();
+  });
+
   it("opens a six-column register without selecting a contract and filters only matching rows", () => {
     const { container } = render(<ContractScheme projectId={6} contracts={[
       { id: 1, number: "ГП-1", title: "Генподряд", counterparty: "Заказчик", contract_kind: "prime_reference" },

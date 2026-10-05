@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarRange, CheckCheck, Download, GripVertical, ListFilter, Plus, RotateCcw, Search, Trash2, Upload } from "lucide-react";
 import { InvoiceBatchUpload, type InvoiceBatchUploadProps } from "./InvoiceBatchUpload";
+import { FinanceVatDetails } from "./FinanceVatDetails";
 import { formatMoney } from "../../utils/numberFormat";
 import type { FinanceOverview } from "./types";
 
@@ -11,6 +12,7 @@ type Props = {
   onConfirm: (kind: string, id: number, status: string) => void | Promise<void>;
   onConfirmMany: (kind: string, ids: number[], status: string) => void | Promise<void>;
   onConfirmPayment: (id: number, amount: number) => void;
+  onRefreshVat?: (kind: string, id: number) => void;
   onLinkControls: (id: number, contractId: number, scheduleItemId: number, budgetLineId: number) => void | Promise<void>;
   onMutatePlan?: (id: number, operation: "edit" | "move" | "copy", plannedDate: string, plannedAmount: number, expectedRecordVersion: number) => Promise<{ mutation_id: number }>;
   onUndoPlanMutation?: (mutationId: number) => Promise<void>;
@@ -95,7 +97,7 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onLinkControls, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
+export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onRefreshVat, onLinkControls, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
   const cashFlowImportInput = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<Tab>("calendar");
   const [objectFilter, setObjectFilter] = useState("all");
@@ -453,6 +455,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       const draft = linkDrafts[row.id] || { scheduleItemId: row.schedule_item_id || 0, budgetLineId: row.budget_line_id || 0 };
       return <tr id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td>{index + 1}</td><td>{dateFormat.format(new Date(`${row.planned_date}T00:00:00Z`))}</td><td>{monthLong.format(monthDate(monthKey(row.planned_date)))}</td><td>{row.object}</td><td>{row.category}</td><td><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money">{formatMoney(amount(row))}</td><td className="money">{row.actual_date ? `${formatMoney(actualAmount(row))} · ${dateFormat.format(new Date(`${row.actual_date}T00:00:00Z`))}` : "—"}</td><td>{row.note}</td><td>{row.status}{(row.entry_kind === "plan_forecast" || row.confirmation_kind === "plan_forecast") && <small> · <span>Прогноз</span></small>}{row.status === "proposed" && row.confirmation_error && <small> · {row.confirmation_error.message}</small>}</td><td>{row.schedule_item_id ? <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button> : "—"}</td><td className="dds-row-actions">
         {row.status === "proposed" && row.direction === "outflow" && row.source_document_id && !controlsComplete && !canConfirm(row) ? <div className="dds-control-links"><select aria-label={`Этап ГПР для ${row.title}`} value={draft.scheduleItemId} onChange={(event) => setLinkDraft(row.id, { scheduleItemId: Number(event.target.value) })}><option value={0}>Этап ГПР</option>{options.schedule.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><select aria-label={`Строка бюджета для ${row.title}`} value={draft.budgetLineId} onChange={(event) => setLinkDraft(row.id, { budgetLineId: Number(event.target.value) })}><option value={0}>Строка бюджета</option>{options.budget.map((item) => <option value={item.id} key={item.id}>{item.description}</option>)}</select><button type="button" disabled={!options.contractId || !draft.scheduleItemId || !draft.budgetLineId} onClick={() => onLinkControls(row.id, options.contractId, draft.scheduleItemId, draft.budgetLineId)}>Связать с контролями</button></div> : row.status === "proposed" && <button type="button" disabled={!canConfirm(row) || confirmingMany} onClick={() => void confirmRows([row.id])}>Подтвердить</button>}
+        <FinanceVatDetails row={row} kind="cash-flow" onRefresh={onRefreshVat} />
         {row.status === "approved" && row.entry_kind !== "plan_forecast" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}
         {["proposed", "approved"].includes(row.status) && !row.actual_date && !Number(row.actual_amount) && <button className="secondary" type="button" aria-label={`Удалить операцию ${row.title}`} disabled={cancellingIds.has(row.id)} onClick={() => void cancelOperation(row)}><Trash2 />{cancellingIds.has(row.id) ? "Удаляем…" : "Удалить из ДДС"}</button>}
       </td></tr>;

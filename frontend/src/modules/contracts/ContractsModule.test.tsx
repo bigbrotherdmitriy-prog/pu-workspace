@@ -36,6 +36,25 @@ function renderModule(overrides: Partial<ComponentProps<typeof ContractsModule>>
 }
 
 describe("ContractsModule", () => {
+  it("labels new monetary inputs with the project currency while retaining RUB defaults", () => {
+    renderModule({ currency: "USD" });
+    fireEvent.click(screen.getByText("Создать договор"));
+    expect(screen.getByLabelText("Сумма договора, USD")).toHaveAttribute("placeholder", "Сумма договора, USD");
+    expect(screen.getByLabelText("Аванс, USD")).toHaveAttribute("placeholder", "Аванс, USD");
+    expect(screen.queryByLabelText("Сумма договора, ₽")).not.toBeInTheDocument();
+  });
+
+  it("offers separate execution and warranty dates and all three VAT states including zero", () => {
+    renderModule();
+    fireEvent.click(screen.getByText("Создать договор"));
+    expect(screen.getByLabelText("НДС нового договора")).toHaveValue("unspecified");
+    expect(screen.getByRole("option", { name: "Без НДС" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Ставка НДС" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Начало исполнения нового договора")).toHaveValue("");
+    expect(screen.getByLabelText("Окончание исполнения нового договора")).toHaveValue("");
+    expect(screen.getByLabelText("Гарантия нового договора до")).toHaveValue("");
+  });
+
   it("keeps manual creation collapsed while exposing the document catalog", () => {
     renderModule();
     expect(screen.getByText("Создать договор").closest("details")).not.toHaveAttribute("open");

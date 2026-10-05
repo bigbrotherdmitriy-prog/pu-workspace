@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role
-from app.dds_article_budget import _digest, _json, _snapshot, normalize_article
+from app.dds_article_budget import _digest, _json, _snapshot, _snapshot_matches, normalize_article
 from app.finance_money import project_currency
 from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
 from app.models.audit_log import AuditLog
@@ -271,7 +271,7 @@ def undo_budget_links(operation_id, db: Session, user):
     # do not prevent undo of unchanged historical rows; the saved row CAS does.
     for item in snapshots:
         row = rows.get(item["after"]["id"])
-        if row is None or row.project_id != receipt.project_id or row.contract_id != receipt.contract_id or _snapshot(row) != item["after"]:
+        if row is None or row.project_id != receipt.project_id or row.contract_id != receipt.contract_id or not _snapshot_matches(row, item["after"]):
             raise HTTPException(409,"LINK_UNDO_STALE: после операции расход изменён; ни одна связь не отменена")
         if item["before"]["budget_line_id"] is not None:
             raise HTTPException(409,"LINK_RECEIPT_INVALID")

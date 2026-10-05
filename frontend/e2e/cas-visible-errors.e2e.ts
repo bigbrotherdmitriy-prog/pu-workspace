@@ -15,10 +15,12 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.goto("/new/");
     await expect(page.getByLabel("Текущий проект")).toHaveValue("2");
     await page.locator('aside button[title="Договоры"]').click();
+    await page.locator(".contract-register-row").filter({ hasText: "SYN-31" })
+      .locator(".contract-register-open").click();
     // This gate covers responsive editor/feedback layout, not drawer navigation.
     await page.setViewportSize(viewport);
-    await page.getByText("Расширенное редактирование карточек", { exact: true }).click();
-    await page.getByRole("button", { name: "Редактировать", exact: true }).click();
+    await page.getByRole("article", { name: "Карточка договора SYN-31", exact: true })
+      .getByRole("button", { name: "Редактировать", exact: true }).click();
     const form = page.getByRole("form", { name: "Редактирование договора SYN-31" });
     await form.getByPlaceholder("Сумма договора, ₽").fill("12345.67");
     await form.getByRole("button", { name: "Сохранить изменения" }).click();

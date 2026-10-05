@@ -9,7 +9,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
@@ -48,6 +48,73 @@ def pg_world(monkeypatch):
         # The migration gate drops FK constraints. No fixture session may keep
         # read locks on their referenced tables while that DDL is running.
         yield context
+    finally:
+        engine.dispose()
+        with base.begin() as connection:
+            connection.execute(DropSchema(schema, cascade=True))
+        base.dispose()
+
+
+@pytest.fixture
+def historical_link_migration_pg(monkeypatch):
+    """Pin the historical b001 -> b002 gate; current APIs require later columns."""
+    url = _test_url()
+    base = create_engine(url, hide_parameters=True, connect_args={"connect_timeout": 5})
+    schema = "dds_links_migration_" + uuid4().hex
+    with base.begin() as connection:
+        connection.execute(CreateSchema(schema))
+    scoped = make_url(url).update_query_dict({"options": f"-csearch_path={schema} -clock_timeout=10s"})
+    engine = create_engine(scoped, hide_parameters=True, connect_args={"connect_timeout": 5})
+    backend = Path(__file__).resolve().parents[1]
+    config = Config(str(backend / "alembic.ini"))
+    config.set_main_option("script_location", str(backend / "migrations"))
+    monkeypatch.setenv("DATABASE_URL", scoped.render_as_string(hide_password=False))
+    try:
+        command.upgrade(config, "d021a6c0b001")
+        # SQL-only historical data: neither modern model defaults nor current
+        # financial creators may introduce business data from later revisions.
+        with engine.begin() as connection:
+            statements = (
+                "INSERT INTO organizations(id,name) VALUES(9701,'Synthetic historical link tenant')",
+                "INSERT INTO users(id,name,email,is_admin) VALUES(9701,'Synthetic owner','historical-links@example.test',true)",
+                "INSERT INTO projects(id,name,organization_id) VALUES(9701,'Synthetic historical links',9701)",
+                "INSERT INTO contracts(id,project_id,number,title,contract_kind,amount,advance_amount,retention_percent,"
+                "signed_at,warranty_until,status,record_version) VALUES "
+                "(9701,9701,'S-HISTORICAL','Synthetic historical contract','customer',1200.25,200.00,22.00,"
+                "'2026-01-01','2027-01-01','draft',6)",
+                "INSERT INTO documents(id,project_id,name,source,status,current_version) "
+                "VALUES(9701,9701,'synthetic-historical-matrix.xlsx','local_upload','discovered',1)",
+                "INSERT INTO document_versions(id,document_id,version_number,content) "
+                "VALUES(9701,9701,1,'Synthetic historical matrix')",
+                "INSERT INTO budget_lines(id,project_id,contract_id,category,description,planned_amount,committed_amount,"
+                "actual_amount,forecast_amount,currency,status,line_kind,budget_period,budget_revision,"
+                "article_normalized_name,record_version) VALUES "
+                "(9701,9701,9701,'Synthetic','Historical article budget',999.98,200.00,0,999.98,'RUB',"
+                "'proposed','article_budget',2026,1,'synthetic historical article',4)",
+                "INSERT INTO cash_flow_entries(id,project_id,contract_id,direction,title,planned_date,actual_date,"
+                "planned_amount,actual_amount,currency,status,record_version,entry_kind) VALUES "
+                "(9701,9701,9701,'outflow','Synthetic historical forecast','2026-01-31',NULL,999.98,0,'RUB',"
+                "'proposed',3,'legacy_unclassified')",
+                "INSERT INTO contract_versions(contract_id,project_id,sequence,event,resulting_record_version,"
+                "snapshot,changed_fields,actor_user_id) VALUES(9701,9701,1,'created',6,"
+                "CAST(:contract_snapshot AS json),CAST(:contract_changed_fields AS json),9701)",
+                "INSERT INTO dds_article_budget_operations(id,project_id,contract_id,actor_user_id,source_document_id,"
+                "source_document_version_id,source_document_sha256,mode,budget_period,budget_revision,idempotency_key,"
+                "request_hash,preview_hash,algorithm_version,result_json,snapshot_json) VALUES "
+                "(9701,9701,9701,9701,9701,9701,repeat('a',64),'create_budget',2026,1,'synthetic-historical-article',"
+                "repeat('b',64),repeat('c',64),'historical-synthetic',:article_result_json,:article_snapshot_json)",
+                "INSERT INTO audit_logs(action,entity_type,entity_id,details) VALUES "
+                "('dds_article_budget_applied','document',9701,'Synthetic historical article receipt')",
+            )
+            json_parameters = {
+                "contract_snapshot": '{"amount":"1200.25","retention_percent":"22.00"}',
+                "contract_changed_fields": '["amount"]',
+                "article_result_json": '{"created_budget_ids":[9701]}',
+                "article_snapshot_json": '{"budget_lines":[{"id":9701,"planned_amount":"999.98"}]}',
+            }
+            for statement in statements:
+                connection.execute(text(statement), json_parameters)
+        yield engine, config
     finally:
         engine.dispose()
         with base.begin() as connection:
@@ -137,23 +204,53 @@ def test_whole_undo_cas_and_parallel_retry(pg_world):
         assert db.query(AuditLog).filter_by(action="cash_flow_budget_link_undone").count() == len(ids)
 
 
-def test_additive_migration_and_history_preserving_downgrade(pg_world):
-    engine, document_id, user_id, request, ids, config = pg_world
-    query = text("SELECT id,planned_amount,actual_amount,planned_date,status,budget_line_id,record_version,entry_kind FROM cash_flow_entries ORDER BY id")
-    with engine.connect() as connection:
-        before = connection.execute(query).all()
-    # Empty link journal is compatible with a downgrade; pre-existing article
-    # budget history is not touched by this migration.
+def test_additive_migration_and_history_preserving_downgrade(historical_link_migration_pg):
+    engine, config = historical_link_migration_pg
+    queries = {
+        "cash_flow": "SELECT id,planned_amount,actual_amount,planned_date,actual_date,status,budget_line_id,"
+                     "schedule_item_id,record_version,entry_kind FROM cash_flow_entries ORDER BY id",
+        "budget": "SELECT id,planned_amount,committed_amount,actual_amount,forecast_amount,currency,status,"
+                  "line_kind,budget_period,budget_revision,record_version FROM budget_lines ORDER BY id",
+        "article_history": "SELECT * FROM dds_article_budget_operations ORDER BY id",
+        "contract_history": "SELECT id,snapshot::text,changed_fields::text,resulting_record_version FROM contract_versions ORDER BY id",
+        "contracts": "SELECT * FROM contracts ORDER BY id",
+        "audit": "SELECT * FROM audit_logs ORDER BY id",
+    }
+
+    def preserved_data():
+        with engine.connect() as connection:
+            return {name: connection.execute(text(query)).all() for name, query in queries.items()}
+
+    before = preserved_data()
+    assert before["cash_flow"][0].planned_amount == Decimal("999.98")
+    assert before["budget"][0].planned_amount == Decimal("999.98")
+    assert before["article_history"] and before["contract_history"] and before["audit"]
+    assert "vat_snapshot" not in {column["name"] for column in inspect(engine).get_columns("budget_lines")}
+    assert "vat_mode" not in {column["name"] for column in inspect(engine).get_columns("contracts")}
+    command.upgrade(config, "d021a6c0b002")
+    assert preserved_data() == before
+    # Only the historical link migration is traversed. Later commercial
+    # downgrade guards remain intact and are tested in their own isolated gate.
     command.downgrade(config, "d021a6c0b001")
-    command.upgrade(config, "head")
-    with engine.connect() as connection:
-        assert connection.execute(query).all() == before
-    with Session(engine) as db:
-        result = service.apply_budget_links(document_id, request, db, db.get(User, user_id))
-        service.undo_budget_links(result["operation_id"], db, db.get(User, user_id))
+    assert preserved_data() == before
+    command.upgrade(config, "d021a6c0b002")
+    assert preserved_data() == before
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO dds_budget_link_operations(project_id,contract_id,actor_user_id,source_document_id,"
+            "source_document_version_id,source_document_sha256,currency,budget_period,budget_revision,"
+            "idempotency_key,request_hash,preview_hash,result_json,snapshot_json,undone_at) VALUES "
+            "(9701,9701,9701,9701,9701,repeat('a',64),'RUB',2026,1,'synthetic-historical-undone-link',"
+            "repeat('d',64),repeat('e',64),:result_json,:snapshot_json,'2026-02-01T00:00:00Z')"
+        ), {
+            "result_json": '{"undone":true,"linked_cash_flow_ids":[9701]}',
+            "snapshot_json": '{"rows":[{"id":9701,"budget_line_id":null,"record_version":3}]}',
+        })
+        link_history = connection.execute(text("SELECT * FROM dds_budget_link_operations ORDER BY id")).all()
     with pytest.raises(RuntimeError, match="DDS_BUDGET_LINK_DOWNGRADE_BLOCKED"):
         command.downgrade(config, "d021a6c0b001")
-    with Session(engine) as db:
-        assert db.query(DdsBudgetLinkOperation).count() == 1
-        assert db.query(DdsBudgetLinkOperation).one().undone_at is not None
-        assert all(db.get(CashFlowEntry, i).budget_line_id is None for i in ids)
+    assert preserved_data() == before
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT * FROM dds_budget_link_operations ORDER BY id")).all() == link_history
+        assert len(link_history) == 1 and link_history[0].undone_at is not None
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "d021a6c0b002"

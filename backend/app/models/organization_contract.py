@@ -42,6 +42,17 @@ class Organization(Base):
 
 class Contract(Base):
     __tablename__ = "contracts"
+    __table_args__ = (
+        CheckConstraint(
+            "(vat_mode IN ('unspecified','none') AND vat_rate IS NULL) OR "
+            "(vat_mode = 'rate' AND vat_rate IS NOT NULL AND vat_rate >= 0 AND vat_rate <= 100)",
+            name="ck_contract_vat_state",
+        ),
+        CheckConstraint(
+            "performed_from IS NULL OR performed_to IS NULL OR performed_from <= performed_to",
+            name="ck_contract_performed_order",
+        ),
+    )
     record_version: Mapped[int] = mapped_column(server_default="1")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -55,6 +66,10 @@ class Contract(Base):
     amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     advance_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     retention_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    vat_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="unspecified", server_default="unspecified")
+    vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    performed_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    performed_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     warranty_until: Mapped[date | None] = mapped_column(Date)
     signed_at: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(50), default="active", index=True)

@@ -159,6 +159,35 @@ jobs:
           assert len(cases) == 2, f'Expected 2 V6-00a PostgreSQL gates, collected {len(cases)}'
           assert not report.findall('.//skipped'), 'V6-00a PostgreSQL gates must not skip tests'
           PY
+      - name: V6-10a commercial fields migration and rollback PostgreSQL gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_v6_10a_contract_migration_postgres.py \
+            --junitxml=../v6-10a-contract-migration.xml 2>&1 | tee ../v6-10a-contract-migration.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../v6-10a-contract-migration.xml').getroot()
+          cases = report.findall('.//testcase')
+          assert len(cases) == 13, f'Expected 13 V6-10a PostgreSQL gates, collected {len(cases)}'
+          assert not report.findall('.//skipped'), 'V6-10a PostgreSQL migration gates must not skip'
+          PY
+      - name: V6-10a VAT snapshot real PostgreSQL CAS and replay gates
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          pytest -q -rA tests/test_contract_vat_finance_postgres.py \
+            --junitxml=../v6-10a-vat-postgres.xml 2>&1 | tee ../v6-10a-vat-postgres.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse('../v6-10a-vat-postgres.xml').getroot()
+          assert len(report.findall('.//testcase')) == 3, 'Expected 3 VAT PostgreSQL CAS/replay gates'
+          assert not report.findall('.//skipped'), 'VAT PostgreSQL CAS/replay gates must not skip'
+          PY
       - name: Provider outbox PostgreSQL recovery races
         working-directory: backend
         env:
@@ -226,6 +255,10 @@ jobs:
             contract-discovery-postgres.xml
             v6-00a-money-postgres.log
             v6-00a-money-postgres.xml
+            v6-10a-contract-migration.log
+            v6-10a-contract-migration.xml
+            v6-10a-vat-postgres.log
+            v6-10a-vat-postgres.xml
             dds-snapshot-postgres.log
             dds-snapshot-postgres.xml
             provider-outbox-postgres.log
