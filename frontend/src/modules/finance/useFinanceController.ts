@@ -47,6 +47,8 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [invoiceConfirmationError, setInvoiceConfirmationError] = useState("");
   const [invoiceConfirming, setInvoiceConfirming] = useState(false);
   const invoiceConfirmationRequest = useRef(false);
+  const vatRefreshRequest = useRef(false);
+  const vatRefreshKeys = useRef(new Map<string, string>());
   const invoiceReviewGeneration = useRef(0);
   const renderedInvoiceReviewGeneration = invoiceReviewGeneration.current;
   const [invoiceAiRetrying, setInvoiceAiRetrying] = useState(false);
@@ -491,6 +493,42 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
+  async function refreshFinanceVat(kind: string, id: number): Promise<boolean> {
+    if (vatRefreshRequest.current || projectContext.current.projectId !== projectId) return false;
+    const current = captureProject();
+    const rows = kind === "budget" ? finance?.budget : kind === "cash-flow" ? finance?.cash_flow
+      : kind === "acts" ? finance?.acts : undefined;
+    const row = rows?.find(item => item.id === id);
+    if (!row || row.status !== "proposed" || !row.vat_refresh_state_hash
+        || !row.vat_contract_record_version) {
+      setError("Обновите экран: НДС можно принять только для неподтверждённой записи с договором.");
+      return false;
+    }
+    const intent = `${projectId}:${kind}:${id}:${row.vat_refresh_state_hash}:${row.vat_contract_record_version}`;
+    let key = vatRefreshKeys.current.get(intent);
+    if (!key) {
+      key = crypto.randomUUID();
+      vatRefreshKeys.current.set(intent, key);
+    }
+    vatRefreshRequest.current = true;
+    try {
+      await api(`/execution/${kind}/${id}/refresh-vat`, { method: "POST", body: JSON.stringify({
+        expected_state_hash: row.vat_refresh_state_hash,
+        expected_contract_record_version: row.vat_contract_record_version,
+        idempotency_key: key,
+      }) });
+      if (!current()) return false;
+      setNotice("Условия НДС приняты для одной записи. Сумма, даты и статус не изменены.");
+      await loadFinance();
+      return current();
+    } catch (error) {
+      if (current()) setError(error instanceof Error ? error.message : "Не удалось принять условия НДС.");
+      return false;
+    } finally {
+      vatRefreshRequest.current = false;
+    }
+  }
+
   async function confirmCashPayment(id: number, amount: number) {
     const rawAmount = window.prompt("Фактически оплаченная сумма, ₽", String(amount));
     if (rawAmount === null) return;
@@ -610,7 +648,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
+    confirmFinance, confirmFinanceMany, refreshFinanceVat, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
     updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }

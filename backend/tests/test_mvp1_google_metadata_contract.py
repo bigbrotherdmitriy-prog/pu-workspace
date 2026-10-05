@@ -9,6 +9,7 @@ import pytest
 
 from app.integrations.contracts import StorageRateLimited
 from app.organizer_engine.drive import DriveClient, FOLDER_MIME, SHORTCUT_MIME
+from app.schema import CURRENT_SCHEMA_REVISION
 
 
 class Request:
@@ -142,5 +143,5 @@ def test_shortcut_metadata_migration_is_sequential_current_head():
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "migrations"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["d021a6c0b002"]
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION]
     assert scripts.get_revision("c13606d92787").down_revision == "201286e2acd0"

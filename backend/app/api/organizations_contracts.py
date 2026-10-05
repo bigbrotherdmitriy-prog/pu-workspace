@@ -1,5 +1,5 @@
-from datetime import date, datetime, timezone
-from decimal import Decimal
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 import json
 import re
 
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, require_project_role, require_user
 from app.database import get_db
+from app.contract_vat import contract_vat_snapshot
 from app.finance_source_pins import resolve_current_document_pin
 from app.finance_money import money as _money, project_currency, require_project_currency
 from app.models.organization_contract import Contract, ContractVersion, Organization
@@ -83,6 +84,20 @@ def _organization(row: Organization) -> dict:
     return {field: getattr(row, field) for field in fields}
 
 
+def _vat_rate(value) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        rate = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("Некорректная ставка НДС") from exc
+    if not rate.is_finite() or rate < 0 or rate > 100:
+        raise ValueError("Ставка НДС должна быть конечным числом от 0 до 100")
+    if rate.as_tuple().exponent < -2:
+        raise ValueError("Ставка НДС должна содержать не более 2 знаков после запятой")
+    return rate.quantize(Decimal("0.01"))
+
+
 class ContractCreate(BaseModel):
     number: str = Field(min_length=1, max_length=255)
     title: str = Field(min_length=1, max_length=500)
@@ -95,6 +110,10 @@ class ContractCreate(BaseModel):
     amount: Decimal | None = Field(default=None, ge=0)
     advance_amount: Decimal | None = Field(default=None, ge=0)
     retention_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    vat_mode: str = Field(default="unspecified", pattern="^(unspecified|none|rate)$")
+    vat_rate: Decimal | None = None
+    performed_from: date | None = None
+    performed_to: date | None = None
     warranty_until: date | None = None
     signed_at: date | None = None
     status: str = Field(default="active", pattern="^(draft|active|completed|terminated|archived)$")
@@ -104,6 +123,7 @@ class ContractCreate(BaseModel):
     _amounts = field_validator("amount", "advance_amount", mode="before")(
         lambda value: None if value is None else _money(value)
     )
+    _vat = field_validator("vat_rate", mode="before")(_vat_rate)
 
 
 class ContractLinkUpdate(BaseModel):
@@ -114,6 +134,11 @@ class ContractLinkUpdate(BaseModel):
     amount: Decimal | None = Field(default=None, ge=0)
     advance_amount: Decimal | None = Field(default=None, ge=0)
     retention_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    vat_mode: str | None = Field(default=None, pattern="^(unspecified|none|rate)$")
+    vat_rate: Decimal | None = None
+    performed_from: date | None = None
+    performed_to: date | None = None
+    warranty_until: date | None = None
     signed_at: date | None = None
     status: str | None = Field(default=None, pattern="^(draft|active|completed|terminated|archived)$")
     notes: str | None = Field(default=None, max_length=5000)
@@ -127,6 +152,53 @@ class ContractLinkUpdate(BaseModel):
     _amounts = field_validator("amount", "advance_amount", mode="before")(
         lambda value: None if value is None else _money(value)
     )
+    _vat = field_validator("vat_rate", mode="before")(_vat_rate)
+
+
+_CONTRACT_COMMERCIAL_FIELDS = (
+    "amount", "advance_amount", "signed_at", "performed_from", "performed_to", "vat_mode", "vat_rate",
+)
+
+
+def _validate_contract_commercial_state(values: dict) -> None:
+    """Validate the final merged state before any version/history mutation."""
+    errors = []
+
+    def reject(field: str, message: str):
+        errors.append({"loc": ["body", field], "msg": message, "type": "value_error"})
+
+    amount, advance = values.get("amount"), values.get("advance_amount")
+    if amount is not None and amount < 0:
+        reject("amount", "Сумма договора не может быть отрицательной")
+    if advance is not None and advance < 0:
+        reject("advance_amount", "Аванс не может быть отрицательным")
+    if amount is not None and advance is not None and advance > amount:
+        reject("advance_amount", "Аванс не может превышать сумму договора")
+    signed = values.get("signed_at")
+    business_today = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=3))).date()
+    if signed is not None and signed > business_today:
+        reject("signed_at", "Дата подписания не может быть позже текущего дня")
+    performed_from, performed_to = values.get("performed_from"), values.get("performed_to")
+    if performed_from is not None and performed_to is not None and performed_from > performed_to:
+        reject("performed_to", "Окончание исполнения не может быть раньше начала")
+    mode, rate = values.get("vat_mode"), values.get("vat_rate")
+    if mode not in {"unspecified", "none", "rate"}:
+        reject("vat_mode", "Укажите состояние НДС")
+    elif mode == "rate" and rate is None:
+        reject("vat_rate", "Для режима «ставка» укажите ставку НДС, включая 0 %")
+    elif mode != "rate" and rate is not None:
+        reject("vat_rate", "Ставка допустима только в режиме «ставка»")
+    if errors:
+        raise HTTPException(422, errors)
+
+
+def _contract_warnings(row: Contract) -> list[dict]:
+    warnings = []
+    if row.amount is None:
+        warnings.append({"code": "CONTRACT_AMOUNT_UNSPECIFIED", "message": "сумма договора не задана"})
+    if row.vat_mode == "unspecified":
+        warnings.append({"code": "CONTRACT_VAT_UNSPECIFIED", "message": "НДС не указан"})
+    return warnings
 
 
 class ContractBudgetProposalUpdate(BaseModel):
@@ -146,6 +218,7 @@ def _normalized(value: str | None) -> str:
 _CONTRACT_SNAPSHOT_FIELDS = (
     "number", "title", "counterparty", "counterparty_organization_id", "contract_kind",
     "parent_contract_id", "amount", "advance_amount", "retention_percent", "warranty_until",
+    "vat_mode", "vat_rate", "performed_from", "performed_to",
     "signed_at", "status", "source_document_id", "notes",
 )
 
@@ -373,6 +446,7 @@ def create_contract(project_id: int, payload: ContractCreate, db: Session = Depe
         raise HTTPException(422, "Роль вышестоящего договора не соответствует выбранной цепочке")
     if not parent_kinds and payload.parent_contract_id is not None:
         raise HTTPException(422, "Для этой роли вышестоящий договор не используется")
+    _validate_contract_commercial_state(payload.model_dump())
     row = Contract(project_id=project_id, **payload.model_dump())
     db.add(row); db.flush()
     if is_financial_contract(row.contract_kind) and row.status != "draft":
@@ -432,12 +506,16 @@ def update_contract_links(project_id: int, contract_id: int, payload: ContractLi
         changes["source_document_id"] = payload.source_document_id
     editable_fields = {
         "number", "title", "counterparty", "amount", "advance_amount",
-        "retention_percent", "signed_at", "status", "notes",
+        "retention_percent", "signed_at", "status", "notes", "warranty_until",
+        "vat_mode", "vat_rate", "performed_from", "performed_to",
     }
     changed_fields = editable_fields & payload.model_fields_set
     for field in changed_fields:
         value = getattr(payload, field)
         changes[field] = value.strip() if isinstance(value, str) else value
+    _validate_contract_commercial_state({
+        field: changes.get(field, getattr(row, field)) for field in _CONTRACT_COMMERCIAL_FIELDS
+    })
     effective_changes = {field: value for field, value in changes.items() if getattr(row, field) != value}
     if not effective_changes:
         return _contract(row, db)
@@ -474,8 +552,10 @@ def _contract_budget_proposal(row: ContractBudgetProposal) -> dict:
     return {
         "id": row.id, "project_id": row.project_id, "contract_id": row.contract_id,
         "contract_record_version": row.contract_record_version,
-        "operation": row.operation, "amount": row.amount,
-        "advance_amount": row.advance_amount, "retention_percent": row.retention_percent,
+        "vat_snapshot": row.vat_snapshot,
+        "operation": row.operation, "amount": format(row.amount, ".2f") if row.amount is not None else None,
+        "advance_amount": format(row.advance_amount, ".2f") if row.advance_amount is not None else None,
+        "retention_percent": row.retention_percent,
         "currency": row.currency, "description": row.description,
         "selected_cost_category_id": row.selected_cost_category_id,
         "source_document_id": row.source_document_id,
@@ -580,6 +660,7 @@ def create_contract_budget_proposal(project_id: int, contract_id: int,
         operation="revise" if target is not None else "create",
         amount=contract.amount, advance_amount=contract.advance_amount,
         retention_percent=contract.retention_percent, currency=project_currency(db, project_id),
+        vat_snapshot=contract_vat_snapshot(contract),
         description=f"Договор {contract.number}: {contract.title}",
         source_document_id=source["document_id"],
         source_document_version_id=source["version_id"],
@@ -679,6 +760,7 @@ def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get
             source_document_version_id=proposal.source_document_version_id,
             source_document_sha256=proposal.source_document_sha256,
             source_name=proposal.source_name,
+            vat_snapshot=proposal.vat_snapshot,
         )
         db.add(budget); db.flush()
     else:
@@ -694,6 +776,7 @@ def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get
             "forecast_amount": str(budget.forecast_amount), "committed_amount": str(budget.committed_amount),
             "actual_amount": str(budget.actual_amount), "category": budget.category,
             "description": budget.description,
+            "vat_snapshot": budget.vat_snapshot,
         }
         budget.cost_category_id = category.id
         budget.category = category.name
@@ -705,6 +788,7 @@ def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get
         budget.source_document_version_id = proposal.source_document_version_id
         budget.source_document_sha256 = proposal.source_document_sha256
         budget.source_name = proposal.source_name
+        budget.vat_snapshot = proposal.vat_snapshot
         budget.status = "proposed"
     proposal.created_budget_line_id = budget.id
     proposal.status = "confirmed"
@@ -715,6 +799,7 @@ def confirm_contract_budget_proposal(proposal_id: int, db: Session = Depends(get
         "forecast_amount": str(budget.forecast_amount), "committed_amount": str(budget.committed_amount),
         "actual_amount": str(budget.actual_amount), "category": budget.category,
         "description": budget.description,
+        "vat_snapshot": budget.vat_snapshot,
     }
     db.add(AuditLog(
         action="contract_budget_confirmed", entity_type="contract_budget_proposal",
@@ -786,10 +871,10 @@ def _contract_dependencies(db: Session, project_id: int, contract_id: int) -> di
 
 
 def _is_empty_contract_draft(row: Contract) -> bool:
-    return row.status == "draft" and all(getattr(row, field) is None for field in (
+    return row.status == "draft" and row.vat_mode in {None, "unspecified"} and all(getattr(row, field) is None for field in (
         "counterparty", "counterparty_organization_id", "parent_contract_id", "amount",
         "advance_amount", "retention_percent", "warranty_until", "signed_at",
-        "source_document_id", "notes",
+        "source_document_id", "notes", "vat_rate", "performed_from", "performed_to",
     ))
 
 
@@ -1018,6 +1103,7 @@ def _create_payment_schedule_proposals(db: Session, row: Contract, document: Doc
             planned_amount=candidate["amount"], actual_amount=Decimal("0"),
             counterparty=row.counterparty, status="proposed", source_name=document.name,
             source_excerpt=candidate["excerpt"],
+            vat_snapshot=contract_vat_snapshot(row),
         )
         db.add(item)
         created.append(item)
@@ -1169,10 +1255,14 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
         "title": row.title, "counterparty": row.counterparty,
         "counterparty_organization_id": row.counterparty_organization_id,
         "contract_kind": row.contract_kind, "parent_contract_id": row.parent_contract_id,
-        "amount": row.amount, "advance_amount": row.advance_amount,
+        "amount": format(row.amount, ".2f") if row.amount is not None else None,
+        "advance_amount": format(row.advance_amount, ".2f") if row.advance_amount is not None else None,
         "retention_percent": row.retention_percent, "warranty_until": row.warranty_until,
+        "vat_mode": row.vat_mode, "vat_rate": format(row.vat_rate, ".2f") if row.vat_rate is not None else None,
+        "performed_from": row.performed_from, "performed_to": row.performed_to,
         "signed_at": row.signed_at, "status": row.status,
         "source_document_id": row.source_document_id, "notes": row.notes,
+        "warnings": _contract_warnings(row),
     }
     if db is not None:
         proposals = list(db.scalars(select(ContractBudgetProposal).where(

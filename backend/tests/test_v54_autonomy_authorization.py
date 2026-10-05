@@ -22,12 +22,13 @@ from app.models.task import Task
 from app.models.v54_authority import AuthorityState
 from app.models.v54_pilot import ActionApproval, ActionReceipt, PendingDispatch, PilotAction
 from app.pilot_task_mutation import InternalTaskMutation
+from app.schema import CURRENT_SCHEMA_REVISION
 from test_v54_action_trust_support import h  # noqa: F401 - shared synthetic fixture
 from v54_pilot_fixture import NOW, uid
 
 
 BACKEND = Path(__file__).resolve().parents[1]
-HEAD = "d021a6c0b002"
+HEAD = CURRENT_SCHEMA_REVISION
 OWNER_PERMISSIONS = ["action.freeze", "autonomy.policy.manage"]
 
 

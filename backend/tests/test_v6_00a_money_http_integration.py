@@ -288,7 +288,7 @@ def test_current_frontend_numeric_money_payloads_are_exact_across_financial_post
     assert updated_contract["record_version"] == contract["record_version"] + 1
     assert stored_contract.amount == Decimal("2700.50")
     assert stored_contract.advance_amount == Decimal("200.50")
-    assert edited_proposal["amount"] == 2800.5
+    assert edited_proposal["amount"] == "2800.50"
     assert db.get(ContractBudgetProposal, proposal["id"]).amount == Decimal("2800.50")
 
 

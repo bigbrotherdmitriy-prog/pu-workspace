@@ -1,0 +1,35 @@
+.contract-details,
+:root[data-display-theme] .shell .contract-workspace .contract-details {
+  display: block;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.contract-commercial-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.contract-commercial-summary > div { min-width: 0; }
+.contract-commercial-summary dt { font-size: 12px; color: var(--read-muted, #667b8e); }
+.contract-commercial-summary dd { margin: 4px 0 0; font-weight: 600; }
+.contract-details .contract-period-notice,
+.contract-form .contract-period-notice { margin: 14px 0; padding: 12px; border: 1px solid var(--read-rule, #bbcdd8); border-radius: 8px; grid-column: 1 / -1; font-size: 12px; }
+.contract-details .contract-version-history { margin: 14px 0; }
+.contract-version-history li { margin: 10px 0; }
+.contract-version-history li span { display: block; font-size: 12px; }
+.contract-history-values { width: 100%; margin-top: 10px; border-collapse: collapse; }
+.contract-history-values th, .contract-history-values td { padding: 8px; text-align: left; border-bottom: 1px solid var(--read-rule, #ccd7df); overflow-wrap: anywhere; }
+.contract-details .contract-links { margin-top: 16px; font-size: 12px; }
+.contract-details .app-route-loading { color: var(--read-text, #41443f); }
+.contract-details .contract-edit-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.contract-details .contract-edit-form input,
+.contract-details .contract-edit-form select { min-width: 0; width: 100%; box-sizing: border-box; }
+.contract-form .form-operation-error { grid-column: 1 / -1; padding: 12px; color: #8b1e2d; border: 1px solid #e36b72; border-radius: 8px; background: #fff0f1; }
+.contract-details [aria-invalid="true"], .contract-form [aria-invalid="true"] { border-color: #e36b72; }
+.contract-details .contract-parent-link { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.contract-details .contract-register-doc-head { margin-top: 20px; }
+.contract-workspace .contract-scheme-detail { width: min(1080px, calc(100% - 32px)); max-height: 75vh; right: 16px; }
+@media (max-width: 760px) {
+  .contract-commercial-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .contract-details .contract-edit-form,
+  .contract-details .contract-parent-link { grid-template-columns: minmax(0, 1fr); }
+  .contract-workspace .contract-scheme-detail { right: 8px; width: calc(100% - 16px); padding: 8px; box-sizing: border-box; }
+}

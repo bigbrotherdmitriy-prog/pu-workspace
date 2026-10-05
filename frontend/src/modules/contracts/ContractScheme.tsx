@@ -12,6 +12,8 @@ export type SchemeContract = {
   parent_contract_id?: number;
   status?: string;
   amount?: number | string | null;
+  performed_to?: string | null;
+  warranty_until?: string | null;
   linked_documents?: SchemeDocument[];
 };
 
@@ -30,6 +32,7 @@ type Props = {
   operationStatus?: string;
   currency?: string;
   actions?: ReactNode;
+  renderDetails?: (contract: SchemeContract, packageContent: ReactNode) => ReactNode;
 };
 
 const nodeWidth = 230;
@@ -84,7 +87,7 @@ function contractAmount(amount: SchemeContract["amount"], currency: string) {
 
 const statusLabels: Record<string, string> = { draft: "Черновик", active: "Действует", completed: "Завершён", terminated: "Расторгнут", archived: "В архиве" };
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus, currency = "RUB", actions }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus, currency = "RUB", actions, renderDetails }: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [view, setView] = useState<"register" | "scheme">("register");
   const [query, setQuery] = useState("");
@@ -175,7 +178,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     deliverFiles(files, parentContractId);
   }
 
-  const detailPanel = selected && <div className="contract-register-detail" id={`contract-files-${projectId}-${selected.id}`}>
+  const packagePanel = selected && <>
     <div className="contract-register-doc-head"><h3>Документы · {selected.linked_documents?.length || 0}</h3>
       {onDropApplications && <label className="contract-application-drop" onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const files = filesFromTransfer(event.dataTransfer); if (files.length) onDropApplications(files, selected.id); }}>
         <FileUp /><span>Добавить файл</span>
@@ -186,12 +189,12 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
       {!selected.linked_documents?.length && <p>Документы ещё не привязаны.</p>}
     </div>
     <details className="contract-row-actions"><summary>Действия с договором</summary>
-    <div className="contract-register-link">
+    {!renderDetails && <div className="contract-register-link">
       <label><span>Подчинить договору</span><select aria-label="Вышестоящий договор" defaultValue="" onChange={(event) => { const parentId = Number(event.target.value); if (parentId) onConnect(parentId, selected.id); event.currentTarget.value = ""; }}>
         <option value="">Выберите вышестоящий договор</option>
         {contracts.filter((item) => item.id !== selected.id).map((item) => <option value={item.id} key={item.id}>{item.number} — {item.counterparty || item.title}</option>)}
       </select></label>
-    </div>
+    </div>}
     {onDropFinance && <>
     <div className="contract-finance-drops">
       {([['schedule', 'ГПР', 'Этапы и сроки'], ['budget', 'Бюджет', 'Смета и план затрат'], ['cash-flow', 'ДДС', 'Платёжный календарь']] as const).map(([kind, title, hint]) =>
@@ -202,11 +205,14 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     </div>
     <p className="contract-finance-confirmation">После анализа откроется предварительный просмотр. ГПР, бюджет и ДДС изменятся только после вашего подтверждения.</p>
     </>}
-    {(onDelete || onArchive) && <div className="contract-scheme-delete-zone">
+    {!renderDetails && (onDelete || onArchive) && <div className="contract-scheme-delete-zone">
       {onArchive && selected.status !== "archived" && <button className="secondary" onClick={() => onArchive(selected)}><Archive /> Архивировать договор</button>}
       {onDelete && <button className="danger" onClick={() => onDelete(selected)}><Trash2 /> Удалить договор</button>}
     </div>}
     </details>
+  </>;
+  const detailPanel = selected && <div className="contract-register-detail" id={`contract-files-${projectId}-${selected.id}`}>
+    {renderDetails ? renderDetails(selected, packagePanel) : packagePanel}
   </div>;
 
   return <section className={`card contract-scheme contract-workspace ${dropTargetId === -1 ? "drop-active" : ""}`} onDragEnter={(event) => {
@@ -247,7 +253,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
               </td>
               <td data-label="Контрагент"><span>{item.counterparty || "Не указан"}</span><small>{kindLabel(item.contract_kind)}</small></td>
               <td data-label="Сумма" className="contract-register-amount">{contractAmount(item.amount, currency)}</td>
-              <td data-label="Срок окончания" className="contract-register-deadline"><span title="Срок окончания пока не указан">Не указан</span></td>
+              <td data-label="Срок окончания" className="contract-register-deadline"><span title="Окончание исполнения договора">{item.performed_to ? item.performed_to.slice(0, 10).split("-").reverse().join(".") : "Не указан"}</span></td>
               <td data-label="Статус"><span className={`contract-register-status ${item.status || "active"}`}>{statusLabels[item.status || "active"] || item.status}</span></td>
               <td data-label="Файлы"><button className="contract-register-files" aria-label={`Документы договора ${item.number}: ${item.linked_documents?.length || 0}`} aria-expanded={expanded} onClick={toggle}><FileText />{item.linked_documents?.length || 0}</button></td>
             </tr>{expanded && <tr className="contract-register-expanded"><td colSpan={6}>{detailPanel}</td></tr>}</Fragment>;
@@ -289,7 +295,7 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     {connectingFrom && connectingFrom > 0 && <p className="contract-scheme-hint">Выбран вышестоящий договор №{contracts.find((item) => item.id === connectingFrom)?.number}. Теперь нажмите на подчинённый блок.</p>}
     {selected && <aside className="contract-scheme-detail">
       <button className="icon-button" aria-label="Закрыть договор" onClick={() => setSelectedId(null)}><X /></button>
-      <h3>{selected.number} — {selected.title}</h3>
+      {!renderDetails && <h3>{selected.number} — {selected.title}</h3>}
       {detailPanel}
     </aside>}</>}
   </section>;

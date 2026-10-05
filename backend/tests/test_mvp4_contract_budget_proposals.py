@@ -67,7 +67,7 @@ def test_01_contract_save_does_not_create_budget(db_session, user_factory):
 def test_02_proposal_is_one_total_amount_not_advance_or_retention(db_session, user_factory):
     user, project, contract, _category, _document, _version = _world(db_session, user_factory)
     result = _proposal(db_session, user, project, contract)
-    assert result["amount"] == Decimal("1000.00")
+    assert result["amount"] == "1000.00"
     assert db_session.query(ContractBudgetProposal).count() == 1
     assert db_session.query(BudgetLine).count() == 0
 
@@ -75,7 +75,7 @@ def test_02_proposal_is_one_total_amount_not_advance_or_retention(db_session, us
 def test_03_advance_and_retention_are_informational_snapshot(db_session, user_factory):
     user, project, contract, _category, _document, _version = _world(db_session, user_factory)
     result = _proposal(db_session, user, project, contract)
-    assert result["advance_amount"] == Decimal("200.00")
+    assert result["advance_amount"] == "200.00"
     assert result["retention_percent"] == Decimal("5.00")
 
 

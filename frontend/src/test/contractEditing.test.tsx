@@ -9,12 +9,25 @@ vi.mock("../api/client", async (importOriginal) => ({
 vi.mock("../modules/documents/localUploadJobs", () => ({
   localUploadMimeType: () => "text/csv", awaitLocalUploadJobs: async () => ({ documents: [91] }),
 }));
-vi.mock("../modules/contracts/ContractsModule", () => ({ ContractsModule: ({ children }: any) => <div>{children}</div> }));
-vi.mock("../modules/contracts/ContractScheme", () => ({ ContractScheme: ({ onDropFinance }: any) =>
-  <button onClick={() => onDropFinance([new File(["synthetic"], "plan.csv")], 31, "cash-flow")}>
-    Attach synthetic finance
-  </button>,
-}));
+vi.mock("../modules/contracts/ContractsModule", () => ({ ContractsModule: ({ children, number, title, currency, onNumberChange, onTitleChange, onCreate }: any) => <div>
+  <span aria-label="Synthetic create currency">{currency}</span>
+  <input aria-label="Synthetic create number" value={number} onChange={(event) => onNumberChange(event.target.value)} />
+  <input aria-label="Synthetic create title" value={title} onChange={(event) => onTitleChange(event.target.value)} />
+  <button onClick={onCreate}>Create synthetic contract</button>{children}
+</div> }));
+vi.mock("../modules/contracts/ContractScheme", async () => {
+  const { useState } = await import("react");
+  return { ContractScheme: ({ onDropFinance, renderDetails, contracts }: any) => {
+    const [open, setOpen] = useState(true);
+    const [view, setView] = useState("register");
+    return <>
+      <button onClick={() => onDropFinance([new File(["synthetic"], "plan.csv")], 31, "cash-flow")}>Attach synthetic finance</button>
+      <button onClick={() => setOpen(!open)}>Toggle synthetic details</button>
+      <button onClick={() => setView(view === "register" ? "scheme" : "register")}>Toggle synthetic view</button>
+      <div key={view}>{open && contracts[0] && renderDetails?.(contracts[0])}</div>
+    </>;
+  } };
+});
 vi.mock("../modules/finance/GprDdsWorkspace", () => ({ GprDdsWorkspace: ({ dds }: any) => <div>{dds}</div> }));
 vi.mock("../modules/finance/FinanceOperations", () => ({ FinanceOperations: ({ invoiceProposal, onConfirmInvoice }: any) =>
   <div>{invoiceProposal && <><span>Synthetic invoice draft</span>
@@ -27,7 +40,8 @@ afterEach(cleanup);
 
 const contract = { id: 31, record_version: 5, number: "SYN-31", title: "Synthetic contract",
   status: "active", contract_kind: "customer", amount: null, advance_amount: null,
-  counterparty: null, signed_at: null, retention_percent: 22, linked_documents: [], version_history: [] };
+  counterparty: null, signed_at: null, retention_percent: 22, linked_documents: [], version_history: [],
+  vat_mode: "unspecified", vat_rate: null, performed_from: null, performed_to: null, warranty_until: null };
 const overview = { summary: {}, baselines: [], schedule: [], budget: [], cash_flow: [], procurement: [], acts: [] };
 const invoice = { id: 61, project_id: 7, source_document_id: 91, amount: 125, currency: "RUB",
   selected_cost_category_id: 1, payment_purpose: "Synthetic materials", target_kind: "cash_flow",
@@ -36,6 +50,8 @@ let current: typeof contract;
 let patch: (body: any) => Promise<unknown>;
 let attach: () => Promise<unknown>;
 let confirmInvoice: () => Promise<unknown>;
+let create: () => Promise<unknown>;
+let projectCurrency: string;
 
 beforeEach(() => {
   sessionStorage.clear(); localStorage.clear();
@@ -44,12 +60,15 @@ beforeEach(() => {
   patch = async (body) => { current = { ...current, ...body, record_version: current.record_version + 1 }; return current; };
   attach = async () => { current = { ...current, record_version: 6 }; return { status: "ok", record_version: 6 }; };
   confirmInvoice = async () => { throw new Error("Synthetic invoice refusal"); };
+  create = async () => ({ ...current, id: 32 });
+  projectCurrency = "RUB";
   vi.mocked(api).mockReset();
   vi.mocked(api).mockImplementation(async (path, init) => {
-    if (path === "/auth/me") return { id: 1, role: "owner", full_name: "QA" };
-    if (path === "/projects/") return { projects: [{ id: 7, name: "Synthetic project" }, { id: 8, name: "Other synthetic project" }] };
+    if (path === "/auth/me") return { id: 1, role: "owner", full_name: "QA", is_admin: true };
+    if (path === "/projects/") return { projects: [{ id: 7, name: "Synthetic project", currency: projectCurrency }, { id: 8, name: "Other synthetic project" }] };
     if (path === "/projects/7/contracts/31/documents" && init?.method === "POST") return attach();
     if (path === "/projects/7/contracts/31" && init?.method === "PATCH") return patch(JSON.parse(String(init.body)));
+    if (path === "/projects/7/contracts" && init?.method === "POST") return create();
     if (path === "/projects/7/contracts") return { contracts: [{ ...current }] };
     if (path.startsWith("/dashboard/project")) return { summary: { attention: 0, overdue_tasks: 0, overdue_obligations: 0 }, documents: [] };
     if (path === "/local-upload/analyze") return { jobs: [] };
@@ -74,9 +93,7 @@ async function openContracts() {
   render(<App />);
   await screen.findByRole("option", { name: "Synthetic project" }, { timeout: 10000 });
   fireEvent.click(screen.getByTitle("Договоры"));
-  const details = (await screen.findByText("Расширенное редактирование карточек")).closest("details")!;
-  details.open = true;
-  await screen.findByRole("button", { name: "Редактировать" });
+  await screen.findByRole("button", { name: "Редактировать" }, { timeout: 10000 });
 }
 async function edit() {
   fireEvent.click(await screen.findByRole("button", { name: "Редактировать" }));
@@ -86,18 +103,91 @@ async function edit() {
 function saves() { return vi.mocked(api).mock.calls.filter(([path, init]) => path === "/projects/7/contracts/31" && init?.method === "PATCH"); }
 
 describe("contract CAS editing", () => {
+  it("labels monetary editor inputs in the project currency and passes currency to creation", async () => {
+    projectCurrency = "USD";
+    await openContracts();
+    expect(screen.getByLabelText("Synthetic create currency")).toHaveTextContent("USD");
+    fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+    expect(screen.getByLabelText("Сумма редактируемого договора с НДС, USD")).toHaveAttribute("placeholder", "Сумма договора, USD");
+    expect(screen.getByLabelText("Аванс редактируемого договора с НДС, USD")).toHaveAttribute("placeholder", "Аванс, USD");
+    expect(screen.queryByLabelText("Сумма редактируемого договора с НДС, ₽")).not.toBeInTheDocument();
+  });
+
+  it("passes project currency to common current/history values and the budget proposal advance", async () => {
+    projectCurrency = "USD";
+    current = { ...current, amount: "731.23", advance_amount: "112.34", version_history: [{ id: 53, sequence: 2,
+      event: "updated", changed_fields: ["amount"], occurred_at: "2026-09-30T10:00:00Z", snapshot: { amount: "71.23" } }],
+      budget_proposals: [{ id: 73, contract_id: 31, contract_record_version: 5, operation: "create", amount: "731.23",
+        advance_amount: "112.34", currency: "USD", description: "Synthetic USD total", status: "proposed" }] } as any;
+    await openContracts();
+    expect(screen.getByText("731,23 USD")).toBeInTheDocument();
+    expect(screen.getByText("112,34 USD")).toBeInTheDocument();
+    expect(screen.getByText(/Общая сумма — одна строка\. Аванс 112,34 USD/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("История договора"));
+    fireEvent.click(screen.getByText("Значения версии 2"));
+    expect(screen.getByText("71,23 USD")).toBeVisible();
+  });
+
+  it("confirms a pending budget only by button and preserves the exact gross decimal amount", async () => {
+    current = { ...current, amount: "9999999999999999.99", budget_proposals: [{ id: 72, contract_id: 31,
+      contract_record_version: 5, operation: "create", amount: "9999999999999999.99", currency: "RUB",
+      description: "Synthetic contract total", selected_cost_category_id: 1, status: "proposed" }] } as any;
+    await openContracts();
+    expect(vi.mocked(api).mock.calls.some(([path, init]) => path.startsWith("/contract-budget-proposals/") && init?.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить бюджет" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/contract-budget-proposals/72", expect.anything()));
+    const call = vi.mocked(api).mock.calls.find(([path, init]) => path === "/contract-budget-proposals/72" && init?.method === "PATCH")!;
+    expect(JSON.parse(String(call[1]?.body)).amount).toBe("9999999999999999.99");
+  });
+
+  it("uses one details surface and retains the external draft through reopen and register/scheme changes", async () => {
+    await openContracts(); await edit();
+    expect(screen.queryByText("Расширенное редактирование карточек")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle synthetic details" }));
+    expect(screen.queryByRole("form", { name: "Редактирование договора SYN-31" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle synthetic details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle synthetic view" }));
+    expect(screen.getByPlaceholderText("Сумма договора, ₽")).toHaveValue(12345.67);
+    expect(screen.getByText("Версия открытого черновика: 5")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(JSON.parse(String(saves()[0][1]?.body))).toMatchObject({ expected_record_version: 5 });
+  });
+
+  it("saves explicit VAT zero and separate execution/warranty dates without touching retention", async () => {
+    await openContracts(); await edit();
+    fireEvent.change(screen.getByLabelText("НДС договора"), { target: { value: "rate" } });
+    fireEvent.change(screen.getByLabelText("Ставка НДС, %"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Начало исполнения договора"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Окончание исполнения договора"), { target: { value: "2026-12-31" } });
+    fireEvent.change(screen.getByLabelText("Гарантия до"), { target: { value: "2027-12-31" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(JSON.parse(String(saves()[0][1]?.body))).toMatchObject({
+      vat_mode: "rate", vat_rate: "0", performed_from: "2026-09-01", performed_to: "2026-12-31",
+      warranty_until: "2027-12-31", retention_percent: "22",
+    });
+    expect(screen.getByText(/Серверная проверка финансового периода.*V6-10b/)).toBeInTheDocument();
+  });
+
+  it("preserves server warnings after a successful save", async () => {
+    patch = async () => ({ ...current, warnings: [{ code: "CONTRACT_AMOUNT_UNSPECIFIED", message: "сумма договора не задана" }] });
+    await openContracts(); await edit();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await screen.findByText(/Договор обновлён.*сумма договора не задана/);
+  });
+
   it("synchronizes the attached version even when the subsequent finance preview fails", async () => {
     await openContracts();
     fireEvent.click(screen.getByRole("button", { name: "Attach synthetic finance" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/projects/7/contracts/31/documents", expect.anything()));
     await screen.findByText("Synthetic preview refusal after attachment");
     fireEvent.click(screen.getByTitle("Договоры"));
-    screen.getByText("Расширенное редактирование карточек").closest("details")!.open = true;
     await waitFor(() => expect(screen.getByText(/Версия карточки: 6/)).toBeInTheDocument());
     await edit();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
     await waitFor(() => expect(saves()).toHaveLength(1));
-    expect(JSON.parse(String(saves()[0][1]?.body))).toMatchObject({ expected_record_version: 6, amount: 12345.67, counterparty: "Synthetic supplier" });
+    expect(JSON.parse(String(saves()[0][1]?.body))).toMatchObject({ expected_record_version: 6, amount: "12345.67", counterparty: "Synthetic supplier" });
   });
 
   it("keeps the original draft version through refresh and leaves a 409 visible inside the form", async () => {
@@ -139,6 +229,17 @@ describe("contract CAS editing", () => {
     expect(within(form).getByPlaceholderText("Сумма договора, ₽")).toHaveValue(12345.67);
   });
 
+  it("shows the server validation field and reason while preserving the unsaved draft", async () => {
+    await openContracts(); await edit();
+    patch = async () => { throw new ApiError("HTTP 422. Код обращения: synthetic-request", 422, "synthetic-request", undefined,
+      [{ loc: ["body", "advance_amount"], msg: "Аванс не должен превышать сумму договора", type: "value_error" }]); };
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    const form = await screen.findByRole("form", { name: "Редактирование договора SYN-31" });
+    await waitFor(() => expect(within(form).getByRole("alert")).toHaveTextContent("Аванс не должен превышать сумму договора"));
+    expect(within(form).getByPlaceholderText("Сумма договора, ₽")).toHaveValue(12345.67);
+    expect(within(form).getByPlaceholderText("Аванс, ₽")).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("disables edits and repeated saves until the current request completes", async () => {
     await openContracts(); await edit();
     let resolve!: (value: unknown) => void;
@@ -165,6 +266,20 @@ describe("contract CAS editing", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Текущий проект" }), { target: { value: "8" } });
     await act(async () => { reject(new Error("Old project refusal")); await pending.catch(() => {}); });
     expect(screen.queryByText("Old project refusal")).not.toBeInTheDocument();
+  });
+
+  it("does not publish old creation feedback after switching projects", async () => {
+    await openContracts();
+    let reject!: (reason: Error) => void;
+    const pending = new Promise((_, fail) => { reject = fail; });
+    create = () => pending;
+    fireEvent.change(screen.getByLabelText("Synthetic create number"), { target: { value: "NEW-SYN" } });
+    fireEvent.change(screen.getByLabelText("Synthetic create title"), { target: { value: "Synthetic new title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create synthetic contract" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/projects/7/contracts", expect.objectContaining({ method: "POST" })));
+    fireEvent.change(screen.getByRole("combobox", { name: "Текущий проект" }), { target: { value: "8" } });
+    await act(async () => { reject(new Error("Old creation project refusal")); await pending.catch(() => {}); });
+    expect(screen.queryByText("Old creation project refusal")).not.toBeInTheDocument();
   });
 });
 

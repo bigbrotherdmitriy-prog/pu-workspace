@@ -19,7 +19,7 @@ def _config(output=None):
 
 def test_mobile_sync_receipts_are_the_single_current_head():
     scripts = ScriptDirectory.from_config(_config())
-    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION] == ["d021a6c0b002"]
+    assert scripts.get_heads() == [CURRENT_SCHEMA_REVISION]
     assert scripts.get_revision("c31a7b9d2e40").down_revision == "b17c4d2e6f90"
 
 

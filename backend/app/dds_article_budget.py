@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role
+from app.contract_vat import contract_vat_snapshot
 from app.finance_money import project_currency
 from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
 from app.models.audit_log import AuditLog
@@ -75,6 +76,14 @@ def _snapshot(row) -> dict:
             value = str(value)
         result[column.name] = value
     return result
+
+
+def _snapshot_matches(row, expected: dict) -> bool:
+    """Old receipts predate this nullable column; all other fields stay strict."""
+    current = _snapshot(row)
+    if "vat_snapshot" in current and "vat_snapshot" not in expected:
+        expected = {**expected, "vat_snapshot": None}
+    return current == expected
 
 
 def _source_cash(db, payload, document_id):
@@ -262,6 +271,7 @@ def apply_article_budget(document_id, payload, db: Session, user):
         raise HTTPException(409, "PREVIEW_STALE: повторите preview, данные изменились")
     if proposal["conflicts"]:
         raise HTTPException(409, {"code": "PREVIEW_CONFLICTS", "conflicts": proposal["conflicts"]})
+    vat_snapshot = contract_vat_snapshot(db.get(Contract, payload.contract_id))
     try:
         with db.begin_nested():
             receipt = DdsArticleBudgetOperation(
@@ -280,6 +290,7 @@ def apply_article_budget(document_id, payload, db: Session, user):
                 else:
                     line = BudgetLine(
                         project_id=payload.project_id, contract_id=payload.contract_id,
+                        vat_snapshot=vat_snapshot,
                         line_kind="analytical_expense", budget_period=payload.plan_year,
                         budget_revision=payload.budget_revision, article_normalized_name=article["normalized_name"],
                         cost_category_id=article["cost_category_id"], category=article["category_name"],
@@ -297,6 +308,7 @@ def apply_article_budget(document_id, payload, db: Session, user):
                         from calendar import monthrange
                         row = CashFlowEntry(
                             project_id=payload.project_id, contract_id=payload.contract_id, budget_line_id=line.id,
+                            vat_snapshot=vat_snapshot,
                             entry_kind="plan_forecast", matrix_operation_id=receipt.id,
                             matrix_article_id=article["article_id"], matrix_month=month["month"],
                             source_document_id=document_id, source_document_version_id=payload.expected_document_version_id,
@@ -344,7 +356,7 @@ def undo_article_budget(operation_id, db: Session, user):
     for model, key, target in ((CashFlowEntry, "cash", rows_to_cancel), (BudgetLine, "budget", rows_to_reject)):
         for snapshot in snapshots[key]:
             row = db.scalar(select(model).where(model.id == snapshot["id"]).with_for_update().execution_options(populate_existing=True))
-            if row is None or _snapshot(row) != snapshot:
+            if row is None or not _snapshot_matches(row, snapshot):
                 raise HTTPException(409, "UNDO_DEPENDENCY_CONFLICT: запись изменена после применения")
             target.append(row)
     dependent_cash = db.scalar(select(CashFlowEntry.id).where(CashFlowEntry.budget_line_id.in_(owned_budget),

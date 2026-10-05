@@ -1,5 +1,6 @@
 import base64
 import binascii
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
@@ -14,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
+from app.contract_vat import assert_proposed_vat_current, contract_vat_snapshot
 from app.database import get_db
 from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
 from app.finance_money import (
@@ -40,7 +42,7 @@ from app.structured_import import parse_structured_rows
 from app.dds_article_budget import (
     ArticleBudgetPreviewRequest, ArticleBudgetApplyRequest,
     preview_article_budget, apply_article_budget, undo_article_budget, confirmed_budget_for_totals,
-    normalize_article,
+    normalize_article, _snapshot as _finance_record_snapshot,
 )
 from app.dds_budget_links import (
     BudgetLinkPreviewRequest, BudgetLinkApplyRequest, preview_budget_links,
@@ -203,6 +205,7 @@ def _create_mpp_cash_flow_proposals(
     if not payload.create_cash_flow_proposals:
         return []
     _require_project_currency(db, payload.project_id, payload.cash_flow_currency)
+    vat_snapshot = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     created: list[int] = []
     for row in _mpp_cost_rows(tasks):
         schedule_item = imported.get(row.external_uid)
@@ -219,6 +222,7 @@ def _create_mpp_cash_flow_proposals(
         item = CashFlowEntry(
             project_id=payload.project_id,
             contract_id=payload.contract_id,
+            vat_snapshot=deepcopy(vat_snapshot),
             schedule_item_id=schedule_item.id,
             direction="outflow",
             title=row.title[:500],
@@ -462,6 +466,13 @@ class ForecastInvoiceConversion(BaseModel):
     schedule_item_id: int | None = Field(default=None, gt=0)
 
 
+class VatSnapshotRefresh(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_state_hash: str = Field(pattern="^[0-9a-f]{64}$")
+    expected_contract_record_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
 class StructuredRowOverride(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     planned_date: date | None = None
@@ -581,6 +592,7 @@ def _invoice_proposal_payload(proposal: InvoiceExtractionProposal) -> dict:
         "target_kind": proposal.target_kind, "status": proposal.status,
         "created_cash_flow_id": proposal.created_cash_flow_id,
         "created_budget_line_id": proposal.created_budget_line_id,
+        "vat_snapshot": proposal.vat_snapshot,
         "requires_confirmation": proposal.status == "proposed",
     }
 
@@ -658,6 +670,69 @@ def _check_contract(db: Session, project_id: int, contract_id: int | None):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
 
 
+def _locked_vat_contract(db: Session, project_id: int, contract_id: int | None) -> Contract | None:
+    if contract_id is None:
+        return None
+    contract = db.scalar(select(Contract).where(
+        Contract.id == contract_id, Contract.project_id == project_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    if contract is None:
+        raise HTTPException(422, "Договор не принадлежит выбранному проекту")
+    return contract
+
+
+def _new_contract_vat_snapshot(db: Session, project_id: int, contract_id: int | None) -> dict | None:
+    return contract_vat_snapshot(_locked_vat_contract(db, project_id, contract_id))
+
+
+def _assert_proposed_row_vat_current(db: Session, row, *, lock: bool = True) -> None:
+    if row.vat_snapshot is not None:
+        contract = (_locked_vat_contract(db, row.project_id, row.contract_id) if lock
+                    else db.get(Contract, row.contract_id) if row.contract_id is not None else None)
+        if contract is not None and contract.project_id != row.project_id:
+            contract = None
+        assert_proposed_vat_current(contract, row.vat_snapshot)
+
+
+def _vat_refresh_state_hash(row) -> str:
+    state = _finance_record_snapshot(row)
+    updated_at = getattr(row, "updated_at", None)
+    if updated_at is not None:
+        state["updated_at"] = updated_at.replace(tzinfo=timezone.utc).isoformat() if updated_at.tzinfo is None else updated_at.astimezone(timezone.utc).isoformat()
+    return hashlib.sha256(json.dumps(state, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def _vat_refresh_metadata(db: Session, row, contracts: dict | None = None) -> dict:
+    contract = (contracts.get(row.contract_id) if contracts is not None
+                else db.get(Contract, row.contract_id) if row.contract_id is not None else None)
+    if contract is not None and contract.project_id != row.project_id:
+        contract = None
+    stale = False
+    try:
+        assert_proposed_vat_current(contract, row.vat_snapshot)
+    except HTTPException:
+        stale = True
+    pending = row.status == "proposed" and contract is not None
+    return {
+        "vat_snapshot_stale": stale,
+        "vat_refresh_state_hash": _vat_refresh_state_hash(row) if pending else None,
+        "vat_contract_record_version": contract.record_version if pending else None,
+        "vat_proposed_snapshot": contract_vat_snapshot(contract) if pending else None,
+    }
+
+
+def _assert_vat_refresh_source_current(db: Session, row) -> None:
+    document_id = row.document_id if isinstance(row, AcceptanceAct) else row.source_document_id
+    if document_id is None:
+        return
+    db.scalar(select(Document).where(Document.id == document_id).with_for_update().execution_options(populate_existing=True))
+    if row.source_document_version_id is not None:
+        db.scalar(select(DocumentVersion).where(DocumentVersion.id == row.source_document_version_id)
+                  .with_for_update().execution_options(populate_existing=True))
+    assert_document_pin_current(db, row.project_id, document_id,
+                                row.source_document_version_id, row.source_document_sha256)
+
+
 def _check_task(db: Session, project_id: int, task_id: int | None) -> None:
     if task_id is not None and not db.scalar(select(Task.id).where(Task.id == task_id, Task.project_id == project_id)):
         raise HTTPException(422, "Задача не принадлежит выбранному проекту")
@@ -710,6 +785,7 @@ def _cash_confirmation_plan(db: Session, item: CashFlowEntry, cache: dict | None
     """§27.1 exception is proven from the pinned matrix, never a client flag."""
     if item.status != "proposed":
         raise HTTPException(409, "STATUS_NOT_PROPOSED: подтверждать можно только предложение")
+    _assert_proposed_row_vat_current(db, item, lock=False)
     if item.actual_date is not None or item.actual_amount != 0:
         raise HTTPException(409, "PLAN_HAS_ACTUAL: запись уже содержит факт")
     _require_project_currency(db, item.project_id, item.currency)
@@ -875,6 +951,7 @@ def _append_payment_event(
         payload_sha256=payload_sha256,
         source_document_version_id=item.source_document_version_id,
         source_document_sha256=item.source_document_sha256,
+        vat_snapshot=deepcopy(item.vat_snapshot),
         reason=reason, created_by_user_id=user.id,
     )
     try:
@@ -1247,6 +1324,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     confirmation_cache: dict = {}
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
     acts = list(db.scalars(select(AcceptanceAct).where(AcceptanceAct.project_id == project_id).order_by(AcceptanceAct.act_date.desc(), AcceptanceAct.id.desc())))
+    vat_contracts = {row.id: row for row in db.scalars(select(Contract).where(Contract.project_id == project_id))}
     schedule_cpm: dict[int, dict[str, int | bool]] = {}
     baseline_warnings: dict[int, str] = {}
     for baseline in baselines:
@@ -1337,7 +1415,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "planned_amount": x.planned_amount, "committed_amount": x.committed_amount, "actual_amount": x.actual_amount,
                     "remaining_amount": x.planned_amount - x.actual_amount,
                     "overrun_amount": max(x.actual_amount - x.planned_amount, Decimal("0")),
-                    "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status} for x in budget],
+                    "forecast_amount": x.forecast_amount, "currency": x.currency, "status": x.status,
+                    "vat_snapshot": x.vat_snapshot, **_vat_refresh_metadata(db, x, vat_contracts)} for x in budget],
         "cash_flow": [{"id": x.id, "contract_id": x.contract_id, "schedule_item_id": x.schedule_item_id,
                         "entry_kind": x.entry_kind,
                         "budget_line_id": x.budget_line_id, "task_id": x.task_id,
@@ -1349,7 +1428,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                         "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
                         "actual_amount": x.actual_amount, "currency": x.currency, "counterparty": x.counterparty,
                        "object_name": x.object_name, "category": x.category, "note": x.note,
-                        "status": x.status, "record_version": x.record_version,
+                        "status": x.status, "record_version": x.record_version, "vat_snapshot": x.vat_snapshot,
+                        **_vat_refresh_metadata(db, x, vat_contracts),
                         **_cash_confirmation_metadata(db, x, confirmation_cache)} for x in cash],
         "procurement": [{"id": x.id, "contract_id": x.contract_id, "title": x.title, "supplier": x.supplier,
                           "stage": x.stage, "planned_delivery": x.planned_delivery, "actual_delivery": x.actual_delivery,
@@ -1359,7 +1439,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                     "source_document_version_id": x.source_document_version_id,
                     "source_document_sha256": x.source_document_sha256, "number": x.number,
                    "title": x.title, "act_date": x.act_date, "amount": x.amount, "currency": x.currency,
-                   "status": x.status} for x in acts],
+                   "status": x.status, "vat_snapshot": x.vat_snapshot,
+                   **_vat_refresh_metadata(db, x, vat_contracts)} for x in acts],
     }
 
 
@@ -1454,6 +1535,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
     import_currency = project_currency(db, payload.project_id)
+    vat_snapshot = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     document, version, digest, content = _document_content(db, payload.project_id, document_id)
     if payload.expected_document_version_id is not None and payload.expected_document_version_id != version.id:
         raise HTTPException(409, "SOURCE_VERSION_MISMATCH: версия документа изменилась после preview")
@@ -1522,6 +1604,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
             )
             item = BudgetLine(
                 project_id=payload.project_id, contract_id=payload.contract_id,
+                vat_snapshot=deepcopy(vat_snapshot),
                 cost_category_id=category_id, category=category_name,
                 description=row["title"], planned_amount=amount,
                 forecast_amount=amount, currency=import_currency,
@@ -1535,6 +1618,7 @@ def structured_import(document_id: int, payload: StructuredImportRequest,
             )
             item = CashFlowEntry(
                 project_id=payload.project_id, contract_id=payload.contract_id,
+                vat_snapshot=deepcopy(vat_snapshot),
                 source_document_id=document.id, direction=row["direction"] or payload.direction,
                 source_document_version_id=version.id, source_document_sha256=digest,
                 title=row["title"], planned_date=_import_date(row["planned_date"]),
@@ -2220,6 +2304,8 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     _check_task(db, item.project_id, payload.task_id)
     if item.target_kind == "budget":
         _check_contract(db, item.project_id, payload.contract_id)
+    vat_snapshot = _new_contract_vat_snapshot(db, item.project_id, payload.contract_id)
+    vat_before = deepcopy(item.vat_snapshot)
     document = db.get(Document, item.source_document_id)
     source_name = document.name if document else f"document:{item.source_document_id}"
     source_excerpt = " | ".join(filter(None, (
@@ -2229,6 +2315,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     if item.target_kind == "budget":
         created = BudgetLine(
             project_id=item.project_id, contract_id=payload.contract_id,
+            vat_snapshot=deepcopy(vat_snapshot),
             cost_category_id=category.id, category=category.name,
             description=item.payment_purpose, planned_amount=item.amount,
             forecast_amount=item.amount, currency=item.currency, status="proposed",
@@ -2249,6 +2336,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
         )
         created = CashFlowEntry(
             project_id=item.project_id, contract_id=payload.contract_id,
+            vat_snapshot=deepcopy(vat_snapshot),
             schedule_item_id=payload.schedule_item_id,
             budget_line_id=payload.budget_line_id, task_id=payload.task_id,
             source_document_id=item.source_document_id,
@@ -2263,11 +2351,13 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
         )
         db.add(created); db.flush()
         item.created_cash_flow_id = created.id
+    item.vat_snapshot = deepcopy(vat_snapshot)
     item.status = "confirmed"
     item.confirmed_by_user_id = user.id
     item.confirmed_at = datetime.now(timezone.utc)
     _audit(db, "invoice_extraction_confirmed", "invoice_extraction_proposal", item.id, user.id,
-           f"target={item.target_kind}; category={category.id}; human_confirmation=true")
+           f"target={item.target_kind}; category={category.id}; human_confirmation=true; "
+           f"vat_before={json.dumps(vat_before, ensure_ascii=False)}; vat_after={json.dumps(item.vat_snapshot, ensure_ascii=False)}")
     db.commit()
     return _invoice_proposal_payload(item)
 
@@ -2299,6 +2389,7 @@ def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: Us
         db, payload.project_id, payload.cost_category_id, payload.category, required=True,
     )
     data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
+    data["vat_snapshot"] = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     item = BudgetLine(**data); db.add(item); db.flush(); _audit(db, "budget_proposed", "budget_line", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
 
 
@@ -2310,6 +2401,7 @@ def create_cash_flow(payload: CashFlowCreate, db: Session = Depends(get_db), use
     data["cost_category_id"], data["category"] = _dual_write_category(
         db, payload.project_id, payload.cost_category_id, payload.category, required=False,
     )
+    data["vat_snapshot"] = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     item = CashFlowEntry(**data); db.add(item); db.flush(); _audit(db, "cash_flow_proposed", "cash_flow", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
 
 
@@ -2341,6 +2433,7 @@ def create_invoice_proposal(payload: InvoiceProposalCreate, db: Session = Depend
     )
     data["source_document_version_id"] = pin_version_id
     data["source_document_sha256"] = pin_sha256
+    data["vat_snapshot"] = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     item = CashFlowEntry(**data, status="proposed", entry_kind="invoice_commitment")
     db.add(item); db.flush()
     _audit(db, "invoice_cash_flow_proposed", "cash_flow", item.id, user.id,
@@ -2366,7 +2459,12 @@ def link_cash_flow_controls(item_id: int, payload: CashFlowControlLinks,
         "contract_id": item.contract_id,
         "schedule_item_id": item.schedule_item_id,
         "budget_line_id": item.budget_line_id,
+        "vat_snapshot": deepcopy(item.vat_snapshot),
     }
+    if item.contract_id != payload.contract_id:
+        item.vat_snapshot = _new_contract_vat_snapshot(db, item.project_id, payload.contract_id)
+    else:
+        _assert_proposed_row_vat_current(db, item)
     item.contract_id = payload.contract_id
     item.schedule_item_id = payload.schedule_item_id
     item.budget_line_id = payload.budget_line_id
@@ -2375,6 +2473,7 @@ def link_cash_flow_controls(item_id: int, payload: CashFlowControlLinks,
         "contract_id": item.contract_id,
         "schedule_item_id": item.schedule_item_id,
         "budget_line_id": item.budget_line_id,
+        "vat_snapshot": deepcopy(item.vat_snapshot),
     }
     _audit(
         db, "cash_flow_controls_linked", "cash_flow", item.id, user.id,
@@ -2425,6 +2524,7 @@ def mutate_cash_flow_plan(item_id: int, payload: CashFlowPlanMutationRequest,
     if payload.operation == "copy":
         result = CashFlowEntry(
             project_id=item.project_id, contract_id=item.contract_id,
+            vat_snapshot=_new_contract_vat_snapshot(db, item.project_id, item.contract_id),
             schedule_item_id=item.schedule_item_id, budget_line_id=item.budget_line_id,
             task_id=item.task_id, cost_category_id=item.cost_category_id,
             direction=item.direction, title=item.title, planned_date=payload.planned_date,
@@ -2514,6 +2614,8 @@ def undo_cash_flow_plan_mutation(mutation_id: int, db: Session = Depends(get_db)
 def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = Depends(get_db), user: User = Depends(require_user)):
     item = _locked_cash_flow(db, item_id)
     require_project_role(db, user, item.project_id, "manager")
+    if item.status == "proposed":
+        _assert_proposed_row_vat_current(db, item)
     if item.entry_kind == "legacy_unclassified" and item.source_document_id is not None:
         pin = assert_document_pin_current(db, item.project_id, item.source_document_id,
             item.source_document_version_id, item.source_document_sha256)
@@ -2652,7 +2754,8 @@ def payment_events(item_id: int, db: Session = Depends(get_db), user: User = Dep
              "payload_sha256": row.payload_sha256,
              "source_document_version_id": row.source_document_version_id,
              "source_document_sha256": row.source_document_sha256,
-             "reason": row.reason, "created_at": row.created_at} for row in rows]
+             "reason": row.reason, "created_at": row.created_at,
+             "vat_snapshot": row.vat_snapshot} for row in rows]
 
 
 @router.post("/procurement")
@@ -2671,6 +2774,7 @@ def create_act(payload: ActCreate, db: Session = Depends(get_db), user: User = D
         budget_line_id=payload.budget_line_id, currency=payload.currency,
     )
     data = payload.model_dump(exclude={"expected_document_version_id", "expected_document_sha256"})
+    data["vat_snapshot"] = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     if payload.document_id is not None:
         pin = resolve_current_document_pin(
             db, payload.project_id, payload.document_id,
@@ -2770,6 +2874,8 @@ def convert_forecast_to_invoice(item_id: int, payload: ForecastInvoiceConversion
             raise HTTPException(409, "CASH_FLOW_VERSION_MISMATCH")
         if item.entry_kind != "plan_forecast" or item.status not in {"proposed", "approved"}:
             raise HTTPException(409, "FORECAST_REQUIRED")
+        if item.status == "proposed":
+            _assert_proposed_row_vat_current(db, item)
         if item.actual_date is not None or item.actual_amount != 0:
             raise HTTPException(409, "PLAN_HAS_ACTUAL")
         schedule_id = payload.schedule_item_id or item.schedule_item_id
@@ -2792,6 +2898,64 @@ def convert_forecast_to_invoice(item_id: int, payload: ForecastInvoiceConversion
         raise
 
 
+@router.post("/{kind}/{item_id}/refresh-vat")
+def refresh_vat_snapshot(kind: str, item_id: int, payload: VatSnapshotRefresh,
+                         db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Explicit, single-row tax refresh; business values and controls stay intact."""
+    models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "acts": AcceptanceAct}
+    model = models.get(kind)
+    if model is None:
+        raise HTTPException(404, "Unsupported VAT register")
+    try:
+        item = db.scalar(select(model).where(model.id == item_id).with_for_update()
+                         .execution_options(populate_existing=True))
+        if item is None:
+            raise HTTPException(404, "Item not found")
+        require_project_role(db, user, item.project_id, "manager")
+        request_hash = hashlib.sha256(json.dumps({"kind": kind, "id": item_id, "user": user.id,
+            "payload": payload.model_dump()}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        receipts = db.scalars(select(AuditLog).where(AuditLog.action == "finance_vat_refreshed",
+            AuditLog.entity_type == kind, AuditLog.entity_id == item_id).order_by(AuditLog.id))
+        for audit in receipts:
+            receipt = json.loads(audit.details or "{}")
+            if receipt.get("idempotency_key") == payload.idempotency_key:
+                if receipt.get("request_hash") != request_hash:
+                    raise HTTPException(409, "IDEMPOTENCY_CONFLICT")
+                return {**receipt["result"], "replayed": True}
+        if item.status != "proposed":
+            raise HTTPException(409, "STATUS_NOT_PROPOSED: НДС обновляется только у предложения")
+        if _vat_refresh_state_hash(item) != payload.expected_state_hash:
+            raise HTTPException(409, "VAT_REFRESH_STATE_MISMATCH: предложение изменилось после загрузки")
+        contract = _locked_vat_contract(db, item.project_id, item.contract_id)
+        if contract is None:
+            raise HTTPException(422, "CONTRACT_REQUIRED: выберите договор предложения")
+        if contract.record_version != payload.expected_contract_record_version:
+            raise HTTPException(409, "CONTRACT_VERSION_MISMATCH: договор изменился после загрузки")
+        _assert_vat_refresh_source_current(db, item)
+        before = deepcopy(item.vat_snapshot)
+        current = contract_vat_snapshot(contract)
+        changed = before != current
+        if changed:
+            item.vat_snapshot = current
+            if hasattr(item, "record_version"):
+                item.record_version += 1
+            db.flush()
+        result = {"id": item.id, "kind": kind, "vat_snapshot": deepcopy(item.vat_snapshot),
+            "record_version": getattr(item, "record_version", None),
+            **_vat_refresh_metadata(db, item, {contract.id: contract}), "changed": changed, "replayed": False}
+        db.add(AuditLog(action="finance_vat_refreshed", entity_type=kind, entity_id=item.id,
+            details=json.dumps({"user": user.id, "idempotency_key": payload.idempotency_key,
+                "request_hash": request_hash, "contract_id": contract.id,
+                "contract_record_version": contract.record_version,
+                "before_vat_snapshot": before, "after_vat_snapshot": item.vat_snapshot,
+                "before_state_hash": payload.expected_state_hash, "result": result}, ensure_ascii=False, sort_keys=True)))
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.patch("/{kind}/{item_id}/status")
 def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     models = {"budget": BudgetLine, "cash-flow": CashFlowEntry, "procurement": ProcurementItem, "acts": AcceptanceAct, "baselines": ScheduleBaseline}
@@ -2806,6 +2970,8 @@ def update_status(kind: str, item_id: int, payload: StatusUpdate, db: Session = 
     if payload.status not in allowed: raise HTTPException(422, "Недопустимый статус")
     status_attribute = "stage" if kind == "procurement" else "status"
     previous_status = getattr(item, status_attribute)
+    if kind in {"budget", "acts"} and previous_status == "proposed" and payload.status in {"approved", "active", "signed", "paid"}:
+        _assert_proposed_row_vat_current(db, item)
     if kind == "acts" and payload.status != previous_status:
         transitions = {
             "proposed": {"approved", "rejected"},

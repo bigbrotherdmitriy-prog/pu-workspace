@@ -26,7 +26,7 @@ test("proposes one contract total and manager confirms it into budget", async ({
   await page.route("**/contract-budget-proposals/701", async route => {
     expect(route.request().method()).toBe("PATCH");
     const payload = JSON.parse(route.request().postData() || "{}");
-    expect(payload).toEqual({ amount: 100000, description: "Договор C-41: Поставка", selected_cost_category_id: 91 });
+    expect(payload).toEqual({ amount: "100000", description: "Договор C-41: Поставка", selected_cost_category_id: 91 });
     Object.assign(proposal, payload);
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(proposal) });
   });
@@ -66,12 +66,14 @@ test("proposes one contract total and manager confirms it into budget", async ({
   await page.getByRole("button", { name: "Договоры", exact: true }).click();
   await expect(page.getByRole("table", { name: "Реестр договоров" })).toBeVisible();
   await expect(page.locator(".contract-register-row").filter({ hasText: "C-41" })).toContainText("100 000,00 ₽");
-  // Financial actions are intentionally outside the compact daily table.
-  // Open the same advanced card that a manager uses before proposing a budget.
-  const advanced = page.locator(".contract-advanced-list");
-  await advanced.locator("summary").click();
-  await expect(advanced).toHaveAttribute("open", "");
-  const card = advanced.locator(".contract-card").filter({ has: page.locator(".contract-number", { hasText: "C-41" }) });
+  // Registry and scheme use the same card, including explicit financial actions.
+  await page.locator(".contract-register-row").filter({ hasText: "C-41" })
+    .locator(".contract-register-open").click();
+  const card = page.getByRole("article", { name: "Карточка договора C-41", exact: true });
+  await expect(card).toBeVisible();
+  await expect(page.locator(".contract-advanced-list")).toHaveCount(0);
+  expect(budget).toHaveLength(0);
+  expect(contract.budget_proposals).toHaveLength(0);
   await card.getByRole("button", { name: "Предложить бюджет по договору" }).click();
   await expect(page.getByText("Предложение строки бюджета")).toBeVisible();
   await expect(page.getByText(/Аванс 20[\s ]?000,00 ₽; удержание 5% — справочно/)).toBeVisible();

@@ -1,3 +1,5 @@
+import type { VatSnapshot } from "../contracts/contractCommercial";
+
 export type FinanceOverview = {
   summary: {
     budget_planned: number;
@@ -52,6 +54,11 @@ export type FinanceOverview = {
   }[];
   budget: {
     id: number;
+    vat_snapshot?: VatSnapshot | null;
+    vat_snapshot_stale?: boolean;
+    vat_proposed_snapshot?: VatSnapshot | null;
+    vat_refresh_state_hash?: string | null;
+    vat_contract_record_version?: number | null;
     contract_id?: number;
     cost_category_id?: number;
     category: string;
@@ -67,6 +74,11 @@ export type FinanceOverview = {
   }[];
   cash_flow: {
     id: number;
+    vat_snapshot?: VatSnapshot | null;
+    vat_snapshot_stale?: boolean;
+    vat_proposed_snapshot?: VatSnapshot | null;
+    vat_refresh_state_hash?: string | null;
+    vat_contract_record_version?: number | null;
     entry_kind?: string;
     confirmation_allowed?: boolean;
     confirmation_kind?: string;
@@ -102,6 +114,11 @@ export type FinanceOverview = {
   }[];
   acts: {
     id: number;
+    vat_snapshot?: VatSnapshot | null;
+    vat_snapshot_stale?: boolean;
+    vat_proposed_snapshot?: VatSnapshot | null;
+    vat_refresh_state_hash?: string | null;
+    vat_contract_record_version?: number | null;
     contract_id?: number;
     budget_line_id?: number;
     number: string;
@@ -121,6 +138,7 @@ export type CostCategory = {
 
 export type InvoiceExtractionProposal = {
   id: number;
+  vat_snapshot?: VatSnapshot | null;
   project_id: number;
   source_document_id: number;
   source_document_version_id: number;
