@@ -90,7 +90,8 @@ def attach_contract_applications(project_id: int, contract_id: int, payload: Con
                     details=f"role={payload.role}; documents={len(documents)}; created={created}; version={contract.record_version}; originals_changed=false"))
     db.commit()
     return {"contract_id": contract_id, "role": payload.role, "attached": created,
-            "documents": len(documents), "originals_changed": False}
+            "documents": len(documents), "originals_changed": False,
+            "record_version": contract.record_version}
 
 
 @router.post("/projects/{project_id}/contracts/{contract_id}/analyze-package")

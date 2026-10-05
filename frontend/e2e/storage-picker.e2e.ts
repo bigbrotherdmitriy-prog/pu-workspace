@@ -136,7 +136,18 @@ for (const endpoint of ["discovery", "confirmation"] as const) {
     await expect(picker(page).getByRole("alert")).toContainText("Переоткройте выбор папки");
     await expect(picker(page).getByRole("button", { name: "Переоткрыть выбор" })).toBeVisible();
     await expect(picker(page).getByRole("button", { name: "Выбрать текущую папку" })).toHaveCount(0);
-    await page.clock.runFor(16_000);
+    // Keep the root picker state/timers alive, but unmount the unrelated animated dashboard.
+    // runFor must observe every timer, not spend the CI budget rendering virtual WebGL frames.
+    await page.getByRole("button", { name: "Документы", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Документы", exact: true }).first()).toBeVisible();
+    await test.step("Observe all 16 virtual seconds without automatic retries", async () => {
+      await page.clock.runFor(16_000);
+    });
+    expect(mock.count("/discover")).toBe(1);
+    expect(mock.count("/snapshot-queue")).toBe(endpoint === "confirmation" ? 1 : 0);
+    await page.getByRole("button", { name: "Рабочий центр", exact: true }).click();
+    await expect(picker(page).getByRole("alert")).toContainText("Переоткройте выбор папки");
+    await expect(picker(page).getByRole("button", { name: "Выбрать текущую папку" })).toHaveCount(0);
     expect(mock.count("/discover")).toBe(1);
     expect(mock.count("/snapshot-queue")).toBe(endpoint === "confirmation" ? 1 : 0);
     mock.discoveryReply = undefined; mock.confirmReply = undefined;

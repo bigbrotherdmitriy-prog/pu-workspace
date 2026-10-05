@@ -1,0 +1,83 @@
+/* Outside module/modal stacking contexts, including the mail connection dialog. */
+.app-feedback-layer {
+  position: fixed;
+  z-index: 1500;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+}
+.app-error-banner {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 960px;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid #e36b72;
+  border-radius: 12px;
+  background: #fff0f1;
+  color: #8b1e2d;
+  box-shadow: 0 8px 28px #0003;
+}
+.app-error-banner span { min-width: 0; overflow-wrap: anywhere; }
+.app-error-banner button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0 4px;
+  min-width: 28px;
+  min-height: 28px;
+  font-size: 24px;
+  line-height: 1;
+}
+.contract-edit-form .form-operation-error,
+.gpr-dds-editor-modal .form-operation-error {
+  padding: 12px 16px;
+  border: 1px solid #e36b72;
+  border-radius: 10px;
+  background: #fff0f1;
+  color: #8b1e2d;
+  overflow-wrap: anywhere;
+}
+.form-operation-error p { margin: 8px 0 0; }
+.form-operation-pending { margin: 0; padding: 12px 16px; }
+.gpr-dds-editor-modal > .finance-editor-fields {
+  min-width: 0;
+  width: min(1440px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 16px;
+  padding: 0;
+  margin: 0;
+  background: #fff;
+  box-shadow: 0 24px 80px #0006;
+}
+html[data-display-theme="dark"] .finance-editor-fields { background: #11263a; }
+.contract-edit-form > small,
+.contract-edit-form > .form-operation-error,
+.contract-edit-form > .contract-edit-comparison,
+.contract-edit-form > button { grid-column: 1 / -1; }
+.contract-edit-comparison { min-width: 0; overflow-x: auto; }
+.contract-edit-comparison table { width: 100%; border-collapse: collapse; }
+.contract-edit-comparison th, .contract-edit-comparison td {
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+html[data-display-theme="dark"] .app-error-banner,
+html[data-display-theme="dark"] .form-operation-error {
+  background: #401f29;
+  color: #ffdde1;
+}
+@media (max-width: 600px) {
+  .app-feedback-layer { top: 8px; left: 8px; right: 8px; }
+  .app-error-banner { width: 100%; padding: 10px 12px; }
+}

@@ -43,7 +43,12 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const [financeBudgetLineId, setFinanceBudgetLineId] = useState(0);
   const [financeBaselineId, setFinanceBaselineId] = useState(0);
   const [costCategories, setCostCategories] = useState<CostCategory[]>([]);
-  const [invoiceExtractionProposal, setInvoiceExtractionProposal] = useState<InvoiceExtractionProposal | null>(null);
+  const [invoiceExtractionProposal, setInvoiceExtractionProposalState] = useState<InvoiceExtractionProposal | null>(null);
+  const [invoiceConfirmationError, setInvoiceConfirmationError] = useState("");
+  const [invoiceConfirming, setInvoiceConfirming] = useState(false);
+  const invoiceConfirmationRequest = useRef(false);
+  const invoiceReviewGeneration = useRef(0);
+  const renderedInvoiceReviewGeneration = invoiceReviewGeneration.current;
   const [invoiceAiRetrying, setInvoiceAiRetrying] = useState(false);
   const projectContext = useRef({ projectId });
   if (projectContext.current.projectId !== projectId) projectContext.current = { projectId };
@@ -64,6 +69,13 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     return () => context.projectId === projectId && projectContext.current === context;
   }
 
+  function setInvoiceExtractionProposal(proposal: InvoiceExtractionProposal | null) {
+    // Invalidate pending work immediately, including before the next render.
+    invoiceReviewGeneration.current += 1;
+    setInvoiceConfirmationError("");
+    setInvoiceExtractionProposalState(proposal);
+  }
+
   useLayoutEffect(() => {
     setSelectedFinanceContractId(0);
     setFinance(null);
@@ -72,6 +84,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     setFinanceStructuredPreview(null);
     setFinanceStructuredRows([]);
     setInvoiceExtractionProposal(null);
+    setInvoiceConfirmationError("");
     setInvoiceAiRetrying(false);
     setFinanceKind("budget");
     setFinanceTitle("");
@@ -126,6 +139,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     // Starting a manual entry is an explicit context switch.  Do not leave a
     // previously confirmed invoice or spreadsheet review covering the editor.
     setInvoiceExtractionProposal(null);
+    setInvoiceConfirmationError("");
     setFinanceStructuredPreview(null);
     setFinanceStructuredRows([]);
     setFinanceKind(kind);
@@ -158,6 +172,8 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       return;
     }
     if (candidate.kind === "invoice") {
+      invoiceReviewGeneration.current += 1;
+      setInvoiceConfirmationError("");
       try {
         const proposal = await api<InvoiceExtractionProposal>(`/execution/documents/${candidate.document_id}/invoice-extraction-proposals`, {
           method: "POST",
@@ -213,7 +229,8 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   function editInvoiceExtraction(patch: Partial<InvoiceExtractionProposal>) {
-    setInvoiceExtractionProposal((current) => current ? { ...current, ...patch } : current);
+    invoiceReviewGeneration.current += 1;
+    setInvoiceExtractionProposalState((current) => current ? { ...current, ...patch } : current);
   }
 
   async function addCostCategory(name: string) {
@@ -228,9 +245,16 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
-  async function confirmInvoiceExtraction() {
+  async function confirmInvoiceExtraction(): Promise<boolean> {
+    const currentProject = captureProject();
+    const current = () => currentProject()
+      && invoiceReviewGeneration.current === renderedInvoiceReviewGeneration;
+    if (!current() || invoiceConfirmationRequest.current) return false;
+    setInvoiceConfirmationError("");
     const proposal = invoiceExtractionProposal;
-    if (!proposal) return;
+    if (!proposal || !projectId || proposal.project_id !== projectId) return false;
+    invoiceConfirmationRequest.current = true;
+    setInvoiceConfirming(true);
     try {
       const reviewed = await api<InvoiceExtractionProposal>(`/execution/invoice-extraction-proposals/${proposal.id}`, {
         method: "PATCH",
@@ -243,6 +267,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           target_kind: proposal.target_kind,
         }),
       });
+      if (!current()) return false;
       const confirmed = await api<InvoiceExtractionProposal>(`/execution/invoice-extraction-proposals/${reviewed.id}/confirm`, {
         method: "POST",
         body: JSON.stringify({
@@ -251,10 +276,23 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           budget_line_id: reviewed.target_kind === "cash_flow" ? financeBudgetLineId || null : null,
         }),
       });
-      setInvoiceExtractionProposal(confirmed);
+      if (!current()) return false;
+      // Applying this request's result keeps its own review generation current.
+      setInvoiceExtractionProposalState(confirmed);
       setNotice("Счёт подтверждён человеком; финансовая строка создана как предложение.");
       await loadFinance();
-    } catch (error) { setError((error as Error).message); }
+      return current();
+    } catch (error) {
+      if (current()) {
+        const message = error instanceof Error ? error.message : "Не удалось подтвердить счёт.";
+        setInvoiceConfirmationError(message);
+        setError(message);
+      }
+      return false;
+    } finally {
+      invoiceConfirmationRequest.current = false;
+      setInvoiceConfirming(false);
+    }
   }
 
   async function rejectInvoiceExtraction() {
@@ -562,7 +600,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   }
 
   return {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceAiRetrying,
+    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceConfirmationError, invoiceConfirming, invoiceAiRetrying,
     selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
