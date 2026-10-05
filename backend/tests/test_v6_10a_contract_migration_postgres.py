@@ -1,5 +1,6 @@
 """Real upgrade/downgrade gate in a disposable, synthetic PostgreSQL schema."""
 
+import json
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -21,6 +22,11 @@ from app.database import get_db
 from app.models.organization_contract import Contract
 from app.models.project_member import ProjectMember
 from app.models.user import User
+
+
+VAT_REVISION_UPDATE_SQL = (
+    "UPDATE cash_flow_entries SET vat_snapshot=CAST(:snapshot AS jsonb) WHERE id=:entry_id"
+)
 
 
 @pytest.fixture
@@ -195,20 +201,20 @@ def test_postgres_jsonb_snapshot_preserves_full_row_noop_and_vat_change_revision
         connection.execute(text("UPDATE cash_flow_entries SET title=title WHERE id=9101"))
     assert revision() == before
     with engine.begin() as connection:
-        connection.execute(text(
-            "UPDATE cash_flow_entries SET vat_snapshot=CAST('{\"mode\":\"rate\",\"rate\":\"0.00\"}' AS jsonb) WHERE id=9101"
-        ))
+        connection.execute(text(VAT_REVISION_UPDATE_SQL), {
+            "snapshot": json.dumps({"mode": "rate", "rate": "0.00"}), "entry_id": 9101,
+        })
     assert revision() == before + 1
     with engine.begin() as connection:
         connection.execute(text("UPDATE cash_flow_entries SET title=title WHERE id=9101"))
     assert revision() == before + 1
     with engine.begin() as connection:
-        connection.execute(text(
-            "UPDATE cash_flow_entries SET vat_snapshot=CAST('{\"rate\":\"0.00\",\"mode\":\"rate\"}' AS jsonb) WHERE id=9101"
-        ))
+        connection.execute(text(VAT_REVISION_UPDATE_SQL), {
+            "snapshot": json.dumps({"rate": "0.00", "mode": "rate"}), "entry_id": 9101,
+        })
     assert revision() == before + 1
     with engine.begin() as connection:
-        connection.execute(text(
-            "UPDATE cash_flow_entries SET vat_snapshot=CAST('{\"mode\":\"none\",\"rate\":null}' AS jsonb) WHERE id=9101"
-        ))
+        connection.execute(text(VAT_REVISION_UPDATE_SQL), {
+            "snapshot": json.dumps({"mode": "none", "rate": None}), "entry_id": 9101,
+        })
     assert revision() == before + 2

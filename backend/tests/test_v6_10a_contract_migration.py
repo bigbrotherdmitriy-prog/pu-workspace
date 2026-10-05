@@ -4,7 +4,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 import pytest
-from sqlalchemy import JSON
+from sqlalchemy import JSON, text
 from sqlalchemy.dialects import postgresql, sqlite
 
 from app.models.execution_finance import (
@@ -48,3 +48,14 @@ def test_vat_snapshot_is_comparable_jsonb_on_postgres_and_sql_null_json_on_sqlit
         serialize = implementation.bind_processor(dialect)
         assert serialize(None) is None
         assert serialize(JSON.NULL) == "null"
+
+
+def test_vat_revision_sql_binds_json_document_without_interpreting_json_null():
+    import json
+    from test_v6_10a_contract_migration_postgres import VAT_REVISION_UPDATE_SQL
+    statement = text(VAT_REVISION_UPDATE_SQL)
+    assert set(statement.compile().params) == {"snapshot", "entry_id"}
+    values = {"snapshot": json.dumps({"mode": "none", "rate": None}), "entry_id": 9101}
+    compiled = statement.bindparams(**values).compile()
+    assert compiled.params == values
+    assert json.loads(compiled.params["snapshot"]) == {"mode": "none", "rate": None}
