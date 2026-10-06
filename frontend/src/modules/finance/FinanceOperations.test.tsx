@@ -102,6 +102,24 @@ describe("invoice extraction review", () => {
     expect(setBudgetLineId).toHaveBeenCalledWith(61);
   });
 
+  it("names the missing link instead of silently disabling confirmation", () => {
+    render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0 })} />);
+
+    expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/этап ГПР/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/строка бюджета/);
+  });
+
+  it("explains that the contract has no GPR stage at all, not just an unselected one", () => {
+    render(<FinanceOperations {...props({
+      scheduleItemId: 0, budgetLineId: 0,
+      finance: { baselines: [{ id: 51, contract_id: 41 }], schedule: [], budget: [] } as unknown as FinanceOverview,
+    })} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/у договора нет ни одного этапа/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/у договора нет ни одной строки бюджета/i);
+  });
+
   it("offers AI retry only for a temporary provider fallback", () => {
     const onRetryInvoiceAi = vi.fn();
     render(<FinanceOperations {...props({

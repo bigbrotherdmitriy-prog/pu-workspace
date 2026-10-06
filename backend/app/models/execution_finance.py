@@ -78,9 +78,16 @@ class BudgetLine(Base):
             "(source_document_version_id IS NOT NULL AND source_document_sha256 IS NOT NULL)",
             name="ck_budget_line_source_pin_pair",
         ),
+        CheckConstraint(
+            "direction IS NULL OR direction IN ('inflow','outflow')",
+            name="ck_budget_line_direction_valid",
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     line_kind: Mapped[str] = mapped_column(String(30), default="legacy_unclassified", server_default="legacy_unclassified")
+    # ADR-V6-05-INCOME-BUDGET-RU: explicit, independent of contract_id. NULL for
+    # legacy_unclassified rows until manually reviewed (BUDGET_SCOPE_UNKNOWN).
+    direction: Mapped[str | None] = mapped_column(String(10), nullable=True)
     budget_period: Mapped[int | None] = mapped_column(Integer, nullable=True)
     budget_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     article_normalized_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -109,6 +116,27 @@ class BudgetLine(Base):
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ScheduleBudgetLink(Base):
+    """ADR-GPR-PER-CONTRACT-BUDGET-ALLOCATION-RU: how much of one BudgetLine's
+    planned_amount is allocated to one ScheduleItem (a GPR stage). amount only,
+    no parallel percent (decision 2). Deleting either side cascades: deleting
+    the budget line or the schedule item removes its allocations, it does not
+    touch the other side's money. A new baseline revision has new ScheduleItem
+    rows (different ids), so allocations are not carried over automatically --
+    there is nothing here to backfill when that happens (decision 4)."""
+    __tablename__ = "schedule_budget_links"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_schedule_budget_link_amount_positive"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    budget_line_id: Mapped[int] = mapped_column(ForeignKey("budget_lines.id", ondelete="CASCADE"), index=True)
+    schedule_item_id: Mapped[int] = mapped_column(ForeignKey("schedule_items.id", ondelete="CASCADE"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CashFlowEntry(Base):
