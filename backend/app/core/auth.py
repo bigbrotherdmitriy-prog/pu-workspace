@@ -93,6 +93,14 @@ def require_user(
     db: Session = Depends(get_db),
 ) -> User:
     bearer_token = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else ""
+    if bearer_token in ("undefined", "null"):
+        # Some browser extensions / injected scripts add a stray
+        # "Authorization: Bearer undefined" (or "null") header to every
+        # request. Treat that as absent rather than letting a bogus bearer
+        # token shadow a perfectly valid pu_session cookie (observed live:
+        # login sets a valid cookie, but the very next request 401s because
+        # this literal string was preferred over it).
+        bearer_token = ""
     cookie_token = request.cookies.get("pu_session", "")
     raw_token = bearer_token or cookie_token
     if not raw_token:

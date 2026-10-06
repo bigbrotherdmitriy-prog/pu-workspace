@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -61,3 +62,43 @@ def test_cookie_authenticated_write_requires_matching_csrf_header():
             db,
         )
         assert authenticated.id == user.id
+
+
+def test_bogus_bearer_undefined_header_does_not_shadow_a_valid_session_cookie():
+    """Reproduces a live incident: some browser extension / injected script adds a
+    literal "Authorization: Bearer undefined" header to every request. Before this
+    fix, require_user preferred that bogus bearer token over a perfectly valid
+    pu_session cookie, so login would succeed (200, cookie set) but the very next
+    request 401'd with "Session is invalid or expired" -- login appeared broken
+    while the session store was actually fine."""
+    engine = _database()
+    with Session(engine) as db:
+        user = User(name="Admin", email="admin@example.test", is_admin=True)
+        db.add(user)
+        db.flush()
+        import hashlib
+        db.add(AuthSession(
+            user_id=user.id,
+            token_hash=hashlib.sha256(b"session-token").hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        ))
+        db.commit()
+
+        for bogus in ("undefined", "null"):
+            authenticated = require_user(
+                _request("GET", "pu_session=session-token"),
+                HTTPAuthorizationCredentials(scheme="Bearer", credentials=bogus),
+                db,
+            )
+            assert authenticated.id == user.id
+
+        # A genuinely wrong bearer token must still fail -- this isn't a
+        # blanket "cookie always wins" change, only the literal js-undefined
+        # placeholder is special-cased.
+        with pytest.raises(HTTPException) as failure:
+            require_user(
+                _request("GET", "pu_session=session-token"),
+                HTTPAuthorizationCredentials(scheme="Bearer", credentials="actually-wrong-token"),
+                db,
+            )
+        assert failure.value.status_code == 401
