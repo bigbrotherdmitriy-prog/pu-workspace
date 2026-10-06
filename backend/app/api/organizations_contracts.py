@@ -947,15 +947,38 @@ def _decimal_value(raw: str) -> Decimal:
     return Decimal(re.sub(r"\s+", "", raw).replace(",", "."))
 
 
+_DATE_PATTERN = r"(\d{1,2})[./](\d{1,2})[./](20\d{2})"
+
+
+def _date_value(day: str, month: str, year: str) -> date | None:
+    try:
+        return date(int(year), int(month), int(day))
+    except ValueError:
+        return None
+
+
 def _contract_financial_terms(content: str) -> dict:
-    """Extract explicit contract price, advance and retention with source evidence."""
-    result: dict[str, Decimal | str | None] = {
+    """Extract explicit contract price, advance, retention, VAT state, dates
+    and warranty with source evidence (ADR V6-10, step 8б: "предложение суммы,
+    дат и НДС ... со ссылкой на источник"). Regex over explicit phrasing only --
+    this is not NLP; an absent match leaves the field None, never a guess."""
+    result: dict[str, Decimal | str | date | None] = {
         "amount": None, "advance_amount": None, "advance_percent": None,
         "retention_percent": None, "amount_evidence": None,
         "advance_evidence": None, "retention_evidence": None,
+        "signed_at": None, "signed_at_evidence": None,
+        "vat_mode": None, "vat_rate": None, "vat_evidence": None,
+        "performed_from": None, "performed_to": None, "performed_evidence": None,
+        "warranty_until": None, "warranty_evidence": None,
     }
     money_pattern = r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:руб(?:\.|лей|ля)?|₽)"
     percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
+    date_pattern = re.compile(_DATE_PATTERN)
+    period_pattern = re.compile(
+        rf"(?:срок|период)\s+(?:выполнения|исполнения|оказания\s+услуг|действия)[^.\n]*?"
+        rf"с\s+{_DATE_PATTERN}\s+(?:по|до)\s+{_DATE_PATTERN}",
+        re.IGNORECASE,
+    )
     lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines() if line.strip()]
     for line in lines:
         lowered = line.casefold()
@@ -977,18 +1000,52 @@ def _contract_financial_terms(content: str) -> dict:
         if result["retention_percent"] is None and percent and re.search(r"удержан|удержива|гарантийн.*удерж", lowered):
             result["retention_percent"] = _decimal_value(percent.group(1))
             result["retention_evidence"] = line[:500]
+        if result["signed_at"] is None and re.search(r"подписан|дата\s+подписания", lowered):
+            match = date_pattern.search(line)
+            if match and (value := _date_value(*match.groups())) is not None:
+                result["signed_at"] = value
+                result["signed_at_evidence"] = line[:500]
+        if result["vat_mode"] is None and "ндс" in lowered:
+            if re.search(r"(?:не\s+облагается|без\s+ндс|ндс\s+не\s+предусмотрен|не\s+признаётся\s+плательщиком\s+ндс)", lowered):
+                result["vat_mode"] = "none"
+                result["vat_evidence"] = line[:500]
+            elif percent and re.search(r"(?:в\s+том\s+числе|включая|кроме|плюс)\s+ндс|ндс\s+(?:составляет|в\s+размере)?", lowered):
+                result["vat_mode"] = "rate"
+                result["vat_rate"] = _decimal_value(percent.group(1))
+                result["vat_evidence"] = line[:500]
+        if result["performed_from"] is None:
+            match = period_pattern.search(line)
+            if match:
+                groups = match.groups()
+                start, end = _date_value(*groups[0:3]), _date_value(*groups[3:6])
+                if start is not None and end is not None:
+                    result["performed_from"], result["performed_to"] = start, end
+                    result["performed_evidence"] = line[:500]
+        if result["warranty_until"] is None and re.search(r"гарантийн.*срок|гарант(?:ия|ийные\s+обязательства)", lowered):
+            match = re.search(rf"(?:до|по)\s+{_DATE_PATTERN}", line, re.IGNORECASE)
+            if match and (value := _date_value(*match.groups())) is not None:
+                result["warranty_until"] = value
+                result["warranty_evidence"] = line[:500]
     if result["advance_amount"] is None and result["advance_percent"] is not None and result["amount"] is not None:
         result["advance_amount"] = (result["amount"] * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
     return result
 
 
 def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
+    """Fill only currently-empty fields; never silently overwrite a value a
+    human already entered. A date/VAT extraction that would make the merged
+    state invalid (e.g. performed_from > performed_to) is not applied -- it is
+    reported separately so a human decides, per the plan's "подтверждение
+    выхода за [период] с записью в аудит"."""
     applied: list[str] = []
     mismatches: list[dict] = []
+    rejected: list[dict] = []
     for field, label, evidence_field, tolerance in (
         ("amount", "Сумма договора", "amount_evidence", Decimal("1")),
         ("advance_amount", "Аванс", "advance_evidence", Decimal("1")),
         ("retention_percent", "Удержание", "retention_evidence", Decimal("0.01")),
+        ("signed_at", "Дата подписания", "signed_at_evidence", None),
+        ("warranty_until", "Гарантия до", "warranty_evidence", None),
     ):
         extracted = terms.get(field)
         if extracted is None:
@@ -997,12 +1054,47 @@ def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
         if current is None:
             setattr(row, field, extracted)
             applied.append(field)
-        elif abs(Decimal(current) - Decimal(extracted)) > tolerance:
+        elif (tolerance is not None and abs(Decimal(current) - Decimal(extracted)) > tolerance) or (
+            tolerance is None and current != extracted
+        ):
             mismatches.append({
                 "field": field, "label": label, "current": str(current),
                 "extracted": str(extracted), "evidence": terms.get(evidence_field),
             })
-    return {"applied": applied, "mismatches": mismatches, "terms": terms}
+    vat_mode, vat_rate = terms.get("vat_mode"), terms.get("vat_rate")
+    if vat_mode is not None:
+        if row.vat_mode in (None, "unspecified"):
+            row.vat_mode, row.vat_rate = vat_mode, vat_rate
+            applied.append("vat_mode")
+        elif row.vat_mode != vat_mode or (vat_mode == "rate" and row.vat_rate != vat_rate):
+            mismatches.append({
+                "field": "vat_mode", "label": "НДС", "current": row.vat_mode,
+                "extracted": vat_mode, "evidence": terms.get("vat_evidence"),
+            })
+    performed_from, performed_to = terms.get("performed_from"), terms.get("performed_to")
+    if performed_from is not None and performed_to is not None:
+        if row.performed_from is None and row.performed_to is None:
+            if performed_from <= performed_to:
+                row.performed_from, row.performed_to = performed_from, performed_to
+                applied.append("performed_from")
+                applied.append("performed_to")
+            else:
+                # Extraction itself is self-contradictory (from > to) -- a
+                # human must look at the source, not have it written silently.
+                rejected.append({
+                    "field": "performed_from", "label": "Период исполнения",
+                    "extracted": f"{performed_from} - {performed_to}",
+                    "evidence": terms.get("performed_evidence"),
+                    "reason": "Начало периода позже окончания в тексте источника",
+                })
+        elif row.performed_from != performed_from or row.performed_to != performed_to:
+            mismatches.append({
+                "field": "performed_from", "label": "Период исполнения",
+                "current": f"{row.performed_from} - {row.performed_to}",
+                "extracted": f"{performed_from} - {performed_to}",
+                "evidence": terms.get("performed_evidence"),
+            })
+    return {"applied": applied, "mismatches": mismatches, "rejected": rejected, "terms": terms}
 
 
 def _rank_contract_documents(db: Session, project_id: int, row: Contract) -> list[dict]:
@@ -1157,6 +1249,7 @@ def analyze_contract(project_id: int, contract_id: int,
         raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
     source_id = document.external_id or f"document:{document.id}"
     financial_check = _apply_contract_financial_terms(row, _contract_financial_terms(content))
+    _validate_contract_commercial_state({field: getattr(row, field) for field in _CONTRACT_COMMERCIAL_FIELDS})
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",
         parent_id=document.parent_external_id or "contracts", content_text=content,
@@ -1194,7 +1287,8 @@ def analyze_contract(project_id: int, contract_id: int,
                  f"decisions_created={len(created_decisions)}; payment_proposals={len(payment_rows)}; "
                  f"organizations_remembered={len(remembered_organizations)}; automatically_linked={automatically_linked}; "
                  f"financial_fields_applied={','.join(financial_check['applied']) or 'none'}; "
-                 f"financial_mismatches={len(financial_check['mismatches'])}; originals_changed=false"),
+                 f"financial_mismatches={len(financial_check['mismatches'])}; "
+                 f"financial_rejected={len(financial_check.get('rejected', []))}; originals_changed=false"),
     ))
     db.commit()
     result = _contract(row, db)
