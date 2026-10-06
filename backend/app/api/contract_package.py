@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.api.organizations_contracts import (
+    _CONTRACT_COMMERCIAL_FIELDS,
+    _apply_contract_financial_terms,
     _contract_financial_terms,
     _contract_source_text,
     _create_payment_schedule_proposals,
     _ensure_contract_baseline,
     _record_contract_version,
+    _validate_contract_commercial_state,
 )
 from app.core.auth import require_project_role, require_user
 from app.core.contract_roles import cash_flow_direction
@@ -37,17 +38,24 @@ class ContractApplicationsRequest(BaseModel):
     role: str = Field(default="application", pattern="^(application|schedule|budget|cash_flow)$")
 
 
-def _financial_issues(contract: Contract, document: Document, content: str) -> list[dict]:
-    terms = _contract_financial_terms(content)
-    issues = []
-    for field, label in (("amount", "Сумма договора"), ("advance_amount", "Аванс"), ("retention_percent", "Удержание")):
-        extracted = terms.get(field)
-        current = getattr(contract, field)
-        if extracted is not None and current is not None and Decimal(extracted) != Decimal(current):
-            issues.append({"document_id": document.id, "document_name": document.name, "field": field,
-                           "title": f"{label}: расхождение", "contract_value": str(current),
-                           "document_value": str(extracted), "severity": "warning"})
-    return issues
+def _apply_financial_terms_from_document(contract: Contract, document: Document, content: str) -> dict:
+    """Step 8б (ADR V6-10): extract from this one document of the package and
+    fill whatever commercial fields are still empty, with a citation to this
+    specific document -- not just the contract's single source_document_id.
+    Each subsequent document in the package only fills fields earlier ones
+    left empty; it never overwrites a value a human (or an earlier document)
+    already set."""
+    check = _apply_contract_financial_terms(contract, _contract_financial_terms(content))
+    issues = [
+        {"document_id": document.id, "document_name": document.name, "field": mismatch["field"],
+         "title": f"{mismatch['label']}: расхождение", "contract_value": mismatch["current"],
+         "document_value": mismatch["extracted"], "severity": "warning"}
+        for mismatch in check["mismatches"]
+    ]
+    rejected = [{**item, "document_id": document.id, "document_name": document.name} for item in check["rejected"]]
+    return {"applied": [{"field": field, "document_id": document.id, "document_name": document.name}
+                        for field in check["applied"]],
+            "issues": issues, "rejected": rejected}
 
 
 @router.post("/projects/{project_id}/contracts/{contract_id}/applications")
@@ -105,8 +113,16 @@ def analyze_contract_package(project_id: int, contract_id: int, db: Session = De
         ContractDocumentLink.project_id == project_id, ContractDocumentLink.contract_id == contract_id,
     )))
     document_ids = list(dict.fromkeys([contract.source_document_id, *application_ids])) if contract.source_document_id else application_ids
-    documents = list(db.scalars(select(Document).where(Document.project_id == project_id, Document.id.in_(document_ids))))
+    by_id = {document.id: document for document in db.scalars(
+        select(Document).where(Document.project_id == project_id, Document.id.in_(document_ids)),
+    )}
+    # Order matters: the contract's own source document is tried first, then
+    # applications in link order -- the first document that has a value for a
+    # field wins; later documents in the package never overwrite it.
+    documents = [by_id[doc_id] for doc_id in document_ids if doc_id in by_id]
     issues: list[dict] = []
+    applied_fields: list[dict] = []
+    rejected_fields: list[dict] = []
     financial_entries = 0
     governance_document_ids: list[int] = []
     for document in documents:
@@ -115,12 +131,27 @@ def analyze_contract_package(project_id: int, contract_id: int, db: Session = De
             issues.append({"document_id": document.id, "document_name": document.name,
                            "title": "Текст не извлечён", "severity": "error"})
             continue
-        issues.extend(_financial_issues(contract, document, content))
+        financial_check = _apply_financial_terms_from_document(contract, document, content)
+        issues.extend(financial_check["issues"])
+        applied_fields.extend(financial_check["applied"])
+        rejected_fields.extend(financial_check["rejected"])
         financial_entries += len(_create_payment_schedule_proposals(db, contract, document))
         governance_document_ids.append(document.id)
+    if applied_fields:
+        _validate_contract_commercial_state({field: getattr(contract, field) for field in _CONTRACT_COMMERCIAL_FIELDS})
+        _ensure_contract_baseline(db, contract, actor_user_id=user.id)
+        contract.record_version += 1
+        db.flush()
+        _record_contract_version(
+            db, contract, event="analyzed", changed_fields={item["field"] for item in applied_fields},
+            actor_user_id=user.id,
+        )
     direction = cash_flow_direction(contract.contract_kind)
+    applied_summary = ",".join(f"{item['field']}<-doc{item['document_id']}" for item in applied_fields) or "none"
     db.add(AuditLog(action="contract_package_analyzed", entity_type="contract", entity_id=contract_id,
-                    details=f"documents={len(documents)}; issues={len(issues)}; financial={financial_entries}; direction={direction or 'context'}"))
+                    details=(f"documents={len(documents)}; issues={len(issues)}; financial={financial_entries}; "
+                             f"direction={direction or 'context'}; "
+                             f"fields_applied={applied_summary}; fields_rejected={len(rejected_fields)}")))
     db.commit()
 
     # §11 (async UX): financial issues/schedule proposals above are regex,
@@ -148,6 +179,7 @@ def analyze_contract_package(project_id: int, contract_id: int, db: Session = De
     return {"contract_id": contract_id, "documents": len(documents), "applications": len(application_ids),
             "issues": issues, "issue_count": len(issues), "financial_entries": financial_entries,
             "financial_direction": direction, "risks": None, "decisions": None,
+            "financial_fields_applied": applied_fields, "financial_fields_rejected": rejected_fields,
             "governance_job_id": governance_job_id, "governance_status": governance_status,
             "governance_already_running": governance_already_running,
             "payments_confirmed": False, "originals_changed": False}

@@ -13,6 +13,7 @@ from app.api.contract_package import (
     analyze_contract_package,
     get_contract_package_analysis_job,
 )
+from app.models.contract_document_link import ContractDocumentLink
 from app.models.document import Document
 from app.models.governance import Risk
 from app.models.job import BackgroundJob
@@ -73,6 +74,38 @@ def test_financials_stay_synchronous_governance_is_deferred(world, monkeypatch):
     assert outcome["risks"] == 1
     risk = db.scalar(select(Risk).where(Risk.project_id == project.id))
     assert risk is not None and "риск срыва поставки" in risk.source_excerpt
+
+
+def test_an_application_document_fills_empty_commercial_fields_with_citation(world):
+    """MVP-4 step 8б gap: "из приложений коммерческие поля не применяются" --
+    the package's own analyze_contract (single source doc) never looked at
+    applications; analyze_contract_package now does, and cites which
+    document each field came from."""
+    db, user, project, contract = world
+    contract.amount = None
+    source = _document(db, project.id, "Договор на выполнение работ.", name="contract.pdf")
+    db.commit()
+    contract.source_document_id = source.id
+    application = _document(
+        db, project.id,
+        "Дополнительное соглашение. Цена настоящего договора составляет 500 000,00 руб. "
+        "В том числе НДС 20%. Гарантийный срок действует до 31.12.2027.",
+        name="доп.соглашение.pdf",
+    )
+    db.commit()
+    db.add(ContractDocumentLink(project_id=project.id, contract_id=contract.id, document_id=application.id, role="application"))
+    db.commit()
+
+    result = analyze_contract_package(project.id, contract.id, db, user)
+
+    db.refresh(contract)
+    assert contract.amount == Decimal("500000.00")
+    assert (contract.vat_mode, contract.vat_rate) == ("rate", Decimal("20"))
+    assert contract.warranty_until is not None
+    applied_fields = {item["field"]: item["document_id"] for item in result["financial_fields_applied"]}
+    assert applied_fields["amount"] == application.id
+    assert applied_fields["vat_mode"] == application.id
+    assert result["financial_fields_rejected"] == []
 
 
 def test_no_documents_with_content_skips_job_entirely(world):

@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from app.api.organizations_contracts import ContractCreate, ContractDelete, ContractLinkUpdate, _apply_contract_financial_terms, _contract_dependencies, _contract_document_score, _contract_financial_terms, _contract_source_text, _payment_schedule_candidates, router
@@ -164,3 +165,61 @@ def test_financial_check_reports_mismatch_without_overwriting_user_value():
     ))
     assert contract.amount == Decimal("9000000")
     assert check["mismatches"][0]["field"] == "amount"
+
+
+def test_extracts_signed_date_vat_period_and_warranty_with_evidence():
+    """ADR V6-10 / MVP-4 step 8б: dates and VAT are extracted with a citation,
+    not just amount/advance/retention."""
+    terms = _contract_financial_terms(
+        "Договор подписан 01.02.2026.\n"
+        "В том числе НДС 20%.\n"
+        "Срок выполнения работ с 01.03.2026 по 30.06.2026.\n"
+        "Гарантийный срок действует до 31.12.2027."
+    )
+    assert terms["signed_at"] == date(2026, 2, 1)
+    assert terms["signed_at_evidence"] and "01.02.2026" in terms["signed_at_evidence"]
+    assert terms["vat_mode"] == "rate"
+    assert terms["vat_rate"] == Decimal("20")
+    assert terms["performed_from"] == date(2026, 3, 1)
+    assert terms["performed_to"] == date(2026, 6, 30)
+    assert terms["warranty_until"] == date(2027, 12, 31)
+
+    contract = Contract(project_id=1, number="1", title="Работы", status="active", vat_mode="unspecified")
+    check = _apply_contract_financial_terms(contract, terms)
+    assert contract.signed_at == date(2026, 2, 1)
+    assert (contract.vat_mode, contract.vat_rate) == ("rate", Decimal("20"))
+    assert (contract.performed_from, contract.performed_to) == (date(2026, 3, 1), date(2026, 6, 30))
+    assert contract.warranty_until == date(2027, 12, 31)
+    assert set(check["applied"]) >= {"signed_at", "vat_mode", "performed_from", "performed_to", "warranty_until"}
+
+
+def test_vat_none_phrasing_is_recognised_without_a_rate():
+    terms = _contract_financial_terms("Работы выполняются без НДС.")
+    assert terms["vat_mode"] == "none"
+    assert terms["vat_rate"] is None
+
+
+def test_self_contradictory_period_is_rejected_not_silently_applied():
+    """A document where the start is literally after the end in the text
+    itself must not be written into the contract -- it needs a human look,
+    per the plan's 'подтверждение выхода за период с записью в аудит'."""
+    contract = Contract(project_id=1, number="1", title="Работы", status="active")
+    terms = _contract_financial_terms(
+        "Срок выполнения работ с 30.06.2026 по 01.03.2026."
+    )
+    check = _apply_contract_financial_terms(contract, terms)
+    assert contract.performed_from is None and contract.performed_to is None
+    assert "performed_from" not in check["applied"]
+    assert check["rejected"][0]["field"] == "performed_from"
+
+
+def test_period_mismatch_against_an_existing_value_is_flagged_not_overwritten():
+    contract = Contract(
+        project_id=1, number="1", title="Работы", status="active",
+        performed_from=date(2026, 1, 1), performed_to=date(2026, 12, 31),
+    )
+    check = _apply_contract_financial_terms(contract, _contract_financial_terms(
+        "Срок выполнения работ с 01.03.2026 по 30.06.2026."
+    ))
+    assert (contract.performed_from, contract.performed_to) == (date(2026, 1, 1), date(2026, 12, 31))
+    assert check["mismatches"][0]["field"] == "performed_from"
