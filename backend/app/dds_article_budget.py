@@ -291,7 +291,7 @@ def apply_article_budget(document_id, payload, db: Session, user):
                     line = BudgetLine(
                         project_id=payload.project_id, contract_id=payload.contract_id,
                         vat_snapshot=vat_snapshot,
-                        line_kind="analytical_expense", budget_period=payload.plan_year,
+                        line_kind="analytical_expense", direction="outflow", budget_period=payload.plan_year,
                         budget_revision=payload.budget_revision, article_normalized_name=article["normalized_name"],
                         cost_category_id=article["cost_category_id"], category=article["category_name"],
                         description=article["title"], planned_amount=Decimal(article["monthly_total"]),

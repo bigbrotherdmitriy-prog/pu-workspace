@@ -43,6 +43,8 @@ def test_mvp4_routes_are_registered():
     assert "/execution/schedule-items/bulk" in paths
     assert "/execution/schedule-items/{item_id}" in paths
     assert "/execution/budget" in paths
+    assert "/execution/schedule-budget-links" in paths
+    assert "/execution/schedule-budget-links/{link_id}" in paths
     assert "/execution/cash-flow" in paths
     assert "/execution/invoice-proposals" in paths
     assert "/execution/cash-flow/{item_id}/link-controls" in paths

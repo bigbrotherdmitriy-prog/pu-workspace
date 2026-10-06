@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
+from app.core.contract_roles import cash_flow_direction
 from app.contract_vat import assert_proposed_vat_current, contract_vat_snapshot
 from app.database import get_db
 from app.finance_source_pins import assert_document_pin_current, resolve_current_document_pin
@@ -31,7 +32,7 @@ from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.execution_finance import (
     AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, ContractBudgetProposal, CostCategory, InvoiceExtractionProposal,
-    PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleItem,
+    PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleBudgetLink, ScheduleItem,
 )
 from app.models.organization_contract import Contract
 from app.models.project import Project
@@ -140,8 +141,21 @@ class MppImportRequest(BaseModel):
     baseline_id: int | None = None
     create_cash_flow_proposals: bool = False
     cash_flow_currency: str = "RUB"
+    # ADR-V6-05-INCOME-BUDGET-RU, step 8в: an .mpp file carries no direction
+    # signal at all (it is a work schedule, not a ledger), so the default stays
+    # "outflow" (a task's Cost is cost-to-complete in virtually every real
+    # case) -- but that default is now visible in /mpp/preview per task and
+    # explicitly overridable here, instead of being an invisible constant.
+    direction_overrides: dict[str, str] = Field(default_factory=dict, max_length=2000)
 
     _cash_flow_currency = field_validator("cash_flow_currency", mode="before")(_strict_currency)
+
+    @field_validator("direction_overrides")
+    @classmethod
+    def _check_direction_overrides(cls, value: dict[str, str]) -> dict[str, str]:
+        if any(direction not in ("inflow", "outflow") for direction in value.values()):
+            raise ValueError("Направление должно быть inflow или outflow")
+        return value
 
 
 MAX_MPP_BYTES = 25 * 1024 * 1024
@@ -219,24 +233,27 @@ def _create_mpp_cash_flow_proposals(
         if existing is not None:
             continue
         amount = _money(row.cost, allow_zero=False)
+        direction = payload.direction_overrides.get(row.external_uid, "outflow")
+        defaulted = row.external_uid not in payload.direction_overrides
         item = CashFlowEntry(
             project_id=payload.project_id,
             contract_id=payload.contract_id,
             vat_snapshot=deepcopy(vat_snapshot),
             schedule_item_id=schedule_item.id,
-            direction="outflow",
+            direction=direction,
             title=row.title[:500],
             planned_date=row.planned_finish or row.planned_start,
             planned_amount=amount,
             currency=payload.cash_flow_currency,
             category="Прочее",
-            note="Стоимость задачи из Microsoft Project; требует проверки",
+            note="Стоимость задачи из Microsoft Project; требует проверки"
+                 + ("" if not defaulted else " (направление не указано явно, использован outflow по умолчанию)"),
             status="proposed",
             source_name=source_name,
             source_excerpt=(
                 f"{payload.filename}; MPP task UID {row.external_uid}; "
                 f"cost={amount} {payload.cash_flow_currency}; "
-                f"date={row.planned_finish or row.planned_start}"
+                f"date={row.planned_finish or row.planned_start}; direction_defaulted={defaulted}"
             ),
         )
         db.add(item)
@@ -246,7 +263,8 @@ def _create_mpp_cash_flow_proposals(
         _audit(
             db, "mpp_cash_flow_proposals_created", "schedule_baseline",
             next(iter(imported.values())).baseline_id, user.id,
-            f"count={len(created)}; currency={payload.cash_flow_currency}; sha256={digest[:12]}",
+            f"count={len(created)}; currency={payload.cash_flow_currency}; sha256={digest[:12]}; "
+            f"direction_overrides={len(payload.direction_overrides)}",
         )
     return created
 
@@ -272,6 +290,11 @@ def _apply_mpp_relationships(tasks, imported: dict[str, ScheduleItem]) -> None:
 class BudgetCreate(BaseModel):
     project_id: int
     contract_id: int | None = None
+    # ADR-V6-05-INCOME-BUDGET-RU: explicit and independent of contract_id, but
+    # validated against the contract's role when both are given (see
+    # _assert_budget_direction_matches_contract). None keeps today's behaviour
+    # (legacy_unclassified line with no direction, excluded from margin).
+    direction: str | None = Field(default=None, pattern="^(inflow|outflow)$")
     category: str | None = Field(default=None, min_length=1, max_length=200)
     cost_category_id: int | None = Field(default=None, ge=1)
     description: str = Field(min_length=2, max_length=1000)
@@ -283,6 +306,18 @@ class BudgetCreate(BaseModel):
         lambda value: None if value is None else _money(value)
     )
     _currency = field_validator("currency", mode="before")(_strict_currency)
+
+
+class ScheduleBudgetLinkCreate(BaseModel):
+    """ADR-GPR-PER-CONTRACT-BUDGET-ALLOCATION-RU: how much of one BudgetLine's
+    planned_amount belongs to one GPR stage. Amount only (decision 2)."""
+    project_id: int
+    budget_line_id: int
+    schedule_item_id: int
+    amount: Decimal = Field(gt=0)
+    note: str | None = Field(default=None, max_length=1000)
+
+    _amount = field_validator("amount", mode="before")(lambda value: _money(value, allow_zero=False))
 
 
 class CashFlowCreate(BaseModel):
@@ -668,6 +703,21 @@ def _finance_document_hints(name: str, content: str) -> dict:
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
     if contract_id is not None and not db.scalar(select(Contract.id).where(Contract.id == contract_id, Contract.project_id == project_id)):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
+
+
+def _assert_budget_direction_matches_contract(db: Session, project_id: int, contract_id: int | None, direction: str | None):
+    """ADR-V6-05-INCOME-BUDGET-RU decision 3: a line's direction must agree with
+    its contract's role -- hard reject, never a warning. A direction without a
+    contract cannot be checked and is rejected too (there is nothing to validate
+    it against)."""
+    if direction is None:
+        return
+    if contract_id is None:
+        raise HTTPException(422, "Для строки с указанным направлением нужен договор")
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.project_id == project_id))
+    expected = cash_flow_direction(contract.contract_kind) if contract else None
+    if expected is None or expected != direction:
+        raise HTTPException(422, f"BUDGET_DIRECTION_CONTRACT_MISMATCH: договор не допускает направление {direction}")
 
 
 def _locked_vat_contract(db: Session, project_id: int, contract_id: int | None) -> Contract | None:
@@ -1320,6 +1370,10 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     baselines = list(db.scalars(select(ScheduleBaseline).where(ScheduleBaseline.project_id == project_id).order_by(ScheduleBaseline.version.desc())))
     schedule = list(db.scalars(select(ScheduleItem).where(ScheduleItem.project_id == project_id).order_by(ScheduleItem.baseline_id, ScheduleItem.sort_order, ScheduleItem.id)))
     budget = list(db.scalars(select(BudgetLine).where(BudgetLine.project_id == project_id).order_by(BudgetLine.id.desc())))
+    schedule_budget_links = list(db.scalars(
+        select(ScheduleBudgetLink).join(BudgetLine, ScheduleBudgetLink.budget_line_id == BudgetLine.id)
+        .where(BudgetLine.project_id == project_id).order_by(ScheduleBudgetLink.id)
+    ))
     cash = list(db.scalars(select(CashFlowEntry).where(CashFlowEntry.project_id == project_id).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)))
     confirmation_cache: dict = {}
     procurement = list(db.scalars(select(ProcurementItem).where(ProcurementItem.project_id == project_id).order_by(ProcurementItem.planned_delivery, ProcurementItem.id)))
@@ -1362,10 +1416,24 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     summary_by_currency: dict[str, dict] = {}
     for currency in currencies:
         currency_budget = [x for x in confirmed_budget if x.currency == currency]
+        # ADR-V6-05-INCOME-BUDGET-RU: budget_planned/committed/actual/forecast keep
+        # their historical meaning (expense + not-yet-classified legacy rows --
+        # today there are no confirmed direction="inflow" rows in production, so
+        # this split changes nothing numerically yet). Income is reported
+        # separately rather than folded into the same totals.
+        expense_budget = [x for x in currency_budget if x.direction != "inflow"]
+        income_budget = [x for x in currency_budget if x.direction == "inflow"]
         currency_cash = [x for x in relevant_cash if x.currency == currency]
-        planned = sum((x.planned_amount for x in currency_budget), Decimal("0"))
-        actual = sum((x.actual_amount for x in currency_budget), Decimal("0"))
-        forecast = sum(((x.forecast_amount or x.planned_amount) for x in currency_budget), Decimal("0"))
+        planned = sum((x.planned_amount for x in expense_budget), Decimal("0"))
+        actual = sum((x.actual_amount for x in expense_budget), Decimal("0"))
+        forecast = sum(((x.forecast_amount or x.planned_amount) for x in expense_budget), Decimal("0"))
+        income_planned = sum((x.planned_amount for x in income_budget), Decimal("0"))
+        income_actual = sum((x.actual_amount for x in income_budget), Decimal("0"))
+        # Margin only counts rows with an explicit direction (decision 5); a
+        # legacy_unclassified row with direction=NULL is excluded until someone
+        # reviews it, same as it is already excluded from direction-aware totals.
+        margin_expense = sum((x.planned_amount for x in currency_budget if x.direction == "outflow"), Decimal("0"))
+        margin_planned = income_planned - margin_expense
         balance = Decimal("0"); minimum = Decimal("0"); gap_date = None
         for row in currency_cash:
             value = row.actual_amount if row.actual_date else row.planned_amount
@@ -1374,10 +1442,13 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                 minimum, gap_date = balance, row.actual_date or row.planned_date
         summary_by_currency[currency] = {
             "budget_planned": planned,
-            "budget_committed": sum((x.committed_amount for x in currency_budget), Decimal("0")),
+            "budget_committed": sum((x.committed_amount for x in expense_budget), Decimal("0")),
             "budget_actual": actual,
             "budget_forecast": forecast,
             "budget_variance": forecast - planned,
+            "budget_income_planned": income_planned,
+            "budget_income_actual": income_actual,
+            "budget_margin_planned": margin_planned,
             "cash_balance_forecast": balance,
             "cash_gap": minimum,
             "cash_gap_date": gap_date,
@@ -1405,8 +1476,11 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                       "planned_progress": x.planned_progress, "actual_progress": x.actual_progress, "status": x.status,
                       **schedule_cpm.get(x.id, {"total_float": 0, "is_critical": False,
                                                 "constraint_violation": False})} for x in schedule],
+        "schedule_budget_links": [{"id": x.id, "budget_line_id": x.budget_line_id,
+                                   "schedule_item_id": x.schedule_item_id, "amount": x.amount,
+                                   "note": x.note} for x in schedule_budget_links],
         "budget": [{"id": x.id, "contract_id": x.contract_id, "cost_category_id": x.cost_category_id,
-                    "line_kind": x.line_kind, "budget_period": x.budget_period,
+                    "line_kind": x.line_kind, "direction": x.direction, "budget_period": x.budget_period,
                     "budget_revision": x.budget_revision, "record_version": x.record_version,
                     "category": x.category, "description": x.description,
                     "source_document_id": x.source_document_id,
@@ -1703,6 +1777,9 @@ def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: 
     data, digest = _decode_mpp(payload)
     tasks = _mpp_tasks(data)
     cost_rows = _mpp_cost_rows(tasks)
+    unknown_overrides = set(payload.direction_overrides) - {row.external_uid for row in cost_rows}
+    if unknown_overrides:
+        raise HTTPException(422, "Направление указано для задачи без стоимости или отсутствующей в файле")
     dated = [row for row in tasks if row.planned_start or row.planned_finish]
     existing_by_uid: dict[str, ScheduleItem] = {}
     if payload.baseline_id:
@@ -1737,6 +1814,15 @@ def preview_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: 
             and row.planned_start is None and row.planned_finish is None
             for row in tasks
         ),
+        # Row-level preview of the direction each cost-bearing task would get
+        # (ADR-V6-05-INCOME-BUDGET-RU, step 8в): "outflow" by default, visibly
+        # so, and overridable via direction_overrides -- never a hidden constant.
+        "cost_rows": [{
+            "external_uid": row.external_uid, "title": row.title[:500],
+            "cost": row.cost, "planned_date": row.planned_finish or row.planned_start,
+            "direction": payload.direction_overrides.get(row.external_uid, "outflow"),
+            "direction_defaulted": row.external_uid not in payload.direction_overrides,
+        } for row in cost_rows],
     }
 
 
@@ -1745,6 +1831,10 @@ def import_mpp(payload: MppImportRequest, db: Session = Depends(get_db), user: U
     require_project_role(db, user, payload.project_id, "editor")
     _check_contract(db, payload.project_id, payload.contract_id)
     data, digest = _decode_mpp(payload)
+    if payload.direction_overrides:
+        known_uids = {row.external_uid for row in _mpp_cost_rows(_mpp_tasks(data))}
+        if set(payload.direction_overrides) - known_uids:
+            raise HTTPException(422, "Направление указано для задачи без стоимости или отсутствующей в файле")
     existing = db.scalar(select(ScheduleBaseline).where(
         ScheduleBaseline.project_id == payload.project_id,
         ScheduleBaseline.contract_id == payload.contract_id,
@@ -2383,6 +2473,7 @@ def reject_invoice_extraction(proposal_id: int, db: Session = Depends(get_db),
 @router.post("/budget")
 def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, payload.project_id, "editor"); _check_contract(db, payload.project_id, payload.contract_id)
+    _assert_budget_direction_matches_contract(db, payload.project_id, payload.contract_id, payload.direction)
     _require_project_currency(db, payload.project_id, payload.currency)
     data = payload.model_dump()
     data["cost_category_id"], data["category"] = _dual_write_category(
@@ -2391,6 +2482,57 @@ def create_budget(payload: BudgetCreate, db: Session = Depends(get_db), user: Us
     data["forecast_amount"] = data["forecast_amount"] if data["forecast_amount"] is not None else data["planned_amount"]
     data["vat_snapshot"] = _new_contract_vat_snapshot(db, payload.project_id, payload.contract_id)
     item = BudgetLine(**data); db.add(item); db.flush(); _audit(db, "budget_proposed", "budget_line", item.id, user.id, "status=proposed"); db.commit(); return {"id": item.id, "status": item.status}
+
+
+def _schedule_budget_link_payload(row: ScheduleBudgetLink) -> dict:
+    return {"id": row.id, "budget_line_id": row.budget_line_id, "schedule_item_id": row.schedule_item_id,
+            "amount": row.amount, "note": row.note, "created_by_user_id": row.created_by_user_id}
+
+
+@router.post("/schedule-budget-links")
+def create_schedule_budget_link(payload: ScheduleBudgetLinkCreate, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, payload.project_id, "editor")
+    budget_line = db.scalar(select(BudgetLine).where(
+        BudgetLine.id == payload.budget_line_id, BudgetLine.project_id == payload.project_id,
+    ).with_for_update())
+    if budget_line is None:
+        raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+    item_row = db.scalar(select(ScheduleItem).where(
+        ScheduleItem.id == payload.schedule_item_id, ScheduleItem.project_id == payload.project_id,
+    ))
+    if item_row is None:
+        raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
+    item_contract_id = db.scalar(select(ScheduleBaseline.contract_id).where(ScheduleBaseline.id == item_row.baseline_id))
+    if budget_line.contract_id is None or item_contract_id is None or budget_line.contract_id != item_contract_id:
+        raise HTTPException(422, "SCHEDULE_BUDGET_LINK_CONTRACT_MISMATCH: строка бюджета и этап ГПР относятся к разным договорам")
+    existing_total = db.scalar(select(func.coalesce(func.sum(ScheduleBudgetLink.amount), 0)).where(
+        ScheduleBudgetLink.budget_line_id == budget_line.id,
+    )) or Decimal("0")
+    if existing_total + payload.amount > budget_line.planned_amount:
+        raise HTTPException(409, "BUDGET_ALLOCATION_EXCEEDS_LINE: сумма распределений по этапам превышает бюджет строки")
+    link = ScheduleBudgetLink(
+        budget_line_id=budget_line.id, schedule_item_id=item_row.id,
+        amount=payload.amount, note=payload.note, created_by_user_id=user.id,
+    )
+    db.add(link); db.flush()
+    _audit(db, "schedule_budget_link_created", "schedule_budget_link", link.id,
+           user.id, f"budget_line={budget_line.id}; schedule_item={item_row.id}; amount={link.amount}")
+    db.commit()
+    return _schedule_budget_link_payload(link)
+
+
+@router.delete("/schedule-budget-links/{link_id}")
+def delete_schedule_budget_link(link_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    link = db.scalar(select(ScheduleBudgetLink).where(ScheduleBudgetLink.id == link_id).with_for_update())
+    if link is None:
+        raise HTTPException(404, "Распределение не найдено")
+    budget_line = db.get(BudgetLine, link.budget_line_id)
+    require_project_role(db, user, budget_line.project_id, "editor")
+    db.delete(link); db.flush()
+    _audit(db, "schedule_budget_link_deleted", "schedule_budget_link", link_id,
+           user.id, f"budget_line={link.budget_line_id}; schedule_item={link.schedule_item_id}; amount={link.amount}")
+    db.commit()
+    return {"deleted": link_id}
 
 
 @router.post("/cash-flow")

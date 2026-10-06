@@ -82,7 +82,26 @@ export function FinanceOperations(props: Props) {
         <small>Категория: {invoiceProposal.category_evidence_quote || "нет подтверждаемой цитаты"}</small>
       </div>
       <div className="structured-actions"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Новая категория" /><button className="secondary" disabled={!newCategory.trim()} onClick={() => { onAddCostCategory?.(newCategory); setNewCategory(""); }}>Добавить в справочник</button></div>
-      {invoiceProposal.status === "proposed" ? <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={!invoiceProposal.amount || !invoiceProposal.payment_purpose || !invoiceProposal.selected_cost_category_id || (invoiceProposal.target_kind === "cash_flow" && (!invoiceProposal.planned_date || !selectedContractId || !scheduleItemId || !budgetLineId))} onClick={onConfirmInvoice}>Подтвердить и создать предложение</button></div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>}
+      {(() => {
+        const requiresChain = invoiceProposal.target_kind === "cash_flow";
+        // v5.5 / MVP-4 шаг 8г: кнопка не просто недоступна — система называет
+        // недостающее звено, а не молчит. Самый частый случай — у договора
+        // вообще нет ни одного этапа ГПР (пустой список для выбора).
+        const missing: string[] = [];
+        if (!invoiceProposal.amount) missing.push("сумма");
+        if (!invoiceProposal.payment_purpose) missing.push("назначение платежа");
+        if (!invoiceProposal.selected_cost_category_id) missing.push("категория затрат");
+        if (requiresChain && !selectedContractId) missing.push("договор");
+        if (requiresChain && selectedContractId && !contractSchedule.length) missing.push("этап ГПР (у договора нет ни одного этапа — добавьте его в разделе «ГПР»)");
+        else if (requiresChain && !scheduleItemId) missing.push("этап ГПР");
+        if (requiresChain && selectedContractId && !contractBudget.length) missing.push("строка бюджета (у договора нет ни одной строки бюджета)");
+        else if (requiresChain && !budgetLineId) missing.push("строка бюджета");
+        if (requiresChain && !invoiceProposal.planned_date) missing.push("плановая дата");
+        return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
+          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={onConfirmInvoice}>Подтвердить и создать предложение</button></div>
+          {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}
+        </div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>;
+      })()}
     </section>}
     {includeEditor && preview && <section className="card structured-import structured-import-review" id="structured-import">
       <div className="card-head"><div><span className="eyebrow">ПРОВЕРКА ПЛАНОВОГО ДДС</span><h2>{preview.name}</h2><p>Проверьте операции. В ДДС они попадут как предложения и не повлияют на прогноз до вашего подтверждения.</p></div><button className="secondary" onClick={onClosePreview}>Отмена</button></div>

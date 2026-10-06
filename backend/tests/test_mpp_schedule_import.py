@@ -1,6 +1,7 @@
 import base64
 
 import pytest
+from fastapi import HTTPException
 
 from app.api.execution_finance import MppImportRequest, _decode_mpp, _mpp_lag_suffix, import_mpp, router
 from app.models.execution_finance import CashFlowEntry, ScheduleBaseline, ScheduleItem
@@ -270,6 +271,107 @@ def test_mpp_costs_create_idempotent_cash_flow_proposals_only_after_opt_in(
     assert replay["duplicate"] is True
     assert replay["cash_flow_proposals_created"] == 0
     assert db_session.query(CashFlowEntry).count() == 1
+
+
+def test_mpp_preview_shows_row_level_direction_instead_of_a_hidden_constant(
+    db_session, user_factory, monkeypatch,
+):
+    """ADR-V6-05-INCOME-BUDGET-RU, step 8в: an .mpp file carries no direction
+    signal; the default stays outflow, but it must be visible per task in
+    preview and overridable, not an invisible constant."""
+    user = user_factory(is_admin=True)
+    organization = Organization(name="MPP direction preview organization")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="MPP direction preview project", organization_id=organization.id)
+    db_session.add(project); db_session.flush()
+    task = map_mpxj_task(Task(42))
+    monkeypatch.setattr("app.api.execution_finance._mpp_tasks", lambda _data: [task])
+    from app.api.execution_finance import preview_mpp
+
+    defaulted = preview_mpp(MppImportRequest(
+        project_id=project.id, filename="plan.mpp",
+        content_base64=base64.b64encode(b"MPP with costs").decode(),
+    ), db_session, user)
+    assert defaulted["cost_rows"] == [{
+        "external_uid": "42", "title": "Монтаж оборудования",
+        "cost": 125400.50, "planned_date": defaulted["cost_rows"][0]["planned_date"],
+        "direction": "outflow", "direction_defaulted": True,
+    }]
+
+    overridden = preview_mpp(MppImportRequest(
+        project_id=project.id, filename="plan.mpp",
+        content_base64=base64.b64encode(b"MPP with costs").decode(),
+        direction_overrides={"42": "inflow"},
+    ), db_session, user)
+    assert overridden["cost_rows"][0]["direction"] == "inflow"
+    assert overridden["cost_rows"][0]["direction_defaulted"] is False
+
+
+def test_mpp_preview_rejects_direction_override_for_an_unknown_task(
+    db_session, user_factory, monkeypatch,
+):
+    user = user_factory(is_admin=True)
+    organization = Organization(name="MPP unknown override organization")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="MPP unknown override project", organization_id=organization.id)
+    db_session.add(project); db_session.flush()
+    task = map_mpxj_task(Task(42))
+    monkeypatch.setattr("app.api.execution_finance._mpp_tasks", lambda _data: [task])
+    from app.api.execution_finance import preview_mpp
+
+    with pytest.raises(HTTPException) as error:
+        preview_mpp(MppImportRequest(
+            project_id=project.id, filename="plan.mpp",
+            content_base64=base64.b64encode(b"MPP with costs").decode(),
+            direction_overrides={"999": "inflow"},
+        ), db_session, user)
+    assert error.value.status_code == 422
+
+
+def test_mpp_import_applies_a_direction_override_instead_of_the_default(
+    db_session, user_factory, monkeypatch,
+):
+    user = user_factory(is_admin=True)
+    organization = Organization(name="MPP override import organization")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="MPP override import project", organization_id=organization.id)
+    db_session.add(project); db_session.flush()
+    task = map_mpxj_task(Task(42))
+    monkeypatch.setattr("app.api.execution_finance._mpp_tasks", lambda _data: [task])
+    payload = MppImportRequest(
+        project_id=project.id, filename="plan.mpp",
+        content_base64=base64.b64encode(b"MPP with costs").decode(),
+        create_cash_flow_proposals=True, cash_flow_currency="RUB",
+        direction_overrides={"42": "inflow"},
+    )
+
+    result = import_mpp(payload, db_session, user)
+
+    assert result["cash_flow_proposals_created"] == 1
+    proposal = db_session.query(CashFlowEntry).one()
+    assert proposal.direction == "inflow"
+    assert "по умолчанию" not in proposal.note
+
+
+def test_mpp_import_rejects_a_direction_override_for_an_unknown_task(
+    db_session, user_factory, monkeypatch,
+):
+    user = user_factory(is_admin=True)
+    organization = Organization(name="MPP import unknown override organization")
+    db_session.add(organization); db_session.flush()
+    project = Project(name="MPP import unknown override project", organization_id=organization.id)
+    db_session.add(project); db_session.flush()
+    task = map_mpxj_task(Task(42))
+    monkeypatch.setattr("app.api.execution_finance._mpp_tasks", lambda _data: [task])
+    payload = MppImportRequest(
+        project_id=project.id, filename="plan.mpp",
+        content_base64=base64.b64encode(b"MPP with costs").decode(),
+        create_cash_flow_proposals=True, direction_overrides={"999": "inflow"},
+    )
+
+    with pytest.raises(HTTPException) as error:
+        import_mpp(payload, db_session, user)
+    assert error.value.status_code == 422
 
 
 def test_mspdi_export_preserves_hierarchy_progress_and_dependency():
