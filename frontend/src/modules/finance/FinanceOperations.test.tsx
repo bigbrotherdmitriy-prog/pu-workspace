@@ -102,6 +102,23 @@ describe("invoice extraction review", () => {
     expect(setBudgetLineId).toHaveBeenCalledWith(61);
   });
 
+  it("lets a manual budget line be marked as income or expense (ADR-V6-05-INCOME-BUDGET-RU)", () => {
+    const setDirection = vi.fn();
+    render(<FinanceOperations {...props({
+      invoiceProposal: null, kind: "budget", direction: "outflow", setDirection,
+    })} />);
+
+    const select = screen.getByLabelText("Направление строки бюджета");
+    expect(select).toHaveValue("outflow");
+    fireEvent.change(select, { target: { value: "inflow" } });
+    expect(setDirection).toHaveBeenCalledWith("inflow");
+  });
+
+  it("hides the direction selector for non-budget record kinds", () => {
+    render(<FinanceOperations {...props({ invoiceProposal: null, kind: "cash-in" })} />);
+    expect(screen.queryByLabelText("Направление строки бюджета")).not.toBeInTheDocument();
+  });
+
   it("names the missing link instead of silently disabling confirmation", () => {
     render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0 })} />);
 

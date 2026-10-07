@@ -587,10 +587,10 @@ export function App() {
   const sourceBreadcrumbs = picker.breadcrumbs;
   const {
     finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceConfirmationError, invoiceConfirming, invoiceAiRetrying,
-    selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
+    selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate, financeDirection,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
-    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
+    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceDirection, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
@@ -3802,6 +3802,7 @@ export function App() {
               title={financeTitle}
               amount={financeAmount}
               date={financeDate}
+              direction={financeDirection}
               extra={financeExtra}
               objectName={financeObject}
               category={financeCategory}
@@ -3812,6 +3813,7 @@ export function App() {
               baselineId={financeBaselineId}
               costCategories={costCategories}
               setKind={setFinanceKind}
+              setDirection={setFinanceDirection}
               setTitle={setFinanceTitle}
               setAmount={setFinanceAmount}
               setDate={setFinanceDate}
@@ -3885,6 +3887,7 @@ export function App() {
               title={financeTitle}
               amount={financeAmount}
               date={financeDate}
+              direction={financeDirection}
               extra={financeExtra}
               objectName={financeObject}
               category={financeCategory}
@@ -3896,6 +3899,7 @@ export function App() {
               costCategories={costCategories}
               invoiceProposal={invoiceExtractionProposal}
               setKind={setFinanceKind}
+              setDirection={setFinanceDirection}
               setTitle={setFinanceTitle}
               setAmount={setFinanceAmount}
               setDate={setFinanceDate}
