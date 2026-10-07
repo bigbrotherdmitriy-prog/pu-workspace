@@ -199,6 +199,18 @@ def test_vat_none_phrasing_is_recognised_without_a_rate():
     assert terms["vat_rate"] is None
 
 
+def test_an_unrelated_percent_on_a_line_that_merely_mentions_vat_is_not_a_false_rate():
+    """Live incident: a line that only contains the word 'ндс' plus some
+    unrelated percent elsewhere on the same line (not immediately after an
+    explicit VAT phrase) must not be read as the VAT rate."""
+    terms = _contract_financial_terms(
+        "Стороны допускают изменение сроков не более чем на 2% от общей "
+        "продолжительности работ; вопросы НДС регулируются законодательством РФ."
+    )
+    assert terms["vat_mode"] is None
+    assert terms["vat_rate"] is None
+
+
 def test_self_contradictory_period_is_rejected_not_silently_applied():
     """A document where the start is literally after the end in the text
     itself must not be written into the contract -- it needs a human look,

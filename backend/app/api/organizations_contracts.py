@@ -1009,9 +1009,17 @@ def _contract_financial_terms(content: str) -> dict:
             if re.search(r"(?:не\s+облагается|без\s+ндс|ндс\s+не\s+предусмотрен|не\s+признаётся\s+плательщиком\s+ндс)", lowered):
                 result["vat_mode"] = "none"
                 result["vat_evidence"] = line[:500]
-            elif percent and re.search(r"(?:в\s+том\s+числе|включая|кроме|плюс)\s+ндс|ндс\s+(?:составляет|в\s+размере)?", lowered):
+            elif (vat_rate_match := re.search(
+                r"(?:в\s+том\s+числе\s+ндс|включая\s+ндс|кроме\s+ндс|плюс\s+ндс|"
+                r"ндс\s+составляет|ндс\s+в\s+размере)\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*%",
+                lowered,
+            )) is not None:
+                # The percent must immediately follow one of these specific VAT
+                # phrases -- not just be "ндс" and some unrelated percent
+                # anywhere on the same line (that produced a false "2%" match
+                # live, from a percent that had nothing to do with VAT).
                 result["vat_mode"] = "rate"
-                result["vat_rate"] = _decimal_value(percent.group(1))
+                result["vat_rate"] = _decimal_value(vat_rate_match.group(1))
                 result["vat_evidence"] = line[:500]
         if result["performed_from"] is None:
             match = period_pattern.search(line)
