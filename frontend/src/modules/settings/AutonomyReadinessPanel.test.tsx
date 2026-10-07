@@ -47,6 +47,21 @@ describe("AutonomyReadinessPanel", () => {
     expect(onLaunchPilot).toHaveBeenCalledTimes(1);
   });
 
+  it("offers to expand authority alongside the other controls, for an admin with the handler wired", () => {
+    const onBootstrapAuthority = vi.fn();
+    const onExpandAuthority = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority onBootstrapAuthority={onBootstrapAuthority}
+      canExpandAuthority onExpandAuthority={onExpandAuthority} />);
+    fireEvent.click(screen.getByRole("button", { name: "Выдать полный набор полномочий" }));
+    expect(onExpandAuthority).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the expand-authority control without the bootstrap control shown first", () => {
+    const onExpandAuthority = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority={false} canExpandAuthority onExpandAuthority={onExpandAuthority} />);
+    expect(screen.queryByRole("button", { name: /Выдать полный набор полномочий/ })).not.toBeInTheDocument();
+  });
+
   it("hides the launch-pilot control without the bootstrap control shown first", () => {
     const onLaunchPilot = vi.fn();
     render(<AutonomyReadinessPanel data={data} canBootstrapAuthority={false} canLaunchPilot onLaunchPilot={onLaunchPilot} />);

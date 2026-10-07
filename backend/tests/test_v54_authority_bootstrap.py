@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
 from app.core.auth import require_user
-from app.core.v54_authority import AuthorityDenied, AuthorityResolver, BOOTSTRAP_VALID_FOR, PILOT_SCOPE
+from app.core.v54_authority import AuthorityDenied, AuthorityResolver, BOOTSTRAP_VALID_FOR, PILOT_OPERATIONS, PILOT_SCOPE
 from app.database import Base, get_db
 from app.main import app
 from app.models.audit_log import AuditLog
@@ -212,3 +212,62 @@ def test_http_adapter_requires_global_admin_not_pilot_mandate(sessions):
         extensions = list(db.scalars(select(AuditExtension)))
         serialized = " ".join(str(item.__dict__) for item in audits + extensions)
         assert "admin-bootstrap@example.test" not in serialized and "owner-bootstrap@example.test" not in serialized
+
+
+def test_http_change_widens_an_already_active_mandate_without_touching_admin_gate(sessions):
+    # The readiness panel's permission-completeness check also fires on a
+    # live, unexpired mandate that simply never held the full PILOT_OPERATIONS
+    # set. bootstrap() refuses an active row on principle; change() is the
+    # ordinary, self-gated path for widening one in place -- no require_admin
+    # needed, because change() re-derives authorization from the caller's own
+    # authority.manage mandate.
+    def session_override():
+        with sessions() as db:
+            yield db
+
+    def owner_override():
+        with sessions() as db:
+            return db.get(User, 2)
+
+    def admin_override():
+        with sessions() as db:
+            return db.get(User, 4)
+
+    app.dependency_overrides[get_db] = session_override
+    app.dependency_overrides[require_user] = admin_override
+    try:
+        client = TestClient(app)
+        # Seed through the real HTTP bootstrap path -- both this and the PATCH
+        # below use the endpoint's own un-frozen AuthorityResolver() clock, so
+        # valid_until actually lands in the future relative to it (a
+        # separately frozen `NOW` here would already be long expired by the
+        # time either live call runs).
+        created = client.post("/api/v54/projects/4/authority/bootstrap", json={
+            "principal_kind": "user", "principal_id": "2",
+            "membership_role": "owner", "permissions": ["metadata", "authority.manage"],
+        })
+        assert created.status_code == 200 and created.json()["authority_epoch"] == 1
+
+        # Now the mandate holder (user 2) widens their own row; no admin
+        # override is used from here on, proving change() is self-gated.
+        app.dependency_overrides[require_user] = owner_override
+        response = client.patch("/api/v54/projects/4/authority", json={
+            "principal_id": 2, "membership_role": "owner", "state": "active",
+            "expected_epoch": 1, "permissions": sorted(PILOT_OPERATIONS),
+        })
+        assert response.status_code == 200 and response.json()["authority_epoch"] == 2
+
+        def not_mandated_override():
+            with sessions() as db:
+                return db.get(User, 5)
+        app.dependency_overrides[require_user] = not_mandated_override
+        denied = client.patch("/api/v54/projects/4/authority", json={
+            "principal_id": 2, "membership_role": "owner", "state": "active",
+            "expected_epoch": 2, "permissions": sorted(PILOT_OPERATIONS),
+        })
+        assert denied.status_code == 409
+    finally:
+        app.dependency_overrides.clear()
+    with sessions() as db:
+        row = db.scalar(select(AuthorityState).where(AuthorityState.principal_id == "2"))
+        assert row.authority_epoch == 2 and set(row.permissions) == PILOT_OPERATIONS
