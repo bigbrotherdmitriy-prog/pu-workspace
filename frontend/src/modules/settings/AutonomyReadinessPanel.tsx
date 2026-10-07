@@ -47,11 +47,15 @@ type Props = {
   canLaunchPilot?: boolean;
   onLaunchPilot?: () => void | Promise<void>;
   launchingPilot?: boolean;
+  canExpandAuthority?: boolean;
+  onExpandAuthority?: () => void | Promise<void>;
+  expandingAuthority?: boolean;
 };
 
 export function AutonomyReadinessPanel({
   data, canBootstrapAuthority, onBootstrapAuthority, bootstrappingAuthority,
   canLaunchPilot, onLaunchPilot, launchingPilot,
+  canExpandAuthority, onExpandAuthority, expandingAuthority,
 }: Props) {
   const reasons = [...data.overall.blockers, ...data.overall.warnings];
   return <section className="card span-settings autonomy-readiness" aria-label="Готовность AUTO">
@@ -96,6 +100,12 @@ export function AutonomyReadinessPanel({
         <p>Отдельно — реальный запуск: отправка внешних писем всегда требует вашего подтверждения (это нельзя переключить на авто), независимо от выбранного ниже режима.</p>
         <button type="button" disabled={launchingPilot} onClick={() => void onLaunchPilot()}>
           {launchingPilot ? "Запускаем…" : "Запустить пилот (всё через подтверждение)"}
+        </button>
+      </>}
+      {canExpandAuthority && onExpandAuthority && <>
+        <p>Если панель выше показывает «Полномочия... не совпадают с политикой» при живом и неистёкшем мандате — это значит, что мандат выдан не на полный список операций пилота. Можно расширить его без пересоздания.</p>
+        <button type="button" className="secondary" disabled={expandingAuthority} onClick={() => void onExpandAuthority()}>
+          {expandingAuthority ? "Расширяем…" : "Выдать полный набор полномочий"}
         </button>
       </>}
     </div>}

@@ -32,6 +32,8 @@ type Props = {
   bootstrappingAuthority?: boolean;
   onLaunchPilot?: () => void | Promise<void>;
   launchingPilot?: boolean;
+  onExpandAuthority?: () => void | Promise<void>;
+  expandingAuthority?: boolean;
   onPolicyChange: (policy: AIProjectPolicy) => void;
   onSavePolicy: () => void;
   onRetrySnapshot: (id: number) => void;
@@ -61,6 +63,9 @@ export function SettingsModule(props: Props) {
         canLaunchPilot={Boolean(props.currentUser?.is_admin)}
         onLaunchPilot={props.onLaunchPilot}
         launchingPilot={props.launchingPilot}
+        canExpandAuthority={Boolean(props.currentUser?.is_admin)}
+        onExpandAuthority={props.onExpandAuthority}
+        expandingAuthority={props.expandingAuthority}
       />}
       <section className="card span-settings">
         <div className="card-head"><div><h2>AI и защита данных</h2><p>Что разрешено передавать внешней модели для выбранного проекта</p></div></div>

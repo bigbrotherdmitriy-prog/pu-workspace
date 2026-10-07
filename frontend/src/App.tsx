@@ -542,6 +542,7 @@ export function App() {
     [autonomyReadiness, setAutonomyReadiness] = useState<AutonomyReadiness | null>(null),
     [bootstrappingAuthority, setBootstrappingAuthority] = useState(false),
     [launchingPilot, setLaunchingPilot] = useState(false),
+    [expandingAuthority, setExpandingAuthority] = useState(false),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
     [busyProposal, setBusyProposal] = useState(0),
@@ -698,6 +699,46 @@ export function App() {
       setError(error instanceof Error ? error.message : "Не удалось запустить пилот.");
     } finally {
       setLaunchingPilot(false);
+    }
+  }
+
+  async function expandAuthority() {
+    // The readiness panel's "authority_revoked_expired_or_mismatched" blocker
+    // also fires when a live, unexpired mandate simply doesn't carry the
+    // FULL PILOT_OPERATIONS set (app/core/v54_authority.py) -- bootstrap()
+    // intentionally refuses to touch an active row, so the fix here is the
+    // ordinary change() path instead, widening the same row in place.
+    if (!window.confirm(
+      "Выдать текущему мандату полный список операций пилота (это не меняет срок действия "
+      + "и не включает автономные внешние сообщения)?",
+    )) return;
+    const myRole = members.find((member) => member.user_id === currentUser?.id)?.role || "owner";
+    const epoch = autonomyReadiness?.authority.authority_epoch;
+    if (!epoch) { setError("Нет текущего epoch мандата для расширения."); return; }
+    setExpandingAuthority(true);
+    try {
+      const result = await api<{ authority_epoch: number }>(
+        `/api/v54/projects/${projectId}/authority`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            principal_id: currentUser?.id, membership_role: myRole, state: "active",
+            expected_epoch: epoch,
+            permissions: ["identity", "write", "observe", "metadata", "fragment", "review",
+              "dispatch", "audit", "audit.append", "mailbox.bootstrap", "claim.extract",
+              "claim.review", "context.confirm", "action.freeze", "action.approve",
+              "action.revoke", "action.dispatch", "action.execute", "action.receipt.read",
+              "task.assign", "task.assignee", "authority.manage", "autonomy.policy.manage",
+              "mailbox.reconcile", "mailbox.read", "mailbox.action"],
+          }),
+        },
+      );
+      setNotice(`Полномочия расширены, epoch=${result.authority_epoch}.`);
+      const readiness = await api(`/api/v54/projects/${projectId}/autonomy-readiness`).catch(() => null);
+      if (readiness?.overall?.status) setAutonomyReadiness(readiness);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не удалось расширить полномочия.");
+    } finally {
+      setExpandingAuthority(false);
     }
   }
 
@@ -4221,6 +4262,8 @@ export function App() {
           bootstrappingAuthority={bootstrappingAuthority}
           onLaunchPilot={() => void launchPilot()}
           launchingPilot={launchingPilot}
+          onExpandAuthority={() => void expandAuthority()}
+          expandingAuthority={expandingAuthority}
           onPolicyChange={setAiPolicy}
           onSavePolicy={() => void saveAIPolicy()}
           onRetrySnapshot={(id) => void retrySnapshot(id)}
