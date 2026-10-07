@@ -2626,6 +2626,51 @@ def link_cash_flow_controls(item_id: int, payload: CashFlowControlLinks,
     return {"id": item.id, "status": item.status, **after}
 
 
+class ApprovedBudgetLineBackfill(BaseModel):
+    project_id: int
+    budget_line_id: int = Field(gt=0)
+
+
+@router.post("/cash-flow/{item_id}/link-budget-line")
+def link_approved_cash_flow_budget_line(item_id: int, payload: ApprovedBudgetLineBackfill,
+                                        db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Narrow backfill path (ADR-V6-05-INCOME-BUDGET-RU): attach a budget line
+    to an already-approved cash-flow entry that currently has none at all.
+    link_cash_flow_controls only works on 'proposed' rows by design -- an
+    approved row's canonical links should not casually change. This exists
+    specifically for historical approved records (mostly income) that were
+    approved before a budget line of the matching direction ever existed to
+    link to. It never overwrites an existing link and never touches amounts,
+    status, contract_id or schedule_item_id."""
+    item = _locked_cash_flow(db, item_id)
+    require_project_role(db, user, item.project_id, "manager")
+    if item.project_id != payload.project_id:
+        raise HTTPException(422, "Запись ДДС не принадлежит выбранному проекту")
+    if item.status != "approved":
+        raise HTTPException(409, "Эта привязка доступна только для уже подтверждённых записей")
+    if item.budget_line_id is not None:
+        raise HTTPException(409, "У записи уже есть строка бюджета; эта операция не меняет существующую связь")
+    budget = db.scalar(select(BudgetLine).where(
+        BudgetLine.id == payload.budget_line_id, BudgetLine.project_id == item.project_id,
+    ))
+    if budget is None:
+        raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
+    if item.contract_id is not None and budget.contract_id != item.contract_id:
+        raise HTTPException(422, "Строка бюджета относится к другому договору")
+    if budget.currency != item.currency:
+        raise HTTPException(422, "Валюта строки бюджета не совпадает с валютой записи ДДС")
+    if budget.direction is not None and budget.direction != item.direction:
+        raise HTTPException(422, f"BUDGET_DIRECTION_MISMATCH: строка бюджета не подходит направлению {item.direction}")
+    item.budget_line_id = budget.id
+    item.record_version += 1
+    _audit(
+        db, "cash_flow_budget_line_backfilled", "cash_flow", item.id, user.id,
+        f"budget_line_id={budget.id}; direction={item.direction}; human_confirmation=true",
+    )
+    db.commit()
+    return {"id": item.id, "status": item.status, "budget_line_id": item.budget_line_id}
+
+
 def _plan_mutation_payload(receipt: CashFlowPlanMutation, *, replayed: bool = False) -> dict:
     return {
         "mutation_id": receipt.id,

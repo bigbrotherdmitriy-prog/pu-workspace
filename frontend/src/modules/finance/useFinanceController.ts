@@ -470,6 +470,20 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
+  async function linkApprovedCashFlowBudgetLine(id: number, budgetLineId: number) {
+    // ADR-V6-05-INCOME-BUDGET-RU: narrow backfill for an already-approved row
+    // (mostly historical income) that has no budget line at all yet -- never
+    // available for a "proposed" row, that's linkCashFlowControls above.
+    try {
+      await api(`/execution/cash-flow/${id}/link-budget-line`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId, budget_line_id: budgetLineId }),
+      });
+      setNotice("Строка бюджета привязана к уже подтверждённой записи ДДС.");
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
   async function mutateCashFlowPlan(id: number, operation: "edit" | "move" | "copy", plannedDate: string,
                                     plannedAmount: number, expectedRecordVersion: number) {
     const result = await api<{ mutation_id: number; result_id: number; record_version: number }>(
@@ -658,7 +672,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, refreshFinanceVat, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation,
+    confirmFinance, confirmFinanceMany, refreshFinanceVat, confirmCashPayment, linkCashFlowControls, linkApprovedCashFlowBudgetLine, mutateCashFlowPlan, undoCashFlowPlanMutation,
     updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }

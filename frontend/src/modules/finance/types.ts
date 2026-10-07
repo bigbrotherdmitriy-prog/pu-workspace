@@ -61,6 +61,7 @@ export type FinanceOverview = {
     vat_contract_record_version?: number | null;
     contract_id?: number;
     cost_category_id?: number;
+    direction?: string | null;
     category: string;
     description: string;
     planned_amount: number;

@@ -157,6 +157,40 @@ describe("DdsWorkspace", () => {
     expect(onLinkControls).toHaveBeenCalledWith(9, 4, 71, 72);
   });
 
+  it("backfills a budget line onto an already-approved row that has none (ADR-V6-05-INCOME-BUDGET-RU)", () => {
+    const onLinkApprovedBudgetLine = vi.fn();
+    const withIncomeBudget = {
+      ...finance,
+      budget: [
+        { id: 80, contract_id: 4, direction: "inflow", category: "Выручка", description: "Доходная строка", planned_amount: 1000, committed_amount: 0, actual_amount: 0, remaining_amount: 1000, overrun_amount: 0, forecast_amount: 1000, currency: "RUB", status: "approved" },
+        { id: 81, contract_id: 4, direction: "outflow", category: "Расходы", description: "Расходная строка", planned_amount: 400, committed_amount: 0, actual_amount: 0, remaining_amount: 400, overrun_amount: 0, forecast_amount: 400, currency: "RUB", status: "approved" },
+      ],
+    } as FinanceOverview;
+    render(<DdsWorkspace finance={withIncomeBudget} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onLinkApprovedBudgetLine={onLinkApprovedBudgetLine} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    const select = screen.getByLabelText("Строка бюджета для Этап 1");
+    // Only the matching-direction (inflow) line is offered, the outflow one is not.
+    expect(within(select).queryByText("Расходная строка")).not.toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "80" } });
+    fireEvent.click(screen.getByRole("button", { name: "Привязать бюджет" }));
+
+    expect(onLinkApprovedBudgetLine).toHaveBeenCalledWith(1, 80);
+  });
+
+  it("does not offer the backfill action when the row already has a budget line", () => {
+    const onLinkApprovedBudgetLine = vi.fn();
+    const linked = {
+      ...finance,
+      budget: [{ id: 80, contract_id: 4, direction: "inflow", category: "Выручка", description: "Доходная строка", planned_amount: 1000, committed_amount: 0, actual_amount: 0, remaining_amount: 1000, overrun_amount: 0, forecast_amount: 1000, currency: "RUB", status: "approved" }],
+      cash_flow: [{ ...finance.cash_flow[0], budget_line_id: 80 }, finance.cash_flow[1]],
+    } as FinanceOverview;
+    render(<DdsWorkspace finance={linked} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onLinkApprovedBudgetLine={onLinkApprovedBudgetLine} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    expect(screen.queryByRole("button", { name: "Привязать бюджет" })).not.toBeInTheDocument();
+  });
+
   it("exports every active workbook view as an Excel-compatible CSV", () => {
     const createObjectUrl = vi.fn(() => "blob:dds");
     const revokeObjectUrl = vi.fn();

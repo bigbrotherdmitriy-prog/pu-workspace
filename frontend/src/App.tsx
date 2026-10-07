@@ -596,7 +596,7 @@ export function App() {
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, mutateCashFlowPlan, undoCashFlowPlanMutation, refreshFinanceVat,
+    confirmFinance, confirmFinanceMany, confirmCashPayment, linkCashFlowControls, linkApprovedCashFlowBudgetLine, mutateCashFlowPlan, undoCashFlowPlanMutation, refreshFinanceVat,
     updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
   } = useFinanceController({ ready, projectId, setNotice, setError });
   useEffect(() => {
@@ -3862,6 +3862,7 @@ export function App() {
               onLinkControls={(id, contractId, scheduleItemId, budgetLineId) =>
                 void linkCashFlowControls(id, contractId, scheduleItemId, budgetLineId)
               }
+              onLinkApprovedBudgetLine={(id, budgetLineId) => void linkApprovedCashFlowBudgetLine(id, budgetLineId)}
               onMutatePlan={mutateCashFlowPlan}
               onUndoPlanMutation={undoCashFlowPlanMutation}
               focusScheduleItemId={focusedScheduleItemId}
