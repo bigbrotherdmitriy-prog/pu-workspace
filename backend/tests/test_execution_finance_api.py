@@ -48,6 +48,7 @@ def test_mvp4_routes_are_registered():
     assert "/execution/cash-flow" in paths
     assert "/execution/invoice-proposals" in paths
     assert "/execution/cash-flow/{item_id}/link-controls" in paths
+    assert "/execution/cash-flow/{item_id}/link-budget-line" in paths
     assert "/execution/cash-flow/{item_id}/confirm-payment" in paths
     assert "/execution/procurement" in paths
     assert "/execution/acts" in paths
