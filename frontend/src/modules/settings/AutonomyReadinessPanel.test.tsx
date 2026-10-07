@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AutonomyReadinessPanel, type AutonomyReadiness } from "./AutonomyReadinessPanel";
 
 const data: AutonomyReadiness = {
@@ -27,6 +27,39 @@ describe("AutonomyReadinessPanel", () => {
     expect(screen.getByText("CONFIRM")).toBeInTheDocument();
     expect(screen.getByText("3 / 3")).toBeInTheDocument();
     expect(screen.getByText(/нельзя подтвердить/)).toBeInTheDocument();
+  });
+
+  it("offers to bootstrap authority only for an admin with the handler wired", () => {
+    const onBootstrapAuthority = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority onBootstrapAuthority={onBootstrapAuthority} />);
+    // The panel itself never gates on confirm -- that's the caller's job (App.tsx);
+    // here it just proves the handler is wired and reachable.
+    fireEvent.click(screen.getByRole("button", { name: "Восстановить мандат пилота" }));
+    expect(onBootstrapAuthority).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers to launch the pilot only alongside the bootstrap control, for an admin with the handler wired", () => {
+    const onBootstrapAuthority = vi.fn();
+    const onLaunchPilot = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority onBootstrapAuthority={onBootstrapAuthority}
+      canLaunchPilot onLaunchPilot={onLaunchPilot} />);
+    fireEvent.click(screen.getByRole("button", { name: "Запустить пилот (всё через подтверждение)" }));
+    expect(onLaunchPilot).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the launch-pilot control without the bootstrap control shown first", () => {
+    const onLaunchPilot = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority={false} canLaunchPilot onLaunchPilot={onLaunchPilot} />);
+    expect(screen.queryByRole("button", { name: /Запустить пилот/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the bootstrap control for a non-admin or without a handler", () => {
+    const onBootstrapAuthority = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority={false} onBootstrapAuthority={onBootstrapAuthority} />);
+    expect(screen.queryByRole("button", { name: "Восстановить мандат пилота" })).not.toBeInTheDocument();
+    cleanup();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority />);
+    expect(screen.queryByRole("button", { name: "Восстановить мандат пилота" })).not.toBeInTheDocument();
   });
 
   it("has no controls capable of changing policy, authority or mailbox", () => {

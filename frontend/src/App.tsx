@@ -540,6 +540,8 @@ export function App() {
     [aiPolicy, setAiPolicy] = useState<AIProjectPolicy | null>(null),
     [processingQueue, setProcessingQueue] = useState<ProcessingQueue | null>(null),
     [autonomyReadiness, setAutonomyReadiness] = useState<AutonomyReadiness | null>(null),
+    [bootstrappingAuthority, setBootstrappingAuthority] = useState(false),
+    [launchingPilot, setLaunchingPilot] = useState(false),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
     [busyProposal, setBusyProposal] = useState(0),
@@ -620,6 +622,78 @@ export function App() {
       .catch(() => { if (current) setAutonomyReadiness(null); });
     return () => { current = false; };
   }, [active, projectId, ready]);
+
+  async function bootstrapAuthority() {
+    // ADR-V6-07-REOPENING-RU condition 1: admin-only recovery for an expired
+    // or missing pilot authority mandate -- change() can't extend one once
+    // it has lapsed, since that itself requires an already-active mandate.
+    if (!window.confirm(
+      "Восстановить мандат пилота для проекта? Это НЕ включает автономные действия само по себе "
+      + "(тот режим настраивается отдельно, через autonomy-policy) -- только продлевает право "
+      + "администратора действовать в рамках пилота ещё на несколько дней.",
+    )) return;
+    const myRole = members.find((member) => member.user_id === currentUser?.id)?.role || "owner";
+    setBootstrappingAuthority(true);
+    try {
+      const result = await api<{ authority_epoch: number }>(
+        `/api/v54/projects/${projectId}/authority/bootstrap`, {
+          method: "POST",
+          body: JSON.stringify({
+            principal_kind: "user", principal_id: String(currentUser?.id || ""),
+            membership_role: myRole,
+            permissions: ["action.dispatch", "action.execute", "action.freeze", "action.receipt.read",
+              "audit.append", "authority.manage", "autonomy.policy.manage", "dispatch", "metadata",
+              "review", "task.assign"],
+          }),
+        },
+      );
+      setNotice(`Мандат пилота восстановлен, epoch=${result.authority_epoch}.`);
+      const readiness = await api(`/api/v54/projects/${projectId}/autonomy-readiness`).catch(() => null);
+      if (readiness?.overall?.status) setAutonomyReadiness(readiness);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не удалось восстановить мандат пилота.");
+    } finally {
+      setBootstrappingAuthority(false);
+    }
+  }
+
+  async function launchPilot() {
+    // Conservative first real launch: every capability on CONFIRM. Sending an
+    // external message is CONFIRM-only in this system regardless -- there is
+    // no AUTO value for it at all, by design (backend/app/autonomy_policy.py).
+    if (!window.confirm(
+      "Запустить пилот для проекта в режиме «всё через подтверждение» "
+      + "(создание задач, уведомлений и отправка писем — только по вашему явному клику, ничего автоматически)? "
+      + "Срок действия — 3 дня.",
+    )) return;
+    setLaunchingPilot(true);
+    try {
+      const current = await api<{ policy: { ref: { id: { value: string } }; value: number }; policy_sha256: string } | null>(
+        `/api/v54/projects/${projectId}/autonomy-policy`,
+      );
+      const validUntil = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+      await api(`/api/v54/projects/${projectId}/autonomy-policy`, {
+        method: "PUT",
+        body: JSON.stringify({
+          expected_policy_id: current?.policy.ref.id.value ?? null,
+          expected_revision: current?.policy.value ?? 0,
+          expected_policy_hash: current?.policy_sha256 ?? null,
+          expected_authority_epoch: autonomyReadiness?.authority.authority_epoch ?? null,
+          create_internal_task: "CONFIRM",
+          create_internal_notification: "CONFIRM",
+          send_external_message: "CONFIRM",
+          valid_until: validUntil,
+        }),
+      });
+      setNotice("Пилот запущен в режиме «всё через подтверждение», на 3 дня.");
+      const readiness = await api(`/api/v54/projects/${projectId}/autonomy-readiness`).catch(() => null);
+      if (readiness?.overall?.status) setAutonomyReadiness(readiness);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не удалось запустить пилот.");
+    } finally {
+      setLaunchingPilot(false);
+    }
+  }
 
   function rememberProject(id: number) {
     if (id !== projectIdRef.current) {
@@ -4137,6 +4211,10 @@ export function App() {
           aiPolicy={aiPolicy}
           processingQueue={processingQueue}
           autonomyReadiness={autonomyReadiness}
+          onBootstrapAuthority={() => void bootstrapAuthority()}
+          bootstrappingAuthority={bootstrappingAuthority}
+          onLaunchPilot={() => void launchPilot()}
+          launchingPilot={launchingPilot}
           onPolicyChange={setAiPolicy}
           onSavePolicy={() => void saveAIPolicy()}
           onRetrySnapshot={(id) => void retrySnapshot(id)}

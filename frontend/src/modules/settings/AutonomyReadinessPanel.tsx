@@ -39,7 +39,20 @@ function quota(label: string, used: number, limit: number | null) {
   return <div className="setting-row"><span>{label}</span><strong>{used} / {limit ?? "—"}</strong></div>;
 }
 
-export function AutonomyReadinessPanel({ data }: { data: AutonomyReadiness }) {
+type Props = {
+  data: AutonomyReadiness;
+  canBootstrapAuthority?: boolean;
+  onBootstrapAuthority?: () => void | Promise<void>;
+  bootstrappingAuthority?: boolean;
+  canLaunchPilot?: boolean;
+  onLaunchPilot?: () => void | Promise<void>;
+  launchingPilot?: boolean;
+};
+
+export function AutonomyReadinessPanel({
+  data, canBootstrapAuthority, onBootstrapAuthority, bootstrappingAuthority,
+  canLaunchPilot, onLaunchPilot, launchingPilot,
+}: Props) {
   const reasons = [...data.overall.blockers, ...data.overall.warnings];
   return <section className="card span-settings autonomy-readiness" aria-label="Готовность AUTO">
     <div className="card-head"><div><h2>Готовность AUTO</h2><p>Только чтение · проект №{data.project_id} · проверено {new Date(data.observed_at).toLocaleString("ru-RU")}</p></div>
@@ -74,5 +87,17 @@ export function AutonomyReadinessPanel({ data }: { data: AutonomyReadiness }) {
       {reasons.length ? reasons.map((reason) => <p key={reason}><AlertTriangle /> {reasonLabels[reason] || reason}</p>) : <p><CheckCircle2 /> Все наблюдаемые проверки пройдены.</p>}
     </div>
     <p className="autonomy-readonly-note">Панель не изменяет policy, authority, mailbox и не запускает внешние действия.</p>
+    {canBootstrapAuthority && onBootstrapAuthority && <div className="autonomy-bootstrap">
+      <p>Единственное исключение: если мандат пилота истёк и его некому продлить (замкнутый круг — продление само требует действующего мандата), администратор может восстановить его.</p>
+      <button type="button" className="secondary" disabled={bootstrappingAuthority} onClick={() => void onBootstrapAuthority()}>
+        {bootstrappingAuthority ? "Восстанавливаем…" : "Восстановить мандат пилота"}
+      </button>
+      {canLaunchPilot && onLaunchPilot && <>
+        <p>Отдельно — реальный запуск: отправка внешних писем всегда требует вашего подтверждения (это нельзя переключить на авто), независимо от выбранного ниже режима.</p>
+        <button type="button" disabled={launchingPilot} onClick={() => void onLaunchPilot()}>
+          {launchingPilot ? "Запускаем…" : "Запустить пилот (всё через подтверждение)"}
+        </button>
+      </>}
+    </div>}
   </section>;
 }
