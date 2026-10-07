@@ -1,6 +1,6 @@
 """DB-backed, explicit authority for the inactive synthetic CONFIRM pilot."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -13,6 +13,10 @@ from app.models.v54_authority import AuthorityState
 
 
 PILOT_SCOPE = "v54.synthetic.confirm"
+# ADR-V6-07-REOPENING-RU: a bootstrap-issued mandate is a short-lived recovery
+# grant, not a standing one -- same order of magnitude as the original pilot's
+# observation window (22-29.09.2026), not a long-lived credential.
+BOOTSTRAP_VALID_FOR = timedelta(days=5)
 PILOT_OPERATIONS = frozenset({
     "identity", "write", "observe", "metadata", "fragment", "review", "dispatch", "audit",
     "audit.append", "mailbox.bootstrap", "claim.extract", "claim.review", "context.confirm",
@@ -182,6 +186,81 @@ class AuthorityResolver:
             authorize=lambda session, request, target: bool(
                 session is db and request == scope and target == subject
                 and "authority.manage" in manager.permissions
+            ),
+        )
+        return row.authority_epoch
+
+    def bootstrap(self, db, *, scope: RequestScope, principal_kind: str, principal_id: str,
+                  membership_role: str | None, permissions, valid_for: timedelta = BOOTSTRAP_VALID_FOR):
+        """Admin-only recovery path for ADR-V6-07-REOPENING-RU condition 1.
+
+        `change()` requires an already-active `authority.manage` mandate to
+        extend one -- a closed loop once the sole row expires or never
+        existed. This method breaks that loop WITHOUT going through
+        `require`/`require_principal`: the caller (an HTTP endpoint gated by
+        `require_admin`, a *global* admin flag, never this scope's own
+        mandate) is solely responsible for authorizing who may call it. This
+        method only enforces the row-state precondition below.
+
+        It creates a new row only if none exists for (project, principal,
+        scope), or reissues one only if the existing row is expired
+        (`valid_until <= now`). An active, unexpired row is never touched --
+        that path stays `change()`, same as any other admin on the pilot.
+        """
+        now = self.clock()
+        tenant_id, project_id, _ = self._ids(scope)
+        if (principal_kind not in {"user", "service"} or not str(principal_id)
+                or type(valid_for) is not timedelta or valid_for <= timedelta(0)):
+            _deny()
+        principal_id = str(principal_id)
+        values = sorted(set(permissions)) if isinstance(permissions, (set, frozenset, tuple, list)) else []
+        if not values or any(value not in PILOT_OPERATIONS for value in values):
+            _deny()
+        member = None
+        if principal_kind == "user":
+            if not principal_id.isdigit() or not membership_role:
+                _deny()
+            member = db.scalar(select(ProjectMember).where(
+                ProjectMember.project_id == project_id, ProjectMember.user_id == int(principal_id),
+            ).with_for_update())
+            if member is None or member.role != membership_role:
+                _deny()
+        elif membership_role is not None:
+            _deny()
+        self._project(db, tenant_id, project_id, lock=True)
+        row = self._state(db, tenant_id, project_id, principal_kind, principal_id, lock=True)
+        if row is not None and row.state == "active" and _utc(row.valid_until) is not None and _utc(row.valid_until) > now:
+            _deny()  # active, unexpired -- the owning principal (or another admin) must use change()
+        valid_until = now + valid_for
+        if row is None:
+            row = AuthorityState(
+                organization_id=tenant_id, project_id=project_id, principal_kind=principal_kind,
+                principal_id=principal_id, scope=self.scope, membership_role=membership_role,
+                permissions=values, state="active", authority_epoch=1, record_version=1,
+                valid_until=valid_until, updated_at=now, updated_by_user_id=int(scope.actor.id.value),
+            )
+            db.add(row)
+        else:
+            row.membership_role = membership_role
+            row.permissions = values
+            row.state = "active"
+            row.authority_epoch += 1
+            row.record_version += 1
+            row.valid_until = valid_until
+            row.updated_at = now
+            row.updated_by_user_id = int(scope.actor.id.value)
+        db.flush()
+
+        # Distinct from AUTHORITY_CHANGED: the audit trail must tell "renewed by
+        # its own owner" apart from "recovered by a global admin after expiry".
+        from app.action_trust.guards import sequence
+        from app.core import v54_transactions
+        subject = scope.project
+        event = AuditAppend(subject=subject, sequence=sequence(db, subject), event="AUTHORITY_BOOTSTRAPPED")
+        v54_transactions.append_audit(
+            db, scope=scope, event=event,
+            authorize=lambda session, request, target: bool(
+                session is db and request == scope and target == subject
             ),
         )
         return row.authority_epoch
