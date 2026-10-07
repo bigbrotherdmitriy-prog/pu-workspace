@@ -363,6 +363,62 @@ describe("atomic DDS confirmation", () => {
   });
 });
 
+describe("reverse a settled cash-flow payment", () => {
+  it("fetches the latest payment event and reverses it with a reason", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("Ошибочная дата, пересоздаём запись");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [] };
+      if (path === "/execution/cash-flow/160/payment-events") {
+        return [{ id: 501, event_type: "confirmation" }, { id: 502, event_type: "correction" }];
+      }
+      if (path === "/execution/cash-flow/160/reverse-payment") return { id: 160, status: "approved" };
+      return { categories };
+    });
+    const { result } = renderHook(() => useFinanceController({ ready: true, projectId: 17, setNotice: vi.fn(), setError: vi.fn() }));
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+
+    await act(async () => result.current.reverseCashPayment(160));
+
+    const reverseCall = vi.mocked(api).mock.calls.find(([path]) => path === "/execution/cash-flow/160/reverse-payment");
+    expect(reverseCall).toBeDefined();
+    const body = JSON.parse(String(reverseCall?.[1]?.body));
+    expect(body.supersedes_event_id).toBe(502);
+    expect(body.reason).toBe("Ошибочная дата, пересоздаём запись");
+    expect(body.idempotency_key).toEqual(expect.any(String));
+  });
+
+  it("does not call the API when the user declines the confirmation prompt", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("Ошибка");
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(api).mockImplementation(async (path) => path.startsWith("/execution/overview") ? overview
+      : path.startsWith("/execution/document-candidates") ? { candidates: [] } : { categories });
+    const { result } = renderHook(() => useFinanceController({ ready: true, projectId: 17, setNotice: vi.fn(), setError: vi.fn() }));
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+    vi.mocked(api).mockClear();
+
+    await act(async () => result.current.reverseCashPayment(160));
+
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reason shorter than 3 characters without calling the API", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("ок");
+    const setError = vi.fn();
+    vi.mocked(api).mockImplementation(async (path) => path.startsWith("/execution/overview") ? overview
+      : path.startsWith("/execution/document-candidates") ? { candidates: [] } : { categories });
+    const { result } = renderHook(() => useFinanceController({ ready: true, projectId: 17, setNotice: vi.fn(), setError }));
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+    vi.mocked(api).mockClear();
+
+    await act(async () => result.current.reverseCashPayment(160));
+
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenCalledWith(expect.stringContaining("сторно"));
+  });
+});
+
 describe("manual budget line direction (ADR-V6-05-INCOME-BUDGET-RU)", () => {
   it("sends direction only when a contract is selected, and resets it to outflow after submit", async () => {
     vi.mocked(api).mockImplementation(async (path) => {

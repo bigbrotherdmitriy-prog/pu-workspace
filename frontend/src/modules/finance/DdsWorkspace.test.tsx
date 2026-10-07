@@ -95,6 +95,27 @@ describe("DdsWorkspace", () => {
     expect(screen.queryByRole("button", { name: /Удалить операцию/ })).not.toBeInTheDocument();
   });
 
+  it("offers to reverse a settled payment when a handler is given", () => {
+    const onReversePayment = vi.fn();
+    const closed = { ...finance, cash_flow: [
+      { ...finance.cash_flow[0], status: "received", actual_date: "2026-01-30", actual_amount: 1000 },
+    ] } as FinanceOverview;
+    render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()}
+      onConfirmPayment={vi.fn()} onReversePayment={onReversePayment} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отменить оплату" }));
+    expect(onReversePayment).toHaveBeenCalledWith(1);
+  });
+
+  it("hides the reverse-payment control without a handler or for an unsettled row", () => {
+    const closed = { ...finance, cash_flow: [
+      { ...finance.cash_flow[0], status: "received", actual_date: "2026-01-30", actual_amount: 1000 },
+    ] } as FinanceOverview;
+    render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
+    expect(screen.queryByRole("button", { name: "Отменить оплату" })).not.toBeInTheDocument();
+  });
+
   it("keeps an operation available for retry when cancellation fails", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn().mockRejectedValue(new Error("offline"))} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);

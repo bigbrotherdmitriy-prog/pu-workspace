@@ -568,6 +568,24 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
+  async function reverseCashPayment(id: number) {
+    const reason = window.prompt("Причина сторно оплаты (минимум 3 символа)", "Ошибочное подтверждение оплаты");
+    if (reason === null) return;
+    if (reason.trim().length < 3) { setError("Укажите причину сторно (минимум 3 символа)"); return; }
+    if (!window.confirm("Отменить подтверждённую оплату? Запись вернётся в статус «подтверждено», факт будет обнулён.")) return;
+    try {
+      const events = await api<Array<{ id: number; event_type: string }>>(`/execution/cash-flow/${id}/payment-events`);
+      const latest = events[events.length - 1];
+      if (!latest) { setError("Не найдено платёжное событие для сторно"); return; }
+      await api(`/execution/cash-flow/${id}/reverse-payment`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim(), supersedes_event_id: latest.id, idempotency_key: crypto.randomUUID() }),
+      });
+      setNotice("Оплата отменена (сторно). Запись возвращена в статус «подтверждено», факт обнулён.");
+      await loadFinance();
+    } catch (error) { setError((error as Error).message); }
+  }
+
   async function updateScheduleActual(id: number) {
     const value = window.prompt("Фактическая готовность, %", "100");
     if (value === null) return;
@@ -672,7 +690,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
     prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
     addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, refreshFinanceVat, confirmCashPayment, linkCashFlowControls, linkApprovedCashFlowBudgetLine, mutateCashFlowPlan, undoCashFlowPlanMutation,
+    confirmFinance, confirmFinanceMany, refreshFinanceVat, confirmCashPayment, reverseCashPayment, linkCashFlowControls, linkApprovedCashFlowBudgetLine, mutateCashFlowPlan, undoCashFlowPlanMutation,
     updateScheduleActual, updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline, recordFinanceActual,
   };
 }

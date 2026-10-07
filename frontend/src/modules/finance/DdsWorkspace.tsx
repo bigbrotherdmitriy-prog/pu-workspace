@@ -12,6 +12,7 @@ type Props = {
   onConfirm: (kind: string, id: number, status: string) => void | Promise<void>;
   onConfirmMany: (kind: string, ids: number[], status: string) => void | Promise<void>;
   onConfirmPayment: (id: number, amount: number) => void;
+  onReversePayment?: (id: number) => void | Promise<void>;
   onRefreshVat?: (kind: string, id: number) => void;
   onLinkControls: (id: number, contractId: number, scheduleItemId: number, budgetLineId: number) => void | Promise<void>;
   onLinkApprovedBudgetLine?: (id: number, budgetLineId: number) => void | Promise<void>;
@@ -98,7 +99,7 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onRefreshVat, onLinkControls, onLinkApprovedBudgetLine, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
+export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onReversePayment, onRefreshVat, onLinkControls, onLinkApprovedBudgetLine, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
   const cashFlowImportInput = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<Tab>("calendar");
   const [objectFilter, setObjectFilter] = useState("all");
@@ -468,6 +469,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
             })() : null}
         <FinanceVatDetails row={row} kind="cash-flow" onRefresh={onRefreshVat} />
         {row.status === "approved" && row.entry_kind !== "plan_forecast" && <button type="button" onClick={() => onConfirmPayment(row.id, Number(row.planned_amount))}>Оплата</button>}
+        {["paid", "received"].includes(row.status) && onReversePayment && <button type="button" className="secondary" onClick={() => void onReversePayment(row.id)}>Отменить оплату</button>}
         {["proposed", "approved"].includes(row.status) && !row.actual_date && !Number(row.actual_amount) && <button className="secondary" type="button" aria-label={`Удалить операцию ${row.title}`} disabled={cancellingIds.has(row.id)} onClick={() => void cancelOperation(row)}><Trash2 />{cancellingIds.has(row.id) ? "Удаляем…" : "Удалить из ДДС"}</button>}
       </td></tr>;
     })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}
