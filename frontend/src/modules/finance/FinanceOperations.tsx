@@ -9,9 +9,10 @@ type Props = {
   finance: FinanceOverview | null; preview: FinanceStructuredPreview | null; selectedRows: number[];
   setSelectedRows: Dispatch<SetStateAction<number[]>>; selectedContractId: number;
   kind: string; title: string; amount: string; date: string; extra: string; objectName: string; category: string; note: string;
-  sourceDocumentId: number; scheduleItemId: number; budgetLineId: number; baselineId: number;
+  sourceDocumentId: number; scheduleItemId: number; budgetLineId: number; baselineId: number; direction?: string;
   setKind: (value: string) => void; setTitle: (value: string) => void; setAmount: (value: string) => void;
   setDate: (value: string) => void; setExtra: (value: string) => void; setScheduleItemId: (value: number) => void;
+  setDirection?: (value: string) => void;
   setObjectName: (value: string) => void; setCategory: (value: string) => void; setNote: (value: string) => void;
   setBaselineId: (value: number) => void;
   setBudgetLineId: (value: number) => void; onClosePreview: () => void; onImport: () => void; onAdd: () => void;
@@ -31,8 +32,8 @@ const money = formatMoney;
 
 export function FinanceOperations(props: Props) {
   const { finance, preview, selectedRows, setSelectedRows, selectedContractId, kind, title, amount, date, extra, objectName, category, note,
-    sourceDocumentId, scheduleItemId, budgetLineId, baselineId, setKind, setTitle, setAmount, setDate, setExtra,
-    setScheduleItemId, setBudgetLineId, setBaselineId, setObjectName, setCategory, setNote, onClosePreview, onImport, onAdd, onEditPreviewRow, onConfirm, onConfirmPayment,
+    sourceDocumentId, scheduleItemId, budgetLineId, baselineId, direction = "outflow", setKind, setTitle, setAmount, setDate, setExtra,
+    setDirection, setScheduleItemId, setBudgetLineId, setBaselineId, setObjectName, setCategory, setNote, onClosePreview, onImport, onAdd, onEditPreviewRow, onConfirm, onConfirmPayment,
     costCategories = [], invoiceProposal, onEditInvoice, onConfirmInvoice, onRejectInvoice, onCloseInvoice, onAddCostCategory, onRefreshVat,
     onRetryInvoiceAi, invoiceAiRetrying = false,
     includeEditor = true, includeRegisters = true, includeScheduleRegister = true, includeCashFlowRegister = true,
@@ -122,6 +123,7 @@ export function FinanceOperations(props: Props) {
     {includeEditor && !preview && !invoiceProposal && <section className="card finance-entry" id="finance-entry">
       <div><h2>{editorScope === "gpr" ? "Добавить версию или задачу ГПР" : editorScope === "finance" ? "Добавить бюджетную или платёжную запись" : "Добавить управленческую запись"}</h2><p>Новая запись создаётся как предложение и не влияет на подтверждённый прогноз.</p>{sourceDocumentId > 0 && <p className="finance-source-note">Источник: документ #{sourceDocumentId}. Связь сохранится для счёта или акта.</p>}</div>
       <div><select aria-label="Тип финансовой записи" value={kind} onChange={(event) => setKind(event.target.value)}>{editorKinds.includes("budget") && <option value="budget">Строка бюджета</option>}{editorKinds.includes("cash-in") && <option value="cash-in">Поступление ДДС</option>}{editorKinds.includes("cash-out") && <option value="cash-out">Выплата ДДС</option>}{editorKinds.includes("invoice") && <option value="invoice">Счёт → предложение ДДС</option>}{editorKinds.includes("procurement") && <option value="procurement">Закупка / поставка</option>}{editorKinds.includes("act") && <option value="act">Акт</option>}{editorKinds.includes("baseline") && <option value="baseline">Версия ГПР</option>}{editorKinds.includes("schedule") && <option value="schedule">Этап ГПР</option>}</select>
+        {kind === "budget" && <select aria-label="Направление строки бюджета" value={direction} onChange={(event) => setDirection?.(event.target.value)}><option value="outflow">Расход</option><option value="inflow">Доход</option></select>}
         <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Название" />
         {kind !== "baseline" && <input type="number" min="0" max={kind === "schedule" ? 100 : undefined} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={kind === "schedule" ? "План выполнения, %" : "Сумма, ₽"} />}
         {kind === "schedule" && <select aria-label="Версия для новой задачи" value={baselineId} onChange={(event) => setBaselineId(Number(event.target.value))}><option value={0}>Выберите черновик ГПР</option>{filterContract(finance?.baselines).filter((row) => row.status === "draft").map((row) => <option value={row.id} key={row.id}>v{row.version} · {row.name}</option>)}</select>}

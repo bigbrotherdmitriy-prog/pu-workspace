@@ -31,6 +31,10 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
   const selectedFinanceContractId = selectedFinanceContract.projectId === projectId
     ? selectedFinanceContract.id : 0;
   const [financeKind, setFinanceKind] = useState("budget");
+  // ADR-V6-05-INCOME-BUDGET-RU: explicit direction for a manually added budget
+  // line. Default stays "outflow" -- same as omitting it entirely used to
+  // behave, so existing muscle memory for expense lines is unaffected.
+  const [financeDirection, setFinanceDirection] = useState("outflow");
   const [financeTitle, setFinanceTitle] = useState("");
   const [financeAmount, setFinanceAmount] = useState("");
   const [financeDate, setFinanceDate] = useState("");
@@ -398,7 +402,12 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     try {
       let path = "/execution/budget";
       let body: Record<string, unknown> = { project_id: projectId, contract_id: selectedFinanceContractId || null };
-      if (financeKind === "budget") body = { ...body, category: financeExtra.trim() || "Прочее", description: financeTitle.trim(), planned_amount: amount };
+      if (financeKind === "budget") {
+        body = { ...body, category: financeExtra.trim() || "Прочее", description: financeTitle.trim(), planned_amount: amount };
+        // direction only validates against a selected contract's role (ADR-V6-05);
+        // omit it entirely without one, same as this form always behaved before.
+        if (selectedFinanceContractId) body = { ...body, direction: financeDirection };
+      }
       if (financeKind === "cash-in" || financeKind === "cash-out") {
         path = "/execution/cash-flow";
         body = { ...body, direction: financeKind === "cash-in" ? "inflow" : "outflow", title: financeTitle.trim(), planned_date: financeDate, planned_amount: amount, counterparty: financeExtra.trim() || null, object_name: financeObject.trim() || "Общие", category: financeCategory.trim() || (financeKind === "cash-in" ? "Приход от заказчика" : "Прочее"), note: financeNote.trim() || financeTitle.trim() };
@@ -434,6 +443,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
       setFinanceTitle("");
       setFinanceAmount("");
       setFinanceDate("");
+      setFinanceDirection("outflow");
       setFinanceExtra("");
       setFinanceObject("");
       setFinanceCategory("");
@@ -639,10 +649,10 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
 
   return {
     finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceConfirmationError, invoiceConfirming, invoiceAiRetrying,
-    selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate,
+    selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate, financeDirection,
     financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
     setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
-    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
+    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceDirection, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
     setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
     setInvoiceExtractionProposal, editInvoiceExtraction,
     loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,

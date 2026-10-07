@@ -363,6 +363,47 @@ describe("atomic DDS confirmation", () => {
   });
 });
 
+describe("manual budget line direction (ADR-V6-05-INCOME-BUDGET-RU)", () => {
+  it("sends direction only when a contract is selected, and resets it to outflow after submit", async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (path.startsWith("/execution/overview")) return overview;
+      if (path.startsWith("/execution/document-candidates")) return { candidates: [] };
+      if (path.startsWith("/execution/budget")) return { id: 1, status: "proposed" };
+      return { categories };
+    });
+    const { result } = renderHook(() => useFinanceController({
+      ready: true, projectId: 17, setNotice: vi.fn(), setError: vi.fn(),
+    }));
+    await waitFor(() => expect(result.current.finance).toEqual(overview));
+
+    // No contract selected: direction must be omitted, same as before this ADR.
+    act(() => {
+      result.current.setFinanceKind("budget");
+      result.current.setFinanceTitle("Без договора");
+      result.current.setFinanceAmount("100");
+    });
+    await act(async () => result.current.addFinanceItem());
+    const firstCall = vi.mocked(api).mock.calls.find(([path]) => path === "/execution/budget");
+    const firstBody = JSON.parse(String(firstCall?.[1]?.body));
+    expect(firstBody.direction).toBeUndefined();
+
+    // Contract selected and direction switched to inflow: must be sent explicitly.
+    act(() => {
+      result.current.setSelectedFinanceContractId(5);
+      result.current.setFinanceTitle("Доход по договору");
+      result.current.setFinanceAmount("200");
+      result.current.setFinanceDirection("inflow");
+    });
+    await act(async () => result.current.addFinanceItem());
+    const calls = vi.mocked(api).mock.calls.filter(([path]) => path === "/execution/budget");
+    const secondBody = JSON.parse(String(calls[calls.length - 1]?.[1]?.body));
+    expect(secondBody.direction).toBe("inflow");
+
+    // Direction resets to the safe default after a successful submit.
+    expect(result.current.financeDirection).toBe("outflow");
+  });
+});
+
 describe("project-scoped independent finance loading", () => {
   it("clears the previous contract and project-bound editor state before loading another project", async () => {
     const pending = deferred<unknown>();
