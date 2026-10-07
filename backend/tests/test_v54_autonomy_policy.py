@@ -186,6 +186,32 @@ def test_policy_cas_stale_epoch_and_duplicate_policy_fail_closed(world):
             service.assign(db, scope=scope(2), command=_assignment())
 
 
+def test_an_expired_policy_is_not_a_conflict_for_a_fresh_revision_zero_assign(world):
+    # Same closed-loop shape as an expired authority row (AuthorityResolver.
+    # bootstrap): once a policy lapses, GET/lock_current_view can no longer
+    # read its exact id/revision/hash back (_view denies on expiry), so a
+    # revision>0 CAS assign is unreachable -- only revision=0 ("no live
+    # policy") can possibly succeed, and it must not conflict just because
+    # a *dead* row still physically exists.
+    sessions, _ = world
+    with sessions.begin() as db:
+        AutonomyPolicyService(
+            authority=AuthorityResolver(clock=lambda: NOW), clock=lambda: NOW,
+        ).assign(db, scope=scope(2), command=_assignment(valid_until=NOW + timedelta(minutes=1)))
+    later = NOW + timedelta(minutes=5)
+    later_service = AutonomyPolicyService(authority=AuthorityResolver(clock=lambda: later), clock=lambda: later)
+    with sessions.begin() as db:
+        with pytest.raises(AutonomyDenied):  # the expired row is still unreadable via GET
+            later_service.get(db, scope=scope(2))
+    with sessions.begin() as db:
+        relaunched = later_service.assign(
+            db, scope=scope(2), command=_assignment(valid_until=later + timedelta(minutes=30)),
+        )
+    assert relaunched.policy.value == 2  # same policy identity continued, not a competing second one
+    with sessions.begin() as db:
+        assert later_service.get(db, scope=scope(2)).policy.value == 2
+
+
 @pytest.mark.parametrize("field,value", [
     ("action_type", "message.external.send"),
     ("payload_sha256", "f" * 64),
