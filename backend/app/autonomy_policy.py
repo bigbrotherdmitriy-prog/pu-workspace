@@ -347,10 +347,27 @@ class AutonomyPolicyService:
             _deny()
         current = self._current(db, scope)
         if command.expected_revision == 0:
-            if current is not None:
+            # A policy whose valid_until has already lapsed carries no live
+            # decision to protect -- same reasoning as AuthorityResolver.
+            # bootstrap() for an expired authority row (see v54_authority.py).
+            # Without this, an expired policy is permanently stuck: _view()
+            # (used by GET and lock_current_view) denies on an expired row, so
+            # its exact id/revision/hash can never be read back for the CAS
+            # path below, and a plain revision=0 create would otherwise
+            # conflict against that same unreadable row.
+            if current is not None and utc(current.valid_until) > now:
                 raise AutonomyConflict("policy_exists")
-            policy_ref = reference(scope, "policy", str(uuid4()))
-            next_revision = 1
+            if current is None:
+                policy_ref = reference(scope, "policy", str(uuid4()))
+                next_revision = 1
+            else:
+                # Reissue the SAME policy identity (one id per scope is an
+                # invariant _current() itself enforces -- a second id for the
+                # same scope makes it ambiguous and _current() denies on the
+                # very next read), just like bootstrap() reissues the same
+                # authority row rather than minting a new principal.
+                policy_ref = reference(scope, "policy", current.id)
+                next_revision = current.revision + 1
         else:
             if (current is None or current.id != command.expected_policy_id
                     or current.revision != command.expected_revision

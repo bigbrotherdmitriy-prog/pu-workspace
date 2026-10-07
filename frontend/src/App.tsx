@@ -668,9 +668,15 @@ export function App() {
     )) return;
     setLaunchingPilot(true);
     try {
+      // GET denies (resource_unavailable) when the existing policy has
+      // already expired -- same "unreadable once lapsed" shape as an expired
+      // authority row. Treat that failure as "no live policy to match
+      // against": the backend accepts expected_revision=0 against an expired
+      // row too (see autonomy_policy.py assign()), the same way bootstrap()
+      // accepts an expired authority row.
       const current = await api<{ policy: { ref: { id: { value: string } }; value: number }; policy_sha256: string } | null>(
         `/api/v54/projects/${projectId}/autonomy-policy`,
-      );
+      ).catch(() => null);
       const validUntil = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
       await api(`/api/v54/projects/${projectId}/autonomy-policy`, {
         method: "PUT",
