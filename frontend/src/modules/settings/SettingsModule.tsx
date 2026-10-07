@@ -28,6 +28,10 @@ type Props = {
   aiPolicy: AIProjectPolicy | null;
   processingQueue: ProcessingQueue | null;
   autonomyReadiness: AutonomyReadiness | null;
+  onBootstrapAuthority?: () => void | Promise<void>;
+  bootstrappingAuthority?: boolean;
+  onLaunchPilot?: () => void | Promise<void>;
+  launchingPilot?: boolean;
   onPolicyChange: (policy: AIProjectPolicy) => void;
   onSavePolicy: () => void;
   onRetrySnapshot: (id: number) => void;
@@ -50,7 +54,14 @@ export function SettingsModule(props: Props) {
       </section>
       <PasswordChangeCard onChanged={props.onPasswordChanged} />
       <CompanyProfileCard editable={Boolean(props.currentUser?.is_admin)} />
-      {props.autonomyReadiness && <AutonomyReadinessPanel data={props.autonomyReadiness} />}
+      {props.autonomyReadiness && <AutonomyReadinessPanel data={props.autonomyReadiness}
+        canBootstrapAuthority={Boolean(props.currentUser?.is_admin)}
+        onBootstrapAuthority={props.onBootstrapAuthority}
+        bootstrappingAuthority={props.bootstrappingAuthority}
+        canLaunchPilot={Boolean(props.currentUser?.is_admin)}
+        onLaunchPilot={props.onLaunchPilot}
+        launchingPilot={props.launchingPilot}
+      />}
       <section className="card span-settings">
         <div className="card-head"><div><h2>AI и защита данных</h2><p>Что разрешено передавать внешней модели для выбранного проекта</p></div></div>
         {props.aiPolicy && <div className="form-grid">
