@@ -102,6 +102,25 @@ class MailboxRolloutTransition(StrictDTO):
         return self
 
 
+class MailboxCohortJoin(StrictDTO):
+    """Explicit owner join of one project into a shared mailbox rollout generation."""
+
+    organization_id: StrictInt = Field(gt=0)
+    project_id: StrictInt = Field(gt=0)
+    mail_connection_id: UUID
+    credential_generation: StrictInt = Field(gt=0)
+    binding_epoch: StrictInt = Field(gt=0)
+
+
+class MailboxCohortJoinResult(StrictDTO):
+    id: StrictInt
+    project_id: StrictInt
+    mail_connection_id: StrictStr
+    credential_generation: StrictInt
+    enabled: StrictBool
+    record_version: StrictInt
+
+
 class MailboxRolloutResult(StrictDTO):
     flag: Literal[
         "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"

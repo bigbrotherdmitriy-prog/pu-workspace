@@ -1,4 +1,10 @@
-"""Explicit owner renewal; narrows an existing grant, never bootstraps rights."""
+"""Explicit owner renewal; narrows an existing grant to a generation, never bootstraps rights.
+
+Variant 1 (ADR-V6-08): renewal no longer narrows the grant to a single project.
+The owner's mandate stays organization-scoped across all of their projects; only
+the credential generation is pinned on renewal, which remains the real
+anti-replay protection against a revoked/rotated credential.
+"""
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
@@ -44,9 +50,11 @@ def renew_project_mailbox_authority(db, command, *, actor, expected_version, now
     role = db.scalar(select(ProjectMember.role).where(
         ProjectMember.project_id == command.project_id, ProjectMember.user_id == actor.id))
     token = db.get(GoogleOAuthToken, generation.google_token_id) if generation else None
+    token_project = db.get(Project, token.project_id) if token else None
     if (not project or project.organization_id != command.organization_id
             or project.archived_at is not None or role != "owner"
-            or not generation or not token or token.project_id != command.project_id
+            or not generation or not token
+            or token_project is None or token_project.organization_id != command.organization_id
             or not mail or mail.organization_id != command.organization_id
             or mail.state != "active" or mail.namespace != "gmail"
             or not identity or identity.organization_id != command.organization_id
@@ -64,8 +72,7 @@ def renew_project_mailbox_authority(db, command, *, actor, expected_version, now
             or not isinstance(row.permissions, list) or not row.permissions
             or any(p not in {"ingest", "read", "rollout"} for p in row.permissions)
             or "rollout" not in row.permissions
-            or (row.scope_project_id is not None and row.scope_project_id != command.project_id)
-            or ((row.scope_project_id is None) != (row.scope_credential_generation is None))):
+            or (row.scope_project_id is not None and row.scope_project_id != command.project_id)):
         raise MailboxConflict("resource_unavailable")
     old_until = row.valid_until
     if old_until is None:
@@ -73,13 +80,13 @@ def renew_project_mailbox_authority(db, command, *, actor, expected_version, now
     old_until = old_until.replace(tzinfo=timezone.utc) if old_until.tzinfo is None else old_until
     if until <= old_until:
         raise MailboxConflict("resource_unavailable")
-    old_scope = (row.scope_project_id, row.scope_credential_generation)
+    old_generation_scope = row.scope_credential_generation
     result = db.execute(update(MailboxAuthorityState).where(
         MailboxAuthorityState.id == row.id,
         MailboxAuthorityState.authority_version == expected_version,
         MailboxAuthorityState.state == "active",
     ).values(valid_until=until, authority_version=expected_version + 1,
-             scope_project_id=command.project_id,
+             scope_project_id=None,
              scope_credential_generation=command.credential_generation)
        .execution_options(synchronize_session="fetch"))
     if result.rowcount != 1:
@@ -87,7 +94,8 @@ def renew_project_mailbox_authority(db, command, *, actor, expected_version, now
     db.add(AuditLog(action="mailbox_authority_renewed", entity_type="mailbox_authority",
         entity_id=row.id, details=(
             f"actor_user_id={actor.id};project_id={command.project_id};"
-            f"generation={command.credential_generation};old_scope={old_scope};"
+            f"generation={command.credential_generation};"
+            f"old_generation_scope={old_generation_scope};"
             f"from_version={expected_version};to_version={expected_version + 1};"
             f"old_valid_until={old_until.isoformat()};valid_until={until.isoformat()};"
             f"reason={command.reason};approval=CONFIRM;permissions_unchanged=true")))

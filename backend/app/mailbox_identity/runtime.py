@@ -149,7 +149,7 @@ def require_mailbox_authority(db, *, runtime, actor: User, permission: str, expe
                    ConnectionIdentity.organization_id == row.organization_id,
                    ConnectionIdentity.state == "verified", MailConnection.state == "active"))
         if (permission not in {"ingest", "read", "rollout"}
-                or project_id != row.scope_project_id
+                or (row.scope_project_id is not None and project_id != row.scope_project_id)
                 or getattr(runtime, "generation", None) != row.scope_credential_generation
                 or current_generation != row.scope_credential_generation
                 or not project or project.organization_id != row.organization_id
