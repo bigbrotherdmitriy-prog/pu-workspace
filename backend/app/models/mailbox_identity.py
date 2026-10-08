@@ -127,7 +127,9 @@ class MailboxAuthorityState(Base):
     state: Mapped[str] = mapped_column(String(16), server_default="revoked")
     authority_version: Mapped[int] = mapped_column(server_default="1")
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    # NULL/NULL preserves legacy grants; renewed grants are always narrowed.
+    # scope_project_id NULL means org-wide (any project the owner has); legacy
+    # rows and renewal (Variant 1, ADR-V6-08) leave it NULL. Renewal always
+    # narrows scope_credential_generation to the generation being renewed.
     scope_project_id: Mapped[int | None] = mapped_column(nullable=True)
     scope_credential_generation: Mapped[int | None] = mapped_column(nullable=True)
 

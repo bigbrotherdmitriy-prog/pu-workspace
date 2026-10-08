@@ -8,6 +8,7 @@ from app.database import get_db
 from app.integrations.catalog import GOOGLE_CAPABILITIES, project_integration_catalog
 from app.mailbox_identity.dto import MailboxRolloutResult, MailboxRolloutTransition
 from app.mailbox_identity.dto import MailboxAuthorityRenewal
+from app.mailbox_identity.dto import MailboxCohortJoin, MailboxCohortJoinResult
 from app.mailbox_identity.authority import renew_project_mailbox_authority
 from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
 from app.models.user import User
@@ -68,3 +69,38 @@ def change_mailbox_rollout(
         raise HTTPException(409, "resource_unavailable") from None
     response.headers["ETag"] = f'"{result.record_version}"'
     return result
+
+
+@router.post("/mailbox-rollout/join", response_model=MailboxCohortJoinResult)
+def join_mailbox_rollout(
+    command: MailboxCohortJoin,
+    response: Response,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    try:
+        authority_version = _if_match_version(if_match)
+        cohort = MailboxIdentityService().join_project_cohort(
+            db,
+            organization_id=command.organization_id,
+            project_id=command.project_id,
+            mail_connection_id=str(command.mail_connection_id),
+            credential_generation=command.credential_generation,
+            binding_epoch=command.binding_epoch,
+            actor=user,
+            authority_version=authority_version,
+        )
+        db.commit()
+    except (MailboxConflict, ValueError):
+        db.rollback()
+        raise HTTPException(409, "resource_unavailable") from None
+    response.headers["ETag"] = f'"{cohort.record_version}"'
+    return MailboxCohortJoinResult(
+        id=cohort.id,
+        project_id=cohort.project_id,
+        mail_connection_id=cohort.mail_connection_id,
+        credential_generation=cohort.credential_generation,
+        enabled=cohort.enabled,
+        record_version=cohort.record_version,
+    )

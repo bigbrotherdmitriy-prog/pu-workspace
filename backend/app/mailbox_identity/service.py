@@ -226,7 +226,12 @@ class MailboxIdentityService:
                 expected_version=command.authority_version,
                 project_id=token.project_id if token else None,
             )
-            if authority.scope_project_id is not None and command.flag in {"primary_read", "actions"}:
+            # Under Variant 1 (ADR-V6-08) a renewed grant no longer narrows
+            # scope_project_id -- but it always narrows scope_credential_generation,
+            # and THAT is the real signal "this is a renewed/recovered grant, not
+            # an original bootstrap". primary_read/actions stay blocked on any
+            # renewed grant regardless of project scope.
+            if authority.scope_credential_generation is not None and command.flag in {"primary_read", "actions"}:
                 _fail()
         except ValueError:
             _fail()
@@ -328,6 +333,7 @@ class MailboxIdentityService:
             MailboxCredentialGeneration.state == "active",
         ).with_for_update())
         token = db.get(GoogleOAuthToken, generation.google_token_id) if generation else None
+        token_project = db.get(Project, token.project_id) if token else None
         cohort = db.scalar(select(MailboxProjectCohort).where(
             MailboxProjectCohort.organization_id == organization_id,
             MailboxProjectCohort.project_id == project_id,
@@ -335,7 +341,8 @@ class MailboxIdentityService:
             MailboxProjectCohort.credential_generation == credential_generation,
         ).with_for_update())
         if (mail is None or identity is None or generation is None or token is None
-                or token.project_id != project_id or cohort is None
+                or token_project is None or token_project.organization_id != organization_id
+                or cohort is None
                 or cohort.record_version != expected_record_version
                 or cohort.enabled is enabled):
             _fail("cohort_version_conflict")
@@ -371,6 +378,138 @@ class MailboxIdentityService:
             entity_type="mailbox_project_cohort",
             entity_id=cohort.id,
             details=(f"project_id={project_id};enabled={str(enabled).lower()};"
+                     f"from_version={expected_record_version};"
+                     f"to_version={expected_record_version + 1};actor_user_id={actor.id}"),
+        ))
+        db.flush()
+        db.refresh(cohort)
+        return cohort
+
+    def join_project_cohort(
+        self,
+        db,
+        *,
+        organization_id: int,
+        project_id: int,
+        mail_connection_id: str,
+        credential_generation: int,
+        binding_epoch: int,
+        actor: User,
+        authority_version: int,
+    ) -> MailboxProjectCohort:
+        """Explicit owner join: create-and-enable, or flip an existing row to enabled.
+
+        Mirrors change_project_cohort's validation (project/membership/owner,
+        mail/identity/generation liveness, same-org token via the Variant 1
+        org-scope check, and require_mailbox_authority(permission="rollout")).
+        Unlike change_project_cohort, join always moves toward enabled and reads
+        its own expected cohort record_version internally -- the caller cannot
+        know a version for a row that may not exist yet. A row already enabled
+        is an idempotent no-op: no write, no audit row, no version bump.
+        """
+        _trusted_actor(db, actor)
+        project = db.scalar(select(Project).where(
+            Project.id == project_id,
+            Project.organization_id == organization_id,
+            Project.archived_at.is_(None),
+        ).with_for_update())
+        membership = db.scalar(select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == actor.id,
+        ).with_for_update())
+        if project is None or membership is None or membership.role != "owner":
+            _fail()
+        mail = db.scalar(select(MailConnection).where(
+            MailConnection.organization_id == organization_id,
+            MailConnection.id == mail_connection_id,
+            MailConnection.namespace == "gmail",
+            MailConnection.state == "active",
+        ).with_for_update())
+        identity = db.scalar(select(ConnectionIdentity).where(
+            ConnectionIdentity.organization_id == organization_id,
+            ConnectionIdentity.id == (mail.identity_id if mail else None),
+            ConnectionIdentity.state == "verified",
+            ConnectionIdentity.credential_generation == credential_generation,
+            ConnectionIdentity.binding_epoch == binding_epoch,
+        ).with_for_update())
+        generation = db.scalar(select(MailboxCredentialGeneration).where(
+            MailboxCredentialGeneration.organization_id == organization_id,
+            MailboxCredentialGeneration.connection_identity_id == (
+                identity.id if identity else None
+            ),
+            MailboxCredentialGeneration.generation == credential_generation,
+            MailboxCredentialGeneration.binding_epoch == binding_epoch,
+            MailboxCredentialGeneration.state == "active",
+        ).with_for_update())
+        token = db.get(GoogleOAuthToken, generation.google_token_id) if generation else None
+        token_project = db.get(Project, token.project_id) if token else None
+        if (mail is None or identity is None or generation is None or token is None
+                or token_project is None or token_project.organization_id != organization_id):
+            _fail("cohort_version_conflict")
+        runtime = type("CohortRuntime", (), {
+            "organization_id": organization_id,
+            "mail_connection_id": mail_connection_id,
+            "generation": credential_generation,
+        })()
+        try:
+            require_mailbox_authority(
+                db,
+                runtime=runtime,
+                actor=actor,
+                permission="rollout",
+                expected_version=authority_version,
+                project_id=project_id,
+            )
+        except ValueError:
+            _fail()
+        cohort = db.scalar(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.organization_id == organization_id,
+            MailboxProjectCohort.project_id == project_id,
+            MailboxProjectCohort.mail_connection_id == mail_connection_id,
+            MailboxProjectCohort.credential_generation == credential_generation,
+        ).with_for_update())
+        now = datetime.now(timezone.utc)
+        if cohort is None:
+            cohort = MailboxProjectCohort(
+                organization_id=organization_id,
+                project_id=project_id,
+                mail_connection_id=mail_connection_id,
+                credential_generation=credential_generation,
+                enabled=True,
+                record_version=1,
+                changed_by_user_id=actor.id,
+                changed_at=now,
+            )
+            db.add(cohort)
+            db.flush()
+            db.add(AuditLog(
+                action="mailbox_project_cohort_joined",
+                entity_type="mailbox_project_cohort",
+                entity_id=cohort.id,
+                details=(f"project_id={project_id};enabled=true;"
+                         f"from_version=0;to_version=1;actor_user_id={actor.id}"),
+            ))
+            db.flush()
+            return cohort
+        if cohort.enabled:
+            return cohort
+        expected_record_version = cohort.record_version
+        result = db.execute(update(MailboxProjectCohort).where(
+            MailboxProjectCohort.id == cohort.id,
+            MailboxProjectCohort.record_version == expected_record_version,
+        ).values(
+            enabled=True,
+            record_version=expected_record_version + 1,
+            changed_by_user_id=actor.id,
+            changed_at=now,
+        ).execution_options(synchronize_session="fetch"))
+        if result.rowcount != 1:
+            _fail("cohort_version_conflict")
+        db.add(AuditLog(
+            action="mailbox_project_cohort_joined",
+            entity_type="mailbox_project_cohort",
+            entity_id=cohort.id,
+            details=(f"project_id={project_id};enabled=true;"
                      f"from_version={expected_record_version};"
                      f"to_version={expected_record_version + 1};actor_user_id={actor.id}"),
         ))
