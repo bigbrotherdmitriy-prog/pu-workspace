@@ -138,6 +138,22 @@ def test_confirmed_mailbox_contact_routes_only_to_its_project(world, monkeypatch
     assert sync(w)["processed"] == 1
 
 
+def test_unscoped_confirmed_contact_routes_regardless_of_mailbox(world, monkeypatch):
+    # A confirmed contact created without a specific mail_connection_id (e.g.
+    # a manual/bulk confirmation not tied to one mailbox at the time) is an
+    # unscoped confirmation, not a dead one -- same "NULL means unscoped"
+    # convention as MailboxAuthorityState.scope_project_id (ADR-V6-08). It
+    # must still route mail arriving through this project's own mailbox.
+    w = world
+    w.db.add(ProjectContact(organization_id=w.org.id, project_id=w.a.id,
+        created_by_user_id=w.user.id,
+        mail_connection_id=None, normalized_email="sender@example.test",
+        email="sender@example.test", name="Synthetic", active=True, confirmed=True, resolution_state="confirmed"))
+    w.db.commit()
+    provider(monkeypatch, w, [item(subject="Unknown")])
+    assert sync(w)["processed"] == 1
+
+
 @pytest.mark.parametrize("change", ["token", "identity", "mail", "scope", "member", "epoch"])
 def test_stale_own_connection_denied_after_network_before_receipts(world, monkeypatch, change):
     w = world
