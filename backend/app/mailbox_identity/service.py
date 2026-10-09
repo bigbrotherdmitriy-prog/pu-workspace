@@ -385,29 +385,20 @@ class MailboxIdentityService:
         db.refresh(cohort)
         return cohort
 
-    def join_project_cohort(
-        self,
-        db,
-        *,
-        organization_id: int,
-        project_id: int,
-        mail_connection_id: str,
-        credential_generation: int,
-        binding_epoch: int,
-        actor: User,
-        authority_version: int,
-    ) -> MailboxProjectCohort:
-        """Explicit owner join: create-and-enable, or flip an existing row to enabled.
+    @staticmethod
+    def _validate_cohort_join(
+        db, *, organization_id: int, project_id: int, mail_connection_id: str,
+        credential_generation: int, binding_epoch: int, actor: User, authority_version: int,
+    ):
+        """Shared join/rejoin validation: owner membership, project not archived,
+        mail/identity/generation liveness at the exact given generation, same-org
+        token (Variant 1 org-scope check), and require_mailbox_authority
+        (permission="rollout", CAS-checked against authority_version).
 
-        Mirrors change_project_cohort's validation (project/membership/owner,
-        mail/identity/generation liveness, same-org token via the Variant 1
-        org-scope check, and require_mailbox_authority(permission="rollout")).
-        Unlike change_project_cohort, join always moves toward enabled and reads
-        its own expected cohort record_version internally -- the caller cannot
-        know a version for a row that may not exist yet. A row already enabled
-        is an idempotent no-op: no write, no audit row, no version bump.
+        Raises MailboxConflict on any failure. Extracted so join_project_cohort
+        and rejoin_project_cohort run the identical checks without duplicating
+        them -- join_project_cohort's own behavior/signature is unchanged.
         """
-        _trusted_actor(db, actor)
         project = db.scalar(select(Project).where(
             Project.id == project_id,
             Project.organization_id == organization_id,
@@ -462,6 +453,35 @@ class MailboxIdentityService:
             )
         except ValueError:
             _fail()
+
+    def join_project_cohort(
+        self,
+        db,
+        *,
+        organization_id: int,
+        project_id: int,
+        mail_connection_id: str,
+        credential_generation: int,
+        binding_epoch: int,
+        actor: User,
+        authority_version: int,
+    ) -> MailboxProjectCohort:
+        """Explicit owner join: create-and-enable, or flip an existing row to enabled.
+
+        Mirrors change_project_cohort's validation (project/membership/owner,
+        mail/identity/generation liveness, same-org token via the Variant 1
+        org-scope check, and require_mailbox_authority(permission="rollout")).
+        Unlike change_project_cohort, join always moves toward enabled and reads
+        its own expected cohort record_version internally -- the caller cannot
+        know a version for a row that may not exist yet. A row already enabled
+        is an idempotent no-op: no write, no audit row, no version bump.
+        """
+        _trusted_actor(db, actor)
+        self._validate_cohort_join(
+            db, organization_id=organization_id, project_id=project_id,
+            mail_connection_id=mail_connection_id, credential_generation=credential_generation,
+            binding_epoch=binding_epoch, actor=actor, authority_version=authority_version,
+        )
         cohort = db.scalar(select(MailboxProjectCohort).where(
             MailboxProjectCohort.organization_id == organization_id,
             MailboxProjectCohort.project_id == project_id,
@@ -516,6 +536,111 @@ class MailboxIdentityService:
         db.flush()
         db.refresh(cohort)
         return cohort
+
+    def rejoin_project_cohort(
+        self,
+        db,
+        *,
+        organization_id: int,
+        project_id: int,
+        mail_connection_id: str,
+        credential_generation: int,
+        binding_epoch: int,
+        actor: User,
+        authority_version: int,
+    ) -> tuple[MailboxProjectCohort, tuple[int, ...]]:
+        """Safe owner rejoin: clear stale-generation cohort rows, then join.
+
+        join_project_cohort alone cannot recover a project stuck on a stale
+        generation: its target-generation lookup only ever sees the row at the
+        EXACT generation it is given, so it would create or enable a SECOND
+        enabled row alongside an old one that is still enabled -- leaving two
+        (or more) enabled rows, which app/autonomy_readiness.py::_mailbox()
+        reports as "ambiguous" forever. This method is the explicit, API-backed
+        fix for that gap (see ADR-V6-08's own cohort-join rationale).
+
+        Within one transaction:
+          1. Run the exact same validation join_project_cohort runs, at the
+             target credential_generation (owner membership, project not
+             archived, mail/identity/generation liveness, same-org token,
+             require_mailbox_authority(permission="rollout") CAS-checked
+             against authority_version). This never touches the stale rows
+             before confirming the target generation is actually live and the
+             actor is actually authorized.
+          2. Find every OTHER enabled MailboxProjectCohort row for this exact
+             (organization_id, project_id, mail_connection_id) at a
+             credential_generation different from the target. CAS-flip each to
+             disabled (its own record_version bump), with a DISTINGUISHABLE
+             audit action (mailbox_project_cohort_rejoin_stale_disabled) rather
+             than reusing change_project_cohort's mailbox_project_cohort_changed
+             -- so the log reads as an explicit, automatic side effect of an
+             owner-initiated rejoin, not an unexplained flag flip indistin-
+             guishable from a manual PATCH. If more than one stale row is
+             enabled (a pre-existing "ambiguous" shape), ALL of them are
+             disabled -- never just the first found.
+          3. Delegate to join_project_cohort, UNCHANGED, for the target
+             generation itself (create-and-enable / enable-a-disabled-row /
+             idempotent no-op). Its own "mailbox_project_cohort_joined" audit
+             entry already distinguishes a join from a flag flip; nothing here
+             duplicates or alters that.
+
+        When there is no stale row at all (first-ever join through this path),
+        step 2 finds nothing, writes nothing, and behaves exactly like
+        join_project_cohort. When the target generation is already the only
+        enabled row, both step 2 and step 3 are no-ops: no audit rows, no
+        version bumps -- rejoin is idempotent.
+        """
+        _trusted_actor(db, actor)
+        self._validate_cohort_join(
+            db, organization_id=organization_id, project_id=project_id,
+            mail_connection_id=mail_connection_id, credential_generation=credential_generation,
+            binding_epoch=binding_epoch, actor=actor, authority_version=authority_version,
+        )
+        stale_rows = list(db.scalars(select(MailboxProjectCohort).where(
+            MailboxProjectCohort.organization_id == organization_id,
+            MailboxProjectCohort.project_id == project_id,
+            MailboxProjectCohort.mail_connection_id == mail_connection_id,
+            MailboxProjectCohort.credential_generation != credential_generation,
+            MailboxProjectCohort.enabled.is_(True),
+        ).order_by(MailboxProjectCohort.id).with_for_update()))
+        now = datetime.now(timezone.utc)
+        disabled_generations = []
+        for stale in stale_rows:
+            expected_version = stale.record_version
+            result = db.execute(update(MailboxProjectCohort).where(
+                MailboxProjectCohort.id == stale.id,
+                MailboxProjectCohort.record_version == expected_version,
+            ).values(
+                enabled=False,
+                record_version=expected_version + 1,
+                changed_by_user_id=actor.id,
+                changed_at=now,
+            ).execution_options(synchronize_session="fetch"))
+            if result.rowcount != 1:
+                _fail("cohort_version_conflict")
+            db.add(AuditLog(
+                action="mailbox_project_cohort_rejoin_stale_disabled",
+                entity_type="mailbox_project_cohort",
+                entity_id=stale.id,
+                details=(f"project_id={project_id};enabled=false;"
+                         f"from_version={expected_version};to_version={expected_version + 1};"
+                         f"actor_user_id={actor.id};stale_generation={stale.credential_generation};"
+                         f"target_generation={credential_generation};"
+                         f"reason=owner_rejoin_stale_generation_cleanup"),
+            ))
+            db.flush()
+            disabled_generations.append(stale.credential_generation)
+        cohort = self.join_project_cohort(
+            db,
+            organization_id=organization_id,
+            project_id=project_id,
+            mail_connection_id=mail_connection_id,
+            credential_generation=credential_generation,
+            binding_epoch=binding_epoch,
+            actor=actor,
+            authority_version=authority_version,
+        )
+        return cohort, tuple(disabled_generations)
 
     @staticmethod
     def _authority(db, command, organization_id, actor):
