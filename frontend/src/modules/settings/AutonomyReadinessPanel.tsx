@@ -7,7 +7,15 @@ export type AutonomyReadiness = {
   runtime: { state: string; pilot_enabled: boolean; producer_enabled: boolean; notification_enabled: boolean; scope_matches: boolean; component_alignment: string };
   policy: { revision: number; hash_prefix: string; enabled: boolean; task_mode: string; notification_mode: string; external_message_mode: string; authority_epoch: number; valid_until: string; ttl_seconds: number; ready: boolean; history: Array<{ revision: number; enabled: boolean }> };
   authority: { state: string; membership_role?: string; authority_epoch?: number; record_version?: number; valid_until?: string; ttl_seconds?: number; ready: boolean };
-  mailbox: { state: string; ready: boolean; valid?: boolean; producer_ready?: boolean; credential_generation?: number; cohort_record_version?: number; cutover?: Record<string, boolean> | null };
+  mailbox: {
+    state: string; ready: boolean; valid?: boolean; producer_ready?: boolean;
+    credential_generation?: number; cohort_record_version?: number; cutover?: Record<string, boolean> | null;
+    organization_id?: number;
+    mail_connection_id?: string | null;
+    current_credential_generation?: number | null;
+    current_binding_epoch?: number | null;
+    actor_authority_version?: number | null;
+  };
   quotas: {
     task_hourly: { used: number; limit: number | null };
     notification_project_hourly: { used: number; limit: number | null };
@@ -50,14 +58,32 @@ type Props = {
   canExpandAuthority?: boolean;
   onExpandAuthority?: () => void | Promise<void>;
   expandingAuthority?: boolean;
+  canRejoinMailbox?: boolean;
+  onRejoinMailbox?: () => void | Promise<void>;
+  rejoiningMailbox?: boolean;
 };
 
 export function AutonomyReadinessPanel({
   data, canBootstrapAuthority, onBootstrapAuthority, bootstrappingAuthority,
   canLaunchPilot, onLaunchPilot, launchingPilot,
   canExpandAuthority, onExpandAuthority, expandingAuthority,
+  canRejoinMailbox, onRejoinMailbox, rejoiningMailbox,
 }: Props) {
   const reasons = [...data.overall.blockers, ...data.overall.warnings];
+  // Offered only when the project already has SOME cohort history on this
+  // mailbox but it isn't on the account's current credential generation --
+  // "stale" (one enabled row, out of date) or "ambiguous" (more than one
+  // enabled row, the pre-existing bug shape this button exists to fix).
+  // Never for "missing": a project that was never part of this mailbox at
+  // all gets no join offer here -- that's a separate, out-of-scope flow.
+  const canOfferRejoinMailbox = Boolean(
+    canRejoinMailbox && onRejoinMailbox
+    && (data.mailbox.state === "stale" || data.mailbox.state === "ambiguous")
+    && data.mailbox.mail_connection_id != null
+    && data.mailbox.current_credential_generation != null
+    && data.mailbox.current_binding_epoch != null
+    && data.mailbox.actor_authority_version != null,
+  );
   return <section className="card span-settings autonomy-readiness" aria-label="Готовность AUTO">
     <div className="card-head"><div><h2>Готовность AUTO</h2><p>Только чтение · проект №{data.project_id} · проверено {new Date(data.observed_at).toLocaleString("ru-RU")}</p></div>
       <span className={`autonomy-state autonomy-state-${data.overall.status.toLowerCase()}`}>{data.overall.status}</span>
@@ -108,6 +134,12 @@ export function AutonomyReadinessPanel({
           {expandingAuthority ? "Расширяем…" : "Выдать полный набор полномочий"}
         </button>
       </>}
+    </div>}
+    {canOfferRejoinMailbox && <div className="autonomy-bootstrap">
+      <p>Mailbox этого проекта подключён к устаревшему поколению учётных данных почты (аккаунт уже переподключал Gmail из другого проекта). Переподключение отключит для этого проекта устаревшее поколение и подключит его к текущему — без этого шага AUTO-обработка писем для проекта не возобновится.</p>
+      <button type="button" className="secondary" disabled={rejoiningMailbox} onClick={() => void onRejoinMailbox!()}>
+        {rejoiningMailbox ? "Переподключаем…" : "Переподключить mailbox к текущему поколению"}
+      </button>
     </div>}
   </section>;
 }

@@ -15,7 +15,7 @@ from app.mailbox_identity.runtime import rollout_flags_are_valid
 from app.models.audit_log import AuditLog
 from app.models.job import BackgroundJob
 from app.models.mailbox_identity import (
-    MailboxCredentialGeneration, MailboxCutoverFlags, MailboxProjectCohort,
+    MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags, MailboxProjectCohort,
 )
 from app.models.v54_authority import AuthorityState
 from app.models.v54_pilot import (
@@ -81,14 +81,55 @@ def _runtime_projection(project_id):
     return settings, "matching" if settings.project_id == project_id else "mismatch"
 
 
-def _mailbox(db, project):
+def _mailbox_current_pointers(db, *, organization_id, mail_connection_id, actor):
+    """Read-only extras the UI needs to call mailbox-rollout/rejoin: the mail
+    connection itself, its identity's CURRENT generation/epoch (which may
+    differ from a stale cohort row's own generation -- that is exactly the gap
+    rejoin exists to close), and the viewing actor's own authority_version for
+    this connection (needed for the rejoin call's If-Match header).
+
+    Never raises: an unresolvable mail connection or a missing authority row
+    for this actor simply comes back as None fields, so a project with no
+    mailbox history at all (state "missing") or an actor with no mailbox
+    authority grant never crashes the readiness endpoint.
+    """
+    mail = db.get(MailConnection, mail_connection_id) if mail_connection_id else None
+    identity = db.get(ConnectionIdentity, mail.identity_id) if mail else None
+    authority = db.scalar(select(MailboxAuthorityState).where(
+        MailboxAuthorityState.organization_id == organization_id,
+        MailboxAuthorityState.mail_connection_id == mail_connection_id,
+        MailboxAuthorityState.principal_kind == "user",
+        MailboxAuthorityState.principal_id == str(actor.id),
+    )) if (mail_connection_id and actor is not None and getattr(actor, "id", None)) else None
+    return {
+        "mail_connection_id": mail_connection_id,
+        "current_credential_generation": identity.credential_generation if identity else None,
+        "current_binding_epoch": identity.binding_epoch if identity else None,
+        "actor_authority_version": authority.authority_version if authority else None,
+    }
+
+
+def _mailbox(db, project, actor=None):
     cohorts = list(db.scalars(select(MailboxProjectCohort).where(
         MailboxProjectCohort.organization_id == project.organization_id,
         MailboxProjectCohort.project_id == project.id,
         MailboxProjectCohort.enabled.is_(True),
     )))
     if len(cohorts) != 1:
-        return {"state": "missing" if not cohorts else "ambiguous", "ready": False}
+        result = {
+            "state": "missing" if not cohorts else "ambiguous", "ready": False,
+            "organization_id": project.organization_id,
+        }
+        if cohorts:
+            # Ambiguous (the pre-existing multi-enabled-row bug this task
+            # closes): every enabled row shares the same mail_connection_id by
+            # construction (the cohort's own unique key), so cohorts[0] is a
+            # safe representative to resolve the CURRENT generation/epoch from.
+            result.update(_mailbox_current_pointers(
+                db, organization_id=project.organization_id,
+                mail_connection_id=cohorts[0].mail_connection_id, actor=actor,
+            ))
+        return result
     cohort = cohorts[0]
     mail = db.get(MailConnection, cohort.mail_connection_id)
     identity = db.get(ConnectionIdentity, mail.identity_id) if mail else None
@@ -113,7 +154,7 @@ def _mailbox(db, project):
         valid and flags.shadow_write and flags.shadow_read_compare and flags.pilot_write
         and not flags.primary_read and not flags.actions
     )
-    return {
+    result = {
         "state": "producer_ready" if producer_ready else ("valid_not_pilot" if valid else "stale"),
         "valid": valid,
         "producer_ready": producer_ready,
@@ -123,7 +164,13 @@ def _mailbox(db, project):
         "cutover": ({name: bool(getattr(flags, name)) for name in (
             "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"
         )} if flags else None),
+        "organization_id": project.organization_id,
     }
+    result.update(_mailbox_current_pointers(
+        db, organization_id=project.organization_id,
+        mail_connection_id=cohort.mail_connection_id, actor=actor,
+    ))
+    return result
 
 
 def _operations(db, project, policy, settings, now):
@@ -199,7 +246,7 @@ def _operations(db, project, policy, settings, now):
     }
 
 
-def project_autonomy_readiness(db, project, now=None):
+def project_autonomy_readiness(db, project, now=None, actor=None):
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     policy, rules, policy_history = _policy_for_project(db, project)
     if policy is None:
@@ -227,7 +274,7 @@ def project_autonomy_readiness(db, project, now=None):
         and PILOT_OPERATIONS.issubset(set(authority.permissions))
     )
     policy_ready = bool(rules["enabled"] and policy_until > now)
-    mailbox = _mailbox(db, project)
+    mailbox = _mailbox(db, project, actor=actor)
     operations = _operations(db, project, policy, settings, now)
 
     blockers = []

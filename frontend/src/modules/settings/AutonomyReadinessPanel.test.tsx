@@ -77,6 +77,64 @@ describe("AutonomyReadinessPanel", () => {
     expect(screen.queryByRole("button", { name: "Восстановить мандат пилота" })).not.toBeInTheDocument();
   });
 
+  const rejoinableMailbox = {
+    state: "stale", ready: false, valid: false, credential_generation: 2, cohort_record_version: 1,
+    cutover: null, organization_id: 1, mail_connection_id: "mail-1",
+    current_credential_generation: 3, current_binding_epoch: 1, actor_authority_version: 9,
+  };
+
+  it("offers to rejoin the mailbox for an admin when state is stale with all pointers present", () => {
+    const onRejoinMailbox = vi.fn();
+    render(<AutonomyReadinessPanel
+      data={{ ...data, mailbox: rejoinableMailbox }}
+      canRejoinMailbox onRejoinMailbox={onRejoinMailbox}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "Переподключить mailbox к текущему поколению" }));
+    expect(onRejoinMailbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers to rejoin the mailbox when state is ambiguous", () => {
+    const onRejoinMailbox = vi.fn();
+    render(<AutonomyReadinessPanel
+      data={{ ...data, mailbox: { ...rejoinableMailbox, state: "ambiguous" } }}
+      canRejoinMailbox onRejoinMailbox={onRejoinMailbox}
+    />);
+    expect(screen.getByRole("button", { name: "Переподключить mailbox к текущему поколению" })).toBeInTheDocument();
+  });
+
+  it.each(["missing", "producer_ready", "valid_not_pilot"])(
+    "hides the rejoin-mailbox control for state %s",
+    (state) => {
+      const onRejoinMailbox = vi.fn();
+      render(<AutonomyReadinessPanel
+        data={{ ...data, mailbox: { ...rejoinableMailbox, state } }}
+        canRejoinMailbox onRejoinMailbox={onRejoinMailbox}
+      />);
+      expect(screen.queryByRole("button", { name: /Переподключить mailbox/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it("hides the rejoin-mailbox control for a non-admin or without a handler", () => {
+    const onRejoinMailbox = vi.fn();
+    render(<AutonomyReadinessPanel
+      data={{ ...data, mailbox: rejoinableMailbox }}
+      canRejoinMailbox={false} onRejoinMailbox={onRejoinMailbox}
+    />);
+    expect(screen.queryByRole("button", { name: /Переподключить mailbox/ })).not.toBeInTheDocument();
+    cleanup();
+    render(<AutonomyReadinessPanel data={{ ...data, mailbox: rejoinableMailbox }} canRejoinMailbox />);
+    expect(screen.queryByRole("button", { name: /Переподключить mailbox/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the rejoin-mailbox control when a required pointer is missing", () => {
+    const onRejoinMailbox = vi.fn();
+    render(<AutonomyReadinessPanel
+      data={{ ...data, mailbox: { ...rejoinableMailbox, actor_authority_version: null } }}
+      canRejoinMailbox onRejoinMailbox={onRejoinMailbox}
+    />);
+    expect(screen.queryByRole("button", { name: /Переподключить mailbox/ })).not.toBeInTheDocument();
+  });
+
   it("has no controls capable of changing policy, authority or mailbox", () => {
     const { container } = render(<AutonomyReadinessPanel data={data} />);
     expect(container.querySelector("button, input, select, textarea, form")).toBeNull();

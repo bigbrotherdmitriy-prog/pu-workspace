@@ -543,6 +543,7 @@ export function App() {
     [bootstrappingAuthority, setBootstrappingAuthority] = useState(false),
     [launchingPilot, setLaunchingPilot] = useState(false),
     [expandingAuthority, setExpandingAuthority] = useState(false),
+    [rejoiningMailbox, setRejoiningMailbox] = useState(false),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
     [busyProposal, setBusyProposal] = useState(0),
@@ -739,6 +740,51 @@ export function App() {
       setError(error instanceof Error ? error.message : "Не удалось расширить полномочия.");
     } finally {
       setExpandingAuthority(false);
+    }
+  }
+
+  async function rejoinMailbox() {
+    // ADR-V6-08: a project's mailbox cohort row can be stuck on an old
+    // credential generation after the shared Google account was reconnected
+    // from a DIFFERENT project. join_project_cohort alone can't fix this --
+    // it would just create a second enabled row ("ambiguous"). Rejoin is the
+    // safe recovery: disable the stale generation(s) for this project, then
+    // join the account's current one.
+    const mailbox = autonomyReadiness?.mailbox;
+    if (!mailbox || mailbox.organization_id == null || mailbox.mail_connection_id == null
+        || mailbox.current_credential_generation == null || mailbox.current_binding_epoch == null
+        || mailbox.actor_authority_version == null) {
+      setError("Недостаточно данных mailbox для переподключения.");
+      return;
+    }
+    if (!window.confirm(
+      "Переподключить mailbox проекта к текущему поколению почтовых учётных данных? "
+      + "Что произойдёт: устаревшее поколение, к которому сейчас привязан проект, будет отключено, "
+      + `а проект подключится к текущему поколению (generation ${mailbox.current_credential_generation}). `
+      + "Сам почтовый ящик не меняется — меняется только то, какое поколение его учётных данных обслуживает этот проект.",
+    )) return;
+    setRejoiningMailbox(true);
+    try {
+      const result = await api<{ credential_generation: number }>(
+        "/integrations/mailbox-rollout/rejoin", {
+          method: "POST",
+          headers: { "If-Match": `"${mailbox.actor_authority_version}"` },
+          body: JSON.stringify({
+            organization_id: mailbox.organization_id,
+            project_id: projectId,
+            mail_connection_id: mailbox.mail_connection_id,
+            credential_generation: mailbox.current_credential_generation,
+            binding_epoch: mailbox.current_binding_epoch,
+          }),
+        },
+      );
+      setNotice(`Mailbox переподключён к поколению ${result.credential_generation}.`);
+      const readiness = await api(`/api/v54/projects/${projectId}/autonomy-readiness`).catch(() => null);
+      if (readiness?.overall?.status) setAutonomyReadiness(readiness);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не удалось переподключить mailbox.");
+    } finally {
+      setRejoiningMailbox(false);
     }
   }
 
@@ -4264,6 +4310,8 @@ export function App() {
           launchingPilot={launchingPilot}
           onExpandAuthority={() => void expandAuthority()}
           expandingAuthority={expandingAuthority}
+          onRejoinMailbox={() => void rejoinMailbox()}
+          rejoiningMailbox={rejoiningMailbox}
           onPolicyChange={setAiPolicy}
           onSavePolicy={() => void saveAIPolicy()}
           onRetrySnapshot={(id) => void retrySnapshot(id)}

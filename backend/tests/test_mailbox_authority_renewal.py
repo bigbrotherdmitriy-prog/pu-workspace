@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from fastapi import HTTPException, Response
 
-from app.api.integrations import join_mailbox_rollout, renew_mailbox_authority
+from app.api.integrations import join_mailbox_rollout, rejoin_mailbox_rollout, renew_mailbox_authority
 from app.mailbox_identity.authority import renew_project_mailbox_authority
 from app.mailbox_identity.dto import MailboxAuthorityRenewal, MailboxCohortJoin
 from app.mailbox_identity.runtime import require_mailbox_authority
@@ -292,6 +292,54 @@ def join_audit_rows(w):
         AuditLog.action == "mailbox_project_cohort_joined")))
 
 
+def rejoin_stale_disabled_audit_rows(w):
+    return list(w.db.scalars(select(AuditLog).where(
+        AuditLog.action == "mailbox_project_cohort_rejoin_stale_disabled")))
+
+
+def rotate_credential(w):
+    """Advance the world's identity/mail connection to a new credential
+    generation via a second bind_verified_google_subject call for the exact
+    same verified subject/token -- this is a real credential re-verification,
+    not a shortcut: it is exactly how a stale enabled cohort row is produced
+    in production (ADR-V6-08). Returns the new generation number; also leaves
+    a fresh DISABLED cohort row for w.project at that new generation, same as
+    bind_verified_google_subject always does for the token's own project."""
+    _, _, new_generation = MailboxIdentityService().bind_verified_google_subject(
+        w.db, organization_id=w.organization.id, google_token_id=w.token.id,
+        subject="private-google-subject", now=w.now,
+    )
+    w.db.flush()
+    return new_generation
+
+
+def renew_at(w, generation, expected_version, **changes):
+    """Renew the owner's mailbox authority mandate pinned to an exact
+    generation, bypassing the `renew` helper's hardcoded expected_version=7
+    (needed here for a SECOND/THIRD renewal in the same test)."""
+    values = dict(credential_generation=generation, binding_epoch=w.identity.binding_epoch)
+    values.update(changes)
+    return renew_project_mailbox_authority(
+        w.db, command(w, **values), actor=w.actor,
+        expected_version=expected_version, now=w.now,
+    )
+
+
+def rejoin(w, project, **changes):
+    values = dict(organization_id=w.organization.id, project_id=project.id,
+                  mail_connection_id=w.connection.id, credential_generation=w.generation,
+                  binding_epoch=w.identity.binding_epoch, actor=w.actor,
+                  authority_version=w.authority.authority_version)
+    values.update(changes)
+    return MailboxIdentityService().rejoin_project_cohort(w.db, **values)
+
+
+def enabled_cohorts(w, project):
+    return list(w.db.scalars(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == project.id,
+        MailboxProjectCohort.enabled.is_(True))))
+
+
 def test_join_creates_and_enables_when_no_cohort_row_exists(world):
     w = world
     renew(w)
@@ -386,4 +434,205 @@ def test_http_join_etag_and_stale_cas(world):
     assert response.headers["etag"] == '"2"'
     with pytest.raises(HTTPException) as exc:
         join_mailbox_rollout(command, Response(), '"7"', w.db, w.actor)
+    assert exc.value.status_code == 409
+
+
+# --- rejoin_project_cohort: safe recovery from a stale/ambiguous cohort shape ---
+
+
+def test_rejoin_disables_one_stale_enabled_row_and_joins_target(world):
+    w = world
+    renew(w)  # authority_version 7 -> 8, scope pinned to generation 1
+    join(w, w.project)  # cohort@gen1 flips disabled(v1) -> enabled(v2)
+    stale_generation = w.generation
+    stale_cohort = w.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.credential_generation == stale_generation))
+    assert stale_cohort.enabled is True and stale_cohort.record_version == 2
+
+    target_generation = rotate_credential(w)
+    renew_at(w, target_generation, expected_version=8,
+             valid_until=w.now + timedelta(hours=13))  # authority_version 8 -> 9
+
+    cohort, disabled = rejoin(w, w.project,
+        credential_generation=target_generation, authority_version=9)
+
+    assert disabled == (stale_generation,)
+    assert cohort.enabled is True
+    assert cohort.credential_generation == target_generation
+    assert cohort.record_version == 2  # bind's own disabled row(v1) -> enabled(v2)
+
+    w.db.refresh(stale_cohort)
+    assert stale_cohort.enabled is False
+    assert stale_cohort.record_version == 3
+
+    rows = enabled_cohorts(w, w.project)
+    assert len(rows) == 1 and rows[0].id == cohort.id
+
+    stale_audits = rejoin_stale_disabled_audit_rows(w)
+    assert len(stale_audits) == 1
+    assert stale_audits[0].entity_id == stale_cohort.id
+    assert f"stale_generation={stale_generation}" in stale_audits[0].details
+    assert f"target_generation={target_generation}" in stale_audits[0].details
+    assert "reason=owner_rejoin_stale_generation_cleanup" in stale_audits[0].details
+    assert f"actor_user_id={w.actor.id}" in stale_audits[0].details
+
+    joined_audits = join_audit_rows(w)
+    assert len(joined_audits) == 2  # the original join(w, w.project) plus rejoin's own join
+    assert joined_audits[-1].entity_id == cohort.id
+
+
+def test_rejoin_disables_multiple_stale_enabled_rows_pre_existing_ambiguous_shape(world):
+    w = world
+    renew(w)  # 7 -> 8, scope gen1
+    join(w, w.project)  # cohort@gen1 enabled, v2
+    gen1 = w.generation
+
+    gen2 = rotate_credential(w)
+    renew_at(w, gen2, expected_version=8, valid_until=w.now + timedelta(hours=13))  # 8 -> 9
+    join(w, w.project, credential_generation=gen2, authority_version=9)  # cohort@gen2 enabled, v2
+
+    gen3 = rotate_credential(w)
+    renew_at(w, gen3, expected_version=9, valid_until=w.now + timedelta(hours=14))  # 9 -> 10
+
+    # Pre-existing ambiguous shape: two enabled rows (gen1, gen2) before any rejoin.
+    assert len(enabled_cohorts(w, w.project)) == 2
+
+    cohort, disabled = rejoin(w, w.project, credential_generation=gen3, authority_version=10)
+
+    assert sorted(disabled) == sorted([gen1, gen2])
+    assert cohort.enabled is True
+    assert cohort.credential_generation == gen3
+
+    rows = enabled_cohorts(w, w.project)
+    assert len(rows) == 1 and rows[0].id == cohort.id
+
+    stale_audits = rejoin_stale_disabled_audit_rows(w)
+    assert len(stale_audits) == 2
+    assert {row.details.split("stale_generation=")[1].split(";")[0] for row in stale_audits} == {
+        str(gen1), str(gen2),
+    }
+    for row in stale_audits:
+        assert f"target_generation={gen3}" in row.details
+
+
+def test_rejoin_with_no_existing_cohort_row_behaves_like_first_join(world):
+    w = world
+    renew(w)  # 7 -> 8, org-scoped (not narrowed to w.project), pinned to generation 1
+    other = add_sibling_project(w, owner=True)
+    assert w.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == other.id)) is None
+
+    cohort, disabled = rejoin(w, other, authority_version=8)
+
+    assert disabled == ()
+    assert cohort.enabled is True
+    assert cohort.record_version == 1
+    assert cohort.project_id == other.id
+    assert not rejoin_stale_disabled_audit_rows(w)
+    audits = join_audit_rows(w)
+    assert len(audits) == 1
+    assert audits[0].entity_id == cohort.id
+
+
+def test_rejoin_is_idempotent_when_target_is_already_the_only_enabled_row(world):
+    w = world
+    renew(w)  # 7 -> 8
+    first, first_disabled = rejoin(w, w.project, authority_version=8)
+    assert first.enabled is True and first.record_version == 2
+    assert first_disabled == ()
+    joined_before = len(join_audit_rows(w))
+    stale_before = len(rejoin_stale_disabled_audit_rows(w))
+
+    second, second_disabled = rejoin(w, w.project, authority_version=8)
+
+    assert second.id == first.id
+    assert second.enabled is True
+    assert second.record_version == 2
+    assert second_disabled == ()
+    assert len(join_audit_rows(w)) == joined_before
+    assert len(rejoin_stale_disabled_audit_rows(w)) == stale_before
+
+
+def test_rejoin_rejects_non_owner_actor_and_leaves_stale_row_untouched(world):
+    w = world
+    renew(w)  # 7 -> 8, scope gen1
+    join(w, w.project)  # cohort@gen1 enabled, v2 -- becomes the stale row once we rotate
+    target_generation = rotate_credential(w)
+    renew_at(w, target_generation, expected_version=8,
+             valid_until=w.now + timedelta(hours=13))  # 8 -> 9
+
+    # Demote the actor on the very project carrying the stale row, then attempt
+    # rejoin on that same project: validation must fail (not owner) BEFORE the
+    # stale-row disablement loop ever runs, so the already-enabled stale row
+    # must come out of this exactly as it went in.
+    member = w.db.scalar(select(ProjectMember).where(ProjectMember.project_id == w.project.id))
+    member.role = "manager"
+    w.db.flush()
+    with pytest.raises(MailboxConflict):
+        rejoin(w, w.project, credential_generation=target_generation, authority_version=9)
+    assert not rejoin_stale_disabled_audit_rows(w)
+    assert len(join_audit_rows(w)) == 1  # only the earlier successful join(w, w.project)
+    stale_cohort = w.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == w.project.id,
+        MailboxProjectCohort.credential_generation == w.generation))
+    assert stale_cohort.enabled is True and stale_cohort.record_version == 2
+
+
+def test_rejoin_rejects_token_in_a_different_organization(world):
+    w = world
+    renew(w)  # 7 -> 8, scope gen1
+    join(w, w.project)  # cohort@gen1 enabled, v2
+    other_org = Organization(name="Foreign organization for rejoin")
+    w.db.add(other_org)
+    w.db.flush()
+    foreign_project = Project(name="Foreign project for rejoin", organization_id=other_org.id)
+    w.db.add(foreign_project)
+    w.db.flush()
+    w.token.project_id = foreign_project.id
+    w.db.flush()
+    with pytest.raises(MailboxConflict):
+        rejoin(w, w.project)
+    assert not rejoin_stale_disabled_audit_rows(w)
+    stale_cohort = w.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == w.project.id,
+        MailboxProjectCohort.credential_generation == w.generation))
+    assert stale_cohort.enabled is True
+
+
+def test_rejoin_rejects_stale_authority_version(world):
+    w = world
+    renew(w)  # 7 -> 8, scope gen1
+    join(w, w.project)  # cohort@gen1 enabled, v2
+    target_generation = rotate_credential(w)
+    renew_at(w, target_generation, expected_version=8,
+             valid_until=w.now + timedelta(hours=13))  # 8 -> 9
+    with pytest.raises(MailboxConflict):
+        rejoin(w, w.project, credential_generation=target_generation, authority_version=8)
+    assert not rejoin_stale_disabled_audit_rows(w)
+    stale_cohort = w.db.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == w.project.id,
+        MailboxProjectCohort.credential_generation == w.generation))
+    assert stale_cohort.enabled is True
+
+
+def test_http_rejoin_etag_and_stale_cas(world):
+    w = world
+    renew(w)  # 7 -> 8, scope gen1
+    join(w, w.project)  # cohort@gen1 enabled, v2
+    target_generation = rotate_credential(w)
+    renew_at(w, target_generation, expected_version=8,
+             valid_until=w.now + timedelta(hours=13))  # 8 -> 9
+
+    command = MailboxCohortJoin(
+        organization_id=w.organization.id, project_id=w.project.id,
+        mail_connection_id=w.connection.id, credential_generation=target_generation,
+        binding_epoch=w.identity.binding_epoch,
+    )
+    response = Response()
+    result = rejoin_mailbox_rollout(command, response, '"9"', w.db, w.actor)
+    assert result.enabled is True
+    assert result.disabled_stale_generations == (w.generation,)
+    assert response.headers["etag"] == f'"{result.record_version}"'
+    with pytest.raises(HTTPException) as exc:
+        rejoin_mailbox_rollout(command, Response(), '"8"', w.db, w.actor)
     assert exc.value.status_code == 409

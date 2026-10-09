@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.autonomy_readiness import exhausted_quota_reasons, project_autonomy_readiness
+from app.autonomy_readiness import _mailbox, exhausted_quota_reasons, project_autonomy_readiness
 from app.autonomy_policy import AutonomyPolicyService, PolicyAssignmentCommand
 from app.core.auth import require_user
 from app.core.v54_authority import AuthorityResolver, PILOT_OPERATIONS, PILOT_SCOPE
@@ -15,7 +15,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models.integration_credential import IntegrationCredential
 from app.models.mailbox_identity import (
-    MailboxCredentialGeneration, MailboxCutoverFlags, MailboxProjectCohort,
+    MailboxAuthorityState, MailboxCredentialGeneration, MailboxCutoverFlags, MailboxProjectCohort,
 )
 from app.models.organization_contract import Organization
 from app.models.project import Project
@@ -247,3 +247,107 @@ def test_quota_boundary_degrades_exactly_at_limit():
     boundary = {"task_hourly": {"used": 3, "limit": 3}}
     assert exhausted_quota_reasons(below) == []
     assert exhausted_quota_reasons(boundary) == ["task_hourly_exhausted"]
+
+
+# --- mailbox: read-only pointers the UI needs to call mailbox-rollout/rejoin ---
+
+
+def test_mailbox_exposes_current_generation_pointers_and_null_actor_authority(readiness_world):
+    _sessions, _current, client = readiness_world
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    mailbox = body["mailbox"]
+    assert mailbox["state"] == "producer_ready"
+    assert mailbox["organization_id"] == 1
+    assert mailbox["mail_connection_id"] == uid(902)
+    assert mailbox["current_credential_generation"] == 1
+    assert mailbox["current_binding_epoch"] == 1
+    # No v54_mailbox_authority_states row exists yet for this actor/connection --
+    # must come back null, never crash the endpoint.
+    assert mailbox["actor_authority_version"] is None
+
+
+def test_mailbox_exposes_actor_authority_version_once_a_row_exists(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        db.add(MailboxAuthorityState(
+            organization_id=1, mail_connection_id=uid(902), principal_kind="user",
+            principal_id="2", permissions=["rollout"], state="active",
+            authority_version=5, valid_until=NOW + timedelta(days=1),
+        ))
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["actor_authority_version"] == 5
+
+
+def test_mailbox_exposes_actor_authority_version_only_for_its_own_principal(readiness_world):
+    sessions, current, client = readiness_world
+    with sessions.begin() as db:
+        db.add(MailboxAuthorityState(
+            organization_id=1, mail_connection_id=uid(902), principal_kind="user",
+            principal_id="3", permissions=["rollout"], state="active",
+            authority_version=9, valid_until=NOW + timedelta(days=1),
+        ))
+    current["user_id"] = 3  # manager, also permitted to view readiness
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["actor_authority_version"] == 9
+    current["user_id"] = 2  # owner has no row of their own -- stays null
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["actor_authority_version"] is None
+
+
+def test_mailbox_missing_state_has_no_cohort_history_and_omits_new_fields(readiness_world):
+    sessions, _current, _client = readiness_world
+    with sessions.begin() as db:
+        db.add(ProjectMember(project_id=11, user_id=2, role="owner"))
+    with sessions() as db:
+        project = db.get(Project, 11)
+        result = _mailbox(db, project, actor=db.get(User, 2))
+    assert result == {"state": "missing", "ready": False, "organization_id": 1}
+    assert "mail_connection_id" not in result
+    assert "current_credential_generation" not in result
+    assert "actor_authority_version" not in result
+
+
+def test_mailbox_handles_missing_actor_gracefully(readiness_world):
+    """project_autonomy_readiness/_mailbox must never crash when called without
+    an actor (e.g. the one remaining direct-call test below, or any future
+    caller that doesn't resolve a viewer) -- actor_authority_version just
+    comes back null."""
+    sessions, _current, _client = readiness_world
+    with sessions() as db:
+        body = project_autonomy_readiness(db, db.get(Project, 10), now=NOW)
+    assert body["mailbox"]["actor_authority_version"] is None
+    assert body["mailbox"]["mail_connection_id"] == uid(902)
+
+
+def test_mailbox_ambiguous_state_still_exposes_current_pointers(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        db.add(MailboxProjectCohort(
+            organization_id=1, project_id=10, mail_connection_id=uid(902),
+            credential_generation=2, enabled=True, record_version=1,
+            changed_by_user_id=2, changed_at=NOW,
+        ))
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    mailbox = body["mailbox"]
+    assert mailbox["state"] == "ambiguous"
+    assert mailbox["ready"] is False
+    assert mailbox["organization_id"] == 1
+    assert mailbox["mail_connection_id"] == uid(902)
+    assert mailbox["current_credential_generation"] == 1
+    assert mailbox["current_binding_epoch"] == 1
+    assert "mailbox_cutover_not_ready" in body["overall"]["blockers"]
+
+
+def test_mailbox_stale_state_still_exposes_current_pointers(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        identity = db.scalar(select(ConnectionIdentity))
+        identity.credential_generation = 2  # identity rotated past the cohort's own generation=1
+        identity.record_version += 1
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    mailbox = body["mailbox"]
+    assert mailbox["state"] == "stale"
+    assert mailbox["valid"] is False
+    assert mailbox["credential_generation"] == 1  # the stale cohort's own (unchanged) generation
+    assert mailbox["current_credential_generation"] == 2  # the identity's real current generation
+    assert mailbox["mail_connection_id"] == uid(902)

@@ -33,7 +33,7 @@ def get_autonomy_readiness(
     # Deliberately no User.is_admin bypass: this is a project owner/manager view.
     if project is None or membership is None or membership.role not in {"owner", "manager"}:
         raise HTTPException(404, "resource_unavailable")
-    result = project_autonomy_readiness(db, project)
+    result = project_autonomy_readiness(db, project, actor=user)
     if result is None:
         raise HTTPException(404, "resource_unavailable")
     response.headers.update(_NO_CACHE)

@@ -121,6 +121,19 @@ class MailboxCohortJoinResult(StrictDTO):
     record_version: StrictInt
 
 
+class MailboxCohortRejoinResult(StrictDTO):
+    """Same shape as MailboxCohortJoinResult, plus which stale generations an
+    explicit owner rejoin found already enabled and disabled along the way."""
+
+    id: StrictInt
+    project_id: StrictInt
+    mail_connection_id: StrictStr
+    credential_generation: StrictInt
+    enabled: StrictBool
+    record_version: StrictInt
+    disabled_stale_generations: tuple[StrictInt, ...] = ()
+
+
 class MailboxRolloutResult(StrictDTO):
     flag: Literal[
         "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"

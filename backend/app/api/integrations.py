@@ -9,6 +9,7 @@ from app.integrations.catalog import GOOGLE_CAPABILITIES, project_integration_ca
 from app.mailbox_identity.dto import MailboxRolloutResult, MailboxRolloutTransition
 from app.mailbox_identity.dto import MailboxAuthorityRenewal
 from app.mailbox_identity.dto import MailboxCohortJoin, MailboxCohortJoinResult
+from app.mailbox_identity.dto import MailboxCohortRejoinResult
 from app.mailbox_identity.authority import renew_project_mailbox_authority
 from app.mailbox_identity.service import MailboxConflict, MailboxIdentityService
 from app.models.user import User
@@ -103,4 +104,45 @@ def join_mailbox_rollout(
         credential_generation=cohort.credential_generation,
         enabled=cohort.enabled,
         record_version=cohort.record_version,
+    )
+
+
+@router.post("/mailbox-rollout/rejoin", response_model=MailboxCohortRejoinResult)
+def rejoin_mailbox_rollout(
+    command: MailboxCohortJoin,
+    response: Response,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Owner recovery path for a project stuck on a stale cohort generation
+    (ADR-V6-08): disables any other enabled cohort row for this project+mail
+    connection at a different generation, then joins the target generation --
+    see MailboxIdentityService.rejoin_project_cohort for the full contract.
+    """
+    try:
+        authority_version = _if_match_version(if_match)
+        cohort, disabled_stale_generations = MailboxIdentityService().rejoin_project_cohort(
+            db,
+            organization_id=command.organization_id,
+            project_id=command.project_id,
+            mail_connection_id=str(command.mail_connection_id),
+            credential_generation=command.credential_generation,
+            binding_epoch=command.binding_epoch,
+            actor=user,
+            authority_version=authority_version,
+        )
+        db.commit()
+    except (MailboxConflict, ValueError):
+        db.rollback()
+        raise HTTPException(409, "resource_unavailable") from None
+    response.headers["ETag"] = f'"{cohort.record_version}"'
+    return MailboxCohortRejoinResult(
+        id=cohort.id,
+        project_id=cohort.project_id,
+        mail_connection_id=cohort.mail_connection_id,
+        credential_generation=cohort.credential_generation,
+        enabled=cohort.enabled,
+        record_version=cohort.record_version,
+        disabled_stale_generations=disabled_stale_generations,
     )
