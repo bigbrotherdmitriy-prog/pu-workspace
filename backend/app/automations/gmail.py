@@ -41,6 +41,84 @@ def interval_seconds() -> int:
     return max(60, int(os.getenv("GMAIL_AUTO_SYNC_INTERVAL_SECONDS", "300")))
 
 
+def _resolve_shared_sync_token_id(db, project_id: int) -> int | None:
+    """Resolve the shared Google account's CURRENT live token for a project
+    whose own `GoogleOAuthToken` has EVER been part of a mailbox identity's
+    credential history (ADR-V6-09, corrected).
+
+    `sync_authorized_projects_once` otherwise authenticates each project with
+    its OWN static `GoogleOAuthToken` row. That row is silently invalidated by
+    Google whenever ANY other project sharing the same underlying account
+    reconnects -- confirmed live in production (projects 14/16/24 broke the
+    moment project 17 reconnected; see
+    docs/architecture/ADR-V6-09-DUAL-GMAIL-SYNC-RU.md).
+
+    The first cut of this fix gated eligibility on an `enabled=True`
+    `MailboxProjectCohort` row. That was wrong: the three projects that
+    actually broke (14, 16, 24) only ever have `enabled=False` cohort rows --
+    the auto-created-disabled rows `bind_verified_google_subject` writes for
+    whichever project owned the token at each past rotation (ADR-V6-08's
+    "Авто-создание MailboxProjectCohort"). They were never pilot-enrolled,
+    just historically touched the shared account, so the old `enabled=True`
+    filter made this resolver return None for exactly the projects it exists
+    to fix, leaving them to keep failing with `RefreshError: invalid_grant`.
+
+    The real eligibility test -- mirroring the `mapped = ...` lookup
+    `runtime_for_project_connection` (app/mailbox_identity/runtime.py) already
+    does for "was this project's own token ever used for this identity" -- is
+    simply: does this project's own token map, via
+    `MailboxCredentialGeneration.google_token_id`, to a `ConnectionIdentity`
+    whose CURRENT generation now points at a token? If so, and that current
+    token differs from this project's own, the scheduled plain-read sweep
+    should use the current one instead of the stale one. `MailboxProjectCohort`
+    (enabled or not) does not gate this -- it is a separate, pilot-provenance
+    policy question (`runtime_for_project_connection`'s subsequent
+    `_deny()`/cohort-enabled checks, which this plain read sync does not need
+    to inherit: this is not pilot shadow/primary-read/actions automation,
+    just "which token keeps a plain read sync from immediately failing").
+
+    Returns None for:
+    - a project whose own token has never been mapped to any
+      `MailboxCredentialGeneration` row at all (the 6 independent/unrelated
+      `GoogleOAuthToken` rows with no mailbox_identity generation) -- it has
+      never touched any shared identity, so it keeps behaving exactly as
+      before this ADR, unaffected.
+    - a project whose own token IS still the identity's current generation's
+      token (nothing to resolve -- its own token is already the live one).
+    """
+    from app.models.mailbox_identity import MailboxCredentialGeneration
+    from app.models.v54_pilot import ConnectionIdentity
+
+    token = db.scalar(select(GoogleOAuthToken).where(GoogleOAuthToken.project_id == project_id))
+    if not token:
+        return None
+    # Mirrors runtime_for_project_connection's "mapped = ..." step
+    # (app/mailbox_identity/runtime.py:167): has this project's own token EVER
+    # been part of a mailbox identity's credential history, at any generation?
+    mapped = db.scalar(select(MailboxCredentialGeneration).where(
+        MailboxCredentialGeneration.google_token_id == token.id).order_by(
+        MailboxCredentialGeneration.generation.desc()))
+    if not mapped:
+        return None
+    identity = db.scalar(select(ConnectionIdentity).where(
+        ConnectionIdentity.id == mapped.connection_identity_id,
+        ConnectionIdentity.organization_id == mapped.organization_id,
+        ConnectionIdentity.state == "verified",
+    ))
+    if identity is None:
+        return None
+    generation = db.scalar(select(MailboxCredentialGeneration).where(
+        MailboxCredentialGeneration.organization_id == identity.organization_id,
+        MailboxCredentialGeneration.connection_identity_id == identity.id,
+        MailboxCredentialGeneration.generation == identity.credential_generation,
+        MailboxCredentialGeneration.binding_epoch == identity.binding_epoch,
+        MailboxCredentialGeneration.state == "active",
+    ))
+    if generation is None or generation.google_token_id is None or generation.google_token_id == token.id:
+        return None
+    return generation.google_token_id
+
+
 def _automation_user(db, project_id: int) -> User | None:
     role_order = {"owner": 0, "manager": 1, "editor": 2}
     members = db.execute(
@@ -110,7 +188,11 @@ def sync_authorized_projects_once() -> dict[str, int]:
                                         details="reason=no_authorized_actor"))
                         db.commit()
                         continue
-                    result = sync_gmail_project(project_id, db, user, query="is:inbox newer_than:7d", max_results=25)
+                    sync_kwargs = {"query": "is:inbox newer_than:7d", "max_results": 25}
+                    shared_token_id = _resolve_shared_sync_token_id(db, project_id)
+                    if shared_token_id is not None:
+                        sync_kwargs["credential_token_id"] = shared_token_id
+                    result = sync_gmail_project(project_id, db, user, **sync_kwargs)
                     totals["projects"] += 1
                     for key in ("processed", "skipped", "failed"):
                         totals[key] += int(result.get(key, 0))
