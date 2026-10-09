@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from app.api.tasks import list_tasks
 from app.core.integration_types import StorageObject
 from app.models.organization_contract import Organization
 from app.models.project import Project
@@ -118,3 +119,72 @@ def test_llm_failure_notes_the_reason_and_leaves_amount_and_assignee_empty(world
     assert task.assignee_user_id == owner.id
     assert "AI не настроен" in task.description
     assert "ответственный и сумма не извлечены" in task.description
+
+
+def _unavailable_provider():
+    provider = Mock()
+    provider.health.return_value = SimpleNamespace(ready=False)
+    return provider
+
+
+def test_regex_fallback_persists_amount_when_cue_phrase_is_adjacent(world, monkeypatch):
+    db, owner, _member, project = world
+    monkeypatch.setattr(de, "configured_ai_provider", _unavailable_provider)
+    text = "Исполнитель обязан оплатить 50000 руб за выполненные работы"
+    file = StorageObject(id="f1", name="doc.txt", mime_type="text/plain", parent_id="root", content_text=text)
+    task, = create_tasks_from_files(db, project.id, None, [file])
+    assert task.extraction_method == "regex"  # same value as every other regex-fallback task, no third value invented
+    assert task.amount == Decimal("50000")
+    assert task.amount_currency == "RUB"
+    assert task.amount_evidence_quote == text
+    assert task.assignee_hint is None  # assignee side of the regex fallback is untouched by this change
+    assert task.assignee_user_id == owner.id
+
+
+def test_regex_fallback_leaves_amount_none_without_a_cue_phrase(world, monkeypatch):
+    db, owner, _member, project = world
+    monkeypatch.setattr(de, "configured_ai_provider", _unavailable_provider)
+    # Has a bare number next to "руб" but no recognized cue phrase ("к оплате",
+    # "оплатить", "сумма к оплате/договора/задолженности", "стоимость
+    # работ/услуг/договора") -- must not be guessed as the task's amount.
+    text = "Бухгалтер обязан подготовить отчёт на сумму 50000 руб к пятнице"
+    file = StorageObject(id="f1", name="doc.txt", mime_type="text/plain", parent_id="root", content_text=text)
+    task, = create_tasks_from_files(db, project.id, None, [file])
+    assert task.extraction_method == "regex"
+    assert task.amount is None
+    assert task.amount_currency is None
+    assert task.amount_evidence_quote is None
+    assert task.assignee_hint is None
+    assert task.assignee_user_id == owner.id
+
+
+def test_list_tasks_serializes_amount_currency_and_assignee_hint(world, monkeypatch):
+    db, _owner, _member, project = world
+    text = "Иванова обязана подготовить отчёт не позднее 20.09.2026. Сумма договора 250000 руб."
+    payload = {
+        "obligations": [_obligation(
+            amount=250000, amount_currency="RUB", amount_evidence_quote="Сумма договора 250000 руб",
+            assignee_hint="Сидоров", assignee_evidence_quote="Иванова обязана",
+        )],
+        "response_candidates": [], "risks": [], "decisions": [],
+    }
+    monkeypatch.setattr(de, "configured_ai_provider", lambda: _fake_provider(payload))
+    file = StorageObject(id="f1", name="doc.txt", mime_type="text/plain", parent_id="root", content_text=text)
+    with_amount, = create_tasks_from_files(db, project.id, None, [file])
+
+    monkeypatch.setattr(de, "configured_ai_provider", _unavailable_provider)
+    file2 = StorageObject(id="f2", name="doc2.txt", mime_type="text/plain", parent_id="root",
+                          content_text="Исполнитель обязан подготовить акт до 21.09.2026.")
+    without_amount, = create_tasks_from_files(db, project.id, None, [file2])
+
+    rows = {row["id"]: row for row in list_tasks(project.id, db, _owner)["tasks"]}
+    with_amount_row = rows[with_amount.id]
+    assert isinstance(with_amount_row["amount"], str)
+    assert Decimal(with_amount_row["amount"]) == Decimal("250000")
+    assert with_amount_row["amount_currency"] == "RUB"
+    assert with_amount_row["assignee_hint"] == "Сидоров"
+
+    without_amount_row = rows[without_amount.id]
+    assert without_amount_row["amount"] is None
+    assert without_amount_row["amount_currency"] is None
+    assert without_amount_row["assignee_hint"] is None
