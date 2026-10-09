@@ -145,6 +145,56 @@ def test_no_api_key_falls_back_to_regex(world, monkeypatch):
     assert result.obligations[0].amount is None
 
 
+def test_no_api_key_falls_back_to_regex_and_extracts_amount_with_adjacent_cue(world, monkeypatch):
+    db, _user, project = world
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    result = de.extract_for_text(
+        db, project.id, "Исполнитель обязан оплатить 50000 руб за выполненные работы", "a.txt",
+    )
+    assert result.extraction_method == "regex"
+    obligation = result.obligations[0]
+    assert obligation.amount == de._parse_amount("50000")
+    assert obligation.amount_currency == "RUB"
+    assert obligation.assignee_hint is None  # assignee side of the fallback is untouched
+
+
+def test_no_api_key_regex_fallback_amount_stays_none_without_cue_phrase(world, monkeypatch):
+    db, _user, project = world
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # Bare number next to "руб" with no recognized cue phrase adjacent -- a
+    # false-positive guess here would be a regression, not an improvement.
+    result = de.extract_for_text(
+        db, project.id, "Бухгалтер обязан подготовить отчёт на сумму 50000 руб к пятнице", "a.txt",
+    )
+    assert result.extraction_method == "regex"
+    obligation = result.obligations[0]
+    assert obligation.amount is None
+    assert obligation.amount_currency is None
+    assert obligation.amount_evidence_quote is None
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("Исполнитель обязан оплатить 50000 руб", "50000"),
+    ("Сумма к оплате составляет 12 500,50 руб.", "12500.50"),
+    ("Стоимость работ 7000 руб по смете", "7000"),
+    ("К оплате 999 руб за материалы", "999"),
+])
+def test_regex_amount_matches_on_recognized_cue_phrases(line, expected):
+    amount, currency, evidence = de._regex_amount(line)
+    assert amount == de._parse_amount(expected)
+    assert currency == "RUB"
+    assert evidence == line
+
+
+@pytest.mark.parametrize("line", [
+    "Указана сумма 50000 руб без дополнительных пояснений",
+    "В документе фигурирует число 50000, относящееся к другому разделу",
+    "Необходимо подготовить отчёт без упоминания денег",
+])
+def test_regex_amount_returns_none_without_a_recognized_cue_phrase(line):
+    assert de._regex_amount(line) == (None, None, None)
+
+
 def test_local_only_project_never_calls_the_provider(world, monkeypatch):
     db, user, project = world
     db.add(ProjectAIPolicy(project_id=project.id, mode="local_only", updated_by_user_id=user.id))

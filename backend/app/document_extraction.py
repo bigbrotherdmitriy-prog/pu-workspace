@@ -22,6 +22,7 @@ regex) and the other two reuse its result -- no orchestration call site
 from __future__ import annotations
 
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date
@@ -284,23 +285,63 @@ def _decisions_from_llm(payload: list[dict], text: str) -> list[RawDecisionCandi
     return result
 
 
+# Same money literal as app.api.organizations_contracts._contract_financial_terms's
+# local `money_pattern` (tightened 2026-10-09, commit 15783c4) -- duplicated here
+# rather than imported because that one is a function-local variable, not a
+# module export; _decimal_value (the matching Decimal-parsing helper) *is*
+# module-level there and is reused directly, via a deferred import below.
+_REGEX_MONEY_RE = re.compile(r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:руб(?:\.|лей|ля)?|₽)", re.IGNORECASE)
+# Adjacency cue, same philosophy as _contract_financial_terms's own amount field
+# (which requires "цена договора"/"стоимость работ/услуг/договора"/"общая
+# стоимость" somewhere on the same line as the money match): a bare number
+# elsewhere in the excerpt is never trusted as *the* task's amount, only one
+# next to an explicit "this is the sum" phrase.
+_REGEX_AMOUNT_CUE_RE = re.compile(
+    r"к\s+оплате|"
+    r"оплатить|"
+    r"сумм[аы]\s+(?:к\s+оплате|договора|задолженности)|"
+    r"стоимост[ьи]\s+(?:работ|услуг|договора)",
+    re.IGNORECASE,
+)
+
+
+def _regex_amount(excerpt: str) -> tuple[Decimal | None, str | None, str | None]:
+    """Fail-closed amount extraction for the regex-fallback path only.
+
+    Mirrors _contract_financial_terms: a money match is trusted only when an
+    explicit cue phrase is present on the same line/sentence; otherwise this
+    returns (None, None, None) -- needs_review beats guessing, same as every
+    other field in this fallback path.
+    """
+    from app.api.organizations_contracts import _decimal_value  # deferred: see _prefilter_patterns()
+
+    line = re.sub(r"\s+", " ", excerpt).strip()
+    money = _REGEX_MONEY_RE.search(line)
+    if not money or not _REGEX_AMOUNT_CUE_RE.search(line.casefold()):
+        return None, None, None
+    return _decimal_value(money.group(1)), "RUB", line[:500]
+
+
 def _regex_fallback(text: str, filename: str, *, reason: str | None) -> CombinedExtraction:
     # Deferred imports -- see _prefilter_patterns() for why.
     from app.task_engine import extract_task_candidates
     from app.response_engine import extract_response_candidates
     from app.governance_engine import extract_governance_candidates
 
-    obligations = [
-        ObligationCandidate(
+    obligations = []
+    for candidate in extract_task_candidates(text):
+        amount, amount_currency, amount_evidence_quote = _regex_amount(candidate.excerpt)
+        obligations.append(ObligationCandidate(
             title=candidate.title, excerpt=candidate.excerpt, due_date=candidate.due_date,
             due_date_evidence_quote=candidate.excerpt if candidate.due_date else None,
+            # Assignee side is explicitly out of scope here -- regex has no
+            # equivalent of the LLM's assignee detection, and stays None by
+            # design (better needs_review than guessing who is responsible).
             assignee_hint=None, assignee_evidence_quote=None,
-            amount=None, amount_currency=None, amount_evidence_quote=None,
+            amount=amount, amount_currency=amount_currency, amount_evidence_quote=amount_evidence_quote,
             confidence=candidate.confidence, extraction_method="regex",
             priority=candidate.priority, review_reasons=candidate.review_reasons,
-        )
-        for candidate in extract_task_candidates(text)
-    ]
+        ))
     # ensure_response's "still produce a generic draft" bonus is not a regex
     # concern -- it applies identically whichever path found the (empty) list
     # of response candidates, so it lives in response_engine.create_response_drafts,

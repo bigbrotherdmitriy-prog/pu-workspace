@@ -87,6 +87,8 @@
 .task-information dd, .document-information dd { margin: 0; color: #26364f; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
 .task-information-wide, .document-information-wide { grid-column: 1 / -1; }
 .task-information .task-description { color: #4f5c6f; }
+.task-amount { color: #4f5c6f; font-weight: 700; }
+.task-information .task-assignee-hint { color: #748091; font-style: italic; }
 .task-priority-label { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; color: #596577; background: #eef1f5; font-size: 11px; font-weight: 750; }
 .task-priority-label.high, .task-priority-label.critical { color: #ad2d2d; background: #fff0f0; }
 .task-priority-label.low { color: #526071; background: #f2f5f7; }

@@ -171,3 +171,39 @@ describe("TasksModule layout and existing actions", () => {
     expect(screen.getByRole("button", { name: "История" })).toBeInTheDocument();
   });
 });
+
+describe("TasksModule amount and assignee_hint (MVP2 п.3)", () => {
+  it("renders the extracted amount with its currency next to the assignee", () => {
+    render(<TasksModule {...props({ tasks: [{ ...task, amount: "750", amount_currency: "RUB" }] })} />);
+    expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent("750,00 ₽");
+  });
+
+  it("renders a non-RUB currency code as-is instead of the ₽ symbol", () => {
+    render(<TasksModule {...props({ tasks: [{ ...task, amount: "500", amount_currency: "USD" }] })} />);
+    expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent("500,00 USD");
+  });
+
+  it("shows assignee_hint as a secondary, muted hint when it was not folded into the confirmed assignee", () => {
+    const { container } = render(<TasksModule {...props({ tasks: [{
+      ...task, assignee_name: "", assignee_hint: "Сидоров",
+    }] })} />);
+    expect(screen.getByText("Система предположила: Сидоров")).toBeInTheDocument();
+    expect(container.querySelector(".task-assignee-hint")).toBeInTheDocument();
+  });
+
+  it("hides the assignee_hint once it already matches the confirmed assignee", () => {
+    render(<TasksModule {...props({ tasks: [{
+      ...task, assignee_name: "Иванова", assignee_hint: "Иванова",
+    }] })} />);
+    expect(screen.queryByText(/Система предположила/)).toBeNull();
+  });
+
+  it("renders no amount or hint UI at all when none of the three fields are present", () => {
+    const { container } = render(<TasksModule {...props({ tasks: [{
+      ...task, amount: undefined, amount_currency: undefined, assignee_hint: undefined,
+    }] })} />);
+    expect(container.querySelector(".task-amount")).toBeNull();
+    expect(container.querySelector(".task-assignee-hint")).toBeNull();
+    expect(screen.queryByText(/Система предположила/)).toBeNull();
+  });
+});

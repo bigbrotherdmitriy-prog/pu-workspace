@@ -1,4 +1,5 @@
 import { ListTodo } from "lucide-react";
+import { formatMoney, formatNumber } from "../../utils/numberFormat";
 
 export type TaskRow = {
   id: number; record_version?: number; title: string; status: string; priority: string; due_date?: string;
@@ -13,7 +14,30 @@ export type TaskRow = {
   };
   result_note?: string; completion_document_id?: number | null; completion_document_name?: string;
   description?: string | null;
+  // LLM/regex extraction fields (MVP2 п.3): null for most tasks today -- only
+  // populated since migration d29a6c4f1e83, and only when extraction found them.
+  amount?: string | null; amount_currency?: string | null; assignee_hint?: string | null;
 };
+
+// Amount is null-safe (most tasks today never had it extracted) and renders
+// next to the assignee, same convention as formatMoney elsewhere in the app.
+function amountLabel(amount?: string | null, currency?: string | null): string | null {
+  if (amount === undefined || amount === null || amount === "") return null;
+  return !currency || currency === "RUB" ? formatMoney(amount) : `${formatNumber(amount)} ${currency}`;
+}
+
+// assignee_hint is only worth surfacing when it was not already folded into
+// the confirmed assignee (match_assignee_hint on the backend) -- otherwise it
+// would just repeat what "Участники" already shows.
+function unconfirmedAssigneeHint(task: TaskRow): string | null {
+  const hint = task.assignee_hint?.trim();
+  if (!hint) return null;
+  const name = task.assignee_name?.trim();
+  if (!name) return hint;
+  const hintLower = hint.toLocaleLowerCase("ru-RU");
+  const nameLower = name.toLocaleLowerCase("ru-RU");
+  return nameLower.includes(hintLower) || hintLower.includes(nameLower) ? null : hint;
+}
 
 function effectLabel(label: string, status: string | undefined): string {
   return `${label}: ${({
@@ -72,9 +96,10 @@ export function TasksModule(props: Props) {
         {task.offline_pending && <span className="task-offline-pending">Ожидает синхронизации</span>}
         <dl className="task-information" aria-label={`Сведения о задаче ${task.title}`}>
           <div><dt>Приоритет</dt><dd><span className={`task-priority-label ${task.priority}`}>{priorityLabel(task.priority)}</span></dd></div>
-          <div><dt>Участники</dt><dd>{task.assignee_name || "Не назначены"}</dd></div>
+          <div><dt>Участники</dt><dd>{task.assignee_name || "Не назначены"}{amountLabel(task.amount, task.amount_currency) && <span className="task-amount"> · {amountLabel(task.amount, task.amount_currency)}</span>}</dd></div>
           <div className="task-information-wide"><dt>Описание</dt><dd className="task-description">{task.description || "Описание не указано"}</dd></div>
           <div className="task-information-wide"><dt>Источник</dt><dd>{task.source_file_name || "Источник не указан"}</dd></div>
+          {unconfirmedAssigneeHint(task) && <div className="task-information-wide"><dt>Подсказка ИИ</dt><dd className="task-assignee-hint">Система предположила: {unconfirmedAssigneeHint(task)}</dd></div>}
         </dl>
         <p className="task-confidence">Эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
         <small>Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
