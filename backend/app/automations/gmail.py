@@ -43,51 +43,69 @@ def interval_seconds() -> int:
 
 def _resolve_shared_sync_token_id(db, project_id: int) -> int | None:
     """Resolve the shared Google account's CURRENT live token for a project
-    enrolled in a mailbox-identity project cohort (ADR-V6-09).
+    whose own `GoogleOAuthToken` has EVER been part of a mailbox identity's
+    credential history (ADR-V6-09, corrected).
 
     `sync_authorized_projects_once` otherwise authenticates each project with
     its OWN static `GoogleOAuthToken` row. That row is silently invalidated by
     Google whenever ANY other project sharing the same underlying account
     reconnects -- confirmed live in production (projects 14/16/24 broke the
     moment project 17 reconnected; see
-    docs/architecture/ADR-V6-09-DUAL-GMAIL-SYNC-RU.md). A project that has
-    explicitly opted into a shared mailbox (an `enabled=True`
-    `MailboxProjectCohort` row for it, any generation) should instead
-    authenticate with whichever token the shared identity's CURRENT
-    credential generation actually points at -- the same source of truth
-    `resolve_project_gmail_read` already relies on for the manual read path.
+    docs/architecture/ADR-V6-09-DUAL-GMAIL-SYNC-RU.md).
 
-    Returns None for a project with no enabled cohort row at all (including
-    one with only disabled rows) -- the caller then falls back to that
-    project's own static token, exactly as before this fix. This is also the
-    correct outcome for the 6 independent `GoogleOAuthToken` rows that have no
-    corresponding `mailbox_identity` generation at all: unrelated Google
-    accounts, unaffected by this bug, must keep working exactly as today.
+    The first cut of this fix gated eligibility on an `enabled=True`
+    `MailboxProjectCohort` row. That was wrong: the three projects that
+    actually broke (14, 16, 24) only ever have `enabled=False` cohort rows --
+    the auto-created-disabled rows `bind_verified_google_subject` writes for
+    whichever project owned the token at each past rotation (ADR-V6-08's
+    "Авто-создание MailboxProjectCohort"). They were never pilot-enrolled,
+    just historically touched the shared account, so the old `enabled=True`
+    filter made this resolver return None for exactly the projects it exists
+    to fix, leaving them to keep failing with `RefreshError: invalid_grant`.
+
+    The real eligibility test -- mirroring the `mapped = ...` lookup
+    `runtime_for_project_connection` (app/mailbox_identity/runtime.py) already
+    does for "was this project's own token ever used for this identity" -- is
+    simply: does this project's own token map, via
+    `MailboxCredentialGeneration.google_token_id`, to a `ConnectionIdentity`
+    whose CURRENT generation now points at a token? If so, and that current
+    token differs from this project's own, the scheduled plain-read sweep
+    should use the current one instead of the stale one. `MailboxProjectCohort`
+    (enabled or not) does not gate this -- it is a separate, pilot-provenance
+    policy question (`runtime_for_project_connection`'s subsequent
+    `_deny()`/cohort-enabled checks, which this plain read sync does not need
+    to inherit: this is not pilot shadow/primary-read/actions automation,
+    just "which token keeps a plain read sync from immediately failing").
+
+    Returns None for:
+    - a project whose own token has never been mapped to any
+      `MailboxCredentialGeneration` row at all (the 6 independent/unrelated
+      `GoogleOAuthToken` rows with no mailbox_identity generation) -- it has
+      never touched any shared identity, so it keeps behaving exactly as
+      before this ADR, unaffected.
+    - a project whose own token IS still the identity's current generation's
+      token (nothing to resolve -- its own token is already the live one).
     """
-    from app.models.mailbox_identity import MailboxCredentialGeneration, MailboxProjectCohort
-    from app.models.v54_pilot import ConnectionIdentity, MailConnection
+    from app.models.mailbox_identity import MailboxCredentialGeneration
+    from app.models.v54_pilot import ConnectionIdentity
 
-    cohort = db.scalar(
-        select(MailboxProjectCohort)
-        .where(MailboxProjectCohort.project_id == project_id, MailboxProjectCohort.enabled.is_(True))
-        .order_by(MailboxProjectCohort.changed_at.desc(), MailboxProjectCohort.id.desc())
-        .limit(1)
-    )
-    if cohort is None:
+    token = db.scalar(select(GoogleOAuthToken).where(GoogleOAuthToken.project_id == project_id))
+    if not token:
         return None
-    mail = db.scalar(select(MailConnection).where(
-        MailConnection.id == cohort.mail_connection_id,
-        MailConnection.organization_id == cohort.organization_id,
-        MailConnection.state == "active",
-    ))
-    if mail is None:
+    # Mirrors runtime_for_project_connection's "mapped = ..." step
+    # (app/mailbox_identity/runtime.py:167): has this project's own token EVER
+    # been part of a mailbox identity's credential history, at any generation?
+    mapped = db.scalar(select(MailboxCredentialGeneration).where(
+        MailboxCredentialGeneration.google_token_id == token.id).order_by(
+        MailboxCredentialGeneration.generation.desc()))
+    if not mapped:
         return None
     identity = db.scalar(select(ConnectionIdentity).where(
-        ConnectionIdentity.id == mail.identity_id,
-        ConnectionIdentity.organization_id == cohort.organization_id,
+        ConnectionIdentity.id == mapped.connection_identity_id,
+        ConnectionIdentity.organization_id == mapped.organization_id,
         ConnectionIdentity.state == "verified",
     ))
-    if identity is None or identity.credential_generation is None:
+    if identity is None:
         return None
     generation = db.scalar(select(MailboxCredentialGeneration).where(
         MailboxCredentialGeneration.organization_id == identity.organization_id,
@@ -96,7 +114,7 @@ def _resolve_shared_sync_token_id(db, project_id: int) -> int | None:
         MailboxCredentialGeneration.binding_epoch == identity.binding_epoch,
         MailboxCredentialGeneration.state == "active",
     ))
-    if generation is None or generation.google_token_id is None:
+    if generation is None or generation.google_token_id is None or generation.google_token_id == token.id:
         return None
     return generation.google_token_id
 

@@ -135,9 +135,12 @@ def _patch_ai_secretary_engines(monkeypatch):
     monkeypatch.setattr(ai_secretary, "configured_action_adapter", lambda *a, **k: SimpleNamespace(provider="test"))
 
 
-def test_resolve_shared_sync_token_id_is_none_without_any_cohort_row(db_session):
-    """The 6 unrelated, independent `GoogleOAuthToken` rows (no mailbox_identity
-    generation at all) must resolve to None -- unaffected, unchanged behaviour."""
+def test_resolve_shared_sync_token_id_is_none_when_token_never_mapped_to_any_identity(db_session):
+    """The 6 unrelated, independent `GoogleOAuthToken` rows (never mapped to
+    any `MailboxCredentialGeneration` at all, i.e. never touched a shared
+    identity) must resolve to None -- unaffected, unchanged behaviour. This is
+    the "own token never mapped" leg of the corrected eligibility test, not a
+    `MailboxProjectCohort` lookup -- that model is not even queried anymore."""
     org = Organization(name="Independent org"); db_session.add(org); db_session.flush()
     project = Project(name="Independent project", organization_id=org.id)
     db_session.add(project); db_session.flush()
@@ -147,12 +150,23 @@ def test_resolve_shared_sync_token_id_is_none_without_any_cohort_row(db_session)
     assert gmail._resolve_shared_sync_token_id(db_session, project.id) is None
 
 
-def test_resolve_shared_sync_token_id_is_none_for_disabled_only_cohort(db_session, user_factory):
-    """A project whose cohort row exists but was never explicitly enabled must
-    fall back to its own static token -- matches the pre-fix (buggy) behaviour
-    for projects 14/16/24, which this PR intentionally does not change: making
-    them use the shared token requires an explicit `join_project_cohort` (an
-    operational decision for the owner), not a code change."""
+def test_resolve_shared_sync_token_id_is_none_when_own_token_is_still_current(db_session, user_factory):
+    """A project whose own token WAS mapped to a mailbox identity, but no
+    rotation has happened since -- its own token is still that identity's
+    CURRENT generation's token -- must resolve to None (nothing to override;
+    it would already authenticate with the same token either way).
+
+    Its `MailboxProjectCohort` row is `enabled=False` (the auto-created-disabled
+    row `bind_verified_google_subject` always writes), but that is NOT why this
+    resolves to None -- `MailboxProjectCohort.enabled` plays no role in this
+    function at all post-fix. It resolves to None purely because own-token ==
+    current-token. Contrast with
+    `test_sweep_uses_shared_current_generation_token_for_disabled_cohort_project`
+    below, which has the SAME `enabled=False` cohort row but DOES resolve a
+    (different) shared token, because a rotation DID happen there. Conflating
+    "disabled cohort" with "falls back to own token" was the exact scope gap
+    that let projects 14/16/24 keep failing in production -- this test must
+    not be read as asserting that conflated (incorrect) rule."""
     org = Organization(name="Shared org"); db_session.add(org); db_session.flush()
     project = Project(name="Shared project", organization_id=org.id)
     db_session.add(project); db_session.flush()
@@ -164,18 +178,22 @@ def test_resolve_shared_sync_token_id_is_none_for_disabled_only_cohort(db_sessio
     db_session.commit()
 
     cohort = db_session.scalar(select(MailboxProjectCohort).where(MailboxProjectCohort.project_id == project.id))
-    assert cohort.enabled is False
+    assert cohort.enabled is False  # the auto-created-disabled row; irrelevant to the resolver post-fix
     assert gmail._resolve_shared_sync_token_id(db_session, project.id) is None
 
 
 def test_sweep_uses_shared_current_generation_token_for_enabled_cohort_project(
         db_session, user_factory, monkeypatch):
-    """Mirrors the real incident of 09.10.2026: a project enrolled in a shared
-    mailbox's cohort (enabled=True) must authenticate the scheduled sweep with
-    the CURRENT generation's live token -- belonging to a DIFFERENT project --
-    never its own stale GoogleOAuthToken row (which would raise RefreshError,
-    exactly like `invalid_grant: Token has been expired or revoked.` in prod).
-    The resulting Message must still be filed under the project being synced.
+    """A project enrolled in a shared mailbox's cohort (here left `enabled=True`,
+    though -- post-fix -- that flag is incidental and plays no role in the
+    resolver) must authenticate the scheduled sweep with the CURRENT
+    generation's live token -- belonging to a DIFFERENT project -- never its
+    own stale GoogleOAuthToken row (which would raise RefreshError, exactly
+    like `invalid_grant: Token has been expired or revoked.` in prod). The
+    resulting Message must still be filed under the project being synced.
+    See `test_sweep_uses_shared_current_generation_token_for_disabled_cohort_project`
+    below for the real-incident shape, where this same outcome holds with
+    `enabled=False` instead.
     """
     org = Organization(name="Incident org"); db_session.add(org); db_session.flush()
     stale_project = Project(name="Project 14 analogue", organization_id=org.id)
@@ -191,7 +209,7 @@ def test_sweep_uses_shared_current_generation_token_for_enabled_cohort_project(
         subject="shared-incident-subject", now=NOW)
     stale_cohort = db_session.scalar(select(MailboxProjectCohort).where(
         MailboxProjectCohort.project_id == stale_project.id))
-    stale_cohort.enabled = True  # explicit prior join, as project 14/16/24 would need
+    stale_cohort.enabled = True  # incidental post-fix -- kept to prove enabled=True still works too
     db_session.flush()
     # The owner reconnects Gmail from the OTHER project's context -- rotates the
     # shared identity to a new generation whose token belongs to live_project,
@@ -230,6 +248,102 @@ def test_sweep_uses_shared_current_generation_token_for_enabled_cohort_project(
     message = db_session.scalar(select(Message).where(Message.source_external_id == item["id"]))
     assert message is not None
     assert message.project_id == stale_project.id
+
+
+def test_sweep_uses_shared_current_generation_token_for_disabled_cohort_project(
+        db_session, user_factory, monkeypatch):
+    """Models tonight's REAL incident shape exactly (09.10.2026, projects 14/16/24):
+    a project whose ONLY `MailboxProjectCohort` row is `enabled=False` -- the
+    auto-created-disabled row from a past `bind_verified_google_subject` call,
+    never explicitly pilot-enrolled -- must STILL authenticate the scheduled
+    sweep with the shared identity's CURRENT generation token (owned by a
+    different project), never its own stale `GoogleOAuthToken`.
+
+    This is the test that would have caught the original scope gap: the first
+    cut's `enabled=True` filter made `_resolve_shared_sync_token_id` return
+    None here, so this project kept falling back to its own stale token and
+    kept raising -- the actual production incident this ADR exists to fix.
+    The project's own token is rigged to raise if ever used, so this test
+    fails loudly (not silently falls back) if the gap reopens.
+    """
+    org = Organization(name="Real incident org"); db_session.add(org); db_session.flush()
+    stale_project = Project(name="Project 14/16/24 analogue", organization_id=org.id)
+    live_project = Project(name="Project 17 analogue", organization_id=org.id)
+    db_session.add_all([stale_project, live_project]); db_session.flush()
+    stale_token = GoogleOAuthToken(project_id=stale_project.id, token_uri="https://oauth2.googleapis.com/token")
+    live_token = GoogleOAuthToken(project_id=live_project.id, token_uri="https://oauth2.googleapis.com/token")
+    db_session.add_all([stale_token, live_token]); db_session.flush()
+
+    service = MailboxIdentityService()
+    service.bind_verified_google_subject(
+        db_session, organization_id=org.id, google_token_id=stale_token.id,
+        subject="real-incident-subject", now=NOW)
+    # The owner reconnects Gmail from the OTHER project's context -- rotates
+    # the shared identity to a new generation whose token belongs to
+    # live_project, exactly like project 17's reconnect rotated the shared
+    # generation tonight. stale_project's cohort row is left untouched: it
+    # stays exactly as `bind_verified_google_subject` auto-created it --
+    # `enabled=False` -- never explicitly joined/pilot-enrolled.
+    service.bind_verified_google_subject(
+        db_session, organization_id=org.id, google_token_id=live_token.id,
+        subject="real-incident-subject", now=NOW)
+    db_session.commit()
+
+    stale_cohort = db_session.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == stale_project.id))
+    assert stale_cohort.enabled is False  # the exact shape that broke in production
+
+    # Also assert via the resolver directly, independent of the sweep plumbing.
+    assert gmail._resolve_shared_sync_token_id(db_session, stale_project.id) == live_token.id
+
+    item = _gmail_item("real-incident-message-1")
+
+    def fake_mailbox(token_id, db):
+        if token_id == stale_token.id:
+            raise AssertionError("must not authenticate with the synced project's own stale token")
+        assert token_id == live_token.id
+        return _fake_gmail_service([item])
+
+    def fake_project(project_id, db):
+        if project_id == stale_project.id:
+            raise AssertionError("must not fall back to google_workspace_for_project for a cohort-history project")
+        return _fake_gmail_service([])  # live_project's own sweep pass: nothing new
+
+    user_factory(is_admin=True)
+    monkeypatch.setattr(gmail.engine.dialect, "name", "sqlite")
+    monkeypatch.setattr("app.api.gmail.google_workspace_for_mailbox", fake_mailbox)
+    monkeypatch.setattr("app.api.gmail.google_workspace_for_project", fake_project)
+    monkeypatch.setattr("app.api.gmail.project_candidate", lambda *a, **k: (stale_project.id, 0.95, "synthetic"))
+    monkeypatch.setattr("app.api.gmail.contact_for_sender", lambda *a, **k: None)
+    monkeypatch.setattr("app.api.gmail.notify_telegram", lambda *a, **k: None)
+    _patch_ai_secretary_engines(monkeypatch)
+    monkeypatch.setattr(gmail, "SessionLocal", lambda: nullcontext(db_session))
+
+    totals = gmail.sync_authorized_projects_once()
+
+    assert totals["failed"] == 0
+    message = db_session.scalar(select(Message).where(Message.source_external_id == item["id"]))
+    assert message is not None
+    assert message.project_id == stale_project.id
+
+    # pilot_write-gated automation (shadow_write/primary_read/actions) must NOT
+    # be silently required or enabled by this -- this is a plain read sync,
+    # exactly like stale_project always did with its own token. Its cohort row
+    # is still enabled=False (no write-side enrollment happened), and the
+    # MailboxCutoverFlags row for the CURRENT generation (created with all-False
+    # defaults by bind_verified_google_subject) was never touched to grant
+    # pilot_write/primary_read/actions.
+    stale_cohort_after = db_session.scalar(select(MailboxProjectCohort).where(
+        MailboxProjectCohort.project_id == stale_project.id))
+    assert stale_cohort_after.enabled is False
+    from app.models.mailbox_identity import MailboxCutoverFlags
+    live_flags = db_session.scalar(select(MailboxCutoverFlags).where(
+        MailboxCutoverFlags.mail_connection_id == stale_cohort_after.mail_connection_id,
+        MailboxCutoverFlags.credential_generation == 2))
+    assert live_flags is not None
+    assert live_flags.pilot_write is False
+    assert live_flags.primary_read is False
+    assert live_flags.actions is False
 
 
 def test_sweep_shares_one_generation_token_across_multiple_cohort_projects(
