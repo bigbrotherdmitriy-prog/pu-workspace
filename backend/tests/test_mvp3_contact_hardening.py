@@ -87,6 +87,28 @@ def test_same_sender_is_scoped_to_exact_verified_mailbox(db_session, user_factor
     assert contact_for_sender(db_session, projects[0].id, "sales@пример.рф", user) is None
 
 
+def test_unscoped_confirmation_routes_regardless_of_mailbox(db_session, user_factory):
+    # A contact confirmed without ever being tied to one mail_connection_id
+    # (e.g. a manual/bulk confirmation) is an unscoped confirmation, not a
+    # dead one -- same "NULL means unscoped" convention as
+    # MailboxAuthorityState.scope_project_id (ADR-V6-08). It must still
+    # resolve for mail arriving through any of the project's own mailboxes.
+    user, _, projects, mailboxes = _world(db_session, user_factory)
+    unscoped = discover_contact_from_message(
+        db_session, projects[0].id, "client@example.test", "Synthetic", user,
+    )
+    assert unscoped.mail_connection_id is None
+    resolve_contact(unscoped.id, _command(f"unscoped-confirm-{unscoped.id}"), db_session, user)
+    assert contact_for_sender(
+        db_session, projects[0].id, "client@example.test", user,
+        mail_connection_id=mailboxes[0].id,
+    ).id == unscoped.id
+    assert contact_for_sender(
+        db_session, projects[0].id, "client@example.test", user,
+        mail_connection_id=mailboxes[1].id,
+    ).id == unscoped.id
+
+
 def test_revoked_or_cross_tenant_mailbox_fails_closed(db_session, user_factory):
     user, _, projects, mailboxes = _world(db_session, user_factory)
     mailboxes[0].state = "revoked"; db_session.commit()

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -173,7 +173,13 @@ def contact_for_sender(db: Session, fallback_project_id: int, sender: str, user:
     contacts = list(db.scalars(select(ProjectContact).where(
         ProjectContact.organization_id == fallback.organization_id,
         ProjectContact.normalized_email == normalized,
-        ProjectContact.mail_connection_id == mail_connection_id,
+        # NULL mail_connection_id is an unscoped confirmation -- it still
+        # counts for whichever mailbox the sender writes from (same "NULL
+        # means unscoped" convention as MailboxAuthorityState.scope_project_id,
+        # ADR-V6-08). A non-NULL stored value still only matches its own
+        # connection.
+        or_(ProjectContact.mail_connection_id.is_(None),
+            ProjectContact.mail_connection_id == mail_connection_id),
         ProjectContact.active.is_(True),
         ProjectContact.confirmed.is_(True),
     ).order_by(ProjectContact.id)))

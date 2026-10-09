@@ -412,7 +412,13 @@ def sync_gmail_read(project_id: int, payload: GmailSyncRequest,
         sender_email = parseaddr(sender)[1].casefold()
         contacts = list(db.scalars(select(ProjectContact).where(
             ProjectContact.organization_id == connection.organization_id,
-            ProjectContact.mail_connection_id == connection.mail_connection_id,
+            # NULL mail_connection_id is an unscoped confirmation (not tied to
+            # one mailbox at confirmation time, e.g. manual/bulk confirmation)
+            # -- it still counts for whichever mailbox the sender writes from,
+            # same "NULL means unscoped" convention as elsewhere in this system
+            # (see MailboxAuthorityState.scope_project_id, ADR-V6-08).
+            or_(ProjectContact.mail_connection_id.is_(None),
+                ProjectContact.mail_connection_id == connection.mail_connection_id),
             ProjectContact.normalized_email == sender_email,
             ProjectContact.active.is_(True), ProjectContact.confirmed.is_(True),
             ProjectContact.resolution_state.in_(("confirmed", "corrected")),
