@@ -41,6 +41,66 @@ def interval_seconds() -> int:
     return max(60, int(os.getenv("GMAIL_AUTO_SYNC_INTERVAL_SECONDS", "300")))
 
 
+def _resolve_shared_sync_token_id(db, project_id: int) -> int | None:
+    """Resolve the shared Google account's CURRENT live token for a project
+    enrolled in a mailbox-identity project cohort (ADR-V6-09).
+
+    `sync_authorized_projects_once` otherwise authenticates each project with
+    its OWN static `GoogleOAuthToken` row. That row is silently invalidated by
+    Google whenever ANY other project sharing the same underlying account
+    reconnects -- confirmed live in production (projects 14/16/24 broke the
+    moment project 17 reconnected; see
+    docs/architecture/ADR-V6-09-DUAL-GMAIL-SYNC-RU.md). A project that has
+    explicitly opted into a shared mailbox (an `enabled=True`
+    `MailboxProjectCohort` row for it, any generation) should instead
+    authenticate with whichever token the shared identity's CURRENT
+    credential generation actually points at -- the same source of truth
+    `resolve_project_gmail_read` already relies on for the manual read path.
+
+    Returns None for a project with no enabled cohort row at all (including
+    one with only disabled rows) -- the caller then falls back to that
+    project's own static token, exactly as before this fix. This is also the
+    correct outcome for the 6 independent `GoogleOAuthToken` rows that have no
+    corresponding `mailbox_identity` generation at all: unrelated Google
+    accounts, unaffected by this bug, must keep working exactly as today.
+    """
+    from app.models.mailbox_identity import MailboxCredentialGeneration, MailboxProjectCohort
+    from app.models.v54_pilot import ConnectionIdentity, MailConnection
+
+    cohort = db.scalar(
+        select(MailboxProjectCohort)
+        .where(MailboxProjectCohort.project_id == project_id, MailboxProjectCohort.enabled.is_(True))
+        .order_by(MailboxProjectCohort.changed_at.desc(), MailboxProjectCohort.id.desc())
+        .limit(1)
+    )
+    if cohort is None:
+        return None
+    mail = db.scalar(select(MailConnection).where(
+        MailConnection.id == cohort.mail_connection_id,
+        MailConnection.organization_id == cohort.organization_id,
+        MailConnection.state == "active",
+    ))
+    if mail is None:
+        return None
+    identity = db.scalar(select(ConnectionIdentity).where(
+        ConnectionIdentity.id == mail.identity_id,
+        ConnectionIdentity.organization_id == cohort.organization_id,
+        ConnectionIdentity.state == "verified",
+    ))
+    if identity is None or identity.credential_generation is None:
+        return None
+    generation = db.scalar(select(MailboxCredentialGeneration).where(
+        MailboxCredentialGeneration.organization_id == identity.organization_id,
+        MailboxCredentialGeneration.connection_identity_id == identity.id,
+        MailboxCredentialGeneration.generation == identity.credential_generation,
+        MailboxCredentialGeneration.binding_epoch == identity.binding_epoch,
+        MailboxCredentialGeneration.state == "active",
+    ))
+    if generation is None or generation.google_token_id is None:
+        return None
+    return generation.google_token_id
+
+
 def _automation_user(db, project_id: int) -> User | None:
     role_order = {"owner": 0, "manager": 1, "editor": 2}
     members = db.execute(
@@ -110,7 +170,11 @@ def sync_authorized_projects_once() -> dict[str, int]:
                                         details="reason=no_authorized_actor"))
                         db.commit()
                         continue
-                    result = sync_gmail_project(project_id, db, user, query="is:inbox newer_than:7d", max_results=25)
+                    sync_kwargs = {"query": "is:inbox newer_than:7d", "max_results": 25}
+                    shared_token_id = _resolve_shared_sync_token_id(db, project_id)
+                    if shared_token_id is not None:
+                        sync_kwargs["credential_token_id"] = shared_token_id
+                    result = sync_gmail_project(project_id, db, user, **sync_kwargs)
                     totals["projects"] += 1
                     for key in ("processed", "skipped", "failed"):
                         totals[key] += int(result.get(key, 0))

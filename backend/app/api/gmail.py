@@ -458,19 +458,44 @@ def sync_gmail_read(project_id: int, payload: GmailSyncRequest,
     return {**counts, "project_id": project_id, "mode": "ordinary_read", "auto_enabled": False}
 
 
-def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int) -> dict:
+def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int,
+                       credential_token_id: int | None = None) -> dict:
+    """Sync one project's Gmail. `credential_token_id`, when given, is a
+    pre-resolved shared-mailbox token (see automations/gmail.py's cohort-aware
+    sweep, ADR-V6-09) to authenticate with INSTEAD of this project's own
+    GoogleOAuthToken row -- used only by the scheduled sweep for a project
+    enrolled in a MailboxProjectCohort on a shared Google account, never by
+    the manual "Получить новые"/sync endpoints, which always omit it and so
+    see byte-for-byte unchanged behaviour below.
+    """
     require_project_role(db, user, project_id, "editor")
     sync_project = db.get(Project, project_id)
     if sync_project is None:
         raise HTTPException(404, "Project not found")
-    try:
-        mailbox_runtime = runtime_for_project_connection(db, project_id)
-    except ValueError as exc:
-        raise HTTPException(409, "Mailbox identity is unavailable") from exc
+    if credential_token_id is None:
+        try:
+            mailbox_runtime = runtime_for_project_connection(db, project_id)
+        except ValueError as exc:
+            raise HTTPException(409, "Mailbox identity is unavailable") from exc
+    else:
+        # A caller that already resolved a shared current-generation token has
+        # its own answer to "which credential authenticates this sync" -- the
+        # separate ADR-V54 pilot-provenance runtime below only ever resolves
+        # non-None for the project that currently owns the live token, and
+        # fail-closed denies (ValueError) a project that is cohort-enrolled but
+        # not that owner. That denial is orthogonal to this ADR-V6-09 fix (it
+        # guards pilot shadow/primary-read provenance, not plain provider
+        # authentication), so here it is treated the same as "no pilot runtime
+        # applies" rather than surfaced as a 409.
+        try:
+            mailbox_runtime = runtime_for_project_connection(db, project_id)
+        except ValueError:
+            mailbox_runtime = None
     if mailbox_runtime and mailbox_runtime.mailbox_cohort and not mailbox_runtime.flags.pilot_write:
         raise HTTPException(409, "Mailbox cohort requires an explicit current-generation write flag")
-    service = (google_workspace_for_mailbox(mailbox_runtime.google_token_id, db)
-               if mailbox_runtime else google_workspace_for_project(project_id, db)).service("gmail", "v1")
+    auth_token_id = mailbox_runtime.google_token_id if mailbox_runtime else credential_token_id
+    service = (google_workspace_for_mailbox(auth_token_id, db)
+               if auth_token_id is not None else google_workspace_for_project(project_id, db)).service("gmail", "v1")
     page = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
     processed = skipped = failed = 0
     errors: list[dict] = []
