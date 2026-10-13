@@ -57,7 +57,7 @@ def service_account(tmp_path, monkeypatch):
     path.write_text(json.dumps({
         "type": "service_account", "project_id": "synthetic-project",
         "client_email": "push@synthetic-project.iam.gserviceaccount.com",
-        "private_key": "-----BEGIN PRIVATE KEY-----\nsynthetic\n-----END PRIVATE KEY-----\n",
+        "private_key": "synthetic-not-a-key",
         "token_uri": "https://oauth2.googleapis.com/token",
     }), encoding="utf-8")
     monkeypatch.setenv("FCM_SERVICE_ACCOUNT_JSON_PATH", str(path))
