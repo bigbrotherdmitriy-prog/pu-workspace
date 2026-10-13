@@ -63,6 +63,9 @@ def validate(model: dict, project: str, image: str, port: int, volume: str, pref
             for item in mounts
         ):
             fail(f"{name} does not mount the dedicated local-upload volume")
+        for item in mounts:
+            if item.get("type") == "bind" and not item.get("read_only"):
+                fail(f"{name} has a writable host bind mount")
     # OAuth redirect configuration may legitimately retain the production URL so
     # encrypted tokens remain usable after DNS cutover. Only executable Compose
     # fields are forbidden from contacting the old endpoint during preparation.

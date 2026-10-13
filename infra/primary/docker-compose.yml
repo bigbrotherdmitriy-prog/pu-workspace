@@ -14,6 +14,9 @@ x-app: &app
   environment: *environment
   volumes:
     - local-upload-staging:/var/lib/pu-workspace-local-upload
+    # Provider credentials that must be files (FCM service account). Host
+    # directory is root-only; mounted read-only, never baked into the image.
+    - ${PRIMARY_SECRETS_DIR:-/opt/pu-workspace-primary/secrets}:/run/pu-secrets:ro
   restart: unless-stopped
 
 services:
