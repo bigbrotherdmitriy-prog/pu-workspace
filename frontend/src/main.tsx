@@ -17,8 +17,11 @@ import "./claude-work-center-reference.css";
 import "./work-center-integration.css";
 import "./application-feedback.css";
 import { applyDisplayPreference } from "./modules/settings/ComfortControls";
+import { captureFcmTokenFromLocation } from "./push/fcmRegistration";
 
 applyDisplayPreference();
+// Before the first render, so no screen ever reads or keeps the #fcm= fragment.
+captureFcmTokenFromLocation();
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Suspense fallback={<div className="app-route-loading" role="status">Загружаю экран…</div>}>

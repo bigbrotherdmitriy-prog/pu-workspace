@@ -53,6 +53,7 @@ import type { AutonomyReadiness } from "./modules/settings/AutonomyReadinessPane
 import type { TaskHistoryRow, TaskRow } from "./modules/tasks/TasksModule";
 import type { DecisionRow, RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
+import { pushTaskIdFromLocation, registerPushDevice, revokePushDevice } from "./push/fcmRegistration";
 import { ComfortControls } from "./modules/settings/ComfortControls";
 import {
   Activity,
@@ -491,7 +492,8 @@ export function App() {
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
       {},
     ),
-    [taskFilter, setTaskFilter] = useState("open"),
+    [taskFilter, setTaskFilter] = useState(() => pushTaskIdFromLocation() ? "all" : "open"),
+    [focusTaskId] = useState(pushTaskIdFromLocation),
     [obligationFilter, setObligationFilter] = useState<"all" | "overdue">("all"),
     [governanceFocus, setGovernanceFocus] = useState<"all" | "risks" | "decisions">("all"),
     [notificationFilter, setNotificationFilter] = useState<"all" | "unread">("all"),
@@ -2643,9 +2645,15 @@ export function App() {
       .catch(() => setReady(false));
   }, []);
   useEffect(() => {
+    if (ready) void registerPushDevice();
+  }, [ready]);
+  useEffect(() => {
     const shortcut = new URLSearchParams(window.location.search).get("section");
-    const sections: Record<string, string> = { today: "Сегодня", mail: "Письма", tasks: "Задачи" };
-    if (shortcut && sections[shortcut]) {
+    const sections: Record<string, string> = { today: "Сегодня", mail: "Письма", tasks: "Задачи", notifications: "Уведомления" };
+    if (pushTaskIdFromLocation()) {
+      setActive("Задачи");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (shortcut && sections[shortcut]) {
       setActive(sections[shortcut]);
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -3406,6 +3414,7 @@ export function App() {
       `На устройстве осталось несинхронизированных изменений: ${offlineSync.summary.total}. При выходе локальная очередь будет удалена. Выйти?`,
     )) return;
     try {
+      await revokePushDevice();
       await api("/auth/logout", { method: "POST" });
       if (typeof indexedDB !== "undefined") await clearOfflineData();
       setReady(false);
@@ -3610,6 +3619,7 @@ export function App() {
               onCompletionNoteChange={setCompletionNote}
               onCompletionDocumentChange={setCompletionDocumentId}
               onLoadHistory={(task) => void loadTaskHistory(task)}
+              focusTaskId={focusTaskId}
             />
           ) : active === "Риски и решения" ? (
             <GovernanceModule

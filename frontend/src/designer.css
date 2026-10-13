@@ -217,6 +217,8 @@ button:not(.icon):not(nav button) { border-radius: var(--pu-radius-sm); }
 .doc-list article:hover, .source-list article:hover, .task-list article:hover,
 .governance-list article:hover, .audit-list article:hover,
 .dashboard-inbox-list > button:hover { background: #f7fbf9; }
+/* Task opened from a push notification */
+.task-list article.task-focused { background: #eef8f3; box-shadow: inset 3px 0 0 #16a779; }
 .file-icon, .source-icon, .integration-icon.connected, .notification-kind {
   border: 1px solid rgba(23,168,120,.1);
   box-shadow: none;

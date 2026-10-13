@@ -207,3 +207,17 @@ describe("TasksModule amount and assignee_hint (MVP2 п.3)", () => {
     expect(screen.queryByText(/Система предположила/)).toBeNull();
   });
 });
+
+describe("TasksModule push deep link", () => {
+  it("highlights and scrolls to the task opened from a push", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const other = { ...task, id: task.id + 1, title: "Другая задача" };
+    const { container } = render(<TasksModule {...props({ tasks: [task, other], focusTaskId: other.id })} />);
+    const focused = container.querySelector(`#task-${other.id}`);
+    expect(focused).toHaveClass("task-focused");
+    expect(focused).toHaveAttribute("aria-current", "true");
+    expect(container.querySelector(`#task-${task.id}`)).not.toHaveClass("task-focused");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+});

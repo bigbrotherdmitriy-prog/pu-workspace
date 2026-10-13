@@ -44,3 +44,5 @@ android/**/build/
 android/*.jks
 android/*.keystore
 android/keystore.properties
+# Firebase project config is supplied at build time (android/README.md)
+google-services.json
