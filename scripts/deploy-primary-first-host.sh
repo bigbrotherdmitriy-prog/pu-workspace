@@ -325,6 +325,10 @@ rollback() {
       echo "ROLLBACK FAILED: previous release static integrity check failed" >&2
       exit "$code"
     fi
+    if [ -n "$(compose --profile cutover ps -q worker scheduler 2>/dev/null)" ]; then
+      compose --profile cutover up -d --no-build --no-deps --force-recreate --wait --wait-timeout 120 worker scheduler \
+        || echo "ROLLBACK WARNING: background services could not be restored; inspect worker/scheduler" >&2
+    fi
     echo "primary application rollback verified: release=$OLD_REVISION" >&2
   fi
   exit "$code"
@@ -349,6 +353,22 @@ echo "[6/6] running read-only loopback smoke; no public host is contacted"
 local_smoke "$RELEASE_DIR"
 static_smoke "$RELEASE_DIR" "$CANDIDATE_IMAGE" candidate
 
+# After cutover the worker/scheduler services are running; step [5/6] only
+# replaces db+backend, so without this they would keep executing the previous
+# release's code (observed 05.10-13.10.2026: workers stayed on a week-old image
+# and no background fix shipped). Before cutover nothing is running and the
+# services stay stopped, exactly as before. Runs while the rollback trap is
+# still armed: a failure here restores the previous release, workers included.
+if [ -n "$(compose --profile cutover ps -q worker scheduler 2>/dev/null)" ]; then
+  echo "[post] background services are live; moving worker and scheduler to the candidate image"
+  compose --profile cutover up -d --no-build --no-deps --force-recreate --wait --wait-timeout 120 worker scheduler
+  for container in $(compose --profile cutover ps -q worker scheduler); do
+    [ "$(docker inspect "$container" --format '{{.Image}}')" = "$CANDIDATE_IMAGE" ] \
+      || fail "background container $container is not running the candidate image"
+  done
+fi
+
 SWITCHED=false
 trap - INT TERM HUP EXIT
+
 echo "first-host primary deploy complete: release=$REVISION backup=${BACKUP_FILE:-none} port=$PORT"

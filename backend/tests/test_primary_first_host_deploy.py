@@ -275,3 +275,21 @@ def test_current_switch_logs_utc_bounds_without_changing_atomic_cutover():
 def test_primary_compose_json_fixture_is_serializable():
     model, *_ = compose_model()
     assert json.loads(json.dumps(model))["services"]["db"]["container_name"].endswith("-db")
+
+
+def test_deploy_moves_live_background_services_to_candidate_image():
+    source = (ROOT / "scripts" / "deploy-primary-first-host.sh").read_text(encoding="utf-8")
+    tail = source[source.index('echo "[6/6]'):]
+    # Only after the candidate passed smoke, and only when cutover already happened.
+    assert 'if [ -n "$(compose --profile cutover ps -q worker scheduler' in tail
+    assert "up -d --no-build --no-deps --force-recreate --wait --wait-timeout 120 worker scheduler" in tail
+    # db/backend must not be touched again by this step.
+    recreate = tail[tail.index("--wait-timeout 120 worker scheduler") - 120:]
+    assert " backend" not in recreate.split("\n")[0]
+    # Every background container is verified against the candidate image id.
+    assert "{{.Image}}')\" = \"$CANDIDATE_IMAGE\"" in tail
+    # Runs while the rollback trap is still armed ...
+    assert tail.index("--force-recreate --wait --wait-timeout 120 worker scheduler") < tail.index("trap - INT TERM HUP EXIT")
+    # ... and the rollback path restores the previous release's workers too.
+    rollback = source[source.index("rollback() {"):source.index('trap rollback INT TERM HUP EXIT')]
+    assert "--force-recreate --wait --wait-timeout 120 worker scheduler" in rollback
