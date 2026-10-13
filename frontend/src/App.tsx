@@ -3555,7 +3555,7 @@ export function App() {
                 </span>
               ))}
             </div>
-            <button className="icon" aria-label="Обновить данные проекта" onClick={() => load()}>
+            <button className="icon header-refresh-button" aria-label="Обновить данные проекта" onClick={() => load()}>
               <RefreshCw />
             </button>
           </div>

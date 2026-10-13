@@ -1,0 +1,74 @@
+/* Phone layout of the application shell (Android TWA, 390–412 px).
+   Loaded after every theme sheet and scoped to ≤ 760 px, so the desktop
+   view is untouched. Theme sheets fight over the header with high-specificity
+   and !important rules; the layout properties here win on purpose, colours
+   stay with the themes. */
+@media (max-width: 760px) {
+  :root { --pu-mobile-nav: calc(62px + env(safe-area-inset-bottom)); --pu-mobile-fab: 44px; }
+
+  /* 9. No page-level horizontal scroll: wide things scroll inside their own box. */
+  html, body { overflow-x: hidden; }
+  .shell, .shell > main, .shell .content { max-width: 100vw; min-width: 0; }
+  .shell .content { overflow-wrap: anywhere; }
+  .shell .content :is(img, video, canvas, svg:not([width])) { max-width: 100%; }
+  .shell .content :is(table, pre) { max-width: 100%; }
+
+  /* 9. Tap targets of at least 44 px. */
+  .shell :is(main, aside) :is(button, select, a[role="button"], [role="tab"]),
+  .shell :is(main, aside) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) { min-height: 44px !important; }
+  .shell :is(main, aside) :is(button.icon, .icon) { min-width: 44px !important; }
+  .shell :is(main, aside) input:is([type="checkbox"], [type="radio"]) { min-width: 22px; min-height: 22px; }
+
+  /* 3. One-row header: ☰, section title, short project picker, refresh. */
+  :root .shell > main > header,
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .future-preview-header {
+    position: sticky; top: 0;
+    height: calc(56px + env(safe-area-inset-top)) !important; min-height: 0 !important;
+    display: flex !important; flex-wrap: nowrap !important; align-items: center !important; gap: 6px !important;
+    padding: env(safe-area-inset-top) 8px 0 4px !important;
+  }
+  :root .shell > main > header > .mobile-menu { display: grid !important; flex: 0 0 44px !important; width: 44px !important; height: 44px !important; margin: 0 !important; }
+  :root .shell > main > header > .page-heading { flex: 1 1 auto !important; min-width: 0 !important; max-width: none !important; display: block !important; margin: 0 !important; }
+  :root .shell > main > header .page-heading :is(.page-kicker, p) { display: none !important; }
+  :root .shell > main > header .page-heading h1 {
+    max-width: none !important; margin: 0 !important; overflow: hidden !important;
+    font-size: 18px !important; line-height: 1.25 !important; letter-spacing: -.01em !important;
+    white-space: nowrap !important; text-overflow: ellipsis !important;
+  }
+  :root .shell > main > header > .header-actions {
+    flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;
+    display: flex !important; flex-wrap: nowrap !important; align-items: center !important; gap: 6px !important; margin: 0 !important;
+  }
+  :root .shell > main > header > .header-actions > :not(.project-switcher):not(.header-refresh-button) { display: none !important; }
+  :root .shell > main > header .project-switcher {
+    position: relative; display: flex !important; flex: 0 1 auto !important; align-items: center !important;
+    width: clamp(96px, 32vw, 140px) !important; min-width: 0 !important; max-width: 140px !important;
+    height: 44px !important; padding: 0 !important; margin: 0 !important;
+  }
+  :root .shell > main > header .project-switcher > :is(span, svg) { display: none !important; }
+  :root .shell > main > header .project-switcher select {
+    width: 100% !important; min-width: 0 !important; max-width: none !important; height: 44px !important;
+    padding: 0 26px 0 10px !important; overflow: hidden !important;
+    font-size: 14px !important; white-space: nowrap !important; text-overflow: ellipsis !important;
+  }
+  :root .shell > main > header .header-refresh-button { display: grid !important; flex: 0 0 44px !important; width: 44px !important; height: 44px !important; margin: 0 !important; }
+
+  /* 8. Floating actions: compact, stacked above the bottom navigation, and
+     the content ends above them so nothing stays covered. */
+  :root .shell .android-upload-fab {
+    right: 10px !important; bottom: calc(var(--pu-mobile-nav) + 10px) !important;
+    width: var(--pu-mobile-fab) !important; height: var(--pu-mobile-fab) !important;
+  }
+  :root .shell .android-upload-fab svg { width: 20px; }
+  :root .shell .ai-mascot {
+    right: 10px !important; bottom: calc(var(--pu-mobile-nav) + var(--pu-mobile-fab) + 18px) !important;
+    width: var(--pu-mobile-fab) !important; height: var(--pu-mobile-fab) !important; min-height: 0 !important; min-width: 0 !important;
+    transform: none !important; filter: none !important;
+  }
+  :root .shell .ai-mascot :is(.ai-mascot-antenna, .ai-mascot-face) { display: none !important; }
+  :root .shell .ai-mascot .ai-mascot-body { inset: 0 !important; width: 100% !important; height: 100% !important; border-radius: 50% !important; font-size: 12px !important; }
+  :root .shell > main > .content,
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content {
+    padding-bottom: calc(var(--pu-mobile-nav) + 2 * var(--pu-mobile-fab) + 32px) !important;
+  }
+}
