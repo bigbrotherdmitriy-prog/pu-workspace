@@ -32,6 +32,9 @@ for (const theme of ["Тёмная", "Светлая"]) test(`header is one comp
     await show(page, section);
     const header = await box(page, ".shell > main > header");
     expect(header.height, `${section}: header height`).toBeLessThanOrEqual(64);
+    // A section overlay starts right under the header, not over it.
+    const overlay = page.locator(".documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay").first();
+    if (await overlay.count()) expect(Math.abs((await overlay.boundingBox())!.y - (header.y + header.height)), `${section}: overlay under the header`).toBeLessThanOrEqual(1);
     const parts = [
       page.getByRole("button", { name: "Открыть меню" }),
       page.locator(".shell > main > header h1"),
@@ -58,8 +61,12 @@ for (const theme of ["Тёмная", "Светлая"]) test(`header is one comp
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await settled(page);
     const fabTop = Math.min((await box(page, ".ai-mascot")).y, (await box(page, ".android-upload-fab")).y);
-    const contentBottom = await page.locator(".shell > main > .content").evaluate(content => {
-      const children = [...content.children].filter(child => child.getBoundingClientRect().height > 0);
+    // Some sections are fixed overlays with their own scroll; scroll those too.
+    const contentBottom = await page.evaluate(() => {
+      const overlay = document.querySelector<HTMLElement>(".documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay");
+      const scroller = overlay ?? document.querySelector<HTMLElement>(".shell > main > .content")!;
+      if (overlay) overlay.scrollTop = overlay.scrollHeight;
+      const children = [...scroller.children].filter(child => child.getBoundingClientRect().height > 0);
       return Math.max(...children.map(child => child.getBoundingClientRect().bottom));
     });
     expect(contentBottom, `${section}: last content block ends above the floating buttons`).toBeLessThanOrEqual(fabTop);

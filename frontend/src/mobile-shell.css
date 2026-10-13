@@ -71,4 +71,10 @@
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .content {
     padding-bottom: calc(var(--pu-mobile-nav) + 2 * var(--pu-mobile-fab) + 32px) !important;
   }
+  /* Sections drawn as fixed overlays (Письма, Документы, Проекты, modules)
+     start under the one-row header and already end above the bottom nav. */
+  :root .shell :is(.documents-overlay, .projects-overlay, .secretary-overlay, .module-overlay):not(.gpr-dds-overlay) {
+    top: calc(56px + env(safe-area-inset-top)) !important; bottom: var(--pu-mobile-nav) !important;
+    padding-bottom: calc(2 * var(--pu-mobile-fab) + 32px) !important;
+  }
 }
