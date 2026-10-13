@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, ChevronRight,
+  AlertTriangle, Archive, Bot, CheckCircle2, ChevronRight,
   Clock3, FileText, Inbox, Mail, MailOpen, Paperclip, PenLine, RefreshCw,
   Reply, ReplyAll, Search, Send, Settings, ShieldAlert, Sparkles, Trash2, Undo2, XCircle,
+  ArrowLeft,
 } from "lucide-react";
 import { ApiError } from "../../api/client";
 import { mailClientApi } from "./mailClientApi";
