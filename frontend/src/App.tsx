@@ -40,7 +40,8 @@ import {
 import { ProjectSearchWorkspace, type ProjectSearchHit } from "./modules/search/ProjectSearchResults";
 import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
-import { SyncStatusPanel } from "./modules/android/SyncStatusPanel";
+import { SyncStatusPanel, syncIsSettled } from "./modules/android/SyncStatusPanel";
+import { usePhoneLayout } from "./modules/android/usePhoneLayout";
 import { clearOfflineData } from "./offline/db";
 import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine";
 import { useOfflineSync } from "./offline/useOfflineSync";
@@ -617,6 +618,9 @@ export function App() {
   const mailSyncAbortRef = useRef<AbortController | null>(null);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
   const offlineSync = useOfflineSync(currentUser?.id || 0, projectId, () => { void load(); });
+  // Phones keep the top of every screen for content (owner review 13.10.2026):
+  // theme controls live in the "Ещё" drawer, sync shows as a header dot unless it needs attention.
+  const phoneLayout = usePhoneLayout();
   useEffect(() => {
     let current = true;
     if (!ready || !projectId || active !== "Настройки") {
@@ -3457,6 +3461,10 @@ export function App() {
             ))}
           </div>)}
         </nav>
+        {phoneLayout && <section className="drawer-appearance" aria-label="Оформление">
+          <span className="nav-group-label">Оформление</span>
+          <ComfortControls />
+        </section>}
         <div className="profile">
           <div className="avatar">D</div>
           {!collapsed && (
@@ -3555,12 +3563,18 @@ export function App() {
                 </span>
               ))}
             </div>
-            <button className="icon header-refresh-button" aria-label="Обновить данные проекта" onClick={() => load()}>
+            <button
+              className="icon header-refresh-button"
+              aria-label="Обновить данные проекта"
+              data-sync={!ready || !currentUser || projectId <= 0 ? undefined : syncIsSettled(online, offlineSync.summary, offlineSync.conflicts) ? "settled" : online ? "pending" : "offline"}
+              onClick={() => load()}
+            >
               <RefreshCw />
             </button>
           </div>
         </header>
         {ready && currentUser && projectId > 0 && <SyncStatusPanel
+          compact={phoneLayout}
           online={online}
           summary={offlineSync.summary}
           conflicts={offlineSync.conflicts}
@@ -3573,7 +3587,7 @@ export function App() {
           <span>{error}</span><button type="button" aria-label="Закрыть сообщение об ошибке" onClick={() => setError("")}>×</button>
         </div></div>, document.body)}
         <section className="content">
-          <ComfortControls />
+          {!phoneLayout && <ComfortControls />}
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
             <TodayModule

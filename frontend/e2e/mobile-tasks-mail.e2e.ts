@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test, settled } from "./storage-fixtures";
+import { chooseThemeOnPhone, expect, test, settled } from "./storage-fixtures";
 
 // 13.10.2026 phone review: task cards showed the evidence quote, the heuristic
 // score and AI hints inline; mail folders had huge paddings and confirming a
@@ -71,7 +71,7 @@ test.describe("phone", () => {
       await withData(page);
       await page.goto("/new/");
       await settled(page);
-      await page.getByRole("button", { name: theme, exact: true }).first().click();
+      await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Задачи", exact: true }).click();
       await page.getByRole("button", { name: "Все", exact: true }).click();
       const card = page.locator("#task-901");
@@ -108,7 +108,7 @@ test.describe("phone", () => {
       const calls = await withData(page);
       await page.goto("/new/");
       await settled(page);
-      await page.getByRole("button", { name: theme, exact: true }).first().click();
+      await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
       const folders = page.getByRole("complementary", { name: "Папки почты" });
       await expect(folders.getByRole("button", { name: /Отправленные/ })).toBeVisible();

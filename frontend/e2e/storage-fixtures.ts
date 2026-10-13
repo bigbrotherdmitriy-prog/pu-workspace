@@ -484,3 +484,11 @@ export async function release(page: Page, hold: ReturnType<StorageApi["hold"]>, 
   hold.release({ body, status });
   await response; await settled(page);
 }
+/** Phones keep the theme controls in the "Ещё" drawer (owner review 13.10.2026). */
+export async function chooseThemeOnPhone(page: Page, theme: string) {
+  await page.getByRole("button", { name: "Открыть всё меню" }).click();
+  await page.locator(".shell > aside.mobile-open").getByRole("button", { name: theme, exact: true }).click();
+  // Close by tapping the uncovered strip to the right of the drawer.
+  await page.getByRole("button", { name: "Закрыть меню" }).click({ position: { x: 370, y: 400 } });
+  await expect(page.locator(".shell > aside.mobile-open")).toHaveCount(0);
+}

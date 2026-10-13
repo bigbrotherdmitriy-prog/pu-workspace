@@ -7,6 +7,8 @@ type Props = {
   conflicts: ServerConflict[];
   onSync: () => void;
   onResolve: (id: number, resolution: "keep_server" | "apply_local" | "latest_write_wins") => void;
+  /** Phone layout: nothing when all is synced, otherwise a one-row banner. */
+  compact?: boolean;
 };
 
 function value(input: unknown) {
@@ -14,7 +16,14 @@ function value(input: unknown) {
   return typeof input === "string" ? input : JSON.stringify(input);
 }
 
-export function SyncStatusPanel({ online, summary, conflicts, onSync, onResolve }: Props) {
+/** Online, nothing queued, nothing to resolve: the state a phone shows only as a header dot. */
+export function syncIsSettled(online: boolean, summary: SyncSummary, conflicts: ServerConflict[]) {
+  return online && !summary.total && !summary.syncing && !summary.lastError
+    && !(summary.attention + summary.authRequired + conflicts.length);
+}
+
+export function SyncStatusPanel({ online, summary, conflicts, onSync, onResolve, compact = false }: Props) {
+  if (compact && syncIsSettled(online, summary, conflicts)) return null;
   const needsAttention = summary.attention + summary.authRequired + conflicts.length;
   const label = !online
     ? `Офлайн · несинхронизировано: ${summary.total}`
@@ -28,12 +37,12 @@ export function SyncStatusPanel({ online, summary, conflicts, onSync, onResolve 
             ? `Синхронизировано · ${new Date(summary.lastSyncedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
             : "Синхронизация готова";
 
-  return <section className={`mobile-sync-panel${needsAttention ? " has-attention" : ""}`} aria-live="polite">
+  return <section className={`mobile-sync-panel${needsAttention ? " has-attention" : ""}${compact ? " compact" : ""}`} aria-live="polite">
     <div className="mobile-sync-summary">
       {!online ? <WifiOff /> : needsAttention ? <AlertTriangle /> : <Check />}
-      <span>{label}</span>
-      <button type="button" onClick={onSync} disabled={!online || Boolean(summary.syncing)}>
-        <RefreshCw /> Синхронизировать сейчас
+      <span title={compact ? label : undefined}>{label}</span>
+      <button type="button" aria-label="Синхронизировать сейчас" onClick={onSync} disabled={!online || Boolean(summary.syncing)}>
+        <RefreshCw /> {compact ? "Синхронизировать" : "Синхронизировать сейчас"}
       </button>
     </div>
     {summary.lastError && <small>{summary.lastError}</small>}

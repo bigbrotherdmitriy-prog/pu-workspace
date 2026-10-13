@@ -53,6 +53,39 @@
   }
   :root .shell > main > header .header-refresh-button { display: grid !important; flex: 0 0 44px !important; width: 44px !important; height: 44px !important; margin: 0 !important; }
 
+  /* Sync state: a dot on the refresh button; the banner below the header
+     appears only when offline or something waits to be sent (one row). */
+  :root .shell > main > header .header-refresh-button { position: relative; }
+  :root .shell > main > header .header-refresh-button[data-sync]::after {
+    content: ""; position: absolute; top: 8px; right: 8px; width: 8px; height: 8px;
+    border-radius: 50%; background: #17a878; box-shadow: 0 0 0 2px rgba(255,255,255,.85); pointer-events: none;
+  }
+  :root .shell > main > header .header-refresh-button[data-sync="pending"]::after { background: #e9a83b; }
+  :root .shell > main > header .header-refresh-button[data-sync="offline"]::after { background: #8b94a3; }
+  :root .shell > main > .mobile-sync-panel.compact,
+  :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .mobile-sync-panel.compact {
+    gap: 6px !important; margin: 6px 12px 0 !important; padding: 4px 6px 4px 10px !important;
+  }
+  :root .shell > main > .mobile-sync-panel.compact .mobile-sync-summary { flex-wrap: nowrap !important; align-items: center !important; gap: 8px; }
+  :root .shell > main > .mobile-sync-panel.compact .mobile-sync-summary > span {
+    min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    font-size: 13px; line-height: 1.25;
+  }
+  :root .shell > main > .mobile-sync-panel.compact .mobile-sync-summary button {
+    flex: 0 0 auto; width: auto !important; min-height: 44px; padding: 6px 10px !important; font-size: 13px; white-space: nowrap;
+  }
+
+  /* Theme controls live at the bottom of the "Ещё" drawer, not on every screen. */
+  .shell > aside .drawer-appearance { display: grid; gap: 8px; margin: 12px 0 14px; }
+  :root .shell > aside .drawer-appearance > .nav-group-label { display: block !important; position: static; padding: 0 10px; }
+  :root .shell > aside .drawer-appearance .display-preferences {
+    display: grid !important; grid-template-columns: 1fr; gap: 6px !important; justify-content: stretch;
+    margin: 0 !important; padding: 0 !important; background: transparent !important; border: 0 !important; backdrop-filter: none !important;
+  }
+  :root .shell > aside .drawer-appearance .display-theme-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  :root .shell > aside .drawer-appearance .display-preferences button { width: 100%; padding: 6px 8px !important; font-size: 13px !important; }
+  :root .shell > aside .drawer-appearance .display-preferences button[aria-pressed="true"] { font-weight: 700; box-shadow: inset 0 0 0 2px #00a7c2 !important; }
+
   /* 8. Floating actions: compact, stacked above the bottom navigation, and
      the content ends above them so nothing stays covered. */
   :root .shell .android-upload-fab {
