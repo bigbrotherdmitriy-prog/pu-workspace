@@ -204,6 +204,17 @@ describe("MailClientModule", () => {
     await waitFor(() => expect(client.threads).toHaveBeenLastCalledWith(7, "sent", ""));
   });
 
+  it("switches between the list and the opened letter for the phone layout", async () => {
+    const { container } = renderClient();
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    const root = container.querySelector(".mail-client")!;
+    expect(root).toHaveClass("mail-mobile-list");
+    fireEvent.click(within(screen.getByRole("region", { name: "Список писем" })).getByRole("button", { name: /Срок поставки/ }));
+    expect(root).toHaveClass("mail-mobile-reading");
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(root).toHaveClass("mail-mobile-list");
+  });
+
   it("reloads the mailbox after the provider sync completes", async () => {
     const { client, props } = renderClient();
     await screen.findByRole("heading", { name: "Срок поставки" });

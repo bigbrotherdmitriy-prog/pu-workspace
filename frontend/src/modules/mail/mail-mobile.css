@@ -1,18 +1,38 @@
-/* Phone mail (≤ 760 px): a compact folder list with counters on the right and
-   a single "Подтвердить для AUTO" button instead of the three-step context
-   strip. Desktop never shows the shortcut. */
-.mail-mobile-auto { display: none; }
+/* Phone mail (≤ 760 px): master-detail. The list view is a horizontal row of
+   folder chips plus the thread list; tapping a thread shows only that letter
+   with a "Назад" button, and a single "Подтвердить для AUTO" button replaces
+   the three-step context strip. Desktop never shows the back button or the
+   AUTO shortcut. */
+.mail-mobile-auto, .mail-mobile-back { display: none; }
 @media (max-width: 760px) {
-  :root .shell .mail-folders { gap: 8px !important; padding: 8px !important; overflow: visible !important; }
+  :root .shell .mail-client.mail-mobile-list .mail-reading-pane { display: none !important; }
+  :root .shell .mail-client.mail-mobile-reading :is(.mail-client-top, .mail-folders, .mail-thread-list) { display: none !important; }
+  :root .shell .mail-layout { display: block !important; min-height: 0 !important; height: auto !important; overflow: hidden !important; }
+  :root .shell .mail-thread-list { max-height: none !important; overflow: visible !important; border: 0 !important; }
+  :root .shell .mail-reading-pane { min-height: 0 !important; max-height: none !important; border: 0 !important; }
+
+  :root .shell .mail-folders { display: grid !important; gap: 8px !important; min-width: 0 !important; padding: 8px !important; overflow: hidden !important; border-right: 0 !important; }
   :root .shell .mail-folders .mail-compose-button { width: 100%; }
-  :root .shell .mail-folders nav { display: grid !important; gap: 2px !important; margin: 0 !important; }
-  :root .shell .mail-folders nav button {
-    display: grid !important; grid-template-columns: 20px minmax(0, 1fr) auto !important; align-items: center !important; gap: 10px !important;
-    width: 100% !important; min-width: 0 !important; min-height: 44px !important; height: auto !important;
-    margin: 0 !important; padding: 0 12px !important; justify-content: stretch !important; text-align: left !important;
+  :root .shell .mail-folders nav {
+    display: flex !important; flex-flow: row nowrap !important; gap: 6px !important; min-width: 0 !important; margin: 0 !important;
+    overflow-x: auto !important; overscroll-behavior-x: contain; scrollbar-width: none;
   }
-  :root .shell .mail-folders nav button > span { justify-self: start !important; overflow: hidden; text-align: left !important; text-overflow: ellipsis; white-space: nowrap; }
-  :root .shell .mail-folders nav button > b { justify-self: end !important; min-width: 24px; text-align: right !important; font-variant-numeric: tabular-nums; }
+  :root .shell .mail-folders nav::-webkit-scrollbar { display: none; }
+  :root .shell .mail-folders nav button {
+    display: inline-flex !important; flex: 0 0 auto !important; align-items: center !important; gap: 8px !important;
+    width: auto !important; min-width: max-content !important; min-height: 44px !important; height: auto !important;
+    margin: 0 !important; padding: 0 12px !important; border: 1px solid var(--read-rule, #dce6e1) !important; border-radius: 999px !important;
+    text-align: left !important; white-space: nowrap;
+  }
+  :root .shell .mail-folders nav button.active { border-color: var(--read-accent, #087a59) !important; }
+  :root .shell .mail-folders nav button > b { min-width: 0; font-variant-numeric: tabular-nums; }
+
+  :root .shell .mail-mobile-back {
+    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px;
+    padding: 0 14px; border: 0; border-bottom: 1px solid var(--read-rule, #e4ebe7); background: var(--read-surface, #fff);
+    color: var(--read-accent, #087a59); font-size: 16px; font-weight: 750; text-align: left;
+  }
+  :root .shell .mail-mobile-back svg { width: 20px; }
 
   :root .shell .mail-context-strip .mail-context-manual { display: none !important; }
   :root .shell .mail-mobile-auto { display: block; grid-column: 1 / -1; }

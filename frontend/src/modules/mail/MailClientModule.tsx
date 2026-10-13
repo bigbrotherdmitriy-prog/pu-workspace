@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, Archive, Bot, CheckCircle2, ChevronRight,
+  AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, ChevronRight,
   Clock3, FileText, Inbox, Mail, MailOpen, Paperclip, PenLine, RefreshCw,
   Reply, ReplyAll, Search, Send, Settings, ShieldAlert, Sparkles, Trash2, Undo2, XCircle,
 } from "lucide-react";
@@ -70,6 +70,16 @@ const folderIcons = {
   inbox: Inbox, attention: AlertTriangle, drafts: FileText, sent: Send, archive: Archive,
   spam: ShieldAlert, trash: Trash2, all: MailOpen,
 };
+
+/** The element that actually scrolls around `element` on a phone (the shell's
+ * content pane, or the document). */
+function scrollParent(element: Element | null): Element {
+  for (let node = element?.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement || document.documentElement;
+}
 
 function addressText(addresses: MailAddress[]): string {
   return addresses.map((item) => item.email).join(", ");
@@ -180,6 +190,11 @@ export function MailClientModule({
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiTone, setAiTone] = useState<"business" | "neutral" | "friendly">("business");
   const [aiNotes, setAiNotes] = useState("");
+  // Phones (≤ 760 px) show either the list or the opened letter, never both.
+  // The flag is harmless on desktop: only mail-mobile.css reacts to it.
+  const [mobileReading, setMobileReading] = useState(false);
+  const listScrollRef = useRef<{ scroller: Element; top: number; list: number } | null>(null);
+  const listRef = useRef<HTMLElement>(null);
   const requestRef = useRef(0);
   const subjectRef = useRef<HTMLInputElement>(null);
 
@@ -221,6 +236,7 @@ export function MailClientModule({
     setQuery("");
     setComposer(null);
     setSelectedThreadId(null);
+    setMobileReading(false);
     void loadMailbox("inbox", "");
     return () => { ++requestRef.current; };
     // Loading is deliberately keyed only to the authoritative project selection.
@@ -512,6 +528,9 @@ export function MailClientModule({
       await client.moveMessage(message.id, destination);
       const labels = { archive: "Письмо перемещено в архив", spam: "Письмо помечено как спам", trash: "Письмо перемещено в корзину", inbox: "Письмо возвращено во входящие" };
       onNotice(labels[destination]);
+      // The letter left this folder; on a phone go back to the list instead of
+      // silently showing whichever thread the reload selects next.
+      setMobileReading(false);
       await loadMailbox(folder, query);
     } catch (error) {
       const detail = (error as Error).message;
@@ -528,6 +547,8 @@ export function MailClientModule({
   async function switchFolder(kind: MailFolderKind) {
     setFolder(kind);
     setSelectedThreadId(null);
+    setMobileReading(false);
+    listScrollRef.current = null;
     await loadMailbox(kind, query);
   }
 
@@ -536,11 +557,36 @@ export function MailClientModule({
     await loadMailbox(folder, query);
   }
 
+  function openThread(threadId: string) {
+    const scroller = scrollParent(listRef.current);
+    listScrollRef.current = { scroller, top: scroller.scrollTop, list: listRef.current?.scrollTop || 0 };
+    setSelectedThreadId(threadId);
+    setMobileReading(true);
+  }
+
+  function backToList() {
+    setMobileReading(false);
+  }
+
+  useLayoutEffect(() => {
+    if (!window.matchMedia?.("(max-width: 760px)").matches) return;
+    if (mobileReading) {
+      // Start the letter at its top with the "Назад" button in view.
+      const scroller = listScrollRef.current?.scroller;
+      if (scroller) scroller.scrollTop = 0;
+      return;
+    }
+    const saved = listScrollRef.current;
+    if (!saved) return;
+    if (listRef.current) listRef.current.scrollTop = saved.list;
+    saved.scroller.scrollTop = saved.top;
+  }, [mobileReading]);
+
   const activeFolders = defaultFolders.map((fallback) => folders.find((item) => item.kind === fallback.kind) || fallback);
   const approvedCurrent = Boolean(composer?.draft && !composer.dirty &&
     composer.draft.approved_revision === composer.draft.revision && composer.draft.status === "approved");
 
-  return <section className="mail-client" aria-label="Почтовый клиент">
+  return <section className={`mail-client ${mobileReading ? "mail-mobile-reading" : "mail-mobile-list"}`} aria-label="Почтовый клиент">
     <div className="mail-client-top">
       <header className="mail-client-header">
         <div>
@@ -581,13 +627,13 @@ export function MailClientModule({
           })}
         </nav>
       </aside>
-      <section className="mail-thread-list" aria-label="Список писем">
+      <section className="mail-thread-list" aria-label="Список писем" ref={listRef}>
         <label className="mail-search"><Search /><input value={query} placeholder="Поиск писем" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
           if (event.key === "Enter") void loadMailbox(folder, query);
         }} /><button aria-label="Найти" onClick={() => void loadMailbox(folder, query)}><ChevronRight /></button></label>
         {loading ? <div className="mail-loading" aria-live="polite"><RefreshCw className="spinning" /> Загружаю письма…</div> : threads.length ? threads.map((thread) => {
           const last = thread.messages[thread.messages.length - 1];
-          return <button className={`mail-thread-row ${selectedThreadId === thread.id ? "selected" : ""}`} key={thread.id} onClick={() => setSelectedThreadId(thread.id)}>
+          return <button className={`mail-thread-row ${selectedThreadId === thread.id ? "selected" : ""}`} key={thread.id} onClick={() => openThread(thread.id)}>
             <span className="mail-avatar">{(last.sender.name || last.sender.email).slice(0, 1).toLocaleUpperCase("ru-RU")}</span>
             <span className="mail-thread-copy"><strong>{last.sender.name || last.sender.email}</strong><b>{thread.subject}</b><small>{last.preview || last.summary || readableMessageBody(last.content)}</small></span>
             <time>{new Date(thread.last_message_at).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}</time>
@@ -597,6 +643,7 @@ export function MailClientModule({
         }) : <div className="mail-empty"><MailOpen /><strong>Загруженных писем в этой папке нет</strong><span>Это не означает, что папка Gmail пуста. Нажмите «Получить новые», чтобы загрузить до 25 последних писем выбранной папки.</span></div>}
       </section>
       <section className="mail-reading-pane" aria-label="Просмотр переписки">
+        <button type="button" className="mail-mobile-back" onClick={backToList}><ArrowLeft />Назад</button>
         {selectedThread && selectedMessage ? <>
           <div className="mail-reading-head">
             <div><span className="eyebrow">ЦЕПОЧКА · {selectedThread.messages.length}</span><h2>{selectedThread.subject}</h2><p>{selectedThread.participants.map((item) => item.name || item.email).join(", ")}</p></div>
