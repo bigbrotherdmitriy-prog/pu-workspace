@@ -222,6 +222,12 @@ def _obligations_from_llm(payload: list[dict], text: str) -> list[ObligationCand
 
         due_date_quote = _verbatim(item.get("due_date_evidence_quote"), text)
         due_date = _parse_iso_date(item.get("due_date")) if due_date_quote else None
+        if due_date is None:
+            # The model often skips yearless deadlines ("до 16.10"); read them
+            # from the verified quote with the same rule as the regex path.
+            from app.task_engine import extract_explicit_due_date
+            due_date = extract_explicit_due_date(evidence_quote)
+            due_date_quote = evidence_quote if due_date else None
 
         assignee_quote = _verbatim(item.get("assignee_evidence_quote"), text)
         assignee_hint = str(item.get("assignee_hint") or "").strip()[:300] if assignee_quote else None

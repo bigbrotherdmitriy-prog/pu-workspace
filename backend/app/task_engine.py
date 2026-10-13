@@ -39,6 +39,13 @@ DEADLINE_DATE_RE = re.compile(
     r"(?:[:=\-–—]|установлен(?:\s+на)?)?\s*(\d{1,2})[./](\d{1,2})[./](20\d{2})\b",
     re.IGNORECASE,
 )
+# "до 16.10" with no year, as people write in letters. Two-digit month only, so
+# measurements like "до 2.5 м" never read as a date; a following ".digit" means
+# it was a full date (handled by DATE_RE) or a decimal, not a deadline.
+SHORT_DATE_RE = re.compile(
+    r"\b(?:не\s+позднее|до|к)\s+(\d{1,2})\.(\d{2})(?![./]?\d)",
+    re.IGNORECASE,
+)
 MONTH_DATE_RE = re.compile(
     r"\b(?:не\s+позднее|до|к)\s+(\d{1,2})\s+"
     r"(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
@@ -128,7 +135,22 @@ def _text_quality_review_reasons(text: str) -> tuple[str, ...]:
     return tuple(reasons)
 
 
-def extract_explicit_due_date(sentence: str) -> date | None:
+def _nearest_year(day: int, month: int, today: date) -> date | None:
+    """A yearless deadline means its next occurrence; a date up to a month in
+    the past is kept (an overdue request), older ones roll to next year."""
+    try:
+        candidate = date(today.year, month, day)
+    except ValueError:
+        return None
+    if (today - candidate).days > 31:
+        try:
+            candidate = date(today.year + 1, month, day)
+        except ValueError:
+            return None
+    return candidate
+
+
+def extract_explicit_due_date(sentence: str, today: date | None = None) -> date | None:
     """Extract only an explicit execution deadline, not a document reference date.
 
     Dates introduced by ``от`` or embedded in СНиП/ГОСТ references identify a
@@ -142,6 +164,9 @@ def extract_explicit_due_date(sentence: str) -> date | None:
             return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
         except ValueError:
             return None
+    short = SHORT_DATE_RE.search(sentence)
+    if short:
+        return _nearest_year(int(short.group(1)), int(short.group(2)), today or date.today())
     word_match = MONTH_DATE_RE.search(sentence)
     if word_match:
         try:
