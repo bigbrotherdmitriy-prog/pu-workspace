@@ -121,7 +121,7 @@ export const mailClientApi = {
       provider_available: raw.provider_available !== false,
       provider_error: raw.provider_error || null,
       folders: raw.folders
-        .filter((item): item is { id: MailFolderKind; name: string; count?: number } => ["inbox", "attention", "drafts", "sent", "archive", "spam", "trash", "all"].includes(item.id))
+        .filter((item): item is { id: MailFolderKind; name: string; count?: number } => ["inbox", "filtered", "attention", "drafts", "sent", "archive", "spam", "trash", "all"].includes(item.id))
         .map((item) => ({ kind: item.id, label: item.name, count: item.count } satisfies MailFolder)),
     }));
   },

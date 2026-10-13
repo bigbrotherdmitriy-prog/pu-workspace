@@ -61,6 +61,7 @@ function mockClient(overrides: Record<string, unknown> = {}) {
     capabilities: vi.fn().mockResolvedValue(capabilities),
     folders: vi.fn().mockResolvedValue({ provider_available: true, provider_error: null, folders: [
       { kind: "inbox", label: "Входящие", count: 1 },
+      { kind: "filtered", label: "Рассылки и уведомления", count: 3 },
       { kind: "attention", label: "Требуют внимания", count: 1 },
       { kind: "drafts", label: "Черновики", count: 1 },
       { kind: "sent", label: "Отправленные", count: 0 },
@@ -202,6 +203,17 @@ describe("MailClientModule", () => {
     await screen.findByRole("heading", { name: "Срок поставки" });
     fireEvent.click(screen.getByRole("button", { name: /Отправленные/ }));
     await waitFor(() => expect(client.threads).toHaveBeenLastCalledWith(7, "sent", ""));
+  });
+
+  it("lists bulk and automated mail in its own folder right after the inbox", async () => {
+    const client = mockClient();
+    const { container } = renderClient(client);
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    const labels = Array.from(container.querySelectorAll(".mail-folders nav button")).map((item) => item.textContent || "");
+    expect(labels[0]).toContain("Входящие");
+    expect(labels[1]).toContain("Рассылки и уведомления");
+    fireEvent.click(screen.getByRole("button", { name: /Рассылки и уведомления/ }));
+    await waitFor(() => expect(client.threads).toHaveBeenLastCalledWith(7, "filtered", ""));
   });
 
   it("reloads the mailbox after the provider sync completes", async () => {

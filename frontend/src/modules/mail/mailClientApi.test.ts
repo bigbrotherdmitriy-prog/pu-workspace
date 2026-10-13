@@ -17,6 +17,7 @@ describe("mailClientApi contract adapter", () => {
       }))
       .mockResolvedValueOnce(response({ provider_available: false, provider_error: "temporarily_unavailable", folders: [
         { id: "inbox", name: "Входящие", kind: "core", count: 9 },
+        { id: "filtered", name: "Рассылки и уведомления", kind: "core", count: 31 },
         { id: "attention", name: "Требуют внимания", kind: "core", count: 2 },
         { id: "drafts", name: "Черновики", kind: "core", count: 3 },
         { id: "sent", name: "Отправленные", kind: "core" },
@@ -29,8 +30,9 @@ describe("mailClientApi contract adapter", () => {
     const capabilities = await mailClientApi.capabilities(7);
     const folders = await mailClientApi.folders(7);
     expect(capabilities).toMatchObject({ provider: "google_workspace", can_compose: true, can_attach: false, versioned_approval: true });
-    expect(folders.folders.map((item) => item.kind)).toEqual(["inbox", "attention", "drafts", "sent", "archive", "all"]);
+    expect(folders.folders.map((item) => item.kind)).toEqual(["inbox", "filtered", "attention", "drafts", "sent", "archive", "all"]);
     expect(folders.folders.find((item) => item.kind === "attention")?.count).toBe(2);
+    expect(folders.folders.find((item) => item.kind === "filtered")).toMatchObject({ label: "Рассылки и уведомления", count: 31 });
     expect(folders).toMatchObject({ provider_available: false, provider_error: "temporarily_unavailable" });
   });
 
