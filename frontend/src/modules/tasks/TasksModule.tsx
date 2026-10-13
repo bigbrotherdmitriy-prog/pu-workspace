@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ListTodo } from "lucide-react";
 import { formatMoney, formatNumber } from "../../utils/numberFormat";
+import "./tasks-mobile.css";
 
 export type TaskRow = {
   id: number; record_version?: number; title: string; status: string; priority: string; due_date?: string;
@@ -52,6 +53,13 @@ function priorityLabel(priority: string): string {
     || priority.replaceAll("_", " ").replace(/^./, (letter) => letter.toLocaleUpperCase("ru-RU"));
 }
 
+export function taskStatusLabel(status: string): string {
+  return ({
+    proposed: "Предложена", assigned: "Назначена", in_progress: "В работе",
+    completed: "Завершена", cancelled: "Отменена", rejected: "Отклонена",
+  } as Record<string, string>)[status] || status.replaceAll("_", " ").replace(/^./, (letter) => letter.toLocaleUpperCase("ru-RU"));
+}
+
 export type TaskHistoryRow = {
   action: string; old_status?: string; new_status?: string; result_note?: string;
   completion_document_name?: string; details?: string; changed_by: string; changed_at: string;
@@ -89,6 +97,14 @@ export function TasksModule(props: Props) {
         : props.filter === "review" ? task.needs_review
           : task.status === "assigned" || task.status === "in_progress",
   );
+  // Phone cards show only the essentials; the rest opens with "Подробнее".
+  // On desktop the toggle and the summary are hidden and every card is full.
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
+  const toggleExpanded = (id: number) => setExpanded((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const focusVisible = Boolean(props.focusTaskId && visibleTasks.some((task) => task.id === props.focusTaskId));
   useEffect(() => {
     if (!focusVisible) return;
@@ -98,38 +114,46 @@ export function TasksModule(props: Props) {
   return <section className="card task-register">
     <div className="card-head"><div><h2>Реестр задач</h2><p>Автоматически выделенные поручения с проверяемым источником</p></div><div className="task-filters">{[["open", "Открытые"], ["overdue", "Просроченные"], ["review", "На проверку"], ["all", "Все"]].map(([id, label]) => <button className={props.filter === id ? "selected" : ""} onClick={() => props.onFilterChange(id)} key={id}>{label}</button>)}</div></div>
     <div className="task-list">{visibleTasks.map((task) => <article key={task.id} id={`task-${task.id}`}
-      className={task.id === props.focusTaskId ? "task-focused" : undefined}
+      className={[task.id === props.focusTaskId ? "task-focused" : "", expanded.has(task.id) ? "task-expanded" : ""].filter(Boolean).join(" ") || undefined}
       aria-current={task.id === props.focusTaskId ? "true" : undefined}>
       <div className={`task-priority ${task.priority}`} />
       <div className="task-body">
         <strong>{task.title}</strong>
+        <div className="task-mobile-summary">
+          <span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span>
+          <span>{task.assignee_name || "Не назначены"}</span>
+          <span className={`task-status-pill ${task.status}`}>{taskStatusLabel(task.status)}</span>
+          {task.needs_review && <span className="task-status-pill review">На проверку</span>}
+        </div>
         {task.offline_pending && <span className="task-offline-pending">Ожидает синхронизации</span>}
-        <dl className="task-information" aria-label={`Сведения о задаче ${task.title}`}>
+        <dl className="task-information task-mobile-detail" aria-label={`Сведения о задаче ${task.title}`}>
           <div><dt>Приоритет</dt><dd><span className={`task-priority-label ${task.priority}`}>{priorityLabel(task.priority)}</span></dd></div>
           <div><dt>Участники</dt><dd>{task.assignee_name || "Не назначены"}{amountLabel(task.amount, task.amount_currency) && <span className="task-amount"> · {amountLabel(task.amount, task.amount_currency)}</span>}</dd></div>
           <div className="task-information-wide"><dt>Описание</dt><dd className="task-description">{task.description || "Описание не указано"}</dd></div>
           <div className="task-information-wide"><dt>Источник</dt><dd>{task.source_file_name || "Источник не указан"}</dd></div>
           {unconfirmedAssigneeHint(task) && <div className="task-information-wide"><dt>Подсказка ИИ</dt><dd className="task-assignee-hint">Система предположила: {unconfirmedAssigneeHint(task)}</dd></div>}
         </dl>
-        <p className="task-confidence">Эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
-        <small>Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
-        {task.needs_review && <p className="task-review-warning">Требуется ручная проверка по документу-источнику.</p>}
-        {task.due_date_adjusted && <p className="task-review-warning">
+        <p className="task-confidence task-mobile-detail">Эвристическая оценка {Math.round(task.confidence * 100)}/100</p>
+        <small className="task-mobile-detail">Оценка не является вероятностью правильного распознавания. Отсутствие предупреждений не гарантирует точность текста.</small>
+        {task.needs_review && <p className="task-review-warning task-mobile-detail">Требуется ручная проверка по документу-источнику.</p>}
+        {task.due_date_adjusted && <p className="task-review-warning task-mobile-detail">
           {task.original_obligation_due_date
             ? `Срок скорректирован, исходное обязательство было до ${task.original_obligation_due_date}.`
             : "Срок скорректирован, в исходном обязательстве срок не указан."}
         </p>}
-        {task.source_excerpt && <small className="task-source-excerpt"><b>Фрагмент источника</b>{task.source_excerpt}</small>}
+        {task.source_excerpt && <small className="task-source-excerpt task-mobile-detail"><b>Фрагмент источника</b>{task.source_excerpt}</small>}
       </div>
-      <div className="task-meta"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{effectLabel("Google Tasks", task.provider_effects?.task.status)} · {effectLabel("Calendar", task.provider_effects?.calendar.status)}</span></div>
+      <div className="task-meta task-mobile-detail"><span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span><span>{effectLabel("Google Tasks", task.provider_effects?.task.status)} · {effectLabel("Calendar", task.provider_effects?.calendar.status)}</span></div>
       <div className="task-actions">
-        <label className="task-assignee"><span>Исполнитель</span><select aria-label={`Исполнитель задачи ${task.title}`} value={task.assignee_user_id} onChange={(event) => props.onAssign(task, Number(event.target.value))}>{props.members.map((member) => <option value={member.user_id} key={member.user_id}>{member.name} · {member.role}</option>)}</select></label>
+        <label className="task-assignee task-mobile-detail"><span>Исполнитель</span><select aria-label={`Исполнитель задачи ${task.title}`} value={task.assignee_user_id} onChange={(event) => props.onAssign(task, Number(event.target.value))}>{props.members.map((member) => <option value={member.user_id} key={member.user_id}>{member.name} · {member.role}</option>)}</select></label>
         <div className="task-action-buttons">
         {task.status !== "completed" && <button className="secondary" onClick={() => props.onChangeDueDate(task)}>Изменить срок</button>}
         {["proposed", "failed"].includes(task.external_action_status) && <button onClick={() => props.onApproveExternal(task)}>Поставить задачу</button>}
         {task.status === "assigned" && <button onClick={() => props.onUpdate(task, "in_progress")}>В работу</button>}
         {task.status !== "completed" && <button className="complete" onClick={() => props.onStartCompletion(task)}>Завершить</button>}
-        <button className="secondary" onClick={() => props.onLoadHistory(task)}>История</button>
+        <button className="secondary task-mobile-detail" onClick={() => props.onLoadHistory(task)}>История</button>
+        <button type="button" className="secondary task-more-toggle" aria-expanded={expanded.has(task.id)}
+          aria-controls={`task-${task.id}`} onClick={() => toggleExpanded(task.id)}>{expanded.has(task.id) ? "Свернуть" : "Подробнее"}</button>
         </div>
       </div>
       {props.completionTaskId === task.id && <div className="task-completion"><strong>Подтверждение выполнения</strong><textarea value={props.completionNote} onChange={(event) => props.onCompletionNoteChange(event.target.value)} placeholder="Что выполнено и какой результат получен *" /><select value={props.completionDocumentId} onChange={(event) => props.onCompletionDocumentChange(Number(event.target.value))}><option value={0}>Без вложения — это допустимо</option>{props.documents.map((document) => <option value={document.id} key={document.id}>{document.name}</option>)}</select><small>Необязательно: выберите акт, письмо, счёт, фото или другой документ проекта.</small><div className="task-completion-actions"><button className="secondary" onClick={props.onCancelCompletion}>Отмена</button><button className="complete" disabled={!props.completionNote.trim()} onClick={() => props.onUpdate(task, "completed")}>Подтвердить завершение</button></div></div>}

@@ -11,8 +11,10 @@ import type {
   MailFolderKind, MailMessage, MailProject, MailSettings, MailThread,
 } from "./types";
 import { MailSettingsDialog } from "./MailSettingsDialog";
+import { MobileAutoConfirm } from "./MobileAutoConfirm";
 import { editorHtml, editorPlainText, RichTextEditor } from "./RichTextEditor";
 import "./mail-client.css";
+import "./mail-mobile.css";
 
 type Props = {
   projectId: number;
@@ -613,14 +615,14 @@ export function MailClientModule({
             </div>
           </div>
           <div className="mail-context-strip">
-            <label>Проект<select defaultValue={selectedMessage.project_id} id={`mail-project-${selectedMessage.id}`}>
+            <label className="mail-context-manual">Проект<select defaultValue={selectedMessage.project_id} id={`mail-project-${selectedMessage.id}`}>
               {projects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select></label>
-            <label>Договор<select defaultValue={selectedMessage.contract_id || 0} id={`mail-contract-${selectedMessage.id}`}>
+            <label className="mail-context-manual">Договор<select defaultValue={selectedMessage.contract_id || 0} id={`mail-contract-${selectedMessage.id}`}>
               <option value={0}>Без договора</option>
               {contracts.filter((item) => item.project_id === selectedMessage.project_id).map((item) => <option value={item.id} key={item.id}>{item.number} — {item.title}</option>)}
             </select></label>
-            <button onClick={() => {
+            <button className="mail-context-manual" onClick={() => {
               const project = document.getElementById(`mail-project-${selectedMessage.id}`) as HTMLSelectElement;
               const contract = document.getElementById(`mail-contract-${selectedMessage.id}`) as HTMLSelectElement;
               void confirmContext(selectedMessage, Number(project.value), Number(contract.value));
@@ -628,11 +630,16 @@ export function MailClientModule({
             <small>{selectedMessage.context_evidence || "Контекст не определён"}{selectedMessage.context_confidence !== undefined ? ` · AI ${Math.round(selectedMessage.context_confidence * 100)}%` : ""}</small>
             {selectedMessage.auto_context_confirmation_state === "confirmed_current"
               ? <small>Контекст для AUTO явно подтверждён владельцем</small>
-              : <button
+              : <>
+                <button
                   type="button"
+                  className="mail-context-manual"
                   disabled={selectedMessage.ordinary_read_only || !selectedMessage.context_confirmed || !selectedMessage.contract_id}
                   onClick={() => void confirmContextForAuto(selectedMessage)}
-                >Подтвердить контекст для AUTO</button>}
+                >Подтвердить контекст для AUTO</button>
+                <MobileAutoConfirm key={selectedMessage.id} message={selectedMessage} contracts={contracts} client={client}
+                  onDone={() => loadMailbox()} onNotice={onNotice} onError={onError} />
+              </>}
           </div>
           <div className="mail-thread-messages">
             {selectedThread.messages.map((message) => <article key={message.id} className={message.direction === "outgoing" ? "outgoing" : "incoming"}>
