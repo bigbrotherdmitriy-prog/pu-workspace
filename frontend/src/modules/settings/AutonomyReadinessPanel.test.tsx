@@ -173,6 +173,21 @@ describe("AutonomyReadinessPanel", () => {
     expect(screen.queryByRole("button", { name: "Продлить доступ к почте на 7 дней" })).toBeNull();
   });
 
+  it("offers the 7-day AUTO pilot next to the CONFIRM launch for an admin", () => {
+    const onEnableAutoPilot = vi.fn();
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority onBootstrapAuthority={vi.fn()}
+      canLaunchPilot onLaunchPilot={vi.fn()} onEnableAutoPilot={onEnableAutoPilot} />);
+    fireEvent.click(screen.getByRole("button", { name: "Включить AUTO для задач и уведомлений на 7 дней" }));
+    expect(onEnableAutoPilot).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Внешние письма — всё равно только по подтверждению/)).toBeInTheDocument();
+  });
+
+  it("hides the AUTO pilot control without the launch control", () => {
+    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority onBootstrapAuthority={vi.fn()}
+      onEnableAutoPilot={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Включить AUTO для задач и уведомлений на 7 дней" })).toBeNull();
+  });
+
   it("has no controls capable of changing policy, authority or mailbox", () => {
     const { container } = render(<AutonomyReadinessPanel data={data} />);
     expect(container.querySelector("button, input, select, textarea, form")).toBeNull();

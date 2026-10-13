@@ -542,6 +542,7 @@ export function App() {
     [autonomyReadiness, setAutonomyReadiness] = useState<AutonomyReadiness | null>(null),
     [bootstrappingAuthority, setBootstrappingAuthority] = useState(false),
     [launchingPilot, setLaunchingPilot] = useState(false),
+    [enablingAutoPilot, setEnablingAutoPilot] = useState(false),
     [expandingAuthority, setExpandingAuthority] = useState(false),
     [rejoiningMailbox, setRejoiningMailbox] = useState(false),
     [renewingMailboxAuthority, setRenewingMailboxAuthority] = useState(false),
@@ -701,6 +702,62 @@ export function App() {
       setError(error instanceof Error ? error.message : "Не удалось запустить пилот.");
     } finally {
       setLaunchingPilot(false);
+    }
+  }
+
+  async function writePilotPolicy(mode: "CONFIRM" | "AUTO", days: number) {
+    // GET denies (resource_unavailable) when the existing policy has already
+    // expired; the backend accepts expected_revision=0 against an expired row.
+    const current = await api<{ policy: { ref: { id: { value: string } }; value: number }; policy_sha256: string } | null>(
+      `/api/v54/projects/${projectId}/autonomy-policy`,
+    ).catch(() => null);
+    // A minute under the ceiling so clock skew never trips the server bound,
+    // and never past the pilot mandate: the server rejects a policy that
+    // outlives the authority it was granted under.
+    let until = Date.now() + days * 24 * 60 * 60 * 1000 - 60 * 1000;
+    const mandateUntil = autonomyReadiness?.authority.valid_until;
+    if (mandateUntil) until = Math.min(until, new Date(mandateUntil).getTime() - 60 * 1000);
+    const validUntil = new Date(until).toISOString();
+    await api(`/api/v54/projects/${projectId}/autonomy-policy`, {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_policy_id: current?.policy.ref.id.value ?? null,
+        expected_revision: current?.policy.value ?? 0,
+        expected_policy_hash: current?.policy_sha256 ?? null,
+        expected_authority_epoch: autonomyReadiness?.authority.authority_epoch ?? null,
+        create_internal_task: mode,
+        create_internal_notification: mode,
+        // External sending has no AUTO value at all, by design.
+        send_external_message: "CONFIRM",
+        valid_until: validUntil,
+      }),
+    });
+    const readiness = await api(`/api/v54/projects/${projectId}/autonomy-readiness`).catch(() => null);
+    if (readiness?.overall?.status) setAutonomyReadiness(readiness);
+  }
+
+  async function enableAutoPilot() {
+    // Owner decision 13.10.2026 (TZ V6-07): internal tasks and notifications
+    // run AUTO for a 7-day observation window; external letters stay CONFIRM.
+    if (!window.confirm(
+      "Включить AUTO для проекта на 7 дней? Система будет САМА создавать внутренние задачи и уведомления "
+      + "по входящим письмам (с лимитами в час и минимальной уверенностью 0.9). "
+      + "Отправка писем наружу по-прежнему только по вашему подтверждению. "
+      + "Перед этим мандат пилота должен быть действующим («Восстановить мандат пилота»).",
+    )) return;
+    const mandateUntil = autonomyReadiness?.authority.valid_until;
+    if (!mandateUntil || new Date(mandateUntil).getTime() <= Date.now()) {
+      setError("Мандат пилота истёк: сначала нажмите «Восстановить мандат пилота», затем снова «Включить AUTO».");
+      return;
+    }
+    setEnablingAutoPilot(true);
+    try {
+      await writePilotPolicy("AUTO", 7);
+      setNotice("AUTO включён на 7 дней: внутренние задачи и уведомления создаются автоматически.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не удалось включить AUTO.");
+    } finally {
+      setEnablingAutoPilot(false);
     }
   }
 
@@ -4352,6 +4409,8 @@ export function App() {
           bootstrappingAuthority={bootstrappingAuthority}
           onLaunchPilot={() => void launchPilot()}
           launchingPilot={launchingPilot}
+          onEnableAutoPilot={() => void enableAutoPilot()}
+          enablingAutoPilot={enablingAutoPilot}
           onExpandAuthority={() => void expandAuthority()}
           expandingAuthority={expandingAuthority}
           onRejoinMailbox={() => void rejoinMailbox()}

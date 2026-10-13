@@ -56,6 +56,8 @@ type Props = {
   canLaunchPilot?: boolean;
   onLaunchPilot?: () => void | Promise<void>;
   launchingPilot?: boolean;
+  onEnableAutoPilot?: () => void | Promise<void>;
+  enablingAutoPilot?: boolean;
   canExpandAuthority?: boolean;
   onExpandAuthority?: () => void | Promise<void>;
   expandingAuthority?: boolean;
@@ -70,7 +72,7 @@ type Props = {
 
 export function AutonomyReadinessPanel({
   data, canBootstrapAuthority, onBootstrapAuthority, bootstrappingAuthority,
-  canLaunchPilot, onLaunchPilot, launchingPilot,
+  canLaunchPilot, onLaunchPilot, launchingPilot, onEnableAutoPilot, enablingAutoPilot,
   canExpandAuthority, onExpandAuthority, expandingAuthority,
   canRejoinMailbox, onRejoinMailbox, rejoiningMailbox,
   canRenewMailboxAuthority, onRenewMailboxAuthority, renewingMailboxAuthority, now,
@@ -147,6 +149,12 @@ export function AutonomyReadinessPanel({
         <button type="button" disabled={launchingPilot} onClick={() => void onLaunchPilot()}>
           {launchingPilot ? "Запускаем…" : "Запустить пилот (всё через подтверждение)"}
         </button>
+        {onEnableAutoPilot && <>
+          <p>AUTO-пилот: система сама создаёт внутренние задачи и уведомления по входящим письмам (лимиты в час, уверенность от 0.9). Внешние письма — всё равно только по подтверждению. Сначала мандат пилота должен быть действующим.</p>
+          <button type="button" disabled={enablingAutoPilot} onClick={() => void onEnableAutoPilot()}>
+            {enablingAutoPilot ? "Включаем…" : "Включить AUTO для задач и уведомлений на 7 дней"}
+          </button>
+        </>}
       </>}
       {canExpandAuthority && onExpandAuthority && <>
         <p>Если панель выше показывает «Полномочия... не совпадают с политикой» при живом и неистёкшем мандате — это значит, что мандат выдан не на полный список операций пилота. Можно расширить его без пересоздания.</p>

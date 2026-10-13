@@ -32,6 +32,8 @@ type Props = {
   bootstrappingAuthority?: boolean;
   onLaunchPilot?: () => void | Promise<void>;
   launchingPilot?: boolean;
+  onEnableAutoPilot?: () => void | Promise<void>;
+  enablingAutoPilot?: boolean;
   onExpandAuthority?: () => void | Promise<void>;
   expandingAuthority?: boolean;
   onRejoinMailbox?: () => void | Promise<void>;
@@ -67,6 +69,8 @@ export function SettingsModule(props: Props) {
         canLaunchPilot={Boolean(props.currentUser?.is_admin)}
         onLaunchPilot={props.onLaunchPilot}
         launchingPilot={props.launchingPilot}
+        onEnableAutoPilot={props.onEnableAutoPilot}
+        enablingAutoPilot={props.enablingAutoPilot}
         canExpandAuthority={Boolean(props.currentUser?.is_admin)}
         onExpandAuthority={props.onExpandAuthority}
         expandingAuthority={props.expandingAuthority}
