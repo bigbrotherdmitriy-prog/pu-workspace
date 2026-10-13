@@ -97,7 +97,9 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await expect(page.getByRole("navigation", { name: "Основная мобильная навигация" })).toBeVisible();
   await page.getByRole("button", { name: "Открыть всё меню" }).click();
   await expect(page.locator(".shell > aside nav")).toBeVisible();
-  await page.getByRole("button", { name: "Закрыть меню" }).click();
+  // The drawer now sits above its backdrop (it used to be hidden under it), so
+  // close it by tapping the uncovered strip to the right, like a person would.
+  await page.getByRole("button", { name: "Закрыть меню" }).click({ position: { x: 370, y: 400 } });
 
   await page.getByRole("navigation", { name: "Основная мобильная навигация" }).getByRole("button", { name: "ГПР" }).click();
   await expect(page.locator(".gpr-dds-title").getByRole("heading", { name: "ГПР и ДДС" })).toBeVisible();
