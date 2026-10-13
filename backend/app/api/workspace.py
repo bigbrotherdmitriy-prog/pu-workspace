@@ -270,16 +270,35 @@ def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, 
         session = OrganizerRepository(check_db).get_session(session_id)
         if session is None or session["project_id"] != project_id or session["source_folder_id"] != source_folder_id:
             raise HTTPException(409, "Organizer session does not match the snapshot target")
-    _scan_worker(session_id, project_id, source_folder_id, auto_apply=True, raise_errors=raise_errors)
+    try:
+        _scan_worker(session_id, project_id, source_folder_id, auto_apply=True, raise_errors=raise_errors)
+    except Exception:
+        # A late failure (e.g. the DB restarting mid-deploy) can kill the job
+        # after the session itself already reached a successful terminal state.
+        # Publish that outcome before re-raising, otherwise the snapshot stays
+        # "analyzing" forever and the UI blocks any retry.
+        _mirror_safe_copy_session(snapshot_id, session_id, only_statuses=SAFE_COPY_SUCCESS_STATUSES)
+        raise
+    _mirror_safe_copy_session(snapshot_id, session_id)
+
+
+SAFE_COPY_SUCCESS_STATUSES = frozenset({"proposed", "applied"})
+SAFE_COPY_TERMINAL_STATUSES = SAFE_COPY_SUCCESS_STATUSES | {"failed", "dead_letter"}
+
+
+def _mirror_safe_copy_session(snapshot_id: int, session_id: int, *, only_statuses=None) -> bool:
+    """Copy an organizer session's outcome onto its snapshot; True if mirrored."""
     db = SessionLocal()
     try:
         snapshot = db.get(WorkspaceSnapshot, snapshot_id)
         repo = OrganizerRepository(db)
         session = repo.get_session(session_id)
         if snapshot is None or session is None:
-            return
+            return False
+        if only_statuses is not None and session["status"] not in only_statuses:
+            return False
         proposal = repo.proposal_for_session(session_id)
-        succeeded = session["status"] in {"proposed", "applied"}
+        succeeded = session["status"] in SAFE_COPY_SUCCESS_STATUSES
         snapshot.analysis_status = "ready" if succeeded else "failed"
         snapshot.analysis_error = None if succeeded else "Safe-copy organization failed. Verify the selected connection and retry."
         snapshot.analysis_result = {
@@ -295,6 +314,7 @@ def _run_safe_copy_pipeline(snapshot_id: int, session_id: int, project_id: int, 
             "originals_modified": False,
         }
         db.commit()
+        return True
     finally:
         db.close()
 
@@ -417,8 +437,21 @@ def recover_incomplete_analyses() -> int:
             for snapshot in snapshots
             if (snapshot.analysis_result or {}).get("mode") != "safe_copy"
         ]
+        # A safe-copy snapshot whose session already finished (its job may have
+        # dead-lettered after the fact) only needs the outcome mirrored back.
+        finished_safe_copies = []
+        repo = OrganizerRepository(db)
+        for snapshot in snapshots:
+            result = snapshot.analysis_result or {}
+            session_id = result.get("organizer_session_id")
+            if result.get("mode") == "safe_copy" and session_id is not None:
+                session = repo.get_session(int(session_id))
+                if session is not None and session["status"] in SAFE_COPY_TERMINAL_STATUSES:
+                    finished_safe_copies.append((snapshot.id, int(session_id)))
     finally:
         db.close()
+    for snapshot_id, session_id in finished_safe_copies:
+        _mirror_safe_copy_session(snapshot_id, session_id)
     for snapshot_id, project_id in rows:
         _enqueue_analysis(snapshot_id, project_id)
     return len(rows)
