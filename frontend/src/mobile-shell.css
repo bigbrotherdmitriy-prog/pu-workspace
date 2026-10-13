@@ -7,7 +7,11 @@
   :root { --pu-mobile-nav: calc(62px + env(safe-area-inset-bottom)); --pu-mobile-fab: 44px; }
 
   /* 9. No page-level horizontal scroll: wide things scroll inside their own box. */
-  html, body { overflow-x: hidden; }
+  /* `clip`, not `hidden`: `hidden` turns overflow-y into `auto`, so <body>
+     becomes a scroll container that cannot scroll, and its
+     `overscroll-behavior-y: none` (android.css) then stops every wheel and
+     swipe from reaching the page; document-flow screens such as Tasks froze. */
+  html, body { overflow-x: clip; }
   .shell, .shell > main, .shell .content { max-width: 100vw; min-width: 0; }
   .shell .content { overflow-wrap: anywhere; }
   .shell .content :is(img, video, canvas, svg:not([width])) { max-width: 100%; }
