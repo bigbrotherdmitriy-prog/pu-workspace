@@ -41,6 +41,7 @@ from app.models.project_contact import ContactConflict, ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.contract_document_link import ContractDocumentLink
 from app.models.job import BackgroundJob, ServiceHeartbeat
+from app.models.notification_device import UserDeviceToken
 from app.models.mail_settings import MailUserSettings
 from app.models.v54_pilot import (  # additive, inactive pilot foundation
     ConnectionIdentity, MailConnection, SourceReference, SourceVersion, SourceCurrent,
@@ -136,4 +137,5 @@ __all__ = [
     "ProviderAction", "ProviderActionApproval", "ProviderDispatchOutbox",
     "ProviderExecutionAttempt", "ProviderOutcomeObservation",
     "MobileSyncCommand", "MobileSyncConflict",
+    "UserDeviceToken",
 ]
