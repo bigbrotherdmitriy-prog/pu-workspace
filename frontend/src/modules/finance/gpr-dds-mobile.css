@@ -1,0 +1,104 @@
+/* Phone layout of ГПР and ДДС (≤ 760 px). ГПР: a tree list of stages and
+   milestones instead of the wide table and the Gantt chart, editing toolbar
+   behind "Действия". ДДС: one month as "статья → сумма" with totals, detail
+   and summary tables as cards, regular font for sums. Desktop never shows
+   the phone blocks and keeps its tables. */
+.gpr-mobile-list, .gpr-mobile-actions-toggle, .dds-mobile-month { display: none; }
+@media (max-width: 760px) {
+  /* ГПР */
+  :root .gpr-workspace .gpr-split { display: none !important; }
+  :root .gpr-workspace .gpr-mobile-list { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; }
+  .gpr-mobile-list li { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; min-width: 0; }
+  :root .gpr-mobile-list .gpr-mobile-collapse {
+    display: grid; place-items: center; width: 32px; min-width: 32px !important; height: 44px; margin: 0; padding: 0;
+    border: 0; background: transparent; color: var(--read-muted, #5b6058); box-shadow: none;
+  }
+  .gpr-mobile-list .gpr-mobile-collapse svg { width: 18px; }
+  :root .gpr-mobile-list .gpr-mobile-task {
+    display: grid; gap: 5px; width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 9px 11px;
+    border: 1px solid var(--read-rule, #cdcec5); border-radius: 10px; background: var(--read-surface, #fff);
+    color: var(--read-text, #18211d); font: inherit; text-align: left; box-shadow: none;
+  }
+  :root .gpr-mobile-list li.selected .gpr-mobile-task { border-color: var(--read-accent, #087a59); box-shadow: inset 3px 0 0 var(--read-accent, #087a59); }
+  :root .gpr-mobile-list li.critical .gpr-mobile-task { border-left: 3px solid #d64545; }
+  .gpr-mobile-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .gpr-mobile-no { flex: none; min-width: 18px; color: var(--read-muted, #5b6058); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .gpr-mobile-title strong { min-width: 0; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+  .gpr-mobile-milestone { flex: none; width: 13px; height: 13px; align-self: center; color: var(--read-accent, #087a59); }
+  .gpr-mobile-dates { color: var(--read-muted, #5b6058); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .gpr-mobile-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .gpr-mobile-progress-bar { height: 6px; overflow: hidden; border-radius: 3px; background: var(--read-rule, #cdcec5); }
+  .gpr-mobile-progress-bar i { display: block; height: 100%; border-radius: 3px; background: var(--read-accent, #087a59); }
+  .gpr-mobile-progress b { min-width: 38px; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+  .gpr-mobile-critical { justify-self: start; padding: 1px 8px; border: 1px solid #d64545; border-radius: 999px; color: #d64545; font-size: 12px; font-weight: 700; }
+  :root .gpr-workspace .gpr-mobile-actions-toggle { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px; margin: 8px 0 0; }
+  .gpr-mobile-actions-toggle svg { width: 18px; }
+  :root .gpr-workspace .gpr-toolbar:not(.open) { display: none !important; }
+  :root .gpr-workspace .gpr-toolbar.open {
+    display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; height: auto; min-height: 0;
+    margin-top: 8px; padding: 10px; overflow: visible;
+  }
+  :root .gpr-workspace .gpr-toolbar.open > * { width: 100%; min-width: 0; height: auto; min-height: 44px; margin: 0; white-space: normal; }
+  :root .gpr-workspace .gpr-toolbar.open > label { display: flex; align-items: center; gap: 6px; }
+  :root .gpr-workspace .gpr-toolbar.open > label select { flex: 1; min-width: 0; }
+  :root .gpr-workspace .gpr-toolbar.open > span:empty { display: none; }
+  :root .gpr-workspace .gpr-context-bar { display: grid !important; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  :root .gpr-workspace .gpr-context-bar select { width: 100%; min-width: 0; }
+  :root .gpr-workspace .gpr-context-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  :root .gpr-workspace .gpr-editor { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: 8px; }
+  :root .gpr-workspace .gpr-editor > * { width: 100%; min-width: 0; }
+
+  /* ДДС */
+  :root .dds-workspace :is(.dds-months, .dds-calendar-shell) { display: none !important; }
+  :root .dds-workspace, :root .dds-workspace :is(td, th, .money, input, select, button, dd, b) {
+    font-family: inherit !important; font-variant-numeric: tabular-nums;
+  }
+  .dds-mobile-month { display: grid; gap: 12px; margin: 12px 0; }
+  .dds-mobile-month-picker { display: grid; gap: 4px; font-size: 13px; font-weight: 700; }
+  .dds-mobile-month-picker select { width: 100%; }
+  .dds-mobile-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  .dds-mobile-totals > div { min-width: 0; padding: 10px; border: 1px solid var(--read-rule, #cdcec5); border-radius: 10px; background: var(--read-secondary, #f4f6f5); }
+  .dds-mobile-totals dt { color: var(--read-muted, #5b6058); font-size: 12px; }
+  .dds-mobile-totals dd { margin: 3px 0 0; font-size: 16px; font-weight: 750; overflow-wrap: anywhere; }
+  .dds-mobile-month .positive { color: #14845f; }
+  .dds-mobile-month .negative { color: #c63737; }
+  :root[data-display-theme="dark"] .dds-mobile-month .positive { color: #4fd1a1; }
+  :root[data-display-theme="dark"] .dds-mobile-month .negative { color: #ff9097; }
+  .dds-mobile-group { min-width: 0; border: 1px solid var(--read-rule, #cdcec5); border-radius: 10px; overflow: hidden; }
+  .dds-mobile-group h3 { display: flex; justify-content: space-between; gap: 12px; margin: 0; padding: 10px 12px; background: var(--read-secondary, #f4f6f5); font-size: 15px; }
+  .dds-mobile-group ul { margin: 0; padding: 0; list-style: none; }
+  .dds-mobile-group li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--read-rule, #cdcec5); }
+  .dds-mobile-group li > span { min-width: 0; overflow-wrap: anywhere; }
+  .dds-mobile-group small { display: block; color: var(--read-muted, #5b6058); font-size: 12px; }
+  .dds-mobile-group :is(h3, li) b { white-space: nowrap; text-align: right; }
+  .dds-mobile-group > p { margin: 0; padding: 10px 12px; color: var(--read-muted, #5b6058); }
+
+  /* Detail and summary tables become cards: label on the left, value on the right. */
+  :root .dds-workspace .dds-table:has(td[data-label]) { display: block; width: 100%; min-width: 0; border: 0; background: transparent; }
+  :root .dds-workspace .dds-table:has(td[data-label]) thead { display: none; }
+  :root .dds-workspace .dds-table:has(td[data-label]) tbody { display: grid; gap: 8px; }
+  :root .dds-workspace .dds-table:has(td[data-label]) tr {
+    display: grid; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--read-rule, #cdcec5) !important; border-radius: 10px;
+    background: var(--read-surface, #fff) !important; box-shadow: none !important;
+  }
+  :root .dds-workspace .dds-table:has(td[data-label]) td {
+    display: grid; grid-template-columns: minmax(0, 42%) minmax(0, 1fr); gap: 8px; height: auto; min-width: 0; padding: 3px 0;
+    border: 0 !important; background: transparent !important; box-shadow: none !important;
+    text-align: right !important; white-space: normal !important; overflow-wrap: anywhere;
+  }
+  :root .dds-workspace .dds-table:has(td[data-label]) td[data-label] > * { justify-self: end; }
+  :root .dds-workspace .dds-table:has(td[data-label]) td::before { content: attr(data-label); color: var(--read-muted, #5b6058); font-size: 12px; text-align: left; }
+  :root .dds-workspace .dds-table:has(td[data-label]) td:not([data-label]) { display: block; text-align: left !important; font-weight: 700; }
+  :root .dds-workspace .dds-table:has(td[data-label]) td:not([data-label]):empty { display: none; }
+  :root .dds-workspace .dds-table:has(td[data-label]) td.dds-row-actions { display: flex; flex-wrap: wrap; gap: 8px; font-weight: 400; }
+  :root .dds-workspace .dds-table:has(td[data-label]) td.dds-row-actions > * { flex: 1 1 140px; }
+  :root .dds-workspace .dds-table-wrap { max-width: 100%; overflow-x: auto; }
+  :root .dds-workspace .dds-head-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  :root .dds-workspace .dds-head-actions button { width: 100%; min-width: 0; white-space: normal; }
+  :root .dds-workspace .dds-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  :root .dds-workspace .dds-filters > * { min-width: 0; }
+  :root .dds-workspace .dds-filters :is(select, input) { width: 100%; min-width: 0; }
+  :root .dds-workspace .dds-filters .dds-search { grid-column: 1 / -1; }
+  :root .dds-workspace .dds-tabs { display: flex; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+  :root .dds-workspace .dds-tabs button { flex: none; }
+}
