@@ -52,6 +52,11 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
         notify_mailbox_authority_expiry_once()
     except Exception:
         log.exception("Mailbox authority expiry reminder failed")
+    from app.gmail_sync_health import notify_gmail_sync_health_once
+    try:
+        notify_gmail_sync_health_once()
+    except Exception:
+        log.exception("Gmail sync health alert failed")
     return recovered
 
 
