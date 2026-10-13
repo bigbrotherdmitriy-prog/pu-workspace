@@ -226,7 +226,7 @@ def test_malformed_request_fails_without_retry_and_keeps_the_token(db_session, f
     assert job.last_error == "PushRequestRejected"
     assert db_session.scalar(select(UserDeviceToken)).fcm_token == TOKEN
     [record] = [r for r in caplog.records if r.name == "pu.push"]
-    assert "status=INVALID_ARGUMENT" in record.getMessage()
+    assert "http=400" in record.getMessage() and "status=INVALID_ARGUMENT" in record.getMessage()
     assert TOKEN not in record.getMessage() and "deep_link" not in record.getMessage()
 
 
