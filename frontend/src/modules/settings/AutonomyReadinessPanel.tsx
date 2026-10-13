@@ -15,6 +15,7 @@ export type AutonomyReadiness = {
     current_credential_generation?: number | null;
     current_binding_epoch?: number | null;
     actor_authority_version?: number | null;
+    authority_valid_until?: string | null;
   };
   quotas: {
     task_hourly: { used: number; limit: number | null };
@@ -61,6 +62,10 @@ type Props = {
   canRejoinMailbox?: boolean;
   onRejoinMailbox?: () => void | Promise<void>;
   rejoiningMailbox?: boolean;
+  canRenewMailboxAuthority?: boolean;
+  onRenewMailboxAuthority?: () => void | Promise<void>;
+  renewingMailboxAuthority?: boolean;
+  now?: Date;
 };
 
 export function AutonomyReadinessPanel({
@@ -68,7 +73,22 @@ export function AutonomyReadinessPanel({
   canLaunchPilot, onLaunchPilot, launchingPilot,
   canExpandAuthority, onExpandAuthority, expandingAuthority,
   canRejoinMailbox, onRejoinMailbox, rejoiningMailbox,
+  canRenewMailboxAuthority, onRenewMailboxAuthority, renewingMailboxAuthority, now,
 }: Props) {
+  // Mail access expires (owner decision 13.10.2026: renew up to 7 days at a
+  // time). Without a live grant every new letter is rejected, so the expiry is
+  // shown always and the renew button is offered to the owner at any time.
+  const mailAccessUntil = data.mailbox.authority_valid_until ? new Date(data.mailbox.authority_valid_until) : null;
+  const mailAccessLeftMs = mailAccessUntil ? mailAccessUntil.getTime() - (now ?? new Date()).getTime() : null;
+  const mailAccessState = mailAccessLeftMs == null ? null
+    : mailAccessLeftMs <= 0 ? "expired" : mailAccessLeftMs <= 24 * 3600 * 1000 ? "expiring" : "ok";
+  const canOfferRenewMailboxAuthority = Boolean(
+    canRenewMailboxAuthority && onRenewMailboxAuthority
+    && data.mailbox.mail_connection_id != null
+    && data.mailbox.current_credential_generation != null
+    && data.mailbox.current_binding_epoch != null
+    && data.mailbox.actor_authority_version != null,
+  );
   const reasons = [...data.overall.blockers, ...data.overall.warnings];
   // Offered only when the project already has SOME cohort history on this
   // mailbox but it isn't on the account's current credential generation --
@@ -134,6 +154,17 @@ export function AutonomyReadinessPanel({
           {expandingAuthority ? "Расширяем…" : "Выдать полный набор полномочий"}
         </button>
       </>}
+    </div>}
+    {mailAccessUntil && <div className="autonomy-bootstrap" data-mail-access={mailAccessState ?? undefined}>
+      <p>
+        {mailAccessState === "expired" && <><AlertTriangle /> Доступ системы к почте истёк {mailAccessUntil.toLocaleString("ru-RU")}. Новые письма не загружаются, пока доступ не продлён.</>}
+        {mailAccessState === "expiring" && <><AlertTriangle /> Доступ системы к почте истекает {mailAccessUntil.toLocaleString("ru-RU")}. Продлите его, чтобы почта не остановилась.</>}
+        {mailAccessState === "ok" && <><CheckCircle2 /> Доступ системы к почте действует до {mailAccessUntil.toLocaleString("ru-RU")}.</>}
+      </p>
+      {canOfferRenewMailboxAuthority && <button type="button" className={mailAccessState === "ok" ? "secondary" : undefined}
+        disabled={renewingMailboxAuthority} onClick={() => void onRenewMailboxAuthority!()}>
+        {renewingMailboxAuthority ? "Продлеваем…" : "Продлить доступ к почте на 7 дней"}
+      </button>}
     </div>}
     {canOfferRejoinMailbox && <div className="autonomy-bootstrap">
       <p>Mailbox этого проекта подключён к устаревшему поколению учётных данных почты (аккаунт уже переподключал Gmail из другого проекта). Переподключение отключит для этого проекта устаревшее поколение и подключит его к текущему — без этого шага AUTO-обработка писем для проекта не возобновится.</p>

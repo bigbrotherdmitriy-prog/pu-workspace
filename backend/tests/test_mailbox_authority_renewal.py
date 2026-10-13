@@ -246,10 +246,17 @@ def test_renewal_rejects_token_belonging_to_a_different_organization(world):
     assert not w.db.scalar(select(AuditLog).where(AuditLog.action == "mailbox_authority_renewed"))
 
 
-@pytest.mark.parametrize("hours", [-1, 0, 25, 120])
+@pytest.mark.parametrize("hours", [-1, 0, 7 * 24 + 1, 30 * 24])
 def test_ttl_bounded(world, hours):
     with pytest.raises(MailboxConflict):
         renew(world, valid_until=world.now + timedelta(hours=hours))
+
+
+@pytest.mark.parametrize("hours", [25, 7 * 24])
+def test_owner_can_renew_for_up_to_seven_days(world, hours):
+    # Owner decision 13.10.2026: a weekly renewal instead of a daily one.
+    result = renew(world, valid_until=world.now + timedelta(hours=hours))
+    assert result["valid_until"] == world.now + timedelta(hours=hours)
 
 
 def test_replay_stale_cas_and_rollback(world):

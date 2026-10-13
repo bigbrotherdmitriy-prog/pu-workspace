@@ -36,6 +36,8 @@ type Props = {
   expandingAuthority?: boolean;
   onRejoinMailbox?: () => void | Promise<void>;
   rejoiningMailbox?: boolean;
+  onRenewMailboxAuthority?: () => void | Promise<void>;
+  renewingMailboxAuthority?: boolean;
   onPolicyChange: (policy: AIProjectPolicy) => void;
   onSavePolicy: () => void;
   onRetrySnapshot: (id: number) => void;
@@ -71,6 +73,9 @@ export function SettingsModule(props: Props) {
         canRejoinMailbox={Boolean(props.currentUser?.is_admin)}
         onRejoinMailbox={props.onRejoinMailbox}
         rejoiningMailbox={props.rejoiningMailbox}
+        canRenewMailboxAuthority={Boolean(props.currentUser?.is_admin)}
+        onRenewMailboxAuthority={props.onRenewMailboxAuthority}
+        renewingMailboxAuthority={props.renewingMailboxAuthority}
       />}
       <section className="card span-settings">
         <div className="card-head"><div><h2>AI и защита данных</h2><p>Что разрешено передавать внешней модели для выбранного проекта</p></div></div>

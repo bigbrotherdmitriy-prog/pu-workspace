@@ -135,6 +135,44 @@ describe("AutonomyReadinessPanel", () => {
     expect(screen.queryByRole("button", { name: /Переподключить mailbox/ })).not.toBeInTheDocument();
   });
 
+  const NOW = new Date("2026-10-13T08:00:00Z");
+  const mailboxWithAccess = (validUntil: string) => ({
+    state: "producer_ready", ready: true, valid: true, credential_generation: 12, cohort_record_version: 2,
+    cutover: null, organization_id: 1, mail_connection_id: "mail-1",
+    current_credential_generation: 12, current_binding_epoch: 1, actor_authority_version: 4,
+    authority_valid_until: validUntil,
+  });
+
+  it.each([
+    ["2026-10-13T07:00:00Z", "expired", /Доступ системы к почте истёк/],
+    ["2026-10-13T20:00:00Z", "expiring", /Доступ системы к почте истекает/],
+    ["2026-10-19T08:00:00Z", "ok", /Доступ системы к почте действует до/],
+  ])("shows mail access valid until %s as %s", (validUntil, state, text) => {
+    const { container } = render(<AutonomyReadinessPanel
+      data={{ ...data, mailbox: mailboxWithAccess(validUntil) }} now={NOW} />);
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(container.querySelector(`[data-mail-access="${state}"]`)).not.toBeNull();
+  });
+
+  it("offers the owner a 7-day mail access renewal", () => {
+    const onRenew = vi.fn();
+    render(<AutonomyReadinessPanel data={{ ...data, mailbox: mailboxWithAccess("2026-10-13T07:00:00Z") }}
+      now={NOW} canRenewMailboxAuthority onRenewMailboxAuthority={onRenew} />);
+    fireEvent.click(screen.getByRole("button", { name: "Продлить доступ к почте на 7 дней" }));
+    expect(onRenew).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the renewal for a non-admin, without a handler or without pointers", () => {
+    const onRenew = vi.fn();
+    render(<AutonomyReadinessPanel data={{ ...data, mailbox: mailboxWithAccess("2026-10-13T07:00:00Z") }}
+      now={NOW} canRenewMailboxAuthority={false} onRenewMailboxAuthority={onRenew} />);
+    expect(screen.queryByRole("button", { name: "Продлить доступ к почте на 7 дней" })).toBeNull();
+    cleanup();
+    render(<AutonomyReadinessPanel data={{ ...data, mailbox: { ...mailboxWithAccess("2026-10-13T07:00:00Z"), actor_authority_version: null } }}
+      now={NOW} canRenewMailboxAuthority onRenewMailboxAuthority={onRenew} />);
+    expect(screen.queryByRole("button", { name: "Продлить доступ к почте на 7 дней" })).toBeNull();
+  });
+
   it("has no controls capable of changing policy, authority or mailbox", () => {
     const { container } = render(<AutonomyReadinessPanel data={data} />);
     expect(container.querySelector("button, input, select, textarea, form")).toBeNull();
