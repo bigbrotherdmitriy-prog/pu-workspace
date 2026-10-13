@@ -1,7 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GprWorkspace } from "./GprWorkspace";
 import type { FinanceOverview } from "./types";
+
+// The desktop table and the phone list both render in jsdom; CSS picks one by width.
+const grid = (container: HTMLElement) => within(container.querySelector(".gpr-grid") as HTMLElement);
 
 const finance = {
   baselines: [
@@ -22,10 +25,10 @@ afterEach(cleanup);
 describe("GprWorkspace", () => {
   it("shows the task grid and saves edits to the selected task", async () => {
     const onUpdateTask = vi.fn().mockResolvedValue(undefined);
-    render(<GprWorkspace projectId={1} finance={finance} contracts={contracts} selectedContractId={4} onSelectContract={vi.fn()} onPrepare={vi.fn()} onUpdateTask={onUpdateTask} onBulkUpdate={vi.fn().mockResolvedValue(undefined)} onCloneBaseline={vi.fn().mockResolvedValue(11)} onImported={vi.fn()} />);
+    const { container } = render(<GprWorkspace projectId={1} finance={finance} contracts={contracts} selectedContractId={4} onSelectContract={vi.fn()} onPrepare={vi.fn()} onUpdateTask={onUpdateTask} onBulkUpdate={vi.fn().mockResolvedValue(undefined)} onCloneBaseline={vi.fn().mockResolvedValue(11)} onImported={vi.fn()} />);
 
-    expect(screen.getByText("Монтаж")).toBeInTheDocument();
-    expect(screen.getByText("Критический путь")).toBeInTheDocument();
+    expect(grid(container).getByText("Монтаж")).toBeInTheDocument();
+    expect(within(container.querySelector(".gpr-toolbar") as HTMLElement).getByText("Критический путь")).toBeInTheDocument();
     expect(screen.getByText("ГПР 02.09.2026.mpp")).toBeInTheDocument();
     expect(screen.getByText(/SHA-256 abcdef123456/)).toBeInTheDocument();
     expect(screen.getByLabelText("Связи задач")).toBeInTheDocument();
@@ -34,7 +37,7 @@ describe("GprWorkspace", () => {
     fireEvent.click(screen.getByLabelText("Свернуть ветвь"));
     expect(screen.queryByText("Монтаж")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Развернуть ветвь"));
-    fireEvent.click(screen.getByText("Монтаж"));
+    fireEvent.click(grid(container).getByText("Монтаж"));
     const title = await screen.findByLabelText("Название задачи");
     fireEvent.change(title, { target: { value: "Монтаж ИБП" } });
     fireEvent.click(screen.getByRole("button", { name: /Сохранить/ }));
@@ -87,10 +90,10 @@ describe("GprWorkspace", () => {
       ...finance,
       baselines: [{ id: 11, contract_id: 4, name: "Пустой draft", version: 3, status: "draft" }, ...finance.baselines],
     } as FinanceOverview;
-    render(<GprWorkspace projectId={1} finance={withEmptyLatest} contracts={contracts} selectedContractId={4} onSelectContract={vi.fn()} onPrepare={vi.fn()} onUpdateTask={vi.fn()} onBulkUpdate={vi.fn()} onCloneBaseline={vi.fn()} onImported={vi.fn()} />);
+    const { container } = render(<GprWorkspace projectId={1} finance={withEmptyLatest} contracts={contracts} selectedContractId={4} onSelectContract={vi.fn()} onPrepare={vi.fn()} onUpdateTask={vi.fn()} onBulkUpdate={vi.fn()} onCloneBaseline={vi.fn()} onImported={vi.fn()} />);
 
     expect(screen.getByLabelText("Версия ГПР")).toHaveValue("10");
     expect(screen.getByText("ГПР 02.09.2026.mpp")).toBeInTheDocument();
-    expect(screen.getByText("Монтаж")).toBeInTheDocument();
+    expect(grid(container).getByText("Монтаж")).toBeInTheDocument();
   });
 });

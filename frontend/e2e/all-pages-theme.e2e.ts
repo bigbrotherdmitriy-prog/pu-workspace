@@ -99,9 +99,9 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
     await page.setViewportSize({ width: 390, height: 844 });
     await settled(page);
     if (name === "ГПР и ДДС") {
-      await expect(page.locator(".gpr-split")).toHaveCSS("overflow-x", "auto");
-      const scrollable = await page.locator(".gpr-split").evaluate(el => { el.scrollLeft = 200; const reached = el.scrollLeft; el.scrollLeft = 0; return reached; });
-      expect(scrollable, "mobile Gantt can reach the chart pane").toBeGreaterThan(0);
+      // Phones get the stage list instead of the wide table and Gantt chart (owner review 13.10.2026).
+      await expect(page.locator(".gpr-split")).toBeHidden();
+      await expect(page.getByRole("list", { name: "Этапы и вехи ГПР" })).toBeVisible();
     }
     expect.soft(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name}: mobile page must not overflow`).toBe(true);
     await page.screenshot({ path: info.outputPath(`${index}-${theme}-mobile.png`), fullPage: true, animations: "disabled", timeout: 10000 });
