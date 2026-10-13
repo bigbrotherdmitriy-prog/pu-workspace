@@ -36,6 +36,7 @@ from app.api.v54_authority_admin import router as v54_authority_admin_router
 from app.api.autonomy_readiness import router as autonomy_readiness_router
 from app.api.v54_sandbox_acceptance import router as v54_sandbox_acceptance_router
 from app.api.mobile_sync import router as mobile_sync_router
+from app.api.notification_devices import router as notification_devices_router
 from app.api.evidence_trail import router as evidence_trail_router
 
 from app.api.access import router as access_router
@@ -174,6 +175,7 @@ app.include_router(v54_authority_admin_router)
 app.include_router(autonomy_readiness_router)
 app.include_router(v54_sandbox_acceptance_router)
 app.include_router(mobile_sync_router)
+app.include_router(notification_devices_router)
 app.include_router(evidence_trail_router)
 app.include_router(google_drive_router)
 app.include_router(mvp1_google_oauth_router)
