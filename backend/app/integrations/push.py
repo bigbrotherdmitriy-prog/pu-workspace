@@ -12,6 +12,7 @@ and FCM payloads leave our infrastructure.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Callable
@@ -20,12 +21,16 @@ import httpx
 
 from app.integrations.contracts import AdapterHealth
 
+log = logging.getLogger("pu.push")
+
 FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 FCM_SEND_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
 APP_BASE_URL = "https://puworkspace.ru/new/"
 ANDROID_CHANNEL_ID = "pu_workspace_alerts"
-# FCM errorCode values meaning the token itself is dead; the row is deleted.
-REJECTED_TOKEN_CODES = frozenset({"UNREGISTERED", "INVALID_ARGUMENT"})
+# INVALID_ARGUMENT also means "malformed request", so it deletes the token only
+# when a google.rpc.BadRequest field violation names the token field.
+TOKEN_FIELD = "message.token"
+_BAD_REQUEST_TYPE = "type.googleapis.com/google.rpc.BadRequest"
 _SERVICE_ACCOUNT_FIELDS = ("type", "project_id", "client_email", "private_key", "token_uri")
 
 # Fixed, content-free titles per Notification.kind.
@@ -56,6 +61,10 @@ class PushTransientError(PushError):
 
 class PushTokenRejected(Exception):
     """FCM says the registration token is dead; retrying cannot help."""
+
+
+class PushRequestRejected(ValueError):
+    """FCM rejected our request itself; ValueError makes the job fail without retry."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,15 +143,25 @@ def _service_account_token(info: dict) -> str:
     return str(credentials.token)
 
 
-def _error_code(response: httpx.Response) -> str:
+def _fcm_error(response: httpx.Response) -> tuple[str, str, bool]:
+    """Return (status, errorCode, token_field_violated) from an FCM v1 error body."""
     try:
         error = response.json().get("error") or {}
-    except ValueError:
-        return ""
+    except (ValueError, AttributeError):
+        return "", "", False
+    status = str(error.get("status") or "")
+    code, token_violated = "", False
     for detail in error.get("details") or []:
-        if isinstance(detail, dict) and detail.get("errorCode"):
-            return str(detail["errorCode"])
-    return str(error.get("status") or "")
+        if not isinstance(detail, dict):
+            continue
+        if detail.get("errorCode") and not code:
+            code = str(detail["errorCode"])
+        if detail.get("@type") == _BAD_REQUEST_TYPE:
+            token_violated = token_violated or any(
+                isinstance(violation, dict) and violation.get("field") == TOKEN_FIELD
+                for violation in detail.get("fieldViolations") or []
+            )
+    return status, code or status, token_violated
 
 
 class FcmPushAdapter:
@@ -172,9 +191,16 @@ class FcmPushAdapter:
                 return str((response.json() or {}).get("name", "sent"))
             except (ValueError, AttributeError):
                 return "sent"
-        code = _error_code(response)
-        if code in REJECTED_TOKEN_CODES:
+        status, code, token_violated = _fcm_error(response)
+        if code == "UNREGISTERED":
             raise PushTokenRejected(code)
+        if "INVALID_ARGUMENT" in (status, code):
+            if token_violated:
+                raise PushTokenRejected("INVALID_ARGUMENT")
+            # Our request is malformed: retrying or dropping the token would not
+            # help. Logged without token or payload.
+            log.error("FCM rejected the push request; status=%s error_code=%s", status, code)
+            raise PushRequestRejected(f"FCM HTTP {response.status_code} {code}")
         # 401/403 (key revoked), 429 (quota), 5xx (outage) and any unknown
         # answer: keep the message and let the durable queue retry.
         raise PushTransientError(f"FCM HTTP {response.status_code} {code}".strip())
