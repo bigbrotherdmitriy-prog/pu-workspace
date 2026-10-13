@@ -190,14 +190,44 @@ def test_auth_quota_and_server_errors_are_retryable(db_session, fcm, scene, stat
     assert _work_once(db_session) == "retrying"
 
 
-@pytest.mark.parametrize("code,status", [("UNREGISTERED", 404), ("INVALID_ARGUMENT", 400)])
-def test_dead_token_is_deleted(db_session, fcm, scene, code, status):
+def _bad_request(field: str) -> tuple[int, dict]:
+    status, body = _fcm_error(400, "INVALID_ARGUMENT")
+    body["error"]["details"].append({"@type": "type.googleapis.com/google.rpc.BadRequest",
+                                     "fieldViolations": [{"field": field, "description": "synthetic"}]})
+    return status, body
+
+
+@pytest.mark.parametrize("response,reason", [
+    (_fcm_error(404, "UNREGISTERED"), "UNREGISTERED"),
+    (_bad_request("message.token"), "INVALID_ARGUMENT"),
+])
+def test_dead_token_is_deleted(db_session, fcm, scene, response, reason):
     fake, _ = fcm
-    fake.responses = [_fcm_error(status, code)]
+    fake.responses = [response]
     user, project, _ = scene
     _notify(db_session, user, project)
-    assert _work_once(db_session) == {"status": "token_removed", "reason": code}
+    assert _work_once(db_session) == {"status": "token_removed", "reason": reason}
     assert db_session.scalar(select(UserDeviceToken)) is None
+
+
+@pytest.mark.parametrize("response", [
+    _fcm_error(400, "INVALID_ARGUMENT"),
+    _bad_request("message.android.notification.channel_id"),
+    (400, {"error": {"code": 400, "status": "INVALID_ARGUMENT"}}),
+])
+def test_malformed_request_fails_without_retry_and_keeps_the_token(db_session, fcm, scene, response, caplog):
+    fake, _ = fcm
+    fake.responses = [response]
+    user, project, _ = scene
+    _notify(db_session, user, project)
+    with caplog.at_level("ERROR", logger="pu.push"):
+        assert _work_once(db_session) == "failed"
+    [job] = _push_jobs(db_session)
+    assert job.last_error == "PushRequestRejected"
+    assert db_session.scalar(select(UserDeviceToken)).fcm_token == TOKEN
+    [record] = [r for r in caplog.records if r.name == "pu.push"]
+    assert "status=INVALID_ARGUMENT" in record.getMessage()
+    assert TOKEN not in record.getMessage() and "deep_link" not in record.getMessage()
 
 
 def test_no_device_or_disabled_channel_queues_nothing(db_session, fcm, user_factory, monkeypatch):
