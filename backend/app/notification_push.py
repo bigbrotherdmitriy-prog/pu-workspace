@@ -20,7 +20,6 @@ from app.database import SessionLocal
 from app.integrations.push import (
     FcmPushAdapter, PushTokenRejected, fcm_configured, push_message_for,
 )
-from app.jobs.queue import enqueue
 from app.models.job import BackgroundJob
 from app.models.management import Notification, NotificationPolicy
 from app.models.notification_device import UserDeviceToken
@@ -158,6 +157,8 @@ def _deliver(db: Session, notification_id: int, device_id: int, now: datetime) -
         return {"status": "skipped", "reason": "notifications_disabled"}
     if available_at > now:
         # Retries after an outage must not ring the phone at night either.
+        # Imported here: app.jobs.queue imports app.models, which loads this module.
+        from app.jobs.queue import enqueue
         enqueue(db, PUSH_JOB_KIND, {"notification_id": notification_id, "device_id": device_id},
                 priority=PUSH_PRIORITY, max_attempts=PUSH_MAX_ATTEMPTS, available_at=available_at,
                 idempotency_key=_job_key(notification_id, device_id, f":at:{available_at.isoformat()}"))
