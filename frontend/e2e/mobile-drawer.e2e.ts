@@ -1,4 +1,4 @@
-import { expect, test, settled } from "./storage-fixtures";
+import { chooseThemeOnPhone, expect, test, settled } from "./storage-fixtures";
 
 // 13.10.2026: on phones the "Ещё" tab opened the drawer underneath its own
 // backdrop (theme sheets pinned the Work Center sidebar at z-index 20 and gave
@@ -8,7 +8,7 @@ test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true
 for (const theme of ["Тёмная", "Светлая"]) test(`"Ещё" shows a usable drawer (${theme})`, async ({ page, mock }) => {
   await page.goto("/new/");
   await settled(page);
-  await page.getByRole("button", { name: theme, exact: true }).first().click();
+  await chooseThemeOnPhone(page, theme);
   await page.getByRole("button", { name: "Открыть всё меню" }).click();
   const drawer = page.locator(".shell > aside.mobile-open");
   await expect(drawer).toBeVisible();

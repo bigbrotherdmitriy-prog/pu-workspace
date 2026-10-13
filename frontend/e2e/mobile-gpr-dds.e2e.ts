@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./storage-fixtures";
+import { chooseThemeOnPhone, expect, test } from "./storage-fixtures";
 
 // 13.10.2026 phone review: ГПР showed the wide table and the Gantt chart with a
 // wide "№" column and the editing toolbar on top; ДДС sums ran off the screen
@@ -45,7 +45,7 @@ async function withData(page: Page) {
 async function open(page: Page, theme: string, tab: "ГПР" | "ДДС") {
   await withData(page);
   await page.goto("/new/");
-  await page.getByRole("button", { name: theme, exact: true }).first().click();
+  await chooseThemeOnPhone(page, theme);
   await page.locator(".android-bottom-nav").getByRole("button", { name: tab, exact: true }).click();
   await expect(page.getByRole("tab", { name: tab, exact: true })).toHaveAttribute("aria-selected", "true");
 }

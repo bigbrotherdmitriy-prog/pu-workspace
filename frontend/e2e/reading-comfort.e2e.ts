@@ -42,7 +42,12 @@ test("reading themes retain contrast, legible copy and responsive layout", async
   await expect(page.getByRole("button", { name: "Режим комфорта" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("html")).toHaveAttribute("data-display-theme", "dark");
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("group", { name: "Тема интерфейса" })).toBeVisible();
+  // Phones keep the theme controls in the "Ещё" drawer, not above the content.
+  await expect(page.locator(".shell > main").getByRole("group", { name: "Тема интерфейса" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Открыть всё меню" }).click();
+  await expect(page.locator(".shell > aside.mobile-open").getByRole("group", { name: "Тема интерфейса" })).toBeVisible();
+  await expect(page.locator(".shell > aside.mobile-open").getByRole("button", { name: "Режим комфорта" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Закрыть меню" }).click({ position: { x: 370, y: 400 } });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("comfort-mobile.png"), fullPage: true });
   await page.getByRole("navigation", { name: "Основная мобильная навигация" }).getByRole("button", { name: "Центр", exact: true }).click();

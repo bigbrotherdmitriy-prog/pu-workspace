@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test, settled } from "./storage-fixtures";
+import { chooseThemeOnPhone, expect, test, settled } from "./storage-fixtures";
 
 // 13.10.2026 phone review: the header wrapped the project name over four lines,
 // the project picker was clipped and the refresh button sat on top of it; the
@@ -11,7 +11,7 @@ const sections = ["Центр", "Задачи", "Письма"];
 async function openTheme(page: Page, theme: string) {
   await page.goto("/new/");
   await settled(page);
-  await page.getByRole("button", { name: theme, exact: true }).first().click();
+  await chooseThemeOnPhone(page, theme);
 }
 
 async function show(page: Page, section: string) {

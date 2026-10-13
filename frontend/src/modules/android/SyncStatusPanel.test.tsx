@@ -39,4 +39,32 @@ describe("mobile synchronization status", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выбрать последнюю по времени" }));
     expect(onResolve).toHaveBeenCalledWith(8, "latest_write_wins");
   });
+
+  it("on phones hides itself when everything is synced", () => {
+    const { container } = render(<SyncStatusPanel
+      compact
+      online
+      summary={{ queued: 0, syncing: 0, attention: 0, authRequired: 0, conflicts: 0, total: 0 }}
+      conflicts={[]}
+      onSync={vi.fn()}
+      onResolve={vi.fn()}
+    />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("on phones shows a one-row offline banner with the sync action", () => {
+    const onSync = vi.fn();
+    render(<SyncStatusPanel
+      compact
+      online={false}
+      summary={{ queued: 2, syncing: 0, attention: 0, authRequired: 0, conflicts: 0, total: 2 }}
+      conflicts={[]}
+      onSync={onSync}
+      onResolve={vi.fn()}
+    />);
+    expect(screen.getByText("Офлайн · несинхронизировано: 2")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Синхронизировать сейчас" });
+    expect(button).toHaveTextContent("Синхронизировать");
+    expect(button).toBeDisabled();
+  });
 });
