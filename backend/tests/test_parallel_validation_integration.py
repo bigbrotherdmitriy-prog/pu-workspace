@@ -123,3 +123,50 @@ def test_recovery_reuses_manual_analysis_job(bound):
     with bound.db() as db:
         jobs = list(db.scalars(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.analysis')))
         assert len(jobs) == 1
+
+
+def test_safe_copy_late_crash_still_publishes_successful_session(bound, monkeypatch):
+    import app.organizer as organizer
+    first = choose(bound).json()
+    session_id = workspace._start_safe_copy_pipeline(first['id'], bound.new, bound.adapter.ids[-1], 'Synthetic')
+    def late_crash(*args, **kwargs):
+        with bound.db() as db:
+            db.get(OrganizerSession, session_id).status = 'proposed'
+            db.commit()
+        raise RuntimeError('synthetic DB restart after the session finished')
+    monkeypatch.setattr(organizer, '_scan_worker', late_crash)
+    with pytest.raises(RuntimeError):
+        workspace._run_safe_copy_pipeline(first['id'], session_id, bound.new, bound.adapter.ids[-1])
+    with bound.db() as db:
+        assert db.get(WorkspaceSnapshot, first['id']).analysis_status == 'ready'
+
+
+def test_safe_copy_early_crash_leaves_snapshot_for_retry(bound, monkeypatch):
+    import app.organizer as organizer
+    first = choose(bound).json()
+    session_id = workspace._start_safe_copy_pipeline(first['id'], bound.new, bound.adapter.ids[-1], 'Synthetic')
+    with bound.db() as db:
+        before = db.get(WorkspaceSnapshot, first['id']).analysis_status
+    def early_crash(*args, **kwargs):
+        raise RuntimeError('synthetic crash before the session finished')
+    monkeypatch.setattr(organizer, '_scan_worker', early_crash)
+    with pytest.raises(RuntimeError):
+        workspace._run_safe_copy_pipeline(first['id'], session_id, bound.new, bound.adapter.ids[-1])
+    with bound.db() as db:
+        assert db.get(WorkspaceSnapshot, first['id']).analysis_status == before
+
+
+def test_recovery_unsticks_safe_copy_snapshot_whose_session_finished(bound):
+    first = choose(bound).json()
+    session_id = workspace._start_safe_copy_pipeline(first['id'], bound.new, bound.adapter.ids[-1], 'Synthetic')
+    with bound.db() as db:
+        snap = db.get(WorkspaceSnapshot, first['id'])
+        snap.analysis_status = 'analyzing'
+        assert snap.analysis_result.get('mode') == 'safe_copy'
+        db.get(OrganizerSession, session_id).status = 'proposed'
+        db.commit()
+    assert workspace.recover_incomplete_analyses() == 0
+    with bound.db() as db:
+        assert db.get(WorkspaceSnapshot, first['id']).analysis_status == 'ready'
+        jobs = list(db.scalars(select(BackgroundJob).where(BackgroundJob.kind == 'workspace.analysis')))
+        assert jobs == []
