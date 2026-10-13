@@ -81,6 +81,12 @@ def _runtime_projection(project_id):
     return settings, "matching" if settings.project_id == project_id else "mismatch"
 
 
+def _utc_iso(value):
+    if value is None:
+        return None
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+
+
 def _mailbox_current_pointers(db, *, organization_id, mail_connection_id, actor):
     """Read-only extras the UI needs to call mailbox-rollout/rejoin: the mail
     connection itself, its identity's CURRENT generation/epoch (which may
@@ -106,6 +112,7 @@ def _mailbox_current_pointers(db, *, organization_id, mail_connection_id, actor)
         "current_credential_generation": identity.credential_generation if identity else None,
         "current_binding_epoch": identity.binding_epoch if identity else None,
         "actor_authority_version": authority.authority_version if authority else None,
+        "authority_valid_until": _utc_iso(authority.valid_until) if authority is not None else None,
     }
 
 

@@ -264,6 +264,7 @@ def test_mailbox_exposes_current_generation_pointers_and_null_actor_authority(re
     # No v54_mailbox_authority_states row exists yet for this actor/connection --
     # must come back null, never crash the endpoint.
     assert mailbox["actor_authority_version"] is None
+    assert mailbox["authority_valid_until"] is None
 
 
 def test_mailbox_exposes_actor_authority_version_once_a_row_exists(readiness_world):
@@ -276,6 +277,8 @@ def test_mailbox_exposes_actor_authority_version_once_a_row_exists(readiness_wor
         ))
     body = client.get("/api/v54/projects/10/autonomy-readiness").json()
     assert body["mailbox"]["actor_authority_version"] == 5
+    # The UI shows when the owner must renew mail access (owner decision 13.10).
+    assert datetime.fromisoformat(body["mailbox"]["authority_valid_until"]) == NOW + timedelta(days=1)
 
 
 def test_mailbox_exposes_actor_authority_version_only_for_its_own_principal(readiness_world):

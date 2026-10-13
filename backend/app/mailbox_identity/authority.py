@@ -19,6 +19,12 @@ from app.models.project_member import ProjectMember
 from app.models.v54_pilot import ConnectionIdentity, MailConnection
 
 
+# Owner decision 13.10.2026 ("вариант А"): a renewal may extend the grant by up
+# to 7 days instead of 24 hours; expiry is announced in Telegram beforehand
+# (app/mailbox_authority_alerts.py) instead of failing silently.
+MAX_RENEWAL_WINDOW = timedelta(days=7)
+
+
 def renew_project_mailbox_authority(db, command, *, actor, expected_version, now=None):
     """Flush in caller transaction. Expired active grants may be renewed by owner.
 
@@ -30,7 +36,7 @@ def renew_project_mailbox_authority(db, command, *, actor, expected_version, now
     now = now or datetime.now(timezone.utc)
     until = command.valid_until.astimezone(timezone.utc)
     if (type(expected_version) is not int or expected_version <= 0
-            or not now < until <= now + timedelta(hours=24)):
+            or not now < until <= now + MAX_RENEWAL_WINDOW):
         raise MailboxConflict("resource_unavailable")
     mail_id = str(command.mail_connection_id)
     mail_hint = db.get(MailConnection, mail_id)

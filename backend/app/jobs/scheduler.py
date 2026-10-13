@@ -47,6 +47,11 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
     )
     # Operational projection only: Telegram failure never changes durable work.
     notify_product_auto_incidents_once()
+    from app.mailbox_authority_alerts import notify_mailbox_authority_expiry_once
+    try:
+        notify_mailbox_authority_expiry_once()
+    except Exception:
+        log.exception("Mailbox authority expiry reminder failed")
     return recovered
 
 

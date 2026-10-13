@@ -544,6 +544,7 @@ export function App() {
     [launchingPilot, setLaunchingPilot] = useState(false),
     [expandingAuthority, setExpandingAuthority] = useState(false),
     [rejoiningMailbox, setRejoiningMailbox] = useState(false),
+    [renewingMailboxAuthority, setRenewingMailboxAuthority] = useState(false),
     [systemState, setSystemState] = useState<SystemState | null>(null),
     [currentUser, setCurrentUser] = useState<CurrentUser | null>(null),
     [busyProposal, setBusyProposal] = useState(0),
@@ -740,6 +741,49 @@ export function App() {
       setError(error instanceof Error ? error.message : "Не удалось расширить полномочия.");
     } finally {
       setExpandingAuthority(false);
+    }
+  }
+
+  async function renewMailboxAuthority() {
+    // Owner decision 13.10.2026: the system's right to read the shared mailbox
+    // is renewed by the owner for up to 7 days; when it lapses every new
+    // letter is rejected (10.10.2026 incident). Telegram warns a day ahead.
+    const mailbox = autonomyReadiness?.mailbox;
+    if (!mailbox || mailbox.organization_id == null || mailbox.mail_connection_id == null
+        || mailbox.current_credential_generation == null || mailbox.current_binding_epoch == null
+        || mailbox.actor_authority_version == null) {
+      setError("Недостаточно данных mailbox для продления доступа.");
+      return;
+    }
+    // A minute under the 7-day ceiling so clock skew never trips the server bound.
+    const validUntil = new Date(Date.now() + 7 * 24 * 3600 * 1000 - 60 * 1000);
+    if (!window.confirm(
+      `Продлить доступ системы к почтовому ящику до ${validUntil.toLocaleString("ru-RU")}? `
+      + "Система сможет читать и разбирать новые письма проекта. Внешняя отправка писем по-прежнему требует вашего подтверждения.",
+    )) return;
+    setRenewingMailboxAuthority(true);
+    try {
+      await api("/integrations/mailbox-authority/renew", {
+        method: "POST",
+        headers: { "If-Match": `"${mailbox.actor_authority_version}"` },
+        body: JSON.stringify({
+          organization_id: mailbox.organization_id,
+          project_id: projectId,
+          mail_connection_id: mailbox.mail_connection_id,
+          credential_generation: mailbox.current_credential_generation,
+          binding_epoch: mailbox.current_binding_epoch,
+          valid_until: validUntil.toISOString(),
+          approval: "CONFIRM",
+          reason: "owner_confirmed_project_reconnect",
+        }),
+      });
+      setNotice(`Доступ к почте продлён до ${validUntil.toLocaleString("ru-RU")}.`);
+      const readiness = await api(`/api/v54/projects/${projectId}/autonomy-readiness`).catch(() => null);
+      if (readiness?.overall?.status) setAutonomyReadiness(readiness);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не удалось продлить доступ к почте.");
+    } finally {
+      setRenewingMailboxAuthority(false);
     }
   }
 
@@ -4312,6 +4356,8 @@ export function App() {
           expandingAuthority={expandingAuthority}
           onRejoinMailbox={() => void rejoinMailbox()}
           rejoiningMailbox={rejoiningMailbox}
+          onRenewMailboxAuthority={() => void renewMailboxAuthority()}
+          renewingMailboxAuthority={renewingMailboxAuthority}
           onPolicyChange={setAiPolicy}
           onSavePolicy={() => void saveAIPolicy()}
           onRetrySnapshot={(id) => void retrySnapshot(id)}
