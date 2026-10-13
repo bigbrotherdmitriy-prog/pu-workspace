@@ -68,6 +68,12 @@ def _required_int(name: str) -> int:
     return value
 
 
+# Owner decision 13.10.2026: the AUTO pilot runs a 7-day observation window
+# (TZ V6-07), so one policy may last up to 7 days (was 48 h). Expiry is
+# announced in Telegram beforehand (app/pilot_expiry_alerts.py).
+MAX_POLICY_TTL_HOURS = 168
+
+
 @dataclass(frozen=True, slots=True)
 class ProductPilotSettings:
     enabled: bool
@@ -92,7 +98,7 @@ class ProductPilotSettings:
         if (type(self.project_id) is not int or self.project_id <= 0
                 or type(self.owner_user_id) is not int or self.owner_user_id <= 0
                 or type(self.hourly_quota) is not int or not 2 <= self.hourly_quota <= 3
-                or type(self.policy_ttl_hours) is not int or not 24 <= self.policy_ttl_hours <= 48
+                or type(self.policy_ttl_hours) is not int or not 24 <= self.policy_ttl_hours <= MAX_POLICY_TTL_HOURS
                 or type(self.minimum_confidence) is not float
                 or not 0.9 <= self.minimum_confidence <= 1.0
                 or type(self.notification_enabled) is not bool

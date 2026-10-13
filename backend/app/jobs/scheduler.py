@@ -57,6 +57,11 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
         notify_gmail_sync_health_once()
     except Exception:
         log.exception("Gmail sync health alert failed")
+    from app.pilot_expiry_alerts import notify_pilot_expiry_once
+    try:
+        notify_pilot_expiry_once()
+    except Exception:
+        log.exception("Pilot expiry reminder failed")
     return recovered
 
 

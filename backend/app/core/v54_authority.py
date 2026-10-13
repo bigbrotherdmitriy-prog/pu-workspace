@@ -16,7 +16,8 @@ PILOT_SCOPE = "v54.synthetic.confirm"
 # ADR-V6-07-REOPENING-RU: a bootstrap-issued mandate is a short-lived recovery
 # grant, not a standing one -- same order of magnitude as the original pilot's
 # observation window (22-29.09.2026), not a long-lived credential.
-BOOTSTRAP_VALID_FOR = timedelta(days=5)
+# 7 days since 13.10.2026 (owner decision): covers the V6-07 observation window.
+BOOTSTRAP_VALID_FOR = timedelta(days=7)
 PILOT_OPERATIONS = frozenset({
     "identity", "write", "observe", "metadata", "fragment", "review", "dispatch", "audit",
     "audit.append", "mailbox.bootstrap", "claim.extract", "claim.review", "context.confirm",
