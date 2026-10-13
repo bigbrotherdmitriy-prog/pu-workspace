@@ -293,3 +293,27 @@ def test_deploy_moves_live_background_services_to_candidate_image():
     # ... and the rollback path restores the previous release's workers too.
     rollback = source[source.index("rollback() {"):source.index('trap rollback INT TERM HUP EXIT')]
     assert "--force-recreate --wait --wait-timeout 120 worker scheduler" in rollback
+
+
+def _secrets_bind(read_only):
+    return {"type": "bind", "source": "/opt/pu-workspace-primary/secrets",
+            "target": "/run/pu-secrets", "read_only": read_only}
+
+
+def test_primary_compose_accepts_read_only_secret_mount():
+    model, project, image, port, volume, prefix = compose_model()
+    for name in ("backend", "worker", "scheduler"):
+        model["services"][name]["volumes"].append(_secrets_bind(True))
+    script("validate_primary_compose").validate(model, project, image, port, volume, prefix)
+
+
+def test_primary_compose_rejects_writable_host_bind():
+    model, project, image, port, volume, prefix = compose_model()
+    model["services"]["worker"]["volumes"].append(_secrets_bind(False))
+    with pytest.raises(ValueError):
+        script("validate_primary_compose").validate(model, project, image, port, volume, prefix)
+
+
+def test_primary_compose_mounts_provider_secrets_read_only():
+    compose = (ROOT / "infra" / "primary" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "${PRIMARY_SECRETS_DIR:-/opt/pu-workspace-primary/secrets}:/run/pu-secrets:ro" in compose
