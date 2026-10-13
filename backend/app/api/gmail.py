@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import json
 import os
 import re
@@ -56,6 +57,7 @@ from app.staging.gmail import (
 from app.provider_actions.contracts import ProviderActionError
 from app.provider_actions.product import action_display_state, queue_confirmed_action
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["gmail"])
 MAX_ATTACHMENT_BYTES = int(os.getenv("GMAIL_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
 
@@ -673,10 +675,17 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
             db.rollback()
             failed += 1
             errors.append({"item_index": processed + skipped + failed, "error": exc.__class__.__name__})
+            # Before 13.10.2026 these were swallowed and a fully failing sweep
+            # looked healthy (project 17, 10-13.10). Exception class only:
+            # str(exc) of a DB error can carry the letter's subject/body.
+            log.warning("Gmail message ingest failed for project %s: %s",
+                        project_id, exc.__class__.__name__)
     reclassified = _backfill_automated_messages_for_user(db, user)
+    error_classes = ",".join(sorted({item["error"] for item in errors}))
     db.add(AuditLog(action="gmail_sync", entity_type="project", entity_id=project_id,
                     details=(f"query={query}; processed={processed}; skipped={skipped}; "
-                             f"failed={failed}; reclassified={reclassified}")))
+                             f"failed={failed}; reclassified={reclassified}"
+                             + (f"; errors={error_classes}" if error_classes else ""))))
     db.commit()
     return {"processed": processed, "skipped": skipped, "failed": failed,
             "reclassified": reclassified, "errors": errors[:20]}
