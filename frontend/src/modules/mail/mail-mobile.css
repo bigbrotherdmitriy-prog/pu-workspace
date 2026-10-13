@@ -1,0 +1,42 @@
+/* Phone mail (≤ 760 px): a compact folder list with counters on the right and
+   a single "Подтвердить для AUTO" button instead of the three-step context
+   strip. Desktop never shows the shortcut. */
+.mail-mobile-auto { display: none; }
+@media (max-width: 760px) {
+  :root .shell .mail-folders { gap: 8px !important; padding: 8px !important; overflow: visible !important; }
+  :root .shell .mail-folders .mail-compose-button { width: 100%; }
+  :root .shell .mail-folders nav { display: grid !important; gap: 2px !important; margin: 0 !important; }
+  :root .shell .mail-folders nav button {
+    display: grid !important; grid-template-columns: 20px minmax(0, 1fr) auto !important; align-items: center !important; gap: 10px !important;
+    width: 100% !important; min-width: 0 !important; min-height: 44px !important; height: auto !important;
+    margin: 0 !important; padding: 0 12px !important; justify-content: stretch !important; text-align: left !important;
+  }
+  :root .shell .mail-folders nav button > span { justify-self: start !important; overflow: hidden; text-align: left !important; text-overflow: ellipsis; white-space: nowrap; }
+  :root .shell .mail-folders nav button > b { justify-self: end !important; min-width: 24px; text-align: right !important; font-variant-numeric: tabular-nums; }
+
+  :root .shell .mail-context-strip .mail-context-manual { display: none !important; }
+  :root .shell .mail-mobile-auto { display: block; grid-column: 1 / -1; }
+  :root .shell .mail-mobile-auto-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; font-weight: 750; }
+  :root .shell .mail-mobile-auto-button svg { width: 18px; }
+  .mail-mobile-auto-backdrop { position: fixed; inset: 0; z-index: 160; display: grid; align-items: end; background: rgba(5, 14, 10, .58); }
+  .mail-mobile-auto-sheet {
+    display: grid; gap: 12px; max-height: 88dvh; overflow-y: auto;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0; background: var(--read-surface, #fff); color: var(--read-text, #18211d);
+    box-shadow: 0 -20px 60px rgba(5, 22, 15, .3);
+  }
+  .mail-mobile-auto-sheet .mail-mobile-auto-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mail-mobile-auto-sheet h2 { margin: 0; font-size: 18px; }
+  .mail-mobile-auto-sheet .mail-mobile-auto-head button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; }
+  .mail-mobile-auto-sheet .mail-mobile-auto-head svg { width: 18px; }
+  .mail-mobile-auto-sheet p { margin: 0; color: var(--read-muted, #5b6058); font-size: 14px; line-height: 1.45; }
+  .mail-mobile-auto-sheet fieldset { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+  .mail-mobile-auto-sheet legend { margin-bottom: 6px; font-size: 13px; font-weight: 750; }
+  .mail-mobile-auto-sheet label { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--read-rule, #cdcec5); border-radius: 10px; }
+  .mail-mobile-auto-sheet label.selected { border-color: var(--read-accent, #087a59); background: var(--read-accent-fill, #e0e6dc); }
+  .mail-mobile-auto-sheet label span { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+  .mail-mobile-auto-sheet label b { font-size: 13px; }
+  .mail-mobile-auto-sheet .mail-mobile-auto-error { color: var(--read-danger, #a4322c); font-weight: 700; }
+  .mail-mobile-auto-sheet .mail-mobile-auto-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mail-mobile-auto-sheet .mail-mobile-auto-actions button { min-height: 48px; }
+}

@@ -1,0 +1,28 @@
+/* Phone task cards (≤ 760 px): title, due date, assignee, status and the
+   action buttons; the evidence, heuristic score and AI hints open with
+   "Подробнее". Desktop never shows the summary or the toggle. */
+.task-mobile-summary, .task-more-toggle { display: none; }
+@media (max-width: 760px) {
+  :root .shell .task-register { min-height: 0; }
+  :root .shell .task-list article:not(.task-expanded) .task-mobile-detail { display: none !important; }
+  :root .shell .task-list article { gap: 8px 10px; padding: 12px 2px; }
+  :root .shell .task-list article:not(.task-expanded) .task-body > strong {
+    display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  }
+  :root .shell .task-mobile-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 13px; line-height: 1.4; }
+  :root .shell .task-mobile-summary .overdue { color: #c63737; font-weight: 700; }
+  :root .shell .task-status-pill { padding: 2px 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 700; opacity: .9; }
+  :root .shell .task-status-pill.review { color: #a06a00; }
+  :root .shell .task-actions { display: block; }
+  :root .shell .task-action-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  :root .shell .task-action-buttons button { width: 100%; min-height: 44px; margin: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
+  /* A tap leaves :hover on the card; the desktop hover tint is a light colour
+     that made the dark theme unreadable. */
+  :root .shell .task-list article:hover:not(.task-focused) { background: transparent; }
+  :root[data-display-theme="dark"] .shell .task-list article.task-focused { background: var(--read-accent-fill); }
+  :root[data-display-theme="dark"] .shell .task-information dd { color: var(--read-text); }
+  :root[data-display-theme="dark"] .shell .task-source-excerpt { background: var(--read-secondary); color: var(--read-text); }
+  :root .shell .task-more-toggle { display: block; }
+  :root .shell .task-list article.task-expanded .task-assignee { display: grid; gap: 4px; margin-bottom: 8px; }
+  :root .shell .task-list article.task-expanded .task-assignee select { width: 100%; }
+}

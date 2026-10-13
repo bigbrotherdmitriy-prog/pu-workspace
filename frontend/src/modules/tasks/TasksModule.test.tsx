@@ -1,7 +1,7 @@
 import type { ComponentProps } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TasksModule } from "./TasksModule";
+import { TasksModule, taskStatusLabel } from "./TasksModule";
 import { task, members, documents, history, longPath } from "../../../tests/fixtures/tasks";
 
 afterEach(cleanup);
@@ -47,7 +47,7 @@ describe("TasksModule layout and existing actions", () => {
     expect(screen.getByLabelText(`Сведения о задаче ${task.title}`)).toHaveTextContent(`Источник${longPath}`);
     expect(screen.getByText("Эвристическая оценка 42/100")).toBeInTheDocument();
     expect(screen.getByText(task.source_excerpt)).toBeInTheDocument();
-    expect(container.querySelector(".task-action-buttons")?.querySelectorAll("button")).toHaveLength(5);
+    expect(container.querySelector(".task-action-buttons")?.querySelectorAll("button:not(.task-more-toggle)")).toHaveLength(5);
     expect(container.querySelector(".task-body select")).toBeNull();
   });
 
@@ -73,7 +73,7 @@ describe("TasksModule layout and existing actions", () => {
   it("shows safe fallbacks for missing source and participant fields", () => {
     render(<TasksModule {...props({ tasks: [{ ...task, source_file_name: "", source_excerpt: "", assignee_name: "" }] })} />);
     expect(screen.getByText("Источник не указан")).toBeInTheDocument();
-    expect(screen.getByText("Не назначены")).toBeInTheDocument();
+    expect(within(screen.getByLabelText(`Сведения о задаче ${task.title}`)).getByText("Не назначены")).toBeInTheDocument();
     expect(screen.queryByText("Фрагмент источника")).toBeNull();
   });
 
@@ -219,5 +219,44 @@ describe("TasksModule push deep link", () => {
     expect(focused).toHaveAttribute("aria-current", "true");
     expect(container.querySelector(`#task-${task.id}`)).not.toHaveClass("task-focused");
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TasksModule phone card", () => {
+  it("summarises due date, assignee and status and keeps details behind «Подробнее»", () => {
+    const { container } = render(<TasksModule {...props({ tasks: [{ ...task, status: "in_progress", needs_review: true }] })} />);
+    const card = container.querySelector(`#task-${task.id}`)!;
+    const summary = card.querySelector(".task-mobile-summary")!;
+    expect(summary).toHaveTextContent(task.due_date!);
+    expect(summary).toHaveTextContent(task.assignee_name);
+    expect(summary).toHaveTextContent("В работе");
+    expect(summary).toHaveTextContent("На проверку");
+    // Evidence, heuristic score and AI hints are the collapsible part.
+    for (const selector of [".task-information", ".task-confidence", ".task-source-excerpt", ".task-meta", ".task-assignee"]) {
+      expect(card.querySelector(selector)).toHaveClass("task-mobile-detail");
+    }
+    expect(card.querySelector(".task-body > strong")).not.toHaveClass("task-mobile-detail");
+    const toggle = screen.getByRole("button", { name: "Подробнее" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(card).not.toHaveClass("task-expanded");
+    fireEvent.click(toggle);
+    expect(card).toHaveClass("task-expanded");
+    expect(screen.getByRole("button", { name: "Свернуть" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Свернуть" }));
+    expect(card).not.toHaveClass("task-expanded");
+  });
+
+  it("expands one card at a time without touching the others", () => {
+    const other = { ...task, id: task.id + 1, title: "Другая задача" };
+    const { container } = render(<TasksModule {...props({ tasks: [task, other] })} />);
+    fireEvent.click(within(container.querySelector(`#task-${other.id}`) as HTMLElement).getByRole("button", { name: "Подробнее" }));
+    expect(container.querySelector(`#task-${other.id}`)).toHaveClass("task-expanded");
+    expect(container.querySelector(`#task-${task.id}`)).not.toHaveClass("task-expanded");
+  });
+
+  it("labels known statuses in Russian", () => {
+    expect(taskStatusLabel("assigned")).toBe("Назначена");
+    expect(taskStatusLabel("completed")).toBe("Завершена");
+    expect(taskStatusLabel("waiting_for_input")).toBe("Waiting for input");
   });
 });
