@@ -163,3 +163,23 @@ def test_rule_rejects_foreign_contract_and_document(world, user_factory):
         api.create_automation_rule(api.AutomationRuleCreate(**base, contract_id=foreign_contract.id), db, manager)
     with pytest.raises(HTTPException):
         api.create_automation_rule(api.AutomationRuleCreate(**base, source_document_id=foreign_doc.id), db, manager)
+
+
+def test_scheduler_derives_short_month_dates_and_never_repeats_a_period(world):
+    db, _owner, _manager, project, contract, document = world
+    rule = make_rule(db, project, contract, document, next_run_on=date(2027, 1, 31))
+
+    assert run_due_rules(db, today=date(2027, 2, 1))["prepared"] == 1
+    db.refresh(rule)
+    # 31st anchor: February date is computed by the engine, not seeded by the test.
+    assert (rule.last_run_on, rule.next_run_on) == (date(2027, 1, 31), date(2027, 2, 28))
+
+    assert run_due_rules(db, today=date(2027, 3, 1))["prepared"] == 1
+    db.refresh(rule)
+    assert (rule.last_run_on, rule.next_run_on) == (date(2027, 2, 28), date(2027, 3, 31))
+
+    before = counts(db)
+    assert run_due_rules(db, today=date(2027, 3, 1))["prepared"] == 0
+    assert counts(db) == before == (2, 2, 2)
+    periods = sorted(db.scalars(select(AutomationRun.scheduled_for).where(AutomationRun.rule_id == rule.id)))
+    assert periods == [date(2027, 1, 31), date(2027, 2, 28)]
