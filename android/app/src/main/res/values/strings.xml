@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="push_channel_name">Уведомления PU Workspace</string>
+    <string name="push_channel_description">Сроки, риски и сводки по проектам</string>
+    <string name="push_default_title">Новое уведомление в PU Workspace</string>
+</resources>

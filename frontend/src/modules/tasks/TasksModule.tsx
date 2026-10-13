@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { ListTodo } from "lucide-react";
 import { formatMoney, formatNumber } from "../../utils/numberFormat";
 
@@ -76,6 +77,8 @@ type Props = {
   onCompletionNoteChange: (value: string) => void;
   onCompletionDocumentChange: (id: number) => void;
   onLoadHistory: (task: TaskRow) => void;
+  /** Task opened from a push deep link (?task=<id>): scrolled to and highlighted. */
+  focusTaskId?: number;
 };
 
 export function TasksModule(props: Props) {
@@ -86,10 +89,17 @@ export function TasksModule(props: Props) {
         : props.filter === "review" ? task.needs_review
           : task.status === "assigned" || task.status === "in_progress",
   );
+  const focusVisible = Boolean(props.focusTaskId && visibleTasks.some((task) => task.id === props.focusTaskId));
+  useEffect(() => {
+    if (!focusVisible) return;
+    document.getElementById(`task-${props.focusTaskId}`)?.scrollIntoView?.({ block: "center" });
+  }, [focusVisible, props.focusTaskId]);
 
   return <section className="card task-register">
     <div className="card-head"><div><h2>Реестр задач</h2><p>Автоматически выделенные поручения с проверяемым источником</p></div><div className="task-filters">{[["open", "Открытые"], ["overdue", "Просроченные"], ["review", "На проверку"], ["all", "Все"]].map(([id, label]) => <button className={props.filter === id ? "selected" : ""} onClick={() => props.onFilterChange(id)} key={id}>{label}</button>)}</div></div>
-    <div className="task-list">{visibleTasks.map((task) => <article key={task.id}>
+    <div className="task-list">{visibleTasks.map((task) => <article key={task.id} id={`task-${task.id}`}
+      className={task.id === props.focusTaskId ? "task-focused" : undefined}
+      aria-current={task.id === props.focusTaskId ? "true" : undefined}>
       <div className={`task-priority ${task.priority}`} />
       <div className="task-body">
         <strong>{task.title}</strong>
