@@ -119,6 +119,30 @@ def _resolve_shared_sync_token_id(db, project_id: int) -> int | None:
     return generation.google_token_id
 
 
+def shared_mailbox_sibling_project_ids(db, project_id: int) -> set[int]:
+    """Other live projects whose Google token has ever belonged to the same
+    mailbox identity as this project's token -- i.e. projects reading the SAME
+    Gmail account (ADR-V6-08/09). Empty for a project with its own mailbox."""
+    from app.models.mailbox_identity import MailboxCredentialGeneration
+
+    token = db.scalar(select(GoogleOAuthToken).where(GoogleOAuthToken.project_id == project_id))
+    if not token:
+        return set()
+    identity_ids = set(db.scalars(select(MailboxCredentialGeneration.connection_identity_id).where(
+        MailboxCredentialGeneration.google_token_id == token.id)))
+    if not identity_ids:
+        return set()
+    token_ids = set(db.scalars(select(MailboxCredentialGeneration.google_token_id).where(
+        MailboxCredentialGeneration.connection_identity_id.in_(identity_ids),
+        MailboxCredentialGeneration.google_token_id.is_not(None))))
+    return set(db.scalars(
+        select(GoogleOAuthToken.project_id)
+        .join(Project, Project.id == GoogleOAuthToken.project_id)
+        .where(GoogleOAuthToken.id.in_(token_ids), Project.archived_at.is_(None),
+               GoogleOAuthToken.project_id != project_id)
+    ))
+
+
 def _automation_user(db, project_id: int) -> User | None:
     role_order = {"owner": 0, "manager": 1, "editor": 2}
     members = db.execute(
@@ -178,6 +202,11 @@ def sync_authorized_projects_once() -> dict[str, int]:
                 .where(Project.archived_at.is_(None))
                 .order_by(GoogleOAuthToken.project_id)
             ))
+            # A shared Gmail account delivers each letter to exactly one project
+            # (sync_gmail_project skips letters a sibling already holds), so
+            # the project owning the account's live token reads first and
+            # receives every letter no contact routes elsewhere.
+            project_ids.sort(key=lambda pid: (_resolve_shared_sync_token_id(db, pid) is not None, pid))
         for project_id in project_ids:
             with SessionLocal() as db:
                 try:

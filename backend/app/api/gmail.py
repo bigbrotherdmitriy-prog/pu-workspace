@@ -460,6 +460,22 @@ def sync_gmail_read(project_id: int, payload: GmailSyncRequest,
     return {**counts, "project_id": project_id, "mode": "ordinary_read", "auto_enabled": False}
 
 
+def _claimed_by_sibling(db: Session, sibling_project_ids: set[int], project_id: int, gmail_id: str) -> bool:
+    """True when a sibling project on the same Gmail account holds this letter
+    and this project does not. Covers every id shape stored so far: mailbox
+    rows (provider_message_id), legacy rows (source_external_id == id) and
+    read-receipt rows ("...:<id>")."""
+    def held_by(project_ids) -> bool:
+        return db.scalar(select(Message.id).where(
+            Message.project_id.in_(project_ids),
+            Message.source_type.in_(("email", "email_outgoing")),
+            or_(Message.provider_message_id == gmail_id,
+                Message.source_external_id == gmail_id,
+                Message.source_external_id.like(f"%:{gmail_id}")),
+        ).limit(1)) is not None
+    return held_by(sibling_project_ids) and not held_by({project_id})
+
+
 def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, max_results: int,
                        credential_token_id: int | None = None) -> dict:
     """Sync one project's Gmail. `credential_token_id`, when given, is a
@@ -502,8 +518,16 @@ def sync_gmail_project(project_id: int, db: Session, user: User, *, query: str, 
     processed = skipped = failed = 0
     errors: list[dict] = []
     notified_threads: set[str] = set()
+    from app.automations.gmail import shared_mailbox_sibling_project_ids
+    sibling_project_ids = shared_mailbox_sibling_project_ids(db, project_id)
     for ref in page.get("messages", []):
         try:
+            if sibling_project_ids and _claimed_by_sibling(db, sibling_project_ids, project_id, ref["id"]):
+                # One letter, one project: another project on the same Gmail
+                # account already holds it (13.10.2026 -- every project used
+                # to ingest the whole shared inbox and draft its own reply).
+                skipped += 1
+                continue
             item = service.users().messages().get(userId="me", id=ref["id"], format="full").execute()
             headers = _headers(item.get("payload", {}))
             content = _message_text(item.get("payload", {})) or item.get("snippet", "")
