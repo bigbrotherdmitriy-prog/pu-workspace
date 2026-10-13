@@ -199,7 +199,8 @@ class FcmPushAdapter:
                 raise PushTokenRejected("INVALID_ARGUMENT")
             # Our request is malformed: retrying or dropping the token would not
             # help. Logged without token or payload.
-            log.error("FCM rejected the push request; status=%s error_code=%s", status, code)
+            log.error("FCM rejected the push request; http=%s status=%s error_code=%s",
+                      response.status_code, status, code)
             raise PushRequestRejected(f"FCM HTTP {response.status_code} {code}")
         # 401/403 (key revoked), 429 (quota), 5xx (outage) and any unknown
         # answer: keep the message and let the durable queue retry.
