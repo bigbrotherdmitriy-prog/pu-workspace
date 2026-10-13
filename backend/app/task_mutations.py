@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.management import append_management_history
 from app.models.audit_log import AuditLog
 from app.models.document import Document
-from app.models.management import Obligation
+from app.models.management import Notification, Obligation
 from app.models.project_member import ProjectMember
 from app.models.task import Task, TaskDueDateHistory, TaskHistory
 from app.models.user import User
@@ -172,4 +172,12 @@ def apply_task_patch(
         reason=str(changes.get("due_change_reason") or "") or task.result_note,
         idempotency_key=history_idempotency_key,
     )
+    if task.assignee_user_id != old_assignee_user_id and task.assignee_user_id != actor.id:
+        # In-app notice for the new assignee; it also feeds the push outbox (V6-04).
+        db.add(Notification(
+            project_id=task.project_id, user_id=task.assignee_user_id, kind="task_assigned",
+            title="Вам назначена задача", body=f"Задача №{task.id}. Откройте её в разделе «Задачи».",
+            entity_type="task", entity_id=task.id,
+            dedupe_key=f"task-assigned:{task.id}:{task.record_version}",
+        ))
     return task

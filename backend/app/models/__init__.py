@@ -139,3 +139,7 @@ __all__ = [
     "MobileSyncCommand", "MobileSyncConflict",
     "UserDeviceToken",
 ]
+
+# Registers the Notification -> push outbox hook wherever models are loaded
+# (API, worker, scheduler), so no notification path can bypass it.
+import app.notification_push  # noqa: E402,F401
