@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Archive, Bot, CheckCircle2, ChevronRight,
-  Clock3, FileText, Inbox, Mail, MailOpen, Paperclip, PenLine, RefreshCw,
+  Clock3, FileText, Inbox, Mail, MailOpen, Newspaper, Paperclip, PenLine, RefreshCw,
   Reply, ReplyAll, Search, Send, Settings, ShieldAlert, Sparkles, Trash2, Undo2, XCircle,
 } from "lucide-react";
 import { ApiError } from "../../api/client";
@@ -57,6 +57,7 @@ const emptyCapabilities: MailCapabilities = {
 
 const defaultFolders: MailFolder[] = [
   { kind: "inbox", label: "Входящие" },
+  { kind: "filtered", label: "Рассылки и уведомления" },
   { kind: "attention", label: "Требуют внимания" },
   { kind: "drafts", label: "Черновики" },
   { kind: "sent", label: "Отправленные" },
@@ -67,7 +68,7 @@ const defaultFolders: MailFolder[] = [
 ];
 
 const folderIcons = {
-  inbox: Inbox, attention: AlertTriangle, drafts: FileText, sent: Send, archive: Archive,
+  inbox: Inbox, filtered: Newspaper, attention: AlertTriangle, drafts: FileText, sent: Send, archive: Archive,
   spam: ShieldAlert, trash: Trash2, all: MailOpen,
 };
 

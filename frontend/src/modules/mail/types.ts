@@ -1,4 +1,4 @@
-export type MailFolderKind = "inbox" | "attention" | "drafts" | "sent" | "archive" | "spam" | "trash" | "all";
+export type MailFolderKind = "inbox" | "filtered" | "attention" | "drafts" | "sent" | "archive" | "spam" | "trash" | "all";
 
 export type MailDeliveryStatus = "draft" | "approved" | "rejected" | "queued" | "sending" | "sent" | "failed" | "unknown";
 

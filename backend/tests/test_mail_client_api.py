@@ -506,3 +506,61 @@ def test_attachment_metadata_is_visible_but_send_fails_closed(mail_context):
         mail.send_mail_draft(created["id"], mail.MailDraftSend(
             revision=1, idempotency_key="attachment-send-1"), mail_context.db, mail_context.user)
     assert blocked.value.detail == "mail_attachment_send_requires_verified_mailbox_origin"
+
+
+def _filtered_row(context, external_id, labels=("INBOX",), status="filtered"):
+    return Message(
+        organization_id=context.project.organization_id,
+        project_id=context.project.id,
+        created_by_user_id=context.user.id,
+        source_type="email",
+        source_external_id=external_id,
+        source_name="[CI] Run failed",
+        source_sender="GitHub <notifications@github.com>",
+        source_thread_id=f"thread-{external_id}",
+        content="Automated notification",
+        attachments_json="[]",
+        mail_labels_json=json.dumps(list(labels)),
+        summary="Automated",
+        context_confidence=0,
+        context_evidence="fixture",
+        context_confirmed=False,
+        status=status,
+    )
+
+
+def test_filtered_service_mail_has_its_own_folder_and_leaves_inbox(monkeypatch, mail_context):
+    ci = _filtered_row(mail_context, "ci-1")
+    unlabeled = _filtered_row(mail_context, "ci-2", labels=())
+    spam = _filtered_row(mail_context, "ci-3", labels=("SPAM",))
+    mail_context.db.add_all([ci, unlabeled, spam])
+    mail_context.db.commit()
+
+    def ids(folder):
+        result = mail.mail_messages(mail_context.project.id, folder, None, 50, None,
+                                    mail_context.db, mail_context.user)
+        return {item["id"] for item in result["messages"]}
+
+    assert ids("inbox") == {mail_context.incoming.id}
+    assert ids("filtered") == {ci.id, unlabeled.id}
+    assert ids("archive") == {mail_context.archived.id}
+    assert ids("spam") == {spam.id}
+    assert ids("all") == {mail_context.incoming.id, mail_context.archived.id, ci.id, unlabeled.id, spam.id}
+    threads = mail.mail_threads(mail_context.project.id, "filtered", None, 50, None,
+                                mail_context.db, mail_context.user)
+    assert {item["thread_id"] for item in threads["threads"]} == {"thread-ci-1", "thread-ci-2"}
+    inbox_threads = mail.mail_threads(mail_context.project.id, "inbox", None, 50, None,
+                                      mail_context.db, mail_context.user)
+    assert [item["thread_id"] for item in inbox_threads["threads"]] == ["gmail-thread-1"]
+
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", lambda *_: FakeMailbox())
+    folders = mail.mail_folders(mail_context.project.id, mail_context.db, mail_context.user)
+    core = [item for item in folders["folders"] if item["kind"] == "core"]
+    assert [item["id"] for item in core][:2] == ["inbox", "filtered"]
+    counts = {item["id"]: item["count"] for item in core}
+    assert counts["inbox"] == 1
+    assert counts["filtered"] == 2
+    assert counts["archive"] == 1
+    assert counts["spam"] == 1
+    assert counts["all"] == 5
+    assert next(item for item in core if item["id"] == "filtered")["name"] == "Рассылки и уведомления"

@@ -33,6 +33,7 @@ router = APIRouter(prefix="/mail", tags=["mail"])
 MAIL_SOURCE_TYPES = ("email", "email_outgoing")
 MAIL_FOLDERS = (
     ("inbox", "Входящие"),
+    ("filtered", "Рассылки и уведомления"),
     ("sent", "Отправленные"),
     ("drafts", "Черновики"),
     ("attention", "Требуют внимания"),
@@ -264,6 +265,12 @@ def _message_rows(db: Session, project_id: int, folder: str, query: str | None, 
         labels = set(_json(row.mail_labels_json, []))
         if folder == "inbox" and (row.source_type != "email" or (labels and "INBOX" not in labels) or labels.intersection({"SPAM", "TRASH"})):
             continue
+        # Bulk/automated senders keep their classification; they only move out of
+        # the inbox view into their own folder. "all" still shows everything.
+        if folder == "inbox" and row.status == "filtered":
+            continue
+        if folder == "filtered" and (row.source_type != "email" or row.status != "filtered" or labels.intersection({"SPAM", "TRASH"})):
+            continue
         if folder == "sent" and row.source_type != "email_outgoing":
             continue
         if folder == "drafts":
@@ -435,6 +442,7 @@ def mail_folders(project_id: int, db: Session = Depends(get_db), user: User = De
     message_rows = _message_rows(db, project_id, "all", None, None)
     counts = {
         "inbox": len(_message_rows(db, project_id, "inbox", None, None)),
+        "filtered": len(_message_rows(db, project_id, "filtered", None, None)),
         "sent": len(_message_rows(db, project_id, "sent", None, None)),
         "drafts": len(list(db.scalars(select(ResponseDraft.id).where(
             ResponseDraft.project_id == project_id,
