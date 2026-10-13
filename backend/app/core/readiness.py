@@ -10,6 +10,7 @@ from app.database import engine
 from app.schema import CURRENT_SCHEMA_REVISION
 from app.automations.gmail import status as gmail_automation_status
 from app.automations.ai_secretary import status as ai_secretary_automation_status
+from app.integrations.push import fcm_health, fcm_service_account_path
 from app.database import SessionLocal
 from app.models.job import BackgroundJob, ServiceHeartbeat
 
@@ -39,6 +40,10 @@ def readiness_report(*, include_live_services: bool = True) -> dict:
         "configured" if telegram_ready else "bot or relay not configured",
         required=False,
     )
+    fcm = fcm_health()
+    # No path = push deliberately off; a path to a broken file blocks startup.
+    checks["fcm_push"] = _check(fcm.ready, "configured" if fcm.ready else f"push disabled: {fcm.detail}",
+                                required=bool(fcm_service_account_path()))
     gmail_automation = gmail_automation_status()
     last_result = gmail_automation.get("last_result") or {}
     automation_message = (
@@ -111,7 +116,8 @@ def readiness_report(*, include_live_services: bool = True) -> dict:
         checks["schema"] = _check(False, "database unavailable")
 
     required_ready = all(item["ok"] for item in checks.values() if item["required"])
-    return {"ready": required_ready, "google_drive_ready": google_ready, "telegram_ready": telegram_ready, "checks": checks}
+    return {"ready": required_ready, "google_drive_ready": google_ready, "telegram_ready": telegram_ready,
+            "push_ready": fcm.ready, "checks": checks}
 
 
 def _check(ok: bool, message: str, required: bool = True) -> dict:

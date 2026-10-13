@@ -64,6 +64,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "notifications.escalation.proposal":
         from app.notification_escalation import run_escalation_proposal
         return run_escalation_proposal(payload)
+    if kind == "notifications.push.deliver":
+        from app.notification_push import run_push_delivery
+        return run_push_delivery(payload)
     if kind == "mvp3.management_digest":
         from app.management_digest import run_digest_job
         return run_digest_job(payload)
