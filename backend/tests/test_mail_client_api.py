@@ -20,6 +20,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.response_draft import ResponseDraft
 from app.models.google_token import GoogleOAuthToken
+from app.models.integration_credential import IntegrationCredential
 from app.models.job import BackgroundJob
 from app.models.v54_provider_action import ProviderAction
 from app.models.user import User
@@ -485,6 +486,30 @@ def test_proven_not_applied_can_be_retried_with_new_command(monkeypatch, mail_co
     assert retried["status"] == "queued"
     assert retried["revision"] == 2
     assert adapter.commands == []
+
+
+def test_capabilities_report_yandex_mail_connected_when_gmail_is_absent(monkeypatch, mail_context):
+    def no_adapter(*_args, **_kwargs):
+        raise RuntimeError("gmail adapter is not configured")
+    monkeypatch.setattr(mail, "mailbox_adapter_for_project", no_adapter)
+    mail_context.db.add(IntegrationCredential(
+        project_id=mail_context.project.id,
+        provider="yandex_mail",
+        capability="channel",
+        access_token="encrypted-app-password",
+        account_email="owner@example.test",
+        scopes="imap.readonly",
+    ))
+    mail_context.db.commit()
+    result = mail.mail_capabilities(mail_context.project.id, mail_context.db, mail_context.user)
+    assert result["connected"] is True
+    assert result["provider"] == "yandex_mail"
+    assert result["features"]["compose"] is False
+    assert result["features"]["reply"] is False
+    assert result["features"]["reply_all"] is False
+    assert result["features"]["forward"] is False
+    assert result["features"]["cc_bcc"] is False
+    assert result["features"]["attachment_send"] is False
 
 
 def test_attachment_metadata_is_visible_but_send_fails_closed(mail_context):
