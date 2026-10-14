@@ -48,66 +48,89 @@ export function useContractDetailsState({
   const contractSaveRequestsRef = useRef(new Set<number>());
 
   async function linkContractDocument(contractId: number, documentId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       const expected = contracts.find((item) => item.id === contractId)?.record_version;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
-      await api(`/projects/${projectId}/contracts/${contractId}`, {
+      await api(`/projects/${requestedProjectId}/contracts/${contractId}`, {
         method: "PATCH",
         body: JSON.stringify({ expected_record_version: expected, source_document_id: documentId || null }),
       });
+      if (!current()) return false;
       setNotice(documentId ? "Документ-источник привязан к договору" : "Связь с документом снята");
       await load();
+      if (!current()) return false;
       return true;
     } catch (e) {
+      if (!current()) return false;
       setError((e as Error).message);
       return false;
     }
   }
   async function linkContractParent(contractId: number, contractKind: string, parentContractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       const expected = contracts.find((item) => item.id === contractId)?.record_version;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
-      await api(`/projects/${projectId}/contracts/${contractId}`, {
+      await api(`/projects/${requestedProjectId}/contracts/${contractId}`, {
         method: "PATCH",
         body: JSON.stringify({ expected_record_version: expected, contract_kind: contractKind, parent_contract_id: parentContractId || null }),
       });
+      if (!current()) return;
       setNotice("Вышестоящий договор сохранён — дерево перестроено");
-      setContractStructureDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
+      setContractStructureDrafts((prev) => { const next = { ...prev }; delete next[contractId]; return next; });
       await load();
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     }
   }
   async function suggestContractDocuments(contractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       setError("");
       setContractCandidateBusy(contractId);
-      const result = await api(`/projects/${projectId}/contracts/${contractId}/source-candidates`);
-      setContractSourceCandidates((current) => ({ ...current, [contractId]: result.candidates || [] }));
-      setContractDocumentTabs((current) => ({ ...current, [contractId]: "recommended" }));
+      const result = await api(`/projects/${requestedProjectId}/contracts/${contractId}/source-candidates`);
+      if (!current()) return;
+      setContractSourceCandidates((prev) => ({ ...prev, [contractId]: result.candidates || [] }));
+      setContractDocumentTabs((prev) => ({ ...prev, [contractId]: "recommended" }));
       setNotice(result.recommended_document_id
         ? "Вероятный документ договора найден. Проверьте объяснение и подтвердите привязку."
         : "Точного совпадения не найдено. Используйте поиск или сначала завершите анализ документов.");
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     } finally {
-      setContractCandidateBusy(0);
+      if (current()) {
+        setContractCandidateBusy(0);
+      }
     }
   }
   async function analyzeContract(contractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       setError("");
-      const result = await api(`/projects/${projectId}/contracts/${contractId}/analyze`, {
+      const result = await api(`/projects/${requestedProjectId}/contracts/${contractId}/analyze`, {
         method: "POST",
       });
+      if (!current()) return;
       const financial = result.financial_check;
-      setContractFinancialChecks((current) => ({ ...current, [contractId]: { ...financial, sourceName: result.source?.name } }));
+      setContractFinancialChecks((prev) => ({ ...prev, [contractId]: { ...financial, sourceName: result.source?.name } }));
       const linked = result.source?.automatically_linked ? ` Автоматически прикреплён файл «${result.source.name}».` : "";
       const applied = financial?.applied?.length ? ` Заполнены условия: ${financial.applied.join(", ")}.` : "";
       const mismatches = financial?.mismatches?.length ? ` ВНИМАНИЕ: расхождений в финансовых условиях — ${financial.mismatches.length}; проверьте карточку договора.` : " Финансовые расхождения не обнаружены.";
       setNotice(`Договор проанализирован.${linked}${applied}${mismatches} Задач ${result.analysis.tasks}, обязательств ${result.analysis.obligations}, строк графика платежей ${result.created?.payment_schedule || 0}.`);
       await load();
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     }
   }
@@ -136,7 +159,7 @@ export function useContractDetailsState({
       setError("");
       const expected = draft.expectedRecordVersion;
       if (!expected) throw new Error("Версия договора не загружена. Обновите карточку.");
-      const saved = await api<ContractRow>(`/projects/${projectId}/contracts/${contractId}`, {
+      const saved = await api<ContractRow>(`/projects/${requestedProjectId}/contracts/${contractId}`, {
         method: "PATCH",
         body: JSON.stringify({
           expected_record_version: expected,
@@ -151,7 +174,7 @@ export function useContractDetailsState({
         }),
       });
       if (!current()) return;
-      setContractEditDrafts((current) => { const next = { ...current }; delete next[contractId]; return next; });
+      setContractEditDrafts((prev) => { const next = { ...prev }; delete next[contractId]; return next; });
       setNotice(["Договор обновлён. Связанные документы, ГПР, бюджет и ДДС сохранены", ...(saved.warnings || []).map((warning) => warning.message)].join(". "));
       await load();
     } catch (e) {
@@ -187,10 +210,14 @@ export function useContractDetailsState({
     }
   }
   async function proposeContractBudget(contractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       setError("");
-      const proposal = await api(`/projects/${projectId}/contracts/${contractId}/budget-proposals`, { method: "POST" });
-      setContractBudgetDrafts((current) => ({ ...current, [proposal.id]: {
+      const proposal = await api(`/projects/${requestedProjectId}/contracts/${contractId}/budget-proposals`, { method: "POST" });
+      if (!current()) return;
+      setContractBudgetDrafts((prev) => ({ ...prev, [proposal.id]: {
         amount: String(proposal.amount), description: proposal.description,
         categoryId: Number(proposal.selected_cost_category_id || 0),
       } }));
@@ -198,9 +225,15 @@ export function useContractDetailsState({
         ? "Подготовлено предложение пересмотреть существующую строку бюджета. Проверьте и подтвердите как менеджер."
         : "Подготовлено предложение одной строки бюджета на общую сумму договора. Проверьте и подтвердите как менеджер.");
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      if (!current()) return;
+      setError((e as Error).message);
+    }
   }
   async function confirmContractBudget(proposal: ContractBudgetProposal) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     const draft = contractBudgetDrafts[proposal.id] || {
       amount: String(proposal.amount), description: proposal.description,
       categoryId: Number(proposal.selected_cost_category_id || 0),
@@ -214,66 +247,100 @@ export function useContractDetailsState({
           selected_cost_category_id: draft.categoryId,
         }),
       });
+      if (!current()) return;
       await api(`/contract-budget-proposals/${proposal.id}/confirm`, { method: "POST" });
+      if (!current()) return;
       setNotice(proposal.operation === "revise"
         ? "Строка бюджета пересмотрена без задвоения суммы; факт и обязательства сохранены."
         : "Предложение подтверждено: создана одна строка бюджета.");
-      await load(); await loadFinance();
-    } catch (e) { setError((e as Error).message); }
+      await load();
+      if (!current()) return;
+      await loadFinance();
+    } catch (e) {
+      if (!current()) return;
+      setError((e as Error).message);
+    }
   }
   async function rejectContractBudget(proposalId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       setError("");
       await api(`/contract-budget-proposals/${proposalId}/reject`, { method: "POST" });
+      if (!current()) return;
       setNotice("Предложение бюджета отклонено. Финансовые записи не создавались.");
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      if (!current()) return;
+      setError((e as Error).message);
+    }
   }
   async function deleteContract(item: ContractRow) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
-      const preview = await api(`/projects/${projectId}/contracts/${item.id}/deletion-preview`);
+      const preview = await api(`/projects/${requestedProjectId}/contracts/${item.id}/deletion-preview`);
+      if (!current()) return;
       if (preview?.can_delete === false) {
         const count = Object.values(preview.dependencies || {}).reduce((sum: number, value) => sum + Number(value || 0), 0);
         if (window.confirm(`У договора ${count} связанных объектов. Физическое удаление заблокировано. Архивировать договор с сохранением всех связей?`)) {
+          if (!current()) return;
           await archiveContract(item);
         }
         return;
       }
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
       return;
     }
     const confirmation = requestContractDeletionConfirmation(item.number);
     if (confirmation === null) return;
+    if (!current()) return;
     try {
       setError("");
-      await api(`/projects/${projectId}/contracts/${item.id}`, {
+      await api(`/projects/${requestedProjectId}/contracts/${item.id}`, {
         method: "DELETE", body: JSON.stringify({ confirmation, expected_record_version: item.record_version }),
       });
+      if (!current()) return;
       setNotice(`Договор «${item.number}» удалён. Исходные документы сохранены.`);
       await load();
     } catch (e) {
+      if (!current()) return;
       const message = (e as Error).message;
       setError(message);
       window.alert(message);
     }
   }
   async function archiveContract(item: ContractRow) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       setError("");
-      await api(`/projects/${projectId}/contracts/${item.id}`, {
+      await api(`/projects/${requestedProjectId}/contracts/${item.id}`, {
         method: "PATCH", body: JSON.stringify({ expected_record_version: item.record_version, status: "archived" }),
       });
+      if (!current()) return;
       setNotice(`Договор «${item.number}» архивирован. Все документы, ГПР, ДДС и другие связи сохранены.`);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      if (!current()) return;
+      setError((e as Error).message);
+    }
   }
   async function openContractControl(contractId: number) {
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const current = () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch;
     try {
       setError("");
-      const result = await api(`/projects/${projectId}/contracts/${contractId}/initialize-control`, {
+      const result = await api(`/projects/${requestedProjectId}/contracts/${contractId}/initialize-control`, {
         method: "POST",
       });
+      if (!current()) return;
       setSelectedFinanceContractId(contractId);
       setGprDdsTab("dds");
       setActive("ГПР и ДДС");
@@ -282,6 +349,7 @@ export function useContractDetailsState({
         : "Цепочка договора открыта: ГПР, бюджет и ДДС связаны с договором");
       await load();
     } catch (e) {
+      if (!current()) return;
       setError((e as Error).message);
     }
   }
