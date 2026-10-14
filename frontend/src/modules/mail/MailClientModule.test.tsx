@@ -198,7 +198,8 @@ describe("MailClientModule", () => {
 
   it("shows the real link state instead of «Контекст не определён» for a linked letter", async () => {
     const linked = { ...message, context_evidence: "", context_confidence: undefined };
-    const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [{ ...thread, messages: [linked] }] }) });
+    const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [{ ...thread, messages: [linked] }] }),
+      thread: vi.fn().mockResolvedValue({ ...thread, messages: [linked] }) });
     renderClient(client);
     await screen.findByRole("heading", { name: "Срок поставки" });
     const line = screen.getByTestId("mail-link-line");
@@ -209,7 +210,8 @@ describe("MailClientModule", () => {
 
   it("marks an unconfirmed link without a contract and keeps AI evidence as a secondary line", async () => {
     const pending = { ...message, contract_id: null, context_confirmed: false };
-    const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [{ ...thread, messages: [pending] }] }) });
+    const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [{ ...thread, messages: [pending] }] }),
+      thread: vi.fn().mockResolvedValue({ ...thread, messages: [pending] }) });
     renderClient(client);
     await screen.findByRole("heading", { name: "Срок поставки" });
     const line = screen.getByTestId("mail-link-line");
