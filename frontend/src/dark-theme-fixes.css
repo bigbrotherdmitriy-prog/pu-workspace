@@ -431,3 +431,4 @@
 
 :root[data-display-theme] .shell .contract-parent-link { background: var(--read-surface); border-color: var(--read-rule); color: var(--read-text); }
 :root[data-display-theme] .shell .contract-parent-link span, :root[data-display-theme] .shell .contract-parent-link small { color: var(--read-muted); }
+:root[data-display-theme] .shell .gpr-dds-unified .dds-table .negative, :root[data-display-theme] .shell .dds-calendar .dds-balance .negative { color: #ffb7c5; }
