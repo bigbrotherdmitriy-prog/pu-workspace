@@ -71,9 +71,10 @@ if args[:2] == ["image", "ls"]:
     print("\n".join(ref for ref in state["tags"] if ref.startswith(args[2] + ":")))
 elif args[:2] == ["image", "inspect"]:
     ref = args[2]
-    if ref not in state["tags"]:
+    by_id = {item["id"]: item for item in state["tags"].values()}
+    item = state["tags"].get(ref) or by_id.get(ref)
+    if item is None:
         save(); sys.exit(1)
-    item = state["tags"][ref]
     print(item["id"] if args[4] == "{{.Id}}" else f'{item["id"]} {item["created"]}')
 elif args[0] == "rmi":
     if state["tags"][args[1]]["id"] in state.get("in_use", []):
@@ -85,7 +86,7 @@ save()
 '''
 
 
-def host(tmp_path, *, fail_all=False, in_use=()):
+def host(tmp_path, *, fail_all=False, in_use=(), pin=None):
     root = tmp_path / "primary"
     for n in range(1, 8):
         release = root / "releases" / sha(n)
@@ -94,7 +95,7 @@ def host(tmp_path, *, fail_all=False, in_use=()):
     (root / "releases" / "not-a-sha").mkdir()
     runtime = root / "runtime" / sha(5)
     runtime.mkdir(parents=True)
-    (runtime / ".env.primary").write_text(f"PRIMARY_IMAGE={image(2)}\n", encoding="utf-8")
+    (runtime / ".env.primary").write_text(f"PRIMARY_IMAGE={pin or image(2)}\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "docker"
@@ -110,13 +111,13 @@ def host(tmp_path, *, fail_all=False, in_use=()):
     return root, env, state
 
 
-def run(root, env, *, previous=6):
+def run(root, env, *, previous=6, previous_image=None):
     return subprocess.run([
         sys.executable, str(SCRIPT), "--root", str(root),
         "--release", str(root / "releases" / sha(7)),
         "--previous-release", str(root / "releases" / sha(previous)),
         "--candidate-ref", f"app-backend:{sha(7)}", "--candidate-image", image(7),
-        "--previous-image", image(previous),
+        "--previous-image", image(previous) if previous_image is None else previous_image,
     ], env=env, capture_output=True, text=True, timeout=60)
 
 
@@ -157,3 +158,30 @@ def test_deploy_prunes_only_after_a_healthy_cutover_and_never_fails_on_it():
     # The repository comes from the reference given to the deploy, before it is resolved to an ID.
     assert source.index("CANDIDATE_REF=$CANDIDATE_IMAGE") < source.index(
         "CANDIDATE_IMAGE=$(docker image inspect \"$CANDIDATE_IMAGE\" --format '{{.Id}}')")
+
+
+def test_tag_references_are_resolved_to_ids_before_planning(tmp_path):
+    # The previous image and the retained pin given as tags, not IDs.
+    root, env, state = host(tmp_path, pin=f"app-backend:{sha(2)}")
+    assert run(root, env, previous_image=f"app-backend:{sha(6)}").returncode == 0
+    assert sorted(json.loads(state.read_text())["tags"]) == sorted(
+        [f"app-backend:{sha(n)}" for n in (2, 4, 5, 6, 7)] + ["other-app:" + sha(9)])
+
+
+def test_empty_previous_image_still_keeps_candidate_and_pins(tmp_path):
+    root, env, state = host(tmp_path)
+    assert run(root, env, previous_image="").returncode == 0
+    tags = json.loads(state.read_text())["tags"]
+    # Candidate 7, pinned 2, newest others 6 and 5.
+    assert sorted(tags) == sorted([f"app-backend:{sha(n)}" for n in (2, 5, 6, 7)] + ["other-app:" + sha(9)])
+
+
+def test_unresolvable_keep_reference_skips_tag_removal(tmp_path):
+    root, env, state = host(tmp_path, pin="app-backend:" + sha(42))
+    result = run(root, env)
+    assert result.returncode == 0
+    assert "keep_reference_unresolved" in result.stdout
+    data = json.loads(state.read_text())
+    assert len(data["tags"]) == 8
+    assert not [call for call in data["calls"] if call[0] == "rmi"]
+    assert data["pruned"] is True

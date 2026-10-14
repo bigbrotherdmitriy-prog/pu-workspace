@@ -8,7 +8,8 @@ Kept for rollback (docs/PRIMARY_FIRST_HOST_DEPLOYMENT.md asks for the current
 and two previous accepted sets):
 - images: the candidate, the image the previous release ran, every image pinned
   in a retained release's runtime env, and the two newest other ``<repo>:<sha>``
-  tags; dangling layers are pruned;
+  tags; dangling layers are pruned. Every reference to keep (ID or tag) is
+  resolved to an image ID first; if any cannot be resolved, no tag is removed;
 - releases: the candidate, the previous release and the three newest others.
 
 The deploy is already live, so nothing here may fail it: every error is logged
@@ -90,16 +91,34 @@ def sha_tags(repository: str) -> list[tuple[str, str, str]]:
     return tags
 
 
-def pinned_image(runtime_dir: Path, release: Path) -> str | None:
+def pinned_reference(runtime_dir: Path, release: Path) -> str | None:
+    """The raw ``PRIMARY_IMAGE`` value (an ID or a tag) of a retained release."""
     env = runtime_dir / release.name / ".env.primary"
     try:
         for line in env.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("PRIMARY_IMAGE="):
-                value = line.split("=", 1)[1].strip()
-                return value if value.startswith("sha256:") else image_id(value)
+                return line.split("=", 1)[1].strip() or None
     except OSError:
         return None
     return None
+
+
+def resolve_keep(references: set[str]) -> tuple[set[str], set[str]] | None:
+    """Resolve every reference to keep into (image IDs, tags).
+
+    Any reference that cannot be resolved makes the caller skip tag removal:
+    without its ID we cannot prove a rollback image is not among the deletions.
+    """
+    ids, tags = set(), set()
+    for reference in references:
+        resolved = image_id(reference)
+        if resolved is None:
+            log(f"keep_unresolved={reference}")
+            return None
+        ids.add(resolved)
+        if not reference.startswith("sha256:"):
+            tags.add(reference)
+    return ids, tags
 
 
 def release_dirs(releases: Path) -> list[tuple[Path, float]]:
@@ -134,21 +153,24 @@ def prune(args: argparse.Namespace) -> None:
         log(f"releases_skipped reason={error.__class__.__name__}")
         entries = []
 
+    # Pins are read for the releases that are still on disk after the removal above.
     retained = [path for path, _ in entries if path not in removed_releases] + [current]
-    keep_ids = {args.candidate_image}
-    if args.previous_image:
-        keep_ids.add(args.previous_image)
-    for release in retained:
-        pinned = pinned_image(root / "runtime", release)
-        if pinned:
-            keep_ids.add(pinned)
+    references = {args.candidate_ref, args.candidate_image, args.previous_image}
+    references |= {pinned_reference(root / "runtime", release) for release in retained}
+    references = {reference for reference in references if reference}
 
     repository = repository_of(args.candidate_ref)
+    keep = resolve_keep(references)
     if repository is None:
         log("image_tags_skipped reason=candidate_reference_is_not_repo_sha_tag")
+    elif keep is None:
+        log("image_tags_skipped reason=keep_reference_unresolved")
     else:
+        keep_ids, keep_tags = keep
         try:
             for reference in plan_images(sha_tags(repository), keep_ids):
+                if reference in keep_tags:
+                    continue
                 try:
                     docker("rmi", reference)
                     log(f"image_removed={reference}")

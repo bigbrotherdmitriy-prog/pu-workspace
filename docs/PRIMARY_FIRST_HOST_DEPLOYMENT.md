@@ -150,7 +150,8 @@ successful activation the first-host script prunes older artifacts with
 `scripts/prune_primary_artifacts.py`: it keeps the candidate and previous
 release, the three newest other release directories, every image pinned by a
 retained runtime env, and the two newest other `<repo>:<sha>` tags, then removes
-dangling images. Runtime envs, receipts and backups are not touched; a pruning
+dangling images. Every reference it keeps is resolved to an image ID first; if
+any cannot be resolved, no tag is removed. Runtime envs, receipts and backups are not touched; a pruning
 error is logged as `PRIMARY_PRUNE ...` and never fails the deploy. Database
 backup and test restoration remain mandatory and are performed by the first-host
 script on updates. No schema change is introduced by this packaging change.
