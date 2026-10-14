@@ -89,6 +89,7 @@ docker image inspect "$CANDIDATE_IMAGE" >/dev/null 2>&1 || fail "candidate image
 IMAGE_REVISION=$(docker image inspect "$CANDIDATE_IMAGE" \
   --format '{{ index .Config.Labels "com.pu-workspace.primary.revision" }}' 2>/dev/null || true)
 [ "$IMAGE_REVISION" = "$REVISION" ] || fail "candidate image is not labelled with the release revision"
+CANDIDATE_REF=$CANDIDATE_IMAGE
 CANDIDATE_IMAGE=$(docker image inspect "$CANDIDATE_IMAGE" --format '{{.Id}}')
 # From this point use the immutable ID, not a mutable tag. This validates the
 # source-built frontend without starting its entrypoint or contacting any DB.
@@ -370,5 +371,16 @@ fi
 
 SWITCHED=false
 trap - INT TERM HUP EXIT
+
+# Disk hygiene: every deploy leaves an image and a release directory behind
+# (host disk reached 80 % on 14.10.2026). Runs only after the candidate passed
+# its smoke checks and the rollback trap is disarmed; it keeps the current and
+# previous release with their images plus the newest others for rollback, and
+# a cleanup error is logged but never fails the deploy.
+python3 "$RELEASE_DIR/scripts/prune_primary_artifacts.py" \
+  --root "$ROOT" --release "$RELEASE_DIR" --previous-release "$PREVIOUS_RELEASE" \
+  --candidate-ref "$CANDIDATE_REF" --candidate-image "$CANDIDATE_IMAGE" \
+  --previous-image "${PREVIOUS_IMAGE:-}" \
+  || echo "primary artifact pruning failed; deploy is unaffected, clean up manually" >&2
 
 echo "first-host primary deploy complete: release=$REVISION backup=${BACKUP_FILE:-none} port=$PORT"

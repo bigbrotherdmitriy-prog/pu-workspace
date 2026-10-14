@@ -145,7 +145,14 @@ manifest is stored at `/app/frontend-build-manifest.json`, outside `/new/`.
 Record the source archive SHA-256 and image ID before activation; save the image
 artifact and the previous image ID before any switch. Do not replace a previously
 accepted image/receipt with another build of the same SHA. Preserve at least the
-current and two previous accepted image/receipt/archive/runtime sets. Database
+current and two previous accepted image/receipt/archive/runtime sets. After a
+successful activation the first-host script prunes older artifacts with
+`scripts/prune_primary_artifacts.py`: it keeps the candidate and previous
+release, the three newest other release directories, every image pinned by a
+retained runtime env, and the two newest other `<repo>:<sha>` tags, then removes
+dangling images. Every reference it keeps is resolved to an image ID first; if
+any cannot be resolved, no tag is removed. Runtime envs, receipts and backups are not touched; a pruning
+error is logged as `PRIMARY_PRUNE ...` and never fails the deploy. Database
 backup and test restoration remain mandatory and are performed by the first-host
 script on updates. No schema change is introduced by this packaging change.
 
