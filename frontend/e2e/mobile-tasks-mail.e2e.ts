@@ -104,8 +104,9 @@ test.describe("phone", () => {
       await expect(card.locator(".task-source-excerpt")).toBeHidden();
     });
 
-    test(`mail folders are compact and AUTO takes one button (${theme})`, async ({ page, mock: _mock }) => {
+    test(`mail folders are compact and AUTO takes one button once the source chain is ready (${theme})`, async ({ page, mock: _mock }) => {
       const calls = await withData(page);
+      await withAutoSourceChainReady(page);
       await page.goto("/new/");
       await settled(page);
       await chooseThemeOnPhone(page, theme);
@@ -126,7 +127,8 @@ test.describe("phone", () => {
 
       await page.getByRole("button", { name: /Исполнительная документация по фасаду/ }).click();
       await expect(page.getByRole("button", { name: "Подтвердить контекст для AUTO" })).toBeHidden();
-      await expect(page.getByRole("button", { name: /^(Изменить|Подтвердить) связь$/ })).toBeHidden();
+      // The desktop link button stays hidden; the phone has its own compact one.
+      await expect(page.locator("button.mail-context-manual", { hasText: /связь$/ })).toBeHidden();
       const auto = page.getByRole("button", { name: "Подтвердить для AUTO" });
       await expect(auto).toBeVisible();
       await auto.click();
@@ -142,13 +144,64 @@ test.describe("phone", () => {
       ]);
       await noHorizontalScroll(page, 390);
     });
+
+    test(`AUTO for mail is deferred: the phone links a contract instead (${theme})`, async ({ page, mock: _mock }) => {
+      const calls = await withData(page);
+      await page.goto("/new/");
+      await settled(page);
+      await chooseThemeOnPhone(page, theme);
+      await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
+      await page.getByRole("button", { name: /Исполнительная документация по фасаду/ }).click();
+      const reading = page.getByRole("region", { name: "Просмотр переписки" });
+      await expect(reading.getByRole("button", { name: /для AUTO/ })).toHaveCount(0);
+      await expect(reading.getByText("AUTO для почты появится после перехода почты на основное чтение (этап V6-07)")).toBeVisible();
+      const line = reading.getByTestId("mail-link-line");
+      await expect(line).toContainText("Проект: Новый проект · Договор: не выбран");
+      await expect(line).toContainText("нужно подтвердить");
+      await expect(reading.getByText("Упоминание фасада · AI 81%")).toBeVisible();
+      await reading.getByRole("button", { name: "Подтвердить связь" }).click();
+      const sheet = page.getByRole("dialog", { name: "Связь письма" });
+      await sheet.getByLabel("Договор").selectOption({ label: "C-41 — Навесной фасад" });
+      await sheet.getByRole("button", { name: "Сохранить" }).click();
+      await expect(sheet).toBeHidden();
+      await expect(line).toContainText("Проект: Новый проект · Договор: C-41");
+      await expect(line).toContainText("связь подтверждена");
+      expect(calls).toEqual([
+        { path: "confirm-context", body: { project_id: 2, contract_id: 41, expected_context_version: 3 } },
+      ]);
+      await noHorizontalScroll(page, 390);
+    });
   }
 });
+
+/** The readiness projection once the mailbox is on primary read (V6-07 done). */
+async function withAutoSourceChainReady(page: Page) {
+  await page.route("**/api/v54/projects/2/autonomy-readiness", route => route.fulfill({ json: {
+    project_id: 2, observed_at: "2026-10-14T07:00:00Z",
+    overall: { status: "ACTIVE", blockers: [], warnings: [] },
+    runtime: { state: "matching", pilot_enabled: true, producer_enabled: true,
+      notification_enabled: true, scope_matches: true, component_alignment: "unverified" },
+    policy: { revision: 2, hash_prefix: "synthetic", enabled: true,
+      task_mode: "AUTO", notification_mode: "AUTO", external_message_mode: "CONFIRM",
+      authority_epoch: 1, valid_until: "2026-10-21T07:00:00Z", ttl_seconds: 86400,
+      ready: true, history: [{ revision: 2, enabled: true }] },
+    authority: { state: "active", membership_role: "owner", ready: true },
+    mailbox: { state: "valid_not_pilot", ready: false, valid: true, producer_ready: false,
+      auto_source_chain_ready: true, auto_blocked_reason: null },
+    quotas: {
+      task_hourly: { used: 0, limit: 3 },
+      notification_project_hourly: { used: 0, limit: 3 },
+      notification_recipient_daily: { max_used: 0, limit: 10 },
+    },
+    operations: { actions: {}, receipts: {}, jobs: {}, incidents: [] },
+  } }));
+}
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1440, height: 1000 } });
   test("keeps full task cards and the three-step mail context", async ({ page, mock: _mock }) => {
     await withData(page);
+    await withAutoSourceChainReady(page);
     await page.goto("/new/");
     await settled(page);
     await page.locator(".shell > aside").getByRole("button", { name: "Задачи", exact: true }).click();
@@ -160,8 +213,21 @@ test.describe("desktop", () => {
     await expect(card.getByRole("button", { name: "Подробнее" })).toBeHidden();
     await page.locator(".shell > aside").getByRole("button", { name: "Письма", exact: true }).click();
     await page.getByRole("button", { name: /Исполнительная документация по фасаду/ }).click();
-    await expect(page.getByRole("button", { name: "Подтвердить связь" })).toBeVisible();
+    await expect(page.locator("button.mail-context-manual", { hasText: "Подтвердить связь" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Подтвердить контекст для AUTO" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Подтвердить для AUTO" })).toBeHidden();
+    await expect(page.locator(".mail-mobile-context")).toBeHidden();
+    await expect(page.getByTestId("mail-link-line")).toContainText("Проект: Новый проект · Договор: не выбран");
+  });
+
+  test("hides the desktop AUTO-for-mail button while the source chain is not ready", async ({ page, mock: _mock }) => {
+    await withData(page);
+    await page.goto("/new/");
+    await settled(page);
+    await page.locator(".shell > aside").getByRole("button", { name: "Письма", exact: true }).click();
+    await page.getByRole("button", { name: /Исполнительная документация по фасаду/ }).click();
+    await expect(page.locator("button.mail-context-manual", { hasText: "Подтвердить связь" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Подтвердить контекст для AUTO" })).toHaveCount(0);
+    await expect(page.getByText(/этап V6-07/)).toBeVisible();
   });
 });

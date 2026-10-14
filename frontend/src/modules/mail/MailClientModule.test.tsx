@@ -46,7 +46,7 @@ it("ordinary-read receipts expose no provider mutation or AUTO controls", async 
   const receiptThread = { ...thread, messages: [receipt] };
   const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [receiptThread] }),
     thread: vi.fn().mockResolvedValue(receiptThread) });
-  renderClient(client);
+  renderClient(client, { autoSourceChainReady: true });
   await screen.findByText("Только чтение · без отправки и AUTO");
   expect(screen.getByRole("button", { name: "Ответить" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Подтвердить контекст для AUTO" })).toBeDisabled();
@@ -173,12 +173,82 @@ describe("MailClientModule", () => {
   });
 
   it("keeps AI confidence separate from explicit owner confirmation for AUTO", async () => {
-    const { client, props } = renderClient();
+    const { client, props } = renderClient(mockClient(), { autoSourceChainReady: true });
     await screen.findByRole("heading", { name: "Срок поставки" });
     expect(screen.getByText(/AI 96%/)).toBeInTheDocument();
+    expect(screen.queryByText(/этап V6-07/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить контекст для AUTO" }));
     await waitFor(() => expect(client.confirmContextForAuto).toHaveBeenCalledWith(101, 7, 11, 4));
     expect(props.onNotice).toHaveBeenCalledWith("Владелец явно подтвердил контекст для AUTO");
+  });
+
+  it("hides AUTO-for-mail until the source chain is ready but keeps the ordinary link flow", async () => {
+    const { client, props, container } = renderClient();
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    expect(screen.queryByRole("button", { name: "Подтвердить контекст для AUTO" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Подтвердить для AUTO/ })).not.toBeInTheDocument();
+    expect(screen.getByText("AUTO для почты появится после перехода почты на основное чтение (этап V6-07)")).toBeInTheDocument();
+    const desktopLink = container.querySelector("button.mail-context-manual") as HTMLButtonElement;
+    expect(desktopLink).toHaveTextContent("Изменить связь");
+    fireEvent.click(desktopLink);
+    await waitFor(() => expect(client.confirmContext).toHaveBeenCalledWith(101, 7, 11, 4));
+    expect(props.onNotice).toHaveBeenCalledWith("Проект и договор письма подтверждены");
+    expect(client.confirmContextForAuto).not.toHaveBeenCalled();
+  });
+
+  it("shows the real link state instead of «Контекст не определён» for a linked letter", async () => {
+    const linked = { ...message, context_evidence: "", context_confidence: undefined };
+    const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [{ ...thread, messages: [linked] }] }),
+      thread: vi.fn().mockResolvedValue({ ...thread, messages: [linked] }) });
+    renderClient(client);
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    const line = screen.getByTestId("mail-link-line");
+    expect(line).toHaveTextContent("Проект: Дубна · Договор: ГП-17");
+    expect(line).toHaveTextContent("связь подтверждена");
+    expect(screen.queryByText(/Контекст не определён/)).not.toBeInTheDocument();
+  });
+
+  it("marks an unconfirmed link without a contract and keeps AI evidence as a secondary line", async () => {
+    const pending = { ...message, contract_id: null, context_confirmed: false };
+    const client = mockClient({ threads: vi.fn().mockResolvedValue({ items: [{ ...thread, messages: [pending] }] }),
+      thread: vi.fn().mockResolvedValue({ ...thread, messages: [pending] }) });
+    renderClient(client);
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    const line = screen.getByTestId("mail-link-line");
+    expect(line).toHaveTextContent("Проект: Дубна · Договор: не выбран");
+    expect(line).toHaveTextContent("нужно подтвердить");
+    expect(screen.getByText("Найден номер договора · AI 96%")).toHaveClass("mail-link-evidence");
+  });
+
+  it("changes the contract from the phone sheet and shows the re-fetched link at once", async () => {
+    const unlinked = { ...message, contract_id: null, context_confirmed: false, context_version: 5 };
+    const saved = { ...message, contract_id: 12, context_confirmed: true, context_version: 6 };
+    let savedOnServer = false;
+    const current = () => ({ ...thread, messages: [savedOnServer ? saved : unlinked] });
+    const threads = vi.fn().mockImplementation(async () => ({ items: [current()] }));
+    const threadDetail = vi.fn().mockImplementation(async () => current());
+    const confirmContext = vi.fn().mockImplementation(async () => { savedOnServer = true; return saved; });
+    const client = mockClient({ threads, thread: threadDetail, confirmContext });
+    const { props } = renderClient(client, { contracts: [
+      { id: 11, project_id: 7, number: "ГП-17", title: "Генподряд" },
+      { id: 12, project_id: 7, number: "СП-3", title: "Субподряд" },
+    ] });
+    await screen.findByRole("heading", { name: "Срок поставки" });
+    expect(screen.getByTestId("mail-link-line")).toHaveTextContent("Договор: не выбран");
+    const mobileLink = screen.getAllByRole("button", { name: "Подтвердить связь" })
+      .find((item) => item.closest(".mail-mobile-context"));
+    fireEvent.click(mobileLink!);
+    const sheet = await screen.findByRole("dialog", { name: "Связь письма" });
+    fireEvent.change(within(sheet).getByLabelText("Договор"), { target: { value: "12" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(client.confirmContext).toHaveBeenCalledWith(101, 7, 12, 5));
+    expect(props.onNotice).toHaveBeenCalledWith("Проект и договор письма подтверждены");
+    await waitFor(() => expect(screen.getByTestId("mail-link-line")).toHaveTextContent("Проект: Дубна · Договор: СП-3"));
+    expect(screen.getByTestId("mail-link-line")).toHaveTextContent("связь подтверждена");
+    expect(screen.queryByRole("dialog", { name: "Связь письма" })).not.toBeInTheDocument();
+    // The opened thread itself is re-fetched after the save, not only the list.
+    const saveOrder = confirmContext.mock.invocationCallOrder[0];
+    expect(threadDetail.mock.invocationCallOrder.some((order) => order > saveOrder)).toBe(true);
   });
 
   it("keeps saved mail usable when the live provider is temporarily unavailable", async () => {

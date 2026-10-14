@@ -344,6 +344,9 @@
 :root[data-display-theme] .shell :is(.mail-thread-row.selected, .mail-thread-row:hover) { color: var(--read-text); background: var(--read-accent-fill); }
 :root[data-display-theme] .shell :is(.mail-context-strip small, .mail-thread-row time, .mail-thread-messages article > header small, .mail-thread-messages article > header time, .mail-ai-summary small) { color: var(--read-muted); }
 :root[data-display-theme] .shell :is(.mail-thread-messages summary, .mail-ai-summary > svg) { color: var(--read-accent); }
+:root[data-display-theme] .shell .mail-link-line { color: var(--read-text); }
+:root[data-display-theme] .shell .mail-link-chip.confirmed { color: var(--read-accent); background: var(--read-accent-fill); border-color: var(--read-accent); }
+:root[data-display-theme] .shell .mail-link-chip.pending { color: var(--read-warn); background: var(--read-warn-fill); border-color: var(--read-warn); }
 :root[data-display-theme] .shell .mail-connection.ready { color: var(--read-accent); background: var(--read-accent-fill); }
 :root[data-display-theme] .shell :is(.mail-provider-warning, .mail-connection.offline) { color: var(--read-warn); background: var(--read-warn-fill); }
 :root[data-display-theme] .shell :is(.gpr-dds-unified-head, .mail-client-header) { height: auto; position: static; flex-shrink: 0; }
