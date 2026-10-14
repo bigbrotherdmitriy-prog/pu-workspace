@@ -6,14 +6,19 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_finance_workspaces_are_extracted_from_app_monolith():
     app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    container = (ROOT / "frontend" / "src" / "modules" / "finance" / "GprDdsContainer.tsx").read_text(encoding="utf-8")
     module = (ROOT / "frontend" / "src" / "modules" / "finance" / "FinanceModule.tsx").read_text(encoding="utf-8")
 
-    assert 'import("./modules/finance/GprDdsWorkspace")' in app
-    assert 'import("./modules/finance/GprWorkspace")' in app
-    assert 'import("./modules/finance/DdsWorkspace")' in app
-    assert "<GprDdsWorkspace" in app
-    assert "<GprWorkspace" in app
-    assert "<DdsWorkspace" in app
+    # App only mounts the screen; the container lazy-loads the workspaces.
+    assert "<GprDdsContainer" in app
+    assert 'import("./GprDdsWorkspace")' in container
+    assert 'import("./GprWorkspace")' in container
+    assert 'import("./DdsWorkspace")' in container
+    assert "<GprDdsWorkspace" in container
+    assert "<GprWorkspace" in container
+    assert "<DdsWorkspace" in container
+    assert "<GprWorkspace" not in app
+    assert "<DdsWorkspace" not in app
     assert "finance-contract-chain" in module
     assert "finance-chain-guide" in module
     assert "finance-document-assistant" in module
