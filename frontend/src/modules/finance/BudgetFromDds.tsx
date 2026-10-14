@@ -109,24 +109,21 @@ function fillMissingMonths(rows: MonthRow[]): MonthRow[] {
   let cumulativeFact = 0;
   return sequence.map((key) => {
     const existing = byKey.get(key);
-    const incomePlan = toNumber(existing?.income_plan);
-    const incomeFact = toNumber(existing?.income_fact);
-    const expensePlan = toNumber(existing?.expense_plan);
-    const expenseFact = toNumber(existing?.expense_fact);
-    const netPlan = incomePlan - expensePlan;
-    const netFact = incomeFact - expenseFact;
-    cumulativePlan += netPlan;
-    cumulativeFact += netFact;
+    if (existing) {
+      cumulativePlan += toNumber(existing.net_plan);
+      cumulativeFact += toNumber(existing.net_fact);
+      return existing;
+    }
     return {
       month: key,
-      income_plan: existing?.income_plan ?? "0",
-      income_fact: existing?.income_fact ?? "0",
-      expense_plan: existing?.expense_plan ?? "0",
-      expense_fact: existing?.expense_fact ?? "0",
-      net_plan: existing?.net_plan ?? "0",
-      net_fact: existing?.net_fact ?? "0",
-      cumulative_plan: existing?.cumulative_plan ?? String(cumulativePlan),
-      cumulative_fact: existing?.cumulative_fact ?? String(cumulativeFact),
+      income_plan: "0",
+      income_fact: "0",
+      expense_plan: "0",
+      expense_fact: "0",
+      net_plan: "0",
+      net_fact: "0",
+      cumulative_plan: String(cumulativePlan),
+      cumulative_fact: String(cumulativeFact),
     };
   });
 }
