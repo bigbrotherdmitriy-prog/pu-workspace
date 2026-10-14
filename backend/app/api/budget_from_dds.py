@@ -25,13 +25,9 @@ ADDITIONAL_COST_CATEGORY_NAMES = ("дополнительные расходы",
 
 def _is_additional_cost(
     *,
-    planned_amount: Decimal,
-    actual_amount: Decimal,
     category_name: str | None,
     fallback_category: str | None,
 ) -> bool:
-    if planned_amount == ZERO and actual_amount > ZERO:
-        return True
     for value in (category_name, fallback_category):
         if value is not None and value.strip().lower() in ADDITIONAL_COST_CATEGORY_NAMES:
             return True
@@ -159,8 +155,6 @@ def budget_from_dds(
             category_key_name = entry.category or "Без статьи"
 
         is_additional = is_expense and _is_additional_cost(
-            planned_amount=planned_amount,
-            actual_amount=actual_amount,
             category_name=category_names.get(entry.cost_category_id) if entry.cost_category_id is not None else None,
             fallback_category=entry.category,
         )
@@ -188,7 +182,7 @@ def budget_from_dds(
         else:
             continue
 
-        if is_additional:
+        if is_additional and (plan_in_range or fact_in_range):
             additional_items.append({
                 "title": entry.title,
                 "counterparty": entry.counterparty,
