@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
 import "./budget-from-dds.css";
@@ -138,6 +138,12 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    if (projectId <= 0) {
+      setData(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -216,9 +222,8 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
             const expanded = expandedCategories.has(key);
             const hasCounterparties = row.counterparties.length > 0;
             return (
-              <>
+              <Fragment key={key}>
                 <tr
-                  key={key}
                   className={`budget-from-dds-category ${expanded ? "expanded" : ""}`}
                   onClick={() => hasCounterparties && toggleCategory(key)}
                 >
@@ -240,7 +245,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                     <td>{completionPct(cp.fact, cp.plan) ?? "—"}</td>
                   </tr>
                 ))}
-              </>
+              </Fragment>
             );
           })}
           <tr className="budget-from-dds-profit">

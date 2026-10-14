@@ -16,7 +16,7 @@ describe("DdsWorkspace", () => {
   it("shows per-row rejection and keeps the whole selection after an atomic failure", async () => {
     const error = Object.assign(new Error("Пакет отклонён"), { details: { rows: [
       { id: 2, code: "CASH_FLOW_VERSION_MISMATCH", message: "Запись изменилась" }] } });
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()}
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()}
       onConfirmMany={vi.fn().mockRejectedValue(error)} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать операцию Щиты" }));
@@ -27,7 +27,7 @@ describe("DdsWorkspace", () => {
 
   it("does not offer payment for an approved forecast", () => {
     const row = { ...finance.cash_flow[1], status: "approved", entry_kind: "plan_forecast" };
-    render(<DdsWorkspace finance={{ ...finance, cash_flow: [row] } as FinanceOverview} selectedContractId={4}
+    render(<DdsWorkspace finance={{ ...finance, cash_flow: [row] } as FinanceOverview} projectId={1} selectedContractId={4}
       onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.queryByRole("button", { name: "Оплата" })).not.toBeInTheDocument();
@@ -36,7 +36,7 @@ describe("DdsWorkspace", () => {
   it("allows a proven matrix forecast without a schedule and labels it as forecast", () => {
     const row = { ...finance.cash_flow[1], source_document_id: 90, budget_line_id: 72,
       confirmation_allowed: true, confirmation_kind: "plan_forecast", entry_kind: "legacy_unclassified" };
-    render(<DdsWorkspace finance={{ ...finance, cash_flow: [row] } as FinanceOverview} selectedContractId={4}
+    render(<DdsWorkspace finance={{ ...finance, cash_flow: [row] } as FinanceOverview} projectId={1} selectedContractId={4}
       onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.getByRole("checkbox", { name: "Выбрать операцию Щиты" })).toBeInTheDocument();
@@ -46,7 +46,7 @@ describe("DdsWorkspace", () => {
   });
   it("imports a planned DDS workbook from the main DDS header", () => {
     const onImportCashFlow = vi.fn();
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onImportCashFlow={onImportCashFlow} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onImportCashFlow={onImportCashFlow} />);
     const workbook = new File(["dds"], "для PU ДДС.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 
     expect(screen.getByRole("button", { name: "Импортировать плановый ДДС" })).toBeEnabled();
@@ -60,7 +60,7 @@ describe("DdsWorkspace", () => {
     const onConfirm = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const unlinked = { ...finance, cash_flow: [{ ...finance.cash_flow[1], source_document_id: 90, contract_id: undefined }] } as FinanceOverview;
-    const props = { finance: unlinked, selectedContractId: 0, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
+    const props = { finance: unlinked, projectId: 1, selectedContractId: 0, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
     const { rerender } = render(<DdsWorkspace {...props} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     const button = screen.getByRole("button", { name: "Удалить операцию Щиты" });
@@ -90,7 +90,7 @@ describe("DdsWorkspace", () => {
       { ...finance.cash_flow[1], status: "paid", actual_date: "2026-02-10", actual_amount: 400 },
       { ...finance.cash_flow[1], id: 3, status: "cancelled" },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={closed} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.queryByRole("button", { name: /Удалить операцию/ })).not.toBeInTheDocument();
   });
@@ -100,7 +100,7 @@ describe("DdsWorkspace", () => {
     const closed = { ...finance, cash_flow: [
       { ...finance.cash_flow[0], status: "received", actual_date: "2026-01-30", actual_amount: 1000 },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()}
+    render(<DdsWorkspace finance={closed} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()}
       onConfirmPayment={vi.fn()} onReversePayment={onReversePayment} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     fireEvent.click(screen.getByRole("button", { name: "Отменить оплату" }));
@@ -111,14 +111,14 @@ describe("DdsWorkspace", () => {
     const closed = { ...finance, cash_flow: [
       { ...finance.cash_flow[0], status: "received", actual_date: "2026-01-30", actual_amount: 1000 },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={closed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={closed} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.queryByRole("button", { name: "Отменить оплату" })).not.toBeInTheDocument();
   });
 
   it("keeps an operation available for retry when cancellation fails", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn().mockRejectedValue(new Error("offline"))} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn().mockRejectedValue(new Error("offline"))} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     fireEvent.click(screen.getByRole("button", { name: "Удалить операцию Этап 1" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось удалить операцию");
@@ -126,7 +126,7 @@ describe("DdsWorkspace", () => {
   });
 
   it("shows every workbook view and recalculates summaries from detail rows", () => {
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
     expect(screen.getByRole("tab", { name: "Таблица ДДС" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Статья ДДС")).toBeInTheDocument();
@@ -149,7 +149,7 @@ describe("DdsWorkspace", () => {
 
   it("confirms selected proposed operations in one callback", () => {
     const onConfirmMany = vi.fn();
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={onConfirmMany} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={onConfirmMany} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать операцию Щиты" }));
@@ -167,7 +167,7 @@ describe("DdsWorkspace", () => {
       budget: [{ id: 72, contract_id: 4, category: "Работы", description: "Монтаж", planned_amount: 400, committed_amount: 0, actual_amount: 0, remaining_amount: 400, overrun_amount: 0, forecast_amount: 400, currency: "RUB", status: "approved" }],
       cash_flow: [{ ...finance.cash_flow[1], id: 9, source_document_id: 90 }],
     } as FinanceOverview;
-    render(<DdsWorkspace finance={unlinked} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={onLinkControls} />);
+    render(<DdsWorkspace finance={unlinked} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={onLinkControls} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.queryByRole("button", { name: "Подтвердить" })).not.toBeInTheDocument();
@@ -187,7 +187,7 @@ describe("DdsWorkspace", () => {
         { id: 81, contract_id: 4, direction: "outflow", category: "Расходы", description: "Расходная строка", planned_amount: 400, committed_amount: 0, actual_amount: 0, remaining_amount: 400, overrun_amount: 0, forecast_amount: 400, currency: "RUB", status: "approved" },
       ],
     } as FinanceOverview;
-    render(<DdsWorkspace finance={withIncomeBudget} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onLinkApprovedBudgetLine={onLinkApprovedBudgetLine} />);
+    render(<DdsWorkspace finance={withIncomeBudget} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onLinkApprovedBudgetLine={onLinkApprovedBudgetLine} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     const select = screen.getByLabelText("Строка бюджета для Этап 1");
@@ -206,7 +206,7 @@ describe("DdsWorkspace", () => {
       budget: [{ id: 80, contract_id: 4, direction: "inflow", category: "Выручка", description: "Доходная строка", planned_amount: 1000, committed_amount: 0, actual_amount: 0, remaining_amount: 1000, overrun_amount: 0, forecast_amount: 1000, currency: "RUB", status: "approved" }],
       cash_flow: [{ ...finance.cash_flow[0], budget_line_id: 80 }, finance.cash_flow[1]],
     } as FinanceOverview;
-    render(<DdsWorkspace finance={linked} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onLinkApprovedBudgetLine={onLinkApprovedBudgetLine} />);
+    render(<DdsWorkspace finance={linked} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onLinkApprovedBudgetLine={onLinkApprovedBudgetLine} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.queryByRole("button", { name: "Привязать бюджет" })).not.toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("DdsWorkspace", () => {
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Экспорт: Таблица ДДС" }));
     fireEvent.click(screen.getByRole("tab", { name: "ДДС по месяцам" }));
@@ -242,7 +242,7 @@ describe("DdsWorkspace", () => {
       { ...finance.cash_flow[1], id: 4, title: "ЭМ Щиты", planned_date: "2026-03-05", planned_amount: 600 },
     ] } as FinanceOverview;
 
-    render(<DdsWorkspace finance={repeatedCosts} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={repeatedCosts} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
     const titles = screen.getAllByText("ЭМ Щиты", { exact: true });
     expect(titles).toHaveLength(1);
@@ -256,7 +256,7 @@ describe("DdsWorkspace", () => {
   it("edits, moves, copies and undoes only a proposed plan cell", async () => {
     const onMutatePlan = vi.fn().mockResolvedValue({ mutation_id: 81 });
     const onUndoPlanMutation = vi.fn().mockResolvedValue(undefined);
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} onUndoPlanMutation={onUndoPlanMutation} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} onUndoPlanMutation={onUndoPlanMutation} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
     const input = screen.getByLabelText("План Щиты 2026-02");
@@ -282,7 +282,7 @@ describe("DdsWorkspace", () => {
       finance.cash_flow[1],
       { ...finance.cash_flow[1], id: 3, title: "USD invoice", currency: "USD", planned_amount: 50 },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={mixed} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
+    render(<DdsWorkspace finance={mixed} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
 
     expect(screen.getByLabelText("Валюта ДДС")).toHaveValue("RUB");
     fireEvent.click(screen.getByRole("tab", { name: "ДДС по месяцам" }));
@@ -299,7 +299,7 @@ describe("DdsWorkspace", () => {
       { ...finance.cash_flow[1], planned_date: "2026-01-31" },
       { ...finance.cash_flow[0], planned_date: "2026-02-01" },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={monthEnd} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
+    render(<DdsWorkspace finance={monthEnd} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Таблица ДДС" }));
     const input = screen.getByLabelText("План Щиты 2026-01");
@@ -318,7 +318,7 @@ describe("DdsWorkspace", () => {
       { ...finance.cash_flow[1], id: 3, title: "эм щиты", planned_date: "2026-02-18", planned_amount: 100 },
       { ...finance.cash_flow[1], id: 4, title: "ЭМ Щиты", planned_date: "2026-03-05", planned_amount: 600 },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={repeatedCosts} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
+    render(<DdsWorkspace finance={repeatedCosts} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onMutatePlan={onMutatePlan} />);
 
     fireEvent.dragStart(screen.getByRole("button", { name: "Перенести ЭМ Щиты, 2 операций из 2026-02" }));
     const row = screen.getByText("ЭМ Щиты", { exact: true }).closest("tr")!;
@@ -333,7 +333,7 @@ describe("DdsWorkspace", () => {
   it("deletes a proposed plan directly from the calendar and hides it after reload", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const onConfirm = vi.fn().mockResolvedValue(undefined);
-    const props = { finance, selectedContractId: 4, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
+    const props = { finance, projectId: 1, selectedContractId: 4, onPrepare: vi.fn(), onConfirm, onConfirmMany: vi.fn(), onConfirmPayment: vi.fn(), onLinkControls: vi.fn() };
     const { rerender } = render(<DdsWorkspace {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить операцию Щиты" }));
@@ -345,7 +345,7 @@ describe("DdsWorkspace", () => {
 
   it("accepts invoice PDFs through the DDS drop zone after explicit upload", () => {
     const onDropInvoices = vi.fn().mockResolvedValue([]);
-    render(<DdsWorkspace finance={finance} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onDropInvoices={onDropInvoices} />);
+    render(<DdsWorkspace finance={finance} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} onDropInvoices={onDropInvoices} />);
     const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
     const zone = screen.getByText("Перетащите сюда счета PDF — один или несколько").closest(".dds-invoice-drop")!;
     fireEvent.drop(zone, { dataTransfer: { files: [file] } });
@@ -363,7 +363,7 @@ describe("DdsWorkspace", () => {
       ...finance.cash_flow,
       { ...finance.cash_flow[1], id: 8, category: "Дополнительные расходы", title: "Непредвиденные работы" },
     ] } as FinanceOverview;
-    render(<DdsWorkspace finance={withExtra} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    render(<DdsWorkspace finance={withExtra} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Полный ДДС" }));
     fireEvent.click(screen.getByRole("button", { name: "Дополнительные расходы" }));

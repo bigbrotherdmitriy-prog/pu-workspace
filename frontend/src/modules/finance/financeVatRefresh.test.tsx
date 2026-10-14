@@ -33,7 +33,7 @@ describe("explicit pending VAT refresh", () => {
     render(<DdsWorkspace finance={{ ...overview, cash_flow: [{ ...row,
       vat_proposed_snapshot: { schema_version: 1, source_contract_id: 41, source_contract_record_version: 3,
         mode: "rate", rate: "0.00" } }] } as FinanceOverview}
-      selectedContractId={41} onPrepare={noop} onConfirm={noop} onConfirmMany={noop}
+      projectId={1} selectedContractId={41} onPrepare={noop} onConfirm={noop} onConfirmMany={noop}
       onConfirmPayment={noop} onLinkControls={noop} onRefreshVat={refresh} />);
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
     expect(screen.getByText(/Предлагается: 0.00 %/)).toBeInTheDocument();

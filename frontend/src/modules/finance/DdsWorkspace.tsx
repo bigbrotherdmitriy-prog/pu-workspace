@@ -10,6 +10,7 @@ import "./gpr-dds-mobile.css";
 
 type Props = {
   finance: FinanceOverview | null;
+  projectId: number;
   selectedContractId: number;
   onPrepare: (kind: "cash-in" | "cash-out") => void;
   onConfirm: (kind: string, id: number, status: string) => void | Promise<void>;
@@ -103,7 +104,7 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onReversePayment, onRefreshVat, onLinkControls, onLinkApprovedBudgetLine, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
+export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onReversePayment, onRefreshVat, onLinkControls, onLinkApprovedBudgetLine, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
   const cashFlowImportInput = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<Tab>("calendar");
   const [objectFilter, setObjectFilter] = useState("all");
@@ -479,7 +480,7 @@ export function DdsWorkspace({ finance, selectedContractId, onPrepare, onConfirm
       </td></tr>;
     })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}
 
-    {tab === "budget" && <BudgetFromDds projectId={finance?.project_id ?? 0} contractId={selectedContractId || null} currency={selectedCurrency} />}
+    {tab === "budget" && <BudgetFromDds projectId={projectId} contractId={selectedContractId || null} currency={selectedCurrency} />}
     {tab === "summary" && <div className="dds-summary">
       <section><h3>По объектам</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Объект</th><th>План прихода, {selectedCurrency}</th><th>План расхода, {selectedCurrency}</th><th>Плановый поток, {selectedCurrency}</th></tr></thead><tbody>{objectSummary.map((item) => <tr key={item.object}><td>{item.object}</td><td className="money positive" data-label="Приход">{formatMoney(item.inflow)}</td><td className="money" data-label="Расход">{formatMoney(item.outflow)}</td><td className={`money ${item.net < 0 ? "negative" : "positive"}`} data-label="Поток">{formatMoney(item.net)}</td></tr>)}<tr className="total"><td>ИТОГО</td><td className="money" data-label="Приход">{formatMoney(totals.inflow)}</td><td className="money" data-label="Расход">{formatMoney(totals.outflow)}</td><td className="money" data-label="Поток">{formatMoney(totals.net)}</td></tr></tbody></table></div></section>
       <section><h3>Расходы по статьям</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Статья затрат</th><th>План, {selectedCurrency}</th><th>Доля, %</th></tr></thead><tbody>{categorySummary.map((item) => <tr key={item.category}><td>{item.category}</td><td className="money" data-label="План">{formatMoney(item.value)}</td><td data-label="Доля"><div className="dds-share"><span style={{ width: `${Math.max(3, item.share * 100)}%` }}></span></div>{(item.share * 100).toFixed(1)}%</td></tr>)}<tr className="total"><td>ИТОГО расходы</td><td className="money" data-label="План">{formatMoney(totals.outflow)}</td><td data-label="Доля">100%</td></tr></tbody></table></div></section>
