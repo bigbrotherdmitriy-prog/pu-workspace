@@ -47,7 +47,12 @@ def world():
             name="Логистика",
             normalized_name="логистика",
         )
-        db.add_all([cat_a, cat_b])
+        cat_extra = CostCategory(
+            organization_id=org.id,
+            name="Дополнительные расходы",
+            normalized_name="дополнительные расходы",
+        )
+        db.add_all([cat_a, cat_b, cat_extra])
         db.commit()
 
         old_overrides = app.dependency_overrides.copy()
@@ -63,6 +68,7 @@ def world():
                 "outsider": outsider,
                 "cat_a": cat_a,
                 "cat_b": cat_b,
+                "cat_extra": cat_extra,
             }
         finally:
             app.dependency_overrides.clear()
@@ -166,6 +172,10 @@ def test_budget_from_dds_aggregates_plan_fact_and_months(world):
     assert payload["currency"] == "RUB"
     assert payload["income"] == {"plan": "1000.00", "fact": "800.00"}
     assert payload["expense_total"] == {"plan": "650.00", "fact": "580.00"}
+    assert payload["direct_expense_total"] == {"plan": "650.00", "fact": "580.00"}
+    assert payload["additional_costs"]["plan"] == "0.00"
+    assert payload["additional_costs"]["fact"] == "0.00"
+    assert payload["additional_costs"]["items"] == []
     assert payload["profit"] == {"plan": "350.00", "fact": "220.00"}
     assert payload["margin_pct"]["plan"] == "35.00"
     assert payload["margin_pct"]["fact"] == "27.50"
@@ -177,6 +187,7 @@ def test_budget_from_dds_aggregates_plan_fact_and_months(world):
     assert materials["category_id"] == cat_a.id
     assert materials["plan"] == "500.00"
     assert materials["fact"] == "430.00"
+    assert materials["remaining"] == "70.00"
     assert materials["deviation"] == "-70.00"
     materials_cp = {cp["counterparty"]: cp for cp in materials["counterparties"]}
     assert materials_cp["ООО Ромашка"] == {
@@ -193,6 +204,7 @@ def test_budget_from_dds_aggregates_plan_fact_and_months(world):
     assert logistics["category_id"] == cat_b.id
     assert logistics["plan"] == "150.00"
     assert logistics["fact"] == "150.00"
+    assert logistics["remaining"] == "0.00"
     assert logistics["deviation"] == "0.00"
 
     by_month = {row["month"]: row for row in payload["by_month"]}
@@ -217,6 +229,149 @@ def test_budget_from_dds_aggregates_plan_fact_and_months(world):
     assert feb["net_fact"] == "-330.00"
     assert feb["cumulative_plan"] == "350.00"
     assert feb["cumulative_fact"] == "220.00"
+
+
+def test_budget_from_dds_additional_costs(world):
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+    cat_extra = world["cat_extra"]
+
+    _add_entry(
+        db,
+        project.id,
+        direction="inflow",
+        title="Поступление",
+        planned_date=date(2026, 3, 1),
+        actual_date=date(2026, 3, 2),
+        planned_amount=Decimal("1000.00"),
+        actual_amount=Decimal("1000.00"),
+        status="approved",
+    )
+    _add_entry(
+        db,
+        project.id,
+        direction="outflow",
+        title="Плановый расход",
+        planned_date=date(2026, 3, 5),
+        actual_date=date(2026, 3, 6),
+        planned_amount=Decimal("200.00"),
+        actual_amount=Decimal("200.00"),
+        category="Материалы",
+        status="approved",
+    )
+    _add_entry(
+        db,
+        project.id,
+        direction="outflow",
+        title="Внеплановые транспортные",
+        planned_date=date(2026, 3, 7),
+        actual_date=date(2026, 3, 8),
+        planned_amount=Decimal("0.00"),
+        actual_amount=Decimal("50.00"),
+        counterparty="ООО Ромашка",
+        status="approved",
+    )
+    _add_entry(
+        db,
+        project.id,
+        direction="outflow",
+        title="Доп. затраты",
+        planned_date=date(2026, 3, 9),
+        actual_date=date(2026, 3, 10),
+        planned_amount=Decimal("30.00"),
+        actual_amount=Decimal("40.00"),
+        cost_category_id=cat_extra.id,
+        status="approved",
+    )
+    db.commit()
+
+    response = client.get(f"/projects/{project.id}/budget-from-dds")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    additional = payload["additional_costs"]
+    assert additional["plan"] == "30.00"
+    assert additional["fact"] == "40.00"
+    assert [item["title"] for item in additional["items"]] == ["Доп. затраты"]
+    first = additional["items"][0]
+    assert first["counterparty"] is None
+    assert first["planned_date"] == "2026-03-09"
+    assert first["actual_date"] == "2026-03-10"
+    assert first["fact"] == "40.00"
+
+    by_category = {row["category"]: row for row in payload["expense_by_category"]}
+    assert set(by_category) == {"Материалы", "Без статьи"}
+    materials = by_category["Материалы"]
+    assert materials["plan"] == "200.00"
+    assert materials["fact"] == "200.00"
+    assert materials["remaining"] == "0.00"
+    unbudgeted = by_category["Без статьи"]
+    assert unbudgeted["plan"] == "0.00"
+    assert unbudgeted["fact"] == "50.00"
+    assert unbudgeted["remaining"] == "-50.00"
+
+    assert payload["direct_expense_total"] == {"plan": "200.00", "fact": "250.00"}
+    assert payload["expense_total"] == {"plan": "230.00", "fact": "290.00"}
+    assert payload["profit"] == {"plan": "770.00", "fact": "710.00"}
+    assert payload["margin_pct"]["plan"] == "77.00"
+    assert payload["margin_pct"]["fact"] == "71.00"
+
+
+def test_budget_from_dds_additional_costs_period_filter(world):
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+    cat_extra = world["cat_extra"]
+
+    _add_entry(
+        db,
+        project.id,
+        direction="inflow",
+        title="Поступление",
+        planned_date=date(2026, 3, 1),
+        actual_date=date(2026, 3, 2),
+        planned_amount=Decimal("1000.00"),
+        actual_amount=Decimal("1000.00"),
+        status="approved",
+    )
+    _add_entry(
+        db,
+        project.id,
+        direction="outflow",
+        title="Доп. в периоде",
+        planned_date=date(2026, 3, 9),
+        actual_date=date(2026, 3, 10),
+        planned_amount=Decimal("30.00"),
+        actual_amount=Decimal("40.00"),
+        cost_category_id=cat_extra.id,
+        status="approved",
+    )
+    _add_entry(
+        db,
+        project.id,
+        direction="outflow",
+        title="Доп. вне периода",
+        planned_date=date(2026, 4, 5),
+        actual_date=date(2026, 4, 6),
+        planned_amount=Decimal("70.00"),
+        actual_amount=Decimal("80.00"),
+        cost_category_id=cat_extra.id,
+        status="approved",
+    )
+    db.commit()
+
+    response = client.get(
+        f"/projects/{project.id}/budget-from-dds",
+        params={"month_from": "2026-03", "month_to": "2026-03"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    additional = payload["additional_costs"]
+    assert additional["plan"] == "30.00"
+    assert additional["fact"] == "40.00"
+    assert [item["title"] for item in additional["items"]] == ["Доп. в периоде"]
 
 
 def test_budget_from_dds_forbidden_without_role(world):
