@@ -624,7 +624,9 @@ export function App() {
   const phoneLayout = usePhoneLayout();
   useEffect(() => {
     let current = true;
-    if (!ready || !projectId || active !== "Настройки") {
+    // Mail needs it too: AUTO-for-mail controls appear only once
+    // mailbox.auto_source_chain_ready is true (ADR-V6-07).
+    if (!ready || !projectId || (active !== "Настройки" && active !== "Письма")) {
       setAutonomyReadiness(null);
       return () => { current = false; };
     }
@@ -4497,6 +4499,7 @@ export function App() {
               canTriage={Boolean(currentUser?.is_admin || members.some((member) =>
                 member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
               ))}
+              autoSourceChainReady={autonomyReadiness?.mailbox.auto_source_chain_ready === true}
             />}
             {active === "AI Secretary" && (
               <AttentionPanel projectId={projectId} onOpenSection={setActive} />

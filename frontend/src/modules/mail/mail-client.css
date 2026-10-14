@@ -66,6 +66,11 @@
 .mail-context-strip label { display: grid; gap: 4px; color: #68786f; font-size: 11px; font-weight: 700; }
 .mail-context-strip select { min-width: 0; height: 36px; border: 1px solid #c9d7d0; border-radius: 8px; background: #fff; }
 .mail-context-strip small { grid-column: 1 / -1; color: #68786f; }
+.mail-link-line { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: #33423b; font-size: 13px; }
+.mail-link-line b { font-weight: 750; overflow-wrap: anywhere; }
+.mail-link-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 1px 9px; border: 1px solid #c9d7d0; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.mail-link-chip.confirmed { border-color: #9fcdb8; background: #e3f3eb; color: #0f6a4a; }
+.mail-link-chip.pending { border-color: #e6cf9b; background: #fbf3df; color: #7a5a12; }
 .mail-thread-messages { display: grid; gap: 14px; padding: 18px; }
 .mail-thread-messages article { min-width: 0; padding: 17px; overflow: hidden; border: 1px solid #dde6e1; border-radius: 13px; background: #fff; box-shadow: 0 7px 24px #1834280a; }
 .mail-thread-messages article.outgoing { margin-left: 8%; border-color: #b9ddd0; background: #f4fbf8; }

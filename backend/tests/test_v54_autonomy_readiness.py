@@ -22,7 +22,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.v54_authority import AuthorityState
-from app.models.v54_pilot import ConnectionIdentity, MailConnection
+from app.models.v54_pilot import ActionPolicy, ConnectionIdentity, MailConnection, SourceReference
 from v54_pilot_fixture import ref, uid
 
 
@@ -147,7 +147,12 @@ def test_owner_and_manager_get_redacted_read_only_projection(readiness_world):
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-store"
         body = response.json()
-        assert body["overall"]["status"] == "DEGRADED"
+        # AUTO modes on a producer-era mailbox: the Gmail source chain cannot
+        # feed AUTO yet, so the projection must not look green.
+        assert body["overall"]["status"] == "BLOCKED"
+        assert body["overall"]["blockers"] == ["mailbox_source_chain_not_ready"]
+        assert body["mailbox"]["auto_source_chain_ready"] is False
+        assert body["mailbox"]["auto_blocked_reason"] == "mailbox_cutover_primary_read_required"
         assert body["policy"]["external_message_mode"] == "CONFIRM"
         assert body["policy"]["history"][0]["revision"] == 1
         assert body["mailbox"]["cutover"]["actions"] is False
@@ -304,7 +309,11 @@ def test_mailbox_missing_state_has_no_cohort_history_and_omits_new_fields(readin
     with sessions() as db:
         project = db.get(Project, 11)
         result = _mailbox(db, project, actor=db.get(User, 2))
-    assert result == {"state": "missing", "ready": False, "organization_id": 1}
+    assert result == {
+        "state": "missing", "ready": False, "organization_id": 1,
+        "auto_source_chain_ready": False,
+        "auto_blocked_reason": "mailbox_cutover_primary_read_required",
+    }
     assert "mail_connection_id" not in result
     assert "current_credential_generation" not in result
     assert "actor_authority_version" not in result
@@ -354,3 +363,91 @@ def test_mailbox_stale_state_still_exposes_current_pointers(readiness_world):
     assert mailbox["credential_generation"] == 1  # the stale cohort's own (unchanged) generation
     assert mailbox["current_credential_generation"] == 2  # the identity's real current generation
     assert mailbox["mail_connection_id"] == uid(902)
+
+
+# --- mailbox: AUTO source chain (ADR-V6-07 addendum 13.10.2026) ---
+
+
+def _gmail_source(number, sync_state, seen_at, project_id=10):
+    return SourceReference(
+        id=uid(number), organization_id=1, origin_project_id=project_id, identity_id=uid(901),
+        namespace="gmail", external_id=f"msg-{number}", external_id_kind="provider_message_id",
+        incarnation=1, object_kind="message", canonical_locator={"kind": "gmail_message"},
+        record_version=1, freshness="fresh", sync_state=sync_state, availability="available",
+        last_seen_at=seen_at,
+    )
+
+
+def _enable_primary_read(db):
+    row = db.scalar(select(MailboxCutoverFlags))
+    row.primary_read = True
+    row.record_version += 1
+
+
+def test_producer_era_observed_sources_keep_auto_chain_blocked(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        db.add(_gmail_source(1001, "observed", NOW))
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["auto_source_chain_ready"] is False
+    assert body["mailbox"]["auto_blocked_reason"] == "mailbox_cutover_primary_read_required"
+    assert "mailbox_source_chain_not_ready" in body["overall"]["blockers"]
+
+
+def test_primary_read_without_current_sources_is_not_ready(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        _enable_primary_read(db)
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["auto_source_chain_ready"] is False
+    with sessions.begin() as db:
+        db.add(_gmail_source(1001, "current", NOW - timedelta(minutes=5)))
+        db.add(_gmail_source(1002, "observed", NOW))  # the latest one is not current
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["auto_source_chain_ready"] is False
+
+
+def test_current_sources_without_primary_read_are_not_ready(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        db.add(_gmail_source(1001, "current", NOW))
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["auto_source_chain_ready"] is False
+
+
+def test_primary_read_and_current_sources_make_chain_ready_read_only(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        _enable_primary_read(db)
+        db.add(_gmail_source(1001, "current", NOW - timedelta(minutes=5)))
+        db.add(_gmail_source(1002, "current", NOW))
+        # Another project's newer, non-current source on the same identity does not count.
+        db.add(_gmail_source(1003, "observed", NOW + timedelta(minutes=1), project_id=11))
+    with sessions() as db:
+        before = [(row.id, row.sync_state, row.record_version) for row in db.scalars(select(SourceReference))]
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["mailbox"]["auto_source_chain_ready"] is True
+    assert body["mailbox"]["auto_blocked_reason"] is None
+    assert "mailbox_source_chain_not_ready" not in body["overall"]["blockers"]
+    with sessions() as db:
+        after = [(row.id, row.sync_state, row.record_version) for row in db.scalars(select(SourceReference))]
+    assert before == after
+
+
+def test_confirm_only_policy_has_no_source_chain_blocker(readiness_world):
+    sessions, _current, client = readiness_world
+    with sessions.begin() as db:
+        row = db.scalar(select(ActionPolicy).order_by(ActionPolicy.revision.desc()))
+        AutonomyPolicyService(
+            authority=AuthorityResolver(clock=lambda: NOW), clock=lambda: NOW,
+        ).assign(db, scope=_scope(), command=PolicyAssignmentCommand(
+            expected_policy_id=row.id, expected_revision=row.revision,
+            expected_policy_hash=row.policy_hash, expected_authority_epoch=1,
+            create_internal_task="CONFIRM", create_internal_notification="CONFIRM",
+            valid_until=NOW + timedelta(hours=24),
+        ))
+    body = client.get("/api/v54/projects/10/autonomy-readiness").json()
+    assert body["policy"]["task_mode"] == "CONFIRM"
+    assert body["mailbox"]["auto_source_chain_ready"] is False
+    assert "mailbox_source_chain_not_ready" not in body["overall"]["blockers"]
+    assert body["overall"]["status"] == "DEGRADED"

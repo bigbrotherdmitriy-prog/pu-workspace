@@ -1,15 +1,28 @@
 /* Phone mail (≤ 760 px): master-detail. The list view is a horizontal row of
    folder chips plus the thread list; tapping a thread shows only that letter
-   with a "Назад" button, and a single "Подтвердить для AUTO" button replaces
-   the three-step context strip. Desktop never shows the back button or the
-   AUTO shortcut. */
-.mail-mobile-auto, .mail-mobile-back { display: none; }
+   with a "Назад" button. The desktop selectors are replaced by one
+   «Изменить связь» button (bottom sheet) and, once AUTO for mail is available,
+   a single "Подтвердить для AUTO" button. Desktop never shows the back button
+   or these phone shortcuts. */
+.mail-mobile-auto, .mail-mobile-back, .mail-mobile-context { display: none; }
 @media (max-width: 760px) {
   :root .shell .mail-client.mail-mobile-list .mail-reading-pane { display: none !important; }
   :root .shell .mail-client.mail-mobile-reading :is(.mail-client-top, .mail-folders, .mail-thread-list) { display: none !important; }
   :root .shell .mail-layout { display: block !important; min-height: 0 !important; height: auto !important; overflow: hidden !important; }
   :root .shell .mail-thread-list { max-height: none !important; overflow: visible !important; border: 0 !important; }
-  :root .shell .mail-reading-pane { min-height: 0 !important; max-height: none !important; border: 0 !important; }
+  /* "Вниз не прокручивается" (14.10.2026): the desktop pane is its own scroll
+     box (overflow-y: auto + overscroll-behavior: contain). On a phone it grows
+     to its content, so it had nothing to scroll yet still swallowed every wheel
+     and swipe instead of chaining them to the shell's scroller. Lay it out in
+     the flow like the thread list; clip (not hidden) keeps it from becoming a
+     scroll container while still cutting off sideways overflow. */
+  :root .shell .mail-reading-pane {
+    min-height: 0 !important; max-height: none !important; border: 0 !important;
+    overflow-x: clip !important; overflow-y: visible !important; overscroll-behavior: auto !important;
+  }
+  /* Keep the last lines / attachments clear of the floating PU and + buttons
+     (and the bottom nav + safe area when the page itself is the scroller). */
+  :root .shell :is(.mail-reading-pane, .mail-thread-list) { padding-bottom: calc(62px + 72px + env(safe-area-inset-bottom, 0px)) !important; }
 
   :root .shell .mail-folders { display: grid !important; gap: 8px !important; min-width: 0 !important; padding: 8px !important; overflow: hidden !important; border-right: 0 !important; }
   :root .shell .mail-folders .mail-compose-button { width: 100%; }
@@ -36,6 +49,12 @@
 
   :root .shell .mail-context-strip .mail-context-manual { display: none !important; }
   :root .shell .mail-mobile-auto { display: block; grid-column: 1 / -1; }
+  /* Phone link editor: «Изменить связь» opens a sheet with project + contract. */
+  :root .shell .mail-mobile-context { display: block; grid-column: 1 / -1; }
+  :root .shell .mail-mobile-context-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; font-weight: 750; }
+  :root .shell .mail-mobile-context-button svg { width: 18px; }
+  .mail-mobile-context-sheet .mail-mobile-context-field { display: grid; grid-template-columns: 1fr; gap: 6px; min-height: 0; padding: 0; border: 0; font-size: 13px; font-weight: 750; }
+  .mail-mobile-context-sheet .mail-mobile-context-field select { width: 100%; min-height: 48px; padding: 0 10px; border: 1px solid var(--read-rule, #cdcec5); border-radius: 10px; background: var(--read-surface, #fff); color: inherit; font-size: 16px; }
   :root .shell .mail-mobile-auto-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; font-weight: 750; }
   :root .shell .mail-mobile-auto-button svg { width: 18px; }
   .mail-mobile-auto-backdrop { position: fixed; inset: 0; z-index: 160; display: grid; align-items: end; background: rgba(5, 14, 10, .58); }
