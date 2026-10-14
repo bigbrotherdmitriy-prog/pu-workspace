@@ -50,6 +50,12 @@ class Project(Base):
         index=True,
     )
 
+    tenant_workspace_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenant_workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     currency: Mapped[str] = mapped_column(
         String(3),
         nullable=False,
