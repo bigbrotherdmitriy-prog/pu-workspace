@@ -20,6 +20,23 @@ router = APIRouter(prefix="/projects", tags=["budget-from-dds"])
 EXCLUDED_STATUSES = ("cancelled", "deleted", "rejected")
 ZERO = Decimal("0.00")
 
+ADDITIONAL_COST_CATEGORY_NAMES = ("дополнительные расходы", "дополнительные затраты")
+
+
+def _is_additional_cost(
+    *,
+    planned_amount: Decimal,
+    actual_amount: Decimal,
+    category_name: str | None,
+    fallback_category: str | None,
+) -> bool:
+    if planned_amount == ZERO and actual_amount > ZERO:
+        return True
+    for value in (category_name, fallback_category):
+        if value is not None and value.strip().lower() in ADDITIONAL_COST_CATEGORY_NAMES:
+            return True
+    return False
+
 
 def _money(value: Decimal | None) -> str:
     if value is None:
@@ -105,8 +122,11 @@ def budget_from_dds(
 
     income = _Bucket()
     expense = _Bucket()
+    direct_expense = _Bucket()
+    additional_expense = _Bucket()
     by_category: "OrderedDict[tuple[int | None, str], dict[str, Any]]" = OrderedDict()
     months: "OrderedDict[str, _Bucket]" = OrderedDict()
+    additional_items: list[dict[str, Any]] = []
     other_currency_count = 0
 
     for entry in entries:
@@ -132,12 +152,35 @@ def budget_from_dds(
         is_income = entry.direction == "inflow"
         is_expense = entry.direction == "outflow"
 
+        category_key_name: str | None = None
+        if entry.cost_category_id is not None:
+            category_key_name = category_names.get(entry.cost_category_id, "Без статьи")
+        else:
+            category_key_name = entry.category or "Без статьи"
+
+        is_additional = is_expense and _is_additional_cost(
+            planned_amount=planned_amount,
+            actual_amount=actual_amount,
+            category_name=category_names.get(entry.cost_category_id) if entry.cost_category_id is not None else None,
+            fallback_category=entry.category,
+        )
+
         if is_income:
             if plan_in_range:
                 income.add_plan(planned_amount)
             if fact_in_range:
                 income.add_fact(actual_amount)
         elif is_expense:
+            if is_additional:
+                if plan_in_range:
+                    additional_expense.add_plan(planned_amount)
+                if fact_in_range:
+                    additional_expense.add_fact(actual_amount)
+            else:
+                if plan_in_range:
+                    direct_expense.add_plan(planned_amount)
+                if fact_in_range:
+                    direct_expense.add_fact(actual_amount)
             if plan_in_range:
                 expense.add_plan(planned_amount)
             if fact_in_range:
@@ -145,13 +188,23 @@ def budget_from_dds(
         else:
             continue
 
+        if is_additional:
+            additional_items.append({
+                "title": entry.title,
+                "counterparty": entry.counterparty,
+                "planned_date": None if planned_date is None else planned_date.isoformat(),
+                "actual_date": None if actual_date is None else actual_date.isoformat(),
+                "fact": _money(actual_amount if fact_in_range else ZERO),
+                "_sort_fact": actual_amount if fact_in_range else ZERO,
+            })
+
         key: tuple[int | None, str]
         if entry.cost_category_id is not None:
             key = (entry.cost_category_id, category_names.get(entry.cost_category_id, "Без статьи"))
         else:
             key = (None, entry.category or "Без статьи")
 
-        if is_expense:
+        if is_expense and not is_additional:
             bucket = by_category.get(key)
             if bucket is None:
                 bucket = {
@@ -177,24 +230,31 @@ def budget_from_dds(
             if fact_in_range:
                 cp_bucket["fact"] = cp_bucket["fact"] + actual_amount
 
-        if plan_in_range:
-            month_key = _month_key(planned_date)
-            months.setdefault(month_key, _Bucket())
-            if is_income:
+        if is_income:
+            if plan_in_range:
+                month_key = _month_key(planned_date)
+                months.setdefault(month_key, _Bucket())
                 months[month_key].add_plan(planned_amount)
-            else:
-                months[month_key].add_plan(-planned_amount)
-
-        if fact_in_range:
-            month_key = _month_key(actual_date)
-            months.setdefault(month_key, _Bucket())
-            if is_income:
+            if fact_in_range:
+                month_key = _month_key(actual_date)
+                months.setdefault(month_key, _Bucket())
                 months[month_key].add_fact(actual_amount)
-            else:
+        elif is_expense:
+            if plan_in_range:
+                month_key = _month_key(planned_date)
+                months.setdefault(month_key, _Bucket())
+                months[month_key].add_plan(-planned_amount)
+            if fact_in_range:
+                month_key = _month_key(actual_date)
+                months.setdefault(month_key, _Bucket())
                 months[month_key].add_fact(-actual_amount)
 
     income_plan = income.plan
     income_fact = income.fact
+    additional_plan = additional_expense.plan
+    additional_fact = additional_expense.fact
+    direct_expense_plan = direct_expense.plan
+    direct_expense_fact = direct_expense.fact
     expense_plan = expense.plan
     expense_fact = expense.fact
     profit_plan = income_plan - expense_plan
@@ -212,10 +272,31 @@ def budget_from_dds(
     income_fact_str = _money(income_fact)
     expense_plan_str = _money(expense_plan)
     expense_fact_str = _money(expense_fact)
+    direct_expense_plan_str = _money(direct_expense_plan)
+    direct_expense_fact_str = _money(direct_expense_fact)
+    additional_plan_str = _money(additional_plan)
+    additional_fact_str = _money(additional_fact)
+
+    sorted_additional = sorted(
+        additional_items,
+        key=lambda item: item["_sort_fact"],
+        reverse=True,
+    )[:200]
+    additional_items_out = [
+        {
+            "title": item["title"],
+            "counterparty": item["counterparty"],
+            "planned_date": item["planned_date"],
+            "actual_date": item["actual_date"],
+            "fact": item["fact"],
+        }
+        for item in sorted_additional
+    ]
 
     expense_by_category = []
     for bucket in by_category.values():
         deviation = bucket["fact"] - bucket["plan"]
+        remaining = bucket["plan"] - bucket["fact"]
         counterparties = [
             {
                 "counterparty": cp["counterparty"],
@@ -229,6 +310,7 @@ def budget_from_dds(
             "category": bucket["category"],
             "plan": _money(bucket["plan"]),
             "fact": _money(bucket["fact"]),
+            "remaining": _money(remaining),
             "deviation": _money(deviation),
             "counterparties": counterparties,
         })
@@ -306,6 +388,12 @@ def budget_from_dds(
         "currency": currency,
         "income": {"plan": income_plan_str, "fact": income_fact_str},
         "expense_total": {"plan": expense_plan_str, "fact": expense_fact_str},
+        "direct_expense_total": {"plan": direct_expense_plan_str, "fact": direct_expense_fact_str},
+        "additional_costs": {
+            "plan": additional_plan_str,
+            "fact": additional_fact_str,
+            "items": additional_items_out,
+        },
         "expense_by_category": expense_by_category,
         "profit": {"plan": _money(profit_plan), "fact": _money(profit_fact)},
         "margin_pct": {
