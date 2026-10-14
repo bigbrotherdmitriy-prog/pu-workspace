@@ -1,0 +1,431 @@
+/* Dark-theme safety net: legacy modules that still hard-code light backgrounds
+   get readable surfaces. This file loads last, so it only needs to cover rules
+   that have no dark variant anywhere else. Entries already handled by
+   workspace-surfaces.css / project-hq-theme.css / future-light-dashboard.css /
+   work-center-integration.css are intentionally skipped (e.g. .contract-workspace,
+   .contract-scheme-scroll, .contract-scheme-node, .gpr-dds-unified,
+   .future-light-dashboard cards, .dashboard-hero, .dds-table). */
+
+/* ---------- Buttons that default to a white surface ---------- */
+:root[data-display-theme] .shell .source-actions button,
+:root[data-display-theme] .shell .source-list button,
+:root[data-display-theme] .shell .source-link,
+:root[data-display-theme] .shell .card-head button,
+:root[data-display-theme] .shell button.secondary,
+:root[data-display-theme] .shell .task-actions button,
+:root[data-display-theme] .shell .task-assignee select,
+:root[data-display-theme] .shell .task-completion select,
+:root[data-display-theme] .shell .task-completion textarea,
+:root[data-display-theme] .shell .system-checks .card-head button,
+:root[data-display-theme] .shell .integration-card > button,
+:root[data-display-theme] .shell .integration-sync-result button,
+:root[data-display-theme] .shell .draft-actions button,
+:root[data-display-theme] .shell .draft-card textarea,
+:root[data-display-theme] .shell .proposal-controls button,
+:root[data-display-theme] .shell .proposal-action select,
+:root[data-display-theme] .shell .proposal-action input,
+:root[data-display-theme] .shell .apply-source-inline,
+:root[data-display-theme] .shell .source-apply-panel button,
+:root[data-display-theme] .shell .inbox-bulk select,
+:root[data-display-theme] .shell .inbox-bulk button,
+:root[data-display-theme] .shell .inbox-toggle,
+:root[data-display-theme] .shell .inbox-workflow.secondary,
+:root[data-display-theme] .shell .inbox-head > button,
+:root[data-display-theme] .shell .inbox-task button,
+:root[data-display-theme] .shell .inbox-attachments button,
+:root[data-display-theme] .shell .inbox-original,
+:root[data-display-theme] .shell .context-confirm select,
+:root[data-display-theme] .shell .context-confirm button,
+:root[data-display-theme] .shell .email-compensation > button,
+:root[data-display-theme] .shell .management-intro button,
+:root[data-display-theme] .shell .management-meta button,
+:root[data-display-theme] .shell .meeting-card button,
+:root[data-display-theme] .shell .meeting-create input,
+:root[data-display-theme] .shell .meeting-create textarea,
+:root[data-display-theme] .shell .meeting-create select,
+:root[data-display-theme] .shell .meeting-source-picker select,
+:root[data-display-theme] .shell .meeting-authority-head .secondary,
+:root[data-display-theme] .shell .meeting-proposal,
+:root[data-display-theme] .shell .notification-list button,
+:root[data-display-theme] .shell .finance-entry select,
+:root[data-display-theme] .shell .finance-entry input,
+:root[data-display-theme] .shell .finance-contract-chain select,
+:root[data-display-theme] .shell .finance-chain-steps button,
+:root[data-display-theme] .shell .finance-candidates article,
+:root[data-display-theme] .shell .finance-candidates article button,
+:root[data-display-theme] .shell .finance-list button,
+:root[data-display-theme] .shell .finance-document-assistant .card-head button,
+:root[data-display-theme] .shell .structured-import button.secondary,
+:root[data-display-theme] .shell .structured-table th,
+:root[data-display-theme] .shell .structured-table td,
+:root[data-display-theme] .shell .structured-table td input:not([type="checkbox"]),
+:root[data-display-theme] .shell .structured-table td select,
+:root[data-display-theme] .shell .structured-actions input,
+:root[data-display-theme] .shell .structured-review-actions,
+:root[data-display-theme] .shell .invoice-review-grid input,
+:root[data-display-theme] .shell .invoice-review-grid select,
+:root[data-display-theme] .shell .invoice-evidence,
+:root[data-display-theme] .shell .daily-briefing-list article button,
+:root[data-display-theme] .shell .daily-briefing-more,
+:root[data-display-theme] .shell .automation-form input,
+:root[data-display-theme] .shell .automation-form select,
+:root[data-display-theme] .shell .automation-form textarea,
+:root[data-display-theme] .shell .automation-list article button.secondary,
+:root[data-display-theme] .shell .inbox-filters button,
+:root[data-display-theme] .shell .mail-view-tabs button,
+:root[data-display-theme] .shell .company-contact a,
+:root[data-display-theme] .shell .contract-edit-form input,
+:root[data-display-theme] .shell .contract-edit-form select,
+:root[data-display-theme] .shell .contract-record-actions button,
+:root[data-display-theme] .shell .contract-edit-actions button,
+:root[data-display-theme] .shell .contract-scheme-tools button.secondary,
+:root[data-display-theme] .shell .contract-scheme-tools button.selected,
+:root[data-display-theme] .shell .contract-scheme-delete-zone button,
+:root[data-display-theme] .shell .contract-scheme-documents > button,
+:root[data-display-theme] .shell .contract-candidate,
+:root[data-display-theme] .shell .contract-candidate button,
+:root[data-display-theme] .shell .contract-parent-link select,
+:root[data-display-theme] .shell .contract-number,
+:root[data-display-theme] .shell .contract-links select,
+:root[data-display-theme] .shell .contract-scheme-tools button,
+:root[data-display-theme] .shell .dds-head-actions button.secondary,
+:root[data-display-theme] .shell .dds-tabs button,
+:root[data-display-theme] .shell .dds-filters select,
+:root[data-display-theme] .shell .dds-filters input,
+:root[data-display-theme] .shell .gpr-controls select,
+:root[data-display-theme] .shell .gpr-toolbar button,
+:root[data-display-theme] .shell .gpr-toolbar select,
+:root[data-display-theme] .shell .gpr-bulk button,
+:root[data-display-theme] .shell .gpr-editor input,
+:root[data-display-theme] .shell .gpr-editor select,
+:root[data-display-theme] .shell .dds-intake-toolbar select,
+:root[data-display-theme] .shell .gpr-context-bar select,
+:root[data-display-theme] .shell .gpr-import-preview button,
+:root[data-display-theme] .shell .gpr-source-binding,
+:root[data-display-theme] .shell .digest-settings input:not([type="checkbox"]),
+:root[data-display-theme] .shell .digest-settings select,
+:root[data-display-theme] .shell .digest-settings > button,
+:root[data-display-theme] .shell .form-grid input:not([type="checkbox"]):not([type="radio"]),
+:root[data-display-theme] .shell .form-grid button,
+:root[data-display-theme] .shell .login-card > a {
+  background: var(--read-surface);
+  color: var(--read-text);
+  border-color: var(--read-rule);
+}
+
+/* ---------- White cards and panels ---------- */
+:root[data-display-theme] .shell .login-card,
+:root[data-display-theme] .shell .source-icon,
+:root[data-display-theme] .shell .file-icon,
+:root[data-display-theme] .shell .integration-icon,
+:root[data-display-theme] .shell .notification-kind,
+:root[data-display-theme] .shell .avatar,
+:root[data-display-theme] .shell .management-intro > span,
+:root[data-display-theme] .shell .primary-label,
+:root[data-display-theme] .shell .member-list article > span,
+:root[data-display-theme] .shell .proposal-intro > span,
+:root[data-display-theme] .shell .metrics button,
+:root[data-display-theme] .shell .dashboard-actions-card .quick button,
+:root[data-display-theme] .shell .dashboard-control-links button,
+:root[data-display-theme] .shell .analytics-hero button,
+:root[data-display-theme] .shell .analytics-metrics article,
+:root[data-display-theme] .shell .analytics-bars i,
+:root[data-display-theme] .shell .install-app,
+:root[data-display-theme] .shell .queue-status,
+:root[data-display-theme] .shell .project-actions button.secondary,
+:root[data-display-theme] .shell .project-create input,
+:root[data-display-theme] .shell .contract-form input,
+:root[data-display-theme] .shell .contract-form select,
+:root[data-display-theme] .shell .contract-scheme-lines path.contract-link-underlay,
+:root[data-display-theme] .shell .contract-project-root,
+:root[data-display-theme] .shell .contract-tree-node::after,
+:root[data-display-theme] .shell .contract-number,
+:root[data-display-theme] .shell .contract-analysis-status span,
+:root[data-display-theme] .shell .contract-chain-status span,
+:root[data-display-theme] .shell .contract-bulk-dialog,
+:root[data-display-theme] .shell .contract-bulk-proposals article,
+:root[data-display-theme] .shell .contract-document-dialog,
+:root[data-display-theme] .shell .contract-document-search,
+:root[data-display-theme] .shell .contract-document-results > label,
+:root[data-display-theme] .shell .contract-folder-row,
+:root[data-display-theme] .shell .contract-scheme-drop-hint,
+:root[data-display-theme] .shell .dds-drop-choice,
+:root[data-display-theme] .shell .dds-plan-cell input,
+:root[data-display-theme] .shell .dds-drag-handle,
+:root[data-display-theme] .shell .dds-delete-plan,
+:root[data-display-theme] .shell .dds-group-drag,
+:root[data-display-theme] .shell .dds-schedule-link,
+:root[data-display-theme] .shell .gpr-cash-link,
+:root[data-display-theme] .shell .gpr-source-binding,
+:root[data-display-theme] .shell .gpr-primary-empty,
+:root[data-display-theme] .shell .gpr-dds-page,
+:root[data-display-theme] .shell .gpr-timescale span,
+:root[data-display-theme] .shell .gpr-timescale,
+:root[data-display-theme] .shell .gpr-collapse,
+:root[data-display-theme] .shell .dds-invoice-drop,
+:root[data-display-theme] .shell .finance-import-actions article,
+:root[data-display-theme] .shell .finance-import-actions article button,
+:root[data-display-theme] .shell .finance-import-hint,
+:root[data-display-theme] .shell .finance-warning,
+:root[data-display-theme] .shell .finance-document-assistant .card-head button,
+:root[data-display-theme] .shell .meeting-create button,
+:root[data-display-theme] .shell .meeting-resource-form input,
+:root[data-display-theme] .shell .meeting-resource-form select,
+:root[data-display-theme] .shell .meeting-resource-list > div,
+:root[data-display-theme] .shell .meeting-conflict-warning,
+:root[data-display-theme] .shell .structured-import,
+:root[data-display-theme] .shell .structured-summary > div,
+:root[data-display-theme] .shell .structured-table,
+:root[data-display-theme] .shell .structured-table tr.invalid,
+:root[data-display-theme] .shell .invoice-review-grid label,
+:root[data-display-theme] .shell .source-progress-track,
+:root[data-display-theme] .shell .source-status,
+:root[data-display-theme] .shell .task-priority-label,
+:root[data-display-theme] .shell .task-source-excerpt,
+:root[data-display-theme] .shell .task-completion,
+:root[data-display-theme] .shell .task-history,
+:root[data-display-theme] .shell .governance-status,
+:root[data-display-theme] .shell .governance-list article,
+:root[data-display-theme] .shell .document-register-head,
+:root[data-display-theme] .shell .document-register-tools,
+:root[data-display-theme] .shell .document-search > button,
+:root[data-display-theme] .shell .document-search input,
+:root[data-display-theme] .shell .document-filter-row select,
+:root[data-display-theme] .shell .document-quick-filters > button,
+:root[data-display-theme] .shell .document-register > button,
+:root[data-display-theme] .shell .document-register-actions > button,
+:root[data-display-theme] .shell .document-empty-actions > button,
+:root[data-display-theme] .shell .document-register-empty > button,
+:root[data-display-theme] .shell .document-file-kind,
+:root[data-display-theme] .shell .document-register-meta .document-status,
+:root[data-display-theme] .shell .document-information,
+:root[data-display-theme] .shell .ocr-batch-result,
+:root[data-display-theme] .shell .document-ocr-actions,
+:root[data-display-theme] .shell .document-links span,
+:root[data-display-theme] .shell .projects-overlay,
+:root[data-display-theme] .shell .project-create > div:last-child > button,
+:root[data-display-theme] .shell .project-metrics span,
+:root[data-display-theme] .shell .secretary-intro > span,
+:root[data-display-theme] .shell .draft-status,
+:root[data-display-theme] .shell .draft-card blockquote,
+:root[data-display-theme] .shell .source-row-actions .analyze,
+:root[data-display-theme] .shell .source-head-actions .queue-all:disabled,
+:root[data-display-theme] .shell .inbox-original pre,
+:root[data-display-theme] .shell .inbox-attachments,
+:root[data-display-theme] .shell .inbox-attachments > div,
+:root[data-display-theme] .shell .inbox-summary,
+:root[data-display-theme] .shell .inbox-risks,
+:root[data-display-theme] .shell .inbox-risks > div,
+:root[data-display-theme] .shell .inbox-draft textarea,
+:root[data-display-theme] .shell .inbox-compose input,
+:root[data-display-theme] .shell .inbox-compose textarea,
+:root[data-display-theme] .shell .email-compensation,
+:root[data-display-theme] .shell .email-compensation__warning,
+:root[data-display-theme] .shell .management-list > article,
+:root[data-display-theme] .shell .management-status,
+:root[data-display-theme] .shell .notification-kind.overdue,
+:root[data-display-theme] .shell .notification-kind.risk,
+:root[data-display-theme] .shell .proposal-status,
+:root[data-display-theme] .shell .contract-status,
+:root[data-display-theme] .shell .contract-status.draft,
+:root[data-display-theme] .shell .mail-view-tabs button,
+:root[data-display-theme] .shell .company-create-form input,
+:root[data-display-theme] .shell .company-create-form select,
+:root[data-display-theme] .shell .company-create-form textarea,
+:root[data-display-theme] .shell .company-drafts article {
+  background: var(--read-surface);
+  color: var(--read-text);
+  border-color: var(--read-rule);
+}
+
+/* Muted secondary text (small, captions, small shadows in dark) */
+:root[data-display-theme] .shell :is(
+  .source-card p, .source-list p,
+  .project-create p, .secretary-intro p,
+  .draft-head p, .draft-status.rejected,
+  .integration-card p, .integration-sync-result,
+  .check-row p, .check-row small, .audit-list p, .audit-list time, .audit-list small,
+  .member-list p, .setting-row, .management-list p, .management-list small,
+  .notification-list small, .notification-list p,
+  .meeting-create p, .meeting-authority-head small, .meeting-source-proof span,
+  .meeting-proposal blockquote, .meeting-proposal-heading span,
+  .finance-metrics span, .finance-entry p, .finance-contract-chain p,
+  .finance-chain-guide p, .finance-chain-steps small, .finance-candidates small,
+  .finance-warning, .finance-empty,
+  .structured-summary span, .structured-summary small,
+  .invoice-evidence small, .daily-briefing-heading p, .daily-briefing-safety,
+  .daily-briefing-list article span, .daily-briefing-list article small,
+  .daily-briefing-list article p, .daily-briefing-metrics span,
+  .inbox-toolbar, .inbox-toolbar small, .inbox-toolbar > span,
+  .inbox-preview, .inbox-attachments small, .inbox-task p, .inbox-task > span,
+  .inbox-draft > span, .inbox-risks small, .inbox-risks b,
+  .context-confirm select, .contract-candidate small, .contract-scheme-head p,
+  .contract-scheme-detail > p, .contract-scheme-documents small,
+  .contract-node-open span, .contract-node-open small, .contract-node-open em,
+  .contract-tree-position, .contract-tree-position b,
+  .contract-parent-link > span, .contract-links, .contract-finance-drops small,
+  .contract-finance-confirmation, .contract-application-drop small,
+  .contract-scheme-file-drop small, .contract-bulk-launch small,
+  .contract-bulk-tree-head small, .contract-bulk-dialog p, .contract-bulk-group > p,
+  .contract-bulk-fields > small:first-child, .contract-bulk-fields > small:last-child,
+  .contract-document-dialog-head p, .contract-folder-breadcrumbs svg,
+  .contract-document-results > label small, .contract-document-dialog-actions > span,
+  .contract-analysis-status span, .contract-chain-status span
+) { color: var(--read-muted); }
+
+/* ---------- Accent chips / badges / status pills ---------- */
+:root[data-display-theme] .shell :is(
+  .primary-label, .member-list article > span, .proposal-intro > span,
+  .management-intro > span, .task-priority-label, .governance-status,
+  .source-status, .source-status.ready,
+  .draft-status.approved, .proposal-status, .proposal-status.applied,
+  .proposal-status.rolled_back, .contract-status,
+  .finance-forecast .good, .notice,
+  .inbox-attachments button.imported, .integration-card > span.connected,
+  .connection-status.online, .connection-status.offline,
+  .daily-briefing-heading .all-clear, .daily-briefing-heading .has-attention,
+  .meeting-source-proof, .meeting-proposal-confirmed,
+  .autonomy-state-active, .autonomy-state-degraded, .autonomy-state-off,
+  .finance-chain-steps button.complete,
+  .project-cleanup-result, .contract-scheme-drop-hint,
+  .contract-source-badge.linked, .contract-source-badge.missing,
+  .document-register-meta .document-status,
+  .document-register-meta .document-status.analyzed,
+  .document-register-meta .document-status.working,
+  .document-register-meta .document-status.attention,
+  .gpr-import-preview, .gpr-import-message, .gpr-import-message.error,
+  .contract-bulk-progress, .contract-bulk-index
+) {
+  background: var(--read-accent-fill);
+  color: var(--read-accent);
+  border-color: var(--read-accent);
+}
+
+/* ---------- Warnings ---------- */
+:root[data-display-theme] .shell :is(
+  .attention, .task-body .task-review-warning,
+  .task-priority-label.high, .task-priority-label.critical, .task-priority-label.low,
+  .task-meta .overdue, .governance-status.high, .governance-status.critical,
+  .management-status, .management-status.breached, .management-status.fulfilled,
+  .management-status.completed, .proposal-status.conflict_source_changed,
+  .finance-list b, .finance-forecast .bad,
+  .pill, .autonomy-state-blocked,
+  .meeting-conflict-warning, .meeting-authority-error,
+  .email-compensation__warning, .email-compensation__status,
+  .contract-scheme-hint,
+  .daily-briefing-icon, .inbox-risks, .inbox-risks b,
+  .finance-chain-steps button.selected,
+  .finance-next-action, .structured-table tr.invalid,
+  .gpr-delay, .gpr-import-message.error,
+  .document-duplicate-note,
+  .document-register-copy > .ocr-quality,
+  .ocr-quality.low,
+  .dds-direction.outflow, .dds-direction.inflow,
+  .company-contact a
+) {
+  color: var(--read-warn);
+}
+
+:root[data-display-theme] .shell :is(
+  .attention, .task-priority-label.high, .task-priority-label.critical,
+  .governance-status.high, .governance-status.critical,
+  .management-status, .management-status.breached,
+  .proposal-status.conflict_source_changed,
+  .email-compensation__warning, .email-compensation__status,
+  .meeting-conflict-warning, .meeting-authority-error,
+  .contract-scheme-hint, .structured-table tr.invalid,
+  .finance-next-action, .gpr-import-message.error,
+  .inbox-risks, .finance-warning, .finance-import-hint, .dds-direction.outflow,
+  .company-contact a
+) {
+  background: var(--read-warn-fill);
+  border-color: var(--read-warn);
+}
+
+/* ---------- Danger / error ---------- */
+:root[data-display-theme] .shell :is(
+  .error, .project-actions button.danger, .task-list article:has(.task-priority.high),
+  .autonomy-state-blocked, .finance-forecast .bad,
+  .inbox-risks b, .document-register-meta .document-status.attention,
+  .contract-source-badge.missing, .gpr-delay,
+  .contract-drop-feedback, .contract-scheme-delete-zone,
+  .dds-table .negative, .dds-calendar .dds-balance .negative
+) {
+  color: var(--read-danger);
+}
+
+:root[data-display-theme] .shell :is(.error, .project-actions button.danger) {
+  background: var(--read-danger-fill);
+  border-color: var(--read-danger);
+}
+
+/* ---------- Small standalone "quiet" pills and inputs ---------- */
+:root[data-display-theme] .shell :is(.integration-icon, .notification-kind, .contract-number, .task-priority-label, .governance-status, .pill, .source-status) {
+  color: var(--read-text);
+}
+
+/* ---------- Headings inside repainted blocks keep readable color ---------- */
+:root[data-display-theme] .shell :is(
+  .login-card h1, .login-card label, .login-card input,
+  .source-card strong, .project-title h2, .project-card strong,
+  .inbox-head h2, .inbox-head p, .inbox-head a, .inbox-meta,
+  .proposal-head h2, .proposal-head p, .proposal-note,
+  .contract-card h2, .contract-card p, .contract-card small,
+  .contract-document-dialog h2, .contract-document-dialog p,
+  .contract-scheme-head h2,
+  .dds-head h2, .dds-head-actions, .dds-empty, .dds-note,
+  .gpr-head h2, .gpr-head p, .gpr-note, .gpr-empty,
+  .gpr-editor > div strong, .gpr-editor > div small,
+  .meeting-card h2, .meeting-card > p, .meeting-agenda,
+  .meeting-authority-head > div,
+  .notification-list p, .notification-list small,
+  .structured-import h2, .structured-toolbar,
+  .invoice-evidence,
+  .finance-import-heading h2, .finance-import-heading p,
+  .finance-document-assistant h2, .finance-document-assistant p,
+  .contract-edit-form > strong,
+  .contract-scheme-detail h3, .contract-scheme-detail h4,
+  .contract-scheme-documents strong, .contract-scheme-documents small,
+  .application-feedback-layer span, .app-error-banner span
+) {
+  color: var(--read-text);
+}
+
+/* ---------- Lists that inherit a light background through default button look ---------- */
+:root[data-display-theme] .shell :is(
+  .doc-list article, .source-list article, .task-list article,
+  .governance-list article, .audit-list article, .member-list article,
+  .setting-row, .dashboard-inbox-list > button
+) {
+  color: var(--read-text);
+  border-color: var(--read-rule);
+}
+
+/* ---------- Modals / dialogs that live inside .shell ---------- */
+:root[data-display-theme] .shell :is(
+  .contract-scheme-detail, .contract-document-dialog, .contract-bulk-dialog,
+  .gpr-dds-editor-modal > section, .gpr-dds-editor-close,
+  .source-apply-panel, .drive-source-picker-modal,
+  .login-card, .notification-kind, .ai-hover-bubble
+) {
+  background: var(--read-surface);
+  color: var(--read-text);
+  border-color: var(--read-rule);
+}
+
+/* ---------- Text-only helpers (no background) — pair with muted var ---------- */
+:root[data-display-theme] .shell :is(.muted, small, .empty, .finance-empty, .gpr-empty) {
+  color: var(--read-muted);
+}
+
+/* ---------- Contract register: light scheme-specific colors ---------- */
+:root[data-display-theme] .shell .contract-scheme-hint { background: var(--read-warn-fill); color: var(--read-warn); }
+:root[data-display-theme] .shell .contract-scheme-delete-zone { background: transparent; }
+:root[data-display-theme] .shell .contract-scheme-delete-zone small { color: var(--read-muted); }
+
+/* ---------- DDS/Rashody: table cells and totals keep the dark surface ---------- */
+:root[data-display-theme] .shell .dds-table .total td,
+:root[data-display-theme] .shell .dds-table .total td:first-child { background: var(--read-secondary); color: var(--read-text); }
+:root[data-display-theme] .shell .dds-table .money { color: var(--read-text); }
+:root[data-display-theme] .shell .dds-table .positive { color: var(--read-accent); }
+:root[data-display-theme] .shell .dds-table .negative { color: var(--read-danger); }

@@ -18,6 +18,7 @@ import "./work-center-integration.css";
 import "./application-feedback.css";
 import "./mobile-shell.css";
 import "./desktop-header.css";
+import "./dark-theme-fixes.css";
 import { applyDisplayPreference } from "./modules/settings/ComfortControls";
 import { captureFcmTokenFromLocation } from "./push/fcmRegistration";
 
