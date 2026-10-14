@@ -158,7 +158,6 @@
 :root[data-display-theme] .shell .gpr-cash-link,
 :root[data-display-theme] .shell .gpr-source-binding,
 :root[data-display-theme] .shell .gpr-primary-empty,
-:root[data-display-theme] .shell .gpr-dds-page,
 :root[data-display-theme] .shell .gpr-timescale span,
 :root[data-display-theme] .shell .gpr-timescale,
 :root[data-display-theme] .shell .gpr-collapse,
@@ -429,3 +428,6 @@
 :root[data-display-theme] .shell .dds-table .money { color: var(--read-text); }
 :root[data-display-theme] .shell .dds-table .positive { color: var(--read-accent); }
 :root[data-display-theme] .shell .dds-table .negative { color: var(--read-danger); }
+
+:root[data-display-theme] .shell .contract-parent-link { background: var(--read-surface); border-color: var(--read-rule); color: var(--read-text); }
+:root[data-display-theme] .shell .contract-parent-link span, :root[data-display-theme] .shell .contract-parent-link small { color: var(--read-muted); }
