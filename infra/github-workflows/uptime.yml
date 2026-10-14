@@ -1,0 +1,135 @@
+# External uptime check for production (puworkspace.ru).
+#
+# Lives at .github/workflows/uptime.yml. If you are reading this under
+# infra/github-workflows/, it is staged there only because the automation
+# token has no `workflow` scope: move it with
+#   git mv infra/github-workflows/uptime.yml .github/workflows/uptime.yml
+#
+# Runs from GitHub's network, so it sees outages the host itself cannot
+# report (host down, network down, Caddy down). Two consecutive failures
+# 60 s apart are required before anything is reported.
+#
+# On an outage: one open GitHub issue labelled `outage` (opened once, then
+# commented on each failing run) and a Telegram message when the outage is
+# opened, a reminder every 2 hours while it lasts, and a recovery message
+# when the issue is closed.
+#
+# Repository secrets (optional; without them only the issue is kept):
+#   TELEGRAM_BOT_TOKEN  - Bot API token
+#   TELEGRAM_CHAT_ID    - chat that receives the alerts
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      # Public URLs that must answer 200. /health is the backend FastAPI
+      # health endpoint proxied by Caddy; /new/ is the React UI.
+      TARGETS: |
+        https://puworkspace.ru/new/
+        https://puworkspace.ru/health
+    steps:
+      - name: Probe production (retry once after 60 s)
+        id: probe
+        shell: bash
+        run: |
+          set -u
+          probe() {
+            local failed="" url code
+            while read -r url; do
+              [ -n "$url" ] || continue
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+                -A 'pu-workspace-uptime/1.0' "$url" 2>/dev/null) || true
+              [ -n "$code" ] || code=000
+              echo "$url -> $code"
+              [ "$code" = "200" ] || failed="${failed}${url} (HTTP ${code}); "
+            done <<< "$TARGETS"
+            FAILED="$failed"
+          }
+          probe
+          if [ -n "$FAILED" ]; then
+            echo "First probe failed: ${FAILED%; }; retrying in 60 s"
+            sleep 60
+            probe
+          fi
+          if [ -n "$FAILED" ]; then
+            echo "status=down" >> "$GITHUB_OUTPUT"
+            echo "details=${FAILED%; }" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=up" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report outage or recovery
+        shell: bash
+        env:
+          STATUS: ${{ steps.probe.outputs.status }}
+          DETAILS: ${{ steps.probe.outputs.details }}
+        run: |
+          set -euo pipefail
+          now=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+          telegram() {
+            if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+              echo "::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets are not set; Telegram alert skipped"
+              return 0
+            fi
+            # The token lives only in the request URL; curl never prints it
+            # (no -v) and GitHub masks secret values in logs anyway.
+            local code
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=$1" \
+              --data-urlencode "disable_web_page_preview=true" 2>/dev/null) || code=000
+            if [ "$code" = "200" ]; then
+              echo "Telegram alert sent"
+            else
+              echo "::warning::Telegram API answered HTTP $code"
+            fi
+          }
+
+          gh label create outage --color B60205 \
+            --description 'Production is unreachable (opened by the Uptime workflow)' >/dev/null 2>&1 || true
+          issue=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ "$STATUS" = "down" ]; then
+            if [ -z "$issue" ]; then
+              gh issue create --label outage \
+                --title "Outage: puworkspace.ru is not answering ($now)" \
+                --body "$(printf 'The Uptime workflow failed twice in a row (60 s apart).\n\n- Failed: %s\n- First detected: %s\n- Run: %s\n\nThis issue is closed automatically when the site answers again.' "$DETAILS" "$now" "$RUN_URL")"
+              telegram "$(printf '🔴 PU Workspace недоступен (%s)\n%s\n%s' "$now" "$DETAILS" "$RUN_URL")"
+            else
+              gh issue comment "$issue" --body "Still down at $now: $DETAILS ([run]($RUN_URL))"
+              comments=$(gh issue view "$issue" --json comments --jq '.comments | length')
+              # Every 8th failing run (~2 h at the 15 min schedule) repeat the alert.
+              if [ $((comments % 8)) -eq 0 ]; then
+                telegram "$(printf '🔴 PU Workspace всё ещё недоступен (%s)\n%s\n%s' "$now" "$DETAILS" "$RUN_URL")"
+              fi
+            fi
+          else
+            echo "Production is up"
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "Recovered at $now: all checks answer HTTP 200 ([run]($RUN_URL))."
+              gh issue close "$issue" --reason completed
+              telegram "$(printf '🟢 PU Workspace восстановлен (%s)\nВсе проверки отвечают 200.' "$now")"
+            fi
+          fi
