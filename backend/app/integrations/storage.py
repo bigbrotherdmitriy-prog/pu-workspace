@@ -37,13 +37,14 @@ def validate_storage_locator(provider: str, locator: str) -> str:
     return locator
 
 
-def storage_for_project(project_id: int, db: Session) -> StorageAdapter:
+def storage_for_project(project_id: int, db: Session, connection: DriveConnection | None = None) -> StorageAdapter:
     """Resolve the selected provider outside Project and Document Core.
 
     Missing legacy connection rows continue to resolve to Google exactly as
     before. Existing Google tokens and folder identifiers are never rewritten.
     """
-    connection = project_storage_connection(project_id, db)
+    if connection is None:
+        connection = project_storage_connection(project_id, db)
     if connection and connection.status == "disconnected":
         raise HTTPException(409, "Project storage is disconnected")
     provider = connection.provider if connection else "google_drive"

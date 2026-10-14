@@ -496,6 +496,7 @@ export function App() {
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
   const yandexMailConnected = integrationItems.some((item) => item.provider === "yandex_mail" && item.capability === "channel" && item.connected);
+  const yandexDiskConnected = integrationItems.some((item) => item.provider === "yandex_disk" && item.connected);
   const [copyCleanupResults, setCopyCleanupResults] = useState<Record<number, { count: number; message: string }>>({});
   const picker = useStoragePicker<DriveFolder>(projectId, projectIdRef);
   const { folders, setFolders, busyFolder, setBusyFolder } = picker;
@@ -3250,8 +3251,10 @@ export function App() {
           {active === "Запуск проекта" && (
             <ProjectLaunchWizard
               projectId={projectId}
-              storageAuthorized={googleState?.authorized === true}
+              storageAuthorized={googleState?.authorized === true || yandexDiskConnected}
               onConnectStorage={() => void connectGoogle()}
+              storageLabel={yandexDiskConnected ? "Яндекс Диск" : "Google Drive"}
+              onOpenStorage={yandexDiskConnected ? () => void openProviderSources("yandex_disk") : undefined}
               onUploadProjectFolder={() => { setLocalUploadPurpose("project-folder"); setMobileUploadOpen(true); }}
               openSection={(section, target) => {
                 if (target === "contacts") setMailView("companies");

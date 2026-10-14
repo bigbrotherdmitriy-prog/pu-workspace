@@ -15,6 +15,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.models.drive_connection import DriveConnection
 from app.models.google_token import GoogleOAuthToken
+from app.models.integration_credential import IntegrationCredential
 from app.models.job import BackgroundJob
 from app.models.workspace import SourceFolder, VirtualNode, WorkspaceSnapshot
 from app.organizer_engine.drive import DriveClient
@@ -179,6 +180,17 @@ def _selected_connection(project_id, db, provider=None, connection_id=None, *, a
     if db.get(Project, project_id) is None:
         raise HTTPException(404, "Project not found")
     connection = project_storage_connection(project_id, db)
+    canonical = lambda value: "google_drive" if value == "google_workspace" else value
+    if connection is None and allow_google_oauth and provider is not None and canonical(provider) == "yandex_disk":
+        # Yandex OAuth stores only a project-scoped credential until a folder is
+        # confirmed; browse read-only and persist the connection on confirmation.
+        credential = db.scalar(select(IntegrationCredential).where(
+            IntegrationCredential.project_id == project_id, IntegrationCredential.provider == "yandex_disk",
+            IntegrationCredential.capability == "storage"))
+        if credential is not None and credential.access_token:
+            connection = DriveConnection(project_id=project_id, provider="yandex_disk",
+                                         connection_id=str(credential.id), account_email=credential.account_email or "",
+                                         root_folder_id="disk:/", status="connected")
     if connection is None and allow_google_oauth:
         # Google OAuth historically stores only a project-scoped token. Browsing
         # must remain read-only; persist a connection only on explicit confirmation.
@@ -189,12 +201,19 @@ def _selected_connection(project_id, db, provider=None, connection_id=None, *, a
                                          root_folder_id="root", status="connected")
     if connection is None or connection.status == "disconnected":
         raise HTTPException(409, "Configure storage for this project before selecting a folder")
-    canonical = lambda value: "google_drive" if value == "google_workspace" else value
     if provider is not None and canonical(provider) != canonical(connection.provider):
         raise HTTPException(409, "Storage provider changed; reopen folder selection")
     if connection_id is not None and connection_id != connection.connection_id:
         raise HTTPException(409, "Storage connection changed; reopen folder selection")
     return connection
+
+
+def _storage_for_selected(project_id, db, connection):
+    # A Yandex connection that is not persisted yet (browse before the first
+    # confirmation) must resolve to Yandex, not to the legacy Google default.
+    if connection.id is None and connection.provider == "yandex_disk":
+        return storage_for_project(project_id, db, connection=connection)
+    return storage_for_project(project_id, db)
 
 
 def _binding(connection, external_id):
@@ -614,7 +633,7 @@ def discover_source_folders(
     if connection.provider == "yandex_disk" and folder_id == "root":
         folder_id = "disk:/"  # Explicit legacy navigation request, never confirmation.
     validate_storage_locator(connection.provider, folder_id)
-    adapter = storage_for_project(project_id, db)
+    adapter = _storage_for_selected(project_id, db, connection)
     provider_folders = [item for item in adapter.list_children(folder_id) if item.is_folder]
     sources = list(db.scalars(select(SourceFolder).where(SourceFolder.project_id == project_id, SourceFolder.provider == adapter.provider)))
     source_by_external = {row.external_id: row for row in sources}
@@ -720,7 +739,7 @@ def queue_workspace_snapshot(
         connection.root_display_name = source.name
         db.commit()
         return response(active, job.id if job else None, True)
-    drive = storage_for_project(project_id, db)
+    drive = _storage_for_selected(project_id, db, connection)
     source_meta = drive.get_object(external_id)
     if not source_meta.is_folder:
         raise HTTPException(422, "Source object is not a folder")
