@@ -1,0 +1,11 @@
+[Unit]
+Description=PU Workspace: daily off-site DB backup at 03:30 Europe/Moscow
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=2min
+Unit=pu-offsite-backup.service
+
+[Install]
+WantedBy=timers.target
