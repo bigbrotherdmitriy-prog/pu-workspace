@@ -11,13 +11,16 @@ type Props = {
   onConnectStorage: () => void;
   onUploadProjectFolder: () => void;
   openSection: (section: string, target?: LaunchTarget) => void;
+  /** Connected project storage shown on the folder step; defaults to Google Drive. */
+  storageLabel?: string;
+  onOpenStorage?: () => void;
 };
 type Step = {
   title: string; description: string; section: string; target?: LaunchTarget;
   complete: boolean; status: string; nextAction: string; icon: typeof Circle;
 };
 
-export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectStorage, onUploadProjectFolder, openSection }: Props) {
+export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectStorage, onUploadProjectFolder, openSection, storageLabel = "Google Drive", onOpenStorage }: Props) {
   const { state, error, reload } = useProjectLaunchReadiness(projectId);
   const [selectedMode, setSelectedMode] = useState<"managed" | "imported" | null>(() => {
     const saved = localStorage.getItem(`pu-project-start-mode:${projectId}`);
@@ -104,7 +107,7 @@ export function ProjectLaunchWizard({ projectId, storageAuthorized, onConnectSto
   return <section className="project-launch-page">
     <div className="launch-hero card"><div><span className="launch-eyebrow">МАСТЕР ЗАПУСКА · {mode === "managed" ? "НОВЫЙ ПРОЕКТ" : "СУЩЕСТВУЮЩИЙ АРХИВ"}</span><h2>{state.projectName || "Выбранный проект"}</h2><p>{mode === "managed" ? "Постоянная структура проекта → договоры → ГПР → ДДС → ежедневная работа." : "Исходная папка → безопасная копия → анализ → договоры → ГПР и ДДС."}</p></div><div className="launch-progress" aria-label={`Готовность проекта ${progress}%`}><strong>{progress}%</strong><span>{completed} из {steps.length} этапов</span></div></div>
     <div className="launch-progress-bar"><span style={{ width: `${progress}%` }} /></div>
-    <div className="launch-steps">{steps.map((step, index) => { const Icon = step.icon; const folderStep = step.title === "Проект и рабочая папка" && mode === "imported"; return <article className={`launch-step card ${step.complete ? "complete" : "pending"}`} key={step.title}><div className="launch-step-number">{step.complete ? <Check /> : index + 1}</div><div className="launch-step-icon"><Icon /></div><div className="launch-step-copy"><h3>{step.title}</h3><p>{step.description}</p><small>{step.complete ? "Готово: " : "Состояние: "}{step.status}</small>{!step.complete && <strong className="launch-step-action">Дальше: {step.nextAction}</strong>}</div>{folderStep && !step.complete ? <div className="launch-step-buttons"><button onClick={onUploadProjectFolder}><HardDriveUpload /> С компьютера</button><button className="secondary" onClick={() => openSection(step.section, step.target)}><FolderSearch2 /> Google Drive</button></div> : <button onClick={() => openSection(step.section, step.target)}>{step.complete ? "Проверить" : step.nextAction}</button>}</article> })}</div>
+    <div className="launch-steps">{steps.map((step, index) => { const Icon = step.icon; const folderStep = step.title === "Проект и рабочая папка" && mode === "imported"; return <article className={`launch-step card ${step.complete ? "complete" : "pending"}`} key={step.title}><div className="launch-step-number">{step.complete ? <Check /> : index + 1}</div><div className="launch-step-icon"><Icon /></div><div className="launch-step-copy"><h3>{step.title}</h3><p>{step.description}</p><small>{step.complete ? "Готово: " : "Состояние: "}{step.status}</small>{!step.complete && <strong className="launch-step-action">Дальше: {step.nextAction}</strong>}</div>{folderStep && !step.complete ? <div className="launch-step-buttons"><button onClick={onUploadProjectFolder}><HardDriveUpload /> С компьютера</button><button className="secondary" onClick={() => onOpenStorage ? onOpenStorage() : openSection(step.section, step.target)}><FolderSearch2 /> {storageLabel}</button></div> : <button onClick={() => openSection(step.section, step.target)}>{step.complete ? "Проверить" : step.nextAction}</button>}</article> })}</div>
     <section className="launch-next card"><Route /><div><h3>{next ? `Сейчас: ${next.nextAction}` : "Проект готов к ежедневной работе"}</h3><p>{next ? `${next.title}. ${next.description}` : `Подключено входящих писем: ${state.inboxMessages}. Контроль задач и исходящих ответов работает через подтверждения пользователя.`}</p></div>{next && <button onClick={() => openSection(next.section, next.target)}>Продолжить запуск</button>}</section>
   </section>;
 }

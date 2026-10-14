@@ -433,3 +433,20 @@ def test_yandex_namespace_breadcrumb_without_network(locator):
     assert [item['id'] for item in workspace._storage_breadcrumb(Adapter(), locator)] == [
         locator.split('/')[0] + '/', locator.rsplit('/', 2)[0], locator.rsplit('/', 1)[0], locator,
     ]
+
+
+def test_yandex_folder_browse_works_before_first_confirmation(db_session, monkeypatch):
+    # Regression 14.10.2026: after Yandex OAuth only a credential exists; the
+    # first folder browse must resolve to Yandex instead of failing with 409
+    # or silently falling back to the legacy Google default.
+    org = Organization(name='Synthetic'); db_session.add(org); db_session.flush()
+    p = Project(name='Project', organization_id=org.id); db_session.add(p); db_session.flush()
+    cred = IntegrationCredential(project_id=p.id, provider='yandex_disk', capability='storage',
+                                 access_token='fake', account_email='test@example.test')
+    db_session.add(cred); db_session.commit()
+    monkeypatch.setattr(storage, 'decrypt_token', lambda _: 'synthetic')
+    connection = workspace._selected_connection(p.id, db_session, 'yandex_disk', None, allow_google_oauth=True)
+    assert connection.id is None and connection.provider == 'yandex_disk' and connection.connection_id == str(cred.id)
+    adapter = workspace._storage_for_selected(p.id, db_session, connection)
+    assert isinstance(adapter, YandexDiskStorageAdapter)
+    assert db_session.query(DriveConnection).filter_by(project_id=p.id).count() == 0
