@@ -1,0 +1,13 @@
+/* Desktop header (> 760 px) with a long project name. The kicker above the
+   page title shows the full project name; as a flex item it sized the whole
+   heading, so `.header-actions` (flex: 1 1 0) was squeezed to zero width,
+   its controls wrapped into a column and ran past the right edge (owner
+   report 14.10.2026, «Договор на модернизацию…», all sections). The heading
+   is capped and the kicker keeps one line with an ellipsis;
+   the full name stays in its title and in the project picker. */
+@media (min-width: 761px) {
+  :root .shell > main > header .page-heading { min-width: 0; max-width: min(26%, 320px); }
+  :root .shell > main > header .page-heading .page-kicker {
+    max-width: 100%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+}
