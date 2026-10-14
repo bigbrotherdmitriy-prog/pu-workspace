@@ -170,10 +170,16 @@ class OrganizerRepository:
                 ELSE 'skipped'
             END
             WHERE proposal_id=:id
+              AND (
+                user_decision IS NULL
+                OR user_decision = 'pending'
+              )
+              AND edited_name IS NULL
+              AND edited_folder IS NULL
         """), {"id": proposal_id, "minimum": minimum_confidence})
         approved = int(self.db.execute(text("""
             SELECT count(*) FROM organizer_actions
-            WHERE proposal_id=:id AND user_decision='approved'
+            WHERE proposal_id=:id AND user_decision='approved' AND edited_name IS NULL AND edited_folder IS NULL
         """), {"id": proposal_id}).scalar_one())
         if approved:
             self.db.execute(text("""
