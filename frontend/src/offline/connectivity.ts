@@ -101,18 +101,32 @@ export function recheckConnectivity(): Promise<boolean> {
   return inflight;
 }
 
+/**
+ * The browser just lost the network. A real offline must show at once, so the
+ * earlier "server reachable" evidence is dropped and the banner appears before
+ * the probe returns; the probe then confirms it, or clears it when the server
+ * still answers (the Android VPN case).
+ */
+export function markOfflineAndRecheck(): Promise<boolean> {
+  if (browserSaysOnline()) return recheckConnectivity();
+  reachable = null;
+  emit();
+  return recheckConnectivity();
+}
+
 /** Attach window/document listeners (ref-counted). Returns a disposer. */
 export function startConnectivityMonitor(): () => void {
   monitors += 1;
   if (monitors === 1 && typeof window !== "undefined") {
-    const onNetworkEvent = () => { void recheckConnectivity(); };
+    const onOnline = () => { void recheckConnectivity(); };
+    const onOffline = () => { void markOfflineAndRecheck(); };
     const onVisibility = () => { if (document.visibilityState === "visible") void recheckConnectivity(); };
-    window.addEventListener("online", onNetworkEvent);
-    window.addEventListener("offline", onNetworkEvent);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisibility);
     detachMonitor = () => {
-      window.removeEventListener("online", onNetworkEvent);
-      window.removeEventListener("offline", onNetworkEvent);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
       document.removeEventListener("visibilitychange", onVisibility);
     };
     void recheckConnectivity();

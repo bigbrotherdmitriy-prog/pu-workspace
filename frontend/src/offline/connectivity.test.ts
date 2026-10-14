@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  HEALTH_PATH, OFFLINE_RECHECK_MS, PROBE_TIMEOUT_MS, isOnline, recheckConnectivity, reportServerReachable,
+  HEALTH_PATH, OFFLINE_RECHECK_MS, PROBE_TIMEOUT_MS, isOnline, markOfflineAndRecheck, recheckConnectivity,
+  reportServerReachable,
   resetConnectivityForTests, startConnectivityMonitor, subscribeConnectivity,
 } from "./connectivity";
 
@@ -135,5 +136,33 @@ describe("connectivity", () => {
     expect(isOnline()).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     stop();
+  });
+
+  it("shows a real offline at once on the offline event, before the probe returns", async () => {
+    const stop = startConnectivityMonitor();
+    reportServerReachable();
+    const states: boolean[] = [];
+    subscribeConnectivity((online) => states.push(online));
+    let answer: (response: Response) => void = () => {};
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    setNavigatorOnline(false);
+    window.dispatchEvent(new Event("offline"));
+    // Offline is reported synchronously, while the probe is still pending.
+    expect(isOnline()).toBe(false);
+    expect(states).toEqual([false]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The server still answers (VPN case): the probe clears the offline state.
+    answer(new Response("{}", { status: 200 }));
+    await vi.waitFor(() => expect(isOnline()).toBe(true));
+    expect(states).toEqual([false, true]);
+    stop();
+  });
+
+  it("keeps a confirmed offline when the probe fails after the offline event", async () => {
+    reportServerReachable();
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    setNavigatorOnline(false);
+    await expect(markOfflineAndRecheck()).resolves.toBe(false);
+    expect(isOnline()).toBe(false);
   });
 });
