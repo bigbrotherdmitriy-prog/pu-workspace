@@ -160,26 +160,25 @@ def test_postgres_migration_preserves_existing_notification_policy(monkeypatch):
         command.upgrade(config, "b85e7f9a1d23")
         engine = create_engine(schema_url, connect_args={"connect_timeout": 5})
         with Session(engine) as db:
-            organization = Organization(name="Migration digest tenant")
-            db.add(organization); db.flush()
-            user = User(name="Migration digest user", email=f"migration-{uuid4().hex}@example.test")
-            db.add(user); db.flush()
             # The schema is intentionally pinned to an historical revision.
             # Insert only columns that existed at that revision instead of using
-            # the current ORM mapper (which now also includes projects.currency).
+            # the current ORM mapper (which now also includes tenant_workspace_id).
+            org_id = db.scalar(text(
+                "INSERT INTO organizations (name) VALUES (:name) RETURNING id"
+            ), {"name": "Migration digest tenant"})
+            user = User(name="Migration digest user", email=f"migration-{uuid4().hex}@example.test")
+            db.add(user); db.flush()
             project_id = db.scalar(text(
                 "INSERT INTO projects (name, organization_id) "
                 "VALUES (:name, :organization_id) RETURNING id"
-            ), {"name": "Migration digest project", "organization_id": organization.id})
-            # New mapped attributes are omitted from INSERT because this schema
-            # intentionally represents the preceding revision.
+            ), {"name": "Migration digest project", "organization_id": org_id})
             db.execute(text(
                 "INSERT INTO notification_policies "
                 "(organization_id,project_id,user_id,timezone,deadline_local_time,quiet_start,quiet_end,"
                 "escalation_delays,channels,enabled,record_version) "
                 "VALUES (:o,:p,:u,'Europe/Moscow','09:00','22:00','07:00',CAST('[0]' AS json),"
                 "CAST('[\"in_app\"]' AS json),true,1)"
-            ), {"o": organization.id, "p": project_id, "u": user.id})
+            ), {"o": org_id, "p": project_id, "u": user.id})
             db.commit()
         engine.dispose()
 
