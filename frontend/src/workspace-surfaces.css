@@ -352,6 +352,33 @@
 :root[data-display-theme] .shell :is(.gpr-dds-unified-head, .mail-client-header) { height: auto; position: static; flex-shrink: 0; }
 :root[data-display-theme] .shell > aside nav button { background: transparent; border-color: transparent; }
 :root[data-display-theme] .shell > aside nav button:is(.active, :hover) { color: var(--read-text); background: var(--read-accent-fill); }
+/* Registers and dense lists: hover/focus must keep the row's foreground readable
+   in every theme, because the light defaults use a near-white hover fill. */
+:root[data-display-theme] .shell :is(
+  .doc-list article, .source-list article, .task-list article,
+  .governance-list article, .audit-list article, .member-list article,
+  .setting-row, .dashboard-inbox-list > button
+):hover { color: var(--read-text); background: var(--read-accent-fill); }
+:root[data-display-theme] .shell :is(
+  .doc-list article, .source-list article, .task-list article,
+  .governance-list article, .audit-list article, .member-list article,
+  .setting-row, .dashboard-inbox-list > button
+):is(:hover, .selected, .task-focused, [aria-selected="true"]) :is(strong, b) { color: var(--read-text); }
+:root[data-display-theme] .shell :is(
+  .doc-list article, .source-list article, .task-list article,
+  .governance-list article, .audit-list article, .member-list article,
+  .setting-row, .dashboard-inbox-list > button
+):is(:hover, .selected, .task-focused, [aria-selected="true"]) :is(p, small, span, time, label) { color: var(--read-muted); }
+:root[data-display-theme] .shell .task-list article.task-focused {
+  color: var(--read-text); background: var(--read-accent-fill); box-shadow: inset 3px 0 0 var(--read-accent);
+}
+:root[data-display-theme] .shell .document-register > button:is(:hover, .selected, [aria-selected="true"]) {
+  color: var(--read-text); background: var(--read-accent-fill);
+}
+:root[data-display-theme] .shell .document-register > button.selected { box-shadow: inset 3px 0 var(--read-accent); }
+:root[data-display-theme] .shell .document-register > button:is(:hover, .selected) :is(strong, b) { color: var(--read-text); }
+:root[data-display-theme] .shell .document-register > button:is(:hover, .selected) :is(p, small, span, time) { color: var(--read-muted); }
+:root[data-display-theme] .shell .primary-label { color: var(--read-accent); background: var(--read-accent-fill); }
 :root[data-display-theme] .shell :is(.daily-briefing-metrics > span, .document-register-tools, .document-quick-filters button span, .inbox-toolbar, .project-card, .project-metrics span) {
   color: var(--read-text); background: var(--read-secondary); border-color: var(--read-rule);
 }
