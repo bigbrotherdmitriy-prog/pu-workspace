@@ -45,6 +45,8 @@ import { usePhoneLayout } from "./modules/android/usePhoneLayout";
 import { clearOfflineData } from "./offline/db";
 import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine";
 import { useOfflineSync } from "./offline/useOfflineSync";
+import { isOnline } from "./offline/connectivity";
+import { useConnectivity } from "./offline/useConnectivity";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
 import { uploadInvoiceBatch } from "./modules/finance/invoiceUploadTransport";
 import type { ProjectContact } from "./modules/contacts/ContactsModule";
@@ -460,7 +462,7 @@ export function App() {
   const [ready, setReady] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [mobile, setMobile] = useState(false),
-    [online, setOnline] = useState(navigator.onLine),
+    online = useConnectivity(),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
   const [localUploadPurpose, setLocalUploadPurpose] = useState<"documents" | "finance" | "project-folder">("documents");
@@ -1904,7 +1906,7 @@ export function App() {
     };
     try {
       setError("");
-      if (!navigator.onLine) {
+      if (!isOnline()) {
         if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
         await enqueueTaskUpdate({
           userId: currentUser.id, projectId, taskId: task.id,
@@ -1970,7 +1972,7 @@ export function App() {
     const patch = { due_date: dueDate || null, due_change_reason: reason };
     try {
       setError("");
-      if (!navigator.onLine) {
+      if (!isOnline()) {
         if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
         await enqueueTaskUpdate({
           userId: currentUser.id, projectId, taskId: task.id,
@@ -2356,7 +2358,7 @@ export function App() {
           offline_pending: offlinePending }
       : row));
     try {
-      if (!navigator.onLine) {
+      if (!isOnline()) {
         if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
         await enqueueTaskUpdate({
           userId: currentUser.id, projectId, taskId: task.id,
@@ -2665,20 +2667,14 @@ export function App() {
     }
   }, []);
   useEffect(() => {
-    const handleOnline = () => setOnline(true);
-    const handleOffline = () => setOnline(false);
     const handleInstall = (event: Event) => {
       event.preventDefault();
       setInstallPrompt(event as InstallPromptEvent);
     };
     const handleInstalled = () => setInstallPrompt(null);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
     window.addEventListener("beforeinstallprompt", handleInstall);
     window.addEventListener("appinstalled", handleInstalled);
     return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
       window.removeEventListener("beforeinstallprompt", handleInstall);
       window.removeEventListener("appinstalled", handleInstalled);
     };
@@ -3099,7 +3095,7 @@ export function App() {
   }
   async function markNotification(item: NotificationRow) {
     try {
-      if (!navigator.onLine) {
+      if (!isOnline()) {
         if (!currentUser) throw new Error("Войдите заново, чтобы сохранить изменение на устройстве.");
         await enqueueNotificationRead({ userId: currentUser.id, projectId, notificationId: item.id });
       } else {
@@ -3115,7 +3111,7 @@ export function App() {
             : row,
         ),
       );
-      if (!navigator.onLine) setNotice("Отметка сохранена на устройстве и будет синхронизирована позже.");
+      if (!isOnline()) setNotice("Отметка сохранена на устройстве и будет синхронизирована позже.");
     } catch (e) {
       if (e instanceof ApiError && e.status === null && currentUser) {
         try {

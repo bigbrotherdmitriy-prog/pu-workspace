@@ -1,3 +1,5 @@
+import { reportServerReachable } from "../offline/connectivity";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -48,6 +50,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
       requestId,
     );
   }
+  reportServerReachable();
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const responseRequestId = response.headers.get("X-Request-ID") || requestId;

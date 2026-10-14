@@ -74,10 +74,23 @@ test.describe("phone", () => {
   });
 
   test("offline shows a one-row sync banner with the action", async ({ page, mock: _mock }, info) => {
-    await connection(page, false);
+    // navigator.onLine=false alone is no longer "offline" while the server
+    // answers (Android VPN false-offline, #177), and the mocked API always
+    // answers. So go offline the way a phone does: the browser drops the
+    // network and fires "offline", and the /health probe gets no answer.
+    // The probe is held open: the banner must show before it returns.
+    let finishProbe: () => Promise<void> = async () => {};
+    await page.route("**/health*", route => new Promise<void>(done => {
+      finishProbe = async () => { await route.abort("internetdisconnected"); done(); };
+    }));
+    await connection(page, true);
     await page.goto("/new/");
     await settled(page);
     await show(page, "Задачи");
+    await page.evaluate(() => {
+      Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => false });
+      window.dispatchEvent(new Event("offline"));
+    });
     const banner = page.locator(".mobile-sync-panel");
     await expect(banner).toBeVisible();
     await expect(banner).toContainText("Офлайн · несинхронизировано: 0");
@@ -94,6 +107,9 @@ test.describe("phone", () => {
     expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth), "no horizontal page scroll").toBeLessThanOrEqual(390);
     await page.screenshot({ path: info.outputPath("top-area-offline-390.png") });
+    // The probe fails too: the offline state is confirmed, not cleared.
+    await finishProbe();
+    await expect(banner).toContainText("Офлайн");
   });
 });
 
