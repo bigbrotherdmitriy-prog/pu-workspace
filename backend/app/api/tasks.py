@@ -20,8 +20,11 @@ from app.api.management import _locked_versioned, append_management_history
 from app.task_mutations import apply_task_patch
 from app.task_mutations import task_sync_snapshot
 from app.mobile_sync_tokens import maybe_issue_mobile_sync_token
+from app.backlog_triage import BulkRequest, bulk_close_tasks, undo_bulk_close_tasks
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+# Project-scoped bulk triage routes (POST /projects/{project_id}/tasks/bulk-close).
+project_router = APIRouter(prefix="/projects/{project_id}/tasks", tags=["tasks"])
 
 
 class TaskUpdate(BaseModel):
@@ -280,3 +283,16 @@ def approve_external(task_id: int, payload: ExternalActionApproval, db: Session 
             ],
             "task_failed": task_failed, "google_task_failed": task_failed,
             "calendar_failed": calendar_failed, "actions": queued_actions, "queue_failures": failures}
+
+
+@project_router.post("/bulk-close")
+def bulk_close(project_id: int, payload: BulkRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Preview (dry_run) or close a filtered set of open tasks as ``cancelled``; reversible by batch."""
+    require_project_role(db, user, project_id, "editor" if payload.dry_run else "manager")
+    return bulk_close_tasks(db, project_id, payload, user)
+
+
+@project_router.post("/bulk-close/{batch_id}/undo")
+def bulk_close_undo(project_id: int, batch_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    return undo_bulk_close_tasks(db, project_id, batch_id, user)

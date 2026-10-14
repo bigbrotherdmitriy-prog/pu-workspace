@@ -112,6 +112,23 @@ function renderClient(client = mockClient(), propOverrides: Record<string, unkno
   return { ...render(<MailClientModule {...props} />), client, props };
 }
 
+it("offers «Разобрать очередь» with draft checkboxes only in the drafts folder for managers", async () => {
+  const plainDraft: MailDraft = { ...approvedDraft, id: 55, status: "draft", approved_revision: null, revision: 1 };
+  const draftThread: MailThread = { ...thread, id: "draft:55", subject: "Re: Черновик ответа",
+    messages: [{ ...message, thread_id: "draft:55", drafts: [plainDraft] }] };
+  const client = mockClient({ threads: vi.fn().mockImplementation(async (_p: number, folder: string) =>
+    ({ items: folder === "drafts" ? [draftThread] : [thread] })) });
+  renderClient(client, { canTriage: true });
+  await screen.findByRole("heading", { name: message.subject });
+  expect(screen.queryByRole("button", { name: "Разобрать очередь" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Черновики/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Разобрать очередь" }));
+  expect(screen.getByText(/Подтверждённые, отправленные и стоящие в очереди письма не затрагиваются/)).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Выбранные вручную галочками (0)"));
+  fireEvent.click(await screen.findByLabelText("Выбрать черновик Re: Черновик ответа"));
+  expect(screen.getByLabelText("Выбранные вручную галочками (1)")).toBeChecked();
+});
+
 describe("MailClientModule", () => {
   it("refreshes the selected sent folder instead of the recent inbox selection", async () => {
     const { props, client } = renderClient();

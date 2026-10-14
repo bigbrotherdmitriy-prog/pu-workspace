@@ -17,7 +17,11 @@ from app.provider_actions.email_compensation import (
     propose_email_compensation,
 )
 
+from app.backlog_triage import BulkRequest, bulk_dismiss_drafts, undo_bulk_dismiss_drafts
+
 router = APIRouter(prefix="/response-drafts", tags=["response-drafts"])
+# Project-scoped bulk triage routes (POST /projects/{project_id}/drafts/bulk-dismiss).
+project_router = APIRouter(prefix="/projects/{project_id}/drafts", tags=["response-drafts"])
 
 
 class DraftUpdate(BaseModel):
@@ -131,3 +135,16 @@ def create_email_compensation_proposal(
             409,
             f"{DIRECT_UNDO_MESSAGE}. Корректирующий ответ сейчас недоступен ({exc.code})",
         ) from exc
+
+
+@project_router.post("/bulk-dismiss")
+def bulk_dismiss(project_id: int, payload: BulkRequest, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Preview (dry_run) or reject a filtered set of plain drafts; approved/sent/queued drafts are never touched."""
+    require_project_role(db, user, project_id, "editor" if payload.dry_run else "manager")
+    return bulk_dismiss_drafts(db, project_id, payload, user)
+
+
+@project_router.post("/bulk-dismiss/{batch_id}/undo")
+def bulk_dismiss_undo(project_id: int, batch_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    return undo_bulk_dismiss_drafts(db, project_id, batch_id, user)
