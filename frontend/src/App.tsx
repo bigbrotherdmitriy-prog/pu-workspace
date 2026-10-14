@@ -3491,7 +3491,7 @@ export function App() {
             <Menu />
           </button>
           <div className="page-heading">
-            <span className="page-kicker"><b>PU</b><i aria-hidden="true" />{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
+            <span className="page-kicker" title={projects.find((item) => item.id === projectId)?.name || undefined}><b>PU</b><i aria-hidden="true" />{projects.find((item) => item.id === projectId)?.name || "PU Workspace"}</span>
             <h1>{active}</h1>
             <p>
               {active === "Рабочий центр"
