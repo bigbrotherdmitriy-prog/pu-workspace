@@ -1,12 +1,13 @@
-import { lazy as reactLazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ComponentProps, ComponentType, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import { Login } from "./auth/Login";
 import { requestedProjectId, useProjectSelection } from "./context/useProjectSelection";
 import { useStoragePicker } from "./modules/integrations/useStoragePicker";
-import { useFinanceController } from "./modules/finance/useFinanceController";
-import type { GprDdsTab } from "./modules/finance/GprDdsWorkspace";
+import { useGprDdsState } from "./modules/finance/useGprDdsState";
+import { GprDdsContainer } from "./modules/finance/GprDdsContainer";
+import { lazy } from "./utils/lazyRoute";
 import { ContextualAssistant } from "./modules/ai-secretary/ContextualAssistant";
 import { DailyBriefingPanel, type DailyBriefing } from "./modules/ai-secretary/DailyBriefingPanel";
 import { AttentionPanel } from "./modules/attention/AttentionPanel";
@@ -48,7 +49,6 @@ import { useOfflineSync } from "./offline/useOfflineSync";
 import { isOnline } from "./offline/connectivity";
 import { useConnectivity } from "./offline/useConnectivity";
 import { awaitLocalUploadJobs, localUploadMimeType } from "./modules/documents/localUploadJobs";
-import { uploadInvoiceBatch } from "./modules/finance/invoiceUploadTransport";
 import type { ProjectContact } from "./modules/contacts/ContactsModule";
 import type { ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import type { AIProjectPolicy, ProcessingQueue } from "./modules/settings/SettingsModule";
@@ -93,23 +93,6 @@ import {
   TimerReset,
 } from "lucide-react";
 
-function lazy<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>): T {
-  const Component = reactLazy(loader);
-  function RouteChunk(props: ComponentProps<T>) {
-    return (
-      <Suspense fallback={<div className="app-route-loading" role="status">Загружаю экран…</div>}>
-        <Component {...props} />
-      </Suspense>
-    );
-  }
-  return RouteChunk as T;
-}
-
-const FinanceModule = lazy(() => import("./modules/finance/FinanceModule").then((m) => ({ default: m.FinanceModule })));
-const DdsWorkspace = lazy(() => import("./modules/finance/DdsWorkspace").then((m) => ({ default: m.DdsWorkspace })));
-const GprWorkspace = lazy(() => import("./modules/finance/GprWorkspace").then((m) => ({ default: m.GprWorkspace })));
-const GprDdsWorkspace = lazy(() => import("./modules/finance/GprDdsWorkspace").then((m) => ({ default: m.GprDdsWorkspace })));
-const FinanceOperations = lazy(() => import("./modules/finance/FinanceOperations").then((m) => ({ default: m.FinanceOperations })));
 const ProjectLaunchWizard = lazy(() => import("./modules/project-launch/ProjectLaunchWizard").then((m) => ({ default: m.ProjectLaunchWizard })));
 const IntegrationsModule = lazy(() => import("./modules/integrations/IntegrationsModule").then((m) => ({ default: m.IntegrationsModule })));
 const YandexMailConnectionDialog = lazy(() => import("./modules/integrations/YandexMailConnectionDialog").then((m) => ({ default: m.YandexMailConnectionDialog })));
@@ -583,9 +566,6 @@ export function App() {
     [newResourceCapacity, setNewResourceCapacity] = useState(""),
     [newMeetingAgenda, setNewMeetingAgenda] = useState("");
   const [analytics, setAnalytics] = useState<ProjectAnalytics | null>(null);
-  const [gprDdsTab, setGprDdsTab] = useState<GprDdsTab>("gpr");
-  const [financeEditorOpen, setFinanceEditorOpen] = useState(false);
-  const [focusedScheduleItemId, setFocusedScheduleItemId] = useState(0);
   const [contractDropStatus, setContractDropStatus] = useState("");
   const [dailyBriefing, setDailyBriefing] = useState<DailyBriefing | null>(null);
   const [integrationItems, setIntegrationItems] = useState<IntegrationItem[]>([]);
@@ -597,23 +577,11 @@ export function App() {
   const sourceFolderId = picker.folderId;
   const sourceProvider = picker.context?.provider;
   const sourceBreadcrumbs = picker.breadcrumbs;
+  const gprDds = useGprDdsState({ ready, projectId, active, setNotice, setError });
   const {
-    finance, financeCandidates, financeStructuredPreview, financeStructuredRows, costCategories, invoiceExtractionProposal, invoiceConfirmationError, invoiceConfirming, invoiceAiRetrying,
-    selectedFinanceContractId, financeKind, financeTitle, financeAmount, financeDate, financeDirection,
-    financeExtra, financeObject, financeCategory, financeNote, financeSourceDocumentId, financeScheduleItemId, financeBudgetLineId, financeBaselineId,
-    setFinanceStructuredPreview, setFinanceStructuredRows, setSelectedFinanceContractId,
-    setFinanceKind, setFinanceTitle, setFinanceAmount, setFinanceDate, setFinanceDirection, setFinanceExtra, setFinanceObject, setFinanceCategory, setFinanceNote,
-    setFinanceSourceDocumentId, setFinanceScheduleItemId, setFinanceBudgetLineId, setFinanceBaselineId,
-    setInvoiceExtractionProposal, editInvoiceExtraction,
-    loadFinance, prepareFinanceItem, useFinanceCandidate, reviewUploadedFinanceDocuments,
-    prepareDroppedFinanceDocument, importStructuredFinance, editStructuredFinanceRow,
-    addFinanceItem, addCostCategory, confirmInvoiceExtraction, rejectInvoiceExtraction, retryInvoiceAiAnalysis,
-    confirmFinance, confirmFinanceMany, confirmCashPayment, reverseCashPayment, linkCashFlowControls, linkApprovedCashFlowBudgetLine, mutateCashFlowPlan, undoCashFlowPlanMutation, refreshFinanceVat,
-    updateScheduleTask, bulkUpdateSchedule, cloneScheduleBaseline,
-  } = useFinanceController({ ready, projectId, setNotice, setError });
-  useEffect(() => {
-    if (active === "ГПР и ДДС" && (invoiceExtractionProposal?.requires_confirmation || financeStructuredPreview)) setFinanceEditorOpen(true);
-  }, [active, invoiceExtractionProposal, financeStructuredPreview]);
+    finance, costCategories, setSelectedFinanceContractId, loadFinance, reviewUploadedFinanceDocuments, prepareDroppedFinanceDocument,
+    gprDdsTab, setGprDdsTab, setFinanceEditorOpen, uploadDdsInvoices,
+  } = gprDds;
   const loadSequenceRef = useRef(0);
   const contractProjectEpochRef = useRef(0);
   const contractSaveRequestsRef = useRef(new Set<number>());
@@ -1506,11 +1474,6 @@ export function App() {
     } catch (reason) { if (current()) setError((reason as Error).message); }
   }
 
-  async function uploadDdsInvoices(files: File[], onProgress: (message: string) => void) {
-    const result = await uploadInvoiceBatch(projectId, files, onProgress);
-    await loadFinance();
-    return result;
-  }
   async function importBulkContracts(proposals: BulkContractProposal[]): Promise<number> {
     const createdByDocument = new Map<number, number>();
     const pending = [...proposals];
@@ -4068,182 +4031,16 @@ export function App() {
       />
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (
-        <section className={`module-overlay gpr-dds-overlay ${collapsed ? "collapsed" : ""}`}>
-          <div className="module-page gpr-dds-page">
-          <GprDdsWorkspace
-            tab={active === "Исполнение и финансы" ? "dds" : active === "График работ" ? "gpr" : gprDdsTab}
-            onTabChange={(tab) => { setGprDdsTab(tab); if (active !== "ГПР и ДДС") setActive("ГПР и ДДС"); }}
-            onClose={() => setActive("Обзор")}
-            gpr={<>
-            <GprWorkspace
-              projectId={projectId}
-              finance={finance}
-              contracts={contracts}
-              selectedContractId={selectedFinanceContractId}
-              onSelectContract={setSelectedFinanceContractId}
-              onPrepare={(kind, baselineId) => { prepareFinanceItem(kind, baselineId); setFinanceEditorOpen(true); }}
-              onUpdateTask={updateScheduleTask}
-              onBulkUpdate={bulkUpdateSchedule}
-              onCloneBaseline={cloneScheduleBaseline}
-              onImported={loadFinance}
-              focusTaskId={focusedScheduleItemId}
-              onOpenCashFlow={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("dds"); }}
-            />
-            {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Редактор ГПР"><button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button><FinanceOperations
-              finance={finance}
-              preview={null}
-              selectedRows={financeStructuredRows}
-              setSelectedRows={setFinanceStructuredRows}
-              selectedContractId={selectedFinanceContractId}
-              kind={financeKind}
-              title={financeTitle}
-              amount={financeAmount}
-              date={financeDate}
-              direction={financeDirection}
-              extra={financeExtra}
-              objectName={financeObject}
-              category={financeCategory}
-              note={financeNote}
-              sourceDocumentId={0}
-              scheduleItemId={financeScheduleItemId}
-              budgetLineId={financeBudgetLineId}
-              baselineId={financeBaselineId}
-              costCategories={costCategories}
-              setKind={setFinanceKind}
-              setDirection={setFinanceDirection}
-              setTitle={setFinanceTitle}
-              setAmount={setFinanceAmount}
-              setDate={setFinanceDate}
-              setExtra={setFinanceExtra}
-              setObjectName={setFinanceObject}
-              setCategory={setFinanceCategory}
-              setNote={setFinanceNote}
-              setScheduleItemId={setFinanceScheduleItemId}
-              setBudgetLineId={setFinanceBudgetLineId}
-              setBaselineId={setFinanceBaselineId}
-              onClosePreview={() => undefined}
-              onImport={() => undefined}
-              onAdd={() => void addFinanceItem()}
-              onConfirm={(kind, id, status) => void confirmFinance(kind, id, status)}
-              onRefreshVat={(kind, id) => void refreshFinanceVat(kind, id)}
-              onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
-              includeEditor={active === "График работ" || (active === "ГПР и ДДС" && gprDdsTab === "gpr")}
-              includeRegisters={false}
-              editorScope="gpr"
-            /></div>}
-            </>}
-            dds={<>
-            <FinanceModule
-              finance={finance}
-              candidates={financeCandidates}
-              contracts={contracts}
-              selectedContractId={selectedFinanceContractId}
-              onSelectContract={setSelectedFinanceContractId}
-              onPrepare={prepareFinanceItem}
-              onUseCandidate={(candidate) => void useFinanceCandidate(candidate)}
-              onUpload={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
-              onUploadFinance={(files, contractId, kind) => void uploadContractFinance(files, contractId, kind)}
-              onOpenSchedule={() => setGprDdsTab("gpr")}
-              onReload={() => void loadFinance()}
-              embedded
-            />
-            <DdsWorkspace
-              key={projectId}
-              finance={finance}
-              selectedContractId={selectedFinanceContractId}
-              onRefreshVat={(kind, id) => void refreshFinanceVat(kind, id)}
-              onPrepare={(kind) => { prepareFinanceItem(kind); setFinanceEditorOpen(true); }}
-              onConfirm={confirmFinance}
-              onConfirmMany={confirmFinanceMany}
-              onConfirmPayment={(id, amount) => void confirmCashPayment(id, amount)}
-              onReversePayment={(id) => void reverseCashPayment(id)}
-              onLinkControls={(id, contractId, scheduleItemId, budgetLineId) =>
-                void linkCashFlowControls(id, contractId, scheduleItemId, budgetLineId)
-              }
-              onLinkApprovedBudgetLine={(id, budgetLineId) => void linkApprovedCashFlowBudgetLine(id, budgetLineId)}
-              onMutatePlan={mutateCashFlowPlan}
-              onUndoPlanMutation={undoCashFlowPlanMutation}
-              focusScheduleItemId={focusedScheduleItemId}
-              onOpenSchedule={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("gpr"); }}
-              onDropInvoices={uploadDdsInvoices}
-              onReviewInvoice={(documentId) => reviewUploadedFinanceDocuments([documentId])}
-              onImportCashFlow={(files) => void uploadContractFinance(files, selectedFinanceContractId, "cash-flow")}
-              onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
-            />
-            {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Проверка финансовых данных">
-              <fieldset className="finance-editor-fields" disabled={invoiceConfirming}>
-              {invoiceConfirming && <p className="form-operation-pending" role="status">Подтверждаю счёт…</p>}
-              {invoiceConfirmationError && <div className="form-operation-error" role="alert">{invoiceConfirmationError}</div>}
-              {!financeStructuredPreview && !invoiceExtractionProposal && <button type="button" className="gpr-dds-editor-close" onClick={() => setFinanceEditorOpen(false)}>Закрыть</button>}<FinanceOperations
-              projectId={projectId}
-              onArticleBudgetApplied={() => void loadFinance()}
-              finance={finance}
-              preview={financeStructuredPreview}
-              selectedRows={financeStructuredRows}
-              setSelectedRows={setFinanceStructuredRows}
-              selectedContractId={selectedFinanceContractId}
-              kind={financeKind}
-              title={financeTitle}
-              amount={financeAmount}
-              date={financeDate}
-              direction={financeDirection}
-              extra={financeExtra}
-              objectName={financeObject}
-              category={financeCategory}
-              note={financeNote}
-              sourceDocumentId={financeSourceDocumentId}
-              scheduleItemId={financeScheduleItemId}
-              budgetLineId={financeBudgetLineId}
-              baselineId={financeBaselineId}
-              costCategories={costCategories}
-              invoiceProposal={invoiceExtractionProposal}
-              setKind={setFinanceKind}
-              setDirection={setFinanceDirection}
-              setTitle={setFinanceTitle}
-              setAmount={setFinanceAmount}
-              setDate={setFinanceDate}
-              setExtra={setFinanceExtra}
-              setObjectName={setFinanceObject}
-              setCategory={setFinanceCategory}
-              setNote={setFinanceNote}
-              setScheduleItemId={setFinanceScheduleItemId}
-              setBudgetLineId={setFinanceBudgetLineId}
-              setBaselineId={setFinanceBaselineId}
-              onEditInvoice={editInvoiceExtraction}
-              onConfirmInvoice={() => void confirmInvoiceExtraction().then((confirmed) => { if (confirmed) setFinanceEditorOpen(false); })}
-              onRejectInvoice={() => void rejectInvoiceExtraction()}
-              onRetryInvoiceAi={() => void retryInvoiceAiAnalysis()}
-              invoiceAiRetrying={invoiceAiRetrying}
-              onCloseInvoice={() => { setInvoiceExtractionProposal(null); setFinanceEditorOpen(false); }}
-              onAddCostCategory={(name) => void addCostCategory(name)}
-              onClosePreview={() => {
-                setFinanceStructuredPreview(null);
-                setFinanceStructuredRows([]);
-                setFinanceEditorOpen(false);
-              }}
-              onImport={() => void importStructuredFinance()}
-              onEditPreviewRow={editStructuredFinanceRow}
-              onAdd={() => void addFinanceItem().then(() => {
-                if (financeKind === "cash-in" || financeKind === "cash-out") {
-                  setFinanceEditorOpen(false);
-                }
-              })}
-              onRefreshVat={(kind, id) => void refreshFinanceVat(kind, id)}
-              onConfirm={(kind, id, status) =>
-                void confirmFinance(kind, id, status)
-              }
-              onConfirmPayment={(id, amount) =>
-                void confirmCashPayment(id, amount)
-              }
-              includeEditor={active === "Исполнение и финансы" || (active === "ГПР и ДДС" && gprDdsTab === "dds")}
-              includeScheduleRegister={false}
-              includeCashFlowRegister={false}
-              editorScope="finance"
-            /></fieldset></div>}
-            </>}
-          />
-          </div>
-        </section>
+        <GprDdsContainer
+          state={gprDds}
+          active={active}
+          setActive={setActive}
+          collapsed={collapsed}
+          projectId={projectId}
+          contracts={contracts}
+          onUploadFinanceDocument={() => { setLocalUploadPurpose("finance"); setMobileUploadOpen(true); }}
+          uploadContractFinance={uploadContractFinance}
+        />
       )}
       {active === "Обязательства" && (
         <ObligationsModule
