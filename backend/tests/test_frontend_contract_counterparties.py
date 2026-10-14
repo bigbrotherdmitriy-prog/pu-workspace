@@ -11,6 +11,7 @@ def test_contract_ui_separates_prime_context_from_our_financial_contracts():
     details = (ROOT / "frontend/src/modules/contracts/ContractDetails.tsx").read_text(encoding="utf-8")
     # Contract card actions (analysis, budget, editing) live in their own hook.
     actions = (ROOT / "frontend/src/modules/contracts/useContractDetailsState.ts").read_text(encoding="utf-8")
+    panel = (ROOT / "frontend/src/modules/contracts/ContractDetailsPanel.tsx").read_text(encoding="utf-8")
     assert "Генподрядный договор — только контекст" in module
     assert "Наш субподрядный договор — доходы, ГПР, бюджет и ДДС" in module
     assert "Договор с субподрядчиком / субсубподрядчиком — расходы" in module
@@ -27,10 +28,10 @@ def test_contract_ui_separates_prime_context_from_our_financial_contracts():
     assert 'kind === "prime_reference"' in scheme
     assert 'kind === "revenue_subcontract"' in scheme
     assert 'kind === "downstream_subcontract"' in scheme
-    assert "ГЕНПОДРЯД · КОНТЕКСТ" in app
-    assert 'item.contract_kind !== "prime_reference" && <div className="contract-budget-proposal"' in app
-    assert "Предложить бюджет по договору" in app
-    assert "renderDetails={(contract, packageContent) => renderContractDetails" in app
+    assert "ГЕНПОДРЯД · КОНТЕКСТ" in panel
+    assert 'item.contract_kind !== "prime_reference" && <div className="contract-budget-proposal"' in panel
+    assert "Предложить бюджет по договору" in panel
+    assert "renderDetails={(contract, packageContent) => <ContractDetailsPanel" in app
     assert "contract-details" in details
     assert "retention_percent" in app
     assert "строк графика платежей" in actions

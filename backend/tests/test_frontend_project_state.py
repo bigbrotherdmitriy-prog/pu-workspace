@@ -8,6 +8,8 @@ FINANCE_MODULE_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "FinanceModu
 FINANCE_OPERATIONS_SOURCE = APP_SOURCE.parent / "modules" / "finance" / "FinanceOperations.tsx"
 CONTEXTUAL_AI_SOURCE = APP_SOURCE.parent / "modules" / "ai-secretary" / "ContextualAssistant.tsx"
 CONTRACT_PICKER_SOURCE = APP_SOURCE.parent / "modules" / "contracts" / "ContractDocumentPicker.tsx"
+CONTRACT_PANEL_SOURCE = APP_SOURCE.parent / "modules" / "contracts" / "ContractDetailsPanel.tsx"
+CONTRACT_ACTIONS_SOURCE = APP_SOURCE.parent / "modules" / "contracts" / "useContractDetailsState.ts"
 
 
 def test_new_project_reload_uses_created_project_id():
@@ -88,7 +90,9 @@ def test_unconfirmed_mail_can_be_bulk_moved_to_one_project():
 
 
 def test_contract_card_exposes_document_schedule_and_cash_flow_chain():
-    source = APP_SOURCE.read_text(encoding="utf-8") + CONTRACT_PICKER_SOURCE.read_text(encoding="utf-8") + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8")
+    source = (APP_SOURCE.read_text(encoding="utf-8") + CONTRACT_PICKER_SOURCE.read_text(encoding="utf-8")
+              + CONTRACT_PANEL_SOURCE.read_text(encoding="utf-8") + CONTRACT_ACTIONS_SOURCE.read_text(encoding="utf-8")
+              + FINANCE_MODULE_SOURCE.read_text(encoding="utf-8"))
     assert "linkContractDocument" in source
     assert "Выбрать договор самому" in source
     assert "Привязать выбранный файл" in source
