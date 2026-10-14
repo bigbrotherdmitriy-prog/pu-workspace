@@ -9,6 +9,8 @@ def test_contract_ui_separates_prime_context_from_our_financial_contracts():
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     scheme = (ROOT / "frontend/src/modules/contracts/ContractScheme.tsx").read_text(encoding="utf-8")
     details = (ROOT / "frontend/src/modules/contracts/ContractDetails.tsx").read_text(encoding="utf-8")
+    # Contract card actions (analysis, budget, editing) live in their own hook.
+    actions = (ROOT / "frontend/src/modules/contracts/useContractDetailsState.ts").read_text(encoding="utf-8")
     assert "Генподрядный договор — только контекст" in module
     assert "Наш субподрядный договор — доходы, ГПР, бюджет и ДДС" in module
     assert "Договор с субподрядчиком / субсубподрядчиком — расходы" in module
@@ -31,4 +33,4 @@ def test_contract_ui_separates_prime_context_from_our_financial_contracts():
     assert "renderDetails={(contract, packageContent) => renderContractDetails" in app
     assert "contract-details" in details
     assert "retention_percent" in app
-    assert "строк графика платежей" in app
+    assert "строк графика платежей" in actions
