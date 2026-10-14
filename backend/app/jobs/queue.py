@@ -12,6 +12,12 @@ from sqlalchemy.orm import Session
 from app.models.job import BackgroundJob, ServiceHeartbeat
 
 READY_STATUSES = ("queued", "retrying")
+# Batch jobs (gmail.sync, ai.rules, notifications.refresh) count per-item
+# failures instead of raising. On 10-13.10.2026 a sweep in which every letter
+# failed was recorded as "completed" for three days. A result in which more
+# items failed than were handled is therefore finished as "failed".
+MAJORITY_FAILED_ERROR = "MajorityOfItemsFailed"
+_ITEM_DONE_KEYS = ("processed", "prepared", "members")
 TERMINAL_STATUSES = ("failed", "dead_letter", "completed", "cancelled")
 _execution_owner = ContextVar("job_execution_owner", default=None)
 _execution_claim = ContextVar("job_execution_claim", default=None)
@@ -182,17 +188,39 @@ def _duration(job: BackgroundJob, ended: datetime) -> int | None:
         ended = ended.replace(tzinfo=timezone.utc)
     return max(0, int((ended - started).total_seconds() * 1000))
 
+def majority_of_items_failed(result: dict | None) -> bool:
+    """True when a batch result reports more failed items than handled ones."""
+    if not isinstance(result, dict):
+        return False
+    failed = result.get("failed")
+    if type(failed) is not int or failed <= 0:
+        return False
+    done = sum(value for key in _ITEM_DONE_KEYS if type(value := result.get(key)) is int)
+    return failed > done
+
+
+def finished_status(result: dict | None) -> str:
+    """Terminal status for a handler that returned ``result`` without raising."""
+    if (result or {}).get("cancelled"):
+        return "cancelled"
+    return "failed" if majority_of_items_failed(result) else "completed"
+
+
 def succeed(db: Session, job_id: int, worker_id: str, result: dict | None = None) -> bool:
     owner_id = worker_id
     job = db.scalar(select(BackgroundJob).where(*_live_owner(job_id, owner_id)).with_for_update())
     if job is None:
         return False
     ended = utcnow()
-    cancelled = bool((result or {}).get("cancelled"))
-    job.status, job.result = ("cancelled" if cancelled else "completed"), (result or {})
+    status = finished_status(result)
+    cancelled = status == "cancelled"
+    job.status, job.result = status, (result or {})
     job.progress = min(99, job.progress or 0) if cancelled else 100
     if cancelled:
         job.cancelled_at = ended
+    if status == "failed":
+        # Not retried: the next scheduled pass is the retry.
+        job.last_error = MAJORITY_FAILED_ERROR
     job.completed_at, job.duration_ms, job.lease_expires_at = ended, _duration(job, ended), None
     db.commit(); return True
 

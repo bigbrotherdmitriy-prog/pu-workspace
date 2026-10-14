@@ -10,7 +10,9 @@ from threading import Event, Thread
 
 from app.database import SessionLocal
 from app.jobs.handlers import notify_outcome, run
-from app.jobs.queue import claim, execution_owner, fail, heartbeat, recover_expired, set_progress, succeed, touch_service
+from app.jobs.queue import (
+    claim, execution_owner, fail, finished_status, heartbeat, recover_expired, set_progress, succeed, touch_service,
+)
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 log = logging.getLogger("pu.jobs.worker")
@@ -73,8 +75,7 @@ def main() -> None:
                     log.error("Lease ownership was lost for completed job %s", job.id)
             if completed:
                 try:
-                    notify_outcome(job.kind, dict(job.payload or {}),
-                                   "cancelled" if (result or {}).get("cancelled") else "completed")
+                    notify_outcome(job.kind, dict(job.payload or {}), finished_status(result))
                 except Exception as hook_error:
                     log.error("Job %s lifecycle hook failed; error_type=%s", job.id, hook_error.__class__.__name__)
         finally:
