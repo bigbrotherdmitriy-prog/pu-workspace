@@ -21,6 +21,7 @@ from app.integrations.mail import mailbox_adapter_for_project
 from app.mail_content import is_rich_mail_body, mail_html_to_text, sanitize_mail_html
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
+from app.models.integration_credential import IntegrationCredential
 from app.models.mail_settings import MailUserSettings
 from app.models.organization_contract import Contract
 from app.models.response_draft import ResponseDraft
@@ -399,11 +400,58 @@ def assist_mail_draft(payload: MailAssistRequest, db: Session = Depends(get_db),
 @router.get("/projects/{project_id}/capabilities")
 def mail_capabilities(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
-    adapter = mailbox_adapter_for_project(project_id, db)
-    health = adapter.health()
+    adapter = None
+    health = None
+    try:
+        adapter = mailbox_adapter_for_project(project_id, db)
+        health = adapter.health()
+    except Exception:
+        adapter = None
+        health = None
+    if adapter is not None and health is not None and health.ready:
+        return {
+            "provider": adapter.provider,
+            "connected": True,
+            "features": {
+                "folders": True,
+                "threads": True,
+                "compose": True,
+                "reply": True,
+                "reply_all": True,
+                "forward": True,
+                "cc_bcc": True,
+                "attachment_metadata": True,
+                "attachment_send": False,
+                "explicit_revision_approval": True,
+                "automatic_send": False,
+            },
+        }
+    yandex_row = db.scalar(select(IntegrationCredential).where(
+        IntegrationCredential.project_id == project_id,
+        IntegrationCredential.provider == "yandex_mail",
+        IntegrationCredential.capability == "channel",
+    ))
+    if yandex_row is not None and yandex_row.access_token:
+        return {
+            "provider": "yandex_mail",
+            "connected": True,
+            "features": {
+                "folders": True,
+                "threads": True,
+                "compose": False,
+                "reply": False,
+                "reply_all": False,
+                "forward": False,
+                "cc_bcc": False,
+                "attachment_metadata": True,
+                "attachment_send": False,
+                "explicit_revision_approval": True,
+                "automatic_send": False,
+            },
+        }
     return {
-        "provider": adapter.provider,
-        "connected": health.ready,
+        "provider": adapter.provider if adapter is not None else "google_workspace",
+        "connected": False,
         "features": {
             "folders": True,
             "threads": True,
