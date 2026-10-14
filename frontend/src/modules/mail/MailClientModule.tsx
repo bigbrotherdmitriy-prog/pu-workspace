@@ -13,6 +13,8 @@ import type {
 } from "./types";
 import { MailSettingsDialog } from "./MailSettingsDialog";
 import { MobileAutoConfirm } from "./MobileAutoConfirm";
+import { MobileContextEditor } from "./MobileContextEditor";
+import { MAIL_AUTO_DEFERRED_NOTE } from "../settings/AutonomyReadinessPanel";
 import { editorHtml, editorPlainText, RichTextEditor } from "./RichTextEditor";
 import "./mail-client.css";
 import "./mail-mobile.css";
@@ -29,7 +31,31 @@ type Props = {
   onNotice: (message: string) => void;
   onError: (message: string) => void;
   client?: typeof mailClientApi;
+  /** autonomy-readiness mailbox.auto_source_chain_ready; AUTO-for-mail stays hidden until true. */
+  autoSourceChainReady?: boolean;
 };
+
+/** What the letter is actually linked to, independent of AI evidence text. */
+export function MailLinkLine({ message, projects, contracts }: {
+  message: MailMessage; projects: MailProject[]; contracts: MailContract[];
+}) {
+  const confidence = message.context_confidence !== undefined ? ` · AI ${Math.round(message.context_confidence * 100)}%` : "";
+  if (!message.project_id) {
+    return <small>{message.context_evidence || "Контекст не определён"}{confidence}</small>;
+  }
+  const projectName = projects.find((item) => item.id === message.project_id)?.name || `№${message.project_id}`;
+  const contract = message.contract_id ? contracts.find((item) => item.id === message.contract_id) : undefined;
+  const contractLabel = message.contract_id ? (contract?.number || `№${message.contract_id}`) : "не выбран";
+  return <>
+    <div className="mail-link-line" data-testid="mail-link-line">
+      <span>Проект: <b>{projectName}</b> · Договор: <b>{contractLabel}</b></span>
+      <span className={`mail-link-chip ${message.context_confirmed ? "confirmed" : "pending"}`}>
+        {message.context_confirmed ? "связь подтверждена" : "нужно подтвердить"}
+      </span>
+    </div>
+    {message.context_evidence && <small className="mail-link-evidence">{message.context_evidence}{confidence}</small>}
+  </>;
+}
 
 type ComposerState = {
   draft: MailDraft | null;
@@ -169,7 +195,7 @@ function bodyForAi(value: string, settings: MailSettings): string {
 
 export function MailClientModule({
   projectId, currentUserEmail, projects, contracts, syncing, syncStatus, onSync, onOpenContacts,
-  onNotice, onError, client = mailClientApi,
+  onNotice, onError, client = mailClientApi, autoSourceChainReady = false,
 }: Props) {
   const [folder, setFolder] = useState<MailFolderKind>("inbox");
   const [folders, setFolders] = useState<MailFolder[]>(defaultFolders);
@@ -493,11 +519,26 @@ export function MailClientModule({
     }
   }
 
+  /** After a link change: reload the list AND the opened thread itself, so the
+   * link line, selectors and context version are never stale (13.10 bug: a
+   * stale version made the next confirm silently fail). */
+  async function reloadAfterLinkChange() {
+    await loadMailbox();
+    const threadId = selectedThreadId;
+    if (!threadId) return;
+    try {
+      const loaded = await client.thread(projectId, threadId);
+      setThreads((current) => current.map((row) => row.id === loaded.id ? loaded : row));
+    } catch {
+      // The reloaded list is still current enough; a later open re-fetches.
+    }
+  }
+
   async function confirmContext(message: MailMessage, targetProjectId: number, contractId: number) {
     try {
       await client.confirmContext(message.id, targetProjectId, contractId || null, message.context_version);
       onNotice("Проект и договор письма подтверждены");
-      await loadMailbox();
+      await reloadAfterLinkChange();
     } catch (error) { onError((error as Error).message); }
   }
 
@@ -663,7 +704,9 @@ export function MailClientModule({
                 </>)}
             </div>
           </div>
-          <div className="mail-context-strip">
+          {/* Keyed by context version: the uncontrolled selects must reset to
+              the saved link after a re-fetch instead of keeping stale values. */}
+          <div className="mail-context-strip" key={`context-${selectedMessage.id}-${selectedMessage.context_version ?? 0}`}>
             <label className="mail-context-manual">Проект<select defaultValue={selectedMessage.project_id} id={`mail-project-${selectedMessage.id}`}>
               {projects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select></label>
@@ -676,9 +719,14 @@ export function MailClientModule({
               const contract = document.getElementById(`mail-contract-${selectedMessage.id}`) as HTMLSelectElement;
               void confirmContext(selectedMessage, Number(project.value), Number(contract.value));
             }}>{selectedMessage.context_confirmed ? "Изменить связь" : "Подтвердить связь"}</button>
-            <small>{selectedMessage.context_evidence || "Контекст не определён"}{selectedMessage.context_confidence !== undefined ? ` · AI ${Math.round(selectedMessage.context_confidence * 100)}%` : ""}</small>
+            <MailLinkLine message={selectedMessage} projects={projects} contracts={contracts} />
+            <MobileContextEditor message={selectedMessage}
+              projects={projects} contracts={contracts} client={client}
+              onDone={() => reloadAfterLinkChange()} onNotice={onNotice} onError={onError} />
             {selectedMessage.auto_context_confirmation_state === "confirmed_current"
               ? <small>Контекст для AUTO явно подтверждён владельцем</small>
+              : !autoSourceChainReady
+              ? <small className="mail-auto-deferred">{MAIL_AUTO_DEFERRED_NOTE}</small>
               : <>
                 <button
                   type="button"
@@ -687,7 +735,7 @@ export function MailClientModule({
                   onClick={() => void confirmContextForAuto(selectedMessage)}
                 >Подтвердить контекст для AUTO</button>
                 <MobileAutoConfirm key={selectedMessage.id} message={selectedMessage} contracts={contracts} client={client}
-                  onDone={() => loadMailbox()} onNotice={onNotice} onError={onError} />
+                  onDone={() => reloadAfterLinkChange()} onNotice={onNotice} onError={onError} />
               </>}
           </div>
           <div className="mail-thread-messages">

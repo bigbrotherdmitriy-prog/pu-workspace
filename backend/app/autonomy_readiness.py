@@ -20,7 +20,7 @@ from app.models.mailbox_identity import (
 from app.models.v54_authority import AuthorityState
 from app.models.v54_pilot import (
     ActionPolicy, ActionReceipt, ActionRevision, ConnectionIdentity, MailConnection,
-    PendingDispatch, PilotAction,
+    PendingDispatch, PilotAction, SourceReference,
 )
 from app.pilot_dispatch import PRODUCT_KIND
 from app.pilot_incidents import ALERT_AUDIT_ACTION
@@ -116,6 +116,38 @@ def _mailbox_current_pointers(db, *, organization_id, mail_connection_id, actor)
     }
 
 
+# Why AUTO cannot act on Gmail letters yet (ADR-V6-07 addendum 13.10.2026):
+# the AUTO chain needs the mailbox on primary read and the project's Gmail
+# source references in sync_state "current"; the producer-era mailbox only
+# ever writes "observed". Surfaced so the UI can hide AUTO-only affordances.
+MAILBOX_AUTO_BLOCKED_REASON = "mailbox_cutover_primary_read_required"
+# How many of the project's most recently seen Gmail sources must be current.
+_AUTO_CHAIN_SOURCE_SAMPLE = 20
+
+
+def _auto_source_chain_ready(db, project, identity, flags, valid):
+    """Read-only: True only when the cutover is on primary read AND the
+    project's latest Gmail source references are all sync_state "current"."""
+    if not (valid and flags is not None and flags.primary_read and identity is not None):
+        return False
+    states = list(db.scalars(select(SourceReference.sync_state).where(
+        SourceReference.organization_id == project.organization_id,
+        SourceReference.origin_project_id == project.id,
+        SourceReference.identity_id == identity.id,
+        SourceReference.namespace == "gmail",
+    ).order_by(
+        SourceReference.last_seen_at.desc().nulls_last(), SourceReference.id.desc(),
+    ).limit(_AUTO_CHAIN_SOURCE_SAMPLE)))
+    return bool(states) and all(state == "current" for state in states)
+
+
+def _auto_chain_fields(ready):
+    return {
+        "auto_source_chain_ready": ready,
+        "auto_blocked_reason": None if ready else MAILBOX_AUTO_BLOCKED_REASON,
+    }
+
+
 def _mailbox(db, project, actor=None):
     cohorts = list(db.scalars(select(MailboxProjectCohort).where(
         MailboxProjectCohort.organization_id == project.organization_id,
@@ -126,6 +158,7 @@ def _mailbox(db, project, actor=None):
         result = {
             "state": "missing" if not cohorts else "ambiguous", "ready": False,
             "organization_id": project.organization_id,
+            **_auto_chain_fields(False),
         }
         if cohorts:
             # Ambiguous (the pre-existing multi-enabled-row bug this task
@@ -172,6 +205,7 @@ def _mailbox(db, project, actor=None):
             "shadow_write", "shadow_read_compare", "pilot_write", "primary_read", "actions"
         )} if flags else None),
         "organization_id": project.organization_id,
+        **_auto_chain_fields(_auto_source_chain_ready(db, project, identity, flags, valid)),
     }
     result.update(_mailbox_current_pointers(
         db, organization_id=project.organization_id,
@@ -294,6 +328,12 @@ def project_autonomy_readiness(db, project, now=None, actor=None):
     if not policy_ready: blockers.append("policy_disabled_or_expired")
     if not authority_ready: blockers.append("authority_revoked_expired_or_mismatched")
     if not mailbox["ready"]: blockers.append("mailbox_cutover_not_ready")
+    has_auto_modes = "AUTO" in (
+        rules["action_modes"][CREATE_INTERNAL_TASK],
+        rules["action_modes"].get(CREATE_INTERNAL_NOTIFICATION, "CONFIRM"),
+    )
+    if has_auto_modes and not mailbox.get("auto_source_chain_ready"):
+        blockers.append("mailbox_source_chain_not_ready")
     if operations["incidents"]: blockers.append("unresolved_incident")
     degraded.extend(exhausted_quota_reasons(operations["quotas"]))
     if runtime_state == "matching":

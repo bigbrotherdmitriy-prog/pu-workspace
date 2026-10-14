@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test, settled } from "./storage-fixtures";
+import { chooseThemeOnPhone, expect, test, settled } from "./storage-fixtures";
 
 // 13.10.2026 phone review: the mail screen stacked the folder list, the thread
 // list and the opened letter on one long page. Phones now get master-detail:
@@ -55,7 +55,7 @@ test.describe("phone", () => {
       await withMail(page);
       await page.goto("/new/");
       await settled(page);
-      await page.getByRole("button", { name: theme, exact: true }).first().click();
+      await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
 
       const list = page.getByRole("region", { name: "Список писем" });
@@ -89,8 +89,10 @@ test.describe("phone", () => {
       await expect(back).toBeVisible();
       expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       expect((await back.boundingBox())!.y, "back button is at the top of the screen").toBeLessThan(150);
-      // The AUTO shortcut still lives inside the letter view.
-      await expect(reading.getByRole("button", { name: "Подтвердить для AUTO" })).toBeVisible();
+      // The letter can be linked from the phone; the AUTO shortcut stays hidden
+      // until the mail source chain is ready (ADR-V6-07, AUTO for mail deferred).
+      await expect(reading.getByRole("button", { name: "Подтвердить связь" })).toBeVisible();
+      await expect(reading.getByRole("button", { name: "Подтвердить для AUTO" })).toHaveCount(0);
       await noHorizontalScroll(page, 390);
 
       await back.click();

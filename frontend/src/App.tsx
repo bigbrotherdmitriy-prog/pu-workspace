@@ -623,7 +623,9 @@ export function App() {
   const phoneLayout = usePhoneLayout();
   useEffect(() => {
     let current = true;
-    if (!ready || !projectId || active !== "Настройки") {
+    // Mail needs it too: AUTO-for-mail controls appear only once
+    // mailbox.auto_source_chain_ready is true (ADR-V6-07).
+    if (!ready || !projectId || (active !== "Настройки" && active !== "Письма")) {
       setAutonomyReadiness(null);
       return () => { current = false; };
     }
@@ -4487,6 +4489,7 @@ export function App() {
               onOpenContacts={() => setMailView("companies")}
               onNotice={setNotice}
               onError={setError}
+              autoSourceChainReady={autonomyReadiness?.mailbox.auto_source_chain_ready === true}
             />}
             {active === "AI Secretary" && (
               <AttentionPanel projectId={projectId} onOpenSection={setActive} />
