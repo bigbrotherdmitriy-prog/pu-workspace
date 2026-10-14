@@ -1,0 +1,18 @@
+[Unit]
+Description=PU Workspace host watchdog (disk, memory, containers, queue, health -> Telegram)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# Installed copy (see docs/operations/MONITORING_RU.md), independent of any git checkout.
+ExecStart=/usr/local/lib/pu-watchdog/host_watchdog.sh
+User=root
+Group=root
+StateDirectory=pu-watchdog
+StateDirectoryMode=0700
+TimeoutStartSec=180
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
