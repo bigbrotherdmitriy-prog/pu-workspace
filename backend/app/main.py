@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.api.history import router as history_router
 from app.api.auth import router as auth_router
-from app.api.tasks import router as tasks_router
-from app.api.responses import router as responses_router
+from app.api.tasks import router as tasks_router, project_router as tasks_project_router
+from app.api.responses import router as responses_router, project_router as responses_project_router
 from app.api.telegram import router as telegram_router
 from app.api.governance import router as governance_router
 from app.api.dashboard import router as dashboard_router
@@ -181,7 +181,9 @@ app.include_router(google_drive_router)
 app.include_router(mvp1_google_oauth_router)
 app.include_router(yandex_disk_router)
 app.include_router(tasks_router)
+app.include_router(tasks_project_router)
 app.include_router(responses_router)
+app.include_router(responses_project_router)
 app.include_router(telegram_router)
 app.include_router(governance_router)
 app.include_router(dashboard_router)

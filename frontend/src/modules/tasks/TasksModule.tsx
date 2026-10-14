@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ListTodo } from "lucide-react";
 import { formatMoney, formatNumber } from "../../utils/numberFormat";
+import { BacklogTriagePanel } from "./BacklogTriagePanel";
+import { TASK_FILTERS } from "./taskFilterStorage";
 import "./tasks-mobile.css";
 
 export type TaskRow = {
@@ -60,6 +62,26 @@ export function taskStatusLabel(status: string): string {
   } as Record<string, string>)[status] || status.replaceAll("_", " ").replace(/^./, (letter) => letter.toLocaleUpperCase("ru-RU"));
 }
 
+const MINE_HORIZON_DAYS = 14;
+
+function isoDay(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * «Мои активные»: assigned to me (or to nobody), still open, and due within
+ * the next 14 days or already overdue. Tasks without a due date stay in
+ * «Открытые».
+ */
+export function isMyActiveTask(task: TaskRow, currentUserId: number | undefined, now = new Date()): boolean {
+  if (task.status !== "assigned" && task.status !== "in_progress") return false;
+  if (task.assignee_user_id && task.assignee_user_id !== currentUserId) return false;
+  if (!task.due_date) return false;
+  const horizon = new Date(now);
+  horizon.setDate(horizon.getDate() + MINE_HORIZON_DAYS);
+  return task.due_date <= isoDay(horizon);
+}
+
 export type TaskHistoryRow = {
   action: string; old_status?: string; new_status?: string; result_note?: string;
   completion_document_name?: string; details?: string; changed_by: string; changed_at: string;
@@ -87,12 +109,19 @@ type Props = {
   onLoadHistory: (task: TaskRow) => void;
   /** Task opened from a push deep link (?task=<id>): scrolled to and highlighted. */
   focusTaskId?: number;
+  /** Signed-in user, for «Мои активные». */
+  currentUserId?: number;
+  /** Project of the register; enables «Разобрать очередь» together with canTriage. */
+  projectId?: number;
+  canTriage?: boolean;
+  onReload?: () => void;
 };
 
 export function TasksModule(props: Props) {
   const today = new Date().toISOString().slice(0, 10);
   const visibleTasks = props.tasks.filter((task) =>
-    props.filter === "all" ? true
+    props.filter === "mine" ? isMyActiveTask(task, props.currentUserId)
+    : props.filter === "all" ? true
       : props.filter === "overdue" ? Boolean(task.due_date && task.due_date < today && task.status !== "completed")
         : props.filter === "review" ? task.needs_review
           : task.status === "assigned" || task.status === "in_progress",
@@ -105,6 +134,17 @@ export function TasksModule(props: Props) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+  // Manual pick for «Разобрать очередь»: checkboxes appear only while that
+  // preset is chosen, and only on open tasks (the only ones it can close).
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<number>>(() => new Set());
+  const togglePicked = (id: number) => setPicked((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const onSelectingChange = useCallback((value: boolean) => setSelecting(value), []);
+  const clearPicked = useCallback(() => setPicked(new Set()), []);
   const focusVisible = Boolean(props.focusTaskId && visibleTasks.some((task) => task.id === props.focusTaskId));
   useEffect(() => {
     if (!focusVisible) return;
@@ -112,12 +152,18 @@ export function TasksModule(props: Props) {
   }, [focusVisible, props.focusTaskId]);
 
   return <section className="card task-register">
-    <div className="card-head"><div><h2>Реестр задач</h2><p>Автоматически выделенные поручения с проверяемым источником</p></div><div className="task-filters">{[["open", "Открытые"], ["overdue", "Просроченные"], ["review", "На проверку"], ["all", "Все"]].map(([id, label]) => <button className={props.filter === id ? "selected" : ""} onClick={() => props.onFilterChange(id)} key={id}>{label}</button>)}</div></div>
+    <div className="card-head"><div><h2>Реестр задач</h2><p>Автоматически выделенные поручения с проверяемым источником</p></div><div className="task-filters">{TASK_FILTERS.map(([id, label]) => <button className={props.filter === id ? "selected" : ""} onClick={() => props.onFilterChange(id)} key={id}>{label}</button>)}</div></div>
+    {props.canTriage && props.projectId ? <BacklogTriagePanel kind="tasks" projectId={props.projectId}
+      selectedIds={[...picked]} onSelectingChange={onSelectingChange} onClearSelection={clearPicked}
+      onDone={() => props.onReload?.()} /> : null}
     <div className="task-list">{visibleTasks.map((task) => <article key={task.id} id={`task-${task.id}`}
       className={[task.id === props.focusTaskId ? "task-focused" : "", expanded.has(task.id) ? "task-expanded" : ""].filter(Boolean).join(" ") || undefined}
       aria-current={task.id === props.focusTaskId ? "true" : undefined}>
       <div className={`task-priority ${task.priority}`} />
       <div className="task-body">
+        {selecting && (task.status === "assigned" || task.status === "in_progress") && <label className="task-pick">
+          <input type="checkbox" checked={picked.has(task.id)} onChange={() => togglePicked(task.id)}
+            aria-label={`Выбрать задачу ${task.title}`} />Выбрать</label>}
         <strong>{task.title}</strong>
         <div className="task-mobile-summary">
           <span className={task.due_date && task.due_date < today && task.status !== "completed" ? "overdue" : ""}>{task.due_date || "Без срока"}</span>

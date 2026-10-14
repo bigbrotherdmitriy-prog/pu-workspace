@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Archive, Bot, CheckCircle2, ChevronRight,
   Clock3, FileText, Inbox, Mail, MailOpen, Newspaper, Paperclip, PenLine, RefreshCw,
@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { MailSettingsDialog } from "./MailSettingsDialog";
 import { MobileAutoConfirm } from "./MobileAutoConfirm";
+import { BacklogTriagePanel } from "../tasks/BacklogTriagePanel";
 import { MobileContextEditor } from "./MobileContextEditor";
 import { MAIL_AUTO_DEFERRED_NOTE } from "../settings/AutonomyReadinessPanel";
 import { editorHtml, editorPlainText, RichTextEditor } from "./RichTextEditor";
@@ -31,6 +32,8 @@ type Props = {
   onNotice: (message: string) => void;
   onError: (message: string) => void;
   client?: typeof mailClientApi;
+  /** Manager/owner: shows «Разобрать очередь» in the drafts folder. */
+  canTriage?: boolean;
   /** autonomy-readiness mailbox.auto_source_chain_ready; AUTO-for-mail stays hidden until true. */
   autoSourceChainReady?: boolean;
 };
@@ -195,7 +198,7 @@ function bodyForAi(value: string, settings: MailSettings): string {
 
 export function MailClientModule({
   projectId, currentUserEmail, projects, contracts, syncing, syncStatus, onSync, onOpenContacts,
-  onNotice, onError, client = mailClientApi, autoSourceChainReady = false,
+  onNotice, onError, client = mailClientApi, canTriage = false, autoSourceChainReady = false,
 }: Props) {
   const [folder, setFolder] = useState<MailFolderKind>("inbox");
   const [folders, setFolders] = useState<MailFolder[]>(defaultFolders);
@@ -221,6 +224,16 @@ export function MailClientModule({
   // Phones (≤ 760 px) show either the list or the opened letter, never both.
   // The flag is harmless on desktop: only mail-mobile.css reacts to it.
   const [mobileReading, setMobileReading] = useState(false);
+  // Manual pick for «Разобрать очередь» in the drafts folder.
+  const [draftSelecting, setDraftSelecting] = useState(false);
+  const [pickedDrafts, setPickedDrafts] = useState<ReadonlySet<number>>(() => new Set());
+  const onDraftSelectingChange = useCallback((value: boolean) => setDraftSelecting(value), []);
+  const clearPickedDrafts = useCallback(() => setPickedDrafts(new Set()), []);
+  const togglePickedDraft = (id: number) => setPickedDrafts((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const listScrollRef = useRef<{ scroller: Element; top: number; list: number } | null>(null);
   const listRef = useRef<HTMLElement>(null);
   const requestRef = useRef(0);
@@ -674,15 +687,22 @@ export function MailClientModule({
         <label className="mail-search"><Search /><input value={query} placeholder="Поиск писем" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
           if (event.key === "Enter") void loadMailbox(folder, query);
         }} /><button aria-label="Найти" onClick={() => void loadMailbox(folder, query)}><ChevronRight /></button></label>
+        {canTriage && folder === "drafts" && <BacklogTriagePanel kind="drafts" projectId={projectId}
+          selectedIds={[...pickedDrafts]} onSelectingChange={onDraftSelectingChange}
+          onClearSelection={clearPickedDrafts} onDone={() => void loadMailbox("drafts", query)} />}
         {loading ? <div className="mail-loading" aria-live="polite"><RefreshCw className="spinning" /> Загружаю письма…</div> : threads.length ? threads.map((thread) => {
           const last = thread.messages[thread.messages.length - 1];
-          return <button className={`mail-thread-row ${selectedThreadId === thread.id ? "selected" : ""}`} key={thread.id} onClick={() => openThread(thread.id)}>
+          const pickDraft = draftSelecting && folder === "drafts" ? thread.messages[0]?.drafts?.[0] : undefined;
+          return <Fragment key={thread.id}>{pickDraft && pickDraft.status === "draft" && <label className="mail-draft-pick">
+            <input type="checkbox" checked={pickedDrafts.has(pickDraft.id)} onChange={() => togglePickedDraft(pickDraft.id)}
+              aria-label={`Выбрать черновик ${thread.subject}`} />Выбрать</label>}
+          <button className={`mail-thread-row ${selectedThreadId === thread.id ? "selected" : ""}`} onClick={() => openThread(thread.id)}>
             <span className="mail-avatar">{(last.sender.name || last.sender.email).slice(0, 1).toLocaleUpperCase("ru-RU")}</span>
             <span className="mail-thread-copy"><strong>{last.sender.name || last.sender.email}</strong><b>{thread.subject}</b><small>{last.preview || last.summary || readableMessageBody(last.content)}</small></span>
             <time>{new Date(thread.last_message_at).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}</time>
             {thread.unread_count > 0 && <span className="mail-unread">{thread.unread_count}</span>}
             {thread.needs_attention && <AlertTriangle className="mail-attention" aria-label="Требует внимания" />}
-          </button>;
+          </button></Fragment>;
         }) : <div className="mail-empty"><MailOpen /><strong>Загруженных писем в этой папке нет</strong><span>Это не означает, что папка Gmail пуста. Нажмите «Получить новые», чтобы загрузить до 25 последних писем выбранной папки.</span></div>}
       </section>
       <section className="mail-reading-pane" aria-label="Просмотр переписки">

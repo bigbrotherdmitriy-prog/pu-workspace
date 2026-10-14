@@ -54,6 +54,7 @@ import type { ProjectAnalytics } from "./modules/analytics/AnalyticsModule";
 import type { AIProjectPolicy, ProcessingQueue } from "./modules/settings/SettingsModule";
 import type { AutonomyReadiness } from "./modules/settings/AutonomyReadinessPanel";
 import type { TaskHistoryRow, TaskRow } from "./modules/tasks/TasksModule";
+import { rememberTaskFilter, storedTaskFilter } from "./modules/tasks/taskFilterStorage";
 import type { DecisionRow, RiskRow } from "./modules/governance/GovernanceModule";
 import { formatMoney } from "./utils/numberFormat";
 import { pushTaskIdFromLocation, registerPushDevice, revokePushDevice } from "./push/fcmRegistration";
@@ -495,7 +496,7 @@ export function App() {
     [projectStats, setProjectStats] = useState<Record<number, ProjectStats>>(
       {},
     ),
-    [taskFilter, setTaskFilter] = useState(() => pushTaskIdFromLocation() ? "all" : "open"),
+    [taskFilter, setTaskFilter] = useState(() => pushTaskIdFromLocation() ? "all" : storedTaskFilter()),
     [focusTaskId] = useState(pushTaskIdFromLocation),
     [obligationFilter, setObligationFilter] = useState<"all" | "overdue">("all"),
     [governanceFocus, setGovernanceFocus] = useState<"all" | "risks" | "decisions">("all"),
@@ -3621,7 +3622,7 @@ export function App() {
               completionDocumentId={completionDocumentId}
               historyTaskId={taskHistoryId}
               history={taskHistory}
-              onFilterChange={setTaskFilter}
+              onFilterChange={(filter) => { setTaskFilter(filter); rememberTaskFilter(filter); }}
               onAssign={(task, userId) => void assignTask(task, userId)}
               onChangeDueDate={(task) => void changeTaskDueDate(task)}
               onApproveExternal={(task) => void approveExternal(task)}
@@ -3632,6 +3633,12 @@ export function App() {
               onCompletionDocumentChange={setCompletionDocumentId}
               onLoadHistory={(task) => void loadTaskHistory(task)}
               focusTaskId={focusTaskId}
+              currentUserId={currentUser?.id}
+              projectId={projectId}
+              canTriage={Boolean(currentUser?.is_admin || members.some((member) =>
+                member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+              ))}
+              onReload={() => void load()}
             />
           ) : active === "Риски и решения" ? (
             <GovernanceModule
@@ -4485,6 +4492,9 @@ export function App() {
               onOpenContacts={() => setMailView("companies")}
               onNotice={setNotice}
               onError={setError}
+              canTriage={Boolean(currentUser?.is_admin || members.some((member) =>
+                member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role),
+              ))}
               autoSourceChainReady={autonomyReadiness?.mailbox.auto_source_chain_ready === true}
             />}
             {active === "AI Secretary" && (

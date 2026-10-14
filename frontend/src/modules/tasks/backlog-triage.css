@@ -1,0 +1,42 @@
+/* «Разобрать очередь» panel (tasks register and mail drafts folder).
+   Desktop: a compact block under the header; phone (≤ 760 px): full-width
+   controls with 44 px touch targets, the toast sits above the bottom nav. */
+.backlog-triage { display: grid; gap: 10px; margin: 0 0 12px; }
+.backlog-triage-toggle { justify-self: start; }
+.backlog-triage-panel {
+  display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--read-rule, #dce6e1); border-radius: 10px;
+  background: var(--read-surface, #fff); color: var(--read-text, #17221d);
+}
+.backlog-triage-panel > button { justify-self: start; }
+.backlog-triage-hint { margin: 0; font-size: 13px; color: var(--read-muted, #5b6b63); }
+.backlog-triage-presets { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.backlog-triage-presets legend { margin-bottom: 4px; font-weight: 700; }
+.backlog-triage-presets label { display: flex; align-items: flex-start; gap: 8px; line-height: 1.35; cursor: pointer; }
+.backlog-triage-presets input { flex: none; margin-top: 2px; }
+.backlog-triage-days { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.backlog-triage-days input { width: 84px; }
+.backlog-triage-error { margin: 0; color: var(--read-danger, #b42318); }
+.backlog-triage-preview { display: grid; gap: 8px; }
+.backlog-triage-preview ul { max-height: 220px; margin: 0; padding-left: 20px; overflow-y: auto; font-size: 13px; overflow-wrap: anywhere; }
+.backlog-triage-more { list-style: none; margin-left: -20px; color: var(--read-muted, #5b6b63); }
+.backlog-triage-reason { display: grid; gap: 4px; font-size: 13px; }
+.backlog-triage-reason textarea { width: 100%; min-height: 56px; box-sizing: border-box; }
+.backlog-triage-preview > button { justify-self: start; }
+.backlog-triage-toast {
+  position: fixed; z-index: 60; left: 50%; bottom: 20px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: 10px 12px; border-radius: 10px; background: #17221d; color: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+}
+.backlog-triage-toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.backlog-triage-toast button { flex: none; }
+.task-pick, .mail-draft-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.mail-draft-pick { padding: 6px 12px 0; }
+@media (max-width: 760px) {
+  :root .shell .backlog-triage-toggle,
+  :root .shell .backlog-triage-panel > button,
+  :root .shell .backlog-triage-preview > button { justify-self: stretch; width: 100%; min-height: 44px; white-space: normal; line-height: 1.2; }
+  :root .shell .backlog-triage-presets label { min-height: 36px; }
+  :root .shell .backlog-triage-toast { left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: none; max-width: none; }
+  :root .shell .backlog-triage-toast button { min-height: 40px; }
+  :root .shell .task-pick, :root .shell .mail-draft-pick { min-height: 36px; }
+}
