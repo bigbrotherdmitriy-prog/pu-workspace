@@ -430,4 +430,5 @@
 :root[data-display-theme] .shell .contract-parent-link { background: var(--read-surface); border-color: var(--read-rule); color: var(--read-text); }
 :root[data-display-theme] .shell .contract-parent-link span, :root[data-display-theme] .shell .contract-parent-link small { color: var(--read-muted); }
 /* Negative DDS amounts sit on the dark balance row (#42516a); keep them light pink for >= 4.5 contrast. */
-:root[data-display-theme] .shell .dds-table .negative, :root[data-display-theme] .shell .dds-calendar .dds-balance .negative { color: #ffb7c5; }
+:root[data-display-theme] .shell .dds-table .negative, :root[data-display-theme] .shell .dds-calendar .dds-balance .negative { color: var(--read-danger); }
+:root[data-display-theme="dark"] .shell .dds-table .negative, :root[data-display-theme="dark"] .shell .dds-calendar .dds-balance .negative { color: #ffb7c5; }
