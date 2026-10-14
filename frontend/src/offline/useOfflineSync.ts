@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CHANGE_EVENT, offlineSummary, resolveConflict, serverConflicts, synchronize,
 } from "./syncEngine";
+import { CONNECTIVITY_EVENT, isOnline } from "./connectivity";
 import type { ServerConflict, SyncSummary } from "./types";
 
 const EMPTY: SyncSummary = {
@@ -22,7 +23,7 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
       return;
     }
     setSummary(await offlineSummary(userId, projectId));
-    if (navigator.onLine && userId && projectId) {
+    if (isOnline() && userId && projectId) {
       try { setConflicts(await serverConflicts(projectId)); } catch { /* Preserve local state. */ }
     }
   }, [userId, projectId, storageAvailable]);
@@ -40,9 +41,11 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
     if (!storageAvailable || !userId || !projectId) return;
     const changed = () => { void refresh(); };
     const online = () => { void syncNow(false); };
+    const connectivity = () => { if (isOnline()) void syncNow(false); };
     const visible = () => { if (document.visibilityState === "visible") void syncNow(false); };
     window.addEventListener(CHANGE_EVENT, changed);
     window.addEventListener("online", online);
+    window.addEventListener(CONNECTIVITY_EVENT, connectivity);
     document.addEventListener("visibilitychange", visible);
     void refresh();
     void syncNow(false);
@@ -50,6 +53,7 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
     return () => {
       window.removeEventListener(CHANGE_EVENT, changed);
       window.removeEventListener("online", online);
+      window.removeEventListener(CONNECTIVITY_EVENT, connectivity);
       document.removeEventListener("visibilitychange", visible);
       window.clearInterval(timer);
     };

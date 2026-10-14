@@ -1,4 +1,5 @@
 import { api, ApiError } from "../api/client";
+import { isOnline } from "./connectivity";
 import { deleteCommand, getMeta, listCommands, putCommand, setMeta } from "./db";
 import type { OfflineCommand, ServerConflict, StoredUploadFile, SyncSummary } from "./types";
 
@@ -178,7 +179,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
 }
 
 export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
-  if (running || !navigator.onLine || !userId || !projectId) return;
+  if (running || !isOnline() || !userId || !projectId) return;
   running = true;
   try {
     const commands = await listCommands(userId, projectId);
@@ -239,7 +240,7 @@ export async function offlineSummary(userId: number, projectId: number): Promise
 }
 
 export async function serverConflicts(projectId: number): Promise<ServerConflict[]> {
-  if (!navigator.onLine || !projectId) return [];
+  if (!isOnline() || !projectId) return [];
   const result = await api<{ conflicts: ServerConflict[] }>(`/mobile-sync/status?project_id=${projectId}`);
   return result.conflicts;
 }

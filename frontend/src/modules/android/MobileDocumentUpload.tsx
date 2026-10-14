@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Camera, FileUp, FolderOpen, Upload, X } from "lucide-react";
 import { api, ApiError } from "../../api/client";
+import { isOnline } from "../../offline/connectivity";
 import { enqueueDocumentUpload } from "../../offline/syncEngine";
 import {
   awaitLocalUploadJobs, isSupportedLocalUploadFile, localUploadMimeType, type QueuedLocalUploadJob,
@@ -104,7 +105,7 @@ export function MobileDocumentUpload({
     try {
       setBusy(true);
       setError("");
-      if (!navigator.onLine) {
+      if (!isOnline()) {
         await enqueueDocumentUpload({
           userId,
           projectId,
@@ -152,7 +153,7 @@ export function MobileDocumentUpload({
       onClose();
     } catch (reason) {
       const remaining = files.slice(uploadedCount);
-      if (remaining.length && ((reason instanceof ApiError && reason.status === null) || !navigator.onLine)) {
+      if (remaining.length && ((reason instanceof ApiError && reason.status === null) || !isOnline())) {
         try {
           await enqueueDocumentUpload({
             userId,
