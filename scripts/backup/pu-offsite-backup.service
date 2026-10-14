@@ -1,0 +1,15 @@
+[Unit]
+Description=PU Workspace: encrypted off-site PostgreSQL backup to Google Drive
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Optional overrides (PU_BACKUP_*), e.g. another token id or folder name.
+EnvironmentFile=-/root/.config/pu-workspace/backup/backup.env
+ExecStart=/usr/local/lib/pu-workspace-backup/offsite_backup.sh
+TimeoutStartSec=1h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

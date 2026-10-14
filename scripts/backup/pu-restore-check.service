@@ -1,0 +1,12 @@
+[Unit]
+Description=PU Workspace: restore check of the newest off-site DB backup
+Wants=network-online.target
+After=network-online.target docker.service pu-offsite-backup.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/root/.config/pu-workspace/backup/backup.env
+ExecStart=/usr/local/lib/pu-workspace-backup/restore_check.sh
+TimeoutStartSec=1h
+Nice=10
