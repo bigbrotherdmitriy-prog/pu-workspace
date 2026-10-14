@@ -173,13 +173,36 @@ describe("AutonomyReadinessPanel", () => {
     expect(screen.queryByRole("button", { name: "Продлить доступ к почте на 7 дней" })).toBeNull();
   });
 
-  it("offers the 7-day AUTO pilot next to the CONFIRM launch for an admin", () => {
+  it("offers the 7-day AUTO pilot next to the CONFIRM launch once the mail source chain is ready", () => {
     const onEnableAutoPilot = vi.fn();
-    render(<AutonomyReadinessPanel data={data} canBootstrapAuthority onBootstrapAuthority={vi.fn()}
+    render(<AutonomyReadinessPanel data={{ ...data, mailbox: { ...data.mailbox, auto_source_chain_ready: true } }}
+      canBootstrapAuthority onBootstrapAuthority={vi.fn()}
       canLaunchPilot onLaunchPilot={vi.fn()} onEnableAutoPilot={onEnableAutoPilot} />);
     fireEvent.click(screen.getByRole("button", { name: "Включить AUTO для задач и уведомлений на 7 дней" }));
     expect(onEnableAutoPilot).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/Внешние письма — всё равно только по подтверждению/)).toBeInTheDocument();
+    expect(screen.queryByText(/этап V6-07/)).toBeNull();
+  });
+
+  it.each([
+    ["false", false],
+    ["absent (older server)", undefined],
+  ])("hides the 7-day AUTO button and explains why when the chain flag is %s", (_label, ready) => {
+    const onLaunchPilot = vi.fn();
+    const onBootstrap = vi.fn();
+    render(<AutonomyReadinessPanel
+      data={{ ...data, overall: { status: "BLOCKED", blockers: ["mailbox_source_chain_not_ready"], warnings: [] },
+        mailbox: { ...data.mailbox, auto_source_chain_ready: ready, auto_blocked_reason: "mailbox_cutover_primary_read_required" } }}
+      canBootstrapAuthority onBootstrapAuthority={onBootstrap}
+      canLaunchPilot onLaunchPilot={onLaunchPilot} onEnableAutoPilot={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Включить AUTO для задач и уведомлений на 7 дней" })).toBeNull();
+    expect(screen.getByText("AUTO для почты появится после перехода почты на основное чтение (этап V6-07)")).toBeInTheDocument();
+    expect(screen.getByText(/Почта ещё не на основном чтении/)).toBeInTheDocument();
+    // Mandate restore and the CONFIRM launch stay available.
+    fireEvent.click(screen.getByRole("button", { name: "Восстановить мандат пилота" }));
+    fireEvent.click(screen.getByRole("button", { name: "Запустить пилот (всё через подтверждение)" }));
+    expect(onBootstrap).toHaveBeenCalledTimes(1);
+    expect(onLaunchPilot).toHaveBeenCalledTimes(1);
   });
 
   it("hides the AUTO pilot control without the launch control", () => {

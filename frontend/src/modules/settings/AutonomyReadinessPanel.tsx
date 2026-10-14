@@ -16,6 +16,9 @@ export type AutonomyReadiness = {
     current_binding_epoch?: number | null;
     actor_authority_version?: number | null;
     authority_valid_until?: string | null;
+    /** False (or absent on older servers) while AUTO cannot act on Gmail letters (ADR-V6-07). */
+    auto_source_chain_ready?: boolean;
+    auto_blocked_reason?: string | null;
   };
   quotas: {
     task_hourly: { used: number; limit: number | null };
@@ -25,6 +28,9 @@ export type AutonomyReadiness = {
   operations: { actions: Record<string, number>; receipts: Record<string, number>; jobs: Record<string, number>; incidents: Array<{ status: string }> };
 };
 
+/** Shown wherever an AUTO-for-mail action is hidden until the V6-07 cutover. */
+export const MAIL_AUTO_DEFERRED_NOTE = "AUTO для почты появится после перехода почты на основное чтение (этап V6-07)";
+
 const reasonLabels: Record<string, string> = {
   runtime_configuration_invalid: "Некорректная runtime-конфигурация",
   runtime_project_scope_mismatch: "Runtime настроен на другой проект",
@@ -33,6 +39,7 @@ const reasonLabels: Record<string, string> = {
   policy_disabled_or_expired: "Политика выключена или истекла",
   authority_revoked_expired_or_mismatched: "Полномочия отозваны, истекли или не совпадают с политикой",
   mailbox_cutover_not_ready: "Mailbox cohort/cutover не готов",
+  mailbox_source_chain_not_ready: "Почта ещё не на основном чтении: AUTO не может действовать по письмам",
   unresolved_incident: "Есть неразрешённый инцидент",
   runtime_component_alignment_unverified: "Версии runtime-компонентов нельзя подтвердить по текущим heartbeat-данным",
 };
@@ -149,7 +156,8 @@ export function AutonomyReadinessPanel({
         <button type="button" disabled={launchingPilot} onClick={() => void onLaunchPilot()}>
           {launchingPilot ? "Запускаем…" : "Запустить пилот (всё через подтверждение)"}
         </button>
-        {onEnableAutoPilot && <>
+        {onEnableAutoPilot && !data.mailbox.auto_source_chain_ready && <p className="autonomy-readonly-note autonomy-auto-deferred">{MAIL_AUTO_DEFERRED_NOTE}</p>}
+        {onEnableAutoPilot && data.mailbox.auto_source_chain_ready && <>
           <p>AUTO-пилот: система сама создаёт внутренние задачи и уведомления по входящим письмам (лимиты в час, уверенность от 0.9). Внешние письма — всё равно только по подтверждению. Сначала мандат пилота должен быть действующим.</p>
           <button type="button" disabled={enablingAutoPilot} onClick={() => void onEnableAutoPilot()}>
             {enablingAutoPilot ? "Включаем…" : "Включить AUTO для задач и уведомлений на 7 дней"}
