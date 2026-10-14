@@ -1,6 +1,7 @@
 import type { VatSnapshot } from "../contracts/contractCommercial";
 
 export type FinanceOverview = {
+  project_id?: number;
   summary: {
     budget_planned: number;
     budget_committed: number;
