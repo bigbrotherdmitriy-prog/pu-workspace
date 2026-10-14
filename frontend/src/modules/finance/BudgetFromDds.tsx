@@ -17,7 +17,22 @@ type ExpenseByCategory = {
   plan: string;
   fact: string;
   deviation: string;
+  remaining?: string | null;
   counterparties: CounterpartyRow[];
+};
+
+type AdditionalCostItem = {
+  title: string;
+  counterparty: string | null;
+  planned_date: string | null;
+  actual_date: string | null;
+  fact: string;
+};
+
+type AdditionalCosts = {
+  plan: string;
+  fact: string;
+  items?: AdditionalCostItem[];
 };
 
 type MonthRow = {
@@ -36,6 +51,8 @@ type BudgetFromDdsResponse = {
   currency: string;
   income: MoneyPair;
   expense_total: MoneyPair;
+  direct_expense_total?: MoneyPair | null;
+  additional_costs?: AdditionalCosts | null;
   expense_by_category: ExpenseByCategory[];
   profit: MoneyPair;
   margin_pct: { plan: string | null; fact: string | null };
@@ -74,6 +91,11 @@ function completionPct(fact: string | number, plan: string | number): string | n
   const planValue = toNumber(plan);
   if (planValue === 0) return null;
   return `${(toNumber(fact) / planValue * 100).toFixed(1)}%`;
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  return value;
 }
 
 function monthDiff(start: string, end: string): number {
@@ -133,6 +155,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [extraExpanded, setExtraExpanded] = useState(false);
 
   useEffect(() => {
     if (projectId <= 0) {
@@ -145,6 +168,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
     setLoading(true);
     setError("");
     setExpandedCategories(new Set());
+    setExtraExpanded(false);
     const params = new URLSearchParams();
     if (contractId) params.set("contract_id", String(contractId));
     const query = params.toString();
@@ -187,7 +211,26 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
 
   const currencyLabel = currency || data.currency;
 
+  const direct = data.direct_expense_total ?? data.expense_total;
+  const additional: AdditionalCosts = data.additional_costs ?? { plan: "0", fact: "0", items: [] };
+  const additionalItems = additional.items ?? [];
+
+  const remainingCell = (plan: string | number, fact: string | number, remainingOverride?: string | null) => {
+    const value = remainingOverride !== undefined && remainingOverride !== null
+      ? toNumber(remainingOverride)
+      : toNumber(plan) - toNumber(fact);
+    const overrun = value < 0;
+    return <td className={`money${overrun ? " budget-overrun" : ""}`}>{fmt(value)}</td>;
+  };
+
+  const remainingTotalCell = (plan: string | number, fact: string | number) => {
+    const value = toNumber(plan) - toNumber(fact);
+    const overrun = value < 0;
+    return <td className={`money${overrun ? " budget-overrun" : ""}`}>{fmt(value)}</td>;
+  };
+
   return <div className="budget-from-dds">
+    <p className="budget-from-dds-caption">Бюджет собирается автоматически из планового ДДС. Счета и оплаты вне плана попадают в «Дополнительные затраты».</p>
     <div className="budget-from-dds-table-wrap">
       <table className="budget-from-dds-table">
         <thead>
@@ -195,7 +238,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
             <th>Статья</th>
             <th>План, {currencyLabel}</th>
             <th>Факт, {currencyLabel}</th>
-            <th>Отклонение, {currencyLabel}</th>
+            <th>Остаток, {currencyLabel}</th>
             <th>% исполнения</th>
           </tr>
         </thead>
@@ -204,15 +247,15 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
             <td>Доходы</td>
             <td className="money positive">{fmt(data.income.plan)}</td>
             <td className="money positive">{fmt(data.income.fact)}</td>
-            <td className={`money ${deviation(data.income.fact, data.income.plan) < 0 ? "negative" : ""}`}>{fmt(deviation(data.income.fact, data.income.plan))}</td>
+            {remainingTotalCell(data.income.plan, data.income.fact)}
             <td>{completionPct(data.income.fact, data.income.plan) ?? "—"}</td>
           </tr>
           <tr className="budget-from-dds-expense-total">
-            <td>Расходы прямые, всего</td>
-            <td className="money">{fmt(data.expense_total.plan)}</td>
-            <td className="money">{fmt(data.expense_total.fact)}</td>
-            <td className={`money ${deviation(data.expense_total.fact, data.expense_total.plan) > 0 ? "negative" : ""}`}>{fmt(deviation(data.expense_total.fact, data.expense_total.plan))}</td>
-            <td>{completionPct(data.expense_total.fact, data.expense_total.plan) ?? "—"}</td>
+            <td>Прямые расходы (по плановому ДДС)</td>
+            <td className="money">{fmt(direct.plan)}</td>
+            <td className="money">{fmt(direct.fact)}</td>
+            {remainingTotalCell(direct.plan, direct.fact)}
+            <td>{completionPct(direct.fact, direct.plan) ?? "—"}</td>
           </tr>
           {data.expense_by_category.map((row) => {
             const key = row.category_id !== null ? `cat-${row.category_id}` : `name-${row.category}`;
@@ -230,7 +273,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                   </td>
                   <td className="money">{fmt(row.plan)}</td>
                   <td className="money">{fmt(row.fact)}</td>
-                  <td className={`money ${deviation(row.fact, row.plan) > 0 ? "negative" : ""}`}>{fmt(deviation(row.fact, row.plan))}</td>
+                  {remainingCell(row.plan, row.fact, row.remaining)}
                   <td>{completionPct(row.fact, row.plan) ?? "—"}</td>
                 </tr>
                 {expanded && row.counterparties.map((cp, index) => (
@@ -238,18 +281,47 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                     <td>{cp.counterparty}</td>
                     <td className="money">{fmt(cp.plan)}</td>
                     <td className="money">{fmt(cp.fact)}</td>
-                    <td className={`money ${deviation(cp.fact, cp.plan) > 0 ? "negative" : ""}`}>{fmt(deviation(cp.fact, cp.plan))}</td>
+                    {remainingCell(cp.plan, cp.fact)}
                     <td>{completionPct(cp.fact, cp.plan) ?? "—"}</td>
                   </tr>
                 ))}
               </Fragment>
             );
           })}
+          <tr
+            className={`budget-from-dds-extra budget-extra ${extraExpanded ? "expanded" : ""}`}
+            onClick={() => additionalItems.length > 0 && setExtraExpanded((v) => !v)}
+          >
+            <td>
+              {additionalItems.length > 0 ? <button type="button" className="budget-from-dds-toggle" aria-expanded={extraExpanded} onClick={(event) => { event.stopPropagation(); setExtraExpanded((v) => !v); }}>{extraExpanded ? "▾" : "▸"}</button> : null}
+              Дополнительные затраты (вне плана)
+            </td>
+            <td className="money">{fmt(additional.plan)}</td>
+            <td className="money">{fmt(additional.fact)}</td>
+            {remainingTotalCell(additional.plan, additional.fact)}
+            <td>{completionPct(additional.fact, additional.plan) ?? "—"}</td>
+          </tr>
+          {extraExpanded && additionalItems.map((item, index) => (
+            <tr key={`extra-${index}`} className="budget-from-dds-extra-item">
+              <td>{item.title}</td>
+              <td className="money">{item.counterparty ?? "—"}</td>
+              <td className="money">{formatDate(item.planned_date)}</td>
+              <td className="money">{formatDate(item.actual_date)}</td>
+              <td className="money">{fmt(item.fact)}</td>
+            </tr>
+          ))}
+          <tr className="budget-from-dds-expense-total">
+            <td>Расходы всего</td>
+            <td className="money">{fmt(data.expense_total.plan)}</td>
+            <td className="money">{fmt(data.expense_total.fact)}</td>
+            {remainingTotalCell(data.expense_total.plan, data.expense_total.fact)}
+            <td>{completionPct(data.expense_total.fact, data.expense_total.plan) ?? "—"}</td>
+          </tr>
           <tr className="budget-from-dds-profit">
             <td>Прибыль</td>
             <td className={`money ${toNumber(data.profit.plan) < 0 ? "negative" : "positive"}`}>{fmt(data.profit.plan)}</td>
             <td className={`money ${toNumber(data.profit.fact) < 0 ? "negative" : "positive"}`}>{fmt(data.profit.fact)}</td>
-            <td className={`money ${deviation(data.profit.fact, data.profit.plan) < 0 ? "negative" : ""}`}>{fmt(deviation(data.profit.fact, data.profit.plan))}</td>
+            {remainingTotalCell(data.profit.plan, data.profit.fact)}
             <td>—</td>
           </tr>
           <tr className="budget-from-dds-margin">

@@ -4,6 +4,38 @@
   gap: 16px;
 }
 
+.budget-from-dds-caption {
+  margin: 0;
+  color: var(--read-text-muted, #4b5563);
+  font-size: 13px;
+}
+
+.budget-from-dds-table .budget-overrun {
+  color: var(--read-negative, #b91c1c);
+  background: var(--read-negative-bg, rgba(185, 28, 28, 0.12));
+}
+
+.budget-from-dds-table .budget-extra td,
+.budget-from-dds-table .budget-extra {
+  background: var(--read-warning-bg, rgba(245, 158, 11, 0.14));
+  color: var(--read-warning-text, #92400e);
+}
+
+.budget-from-dds-extra {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.budget-from-dds-extra.expanded {
+  background: var(--read-warning-bg, rgba(245, 158, 11, 0.2));
+}
+
+.budget-from-dds-extra-item td {
+  padding-left: 28px;
+  color: var(--read-text-muted, #4b5563);
+  font-style: italic;
+}
+
 .budget-from-dds-status {
   color: var(--read-text, #1f2937);
   padding: 12px 0;
@@ -161,4 +193,27 @@
 
 :root[data-display-theme="dark"] .budget-from-dds-toggle {
   color: var(--read-text, #e5e7eb);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-caption {
+  color: var(--read-text-muted, #9ca3af);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table .budget-overrun {
+  color: var(--read-negative, #f87171);
+  background: var(--read-negative-bg, rgba(248, 113, 113, 0.2));
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table .budget-extra td,
+:root[data-display-theme="dark"] .budget-from-dds-table .budget-extra {
+  background: var(--read-warning-bg, rgba(245, 158, 11, 0.2));
+  color: var(--read-warning-text, #fcd34d);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-extra.expanded {
+  background: var(--read-warning-bg, rgba(245, 158, 11, 0.28));
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-extra-item td {
+  color: var(--read-text-muted, #9ca3af);
 }
