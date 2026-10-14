@@ -1,0 +1,164 @@
+.budget-from-dds {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.budget-from-dds-status {
+  color: var(--read-text, #1f2937);
+  padding: 12px 0;
+}
+
+.budget-from-dds-error {
+  color: var(--read-danger, #b91c1c);
+}
+
+.budget-from-dds-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--read-border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--read-surface, #ffffff);
+}
+
+.budget-from-dds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--read-text, #1f2937);
+}
+
+.budget-from-dds-table th,
+.budget-from-dds-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--read-border, #e5e7eb);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.budget-from-dds-table th {
+  background: var(--read-surface-strong, #f3f4f6);
+  font-weight: 600;
+}
+
+.budget-from-dds-table .money {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-from-dds-table .positive {
+  color: var(--read-positive, #15803d);
+}
+
+.budget-from-dds-table .negative {
+  color: var(--read-negative, #b91c1c);
+}
+
+.budget-from-dds-table .budget-gap {
+  background: var(--read-negative-bg, rgba(185, 28, 28, 0.12));
+}
+
+.budget-from-dds-income td {
+  background: var(--read-surface-strong, #f3f4f6);
+  font-weight: 600;
+}
+
+.budget-from-dds-expense-total td {
+  background: var(--read-surface-strong, #f3f4f6);
+  font-weight: 600;
+}
+
+.budget-from-dds-category {
+  cursor: pointer;
+}
+
+.budget-from-dds-category.expanded {
+  background: var(--read-surface-hover, rgba(0, 0, 0, 0.03));
+}
+
+.budget-from-dds-counterparty td {
+  padding-left: 28px;
+  color: var(--read-text-muted, #4b5563);
+  font-style: italic;
+}
+
+.budget-from-dds-profit td {
+  background: var(--read-surface-strong, #f3f4f6);
+  font-weight: 600;
+}
+
+.budget-from-dds-margin td {
+  background: var(--read-surface-strong, #f3f4f6);
+  font-weight: 600;
+}
+
+.budget-from-dds-toggle {
+  border: none;
+  background: transparent;
+  color: var(--read-text, #1f2937);
+  cursor: pointer;
+  margin-right: 6px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.budget-from-dds-note {
+  color: var(--read-text-muted, #6b7280);
+  font-size: 12px;
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table-wrap {
+  background: var(--read-surface, #1f2937);
+  border-color: var(--read-border, #374151);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table {
+  color: var(--read-text, #e5e7eb);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table th,
+:root[data-display-theme="dark"] .budget-from-dds-table td {
+  border-color: var(--read-border, #374151);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table th {
+  background: var(--read-surface-strong, #111827);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-income td,
+:root[data-display-theme="dark"] .budget-from-dds-expense-total td,
+:root[data-display-theme="dark"] .budget-from-dds-profit td,
+:root[data-display-theme="dark"] .budget-from-dds-margin td {
+  background: var(--read-surface-strong, #111827);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table .positive {
+  color: var(--read-positive, #4ade80);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table .negative {
+  color: var(--read-negative, #f87171);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-table .budget-gap {
+  background: var(--read-negative-bg, rgba(248, 113, 113, 0.18));
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-status {
+  color: var(--read-text, #e5e7eb);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-error {
+  color: var(--read-danger, #f87171);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-category.expanded {
+  background: var(--read-surface-hover, rgba(255, 255, 255, 0.05));
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-counterparty td {
+  color: var(--read-text-muted, #9ca3af);
+}
+
+:root[data-display-theme="dark"] .budget-from-dds-toggle {
+  color: var(--read-text, #e5e7eb);
+}
