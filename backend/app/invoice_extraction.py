@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.ai_policy import ExternalAIBlocked, apply_ai_policy_mode, policy_mode_for_project
 from app.document_extraction import CONFIDENCE_FROM_LLM_LEVEL, verify_verbatim_evidence
-from app.gemini_analysis import extract_invoice_fields_with_gemini, gemini_configured
+from app.gemini_analysis import ai_configured, extract_invoice_fields_with_gemini
 
 
 @dataclass(slots=True, frozen=True)
@@ -127,7 +127,7 @@ def extract_invoice_fields(
         ai_text = apply_ai_policy_mode(mode, text)
     except ExternalAIBlocked:
         return _regex_fallback(text, "policy_blocked")
-    if not gemini_configured():
+    if not ai_configured():
         return _regex_fallback(text, "not_configured")
     try:
         payload = extract_invoice_fields_with_gemini(ai_text, filename, category_names)
@@ -140,6 +140,14 @@ def extract_invoice_fields(
     amount = _money(payload.get("amount")) if amount_quote else None
     counterparty_quote = verify_verbatim_evidence(payload.get("counterparty_evidence_quote"), text)
     counterparty = _safe_text(payload.get("counterparty"), 500) if counterparty_quote else None
+    if amount is None or counterparty is None:
+        fallback = _regex_fallback(text, "ai_partial")
+        if amount is None and fallback.amount is not None:
+            amount = fallback.amount
+            amount_quote = fallback.amount_evidence_quote
+        if counterparty is None and fallback.counterparty is not None:
+            counterparty = fallback.counterparty
+            counterparty_quote = fallback.counterparty_evidence_quote
     purpose_quote = verify_verbatim_evidence(payload.get("payment_purpose_evidence_quote"), text)
     purpose = _safe_text(payload.get("payment_purpose"), 1000) if purpose_quote else None
     category_quote = verify_verbatim_evidence(payload.get("category_evidence_quote"), text)
@@ -152,6 +160,7 @@ def extract_invoice_fields(
     currency = str(payload.get("currency") or "RUB").strip().upper()
     if currency not in _CURRENCY_CODES:
         currency = "RUB"
+    method = "llm" if (amount_quote or counterparty_quote or purpose_quote or category_quote) else "regex"
     return InvoiceFields(
         amount=amount, amount_evidence_quote=amount_quote,
         currency=currency, counterparty=counterparty,
@@ -160,5 +169,5 @@ def extract_invoice_fields(
         suggested_category_name=suggested, category_evidence_quote=category_quote,
         planned_date=_planned_date_hint(text),
         confidence=CONFIDENCE_FROM_LLM_LEVEL.get(payload.get("confidence"), 0.45),
-        extraction_method="llm",
+        extraction_method=method,
     )
