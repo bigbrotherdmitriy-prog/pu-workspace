@@ -1550,6 +1550,45 @@ def _contract_terms_content(db: Session, project_id: int, row: Contract,
     return "".join(parts)
 
 
+def _fill_contract_identity(db: Session, project_id: int, row: Contract, document: Document,
+                            content: str, financial_check: dict) -> None:
+    """Fill the counterparty and replace a file-name number from the contract text.
+
+    Owner rule: the system fills the card itself; a number copied from the file
+    name («11-26_правки_v2_03_02_2026») is replaced by the heading number,
+    hand-edited values are never touched."""
+    from pathlib import Path
+
+    from app.api.contract_discovery import discover_contract_fields
+    from app.models.project import Project
+
+    manual = _manually_edited_contract_fields(db, row.id)
+    stem = Path(document.name or "").stem.strip()
+    compact_number = (row.number or "").replace(" ", "")
+    number_from_file = len(compact_number) >= 8 and compact_number in stem.replace(" ", "")
+    if row.counterparty and not number_from_file:
+        return
+    project = db.get(Project, project_id)
+    organization = db.get(Organization, project.organization_id) if project is not None else None
+    own = tuple(filter(None, (organization.name, organization.legal_name))) if organization else ()
+    try:
+        found = discover_contract_fields(document.name or "", content, own)
+    except Exception:
+        return
+    counterparty = (found.get("counterparty") or "").strip()
+    if counterparty and not row.counterparty and "counterparty" not in manual:
+        row.counterparty = counterparty[:500]
+        financial_check["applied"].append("counterparty")
+    number = (found.get("number") or "").strip()
+    if number and number_from_file and number != row.number and "number" not in manual:
+        taken = db.scalar(select(Contract.id).where(
+            Contract.project_id == project_id, Contract.number == number, Contract.id != row.id,
+        ))
+        if taken is None:
+            row.number = number[:255]
+            financial_check["applied"].append("number")
+
+
 def _manually_edited_contract_fields(db: Session | None, contract_id: int | None) -> set[str]:
     """Fields a person changed by hand (contract_updated audit «fields=a,b»)."""
     if db is None or contract_id is None:
@@ -1826,6 +1865,7 @@ def analyze_contract(project_id: int, contract_id: int,
         merged_terms["vat_mode"], merged_terms["vat_rate"] = "rate", Decimal("22")
         merged_terms["vat_evidence"] = "Ставка не указана в документах — применена ставка НДС 22% по умолчанию (РФ)"
     financial_check = _apply_contract_financial_terms(row, merged_terms, db)
+    _fill_contract_identity(db, project_id, row, document, content, financial_check)
     _validate_contract_commercial_state({field: getattr(row, field) for field in _CONTRACT_COMMERCIAL_FIELDS})
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",
