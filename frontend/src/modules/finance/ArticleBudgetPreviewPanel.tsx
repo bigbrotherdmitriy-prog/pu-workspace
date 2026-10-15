@@ -13,6 +13,8 @@ type Preview = {
   conflicts: { code: string; message: string }[];
   articles: { article_id: number; title: string; source_coordinate: string; monthly_total: string;
     annual_total: string | null; annual_difference: string | null; budget_line_id: number | null;
+    suggested_category_id?: number | null; suggested_category_name?: string | null;
+    suggestion_reason?: string | null;
     months: { month: number; source_coordinate: string; raw_amount: string; ordinary_amount: string;
       amount: string; adjustment: string }[] }[];
   existing_rows: { id: number; title: string; source_coordinate: string; amount: string;
