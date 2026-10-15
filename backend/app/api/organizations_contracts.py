@@ -1265,6 +1265,34 @@ def _contract_financial_terms(content: str, source_name: str = "") -> dict:
                 result["amount"] = best_total
                 result["amount_evidence"] = appendix_evidence
 
+    # A specification's explicit total («Итого: 373 620,00», «Всего к оплате»)
+    # beats any amount found by scanning table rows: DOCX tables often arrive
+    # as one line and merging spaced digits glues neighbouring cells together
+    # (owner's «Сириус» spec gave 21 280 620 instead of 373 620,00).
+    appendix_at = content.casefold().find("=== приложение:")
+    spec_text = content[appendix_at:] if appendix_at >= 0 else (
+        content if re.search(r"спецификаци", content[:400], re.IGNORECASE) else "")
+    if spec_text:
+        explicit_totals = []
+        for total_match in re.finditer(
+            r"(всего\s+к\s+оплате|итого\s+с\s+ндс|итого|на\s+сумму)\s*[:\-]?\s*"
+            r"(\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?!\d)",
+            spec_text, re.IGNORECASE,
+        ):
+            try:
+                value = _decimal_value(total_match.group(2))
+            except (InvalidOperation, ValueError):
+                continue
+            if value and value >= Decimal("1000"):
+                explicit_totals.append((value, total_match))
+        if explicit_totals:
+            best_value, best_match = max(explicit_totals, key=lambda item: item[0])
+            if result["amount"] != best_value:
+                result["amount"] = best_value
+                result["amount_evidence"] = _evidence_window(spec_text, best_match)
+                if result["advance_percent"] is not None:
+                    result["advance_amount"] = (best_value * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
+
     # VAT rate derivation from explicit total/VAT sums when the rate itself is
     # not printed, followed by the RF default of 22%.
     vat_exempt_in_content = vat_exempt.search(flat)
