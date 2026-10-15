@@ -3,7 +3,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from app.contract_terms_ai import extract_contract_terms_ai
-from app.api.organizations_contracts import _contract_financial_terms
+from app.contract_terms_regex import extract_contract_financial_terms as _contract_financial_terms
 
 
 SAMPLE = (
