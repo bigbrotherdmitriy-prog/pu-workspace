@@ -428,3 +428,16 @@ def test_uppercase_party_with_short_name_parenthetical_and_heading_number():
     result = discover_contract_fields("Договор 11-26_правки_v2_03_02_2026.docx", text, ("ДИСИАЙ СОЛЮШНС",))
     assert result["number"] == "11-26"
     assert result["counterparty"] == "ООО «ВЕЛИОР-АЛЬЯНС»"
+
+
+def test_role_with_gender_ending_in_brackets():
+    from app.api.contract_discovery import discover_contract_fields
+    text = (
+        "Договор № 2 6 _0 2 PD г. Москва « 16 » февраля 20 2 6 г. Общество с ограниченной ответственностью "
+        "« ДИСИАЙ СОЛЮШНС » (ООО «ДИСИАЙ СОЛЮШНС») , именуемое в дальнейшем «Заказчик», и Общество с "
+        "ограниченной ответственностью «Интеллиджент инжиниринг» (ООО «Интеллиджент инжиниринг») , "
+        "именуемый ( ое ) в дальнейшем «Подрядчик», заключили настоящий Договор. 1. ПРЕДМЕТ ДОГОВОРА. "
+        "2. ЦЕНА ДОГОВОРА. 3. ОТВЕТСТВЕННОСТЬ СТОРОН."
+    )
+    result = discover_contract_fields("26_02PD.docx", text, ("ДИСИАЙ СОЛЮШНС",))
+    assert "Интеллиджент инжиниринг" in (result["counterparty"] or "")

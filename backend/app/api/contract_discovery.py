@@ -180,7 +180,7 @@ def _discovered_counterparty(text: str, kind: str, own_names: tuple[str, ...] = 
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
         tail = body[match.end():min(end, match.end() + 800)]
         role = re.search(
-            r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?\s*"
+            r"именуем\w*\s*(?:\(\s*\w{0,4}\s*\)\s*)?(?:в\s+дальнейшем\s+)?[«\"']?\s*"
             r"(поставщик|покупатель|заказчик|подрядчик|исполнитель)\b", tail, re.IGNORECASE,
         )
         normalized_role = role.group(1).casefold() if role else None
