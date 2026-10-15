@@ -1261,13 +1261,22 @@ export function App() {
       setError("");
       const proposals = await discoverBulkContracts(documentIds);
       if (!proposals.length) throw new Error("Файл распознан, но самостоятельный договор не найден. Откройте массовый мастер и выберите тип вручную.");
-      setDroppedContractProposals(proposals.map((item) => parentContractId ? {
-        ...item,
-        contract_kind: ["supply", "downstream_subcontract"].includes(item.contract_kind) ? item.contract_kind : "downstream_subcontract",
-        parent_document_id: undefined,
-        parent_contract_id: parentContractId,
-        evidence: [...item.evidence, "вышестоящий договор выбран перетаскиванием на схеме"],
-      } : item));
+      setDroppedContractProposals(proposals.map((item) => {
+        if (!parentContractId || item.parent_contract_id || item.parent_document_id) return item;
+        return {
+          ...item,
+          contract_kind: ["supply", "downstream_subcontract"].includes(item.contract_kind) ? item.contract_kind : "downstream_subcontract",
+          parent_document_id: undefined,
+          parent_contract_id: parentContractId,
+          evidence: [...item.evidence, "вышестоящий договор выбран перетаскиванием на схеме"],
+        };
+      }));
+      if (parentContractId && proposals.some((item) => item.parent_contract_id || item.parent_document_id)) {
+        setDroppedContractProposals((current) => current.map((item) => item.parent_contract_id && item.parent_contract_id !== parentContractId ? {
+          ...item,
+          evidence: [...item.evidence, "файл перетащен на другой договор, но по сторонам и тексту вышестоящий — договор, определённый автоматически; при необходимости смените в списке"],
+        } : item));
+      }
       const roles = proposals.map((item) => item.contract_kind === "prime_reference" ? "генподряд" : item.contract_kind === "supply" ? "поставщик" : item.contract_kind === "downstream_subcontract" ? "субподряд" : "прямой договор").join(", ");
       setContractDropStatus(`Анализ завершён: найдено ${proposals.length}; предложенная роль: ${roles}. Открыт мастер проверки — подтвердите тип и связь.`);
     } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Анализ завершён с замечанием: ${message}`); setError(message); }
