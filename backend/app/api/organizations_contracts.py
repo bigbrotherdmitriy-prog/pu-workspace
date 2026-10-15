@@ -1293,6 +1293,22 @@ def _contract_financial_terms(content: str, source_name: str = "") -> dict:
                 if result["advance_percent"] is not None:
                     result["advance_amount"] = (best_value * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
 
+    # An advance schedule in an appendix («ГРАФИК АВАНСИРОВАНИЯ»: «Первый аванс
+    # 2000000 …», «Второй аванс …») gives the total advance as the sum of rows.
+    if appendix_at >= 0:
+        schedule = [
+            item for item in re.finditer(
+                r"(?:перв|втор|трет|четв[её]рт|пят|шест|седьм|восьм|девят|десят)\w*\s+аванс\w*\s*[:\-]?\s*"
+                r"(\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?!\d)",
+                content[appendix_at:], re.IGNORECASE,
+            )
+        ]
+        if len(schedule) >= 2:
+            total_advance = sum((_decimal_value(item.group(1)) for item in schedule), Decimal("0"))
+            if total_advance > 0:
+                result["advance_amount"] = total_advance.quantize(Decimal("0.01"))
+                result["advance_evidence"] = _evidence_window(content[appendix_at:], schedule[0])
+
     # VAT rate derivation from explicit total/VAT sums when the rate itself is
     # not printed, followed by the RF default of 22%.
     vat_exempt_in_content = vat_exempt.search(flat)

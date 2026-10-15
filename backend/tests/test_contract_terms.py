@@ -265,3 +265,24 @@ def test_specification_table_on_one_line_uses_explicit_total():
     terms = _contract_financial_terms(text)
     assert terms["amount"] == Decimal("373620.00")
     assert terms["advance_amount"] == Decimal("298896.00")
+
+
+def test_advance_schedule_appendix_is_summed():
+    from app.api.organizations_contracts import _contract_financial_terms
+    text = (
+        "Договор подряда № 976 от 05.02.2026 г. Цена договора составляет 46 237 002 рублей.\n"
+        "=== Приложение: Приложение №2 - График Авансирования.xlsx ===\n"
+        "ГРАФИК АВАНСИРОВАНИЯ РАБОТ\n1\tПервый аванс\t2000000\t3 рабочих дня\n2\tВторой аванс\t2000000\t01.03.2026\n"
+        "1\tТретий аванс\t1000000\t01.04.2026\n2\tЧетвёртый аванс\t500000\t04.05.2026\n2\tПятый аванс\t900000\t01.07.2026\n"
+    )
+    assert _contract_financial_terms(text)["advance_amount"] == Decimal("6400000.00")
+
+
+def test_docx_deleted_tracked_changes_are_not_read():
+    from app.organizer_engine.content import _xml_text
+    xml = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
+        '<w:r><w:t>Договор №</w:t></w:r><w:del><w:r><w:delText>______</w:delText></w:r></w:del>'
+        '<w:ins><w:r><w:t>976</w:t></w:r></w:ins></w:p></w:body></w:document>'
+    ).encode()
+    assert _xml_text(xml) == "Договор № 976"

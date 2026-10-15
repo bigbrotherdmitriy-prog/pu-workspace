@@ -145,8 +145,18 @@ class ExtractionResult:
         }
 
 
+_WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
 def _xml_text(data: bytes) -> str:
     root = ElementTree.fromstring(data)
+    # Track-changes documents keep deleted runs (<w:del>/<w:delText>) next to the
+    # inserted ones; reading both produced «№ ______ № 976», «2025 2026» and two
+    # directors in one sentence. Only the current (accepted) text is read.
+    for parent in list(root.iter()):
+        for child in list(parent):
+            if child.tag in (f"{_WORD_NS}del", f"{_WORD_NS}delText", f"{_WORD_NS}moveFrom"):
+                parent.remove(child)
     return " ".join(text.strip() for text in root.itertext() if text.strip())
 
 
