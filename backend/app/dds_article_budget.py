@@ -96,11 +96,86 @@ def _source_cash(db, payload, document_id):
     ).order_by(CashFlowEntry.id)))
 
 
+DEFAULT_CATEGORY_NAMES = (
+    "Оборудование", "Материалы", "СМР", "ПНР",
+    "Проектирование", "Прочие прямые", "Дополнительные затраты",
+)
+
+
+def ensure_default_categories(db: Session, organization_id: int) -> None:
+    existing = set(db.scalars(select(CostCategory.normalized_name).where(
+        CostCategory.organization_id == organization_id)))
+    missing = [name for name in DEFAULT_CATEGORY_NAMES
+               if name.lower() not in existing]
+    if not missing:
+        return
+    for name in missing:
+        db.add(CostCategory(organization_id=organization_id, name=name,
+                            normalized_name=name.lower(), is_active=True))
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        # Another session created the same categories concurrently; reload.
+        db.expire_all()
+    db.expire_all()
+
+
+def _suggest_category_by_keywords(title: str) -> tuple[str | None, str | None]:
+    text = " " + unicodedata.normalize("NFKC", title).casefold() + " "
+    has_material = "материал" in text or "бетон" in text or "кабел" in text
+    has_work = ("работ" in text or "монтаж" in text or "смр" in text
+                or "эм работ" in text or "демонтаж" in text)
+    if has_material:
+        return "Материалы", "по ключевому слову: материал"
+    if "оборуд" in text or "зип" in text or "ибп" in text or "кондиционер" in text \
+            or "скпт" in text or "шкаф" in text:
+        return "Оборудование", "по ключевому слову: оборудование/ЗИП"
+    if "пнр" in text or "пусконалад" in text or "наладк" in text:
+        return "ПНР", "по ключевому слову: ПНР"
+    if has_work:
+        return "СМР", "по ключевому слову: работы/монтаж"
+    if "проект" in text or "изыскан" in text or " рд " in text:
+        return "Проектирование", "по ключевому слову: проектирование"
+    if "scada" in text or "асду" in text or "асу" in text or "скуд" in text:
+        return "Оборудование", "по ключевому слову: АСУ/SCADA"
+    if " ар " in text:
+        return "Проектирование", "по ключевому слову: АР"
+    return None, None
+
+
+def _suggest_category_with_ai(title: str) -> tuple[str, str]:
+    allowed = ["Оборудование", "Материалы", "СМР", "ПНР", "Проектирование", "Прочие прямые"]
+    schema = {
+        "type": "object",
+        "properties": {
+            "category": {"type": "string", "enum": allowed},
+            "reason": {"type": "string"},
+        },
+        "required": ["category", "reason"],
+    }
+    try:
+        from app import gemini_analysis
+        if not gemini_analysis.gemini_configured():
+            return "Прочие прямые", "AI недоступен"
+        prompt = (
+            "Ты классификатор статей бюджета. Определи категорию статьи из списка: "
+            + ", ".join(allowed) + ". Ответь JSON по схеме. Статья: " + title
+        )
+        result = gemini_analysis.generate_json(prompt, schema)
+        if isinstance(result, dict) and result.get("category") in allowed:
+            return result["category"], str(result.get("reason") or "предложено AI")
+    except Exception:
+        pass
+    return "Прочие прямые", "AI недоступен"
+
+
 def _preview(document_id, payload, db):
     project = db.get(Project, payload.project_id)
     contract = db.scalar(select(Contract).where(Contract.id == payload.contract_id, Contract.project_id == payload.project_id))
     if project is None or contract is None or contract.contract_kind == "prime_reference":
         raise HTTPException(422, "CONTRACT_SCOPE_MISMATCH: выберите финансовый договор проекта")
+    ensure_default_categories(db, project.organization_id)
     try:
         currency = project_currency(db, project.id)
     except ValueError as exc:
@@ -135,6 +210,7 @@ def _preview(document_id, payload, db):
     categories = list(db.scalars(select(CostCategory).where(CostCategory.organization_id == project.organization_id)
                                  .order_by(CostCategory.id)))
     category_by_id = {item.id: item for item in categories}
+    category_by_name = {item.normalized_name: item for item in categories}
     article_ids = {article["article_id"] for article in articles}
     if set(payload.category_by_article) - article_ids:
         conflicts.append({"code": "UNKNOWN_ARTICLE", "message": "Категория задана нерасходной/отсутствующей статье"})
@@ -148,7 +224,26 @@ def _preview(document_id, payload, db):
         seen_names.add(name)
         category = category_by_id.get(article["cost_category_id"])
         if article["cost_category_id"] is None:
-            conflicts.append({"code": "CATEGORY_CONFIRMATION_REQUIRED", "article_id": article["article_id"], "message": "Выберите категорию явно"})
+            # Propose a category automatically (owner rule: system fills, human confirms).
+            suggested_name, reason = _suggest_category_by_keywords(article["title"])
+            if suggested_name is None:
+                suggested_name, reason = _suggest_category_with_ai(article["title"])
+            suggested_category = category_by_name.get(suggested_name.casefold())
+            if suggested_category is None:
+                # Fall back to created defaults if the name lookup missed.
+                suggested_category = next(
+                    (item for item in categories if item.name == suggested_name), None)
+            article["cost_category_id"] = None
+            article["category_name"] = None
+            article["suggested_category_name"] = suggested_name
+            article["suggested_category_id"] = (suggested_category.id
+                                                 if suggested_category is not None else None)
+            article["suggestion_reason"] = reason
+            conflicts.append({
+                "code": "CATEGORY_CONFIRMATION_REQUIRED",
+                "article_id": article["article_id"],
+                "message": f"Подтвердите категорию: предложено «{suggested_name}» ({reason})",
+            })
         elif category is None or not category.is_active:
             conflicts.append({"code": "CATEGORY_UNAVAILABLE", "article_id": article["article_id"], "message": "Категория недоступна в проекте"})
         article["category_name"] = category.name if category else None
