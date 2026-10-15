@@ -105,6 +105,10 @@ export class StorageApi {
     }
     const path = url.pathname;
     const projectId = Number(path.match(/^\/projects\/(\d+)/)?.[1] || url.searchParams.get("project_id") || 2);
+    if (method === "GET" && /^\/projects\/\d+\/invoice-extraction-proposals\/\d+\/plan-line-suggestions$/.test(path)) {
+      // AI plan-line hint for an invoice is optional; tests that need one override it.
+      return this.fulfill(route, { body: { suggestions: [], recommended: null, additional_recommended: false } });
+    }
     if (method === "GET" && path === "/project-search") {
       const cursor = url.searchParams.get("cursor");
       const rows = this.searchItems.filter(row => Number(row.project_id) === projectId);

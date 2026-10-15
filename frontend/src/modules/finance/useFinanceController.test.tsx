@@ -90,7 +90,7 @@ describe("invoice confirmation outcomes", () => {
     expect(confirmed).toBe(false);
     expect(api).toHaveBeenCalledTimes(2);
     expect(api).toHaveBeenNthCalledWith(2, "/execution/invoice-extraction-proposals/17/confirm", {
-      method: "POST", body: JSON.stringify({ contract_id: 4, schedule_item_id: 41, budget_line_id: 42 }),
+      method: "POST", body: JSON.stringify({ contract_id: 4, schedule_item_id: 41, budget_line_id: 42, plan_entry_id: null, additional: false }),
     });
     expect(result.current.invoiceExtractionProposal).toEqual(edited);
     expect(result.current.financeScheduleItemId).toBe(41);
