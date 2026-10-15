@@ -1,13 +1,40 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
-from typing import Any
+import time
+from typing import Any, Callable, TypeVar
 
 from app.core.external_retry import HEAVY_AI_RETRY, request_with_retry
 
 logger = logging.getLogger(__name__)
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _timed(kind: str) -> Callable[[_F], _F]:
+    """Measure wall-clock time of an AI call and log provider + duration."""
+
+    def decorator(func: _F) -> _F:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            started = time.perf_counter()
+            try:
+                result = func(*args, **kwargs)
+            except Exception:
+                ms = int((time.perf_counter() - started) * 1000)
+                logger.warning("ai_call kind=%s provider=failed ms=%d", kind, ms)
+                raise
+            ms = int((time.perf_counter() - started) * 1000)
+            provider = result.get("_provider") if isinstance(result, dict) else "?"
+            logger.info("ai_call kind=%s provider=%s ms=%d", kind, provider, ms)
+            return result
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorator
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -194,6 +221,11 @@ amount — число без разделителей тысяч и без ук�
 валюту (например, "RUB", "USD") возвращай отдельно в amount_currency."""
 
 
+def primary_provider() -> str:
+    value = os.getenv("AI_PRIMARY_PROVIDER", "gemini").strip().casefold()
+    return "deepseek" if value == "deepseek" else "gemini"
+
+
 def gemini_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
 
@@ -251,6 +283,21 @@ def _try_deepseek(system_prompt: str, user_prompt: str, schema: dict) -> dict[st
     return result
 
 
+def _deepseek_first(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any] | None:
+    """Try DeepSeek first when configured as the primary provider.
+
+    Returns the DeepSeek result on success, or None so the caller continues
+    with its normal Gemini path (including on any DeepSeek failure).
+    """
+    if primary_provider() != "deepseek" or not deepseek_configured():
+        return None
+    try:
+        return _try_deepseek(system_prompt, user_prompt, schema)
+    except Exception:
+        logger.warning("DeepSeek primary attempt failed, falling back to Gemini")
+        return None
+
+
 def _mark_provider(result: Any, provider: str) -> Any:
     if isinstance(result, dict):
         result.setdefault("_provider", provider)
@@ -276,6 +323,7 @@ def _generation_config(model: str, schema: dict[str, Any], legacy_temperature: f
     return config
 
 
+@_timed("analyze_document")
 def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
     import httpx
 
@@ -285,6 +333,9 @@ def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
         "сторонам, суммам и НДС, датам, обязательствам, рискам, противоречиям, отсутствующим "
         "данным и следующим действиям.\n\nТЕКСТ ДОКУМЕНТА:\n" + text[:50_000]
     )
+    preferred = _deepseek_first(SYSTEM_INSTRUCTION, prompt, ANALYSIS_SCHEMA)
+    if preferred is not None:
+        return preferred
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         if deepseek_configured():
@@ -317,6 +368,7 @@ def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
     return _mark_provider(result, "gemini")
 
 
+@_timed("extract_combined_fields")
 def extract_combined_fields_with_gemini(
     text: str, filename: str, project_name: str, member_names: list[str],
 ) -> dict[str, Any]:
@@ -338,6 +390,9 @@ def extract_combined_fields_with_gemini(
         "Обычное описание уже выполненных работ или технических характеристик не является "
         "поручением.\n\nТЕКСТ ДОКУМЕНТА:\n" + text[:50_000]
     )
+    preferred = _deepseek_first(COMBINED_EXTRACTION_SYSTEM_INSTRUCTION, prompt, COMBINED_EXTRACTION_SCHEMA)
+    if preferred is not None:
+        return preferred
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         if deepseek_configured():
@@ -370,6 +425,7 @@ def extract_combined_fields_with_gemini(
     return _mark_provider(result, "gemini")
 
 
+@_timed("extract_invoice_fields")
 def extract_invoice_fields_with_gemini(
     text: str, filename: str, category_names: list[str],
 ) -> dict[str, Any]:
@@ -386,6 +442,14 @@ def extract_invoice_fields_with_gemini(
         "дословную цитату из документа. Если основания нет, верни null. Категория — только "
         "предложение для последующей проверки человеком.\n\nТЕКСТ СЧЁТА:\n" + text[:50_000]
     )
+    preferred = _deepseek_first(SYSTEM_INSTRUCTION + """
+
+Каждое поле evidence_quote должно быть дословной подстрокой исходного текста.
+Не классифицируй материалы как «Зарплата» без прямого основания в документе.
+Не применяй категорию автоматически: результат является только предложением.
+""", prompt, INVOICE_EXTRACTION_SCHEMA)
+    if preferred is not None:
+        return preferred
     instruction = SYSTEM_INSTRUCTION + """
 
 Каждое поле evidence_quote должно быть дословной подстрокой исходного текста.
@@ -423,6 +487,7 @@ def extract_invoice_fields_with_gemini(
     return _mark_provider(result, "gemini")
 
 
+@_timed("analyze_message")
 def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     import httpx
 
@@ -434,6 +499,9 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
         "или вложения, которых нет во входящем сообщении. Если данных не хватает, задай "
         "уточняющий вопрос в самом ответе.\n\nВХОДЯЩЕЕ СООБЩЕНИЕ:\n" + text[:20_000]
     )
+    preferred = _deepseek_first(SYSTEM_INSTRUCTION, prompt, MESSAGE_REPLY_SCHEMA)
+    if preferred is not None:
+        return preferred
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         if deepseek_configured():
@@ -465,6 +533,7 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     return _mark_provider(result, "gemini")
 
 
+@_timed("compose_message")
 def compose_message_with_gemini(text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
     import httpx
 
@@ -476,6 +545,9 @@ def compose_message_with_gemini(text: str, context_name: str, action: str, tone:
         "Не добавляй подпись: приложение подставит подтверждённую подпись пользователя.\n\n"
         "ИСХОДНЫЕ ДАННЫЕ:\n" + text[:20_000]
     )
+    preferred = _deepseek_first(SYSTEM_INSTRUCTION, prompt, MAIL_COMPOSER_SCHEMA)
+    if preferred is not None:
+        return preferred
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         if deepseek_configured():
