@@ -70,7 +70,14 @@ def update_service_settings(
 
     row = db.get(ProjectServiceSettings, project_id)
     if row is None:
-        row = ProjectServiceSettings(project_id=project_id)
+        effective = get_settings(db, project_id)
+        row = ProjectServiceSettings(
+            project_id=project_id,
+            gmail_enabled=effective.gmail_enabled,
+            google_tasks_enabled=effective.google_tasks_enabled,
+            google_calendar_enabled=effective.google_calendar_enabled,
+            primary_mail=effective.primary_mail,
+        )
         db.add(row)
 
     if "gmail_enabled" in data and data["gmail_enabled"] is not None:

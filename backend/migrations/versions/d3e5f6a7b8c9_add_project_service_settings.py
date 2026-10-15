@@ -24,7 +24,12 @@ def upgrade():
     op.execute(
         "INSERT INTO project_service_settings "
         "(project_id, gmail_enabled, google_tasks_enabled, google_calendar_enabled, primary_mail) "
-        "SELECT project_id, TRUE, TRUE, TRUE, 'gmail' FROM google_oauth_tokens"
+        "SELECT DISTINCT project_id, TRUE, TRUE, TRUE, 'gmail' "
+        "FROM google_oauth_tokens "
+        "WHERE project_id IS NOT NULL "
+        "AND NOT EXISTS ("
+        "SELECT 1 FROM project_service_settings WHERE project_service_settings.project_id = google_oauth_tokens.project_id"
+        ")"
     )
 
 

@@ -66,6 +66,8 @@ def test_put_primary_mail_yandex_mail_disables_gmail_active():
     from app.service_settings import get_settings
 
     engine, db, user, project = _make_world(role="manager")
+    db.add(GoogleOAuthToken(project_id=project.id))
+    db.commit()
     old, client = _client(db, user)
     try:
         response = client.put(
@@ -75,10 +77,14 @@ def test_put_primary_mail_yandex_mail_disables_gmail_active():
         assert response.status_code == 200, response.text
         payload = response.json()
         assert payload["primary_mail"] == "yandex_mail"
-        assert payload["gmail_enabled"] is False
+        assert payload["gmail_enabled"] is True
+        assert payload["google_tasks_enabled"] is True
+        assert payload["google_calendar_enabled"] is True
 
         settings = get_settings(db, project.id)
         assert settings.primary_mail == "yandex_mail"
+        assert settings.google_tasks_enabled is True
+        assert settings.google_calendar_enabled is True
         assert gmail_active(db, project.id) is False
     finally:
         app.dependency_overrides.clear()
