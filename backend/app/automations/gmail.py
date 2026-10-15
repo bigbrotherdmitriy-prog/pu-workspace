@@ -180,6 +180,30 @@ def _exclusive_run():
             _run_lock.release()
 
 
+def gmail_project_ids(db) -> list[int]:
+    from sqlalchemy import exists, or_
+    from app.models.project_service_settings import ProjectServiceSettings
+
+    active = exists().where(
+        ProjectServiceSettings.project_id == GoogleOAuthToken.project_id,
+    ).where(
+        ProjectServiceSettings.gmail_enabled.is_(True),
+    ).where(
+        or_(
+            ProjectServiceSettings.primary_mail.is_(None),
+            ProjectServiceSettings.primary_mail == "gmail",
+        ),
+    )
+
+    return list(db.scalars(
+        select(GoogleOAuthToken.project_id)
+        .join(Project, Project.id == GoogleOAuthToken.project_id)
+        .where(Project.archived_at.is_(None))
+        .where(active)
+        .order_by(GoogleOAuthToken.project_id)
+    ))
+
+
 def sync_authorized_projects_once() -> dict[str, int]:
     """Run one bounded pass. A database lock prevents overlap across web workers."""
     with _exclusive_run() as acquired:
@@ -196,12 +220,7 @@ def sync_authorized_projects_once() -> dict[str, int]:
             # docs/audits/... incident notes: a connection left pointed at an
             # archived-adjacent project was the proximate cause of a week of
             # misrouted client mail.
-            project_ids = list(db.scalars(
-                select(GoogleOAuthToken.project_id)
-                .join(Project, Project.id == GoogleOAuthToken.project_id)
-                .where(Project.archived_at.is_(None))
-                .order_by(GoogleOAuthToken.project_id)
-            ))
+            project_ids = gmail_project_ids(db)
             # A shared Gmail account delivers each letter to exactly one project
             # (sync_gmail_project skips letters a sibling already holds), so
             # the project owning the account's live token reads first and
