@@ -1071,7 +1071,8 @@ def _audit(db: Session, action: str, kind: str, entity_id: int, user_id: int, de
 
 def _linked_budget_committed(rows: list[CashFlowEntry]) -> Decimal:
     return sum(
-        (row.planned_amount for row in rows
+        # Invoice rows are fact (planned 0, invoiced_amount set) but still commit money.
+        ((row.planned_amount or Decimal("0")) + (getattr(row, "invoiced_amount", None) or Decimal("0")) for row in rows
          if row.direction == "outflow" and row.status in {"approved", "paid"}
          and getattr(row, "entry_kind", "legacy_unclassified") != "plan_forecast"),
         Decimal("0"),
@@ -2875,7 +2876,8 @@ def confirm_payment(item_id: int, payload: PaymentConfirmation, db: Session = De
     currency = payload.currency or item.currency
     if currency != item.currency:
         raise HTTPException(422, "Валюта факта не совпадает с валютой записи ДДС")
-    actual_amount = _money(payload.actual_amount or item.planned_amount, allow_zero=False)
+    # Invoice rows carry their amount in invoiced_amount (planned stays 0).
+    actual_amount = _money(payload.actual_amount or item.invoiced_amount or item.planned_amount, allow_zero=False)
     actual_date = payload.actual_date or date.today()
     _assert_cash_flow_source_current(
         db, item, payload.expected_document_version_id, payload.expected_document_sha256,
