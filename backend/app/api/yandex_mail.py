@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.ai_secretary import IncomingMessage, ingest_message
 from app.api.gmail import _automated_sender_reason, _bulk_email_reason
+from app.mail_invoice_intake import intake_invoice_attachments
 from app.core.auth import require_project_role, require_user
 from app.core.token_crypto import TokenEncryptionError, decrypt_token, encrypt_token
 from app.database import get_db
@@ -266,7 +267,7 @@ def sync_yandex_mail(
     require_project_role(db, user, project_id, "editor")
     email, password = _credentials(project_id, db)
     since = (datetime.now(timezone.utc) - timedelta(days=payload.days)).strftime("%d-%b-%Y")
-    processed = skipped = failed = 0
+    processed = skipped = failed = invoices = 0
     errors: list[dict] = []
     try:
         with _mailbox(email, password) as client:
@@ -311,6 +312,12 @@ def sync_yandex_mail(
                         stored.mail_headers_json = json.dumps(headers, ensure_ascii=False)
                         stored.mail_labels_json = "[]"
                         db.commit()
+                    if not bulk_reason:
+                        invoices += len(intake_invoice_attachments(
+                            db, project_id=project_id, message_external_id=external_id,
+                            subject=subject, parsed=parsed, user_id=user.id,
+                        ))
+                        db.commit()
                     processed += 1
                 except Exception as exc:
                     db.rollback()
@@ -319,7 +326,8 @@ def sync_yandex_mail(
     except (imaplib.IMAP4.error, OSError, TimeoutError) as exc:
         raise _provider_error(exc) from exc
     db.add(AuditLog(action="mail_channel_sync", entity_type="project", entity_id=project_id,
-                    details=f"provider=yandex_mail; processed={processed}; skipped={skipped}; failed={failed}"))
+                    details=f"provider=yandex_mail; processed={processed}; skipped={skipped}; failed={failed}; invoices={invoices}"))
     db.commit()
     return {"provider": "yandex_mail", "processed": processed, "skipped": skipped,
-            "failed": failed, "errors": errors[:20], "read_only": True}
+            "failed": failed, "errors": errors[:20], "read_only": True,
+            "invoices_proposed": invoices}
