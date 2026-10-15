@@ -303,11 +303,14 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           </tr>
           {extraExpanded && additionalItems.map((item, index) => (
             <tr key={`extra-${index}`} className="budget-from-dds-extra-item">
-              <td>{item.title}</td>
-              <td className="money">{item.counterparty ?? "—"}</td>
-              <td className="money">{formatDate(item.planned_date)}</td>
-              <td className="money">{formatDate(item.actual_date)}</td>
+              <td>
+                {item.title}
+                <small>{[item.counterparty, formatDate(item.actual_date || item.planned_date)].filter((part) => part && part !== "—").join(" · ")}</small>
+              </td>
+              <td className="money">—</td>
               <td className="money">{fmt(item.fact)}</td>
+              <td className="money">—</td>
+              <td>—</td>
             </tr>
           ))}
           <tr className="budget-from-dds-expense-total">
