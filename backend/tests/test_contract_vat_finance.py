@@ -136,7 +136,10 @@ def test_extracted_invoice_confirmation_inherits_chosen_contract(vat_world, kind
     else:
         row = w.db.get(CashFlowEntry, result["created_cash_flow_id"])
     assert row.vat_snapshot == snapshot(w.contract)
-    assert row.planned_amount == Decimal("122.00")
+    if kind == "budget":
+        assert row.planned_amount == Decimal("122.00")
+    else:  # a confirmed invoice is fact «выставлено», never plan (owner, 15.10.2026)
+        assert row.planned_amount == Decimal("0") and row.invoiced_amount == Decimal("122.00")
     assert proposal.vat_snapshot == row.vat_snapshot
     assert result["vat_snapshot"] == row.vat_snapshot
 
