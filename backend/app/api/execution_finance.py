@@ -383,6 +383,10 @@ class InvoiceExtractionConfirm(BaseModel):
     budget_line_id: int | None = None
     schedule_item_id: int | None = None
     task_id: int | None = None
+    # A confirmed invoice is fact ("выставлено") against one plan DDS line,
+    # or an explicitly chosen "Дополнительные затраты" outside the plan.
+    plan_entry_id: int | None = None
+    additional: bool = False
 
 
 class CashFlowControlLinks(BaseModel):
@@ -571,6 +575,23 @@ def _ensure_default_categories(db: Session, organization_id: int) -> list[CostCa
             rows.append(row)
     db.flush()
     return sorted(rows, key=lambda row: (row.sort_order, row.id or 0))
+
+
+ADDITIONAL_COSTS_CATEGORY = "Дополнительные затраты"
+
+
+def _additional_costs_category(db: Session, project_id: int) -> CostCategory:
+    organization_id = _project_organization_id(db, project_id)
+    normalized = _normalize_category(ADDITIONAL_COSTS_CATEGORY)
+    category = db.scalar(select(CostCategory).where(
+        CostCategory.organization_id == organization_id,
+        CostCategory.normalized_name == normalized,
+    ))
+    if category is None:
+        category = CostCategory(organization_id=organization_id, name=ADDITIONAL_COSTS_CATEGORY,
+                                normalized_name=normalized, is_active=True)
+        db.add(category); db.flush()
+    return category
 
 
 def _category_for_project(db: Session, project_id: int, category_id: int) -> CostCategory:
@@ -1500,7 +1521,8 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
                         "cost_category_id": x.cost_category_id,
                         "direction": x.direction, "title": x.title,
                         "planned_date": x.planned_date, "actual_date": x.actual_date, "planned_amount": x.planned_amount,
-                        "actual_amount": x.actual_amount, "currency": x.currency, "counterparty": x.counterparty,
+                        "actual_amount": x.actual_amount, "invoiced_amount": x.invoiced_amount,
+                        "plan_entry_id": x.plan_entry_id, "currency": x.currency, "counterparty": x.counterparty,
                        "object_name": x.object_name, "category": x.category, "note": x.note,
                         "status": x.status, "record_version": x.record_version, "vat_snapshot": x.vat_snapshot,
                         **_vat_refresh_metadata(db, x, vat_contracts),
@@ -2379,9 +2401,31 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
         return _invoice_proposal_payload(item)
     if item.status != "proposed":
         raise HTTPException(409, "Отклонённое предложение нельзя подтвердить")
-    if item.selected_cost_category_id is None:
-        raise HTTPException(422, "Менеджер должен выбрать категорию затрат")
-    category = _category_for_project(db, item.project_id, item.selected_cost_category_id)
+    if payload.plan_entry_id is not None and payload.additional:
+        raise HTTPException(422, "Выберите либо строку планового ДДС, либо «Дополнительные затраты»")
+    plan_entry = None
+    if payload.plan_entry_id is not None:
+        if item.target_kind == "budget":
+            raise HTTPException(422, "Строку планового ДДС можно выбрать только для платежа")
+        plan_entry = db.get(CashFlowEntry, payload.plan_entry_id)
+        if (plan_entry is None or plan_entry.project_id != item.project_id
+                or plan_entry.direction != "outflow" or not plan_entry.planned_amount
+                or plan_entry.planned_amount <= 0):
+            raise HTTPException(422, "Строка планового ДДС не найдена в проекте")
+    if plan_entry is not None and plan_entry.cost_category_id is not None:
+        category = _category_for_project(db, item.project_id, plan_entry.cost_category_id)
+    elif payload.additional:
+        category = _additional_costs_category(db, item.project_id)
+    else:
+        if item.selected_cost_category_id is None:
+            raise HTTPException(422, "Менеджер должен выбрать категорию затрат")
+        category = _category_for_project(db, item.project_id, item.selected_cost_category_id)
+    if plan_entry is not None:
+        payload = payload.model_copy(update={
+            "contract_id": payload.contract_id or plan_entry.contract_id,
+            "schedule_item_id": payload.schedule_item_id or plan_entry.schedule_item_id,
+            "budget_line_id": payload.budget_line_id or plan_entry.budget_line_id,
+        })
     if item.amount is None or not item.payment_purpose:
         raise HTTPException(422, "Перед подтверждением укажите сумму и назначение платежа")
     _require_project_currency(db, item.project_id, item.currency)
@@ -2419,11 +2463,18 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     else:
         if item.planned_date is None:
             raise HTTPException(422, "Перед подтверждением укажите плановую дату платежа")
-        _validate_invoice_control_chain(
-            db, project_id=item.project_id, contract_id=payload.contract_id,
-            schedule_item_id=payload.schedule_item_id,
-            budget_line_id=payload.budget_line_id, currency=item.currency,
-        )
+        if plan_entry is None and not payload.additional:
+            _validate_invoice_control_chain(
+                db, project_id=item.project_id, contract_id=payload.contract_id,
+                schedule_item_id=payload.schedule_item_id,
+                budget_line_id=payload.budget_line_id, currency=item.currency,
+            )
+        else:
+            # The plan line (or the explicit «Дополнительные затраты») is the
+            # anchor; only the contract is mandatory.
+            _check_contract(db, item.project_id, payload.contract_id)
+            if payload.contract_id is None:
+                raise HTTPException(422, "Для счёта обязателен договор")
         created = CashFlowEntry(
             project_id=item.project_id, contract_id=payload.contract_id,
             vat_snapshot=deepcopy(vat_snapshot),
@@ -2434,7 +2485,11 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
             source_document_sha256=item.source_document_sha256,
             cost_category_id=category.id, category=category.name,
             direction="outflow", title=item.payment_purpose,
-            planned_date=item.planned_date, planned_amount=item.amount,
+            # An invoice is fact ("выставлено"), never plan: the plan DDS
+            # keeps its own planned amounts unchanged.
+            planned_date=item.planned_date, planned_amount=Decimal("0"),
+            invoiced_amount=item.amount,
+            plan_entry_id=plan_entry.id if plan_entry is not None else None,
             currency=item.currency, counterparty=item.counterparty,
             note=item.payment_purpose, status="proposed",
             source_name=source_name, source_excerpt=source_excerpt,
@@ -2446,7 +2501,8 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     item.confirmed_by_user_id = user.id
     item.confirmed_at = datetime.now(timezone.utc)
     _audit(db, "invoice_extraction_confirmed", "invoice_extraction_proposal", item.id, user.id,
-           f"target={item.target_kind}; category={category.id}; human_confirmation=true; "
+           f"target={item.target_kind}; category={category.id}; plan_entry={payload.plan_entry_id}; "
+           f"additional={payload.additional}; human_confirmation=true; "
            f"vat_before={json.dumps(vat_before, ensure_ascii=False)}; vat_after={json.dumps(item.vat_snapshot, ensure_ascii=False)}")
     db.commit()
     return _invoice_proposal_payload(item)

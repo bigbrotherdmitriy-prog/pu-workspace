@@ -251,7 +251,7 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
     } catch (error) { setError((error as Error).message); }
   }
 
-  async function confirmInvoiceExtraction(): Promise<boolean> {
+  async function confirmInvoiceExtraction(choice?: { plan_entry_id?: number; additional?: boolean }): Promise<boolean> {
     const currentProject = captureProject();
     const current = () => currentProject()
       && invoiceReviewGeneration.current === renderedInvoiceReviewGeneration;
@@ -280,12 +280,14 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
           contract_id: selectedFinanceContractId || null,
           schedule_item_id: reviewed.target_kind === "cash_flow" ? financeScheduleItemId || null : null,
           budget_line_id: reviewed.target_kind === "cash_flow" ? financeBudgetLineId || null : null,
+          plan_entry_id: reviewed.target_kind === "cash_flow" ? choice?.plan_entry_id ?? null : null,
+          additional: reviewed.target_kind === "cash_flow" ? Boolean(choice?.additional) : false,
         }),
       });
       if (!current()) return false;
       // Applying this request's result keeps its own review generation current.
       setInvoiceExtractionProposalState(confirmed);
-      setNotice("Счёт подтверждён человеком; финансовая строка создана как предложение.");
+      setNotice(choice?.additional ? "Счёт подтверждён: «Дополнительные затраты» (выставлено)." : choice?.plan_entry_id ? "Счёт подтверждён: выставлено по строке планового ДДС." : "Счёт подтверждён человеком; финансовая строка создана как предложение.");
       await loadFinance();
       return current();
     } catch (error) {

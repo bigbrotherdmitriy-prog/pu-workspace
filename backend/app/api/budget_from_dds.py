@@ -123,6 +123,7 @@ def budget_from_dds(
     by_category: "OrderedDict[tuple[int | None, str], dict[str, Any]]" = OrderedDict()
     months: "OrderedDict[str, _Bucket]" = OrderedDict()
     additional_items: list[dict[str, Any]] = []
+    invoiced_totals = {"expense": ZERO, "direct": ZERO, "additional": ZERO}
     other_currency_count = 0
 
     for entry in entries:
@@ -132,6 +133,8 @@ def budget_from_dds(
 
         planned_amount = entry.planned_amount or ZERO
         actual_amount = entry.actual_amount or ZERO
+        # Confirmed invoices are fact «выставлено» (owner, 15.10.2026).
+        invoiced_amount = getattr(entry, "invoiced_amount", None) or ZERO
 
         planned_date = entry.planned_date
         actual_date = entry.actual_date
@@ -182,6 +185,10 @@ def budget_from_dds(
         else:
             continue
 
+        if is_expense and plan_in_range and invoiced_amount:
+            invoiced_totals["expense"] += invoiced_amount
+            invoiced_totals["additional" if is_additional else "direct"] += invoiced_amount
+
         if is_additional and (plan_in_range or fact_in_range):
             additional_items.append({
                 "title": entry.title,
@@ -189,7 +196,8 @@ def budget_from_dds(
                 "planned_date": None if planned_date is None else planned_date.isoformat(),
                 "actual_date": None if actual_date is None else actual_date.isoformat(),
                 "fact": _money(actual_amount if fact_in_range else ZERO),
-                "_sort_fact": actual_amount if fact_in_range else ZERO,
+                "invoiced": _money(invoiced_amount if plan_in_range else ZERO),
+                "_sort_fact": max(actual_amount if fact_in_range else ZERO, invoiced_amount if plan_in_range else ZERO),
             })
 
         key: tuple[int | None, str]
@@ -206,6 +214,7 @@ def budget_from_dds(
                     "category": key[1],
                     "plan": ZERO,
                     "fact": ZERO,
+                    "invoiced": ZERO,
                     "counterparties": OrderedDict(),
                 }
                 by_category[key] = bucket
@@ -213,6 +222,8 @@ def budget_from_dds(
                 bucket["plan"] = bucket["plan"] + planned_amount
             if fact_in_range:
                 bucket["fact"] = bucket["fact"] + actual_amount
+            if plan_in_range:
+                bucket["invoiced"] = bucket["invoiced"] + invoiced_amount
             counterparty_name = entry.counterparty or "—"
             cp_map = bucket["counterparties"]
             cp_bucket = cp_map.get(counterparty_name)
@@ -283,6 +294,7 @@ def budget_from_dds(
             "planned_date": item["planned_date"],
             "actual_date": item["actual_date"],
             "fact": item["fact"],
+            "invoiced": item["invoiced"],
         }
         for item in sorted_additional
     ]
@@ -290,7 +302,9 @@ def budget_from_dds(
     expense_by_category = []
     for bucket in by_category.values():
         deviation = bucket["fact"] - bucket["plan"]
-        remaining = bucket["plan"] - bucket["fact"]
+        # Remaining against the plan: whichever is larger of invoiced and paid
+        # is already committed (an invoice counts before it is paid).
+        remaining = bucket["plan"] - max(bucket["invoiced"], bucket["fact"])
         counterparties = [
             {
                 "counterparty": cp["counterparty"],
@@ -304,6 +318,7 @@ def budget_from_dds(
             "category": bucket["category"],
             "plan": _money(bucket["plan"]),
             "fact": _money(bucket["fact"]),
+            "invoiced": _money(bucket["invoiced"]),
             "remaining": _money(remaining),
             "deviation": _money(deviation),
             "counterparties": counterparties,
@@ -381,11 +396,14 @@ def budget_from_dds(
     return {
         "currency": currency,
         "income": {"plan": income_plan_str, "fact": income_fact_str},
-        "expense_total": {"plan": expense_plan_str, "fact": expense_fact_str},
-        "direct_expense_total": {"plan": direct_expense_plan_str, "fact": direct_expense_fact_str},
+        "expense_total": {"plan": expense_plan_str, "fact": expense_fact_str,
+                          "invoiced": _money(invoiced_totals["expense"])},
+        "direct_expense_total": {"plan": direct_expense_plan_str, "fact": direct_expense_fact_str,
+                                 "invoiced": _money(invoiced_totals["direct"])},
         "additional_costs": {
             "plan": additional_plan_str,
             "fact": additional_fact_str,
+            "invoiced": _money(invoiced_totals["additional"]),
             "items": additional_items_out,
         },
         "expense_by_category": expense_by_category,

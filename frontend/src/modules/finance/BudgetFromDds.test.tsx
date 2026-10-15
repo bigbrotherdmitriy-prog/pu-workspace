@@ -37,6 +37,6 @@ it("lines up additional cost items with the header columns and puts the amount u
   expect(cells.length).toBe(headerCells);
   expect(cells[0].textContent).toContain("ООО Кран");
   expect(cells[0].textContent).toContain("2026-10-10");
-  expect(cells[2].textContent).toMatch(/70/);
+  expect(cells[3].textContent).toMatch(/70/);
   expect(cells[1].textContent).toBe("—");
 });
