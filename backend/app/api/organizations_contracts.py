@@ -1265,6 +1265,50 @@ def _contract_financial_terms(content: str, source_name: str = "") -> dict:
                 result["amount"] = best_total
                 result["amount_evidence"] = appendix_evidence
 
+    # A specification's explicit total («Итого: 373 620,00», «Всего к оплате»)
+    # beats any amount found by scanning table rows: DOCX tables often arrive
+    # as one line and merging spaced digits glues neighbouring cells together
+    # (owner's «Сириус» spec gave 21 280 620 instead of 373 620,00).
+    appendix_at = content.casefold().find("=== приложение:")
+    spec_text = content[appendix_at:] if appendix_at >= 0 else (
+        content if re.search(r"спецификаци", content[:400], re.IGNORECASE) else "")
+    if spec_text:
+        explicit_totals = []
+        for total_match in re.finditer(
+            r"(всего\s+к\s+оплате|итого\s+с\s+ндс|итого|на\s+сумму)\s*[:\-]?\s*"
+            r"(\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?!\d)",
+            spec_text, re.IGNORECASE,
+        ):
+            try:
+                value = _decimal_value(total_match.group(2))
+            except (InvalidOperation, ValueError):
+                continue
+            if value and value >= Decimal("1000"):
+                explicit_totals.append((value, total_match))
+        if explicit_totals:
+            best_value, best_match = max(explicit_totals, key=lambda item: item[0])
+            if result["amount"] != best_value:
+                result["amount"] = best_value
+                result["amount_evidence"] = _evidence_window(spec_text, best_match)
+                if result["advance_percent"] is not None:
+                    result["advance_amount"] = (best_value * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
+
+    # An advance schedule in an appendix («ГРАФИК АВАНСИРОВАНИЯ»: «Первый аванс
+    # 2000000 …», «Второй аванс …») gives the total advance as the sum of rows.
+    if appendix_at >= 0:
+        schedule = [
+            item for item in re.finditer(
+                r"(?:перв|втор|трет|четв[её]рт|пят|шест|седьм|восьм|девят|десят)\w*\s+аванс\w*\s*[:\-]?\s*"
+                r"(\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?!\d)",
+                content[appendix_at:], re.IGNORECASE,
+            )
+        ]
+        if len(schedule) >= 2:
+            total_advance = sum((_decimal_value(item.group(1)) for item in schedule), Decimal("0"))
+            if total_advance > 0:
+                result["advance_amount"] = total_advance.quantize(Decimal("0.01"))
+                result["advance_evidence"] = _evidence_window(content[appendix_at:], schedule[0])
+
     # VAT rate derivation from explicit total/VAT sums when the rate itself is
     # not printed, followed by the RF default of 22%.
     vat_exempt_in_content = vat_exempt.search(flat)
@@ -1504,6 +1548,45 @@ def _contract_terms_content(db: Session, project_id: int, row: Contract,
         parts.append(chunk)
         total += len(chunk)
     return "".join(parts)
+
+
+def _fill_contract_identity(db: Session, project_id: int, row: Contract, document: Document,
+                            content: str, financial_check: dict) -> None:
+    """Fill the counterparty and replace a file-name number from the contract text.
+
+    Owner rule: the system fills the card itself; a number copied from the file
+    name («11-26_правки_v2_03_02_2026») is replaced by the heading number,
+    hand-edited values are never touched."""
+    from pathlib import Path
+
+    from app.api.contract_discovery import discover_contract_fields
+    from app.models.project import Project
+
+    manual = _manually_edited_contract_fields(db, row.id)
+    stem = Path(document.name or "").stem.strip()
+    compact_number = (row.number or "").replace(" ", "")
+    number_from_file = len(compact_number) >= 8 and compact_number in stem.replace(" ", "")
+    if row.counterparty and not number_from_file:
+        return
+    project = db.get(Project, project_id)
+    organization = db.get(Organization, project.organization_id) if project is not None else None
+    own = tuple(filter(None, (organization.name, organization.legal_name))) if organization else ()
+    try:
+        found = discover_contract_fields(document.name or "", content, own)
+    except Exception:
+        return
+    counterparty = (found.get("counterparty") or "").strip()
+    if counterparty and not row.counterparty and "counterparty" not in manual:
+        row.counterparty = counterparty[:500]
+        financial_check["applied"].append("counterparty")
+    number = (found.get("number") or "").strip()
+    if number and number_from_file and number != row.number and "number" not in manual:
+        taken = db.scalar(select(Contract.id).where(
+            Contract.project_id == project_id, Contract.number == number, Contract.id != row.id,
+        ))
+        if taken is None:
+            row.number = number[:255]
+            financial_check["applied"].append("number")
 
 
 def _manually_edited_contract_fields(db: Session | None, contract_id: int | None) -> set[str]:
@@ -1782,6 +1865,7 @@ def analyze_contract(project_id: int, contract_id: int,
         merged_terms["vat_mode"], merged_terms["vat_rate"] = "rate", Decimal("22")
         merged_terms["vat_evidence"] = "Ставка не указана в документах — применена ставка НДС 22% по умолчанию (РФ)"
     financial_check = _apply_contract_financial_terms(row, merged_terms, db)
+    _fill_contract_identity(db, project_id, row, document, content, financial_check)
     _validate_contract_commercial_state({field: getattr(row, field) for field in _CONTRACT_COMMERCIAL_FIELDS})
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",

@@ -250,3 +250,39 @@ def test_system_set_value_is_replaced_but_hand_entered_is_kept(db_session):
     manual = _contract_row(id=9102, amount=Decimal("500"))
     result = _apply_contract_financial_terms(manual, {"amount": Decimal("373620")}, db_session)
     assert manual.amount == Decimal("500") and result["mismatches"][0]["field"] == "amount"
+
+
+def test_specification_table_on_one_line_uses_explicit_total():
+    from app.api.organizations_contracts import _contract_financial_terms
+    text = (
+        "Договор поставки № 02/С/ДС « 02 » февраля 2026 г. Цена определяется Спецификацией.\n"
+        "=== Приложение: Спецификация v2.docx ===\n"
+        "Приложение № 1 СПЕЦИФИКАЦИЯ № 1 1 Дверь НФ-000016181 шт 10 000,00 10 000,00 2 1 280 620 "
+        "6 Монтаж 5 шт 15 000,00 75 000,00 15 93 000 Итого: 373 620,00 В том числе НДС 22%: 67 374,10 "
+        "Всего к оплате: 373 620,00 Всего наименований 7, на сумму 373 620,00 руб. "
+        "Условия и срок оплаты: Аванс 80 % (восемьдесят процентов) от суммы настоящей спецификации."
+    )
+    terms = _contract_financial_terms(text)
+    assert terms["amount"] == Decimal("373620.00")
+    assert terms["advance_amount"] == Decimal("298896.00")
+
+
+def test_advance_schedule_appendix_is_summed():
+    from app.api.organizations_contracts import _contract_financial_terms
+    text = (
+        "Договор подряда № 976 от 05.02.2026 г. Цена договора составляет 46 237 002 рублей.\n"
+        "=== Приложение: Приложение №2 - График Авансирования.xlsx ===\n"
+        "ГРАФИК АВАНСИРОВАНИЯ РАБОТ\n1\tПервый аванс\t2000000\t3 рабочих дня\n2\tВторой аванс\t2000000\t01.03.2026\n"
+        "1\tТретий аванс\t1000000\t01.04.2026\n2\tЧетвёртый аванс\t500000\t04.05.2026\n2\tПятый аванс\t900000\t01.07.2026\n"
+    )
+    assert _contract_financial_terms(text)["advance_amount"] == Decimal("6400000.00")
+
+
+def test_docx_deleted_tracked_changes_are_not_read():
+    from app.organizer_engine.content import _xml_text
+    xml = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>'
+        '<w:r><w:t>Договор №</w:t></w:r><w:del><w:r><w:delText>______</w:delText></w:r></w:del>'
+        '<w:ins><w:r><w:t>976</w:t></w:r></w:ins></w:p></w:body></w:document>'
+    ).encode()
+    assert _xml_text(xml) == "Договор № 976"

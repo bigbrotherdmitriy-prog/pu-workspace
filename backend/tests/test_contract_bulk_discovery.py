@@ -414,3 +414,30 @@ def test_contract_discovery_batch_boundaries(count, expected_sizes):
     assert [len(batch) for batch in batches] == expected_sizes
     assert all(len(batch) <= CONTRACT_DISCOVERY_BATCH_SIZE for batch in batches)
     assert [item for batch in batches for item in batch] == pins
+
+
+def test_uppercase_party_with_short_name_parenthetical_and_heading_number():
+    from app.api.contract_discovery import discover_contract_fields
+    text = (
+        "ДОГОВОР ПОСТАВКИ № 11 -2 6 г. Москва « 12 » января 2026 г. ОБЩЕСТВО С ОГРАНИЧЕННОЙ "
+        "ОТВЕТСТВЕННОСТЬЮ «ВЕЛИОР-АЛЬЯНС» (ООО «ВЕЛИОР-АЛЬЯНС») , в дальнейшем именуемое « Поставщик », "
+        "в лице Генерального директора Бутуханова А.Ю., и АКЦИОНЕРНОЕ ОБЩЕСТВО « ДИСИАЙ СОЛЮШНС» "
+        "( ООО «ДИСИАЙ СОЛЮШНС» ) , далее именуемое Покупатель , заключили настоящий Договор. "
+        "1. ПРЕДМЕТ ДОГОВОРА. 2. ЦЕНА ДОГОВОРА. 3. ОТВЕТСТВЕННОСТЬ СТОРОН."
+    )
+    result = discover_contract_fields("Договор 11-26_правки_v2_03_02_2026.docx", text, ("ДИСИАЙ СОЛЮШНС",))
+    assert result["number"] == "11-26"
+    assert result["counterparty"] == "ООО «ВЕЛИОР-АЛЬЯНС»"
+
+
+def test_role_with_gender_ending_in_brackets():
+    from app.api.contract_discovery import discover_contract_fields
+    text = (
+        "Договор № 2 6 _0 2 PD г. Москва « 16 » февраля 20 2 6 г. Общество с ограниченной ответственностью "
+        "« ДИСИАЙ СОЛЮШНС » (ООО «ДИСИАЙ СОЛЮШНС») , именуемое в дальнейшем «Заказчик», и Общество с "
+        "ограниченной ответственностью «Интеллиджент инжиниринг» (ООО «Интеллиджент инжиниринг») , "
+        "именуемый ( ое ) в дальнейшем «Подрядчик», заключили настоящий Договор. 1. ПРЕДМЕТ ДОГОВОРА. "
+        "2. ЦЕНА ДОГОВОРА. 3. ОТВЕТСТВЕННОСТЬ СТОРОН."
+    )
+    result = discover_contract_fields("26_02PD.docx", text, ("ДИСИАЙ СОЛЮШНС",))
+    assert "Интеллиджент инжиниринг" in (result["counterparty"] or "")
