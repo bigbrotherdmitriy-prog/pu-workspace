@@ -403,8 +403,11 @@ def mail_capabilities(project_id: int, db: Session = Depends(get_db), user: User
     adapter = None
     health = None
     try:
-        adapter = mailbox_adapter_for_project(project_id, db)
-        health = adapter.health()
+        from app.service_settings import gmail_active
+
+        if gmail_active(db, project_id):
+            adapter = mailbox_adapter_for_project(project_id, db)
+            health = adapter.health()
     except Exception:
         adapter = None
         health = None
