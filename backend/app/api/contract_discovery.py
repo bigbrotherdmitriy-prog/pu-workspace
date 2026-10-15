@@ -48,7 +48,8 @@ _COMPANY_RE = re.compile(
     r"\b((?:общество\s+с\s+ограниченной\s+ответственностью|"
     r"индивидуальн(?:ый|ого)\s+предпринимател(?:ь|я)|ООО|АО|ПАО|ЗАО|ИП|ФКУ|ФГУП|ГУП|МУП)\b"
     r"\s*(?:[«\"'][^»\"'\n]{2,100}[»\"']|[^\n,;]{2,100}?))"
-    r"(?=\s*(?:,|именуем|в лице|$))",
+    # «ООО «X» (ООО «X»)» -- a short-name parenthetical may follow the full name.
+    r"(?=\s*(?:\([^)\n]{0,120}\)\s*)?(?:,|именуем|в лице|в дальнейшем|далее|$))",
     re.IGNORECASE,
 )
 
@@ -172,14 +173,14 @@ def _discovered_counterparty(text: str, kind: str, own_names: tuple[str, ...] = 
     }
     customers: dict[str, tuple[str, str]] = {}
     for index, match in enumerate(matches):
-        company = " ".join(match.group(1).split()).strip(" .,:;")
+        company = " ".join(match.group(1).split()).strip(" .,:;()")
         key = _organization_key(company)
         companies.setdefault(key, company)
         # A role belongs only to the current organization, not the next party.
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
         tail = body[match.end():min(end, match.end() + 800)]
         role = re.search(
-            r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
+            r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?\s*"
             r"(поставщик|покупатель|заказчик|подрядчик|исполнитель)\b", tail, re.IGNORECASE,
         )
         normalized_role = role.group(1).casefold() if role else None
@@ -407,14 +408,15 @@ def discover_contract_fields(name: str, content: str, own_names: tuple[str, ...]
     heading_source = f"{Path(name).stem}\n{raw[:1_800]}"
     lowered = f"{name}\n{text[:20_000]}".casefold()
     own_heading = bool(_OWN_HEADING_RE.search(heading_source))
-    number_match = _NUMBER_RE.search(heading_source) if own_heading else None
+    # The document's own heading wins over the file name («Договор 11-26_правки_v2…»).
+    number_match = (_NUMBER_RE.search(raw[:1_800]) or _NUMBER_RE.search(heading_source)) if own_heading else None
     if number_match:
         candidate = number_match.group(1).strip(" .,:;№")
         # OCR frequently turns headings such as "договором" into a bogus number "ом".
         # A usable automatic number must contain a digit; otherwise the filename is safer.
         if not any(character.isdigit() for character in candidate):
             number_match = None
-    spaced_number = _spaced_contract_number(heading_source) if own_heading else None
+    spaced_number = (_spaced_contract_number(raw[:1_800]) or _spaced_contract_number(heading_source)) if own_heading else None
     if spaced_number and (not number_match or len(spaced_number) > len(number_match.group(1).strip(" .,:;№"))):
         number_match = None
     fallback_number = Path(name).stem.strip()[:255]
