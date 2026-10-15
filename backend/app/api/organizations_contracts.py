@@ -945,7 +945,8 @@ def _contract_source_text(document: Document, db: Session | None = None) -> str:
 
 
 def _decimal_value(raw: str) -> Decimal:
-    return Decimal(re.sub(r"\s+", "", raw).replace(",", "."))
+    # «300000-00» / «180327-87» is rubles-kopecks written with a dash.
+    return Decimal(re.sub(r"-(\d{2})$", r".\1", re.sub(r"\s+", "", raw)).replace(",", "."))
 
 
 _DATE_PATTERN = r"(\d{1,2})[./](\d{1,2})[./](20\d{2})"
@@ -956,6 +957,39 @@ def _date_value(day: str, month: str, year: str) -> date | None:
         return date(int(year), int(month), int(day))
     except ValueError:
         return None
+
+
+_RU_MONTHS = {
+    "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5, "июн": 6,
+    "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12,
+}
+
+
+def _spaced_word(word: str) -> str:
+    # OCR splits words with stray spaces («Ок ончание»): allow \s* between letters.
+    return r"\s*".join(re.escape(letter) for letter in word)
+
+
+_WORDY_DATE = r"«?\s*(\d{1,2})\s*»?\s+([а-яё]+)\s+(20\s*\d\s*\d)"
+
+
+def _wordy_date_value(day: str, month_word: str, year: str) -> date | None:
+    month_word = month_word.casefold()
+    month = next((number for stem, number in sorted(_RU_MONTHS.items(), key=lambda item: -len(item[0]))
+                  if month_word.startswith(stem)), None)
+    if month is None:
+        return None
+    return _date_value(day, str(month), re.sub(r"\s+", "", year))
+
+
+def _work_boundary_date(text: str, word: str) -> date | None:
+    """«Начало Работ: «27» марта 2026 года» / «Окончание выполнения работ: 31.12.2026»."""
+    pattern = rf"{_spaced_word(word)}\s*(?:{_spaced_word('выполнения')}\s*)?{_spaced_word('работ')}\s*[:\-–]?\s*"
+    match = re.search(pattern + _WORDY_DATE, text, re.IGNORECASE)
+    if match:
+        return _wordy_date_value(*match.groups())
+    match = re.search(pattern + _DATE_PATTERN, text, re.IGNORECASE)
+    return _date_value(*match.groups()) if match else None
 
 
 def _contract_financial_terms(content: str) -> dict:
@@ -973,8 +1007,8 @@ def _contract_financial_terms(content: str) -> dict:
         "warranty_until": None, "warranty_evidence": None,
     }
     money_pattern = (
-        r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)"
-        r"(?:\s*\([^)]{0,200}\))?\s*"
+        r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2}|-\d{2}(?!\d))?)"
+        r"(?:\s*=?\s*\([^)]{0,200}\))?\s*"
         r"(?:руб(?:\.|лей|ля)?|₽)"
     )
     percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
@@ -1031,18 +1065,30 @@ def _contract_financial_terms(content: str) -> dict:
     max_signed_year = current_year + 2
     lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines() if line.strip()]
     for line in lines:
+        # Scans/DOCX split numbers with stray spaces («НДС 2 2 %», «20 2 6»); digits
+        # separated only by spaces belong to one number.
+        line = re.sub(r"(?<=\d)\s+(?=\d)", "", line)
         lowered = line.casefold()
-        money = re.search(money_pattern, line, re.IGNORECASE)
+        money_matches = list(re.finditer(money_pattern, line, re.IGNORECASE))
+        # The contract price is the largest amount on its line (VAT and advances are smaller).
+        money = max(money_matches, key=lambda item: _decimal_value(item.group(1)) or 0, default=None)
         percent = re.search(percent_pattern, line)
         if result["amount"] is None and money and amount_keywords.search(lowered):
             result["amount"] = _decimal_value(money.group(1))
             result["amount_evidence"] = line[:500]
         if "аванс" in lowered:
-            if result["advance_amount"] is None and money:
-                result["advance_amount"] = _decimal_value(money.group(1))
-            if result["advance_percent"] is None and percent:
-                result["advance_percent"] = _decimal_value(percent.group(1))
-            if money or percent:
+            # Only figures that follow the word «аванс» closely belong to the advance;
+            # the contract price and VAT often share the same paragraph.
+            window = " ".join(match.group(0) for match in re.finditer(r"аванс\w*[^.;]{0,160}", line, re.IGNORECASE))
+            advance_money = re.search(money_pattern, window, re.IGNORECASE)
+            advance_percent = re.search(percent_pattern, window)
+            if advance_percent and re.search(r"ндс\s*$", window[:advance_percent.start()].casefold()):
+                advance_percent = None
+            if result["advance_amount"] is None and advance_money:
+                result["advance_amount"] = _decimal_value(advance_money.group(1))
+            if result["advance_percent"] is None and advance_percent:
+                result["advance_percent"] = _decimal_value(advance_percent.group(1))
+            if advance_money or advance_percent:
                 result["advance_evidence"] = line[:500]
         if result["retention_percent"] is None:
             marker = retention_marker.search(line) or retention_generic.search(line)
@@ -1111,6 +1157,13 @@ def _contract_financial_terms(content: str) -> dict:
             if match and (value := _date_value(*match.groups())) is not None:
                 result["warranty_until"] = value
                 result["warranty_evidence"] = line[:500]
+    flat = re.sub(r"\s+", " ", content)
+    if result["performed_from"] is None and (start := _work_boundary_date(flat, "начало")) is not None:
+        result["performed_from"] = start
+        result["performed_evidence"] = result["performed_evidence"] or "Начало работ: " + start.isoformat()
+    if result["performed_to"] is None and (finish := _work_boundary_date(flat, "окончание")) is not None:
+        result["performed_to"] = finish
+        result["performed_evidence"] = result["performed_evidence"] or "Окончание работ: " + finish.isoformat()
     if result["advance_amount"] is None and result["advance_percent"] is not None and result["amount"] is not None:
         result["advance_amount"] = (result["amount"] * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
     return result

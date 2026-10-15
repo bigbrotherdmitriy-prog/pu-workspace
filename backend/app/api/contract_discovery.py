@@ -15,7 +15,8 @@ from app.jobs.queue import enqueue, retry, update_cooperative_progress
 from app.models.document import Document
 from app.models.document_version import DocumentVersion
 from app.models.job import BackgroundJob
-from app.models.organization_contract import Contract
+from app.models.organization_contract import Contract, Organization
+from app.models.project import Project
 from app.models.user import User
 
 
@@ -76,7 +77,78 @@ _LEGAL_SECTIONS = (
 )
 
 
-def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
+# OCR of scanned contracts splits words and numbers with stray spaces
+# («Граждан ин», «Юри я», «№ 01/ 21 11 -2 6»); owner rule 15.10.2026:
+# the system fills the card itself, so these are repaired, not left empty.
+_SPACED_NUMBER_RE = re.compile(r"(?:договор|контракт)[^№\n]{0,40}№\s*(?P<tail>[^\n]{1,80})", re.IGNORECASE)
+_PERSON_RE = re.compile(
+    r"граждан\s*(?:ин|ка)\s*(?:РФ|Российской\s+Федерации)?\s*,?\s*"
+    r"(?P<name>[А-ЯЁ][а-яё]+(?:\s+[а-яё]{1,2}(?=\s|,))?\s+[А-ЯЁ][а-яё]+(?:\s+[а-яё]{1,2}(?=\s|,))?"
+    r"\s+[А-ЯЁ][а-яё]+(?:\s+[а-яё]{1,2}(?=\s|,))?)",
+    re.IGNORECASE,
+)
+
+
+def _spaced_contract_number(heading: str) -> str | None:
+    """«№ 6 - FIL /730-02- 2026 г.» → «6-FIL/730-02-2026»; «№ 01/ 21 11 -2 6 возмездного» → «01/2111-26»."""
+    match = _SPACED_NUMBER_RE.search(heading)
+    if not match:
+        return None
+    parts: list[str] = []
+    for token in match.group("tail").split():
+        if re.search(r"[а-яё]", token):  # first lowercase Cyrillic word (г., от, возмездного) ends the number
+            break
+        if not re.fullmatch(r"[A-ZА-ЯЁ0-9/._\-]+", token, re.IGNORECASE):
+            break
+        parts.append(token)
+    number = "".join(parts).strip("-./_")
+    return number if len(number) >= 3 and any(ch.isdigit() for ch in number) else None
+
+
+def _join_ocr_fragments(value: str) -> str:
+    """Glue 1–2 letter lowercase OCR fragments back to the previous word: «Юри я» → «Юрия»."""
+    # Only word endings, never real short words such as «с», «и», «в», «по».
+    return re.sub(r"(?<=[а-яё])\s+(я|ы|й|е|ь|ый|ий|ая|ое|ой|ич|ов|ев)(?=\s|$|[,.;])", r"\1", value)
+
+
+def _nominative_person(name: str) -> str:
+    words = _join_ocr_fragments(" ".join(name.split())).split()
+    if len(words) != 3:
+        return " ".join(words)
+    surname, first, patronymic = words
+    if patronymic.endswith("ича"):  # genitive male → nominative
+        patronymic = patronymic[:-1]
+        if first.endswith("ия"):
+            first = first[:-2] + "ий"
+        elif first.endswith("я") and len(first) > 3:
+            first = first[:-1] + "ь"
+        elif first.endswith("а") and len(first) > 3:
+            first = first[:-1]
+        if surname.endswith(("ова", "ева", "ина", "ына")):
+            surname = surname[:-1]
+    elif patronymic.endswith(("овны", "евны")):
+        patronymic = patronymic[:-1] + "а"
+        if first.endswith("ы"):
+            first = first[:-1] + "а"
+        elif first.endswith("и") and len(first) > 3:
+            first = first[:-1] + "я"
+        if surname.endswith(("овой", "евой", "иной")):
+            surname = surname[:-2] + "а"
+    return f"{surname} {first} {patronymic}"
+
+
+def _normalized_party(value: str) -> str:
+    value = _join_ocr_fragments(" ".join(value.split())).strip(" .,:;")
+    organization = re.match(r"обществ[оа]\s+с\s+ограниченной\s+ответственностью\s*(.+)$", value, re.IGNORECASE)
+    if organization:
+        return f"ООО {organization.group(1).strip()}"
+    entrepreneur = re.match(r"индивидуальн(?:ый|ого)\s+предпринимател(?:ь|я)\s+(.+)$", value, re.IGNORECASE)
+    if entrepreneur:
+        return f"ИП {_nominative_person(entrepreneur.group(1))}"
+    return value
+
+
+def _discovered_counterparty(text: str, kind: str, own_names: tuple[str, ...] = ()) -> tuple[str | None, str]:
     """Resolve an external provider by its legal role, never by document order."""
     body = text[:15_000]
     matches = list(_COMPANY_RE.finditer(body))
@@ -84,6 +156,7 @@ def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
     providers: dict[str, dict[str, tuple[str, str]]] = {
         "поставщик": {}, "подрядчик": {}, "исполнитель": {},
     }
+    customers: dict[str, tuple[str, str]] = {}
     for index, match in enumerate(matches):
         company = " ".join(match.group(1).split()).strip(" .,:;")
         key = _organization_key(company)
@@ -98,6 +171,29 @@ def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
         normalized_role = role.group(1).casefold() if role else None
         if normalized_role in providers:
             providers[normalized_role][key] = (company, body[match.start():match.end() + role.end()])
+        elif normalized_role in {"заказчик", "покупатель"}:
+            customers[key] = (company, body[match.start():match.end() + role.end()])
+    for person in _PERSON_RE.finditer(body):
+        tail = body[person.end():person.end() + 300]
+        role = re.search(
+            r"именуем\w*(?:\s+\w{1,3})?\s+(?:в\s+дальнейшем\s+)?[«\"']?(исполнитель|подрядчик|поставщик)\b",
+            tail, re.IGNORECASE,
+        )
+        if not role:
+            continue
+        name = _nominative_person(person.group("name"))
+        nearby = body[max(0, person.start() - 600):person.end() + 300].casefold()
+        if "самозанят" in nearby or "профессиональный доход" in nearby:
+            name = f"{name} (самозанятый)"
+        providers[role.group(1).casefold()][name.casefold()] = (name, body[person.start():person.end() + role.end()])
+    own_keys = {_organization_key(name) for name in own_names if name}
+    if own_keys & set(customers):
+        # Our company orders the work: the single provider is the counterparty.
+        other_providers = {key: value for role in providers.values() for key, value in role.items()
+                           if key not in own_keys}
+        if len(other_providers) == 1:
+            company, quote = next(iter(other_providers.values()))
+            return _normalized_party(company), f"контрагент предложен по роли исполнителя/подрядчика: {quote}"
     desired_roles = {
         "supply": ("поставщик",),
         "downstream_subcontract": ("подрядчик", "исполнитель"),
@@ -111,11 +207,21 @@ def _discovered_counterparty(text: str, kind: str) -> tuple[str | None, str]:
         if len(matches_by_role) == 1:
             company, quote = next(iter(matches_by_role.values()))
             role_label = "поставщика" if kind == "supply" else "подрядчика/исполнителя"
-            return company, f"контрагент предложен по роли {role_label}: {quote}"
+            return _normalized_party(company), f"контрагент предложен по роли {role_label}: {quote}"
         expected = "поставщик" if kind == "supply" else "подрядчик/исполнитель"
         return None, f"{expected} не определён однозначно; подтвердите контрагента вручную"
+    # The customer role is the counterparty only when the project's own company is
+    # the contractor in this contract (we cannot tell sides apart otherwise).
+    provider_rows = {key: value for role in providers.values() for key, value in role.items()}
+    other_customers = {key: value for key, value in customers.items() if key not in own_keys}
+    if own_keys & set(provider_rows) and len(other_customers) == 1:
+        company, quote = next(iter(other_customers.values()))
+        return _normalized_party(company), f"контрагент предложен по роли заказчика: {quote}"
+    if not customers and len(provider_rows) == 1:
+        company, quote = next(iter(provider_rows.values()))
+        return _normalized_party(company), f"контрагент предложен по роли исполнителя: {quote}"
     if len(companies) == 1:
-        return next(iter(companies.values())), "найдена одна организация; подтвердите контрагента"
+        return _normalized_party(next(iter(companies.values()))), "найдена одна организация; подтвердите контрагента"
     return None, "стороны не определены однозначно; подтвердите контрагента вручную"
 
 
@@ -228,7 +334,7 @@ def _party_chain_parent(content: str, contract_contents: list[tuple[Contract, st
     return matches[0] if len(matches) == 1 else None
 
 
-def discover_contract_fields(name: str, content: str) -> dict:
+def discover_contract_fields(name: str, content: str, own_names: tuple[str, ...] = ()) -> dict:
     """Return a reviewable proposal. It never creates or links records."""
     raw = content or ""
     text = " ".join(raw.split())
@@ -242,10 +348,14 @@ def discover_contract_fields(name: str, content: str) -> dict:
         # A usable automatic number must contain a digit; otherwise the filename is safer.
         if not any(character.isdigit() for character in candidate):
             number_match = None
+    spaced_number = _spaced_contract_number(heading_source) if own_heading else None
+    if spaced_number and (not number_match or len(spaced_number) > len(number_match.group(1).strip(" .,:;№"))):
+        number_match = None
     fallback_number = Path(name).stem.strip()[:255]
     filename_number_match = _FILENAME_CONTRACT_NUMBER_RE.fullmatch(fallback_number.replace(" ", ""))
     filename_number = filename_number_match.group("number") if filename_number_match else None
-    number = (number_match.group(1).strip(" .,:;№") if number_match else filename_number or fallback_number) or "Без номера"
+    number = (number_match.group(1).strip(" .,:;№") if number_match
+              else spaced_number or filename_number or fallback_number) or "Без номера"
     companies = []
     for value in _COMPANY_RE.findall(text[:15_000]):
         normalized = " ".join(value.split()).strip(" .,:;")
@@ -312,7 +422,7 @@ def discover_contract_fields(name: str, content: str) -> dict:
         evidence.append("исключён: найдена только ссылка на другой договор")
     elif not is_contract:
         evidence.append("исключён: недостаточно независимых признаков самостоятельного договора")
-    counterparty, party_evidence = _discovered_counterparty(text, kind)
+    counterparty, party_evidence = _discovered_counterparty(text, kind, own_names)
     evidence.insert(1, party_evidence)
     return {
         "number": number,
@@ -337,6 +447,12 @@ def _discover_documents(db: Session, project_id: int, documents: list[Document],
         contract.source_document_id: contract for contract in project_contracts if contract.source_document_id is not None
     }
     linked_ids = set(linked_by_document)
+    project = db.get(Project, project_id)
+    own_organization = db.get(Organization, project.organization_id) if project is not None else None
+    own_names = tuple(filter(None, (
+        own_organization.name if own_organization else None,
+        own_organization.legal_name if own_organization else None,
+    )))
     proposals = []
     rejected = []
     content_by_document: dict[int, str] = {}
@@ -345,7 +461,7 @@ def _discover_documents(db: Session, project_id: int, documents: list[Document],
             continue
         content = pinned_contents.get(document.id, "") if pinned_contents is not None else _text_for_document(db, document)
         content_by_document[document.id] = content
-        proposal = discover_contract_fields(document.name, content)
+        proposal = discover_contract_fields(document.name, content, own_names)
         if not proposal.pop("is_contract"):
             rejected.append({
                 "document_id": document.id, "document_name": document.name,
@@ -395,7 +511,7 @@ def _discover_documents(db: Session, project_id: int, documents: list[Document],
             )
         if not child.get("counterparty"):
             counterparty, party_evidence = _discovered_counterparty(
-                content_by_document.get(child["document_id"], ""), child["contract_kind"],
+                content_by_document.get(child["document_id"], ""), child["contract_kind"], own_names,
             )
             if counterparty:
                 child["counterparty"] = counterparty
