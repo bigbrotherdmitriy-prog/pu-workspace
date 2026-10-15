@@ -12,6 +12,7 @@ type Preview = {
   existing_expense_total?: string; existing_expense_difference?: string | null;
   conflicts: { code: string; message: string }[];
   articles: { article_id: number; title: string; source_coordinate: string; monthly_total: string;
+    suggested_category_id?: number | null; suggested_category_name?: string | null; suggestion_reason?: string | null;
     annual_total: string | null; annual_difference: string | null; budget_line_id: number | null;
     months: { month: number; source_coordinate: string; raw_amount: string; ordinary_amount: string;
       amount: string; adjustment: string }[] }[];
@@ -39,6 +40,19 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
   const context = useRef({ key });
   if (context.current.key !== key) context.current = { key };
   const attempt = useRef<{ signature: string; id: string } | null>(null);
+  const autoFilled = useRef(false);
+  function suggestedChoices(result: Preview | null, chosen: Record<number, number>) {
+    const suggested: Record<number, number> = {};
+    for (const article of result?.articles || []) {
+      if (!chosen[article.article_id] && article.suggested_category_id) suggested[article.article_id] = article.suggested_category_id;
+    }
+    return suggested;
+  }
+  function acceptAllSuggestions() {
+    const merged = { ...choices, ...suggestedChoices(preview, choices) };
+    setChoices(merged);
+    void refresh({ ...body, category_by_article: merged });
+  }
   const body = { project_id: projectId, contract_id: contractId, plan_year: year,
     budget_revision: revision, mode, category_by_article: choices };
   const config = JSON.stringify(body);
@@ -53,6 +67,16 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
       });
       if (context.current !== captured || requestSequence !== sequence.current) return;
       setPreview(result); setPreviewConfig(JSON.stringify(requestBody)); setOperation(null);
+      // Owner rule 15.10.2026: the AI fills the categories, the owner only reviews.
+      // Pre-select every suggestion once and re-check the preview with them.
+      const chosen = requestBody.category_by_article as Record<number, number>;
+      const suggested = suggestedChoices(result, chosen);
+      if (Object.keys(suggested).length && !autoFilled.current) {
+        autoFilled.current = true;
+        const merged = { ...chosen, ...suggested };
+        setChoices(merged);
+        void refresh({ ...requestBody, category_by_article: merged });
+      }
     } catch (caught) {
       if (context.current === captured && requestSequence === sequence.current) {
         setError((caught as Error).message); setPreviewConfig("");
@@ -64,7 +88,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
 
   useEffect(() => {
     setMode("create_budget"); setRevision(1); setYear(planYear); setChoices({}); setPreview(null); setOperation(null);
-    setPreviewConfig(""); attempt.current = null; pending.current = false;
+    setPreviewConfig(""); attempt.current = null; pending.current = false; autoFilled.current = false;
     if (projectId && contractId) void refresh({ project_id: projectId, contract_id: contractId,
       plan_year: planYear, budget_revision: 1, mode: "create_budget", category_by_article: {} });
     return () => { ++sequence.current; };
@@ -111,7 +135,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
 
   return <section aria-label="Бюджет из статей ДДС" className="card structured-import">
     <h3>Создать расходный бюджет из статей</h3>
-    <p>Период: {year}. Источник суммы — месячные ячейки, годовая колонка — контроль. Существующие записи ДДС не изменяются. Категорию каждой статьи выберите явно.</p>
+    <p>Период: {year}. Источник суммы — месячные ячейки, годовая колонка — контроль. Существующие записи ДДС не изменяются. Категории статей предложил AI-секретарь — проверьте и при необходимости поправьте.</p>
     <p>Подтверждение прогноза без этапа ГПР — следующий отдельный шаг. Созданные здесь предложения не входят в утверждённые итоги и не являются платежами.</p>
     <div className="structured-actions">
       <label>Режим<select aria-label="Режим бюджетного импорта" value={mode} disabled={busy || Boolean(operation)} onChange={(event) => setMode(event.target.value)}>
@@ -120,10 +144,19 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
       <label>Ревизия<input aria-label="Ревизия расходного бюджета" type="number" min={1} max={10000} value={revision} disabled={busy || Boolean(operation)} onChange={(event) => setRevision(Number(event.target.value))} /></label>
       <label>Год бюджета<input aria-label="Год расходного бюджета" type="number" min={2000} max={2100} value={year} disabled={busy || Boolean(operation)} onChange={(event) => setYear(Number(event.target.value))} /></label>
       <button type="button" disabled={busy || !contractId} onClick={() => void refresh()}>Обновить предпросмотр бюджета</button>
+      {preview && Object.keys(suggestedChoices(preview, choices)).length > 0 && <button type="button" disabled={busy || Boolean(operation)} onClick={acceptAllSuggestions}>Принять все предложенные категории</button>}
     </div>
     {error && <p role="alert" className="finance-warning">{error}</p>}
     {preview?.warnings.map((warning, index) => <p className="finance-warning" key={index}>{warning}</p>)}
-    {preview?.conflicts.map((conflict, index) => <p role="alert" className="finance-warning" key={index}>{conflict.code}: {conflict.message}</p>)}
+    {(() => {
+      // Never show raw codes; per-article category confirmations collapse into one line.
+      const categoryConflicts = preview?.conflicts.filter((conflict) => conflict.code === "CATEGORY_CONFIRMATION_REQUIRED") || [];
+      const other = preview?.conflicts.filter((conflict) => conflict.code !== "CATEGORY_CONFIRMATION_REQUIRED") || [];
+      return <>
+        {categoryConflicts.length > 0 && <p role="alert" className="finance-warning">Проверьте предложенные категории: {categoryConflicts.length} стат{categoryConflicts.length === 1 ? "ья" : "ей"}.</p>}
+        {other.map((conflict, index) => <p role="alert" className="finance-warning" key={index}>{conflict.message}</p>)}
+      </>;
+    })()}
     {preview && <><p>Расходных статей: {preview.articles.length}. Всего: {preview.expense_total} {preview.currency}.</p>
       <div className="structured-table"><table><thead><tr><th>Источник / статья</th><th>Сумма месяцев</th><th>Годовой контроль / разница</th><th>Категория затрат</th><th>Проверка округления</th></tr></thead><tbody>
         {preview.articles.map((article) => <tr key={article.article_id}>
@@ -131,7 +164,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
           <td>{article.monthly_total}</td><td>{article.annual_total ?? "—"} / {article.annual_difference ?? "—"}</td>
           <td><select aria-label={`Категория статьи ${article.title}`} value={choices[article.article_id] || ""} disabled={busy || Boolean(operation)} onChange={(event) => setChoices((current) => ({ ...current, [article.article_id]: Number(event.target.value) }))}>
             <option value="">Выберите категорию</option>{categories.filter((item) => item.is_active).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
-          </select></td>
+          </select>{article.suggested_category_name && <small className="muted">Предложено AI: {article.suggested_category_name}{article.suggestion_reason ? ` — ${article.suggestion_reason}` : ""}</small>}</td>
           <td><details><summary>Месяцы и остатки</summary>{article.months.map((cell) => <p key={cell.source_coordinate}>{cell.source_coordinate}: raw {cell.raw_amount}; округление {cell.ordinary_amount}; поправка {cell.adjustment}; итог {cell.amount}</p>)}</details></td>
         </tr>)}
       </tbody></table></div>

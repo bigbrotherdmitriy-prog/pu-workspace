@@ -70,10 +70,11 @@ it("explicit confirmation sends exact pin/hash and no legacy row IDs or approval
   expect(payload).not.toHaveProperty("status");
 });
 
-it("conflicts block confirmation and show reason code", async () => {
+it("conflicts block confirmation and show the reason without raw codes", async () => {
   mockApi.mockResolvedValue({ ...proposal, conflicts: [{ code: "ARTICLE_AMBIGUOUS", message: "Дубликат" }] });
   const Panel = await panel(); render(<Panel {...options} />);
-  await screen.findByText(/ARTICLE_AMBIGUOUS/);
+  await screen.findByText("Дубликат");
+  expect(screen.queryByText(/ARTICLE_AMBIGUOUS/)).toBeNull();
   expect(screen.getByRole("button", { name: /Подтвердить создание/ }).hasAttribute("disabled")).toBe(true);
 });
 
@@ -85,4 +86,19 @@ it("a late response from the old project cannot replace the new preview", async 
   await screen.findByText("Годовой итог отличается на 14.00");
   resolve({ ...proposal, warnings: ["Старый проект"] });
   await waitFor(() => expect(screen.queryByText("Старый проект")).toBeNull());
+});
+
+
+it("pre-selects AI-suggested categories and re-checks the preview with them", async () => {
+  const withSuggestions = { ...proposal, conflicts: [{ code: "CATEGORY_CONFIRMATION_REQUIRED", message: "x" }],
+    articles: proposal.articles.map((article: Record<string, unknown>) => ({
+      ...article, suggested_category_id: 1, suggested_category_name: "Материалы", suggestion_reason: "по ключевому слову: материал" })) };
+  mockApi.mockResolvedValueOnce(withSuggestions).mockResolvedValue({ ...withSuggestions, conflicts: [] });
+  const Panel = await panel(); render(<Panel {...options} />);
+  await screen.findByText(/Предложено AI: Материалы/);
+  await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2));
+  const second = JSON.parse(String((mockApi.mock.calls[1][1] as RequestInit).body));
+  const articleId = (proposal.articles[0] as { article_id: number }).article_id;
+  expect(second.category_by_article[articleId]).toBe(1);
+  expect(screen.queryByText(/CATEGORY_CONFIRMATION_REQUIRED/)).toBeNull();
 });
