@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../../api/client";
+import { api } from "../../api/client";
+import { ApiError } from "../../api/errors";
 
 type Props = { projectId: number; contractId: number; documentId: number; planYear: number;
   budgetRevision: number; refreshToken?: number; onApplied: () => void };

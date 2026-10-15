@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { api, ApiError } from "../../api/client";
+import { api } from "../../api/client";
+import { ApiError } from "../../api/errors";
 import { ExistingBudgetLinksPanel } from "./ExistingBudgetLinksPanel";
 
 vi.mock("../../api/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../api/client")>()), api: vi.fn() }));

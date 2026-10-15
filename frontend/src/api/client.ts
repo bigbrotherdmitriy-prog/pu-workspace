@@ -1,17 +1,7 @@
 import { reportServerReachable } from "../offline/connectivity";
+import { ApiError } from "./errors";
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number | null,
-    public requestId: string,
-    public code?: string,
-    public details?: unknown,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError } from "./errors";
 
 function newRequestId(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
