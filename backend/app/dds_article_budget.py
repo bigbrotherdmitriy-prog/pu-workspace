@@ -175,7 +175,6 @@ def _preview(document_id, payload, db):
     contract = db.scalar(select(Contract).where(Contract.id == payload.contract_id, Contract.project_id == payload.project_id))
     if project is None or contract is None or contract.contract_kind == "prime_reference":
         raise HTTPException(422, "CONTRACT_SCOPE_MISMATCH: выберите финансовый договор проекта")
-    ensure_default_categories(db, project.organization_id)
     try:
         currency = project_currency(db, project.id)
     except ValueError as exc:
@@ -230,7 +229,6 @@ def _preview(document_id, payload, db):
                 suggested_name, reason = _suggest_category_with_ai(article["title"])
             suggested_category = category_by_name.get(suggested_name.casefold())
             if suggested_category is None:
-                # Fall back to created defaults if the name lookup missed.
                 suggested_category = next(
                     (item for item in categories if item.name == suggested_name), None)
             article["cost_category_id"] = None
