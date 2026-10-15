@@ -1014,7 +1014,7 @@ def _contract_financial_terms(content: str) -> dict:
     percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
     amount_keywords = re.compile(
         r"цена\s+(?:настоящего\s+)?договора|цена\s+работ|общая\s+цена|"
-        r"стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость|составляет",
+        r"стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость|составляет|стоимость\s+всех|в\s+сумме",
         re.IGNORECASE,
     )
     vat_keywords = re.compile(
