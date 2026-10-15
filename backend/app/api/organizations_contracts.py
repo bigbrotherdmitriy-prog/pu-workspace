@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, require_project_role, require_user
+from app.contract_terms_ai import extract_contract_terms_ai
 from app.database import get_db
 from app.contract_vat import contract_vat_snapshot
 from app.finance_source_pins import resolve_current_document_pin
@@ -971,23 +972,69 @@ def _contract_financial_terms(content: str) -> dict:
         "performed_from": None, "performed_to": None, "performed_evidence": None,
         "warranty_until": None, "warranty_evidence": None,
     }
-    money_pattern = r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:руб(?:\.|лей|ля)?|₽)"
+    money_pattern = (
+        r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)"
+        r"(?:\s*\([^)]{0,200}\))?\s*"
+        r"(?:руб(?:\.|лей|ля)?|₽)"
+    )
     percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
+    amount_keywords = re.compile(
+        r"цена\s+(?:настоящего\s+)?договора|цена\s+работ|общая\s+цена|"
+        r"стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость|составляет",
+        re.IGNORECASE,
+    )
+    vat_keywords = re.compile(
+        r"(?:в\s*т\.?\s*ч\.?|в\s+том\s+числе|включая\s+ндс|кроме\s+ндс|плюс\s+ндс|"
+        r"ндс\s+составляет|ндс\s+в\s+размере)",
+        re.IGNORECASE,
+    )
+    vat_percent_after_keyword = re.compile(
+        r"(?:в\s*т\.?\s*ч\.?|в\s+том\s+числе|включая\s+ндс|кроме\s+ндс|плюс\s+ндс|"
+        r"ндс\s+составляет|ндс\s+в\s+размере)\s*[:\-]?\s*НДС\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*%",
+        re.IGNORECASE,
+    )
+    vat_percent_generic = re.compile(
+        r"НДС\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*%",
+        re.IGNORECASE,
+    )
+    vat_none = re.compile(
+        r"(?:не\s+облагается|без\s+ндс|ндс\s+не\s+предусмотрен|"
+        r"не\s+признаётся\s+плательщиком\s+ндс)",
+        re.IGNORECASE,
+    )
+    retention_marker = re.compile(r"удержан|удержива", re.IGNORECASE)
+    retention_generic = re.compile(r"гарантийн[а-яё]*\s+удерж", re.IGNORECASE)
     date_pattern = re.compile(_DATE_PATTERN)
     period_pattern = re.compile(
         rf"(?:срок|период)\s+(?:выполнения|исполнения|оказания\s+услуг|действия)[^.\n]*?"
         rf"с\s+{_DATE_PATTERN}\s+(?:по|до)\s+{_DATE_PATTERN}",
         re.IGNORECASE,
     )
+    deadline_pattern = re.compile(
+        rf"(?:срок[а-яё]*\s+(?:выполнения|исполнения|оказания\s+услуг|поставки|работ)|"
+        rf"не\s+позднее|до)\s*[«\"]?\s*{_DATE_PATTERN}"
+        rf"|(?:срок[а-яё]*\s+(?:выполнения|исполнения|оказания\s+услуг|поставки|работ))\s*[^.\n]*?"
+        rf"не\s+позднее\s*[«\"]?\s*{_DATE_PATTERN}",
+        re.IGNORECASE,
+    )
+    month_names = {
+        "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+        "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+    }
+    text_deadline_pattern = re.compile(
+        rf"(?:не\s+позднее|до)\s*[«\"]?\s*(\d{{1,2}})[»\"]?\s+"
+        rf"({'|'.join(month_names)})\s+(\d{{4}})",
+        re.IGNORECASE,
+    )
+    current_year = date.today().year
+    min_signed_year = current_year - 5
+    max_signed_year = current_year + 2
     lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines() if line.strip()]
     for line in lines:
         lowered = line.casefold()
         money = re.search(money_pattern, line, re.IGNORECASE)
         percent = re.search(percent_pattern, line)
-        if result["amount"] is None and money and re.search(
-            r"цена\s+(?:настоящего\s+)?договора|стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость",
-            lowered,
-        ):
+        if result["amount"] is None and money and amount_keywords.search(lowered):
             result["amount"] = _decimal_value(money.group(1))
             result["amount_evidence"] = line[:500]
         if "аванс" in lowered:
@@ -997,37 +1044,67 @@ def _contract_financial_terms(content: str) -> dict:
                 result["advance_percent"] = _decimal_value(percent.group(1))
             if money or percent:
                 result["advance_evidence"] = line[:500]
-        if result["retention_percent"] is None and percent and re.search(r"удержан|удержива|гарантийн.*удерж", lowered):
-            result["retention_percent"] = _decimal_value(percent.group(1))
-            result["retention_evidence"] = line[:500]
+        if result["retention_percent"] is None:
+            marker = retention_marker.search(line) or retention_generic.search(line)
+            if marker:
+                tail = line[marker.start():marker.start() + 60 + len(marker.group(0))]
+                vat_near = re.search(r"НДС", tail, re.IGNORECASE)
+                percent_in_tail = re.search(percent_pattern, tail)
+                if percent_in_tail and not vat_near:
+                    result["retention_percent"] = _decimal_value(percent_in_tail.group(1))
+                    result["retention_evidence"] = line[:500]
         if result["signed_at"] is None and re.search(r"подписан|дата\s+подписания", lowered):
             match = date_pattern.search(line)
             if match and (value := _date_value(*match.groups())) is not None:
-                result["signed_at"] = value
-                result["signed_at_evidence"] = line[:500]
+                if min_signed_year <= value.year <= max_signed_year:
+                    result["signed_at"] = value
+                    result["signed_at_evidence"] = line[:500]
         if result["vat_mode"] is None and "ндс" in lowered:
-            if re.search(r"(?:не\s+облагается|без\s+ндс|ндс\s+не\s+предусмотрен|не\s+признаётся\s+плательщиком\s+ндс)", lowered):
+            if vat_none.search(line):
                 result["vat_mode"] = "none"
                 result["vat_evidence"] = line[:500]
-            elif (vat_rate_match := re.search(
-                r"(?:в\s+том\s+числе\s+ндс|включая\s+ндс|кроме\s+ндс|плюс\s+ндс|"
-                r"ндс\s+составляет|ндс\s+в\s+размере)\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*%",
-                lowered,
-            )) is not None:
-                # The percent must immediately follow one of these specific VAT
-                # phrases -- not just be "ндс" and some unrelated percent
-                # anywhere on the same line (that produced a false "2%" match
-                # live, from a percent that had nothing to do with VAT).
-                result["vat_mode"] = "rate"
-                result["vat_rate"] = _decimal_value(vat_rate_match.group(1))
-                result["vat_evidence"] = line[:500]
-        if result["performed_from"] is None:
+            else:
+                vat_rate_match = vat_percent_after_keyword.search(line)
+                if vat_rate_match is None and vat_keywords.search(line):
+                    vat_rate_match = vat_percent_generic.search(line)
+                if vat_rate_match is None:
+                    vat_rate_match = vat_percent_generic.search(line)
+                if vat_rate_match is not None:
+                    result["vat_mode"] = "rate"
+                    result["vat_rate"] = _decimal_value(vat_rate_match.group(1))
+                    result["vat_evidence"] = line[:500]
+        if result["performed_from"] is None or result["performed_to"] is None:
             match = period_pattern.search(line)
             if match:
                 groups = match.groups()
                 start, end = _date_value(*groups[0:3]), _date_value(*groups[3:6])
                 if start is not None and end is not None:
                     result["performed_from"], result["performed_to"] = start, end
+                    result["performed_evidence"] = line[:500]
+        if result["performed_to"] is None and re.search(
+            r"срок[а-яё]*\s+(?:выполнения|исполнения|оказания\s+услуг|поставки|работ)"
+            r"|не\s+позднее",
+            lowered,
+        ):
+            numeric = deadline_pattern.search(line)
+            value: date | None = None
+            if numeric is not None:
+                groups = numeric.groups()
+                if all(groups[:3]):
+                    value = _date_value(*groups[0:3])
+            if value is None:
+                textual = text_deadline_pattern.search(line)
+                if textual:
+                    day, month_name, year = textual.groups()
+                    month_number = month_names.get(month_name.casefold())
+                    if month_number is not None:
+                        try:
+                            value = date(int(year), month_number, int(day))
+                        except ValueError:
+                            value = None
+            if value is not None:
+                result["performed_to"] = value
+                if result["performed_evidence"] is None:
                     result["performed_evidence"] = line[:500]
         if result["warranty_until"] is None and re.search(r"гарантийн.*срок|гарант(?:ия|ийные\s+обязательства)", lowered):
             match = re.search(rf"(?:до|по)\s+{_DATE_PATTERN}", line, re.IGNORECASE)
@@ -1037,6 +1114,27 @@ def _contract_financial_terms(content: str) -> dict:
     if result["advance_amount"] is None and result["advance_percent"] is not None and result["amount"] is not None:
         result["advance_amount"] = (result["amount"] * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
     return result
+
+
+def _merge_contract_terms_with_ai(content: str, base: dict) -> dict:
+    """Regex verdict wins; the AI only fills fields regex left empty. Failures
+    of the AI call never propagate -- the regex result is always returned."""
+    missing = [key for key, value in base.items() if value is None and not key.endswith("_evidence")]
+    if not missing:
+        return base
+    try:
+        ai_terms = extract_contract_terms_ai(content)
+    except Exception:
+        return base
+    if not ai_terms:
+        return base
+    merged = dict(base)
+    for key, value in ai_terms.items():
+        if value is None:
+            continue
+        if key in merged and merged[key] is None:
+            merged[key] = value
+    return merged
 
 
 def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
@@ -1256,7 +1354,9 @@ def analyze_contract(project_id: int, contract_id: int,
     if not content:
         raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
     source_id = document.external_id or f"document:{document.id}"
-    financial_check = _apply_contract_financial_terms(row, _contract_financial_terms(content))
+    financial_check = _apply_contract_financial_terms(
+        row, _merge_contract_terms_with_ai(content, _contract_financial_terms(content)),
+    )
     _validate_contract_commercial_state({field: getattr(row, field) for field in _CONTRACT_COMMERCIAL_FIELDS})
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",
