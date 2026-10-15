@@ -17,7 +17,7 @@ def _stub_policy(monkeypatch):
 
 def test_ai_without_amount_falls_back_to_regex(monkeypatch):
     _stub_policy(monkeypatch)
-    monkeypatch.setattr(invoice_extraction, "ai_configured", lambda: True)
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: True)
 
     def fake_ai(text, filename, categories):
         return {
@@ -44,7 +44,8 @@ def test_ai_without_amount_falls_back_to_regex(monkeypatch):
 
 def test_deepseek_configured_calls_ai(monkeypatch):
     _stub_policy(monkeypatch)
-    monkeypatch.setattr(invoice_extraction, "ai_configured", lambda: True)
+    monkeypatch.setattr(invoice_extraction, "gemini_configured", lambda: False)
+    monkeypatch.setattr(invoice_extraction, "deepseek_configured", lambda: True)
 
     called = {"count": 0}
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.ai_policy import ExternalAIBlocked, apply_ai_policy_mode, policy_mode_for_project
 from app.document_extraction import CONFIDENCE_FROM_LLM_LEVEL, verify_verbatim_evidence
-from app.gemini_analysis import ai_configured, extract_invoice_fields_with_gemini
+from app.gemini_analysis import deepseek_configured, extract_invoice_fields_with_gemini, gemini_configured
 
 
 @dataclass(slots=True, frozen=True)
@@ -127,7 +127,7 @@ def extract_invoice_fields(
         ai_text = apply_ai_policy_mode(mode, text)
     except ExternalAIBlocked:
         return _regex_fallback(text, "policy_blocked")
-    if not ai_configured():
+    if not (gemini_configured() or deepseek_configured()):
         return _regex_fallback(text, "not_configured")
     try:
         payload = extract_invoice_fields_with_gemini(ai_text, filename, category_names)
