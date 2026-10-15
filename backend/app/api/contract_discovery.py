@@ -89,20 +89,34 @@ _PERSON_RE = re.compile(
 )
 
 
+_MONTH_RE = re.compile(
+    r"^(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)",
+    re.IGNORECASE,
+)
+
+
 def _spaced_contract_number(heading: str) -> str | None:
     """«№ 6 - FIL /730-02- 2026 г.» → «6-FIL/730-02-2026»; «№ 01/ 21 11 -2 6 возмездного» → «01/2111-26»."""
     match = _SPACED_NUMBER_RE.search(heading)
     if not match:
         return None
     parts: list[str] = []
-    for token in match.group("tail").split():
+    tokens = match.group("tail").split()
+    for index, token in enumerate(tokens):
+        if token.startswith(("«", "\"")):  # quoted OCR fragment, not part of the number
+            break
+        following = tokens[index + 1] if index + 1 < len(tokens) else ""
+        if re.fullmatch(r"\d{1,2}", token) and parts and _MONTH_RE.match(following):
+            break  # «№ 52 02 февраля» -- the day of the date, not the number
         if re.search(r"[а-яё]", token):  # first lowercase Cyrillic word (г., от, возмездного) ends the number
+            break
+        if _MONTH_RE.match(token):  # day-of-month followed by a month name, not the number
             break
         if not re.fullmatch(r"[A-ZА-ЯЁ0-9/._\-]+", token, re.IGNORECASE):
             break
         parts.append(token)
     number = "".join(parts).strip("-./_")
-    return number if len(number) >= 3 and any(ch.isdigit() for ch in number) else None
+    return number if len(number) >= 2 and any(ch.isdigit() for ch in number) else None
 
 
 def _join_ocr_fragments(value: str) -> str:
@@ -334,6 +348,58 @@ def _party_chain_parent(content: str, contract_contents: list[tuple[Contract, st
     return matches[0] if len(matches) == 1 else None
 
 
+def _own_is_customer(own_names: tuple[str, ...], content: str) -> bool:
+    """True when our organization is named as the customer/buyer/general contractor."""
+    if not own_names:
+        return False
+    own_keys = {_organization_key(name) for name in own_names if name}
+    if not own_keys:
+        return False
+    compact = " ".join((content or "").split())[:15_000].casefold()
+    for key in own_keys:
+        if not key:
+            continue
+        start = 0
+        while True:
+            index = compact.find(key, start)
+            if index < 0:
+                break
+            tail = compact[index + len(key):index + len(key) + 300]
+            if re.search(
+                r"именуем\w*\s+(?:в\s+дальнейшем\s+)?[«\"']?"
+                r"(?:заказчик|покупатель|генподрядчик)\b",
+                tail, re.IGNORECASE,
+            ):
+                return True
+            start = index + len(key)
+    return False
+
+
+def _common_subject_words(first: str, second: str) -> bool:
+    """True when two contract subjects share a significant common word (≥5 letters)."""
+    words = {word for word in re.findall(r"[A-Za-zА-Яа-яЁё]{5,}", (first or "").casefold())}
+    other = {word for word in re.findall(r"[A-Za-zА-Яа-яЁё]{5,}", (second or "").casefold())}
+    return bool(words & other)
+
+
+def _own_customer_parent(content: str, own_names: tuple[str, ...],
+                         project_contracts: list[Contract]) -> Contract | None:
+    """Choose the single head contract where our company is the contractor."""
+    candidates = [
+        contract for contract in project_contracts
+        if not getattr(contract, "archived", False)
+        and contract.contract_kind in {"prime_reference", "customer"}
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        subject = _short_contract_title(content, "") or ""
+        matched = [contract for contract in candidates if _common_subject_words(contract.title or "", subject)]
+        if len(matched) == 1:
+            return matched[0]
+    return None
+
+
 def discover_contract_fields(name: str, content: str, own_names: tuple[str, ...] = ()) -> dict:
     """Return a reviewable proposal. It never creates or links records."""
     raw = content or ""
@@ -509,6 +575,18 @@ def _discover_documents(db: Session, project_id: int, documents: list[Document],
             child["evidence"].append(
                 f"вышестоящий договор {inferred_parent.number}: {reason}"
             )
+        if (not child["parent_contract_id"]
+                and child["contract_kind"] not in {"prime_reference", "customer"}
+                and _own_is_customer(own_names, content_by_document.get(child["document_id"], ""))):
+            own_parent = _own_customer_parent(
+                content_by_document.get(child["document_id"], ""), own_names, project_contracts,
+            )
+            if own_parent is not None:
+                child["parent_contract_id"] = own_parent.id
+                child["evidence"].append(
+                    f"вышестоящий договор {own_parent.number}: наша компания заказчик в этом договоре "
+                    "и подрядчик в головном"
+                )
         if not child.get("counterparty"):
             counterparty, party_evidence = _discovered_counterparty(
                 content_by_document.get(child["document_id"], ""), child["contract_kind"], own_names,

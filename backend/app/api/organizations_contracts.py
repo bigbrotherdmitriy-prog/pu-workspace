@@ -1169,24 +1169,106 @@ def _contract_financial_terms(content: str) -> dict:
     return result
 
 
+_CONTRACT_TERM_FIELDS = (
+    "amount", "advance_amount", "advance_percent", "retention_percent",
+    "signed_at", "performed_from", "performed_to", "warranty_until",
+    "vat_mode", "vat_rate",
+)
+
+_CONTRACT_TERM_EVIDENCE_FIELDS = (
+    "amount_evidence", "advance_evidence", "retention_evidence",
+    "signed_at_evidence", "performed_evidence", "vat_evidence",
+    "warranty_evidence",
+)
+_CONTRACT_TERM_EVIDENCE_FIELDS = tuple(_CONTRACT_TERM_EVIDENCE_FIELDS) + (
+    "advance_amount_evidence", "advance_percent_evidence",
+    "performed_from_evidence", "performed_to_evidence", "warranty_until_evidence",
+)
+
+
+def _contract_term_values_differ(field: str, left, right) -> bool:
+    if left is None or right is None:
+        return False
+    if field in {"amount", "advance_amount"}:
+        try:
+            return abs(Decimal(left) - Decimal(right)) > Decimal("1")
+        except (InvalidOperation, TypeError, ValueError):
+            return str(left) != str(right)
+    if field == "vat_rate":
+        try:
+            return Decimal(left) != Decimal(right)
+        except (InvalidOperation, TypeError, ValueError):
+            return str(left) != str(right)
+    if field == "retention_percent":
+        try:
+            return Decimal(left) != Decimal(right)
+        except (InvalidOperation, TypeError, ValueError):
+            return str(left) != str(right)
+    return left != right
+
+
 def _merge_contract_terms_with_ai(content: str, base: dict) -> dict:
-    """Regex verdict wins; the AI only fills fields regex left empty. Failures
-    of the AI call never propagate -- the regex result is always returned."""
-    missing = [key for key, value in base.items() if value is None and not key.endswith("_evidence")]
-    if not missing:
-        return base
+    """AI is the primary source for contract terms; regex is the fallback.
+
+    The AI is always called when content is available. For every field where
+    the AI produced a value (extract_contract_terms_ai already verifies that
+    each value has a verbatim evidence quote) the AI value and its *_evidence
+    replace the regex result; otherwise the regex value is kept. If both sides
+    produced a value and they disagree (Decimal diff > 1 for money, plain
+    inequality for dates/strings), the conflict is reported in
+    "extraction_conflicts" with the field name and both representations as
+    strings. Errors of the AI call are never propagated: the regex result is
+    returned unchanged. Extraction callers iterating over the result must skip
+    the auxiliary "extraction_conflicts" key.
+    """
+    if not content:
+        return dict(base)
     try:
         ai_terms = extract_contract_terms_ai(content)
     except Exception:
-        return base
+        return dict(base)
     if not ai_terms:
-        return base
+        return dict(base)
     merged = dict(base)
-    for key, value in ai_terms.items():
-        if value is None:
+    conflicts: list[dict] = []
+    for field in _CONTRACT_TERM_FIELDS:
+        ai_value = ai_terms.get(field)
+        if ai_value is None:
             continue
-        if key in merged and merged[key] is None:
-            merged[key] = value
+        regex_value = merged.get(field)
+        if regex_value is not None and _contract_term_values_differ(field, ai_value, regex_value):
+            conflicts.append({
+                "field": field,
+                "ai": str(ai_value),
+                "regex": str(regex_value),
+            })
+        merged[field] = ai_value
+        for evidence_field in _CONTRACT_TERM_EVIDENCE_FIELDS:
+            if not evidence_field.startswith(field):
+                continue
+            evidence = ai_terms.get(evidence_field)
+            if evidence is None:
+                continue
+            merged[evidence_field] = evidence
+    # Advance evidence may arrive under the "advance_*" prefix alongside the
+    # generic "advance_evidence" key used by regex extraction.
+    for source_field, target_field in (
+        ("advance_amount_evidence", "advance_evidence"),
+        ("advance_percent_evidence", "advance_evidence"),
+    ):
+        evidence = ai_terms.get(source_field)
+        if evidence is not None:
+            merged[target_field] = evidence
+    evidence = ai_terms.get("performed_from_evidence") or ai_terms.get("performed_to_evidence")
+    if evidence is not None:
+        merged["performed_evidence"] = evidence
+    evidence = ai_terms.get("warranty_until_evidence")
+    if evidence is not None:
+        merged["warranty_evidence"] = evidence
+    if conflicts:
+        merged["extraction_conflicts"] = conflicts
+    else:
+        merged["extraction_conflicts"] = []
     return merged
 
 
@@ -1195,10 +1277,12 @@ def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
     human already entered. A date/VAT extraction that would make the merged
     state invalid (e.g. performed_from > performed_to) is not applied -- it is
     reported separately so a human decides, per the plan's "подтверждение
-    выхода за [период] с записью в аудит"."""
+    выхода за [период] с записью в аудит". Auxiliary keys such as
+    "extraction_conflicts" produced by the AI/regex merge are ignored here."""
     applied: list[str] = []
     mismatches: list[dict] = []
     rejected: list[dict] = []
+    extraction_conflicts = terms.get("extraction_conflicts")
     for field, label, evidence_field, tolerance in (
         ("amount", "Сумма договора", "amount_evidence", Decimal("1")),
         ("advance_amount", "Аванс", "advance_evidence", Decimal("1")),
@@ -1253,7 +1337,13 @@ def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
                 "extracted": f"{performed_from} - {performed_to}",
                 "evidence": terms.get("performed_evidence"),
             })
-    return {"applied": applied, "mismatches": mismatches, "rejected": rejected, "terms": terms}
+    return {
+        "applied": applied,
+        "mismatches": mismatches,
+        "rejected": rejected,
+        "terms": terms,
+        "extraction_conflicts": extraction_conflicts or [],
+    }
 
 
 def _rank_contract_documents(db: Session, project_id: int, row: Contract) -> list[dict]:
