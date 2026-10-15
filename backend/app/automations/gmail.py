@@ -195,11 +195,18 @@ def gmail_project_ids(db) -> list[int]:
         ),
     )
 
+    # Projects with no settings row at all are legacy projects created before
+    # ProjectServiceSettings existed; they must keep syncing exactly as they
+    # did before that table was introduced.
+    settings_row = exists().where(
+        ProjectServiceSettings.project_id == GoogleOAuthToken.project_id,
+    )
+
     return list(db.scalars(
         select(GoogleOAuthToken.project_id)
         .join(Project, Project.id == GoogleOAuthToken.project_id)
         .where(Project.archived_at.is_(None))
-        .where(active)
+        .where(or_(~settings_row, active))
         .order_by(GoogleOAuthToken.project_id)
     ))
 

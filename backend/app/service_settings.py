@@ -18,7 +18,12 @@ class ServiceSettings:
 def get_settings(db: Session, project_id: int) -> ServiceSettings:
     row = db.get(ProjectServiceSettings, project_id)
     if row is None:
-        return ServiceSettings()
+        return ServiceSettings(
+            gmail_enabled=True,
+            google_tasks_enabled=True,
+            google_calendar_enabled=True,
+            primary_mail=None,
+        )
     return ServiceSettings(
         gmail_enabled=bool(row.gmail_enabled),
         google_tasks_enabled=bool(row.google_tasks_enabled),

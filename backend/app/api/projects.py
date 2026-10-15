@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.project_service_settings import ProjectServiceSettings
 from app.models.user import User
 from app.models.organization_contract import Organization
 from app.models.audit_log import AuditLog
@@ -130,6 +131,13 @@ def create_project(
 
     db.add(item)
     db.flush()
+    db.add(ProjectServiceSettings(
+        project_id=item.id,
+        gmail_enabled=False,
+        google_tasks_enabled=False,
+        google_calendar_enabled=False,
+        primary_mail=None,
+    ))
     db.add(ProjectMember(project_id=item.id, user_id=user.id, role="owner"))
     db.add(AuditLog(
         action="project_created", entity_type="project", entity_id=item.id,
