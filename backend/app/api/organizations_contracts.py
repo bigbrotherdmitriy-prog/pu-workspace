@@ -945,10 +945,42 @@ def _contract_source_text(document: Document, db: Session | None = None) -> str:
 
 
 def _decimal_value(raw: str) -> Decimal:
-    return Decimal(re.sub(r"\s+", "", raw).replace(",", "."))
+    # «300000-00» / «180327-87» is rubles-kopecks written with a dash.
+    return Decimal(re.sub(r"-(\d{2})$", r".\1", re.sub(r"\s+", "", raw)).replace(",", "."))
 
 
 _DATE_PATTERN = r"(\d{1,2})[./](\d{1,2})[./](20\d{2})"
+
+_EVIDENCE_RADIUS = 160
+
+
+def _evidence_window(line: str, match: re.Match | None, radius: int = _EVIDENCE_RADIUS) -> str:
+    """Return a slice of `line` around `match` widened to word boundaries.
+
+    Long DOCX/PDF extracts are often a single physical line, so slicing from
+    the beginning shows the preamble instead of the clause with the value.
+    Falls back to `line[:500]` when there is no match to center on."""
+    if match is None:
+        return line[:500]
+    length = len(line)
+    start = max(0, match.start() - radius)
+    end = min(length, match.end() + radius)
+    if start > 0:
+        boundary = line.find(" ", start)
+        if boundary != -1 and boundary < match.start():
+            start = boundary + 1
+    if end < length:
+        boundary = line.rfind(" ", match.end(), end)
+        if boundary != -1:
+            end = boundary
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < length else ""
+    return f"{prefix}{line[start:end].strip()}{suffix}"
+
+
+def _evidence_for_keyword(line: str, keyword: str, radius: int = _EVIDENCE_RADIUS) -> str:
+    match = re.search(keyword, line, re.IGNORECASE)
+    return _evidence_window(line, match, radius)
 
 
 def _date_value(day: str, month: str, year: str) -> date | None:
@@ -958,7 +990,40 @@ def _date_value(day: str, month: str, year: str) -> date | None:
         return None
 
 
-def _contract_financial_terms(content: str) -> dict:
+_RU_MONTHS = {
+    "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5, "июн": 6,
+    "июл": 7, "август": 8, "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12,
+}
+
+
+def _spaced_word(word: str) -> str:
+    # OCR splits words with stray spaces («Ок ончание»): allow \s* between letters.
+    return r"\s*".join(re.escape(letter) for letter in word)
+
+
+_WORDY_DATE = r"«?\s*(\d{1,2})\s*»?\s+([а-яё]+)\s+(20\s*\d\s*\d)"
+
+
+def _wordy_date_value(day: str, month_word: str, year: str) -> date | None:
+    month_word = month_word.casefold()
+    month = next((number for stem, number in sorted(_RU_MONTHS.items(), key=lambda item: -len(item[0]))
+                  if month_word.startswith(stem)), None)
+    if month is None:
+        return None
+    return _date_value(day, str(month), re.sub(r"\s+", "", year))
+
+
+def _work_boundary_date(text: str, word: str) -> date | None:
+    """«Начало Работ: «27» марта 2026 года» / «Окончание выполнения работ: 31.12.2026»."""
+    pattern = rf"{_spaced_word(word)}\s*(?:{_spaced_word('выполнения')}\s*)?{_spaced_word('работ')}\s*[:\-–]?\s*"
+    match = re.search(pattern + _WORDY_DATE, text, re.IGNORECASE)
+    if match:
+        return _wordy_date_value(*match.groups())
+    match = re.search(pattern + _DATE_PATTERN, text, re.IGNORECASE)
+    return _date_value(*match.groups()) if match else None
+
+
+def _contract_financial_terms(content: str, source_name: str = "") -> dict:
     """Extract explicit contract price, advance, retention, VAT state, dates
     and warranty with source evidence (ADR V6-10, step 8б: "предложение суммы,
     дат и НДС ... со ссылкой на источник"). Regex over explicit phrasing only --
@@ -973,14 +1038,32 @@ def _contract_financial_terms(content: str) -> dict:
         "warranty_until": None, "warranty_evidence": None,
     }
     money_pattern = (
-        r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2})?)"
-        r"(?:\s*\([^)]{0,200}\))?\s*"
+        r"(?<!\d)(\d[\d\s]{2,}(?:[.,]\d{1,2}|-\d{2}(?!\d))?)"
+        r"(?:\s*=?\s*\([^)]{0,200}\))?\s*"
         r"(?:руб(?:\.|лей|ля)?|₽)"
     )
     percent_pattern = r"(?<!\d)(\d{1,3}(?:[.,]\d{1,2})?)\s*%"
     amount_keywords = re.compile(
         r"цена\s+(?:настоящего\s+)?договора|цена\s+работ|общая\s+цена|"
-        r"стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость|составляет",
+        r"стоимость\s+(?:работ|услуг|договора)|общая\s+стоимость|составляет|стоимость\s+всех|в\s+сумме",
+        re.IGNORECASE,
+    )
+    application_reference = re.compile(
+        r"спецификаци|приложени",
+        re.IGNORECASE,
+    )
+    application_total_markers = re.compile(
+        r"итого\s+с\s+ндс|итого|всего\s+к\s+оплате|всего|общая\s+стоимость",
+        re.IGNORECASE,
+    )
+    vat_exempt = re.compile(
+        r"без\s+ндс|ндс\s+не\s+облагается|не\s+является\s+плательщиком\s+ндс|"
+        r"упрощ|\bусн\b|346\.11|145\s+нк|самозанят|налог\s+на\s+профессиональный\s+доход|\bнпд\b",
+        re.IGNORECASE,
+    )
+    vat_unknown_rate_pattern = re.compile(
+        r"(?:в\s*т\.?\s*ч\.?|в\s+том\s+числе|включая\s+ндс)\s*[:\-]?\s*ндс\s*[:\-]?\s*"
+        r"(\d[\d\s]{2,}(?:[.,]\d{1,2})?)\s*(?:руб(?:\.|лей|ля)?|₽)?",
         re.IGNORECASE,
     )
     vat_keywords = re.compile(
@@ -1030,20 +1113,40 @@ def _contract_financial_terms(content: str) -> dict:
     min_signed_year = current_year - 5
     max_signed_year = current_year + 2
     lines = [re.sub(r"\s+", " ", line).strip() for line in content.splitlines() if line.strip()]
+    appendix_marker = "=== приложение:"
+    appendix_indices: set[int] = set()
+    for index, line in enumerate(lines):
+        if line.casefold().startswith(appendix_marker):
+            appendix_indices.add(index)
     for line in lines:
+        # Scans/DOCX split numbers with stray spaces («НДС 2 2 %», «20 2 6»); digits
+        # separated only by spaces belong to one number.
+        line = re.sub(r"(?<=\d)\s+(?=\d)", "", line)
         lowered = line.casefold()
-        money = re.search(money_pattern, line, re.IGNORECASE)
+        money_matches = list(re.finditer(money_pattern, line, re.IGNORECASE))
+        # The contract price is the largest amount on its line (VAT and advances are smaller).
+        money = max(money_matches, key=lambda item: _decimal_value(item.group(1)) or 0, default=None)
         percent = re.search(percent_pattern, line)
         if result["amount"] is None and money and amount_keywords.search(lowered):
             result["amount"] = _decimal_value(money.group(1))
-            result["amount_evidence"] = line[:500]
+            result["amount_evidence"] = _evidence_window(line, money)
         if "аванс" in lowered:
-            if result["advance_amount"] is None and money:
-                result["advance_amount"] = _decimal_value(money.group(1))
-            if result["advance_percent"] is None and percent:
-                result["advance_percent"] = _decimal_value(percent.group(1))
-            if money or percent:
-                result["advance_evidence"] = line[:500]
+            # Only figures that follow the word «аванс» closely belong to the advance;
+            # the contract price and VAT often share the same paragraph.
+            window = " ".join(match.group(0) for match in re.finditer(r"аванс\w*[^.;]{0,160}", line, re.IGNORECASE))
+            advance_money = re.search(money_pattern, window, re.IGNORECASE)
+            advance_percent = re.search(percent_pattern, window)
+            if advance_percent and re.search(r"ндс\s*$", window[:advance_percent.start()].casefold()):
+                advance_percent = None
+            if result["advance_amount"] is None and advance_money:
+                result["advance_amount"] = _decimal_value(advance_money.group(1))
+            if result["advance_percent"] is None and advance_percent:
+                result["advance_percent"] = _decimal_value(advance_percent.group(1))
+            if advance_money or advance_percent:
+                anchor = advance_money or advance_percent
+                result["advance_evidence"] = _evidence_window(line, anchor)
+            elif result["advance_evidence"] is None:
+                result["advance_evidence"] = _evidence_for_keyword(line, r"аванс\w*")
         if result["retention_percent"] is None:
             marker = retention_marker.search(line) or retention_generic.search(line)
             if marker:
@@ -1052,17 +1155,19 @@ def _contract_financial_terms(content: str) -> dict:
                 percent_in_tail = re.search(percent_pattern, tail)
                 if percent_in_tail and not vat_near:
                     result["retention_percent"] = _decimal_value(percent_in_tail.group(1))
-                    result["retention_evidence"] = line[:500]
+                    result["retention_evidence"] = _evidence_window(line, marker)
+                elif result["retention_evidence"] is None:
+                    result["retention_evidence"] = _evidence_window(line, marker)
         if result["signed_at"] is None and re.search(r"подписан|дата\s+подписания", lowered):
             match = date_pattern.search(line)
             if match and (value := _date_value(*match.groups())) is not None:
                 if min_signed_year <= value.year <= max_signed_year:
                     result["signed_at"] = value
-                    result["signed_at_evidence"] = line[:500]
+                    result["signed_at_evidence"] = _evidence_window(line, match)
         if result["vat_mode"] is None and "ндс" in lowered:
             if vat_none.search(line):
                 result["vat_mode"] = "none"
-                result["vat_evidence"] = line[:500]
+                result["vat_evidence"] = _evidence_window(line, vat_none.search(line))
             else:
                 vat_rate_match = vat_percent_after_keyword.search(line)
                 if vat_rate_match is None and vat_keywords.search(line):
@@ -1072,7 +1177,12 @@ def _contract_financial_terms(content: str) -> dict:
                 if vat_rate_match is not None:
                     result["vat_mode"] = "rate"
                     result["vat_rate"] = _decimal_value(vat_rate_match.group(1))
-                    result["vat_evidence"] = line[:500]
+                    result["vat_evidence"] = _evidence_window(line, vat_rate_match)
+                elif vat_unknown_rate_pattern.search(line):
+                    vat_unknown = vat_unknown_rate_pattern.search(line)
+                    result["vat_mode"] = "rate"
+                    result["vat_rate"] = None
+                    result["vat_evidence"] = _evidence_window(line, vat_unknown)
         if result["performed_from"] is None or result["performed_to"] is None:
             match = period_pattern.search(line)
             if match:
@@ -1080,7 +1190,7 @@ def _contract_financial_terms(content: str) -> dict:
                 start, end = _date_value(*groups[0:3]), _date_value(*groups[3:6])
                 if start is not None and end is not None:
                     result["performed_from"], result["performed_to"] = start, end
-                    result["performed_evidence"] = line[:500]
+                    result["performed_evidence"] = _evidence_window(line, match)
         if result["performed_to"] is None and re.search(
             r"срок[а-яё]*\s+(?:выполнения|исполнения|оказания\s+услуг|поставки|работ)"
             r"|не\s+позднее",
@@ -1105,47 +1215,328 @@ def _contract_financial_terms(content: str) -> dict:
             if value is not None:
                 result["performed_to"] = value
                 if result["performed_evidence"] is None:
-                    result["performed_evidence"] = line[:500]
+                    anchor = numeric or textual
+                    result["performed_evidence"] = _evidence_window(line, anchor)
         if result["warranty_until"] is None and re.search(r"гарантийн.*срок|гарант(?:ия|ийные\s+обязательства)", lowered):
             match = re.search(rf"(?:до|по)\s+{_DATE_PATTERN}", line, re.IGNORECASE)
             if match and (value := _date_value(*match.groups())) is not None:
                 result["warranty_until"] = value
+                result["warranty_evidence"] = _evidence_window(line, match)
+            elif result["warranty_evidence"] is None:
                 result["warranty_evidence"] = line[:500]
+    flat = re.sub(r"\s+", " ", content)
+    if result["performed_from"] is None and (start := _work_boundary_date(flat, "начало")) is not None:
+        result["performed_from"] = start
+        result["performed_evidence"] = result["performed_evidence"] or "Начало работ: " + start.isoformat()
+    if result["performed_to"] is None and (finish := _work_boundary_date(flat, "окончание")) is not None:
+        result["performed_to"] = finish
+        result["performed_evidence"] = result["performed_evidence"] or "Окончание работ: " + finish.isoformat()
+
+    # Fallback: the contract references an appendix/specification for the price.
+    needs_appendix_amount = result["amount"] is None or (
+        result["amount"] < Decimal("1000")
+        and bool(appendix_indices)
+    )
+    if needs_appendix_amount:
+        appendix_totals: list[Decimal] = []
+        appendix_evidence: str | None = None
+        for index in sorted(appendix_indices):
+            following = sorted(i for i in appendix_indices if i > index)
+            section_end = following[0] if following else len(lines)
+            for offset in range(index + 1, section_end):
+                appendix_line = re.sub(r"(?<=\d)\s+(?=\d)", "", lines[offset])
+                # Specification totals are table cells («Итого: 373 620,00») without
+                # «руб.»; VAT lines are skipped so the VAT sum is never the price.
+                if not application_total_markers.search(appendix_line) or "ндс" in appendix_line.casefold().split(":")[0]:
+                    continue
+                for amount_match in re.finditer(r"(\d+(?:[.,]\d{1,2})?)", appendix_line):
+                    try:
+                        value = _decimal_value(amount_match.group(1))
+                    except (InvalidOperation, AttributeError):
+                        continue
+                    if value is None:
+                        continue
+                    appendix_totals.append(value)
+                    if appendix_evidence is None or value >= max(appendix_totals):
+                        appendix_evidence = _evidence_window(appendix_line, amount_match)
+        if appendix_totals:
+            best_total = max(appendix_totals)
+            if result["amount"] is None or best_total > result["amount"]:
+                result["amount"] = best_total
+                result["amount_evidence"] = appendix_evidence
+
+    # VAT rate derivation from explicit total/VAT sums when the rate itself is
+    # not printed, followed by the RF default of 22%.
+    vat_exempt_in_content = vat_exempt.search(flat)
+    if result["vat_mode"] is None or (result["vat_mode"] == "rate" and result["vat_rate"] is None):
+        result["vat_mode"] = None
+        if vat_exempt_in_content:
+            result["vat_mode"] = "none"
+            result["vat_rate"] = Decimal("0")
+            result["vat_evidence"] = _evidence_window(flat, vat_exempt_in_content)
+        else:
+            vat_unknown = vat_unknown_rate_pattern.search(flat)
+            derived_rate: Decimal | None = None
+            if vat_unknown is not None:
+                vat_sum = _decimal_value(vat_unknown.group(1))
+                if vat_sum is not None and result["amount"] is not None and result["amount"] > vat_sum:
+                    base = result["amount"] - vat_sum
+                    if base > 0:
+                        raw_rate = vat_sum / base * Decimal("100")
+                        for candidate in (Decimal("22"), Decimal("20"), Decimal("10"),
+                                          Decimal("7"), Decimal("5")):
+                            if abs(raw_rate - candidate) <= Decimal("0.5"):
+                                derived_rate = candidate
+                                break
+            if derived_rate is not None:
+                result["vat_mode"] = "rate"
+                result["vat_rate"] = derived_rate
+                result["vat_evidence"] = _evidence_window(flat, vat_unknown)
+            else:
+                # Applied by analyze_contract only after every document was read.
+                result["vat_mode"] = None
+                result["vat_rate"] = None
+                result["vat_default_22"] = True
+
+    # Signed date fallback from the header ("… № 52 от 2 февраля 2026 г."),
+    # from an appendix ("к договору № 52 от 2 февраля 2026 г.") and finally
+    # from the source document name.
+    if result["signed_at"] is None:
+        header_markers = re.compile(
+            rf"(?:договор[а-яё]*\s*№\s*\S+|к\s+договору\s*№\s*\S+|"
+            rf"«?\d{{1,2}}»?\s+[а-яё]+\s+20\s*\d\s*\d)",
+            re.IGNORECASE,
+        )
+        wordy_bound = re.search(
+            rf"«?\s*(\d{{1,2}})\s*»?\s+([а-яё]+)\s+(20\s*\d\s*\d)",
+            flat,
+            re.IGNORECASE,
+        )
+        numeric_bound = re.search(_DATE_PATTERN, flat)
+        candidate_date: date | None = None
+        candidate_match: re.Match | None = None
+        if header_markers.search(flat):
+            for wordy in re.finditer(
+                rf"«?\s*(\d{{1,2}})\s*»?\s+([а-яё]+)\s+(20\s*\d\s*\d)",
+                flat,
+                re.IGNORECASE,
+            ):
+                value = _wordy_date_value(*wordy.groups())
+                if value is not None and min_signed_year <= value.year <= max_signed_year and value <= date.today():
+                    candidate_date = value
+                    candidate_match = wordy
+                    break
+            if candidate_date is None:
+                for numeric in re.finditer(_DATE_PATTERN, flat):
+                    value = _date_value(*numeric.groups())
+                    if value is not None and min_signed_year <= value.year <= max_signed_year and value <= date.today():
+                        candidate_date = value
+                        candidate_match = numeric
+                        break
+        elif wordy_bound is not None:
+            value = _wordy_date_value(*wordy_bound.groups())
+            if value is not None and min_signed_year <= value.year <= max_signed_year and value <= date.today():
+                candidate_date = value
+                candidate_match = wordy_bound
+        elif numeric_bound is not None:
+            value = _date_value(*numeric_bound.groups())
+            if value is not None and min_signed_year <= value.year <= max_signed_year and value <= date.today():
+                candidate_date = value
+                candidate_match = numeric_bound
+        if candidate_date is not None:
+            result["signed_at"] = candidate_date
+            result["signed_at_evidence"] = _evidence_window(flat, candidate_match)
+
+    if result["signed_at"] is None and source_name:
+        filename_match = re.search(
+            rf"от\s*(\d{{1,2}})[.\-](\d{{1,2}})[.\-](20\d{{2}})"
+            rf"|от\s*(\d{{1,2}})[.\-](\d{{1,2}})[.\-](\d{{2}})(?!\d)"
+            rf"|(\d{{1,2}})[.\-](\d{{1,2}})[.\-](20\d{{2}})(?!\d)",
+            source_name,
+            re.IGNORECASE,
+        )
+        if filename_match is not None:
+            groups = filename_match.groups()
+            day = month = year = None
+            if groups[0]:
+                day, month, year = groups[0], groups[1], groups[2]
+            elif groups[3]:
+                day, month, year = groups[3], groups[4], "20" + groups[5]
+            elif groups[6]:
+                day, month, year = groups[6], groups[7], groups[8]
+            if day and month and year:
+                value = _date_value(day, month, year)
+                if value is not None and min_signed_year <= value.year <= max_signed_year and value <= date.today():
+                    result["signed_at"] = value
+                    result["signed_at_evidence"] = f"Дата из имени файла: {source_name}"
+
     if result["advance_amount"] is None and result["advance_percent"] is not None and result["amount"] is not None:
         result["advance_amount"] = (result["amount"] * result["advance_percent"] / Decimal("100")).quantize(Decimal("0.01"))
     return result
 
 
+_CONTRACT_TERM_FIELDS = (
+    "amount", "advance_amount", "advance_percent", "retention_percent",
+    "signed_at", "performed_from", "performed_to", "warranty_until",
+    "vat_mode", "vat_rate",
+)
+
+_CONTRACT_TERM_EVIDENCE_FIELDS = (
+    "amount_evidence", "advance_evidence", "retention_evidence",
+    "signed_at_evidence", "performed_evidence", "vat_evidence",
+    "warranty_evidence",
+)
+_CONTRACT_TERM_EVIDENCE_FIELDS = tuple(_CONTRACT_TERM_EVIDENCE_FIELDS) + (
+    "advance_amount_evidence", "advance_percent_evidence",
+    "performed_from_evidence", "performed_to_evidence", "warranty_until_evidence",
+)
+
+
+def _contract_term_values_differ(field: str, left, right) -> bool:
+    if left is None or right is None:
+        return False
+    if field in {"amount", "advance_amount"}:
+        try:
+            return abs(Decimal(left) - Decimal(right)) > Decimal("1")
+        except (InvalidOperation, TypeError, ValueError):
+            return str(left) != str(right)
+    if field == "vat_rate":
+        try:
+            return Decimal(left) != Decimal(right)
+        except (InvalidOperation, TypeError, ValueError):
+            return str(left) != str(right)
+    if field == "retention_percent":
+        try:
+            return Decimal(left) != Decimal(right)
+        except (InvalidOperation, TypeError, ValueError):
+            return str(left) != str(right)
+    return left != right
+
+
 def _merge_contract_terms_with_ai(content: str, base: dict) -> dict:
-    """Regex verdict wins; the AI only fills fields regex left empty. Failures
-    of the AI call never propagate -- the regex result is always returned."""
-    missing = [key for key, value in base.items() if value is None and not key.endswith("_evidence")]
-    if not missing:
-        return base
+    """AI is the primary source for contract terms; regex is the fallback.
+
+    The AI is always called when content is available. For every field where
+    the AI produced a value (extract_contract_terms_ai already verifies that
+    each value has a verbatim evidence quote) the AI value and its *_evidence
+    replace the regex result; otherwise the regex value is kept. If both sides
+    produced a value and they disagree (Decimal diff > 1 for money, plain
+    inequality for dates/strings), the conflict is reported in
+    "extraction_conflicts" with the field name and both representations as
+    strings. Errors of the AI call are never propagated: the regex result is
+    returned unchanged. Extraction callers iterating over the result must skip
+    the auxiliary "extraction_conflicts" key.
+    """
+    if not content:
+        return dict(base)
     try:
         ai_terms = extract_contract_terms_ai(content)
     except Exception:
-        return base
+        return dict(base)
     if not ai_terms:
-        return base
+        return dict(base)
     merged = dict(base)
-    for key, value in ai_terms.items():
-        if value is None:
+    conflicts: list[dict] = []
+    for field in _CONTRACT_TERM_FIELDS:
+        ai_value = ai_terms.get(field)
+        if ai_value is None:
             continue
-        if key in merged and merged[key] is None:
-            merged[key] = value
+        regex_value = merged.get(field)
+        if regex_value is not None and _contract_term_values_differ(field, ai_value, regex_value):
+            conflicts.append({
+                "field": field,
+                "ai": str(ai_value),
+                "regex": str(regex_value),
+            })
+        merged[field] = ai_value
+        for evidence_field in _CONTRACT_TERM_EVIDENCE_FIELDS:
+            if not evidence_field.startswith(field):
+                continue
+            evidence = ai_terms.get(evidence_field)
+            if evidence is None:
+                continue
+            merged[evidence_field] = evidence
+    # Advance evidence may arrive under the "advance_*" prefix alongside the
+    # generic "advance_evidence" key used by regex extraction.
+    for source_field, target_field in (
+        ("advance_amount_evidence", "advance_evidence"),
+        ("advance_percent_evidence", "advance_evidence"),
+    ):
+        evidence = ai_terms.get(source_field)
+        if evidence is not None:
+            merged[target_field] = evidence
+    evidence = ai_terms.get("performed_from_evidence") or ai_terms.get("performed_to_evidence")
+    if evidence is not None:
+        merged["performed_evidence"] = evidence
+    evidence = ai_terms.get("warranty_until_evidence")
+    if evidence is not None:
+        merged["warranty_evidence"] = evidence
+    if conflicts:
+        merged["extraction_conflicts"] = conflicts
+    else:
+        merged["extraction_conflicts"] = []
     return merged
 
 
-def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
+def _contract_terms_content(db: Session, project_id: int, row: Contract,
+                            document: Document, content: str) -> str:
+    """Main contract text plus every attached appendix/specification.
+
+    Prices, advances and VAT are often given only in «Приложение № 1» or a
+    specification; reading the main file alone produced a random 500 ₽."""
+    parts = [content[:60_000]]
+    total = len(parts[0])
+    links = db.scalars(select(ContractDocumentLink).where(
+        ContractDocumentLink.contract_id == row.id,
+        ContractDocumentLink.project_id == project_id,
+        ContractDocumentLink.document_id != document.id,
+    ).order_by(ContractDocumentLink.created_at, ContractDocumentLink.id))
+    for link in links:
+        linked = db.scalar(select(Document).where(
+            Document.id == link.document_id, Document.project_id == project_id,
+        ))
+        text = _contract_source_text(linked, db) if linked is not None else ""
+        if not text:
+            continue
+        chunk = f"\n\n=== Приложение: {linked.name} ===\n" + text[:30_000]
+        if total + len(chunk) > 150_000:
+            break
+        parts.append(chunk)
+        total += len(chunk)
+    return "".join(parts)
+
+
+def _manually_edited_contract_fields(db: Session | None, contract_id: int | None) -> set[str]:
+    """Fields a person changed by hand (contract_updated audit «fields=a,b»)."""
+    if db is None or contract_id is None:
+        return set()
+    edited: set[str] = set()
+    for details in db.scalars(select(AuditLog.details).where(
+        AuditLog.action == "contract_updated", AuditLog.entity_type == "contract",
+        AuditLog.entity_id == contract_id,
+    )):
+        match = re.search(r"fields=([^;]*)", details or "")
+        if match:
+            edited.update(item.strip() for item in match.group(1).split(",") if item.strip())
+    return edited
+
+
+def _apply_contract_financial_terms(row: Contract, terms: dict, db: Session | None = None) -> dict:
     """Fill only currently-empty fields; never silently overwrite a value a
     human already entered. A date/VAT extraction that would make the merged
     state invalid (e.g. performed_from > performed_to) is not applied -- it is
     reported separately so a human decides, per the plan's "подтверждение
-    выхода за [период] с записью в аудит"."""
+    выхода за [период] с записью в аудит". Auxiliary keys such as
+    "extraction_conflicts" produced by the AI/regex merge are ignored here."""
     applied: list[str] = []
     mismatches: list[dict] = []
     rejected: list[dict] = []
+    replaced: list[dict] = []
+    # Owner rule 15.10.2026: values the system itself put into the card (wizard,
+    # previous analysis) are corrected by the system; only hand-entered values
+    # are protected and reported as mismatches. Zero money counts as empty.
+    manual = _manually_edited_contract_fields(db, getattr(row, "id", None))
+    extraction_conflicts = terms.get("extraction_conflicts")
     for field, label, evidence_field, tolerance in (
         ("amount", "Сумма договора", "amount_evidence", Decimal("1")),
         ("advance_amount", "Аванс", "advance_evidence", Decimal("1")),
@@ -1157,12 +1548,23 @@ def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
         if extracted is None:
             continue
         current = getattr(row, field)
-        if current is None:
+        zero_money = (field in {"amount", "advance_amount", "retention_percent"}
+                      and current is not None and Decimal(current) == 0
+                      and Decimal(extracted) > 0)
+        if current is None or zero_money:
             setattr(row, field, extracted)
             applied.append(field)
         elif (tolerance is not None and abs(Decimal(current) - Decimal(extracted)) > tolerance) or (
             tolerance is None and current != extracted
         ):
+            if db is not None and field not in manual:
+                setattr(row, field, extracted)
+                applied.append(field)
+                replaced.append({
+                    "field": field, "label": label, "previous": str(current),
+                    "extracted": str(extracted), "evidence": terms.get(evidence_field),
+                })
+                continue
             mismatches.append({
                 "field": field, "label": label, "current": str(current),
                 "extracted": str(extracted), "evidence": terms.get(evidence_field),
@@ -1170,6 +1572,16 @@ def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
     vat_mode, vat_rate = terms.get("vat_mode"), terms.get("vat_rate")
     if vat_mode is not None:
         if row.vat_mode in (None, "unspecified"):
+            row.vat_mode, row.vat_rate = vat_mode, vat_rate
+            applied.append("vat_mode")
+        elif (row.vat_mode != vat_mode or (vat_mode == "rate" and row.vat_rate != vat_rate)) and (
+            db is not None and not ({"vat_mode", "vat_rate"} & manual)
+            and not str(terms.get("vat_evidence") or "").startswith("Ставка не указана")
+        ):
+            replaced.append({
+                "field": "vat_mode", "label": "НДС", "previous": f"{row.vat_mode} {row.vat_rate or ''}".strip(),
+                "extracted": f"{vat_mode} {vat_rate or ''}".strip(), "evidence": terms.get("vat_evidence"),
+            })
             row.vat_mode, row.vat_rate = vat_mode, vat_rate
             applied.append("vat_mode")
         elif row.vat_mode != vat_mode or (vat_mode == "rate" and row.vat_rate != vat_rate):
@@ -1200,7 +1612,14 @@ def _apply_contract_financial_terms(row: Contract, terms: dict) -> dict:
                 "extracted": f"{performed_from} - {performed_to}",
                 "evidence": terms.get("performed_evidence"),
             })
-    return {"applied": applied, "mismatches": mismatches, "rejected": rejected, "terms": terms}
+    return {
+        "applied": applied,
+        "mismatches": mismatches,
+        "rejected": rejected,
+        "terms": terms,
+        "extraction_conflicts": extraction_conflicts or [],
+        "replaced": replaced,
+    }
 
 
 def _rank_contract_documents(db: Session, project_id: int, row: Contract) -> list[dict]:
@@ -1354,9 +1773,15 @@ def analyze_contract(project_id: int, contract_id: int,
     if not content:
         raise HTTPException(409, "Документ ещё не проанализирован. Сначала завершите анализ рабочей папки")
     source_id = document.external_id or f"document:{document.id}"
-    financial_check = _apply_contract_financial_terms(
-        row, _merge_contract_terms_with_ai(content, _contract_financial_terms(content)),
+    terms_content = _contract_terms_content(db, project_id, row, document, content)
+    merged_terms = _merge_contract_terms_with_ai(
+        terms_content, _contract_financial_terms(terms_content, source_name=document.name or ""),
     )
+    if merged_terms.get("vat_mode") is None and merged_terms.get("vat_default_22") and row.vat_mode in (None, "unspecified"):
+        # Owner rule 15.10.2026: in Russia VAT is 22% unless a document says otherwise.
+        merged_terms["vat_mode"], merged_terms["vat_rate"] = "rate", Decimal("22")
+        merged_terms["vat_evidence"] = "Ставка не указана в документах — применена ставка НДС 22% по умолчанию (РФ)"
+    financial_check = _apply_contract_financial_terms(row, merged_terms, db)
     _validate_contract_commercial_state({field: getattr(row, field) for field in _CONTRACT_COMMERCIAL_FIELDS})
     source = StorageObject(
         id=source_id, name=document.name, mime_type=document.mime_type or "application/octet-stream",

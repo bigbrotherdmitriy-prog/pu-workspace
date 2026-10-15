@@ -200,14 +200,28 @@ class LocalUploadLifecycleAdapter:
     def _call(self, method: str, expected: type, *args: Any, **kwargs: Any) -> Any:
         function = getattr(self.__backend, method, None)
         if not callable(function):
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s", method, "missing_method",
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         try:
             result = function(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
             # Never propagate a lifecycle/DB exception: its text may contain a
             # filename, locator, SQL value, key reference, or document data.
+            cause = exc.__cause__
+            reason = "exception:" + type(exc).__name__
+            if cause is not None:
+                reason += "<-" + type(cause).__name__
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s", method, reason,
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable") from None
         if not isinstance(result, expected):
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s",
+                method, "unexpected_result:" + type(result).__name__,
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         return result
 
@@ -225,34 +239,65 @@ class LocalUploadLifecycleAdapter:
     ) -> MaterializedUpload | FinalizedUpload:
         result = self._call("load_for_processing", object, session, **kwargs)
         if not isinstance(result, (MaterializedUpload, FinalizedUpload)):
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s",
+                "load_for_processing", "unexpected_result:" + type(result).__name__,
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         return result
 
     def finalize(self, session: Any, **kwargs: Any) -> CleanupDecision:
         decision = self._call("finalize", CleanupDecision, session, **kwargs)
         if type(decision.delete_ciphertext) is not bool:
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s",
+                "finalize", "invalid_decision",
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         if decision.retention_until is not None and (
             not isinstance(decision.retention_until, datetime)
             or decision.retention_until.tzinfo is None
         ):
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s",
+                "finalize", "invalid_decision",
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         return decision
 
     def complete_cleanup(self, session: Any, **kwargs: Any) -> None:
-        function = getattr(self.__backend, "complete_cleanup", None)
+        method = "complete_cleanup"
+        function = getattr(self.__backend, method, None)
         if not callable(function):
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s", method, "missing_method",
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         try:
             result = function(session, **kwargs)
-        except Exception:
+        except Exception as exc:
+            cause = exc.__cause__
+            reason = "exception:" + type(exc).__name__
+            if cause is not None:
+                reason += "<-" + type(cause).__name__
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s", method, reason,
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable") from None
         if result is not None:
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s",
+                method, "unexpected_result:" + type(result).__name__,
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
 
     def recover_retention(self, session_factory: Callable[[], Any], *, limit: int) -> int:
         result = self._call("recover_retention", int, session_factory, limit=limit)
         if type(result) is not int or not 0 <= result <= limit:
+            log.warning(
+                "local upload lifecycle %s failed: reason=%s",
+                "recover_retention", "unexpected_result:" + type(result).__name__,
+            )
             raise LocalUploadUnavailable("local_upload_lifecycle_unavailable")
         return result
 

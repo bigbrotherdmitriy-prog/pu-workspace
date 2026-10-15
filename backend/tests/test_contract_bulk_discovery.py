@@ -9,6 +9,7 @@ from app.api.contract_discovery import (
     _party_chain_parent,
     _referenced_existing_contract,
     _short_contract_title,
+    _spaced_contract_number,
     discover_contract_fields,
     router,
 )
@@ -29,7 +30,7 @@ def test_supply_counterparty_uses_role_not_order(reverse, legal_form):
         parties.reverse()
     text = 'Договор поставки (с условием подряда). ' + ', с одной стороны, и '.join(parties)
     result = discover_contract_fields('Договор.docx', text)
-    assert result['counterparty'] == f'{legal_form} «Сириус»'
+    assert result['counterparty'] == 'ООО «Сириус»'  # legal form normalized to the short name
     assert any('по роли поставщика' in item and 'Сириус' in item for item in result['evidence'])
 
 
@@ -206,8 +207,50 @@ def test_discovers_sole_proprietor_as_downstream_counterparty(contractor):
         'Цена договора. Ответственность сторон.',
     )
     assert result["contract_kind"] == "downstream_subcontract"
-    assert result["counterparty"] == contractor
+    assert result["counterparty"] == "ИП Демиденко Алексей Сергеевич"  # normalized short form
     assert any("по роли подрядчика/исполнителя" in item for item in result["evidence"])
+
+
+def test_spaced_contract_number_stops_before_month_name():
+    assert _spaced_contract_number("ДОГОВОР № 52 02 февраля 2026 г.") == "52"
+
+
+def test_spaced_contract_number_stops_before_quoted_day():
+    assert _spaced_contract_number("ДОГОВОР № 52 «02» февраля 2026") == "52"
+
+
+def test_spaced_contract_number_keeps_legacy_examples():
+    assert _spaced_contract_number("ДОГОВОР № 01/ 21 11 -2 6 возмездного") == "01/2111-26"
+    assert _spaced_contract_number("ДОГОВОР № 6 - FIL /730-02- 2026 г.") == "6-FIL/730-02-2026"
+
+
+def test_discovery_links_own_customer_subcontract_to_head_contract(db_session):
+    project_id = 704
+    head_text = (
+        'Договор № Б-УЗП130-02-2026. ФКУ «Налог-Сервис», именуемое «Заказчик», и '
+        'ООО «ДИСИАЙ СОЛЮШНС», именуемое «Подрядчик», заключили настоящий договор. '
+        'Предмет договора. Цена договора.'
+    )
+    head_document = _document_with_content(db_session, project_id, "Б-УЗП130-02-2026.pdf", head_text)
+    head = Contract(
+        project_id=project_id, number="Б-УЗП130-02-2026", title="Модернизация электропитания ЦОД",
+        contract_kind="prime_reference", source_document_id=head_document.id,
+    )
+    db_session.add(head)
+    db_session.flush()
+    subcontract_document = _document_with_content(
+        db_session, project_id, "Субподряд ДИСИАЙ - ПРОФДВЕРИ.pdf",
+        'Договор субподряда от 02.02.2026. Общество с ограниченной ответственностью '
+        '«ПРОФДВЕРИ», именуемое в дальнейшем «Подрядчик», и Общество с ограниченной '
+        'ответственностью «ДИСИАЙ СОЛЮШНС», именуемое в дальнейшем «Заказчик», '
+        'заключили настоящий Договор. Предмет договора. Цена договора. Ответственность сторон.',
+    )
+
+    proposal = _discover_documents(db_session, project_id, [subcontract_document])["proposals"][0]
+
+    assert proposal["contract_kind"] == "downstream_subcontract"
+    assert proposal["parent_contract_id"] == head.id
+    assert any(f"вышестоящий договор {head.number}" in item for item in proposal["evidence"])
 
 
 def _document_with_content(db_session, project_id: int, name: str, content: str) -> Document:
@@ -275,7 +318,7 @@ def test_discovery_promotes_child_and_extracts_sole_proprietor(db_session):
 
     assert proposal["contract_kind"] == "downstream_subcontract"
     assert proposal["parent_contract_id"] == parent.id
-    assert proposal["counterparty"] == "Индивидуальный предприниматель Демиденко Алексей Сергеевич"
+    assert proposal["counterparty"] == "ИП Демиденко Алексей Сергеевич"
 
 
 def test_supply_parent_stays_unset_when_party_chain_is_ambiguous(db_session):
