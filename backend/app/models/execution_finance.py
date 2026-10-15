@@ -166,6 +166,13 @@ class CashFlowEntry(Base):
     actual_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     planned_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     actual_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
+    # Amount of confirmed invoices booked against this row (fact "выставлено").
+    # The plan DDS line itself keeps planned_amount; an invoice never becomes plan.
+    invoiced_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, server_default="0")
+    # Fact rows created from an invoice point at the plan DDS line they belong to.
+    plan_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cash_flow_entries.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
     counterparty: Mapped[str | None] = mapped_column(String(500), nullable=True)
     object_name: Mapped[str | None] = mapped_column(String(300), nullable=True, index=True)

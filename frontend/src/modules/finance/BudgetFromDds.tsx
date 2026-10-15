@@ -3,7 +3,7 @@ import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
 import "./budget-from-dds.css";
 
-type MoneyPair = { plan: string; fact: string };
+type MoneyPair = { plan: string; fact: string; invoiced?: string };
 
 type CounterpartyRow = {
   counterparty: string;
@@ -12,6 +12,7 @@ type CounterpartyRow = {
 };
 
 type ExpenseByCategory = {
+  invoiced?: string;
   category_id: number | null;
   category: string;
   plan: string;
@@ -22,6 +23,7 @@ type ExpenseByCategory = {
 };
 
 type AdditionalCostItem = {
+  invoiced?: string;
   title: string;
   counterparty: string | null;
   planned_date: string | null;
@@ -30,6 +32,7 @@ type AdditionalCostItem = {
 };
 
 type AdditionalCosts = {
+  invoiced?: string;
   plan: string;
   fact: string;
   items?: AdditionalCostItem[];
@@ -223,8 +226,9 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
     return <td className={`money${overrun ? " budget-overrun" : ""}`}>{fmt(value)}</td>;
   };
 
-  const remainingTotalCell = (plan: string | number, fact: string | number) => {
-    const value = toNumber(plan) - toNumber(fact);
+  // Remaining = plan − max(invoiced, paid): an invoice already commits money (owner, 15.10.2026).
+  const remainingTotalCell = (plan: string | number, fact: string | number, invoiced?: string | number) => {
+    const value = toNumber(plan) - Math.max(toNumber(fact), toNumber(invoiced ?? 0));
     const overrun = value < 0;
     return <td className={`money${overrun ? " budget-overrun" : ""}`}>{fmt(value)}</td>;
   };
@@ -237,7 +241,8 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           <tr>
             <th>Статья</th>
             <th>План, {currencyLabel}</th>
-            <th>Факт, {currencyLabel}</th>
+            <th>Выставлено, {currencyLabel}</th>
+            <th>Оплачено, {currencyLabel}</th>
             <th>Остаток, {currencyLabel}</th>
             <th>% исполнения</th>
           </tr>
@@ -246,6 +251,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           <tr className="budget-from-dds-income">
             <td>Доходы</td>
             <td className="money positive">{fmt(data.income.plan)}</td>
+            <td className="money">—</td>
             <td className="money positive">{fmt(data.income.fact)}</td>
             {remainingTotalCell(data.income.plan, data.income.fact)}
             <td>{completionPct(data.income.fact, data.income.plan) ?? "—"}</td>
@@ -253,8 +259,9 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           <tr className="budget-from-dds-expense-total">
             <td>Прямые расходы (по плановому ДДС)</td>
             <td className="money">{fmt(direct.plan)}</td>
+            <td className="money">{fmt(direct.invoiced)}</td>
             <td className="money">{fmt(direct.fact)}</td>
-            {remainingTotalCell(direct.plan, direct.fact)}
+            {remainingTotalCell(direct.plan, direct.fact, direct.invoiced)}
             <td>{completionPct(direct.fact, direct.plan) ?? "—"}</td>
           </tr>
           {data.expense_by_category.map((row) => {
@@ -272,6 +279,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                     {row.category}
                   </td>
                   <td className="money">{fmt(row.plan)}</td>
+                  <td className="money">{fmt(row.invoiced)}</td>
                   <td className="money">{fmt(row.fact)}</td>
                   {remainingCell(row.plan, row.fact, row.remaining)}
                   <td>{completionPct(row.fact, row.plan) ?? "—"}</td>
@@ -280,6 +288,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                   <tr key={`${key}-cp-${index}`} className="budget-from-dds-counterparty">
                     <td>{cp.counterparty}</td>
                     <td className="money">{fmt(cp.plan)}</td>
+                    <td className="money">—</td>
                     <td className="money">{fmt(cp.fact)}</td>
                     {remainingCell(cp.plan, cp.fact)}
                     <td>{completionPct(cp.fact, cp.plan) ?? "—"}</td>
@@ -297,8 +306,9 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
               Дополнительные затраты (вне плана)
             </td>
             <td className="money">{fmt(additional.plan)}</td>
+            <td className="money">{fmt(additional.invoiced)}</td>
             <td className="money">{fmt(additional.fact)}</td>
-            {remainingTotalCell(additional.plan, additional.fact)}
+            {remainingTotalCell(additional.plan, additional.fact, additional.invoiced)}
             <td>{completionPct(additional.fact, additional.plan) ?? "—"}</td>
           </tr>
           {extraExpanded && additionalItems.map((item, index) => (
@@ -308,6 +318,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                 <small>{[item.counterparty, formatDate(item.actual_date || item.planned_date)].filter((part) => part && part !== "—").join(" · ")}</small>
               </td>
               <td className="money">—</td>
+              <td className="money">{fmt(item.invoiced)}</td>
               <td className="money">{fmt(item.fact)}</td>
               <td className="money">—</td>
               <td>—</td>
@@ -316,13 +327,15 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           <tr className="budget-from-dds-expense-total">
             <td>Расходы всего</td>
             <td className="money">{fmt(data.expense_total.plan)}</td>
+            <td className="money">{fmt(data.expense_total.invoiced)}</td>
             <td className="money">{fmt(data.expense_total.fact)}</td>
-            {remainingTotalCell(data.expense_total.plan, data.expense_total.fact)}
+            {remainingTotalCell(data.expense_total.plan, data.expense_total.fact, data.expense_total.invoiced)}
             <td>{completionPct(data.expense_total.fact, data.expense_total.plan) ?? "—"}</td>
           </tr>
           <tr className="budget-from-dds-profit">
             <td>Прибыль</td>
             <td className={`money ${toNumber(data.profit.plan) < 0 ? "negative" : "positive"}`}>{fmt(data.profit.plan)}</td>
+            <td className="money">—</td>
             <td className={`money ${toNumber(data.profit.fact) < 0 ? "negative" : "positive"}`}>{fmt(data.profit.fact)}</td>
             {remainingTotalCell(data.profit.plan, data.profit.fact)}
             <td>—</td>
@@ -330,6 +343,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           <tr className="budget-from-dds-margin">
             <td>Рентабельность, %</td>
             <td>{data.margin_pct.plan !== null ? `${data.margin_pct.plan}%` : "—"}</td>
+            <td>—</td>
             <td>{data.margin_pct.fact !== null ? `${data.margin_pct.fact}%` : "—"}</td>
             <td>—</td>
             <td>—</td>

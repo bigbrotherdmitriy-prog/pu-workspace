@@ -3,6 +3,7 @@ import type { CostCategory, FinanceOverview, FinanceStructuredPreview, InvoiceEx
 import { formatMoney } from "../../utils/numberFormat";
 import { ArticleBudgetPreviewPanel } from "./ArticleBudgetPreviewPanel";
 import { FinanceVatDetails } from "./FinanceVatDetails";
+import { api } from "../../api/client";
 
 type Props = {
   projectId?: number; onArticleBudgetApplied?: () => void;
@@ -21,7 +22,7 @@ type Props = {
   onRefreshVat?: (kind: string, id: number) => void;
   costCategories?: CostCategory[]; invoiceProposal?: InvoiceExtractionProposal | null;
   onEditInvoice?: (patch: Partial<InvoiceExtractionProposal>) => void;
-  onConfirmInvoice?: () => void; onRejectInvoice?: () => void; onCloseInvoice?: () => void;
+  onConfirmInvoice?: (choice?: InvoicePlanChoice) => void; onRejectInvoice?: () => void; onCloseInvoice?: () => void;
   onRetryInvoiceAi?: () => void; invoiceAiRetrying?: boolean;
   onAddCostCategory?: (name: string) => void;
   includeEditor?: boolean; includeRegisters?: boolean; includeScheduleRegister?: boolean; includeCashFlowRegister?: boolean;
@@ -29,6 +30,9 @@ type Props = {
 };
 
 const money = formatMoney;
+
+export type InvoicePlanChoice = { plan_entry_id?: number; additional?: boolean };
+type PlanSuggestion = { plan_entry_id: number; title: string; counterparty?: string | null; remaining?: string; score: number; reasons?: string[] };
 
 export function FinanceOperations(props: Props) {
   const { finance, preview, selectedRows, setSelectedRows, selectedContractId, kind, title, amount, date, extra, objectName, category, note,
@@ -39,6 +43,27 @@ export function FinanceOperations(props: Props) {
     includeEditor = true, includeRegisters = true, includeScheduleRegister = true, includeCashFlowRegister = true,
     editorScope = "all" } = props;
   const [newCategory, setNewCategory] = useState("");
+  // Owner 15.10.2026: a real invoice is booked as fact against ONE plan DDS
+  // line (tied to a GPR stage) or as «Дополнительные затраты»; the AI
+  // secretary pre-selects the line, the owner only confirms.
+  const [planChoice, setPlanChoice] = useState<string>("");
+  const [planSuggestions, setPlanSuggestions] = useState<PlanSuggestion[]>([]);
+  const invoiceProposalId = invoiceProposal?.id;
+  const invoiceProjectId = invoiceProposal?.project_id;
+  useEffect(() => {
+    setPlanChoice(""); setPlanSuggestions([]);
+    if (!invoiceProposalId || !invoiceProjectId) return;
+    let alive = true;
+    api<{ suggestions: PlanSuggestion[]; recommended: number | null; additional_recommended: boolean }>(
+      `/projects/${invoiceProjectId}/invoice-extraction-proposals/${invoiceProposalId}/plan-line-suggestions`,
+    ).then((result) => {
+      if (!alive) return;
+      setPlanSuggestions(result.suggestions || []);
+      if (result.recommended) setPlanChoice(String(result.recommended));
+      else if (result.additional_recommended) setPlanChoice("additional");
+    }).catch(() => { /* suggestions are optional; manual choice stays available */ });
+    return () => { alive = false; };
+  }, [invoiceProposalId, invoiceProjectId]);
   const [previewFilter, setPreviewFilter] = useState<"all" | "inflow" | "outflow" | "issues">("all");
   const editorKinds = useMemo(() => editorScope === "gpr" ? ["baseline", "schedule"] : editorScope === "finance" ? ["budget", "cash-in", "cash-out", "invoice", "procurement", "act"] : ["budget", "cash-in", "cash-out", "invoice", "procurement", "act", "baseline", "schedule"], [editorScope]);
   useEffect(() => {
@@ -48,6 +73,8 @@ export function FinanceOperations(props: Props) {
   const contractBaselineIds = new Set(finance?.baselines.filter((row) => row.contract_id === selectedContractId).map((row) => row.id) || []);
   const contractSchedule = finance?.schedule.filter((row) => contractBaselineIds.has(row.baseline_id)) || [];
   const contractBudget = finance?.budget.filter((row) => row.contract_id === selectedContractId) || [];
+  const planLines = (finance?.cash_flow || []).filter((row) => row.direction === "outflow"
+    && Number(row.planned_amount) > 0 && (!selectedContractId || row.contract_id === selectedContractId));
   const importableRows = preview?.rows.filter((row) => row.importable) || [];
   const visiblePreviewRows = (preview?.rows || []).filter((row) =>
     previewFilter === "all" || (previewFilter === "issues" ? row.issues.length > 0 : row.direction === previewFilter)
@@ -70,7 +97,15 @@ export function FinanceOperations(props: Props) {
         <label className="wide">Назначение платежа<input value={invoiceProposal.payment_purpose || ""} onChange={(event) => onEditInvoice?.({ payment_purpose: event.target.value })} /></label>
         <label>Куда импортировать<select value={invoiceProposal.target_kind} onChange={(event) => onEditInvoice?.({ target_kind: event.target.value as "cash_flow" | "budget" })}><option value="cash_flow">ДДС</option><option value="budget">Бюджет</option></select></label>
         <label>Категория затрат<select aria-label="Категория затрат счёта" value={invoiceProposal.selected_cost_category_id || ""} onChange={(event) => onEditInvoice?.({ selected_cost_category_id: Number(event.target.value) || undefined })}><option value="">Выберите категорию</option>{costCategories.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        {invoiceProposal.target_kind === "cash_flow" && <>
+        {invoiceProposal.target_kind === "cash_flow" && <label className="wide">Строка планового ДДС<select aria-label="Строка планового ДДС счёта" value={planChoice} onChange={(event) => setPlanChoice(event.target.value)}>
+          <option value="">Выберите строку плана или «Дополнительные затраты»</option>
+          {planLines.map((row) => {
+            const hint = planSuggestions.find((item) => item.plan_entry_id === row.id);
+            return <option value={String(row.id)} key={row.id}>{`${hint ? "★ " : ""}${row.title}${row.counterparty ? ` · ${row.counterparty}` : ""} · план ${formatMoney(Number(row.planned_amount))}`}</option>;
+          })}
+          <option value="additional">Дополнительные затраты (вне плана)</option>
+        </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planChoice); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
+        {invoiceProposal.target_kind === "cash_flow" && !planChoice && <>
           <label>Этап ГПР<select aria-label="Этап ГПР счёта" value={scheduleItemId} onChange={(event) => setScheduleItemId(Number(event.target.value))}><option value={0}>Выберите этап ГПР</option>{contractSchedule.map((row) => <option value={row.id} key={row.id}>{row.title}</option>)}</select></label>
           <label>Строка бюджета<select aria-label="Строка бюджета счёта" value={budgetLineId} onChange={(event) => setBudgetLineId(Number(event.target.value))}><option value={0}>Выберите строку бюджета</option>{contractBudget.map((row) => <option value={row.id} key={row.id}>{row.description}</option>)}</select></label>
         </>}
@@ -84,14 +119,16 @@ export function FinanceOperations(props: Props) {
       </div>
       <div className="structured-actions"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Новая категория" /><button className="secondary" disabled={!newCategory.trim()} onClick={() => { onAddCostCategory?.(newCategory); setNewCategory(""); }}>Добавить в справочник</button></div>
       {(() => {
-        const requiresChain = invoiceProposal.target_kind === "cash_flow";
+        const anchored = invoiceProposal.target_kind === "cash_flow" && planChoice !== "";
+        const requiresChain = invoiceProposal.target_kind === "cash_flow" && !anchored;
         // v5.5 / MVP-4 шаг 8г: кнопка не просто недоступна — система называет
         // недостающее звено, а не молчит. Самый частый случай — у договора
         // вообще нет ни одного этапа ГПР (пустой список для выбора).
         const missing: string[] = [];
         if (!invoiceProposal.amount) missing.push("сумма");
         if (!invoiceProposal.payment_purpose) missing.push("назначение платежа");
-        if (!invoiceProposal.selected_cost_category_id) missing.push("категория затрат");
+        if (!anchored && !invoiceProposal.selected_cost_category_id) missing.push("категория затрат");
+        if (anchored && !selectedContractId) missing.push("договор");
         if (requiresChain && !selectedContractId) missing.push("договор");
         if (requiresChain && selectedContractId && !contractSchedule.length) missing.push("этап ГПР (у договора нет ни одного этапа — добавьте его в разделе «ГПР»)");
         else if (requiresChain && !scheduleItemId) missing.push("этап ГПР");
@@ -99,7 +136,7 @@ export function FinanceOperations(props: Props) {
         else if (requiresChain && !budgetLineId) missing.push("строка бюджета");
         if (requiresChain && !invoiceProposal.planned_date) missing.push("плановая дата");
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
-          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={onConfirmInvoice}>Подтвердить и создать предложение</button></div>
+          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={() => onConfirmInvoice?.(planChoice === "additional" ? { additional: true } : planChoice ? { plan_entry_id: Number(planChoice) } : undefined)}>Подтвердить счёт</button></div>
           {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}
         </div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>;
       })()}

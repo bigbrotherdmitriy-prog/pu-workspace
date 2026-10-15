@@ -140,7 +140,7 @@ def test_upload_proposal_confirmation_creates_dual_written_cash_flow_on_postgres
     assert confirmed["status"] == "confirmed"
     assert category.name == "Прямые"
     assert entry.category == category.name
-    assert entry.planned_amount == Decimal("125400.50")
+    assert entry.planned_amount == Decimal("0") and entry.invoiced_amount == Decimal("125400.50")  # invoice = fact
     assert entry.source_document_id == document.id
     assert entry.source_document_version_id == version.id
     assert entry.source_document_sha256 == hashlib.sha256(content.encode()).hexdigest()

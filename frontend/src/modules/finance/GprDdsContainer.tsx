@@ -182,7 +182,7 @@ export function GprDdsContainer({ state, active, setActive, collapsed, projectId
           setBudgetLineId={setFinanceBudgetLineId}
           setBaselineId={setFinanceBaselineId}
           onEditInvoice={editInvoiceExtraction}
-          onConfirmInvoice={() => void confirmInvoiceExtraction().then((confirmed) => { if (confirmed) setFinanceEditorOpen(false); })}
+          onConfirmInvoice={(choice) => void confirmInvoiceExtraction(choice).then((confirmed) => { if (confirmed) setFinanceEditorOpen(false); })}
           onRejectInvoice={() => void rejectInvoiceExtraction()}
           onRetryInvoiceAi={() => void retryInvoiceAiAnalysis()}
           invoiceAiRetrying={invoiceAiRetrying}

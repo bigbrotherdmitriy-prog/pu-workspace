@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
 from app.core.external_retry import HEAVY_AI_RETRY, request_with_retry
+
+logger = logging.getLogger(__name__)
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -195,6 +198,65 @@ def gemini_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
 
 
+def deepseek_configured() -> bool:
+    return bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
+
+
+def ai_configured() -> bool:
+    return gemini_configured() or deepseek_configured()
+
+
+def _deepseek_json(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
+    """Call DeepSeek's OpenAI-compatible chat/completions endpoint and parse a JSON object."""
+    import httpx
+
+    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("DeepSeek API key is not configured")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
+    base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
+    instruction = (
+        system_prompt
+        + "\n\nОтветь строго JSON-объектом по этой JSON-схеме: "
+        + json.dumps(schema, ensure_ascii=False)
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.2,
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = request_with_retry(
+            client, "POST", f"{base_url}/chat/completions",
+            policy=HEAVY_AI_RETRY,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+        )
+    raw = response.json()["choices"][0]["message"]["content"]
+    result = json.loads(raw)
+    if not isinstance(result, dict):
+        raise ValueError("DeepSeek returned an unexpected response")
+    return result
+
+
+def _try_deepseek(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
+    logger.warning("Gemini failed, switching to DeepSeek provider")
+    result = _deepseek_json(system_prompt, user_prompt, schema)
+    if isinstance(result, dict):
+        result.setdefault("_provider", "deepseek")
+    return result
+
+
+def _mark_provider(result: Any, provider: str) -> Any:
+    if isinstance(result, dict):
+        result.setdefault("_provider", provider)
+    return result
+
+
 def _generation_config(model: str, schema: dict[str, Any], legacy_temperature: float) -> dict[str, Any]:
     """Build a model-compatible structured-output configuration.
 
@@ -217,35 +279,42 @@ def _generation_config(model: str, schema: dict[str, Any], legacy_temperature: f
 def analyze_document_with_gemini(text: str, filename: str) -> dict[str, Any]:
     import httpx
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Gemini API key is not configured")
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     prompt = (
         f"Имя файла: {filename}\n\n"
         "Проведи содержательный анализ документа. Особое внимание удели связи с договором, "
         "сторонам, суммам и НДС, датам, обязательствам, рискам, противоречиям, отсутствующим "
         "данным и следующим действиям.\n\nТЕКСТ ДОКУМЕНТА:\n" + text[:50_000]
     )
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        if deepseek_configured():
+            return _try_deepseek(SYSTEM_INSTRUCTION, prompt, ANALYSIS_SCHEMA)
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": _generation_config(model, ANALYSIS_SCHEMA, 0.1),
     }
-    with httpx.Client(timeout=90.0) as client:
-        response = request_with_retry(
-            client, "POST", f"{base_url}/models/{model}:generateContent",
-            policy=HEAVY_AI_RETRY,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=payload,
-        )
-    parts = response.json()["candidates"][0]["content"]["parts"]
-    raw = "".join(part.get("text", "") for part in parts)
-    result = json.loads(raw)
-    if not isinstance(result, dict):
-        raise ValueError("Gemini returned an unexpected response")
-    return result
+    try:
+        with httpx.Client(timeout=90.0) as client:
+            response = request_with_retry(
+                client, "POST", f"{base_url}/models/{model}:generateContent",
+                policy=HEAVY_AI_RETRY,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        parts = response.json()["candidates"][0]["content"]["parts"]
+        raw = "".join(part.get("text", "") for part in parts)
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError("Gemini returned an unexpected response")
+    except Exception:
+        if deepseek_configured():
+            return _try_deepseek(SYSTEM_INSTRUCTION, prompt, ANALYSIS_SCHEMA)
+        raise
+    return _mark_provider(result, "gemini")
 
 
 def extract_combined_fields_with_gemini(
@@ -259,11 +328,6 @@ def extract_combined_fields_with_gemini(
     """
     import httpx
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Gemini API key is not configured")
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     members_line = ", ".join(member_names) if member_names else "(список участников недоступен)"
     prompt = (
         f"Имя файла: {filename}\n"
@@ -274,24 +338,36 @@ def extract_combined_fields_with_gemini(
         "Обычное описание уже выполненных работ или технических характеристик не является "
         "поручением.\n\nТЕКСТ ДОКУМЕНТА:\n" + text[:50_000]
     )
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        if deepseek_configured():
+            return _try_deepseek(COMBINED_EXTRACTION_SYSTEM_INSTRUCTION, prompt, COMBINED_EXTRACTION_SCHEMA)
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     payload = {
         "systemInstruction": {"parts": [{"text": COMBINED_EXTRACTION_SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": _generation_config(model, COMBINED_EXTRACTION_SCHEMA, 0.1),
     }
-    with httpx.Client(timeout=90.0) as client:
-        response = request_with_retry(
-            client, "POST", f"{base_url}/models/{model}:generateContent",
-            policy=HEAVY_AI_RETRY,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=payload,
-        )
-    parts = response.json()["candidates"][0]["content"]["parts"]
-    raw = "".join(part.get("text", "") for part in parts)
-    result = json.loads(raw)
-    if not isinstance(result, dict):
-        raise ValueError("Gemini returned an unexpected response")
-    return result
+    try:
+        with httpx.Client(timeout=90.0) as client:
+            response = request_with_retry(
+                client, "POST", f"{base_url}/models/{model}:generateContent",
+                policy=HEAVY_AI_RETRY,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        parts = response.json()["candidates"][0]["content"]["parts"]
+        raw = "".join(part.get("text", "") for part in parts)
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError("Gemini returned an unexpected response")
+    except Exception:
+        if deepseek_configured():
+            return _try_deepseek(COMBINED_EXTRACTION_SYSTEM_INSTRUCTION, prompt, COMBINED_EXTRACTION_SCHEMA)
+        raise
+    return _mark_provider(result, "gemini")
 
 
 def extract_invoice_fields_with_gemini(
@@ -300,11 +376,6 @@ def extract_invoice_fields_with_gemini(
     """Extract an invoice proposal; callers must verify evidence and require confirmation."""
     import httpx
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Gemini API key is not configured")
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     categories = ", ".join(category_names) or "(категории не настроены)"
     prompt = (
         f"Имя файла: {filename}\n"
@@ -321,33 +392,40 @@ def extract_invoice_fields_with_gemini(
 Не классифицируй материалы как «Зарплата» без прямого основания в документе.
 Не применяй категорию автоматически: результат является только предложением.
 """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        if deepseek_configured():
+            return _try_deepseek(instruction, prompt, INVOICE_EXTRACTION_SCHEMA)
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     payload = {
         "systemInstruction": {"parts": [{"text": instruction}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": _generation_config(model, INVOICE_EXTRACTION_SCHEMA, 0.1),
     }
-    with httpx.Client(timeout=90.0) as client:
-        response = request_with_retry(
-            client, "POST", f"{base_url}/models/{model}:generateContent",
-            policy=HEAVY_AI_RETRY,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=payload,
-        )
-    parts = response.json()["candidates"][0]["content"]["parts"]
-    result = json.loads("".join(part.get("text", "") for part in parts))
-    if not isinstance(result, dict):
-        raise ValueError("Gemini returned an unexpected invoice response")
-    return result
+    try:
+        with httpx.Client(timeout=90.0) as client:
+            response = request_with_retry(
+                client, "POST", f"{base_url}/models/{model}:generateContent",
+                policy=HEAVY_AI_RETRY,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        parts = response.json()["candidates"][0]["content"]["parts"]
+        result = json.loads("".join(part.get("text", "") for part in parts))
+        if not isinstance(result, dict):
+            raise ValueError("Gemini returned an unexpected invoice response")
+    except Exception:
+        if deepseek_configured():
+            return _try_deepseek(instruction, prompt, INVOICE_EXTRACTION_SCHEMA)
+        raise
+    return _mark_provider(result, "gemini")
 
 
 def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
     import httpx
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Gemini API key is not configured")
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     prompt = (
         f"Контекст: {context_name}\n\n"
         "Определи суть входящего делового сообщения и требуется ли на него ответ. "
@@ -356,33 +434,40 @@ def analyze_message_with_gemini(text: str, context_name: str) -> dict[str, Any]:
         "или вложения, которых нет во входящем сообщении. Если данных не хватает, задай "
         "уточняющий вопрос в самом ответе.\n\nВХОДЯЩЕЕ СООБЩЕНИЕ:\n" + text[:20_000]
     )
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        if deepseek_configured():
+            return _try_deepseek(SYSTEM_INSTRUCTION, prompt, MESSAGE_REPLY_SCHEMA)
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": _generation_config(model, MESSAGE_REPLY_SCHEMA, 0.2),
     }
-    with httpx.Client(timeout=90.0) as client:
-        response = request_with_retry(
-            client, "POST", f"{base_url}/models/{model}:generateContent",
-            policy=HEAVY_AI_RETRY,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=payload,
-        )
-    parts = response.json()["candidates"][0]["content"]["parts"]
-    result = json.loads("".join(part.get("text", "") for part in parts))
-    if not isinstance(result, dict):
-        raise ValueError("Gemini returned an unexpected response")
-    return result
+    try:
+        with httpx.Client(timeout=90.0) as client:
+            response = request_with_retry(
+                client, "POST", f"{base_url}/models/{model}:generateContent",
+                policy=HEAVY_AI_RETRY,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        parts = response.json()["candidates"][0]["content"]["parts"]
+        result = json.loads("".join(part.get("text", "") for part in parts))
+        if not isinstance(result, dict):
+            raise ValueError("Gemini returned an unexpected response")
+    except Exception:
+        if deepseek_configured():
+            return _try_deepseek(SYSTEM_INSTRUCTION, prompt, MESSAGE_REPLY_SCHEMA)
+        raise
+    return _mark_provider(result, "gemini")
 
 
 def compose_message_with_gemini(text: str, context_name: str, action: str, tone: str) -> dict[str, Any]:
     import httpx
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("Gemini API key is not configured")
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     prompt = (
         f"Контекст: {context_name}\nДействие редактора: {action}\nТон: {tone}\n\n"
         "Подготовь или переработай деловое письмо на русском языке. Верни тему, готовый текст письма "
@@ -391,23 +476,35 @@ def compose_message_with_gemini(text: str, context_name: str, action: str, tone:
         "Не добавляй подпись: приложение подставит подтверждённую подпись пользователя.\n\n"
         "ИСХОДНЫЕ ДАННЫЕ:\n" + text[:20_000]
     )
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        if deepseek_configured():
+            return _try_deepseek(SYSTEM_INSTRUCTION, prompt, MAIL_COMPOSER_SCHEMA)
+        raise RuntimeError("Gemini API key is not configured")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+    base_url = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": _generation_config(model, MAIL_COMPOSER_SCHEMA, 0.2),
     }
-    with httpx.Client(timeout=90.0) as client:
-        response = request_with_retry(
-            client, "POST", f"{base_url}/models/{model}:generateContent",
-            policy=HEAVY_AI_RETRY,
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=payload,
-        )
-    parts = response.json()["candidates"][0]["content"]["parts"]
-    result = json.loads("".join(part.get("text", "") for part in parts))
-    if not isinstance(result, dict) or not str(result.get("body") or "").strip():
-        raise ValueError("Gemini returned an unexpected mail draft")
-    return result
+    try:
+        with httpx.Client(timeout=90.0) as client:
+            response = request_with_retry(
+                client, "POST", f"{base_url}/models/{model}:generateContent",
+                policy=HEAVY_AI_RETRY,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        parts = response.json()["candidates"][0]["content"]["parts"]
+        result = json.loads("".join(part.get("text", "") for part in parts))
+        if not isinstance(result, dict) or not str(result.get("body") or "").strip():
+            raise ValueError("Gemini returned an unexpected mail draft")
+    except Exception:
+        if deepseek_configured():
+            return _try_deepseek(SYSTEM_INSTRUCTION, prompt, MAIL_COMPOSER_SCHEMA)
+        raise
+    return _mark_provider(result, "gemini")
 
 
 def format_message_replies(result: dict[str, Any]) -> str:

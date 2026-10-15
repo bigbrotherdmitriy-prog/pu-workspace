@@ -123,7 +123,7 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   await dds.getByRole("button", { name: "Проверить и использовать" }).click();
   await dds.getByLabel("Этап ГПР счёта").selectOption("72");
   await dds.getByLabel("Строка бюджета счёта").selectOption("81");
-  await dds.getByRole("button", { name: "Подтвердить и создать предложение" }).click();
+  await dds.getByRole("button", { name: "Подтвердить счёт" }).click();
 
   await dds.getByRole("tab", { name: "Детализация" }).click();
   await dds.getByRole("button", { name: "Подтвердить", exact: true }).click();

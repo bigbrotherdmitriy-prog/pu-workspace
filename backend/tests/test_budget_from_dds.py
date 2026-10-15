@@ -171,8 +171,8 @@ def test_budget_from_dds_aggregates_plan_fact_and_months(world):
 
     assert payload["currency"] == "RUB"
     assert payload["income"] == {"plan": "1000.00", "fact": "800.00"}
-    assert payload["expense_total"] == {"plan": "650.00", "fact": "580.00"}
-    assert payload["direct_expense_total"] == {"plan": "650.00", "fact": "580.00"}
+    assert payload["expense_total"] == {"plan": "650.00", "fact": "580.00", "invoiced": "0.00"}
+    assert payload["direct_expense_total"] == {"plan": "650.00", "fact": "580.00", "invoiced": "0.00"}
     assert payload["additional_costs"]["plan"] == "0.00"
     assert payload["additional_costs"]["fact"] == "0.00"
     assert payload["additional_costs"]["items"] == []
@@ -311,8 +311,8 @@ def test_budget_from_dds_additional_costs(world):
     assert unbudgeted["fact"] == "50.00"
     assert unbudgeted["remaining"] == "-50.00"
 
-    assert payload["direct_expense_total"] == {"plan": "200.00", "fact": "250.00"}
-    assert payload["expense_total"] == {"plan": "230.00", "fact": "290.00"}
+    assert payload["direct_expense_total"] == {"plan": "200.00", "fact": "250.00", "invoiced": "0.00"}
+    assert payload["expense_total"] == {"plan": "230.00", "fact": "290.00", "invoiced": "0.00"}
     assert payload["profit"] == {"plan": "770.00", "fact": "710.00"}
     assert payload["margin_pct"]["plan"] == "77.00"
     assert payload["margin_pct"]["fact"] == "71.00"

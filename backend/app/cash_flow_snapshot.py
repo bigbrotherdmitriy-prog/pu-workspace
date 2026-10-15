@@ -1,3 +1,4 @@
+from decimal import Decimal
 """Read-only, exact-money DDS projections from one bounded SQL statement."""
 
 from datetime import date, timedelta
@@ -86,7 +87,8 @@ def build_snapshot(*, project_id, currency, revision, rows, date_from, date_to,
         reason = ("awaiting_confirmation" if status == "proposed" else "cancelled" if status == "cancelled"
                   else "status_filtered" if status not in statuses else None)
         values = _zero()
-        canonical = {key: value.isoformat() if isinstance(value, date) else value
+        canonical = {key: value.isoformat() if isinstance(value, date)
+                     else str(value) if isinstance(value, Decimal) else value
                      for key, value in row.items() if key not in {"planned_amount", "actual_amount"}}
         canonical.update(planned_amount=_money(planned), actual_amount=_money(actual), exclusion_reason=reason)
         source.append(canonical)

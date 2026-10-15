@@ -73,8 +73,27 @@ describe("invoice extraction review", () => {
     render(<FinanceOperations {...props({ onConfirmInvoice })} />);
 
     expect(screen.getByText(/Итого 125 400,50 руб\./)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Подтвердить и создать предложение" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить счёт" }));
     expect(onConfirmInvoice).toHaveBeenCalledTimes(1);
+  });
+
+  it("books the invoice against a plan DDS line or «Дополнительные затраты» without GPR/budget pickers", () => {
+    const onConfirmInvoice = vi.fn();
+    const finance = { baselines: [], schedule: [], budget: [], cash_flow: [
+      { id: 90, contract_id: 41, direction: "outflow", title: "Дубна, монтаж, материалы", planned_amount: 500000, counterparty: "ООО Бетон" },
+      { id: 91, contract_id: 41, direction: "inflow", title: "Этапы Дубна", planned_amount: 900000 },
+    ] } as unknown as FinanceOverview;
+    render(<FinanceOperations {...props({ finance, onConfirmInvoice, scheduleItemId: 0, budgetLineId: 0 })} />);
+    const select = screen.getByLabelText("Строка планового ДДС счёта");
+    expect(within(select).getByRole("option", { name: /Дубна, монтаж, материалы/ })).toBeInTheDocument();
+    expect(within(select).queryByRole("option", { name: /Этапы Дубна/ })).not.toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "90" } });
+    expect(screen.queryByLabelText("Этап ГПР счёта")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить счёт" }));
+    expect(onConfirmInvoice).toHaveBeenLastCalledWith({ plan_entry_id: 90 });
+    fireEvent.change(select, { target: { value: "additional" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить счёт" }));
+    expect(onConfirmInvoice).toHaveBeenLastCalledWith({ additional: true });
   });
 
   it("lets the manager override the AI category before import", () => {
@@ -87,7 +106,7 @@ describe("invoice extraction review", () => {
 
   it("does not enable confirmation while category is missing", () => {
     render(<FinanceOperations {...props({ invoiceProposal: { ...proposal, selected_cost_category_id: undefined } })} />);
-    expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Подтвердить счёт" })).toBeDisabled();
   });
 
   it("requires and exposes the contract schedule and budget controls", () => {
@@ -95,7 +114,7 @@ describe("invoice extraction review", () => {
     const setBudgetLineId = vi.fn();
     render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0, setScheduleItemId, setBudgetLineId })} />);
 
-    expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Подтвердить счёт" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Этап ГПР счёта"), { target: { value: "52" } });
     fireEvent.change(screen.getByLabelText("Строка бюджета счёта"), { target: { value: "61" } });
     expect(setScheduleItemId).toHaveBeenCalledWith(52);
@@ -122,7 +141,7 @@ describe("invoice extraction review", () => {
   it("names the missing link instead of silently disabling confirmation", () => {
     render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0 })} />);
 
-    expect(screen.getByRole("button", { name: "Подтвердить и создать предложение" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Подтвердить счёт" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent(/этап ГПР/);
     expect(screen.getByRole("alert")).toHaveTextContent(/строка бюджета/);
   });

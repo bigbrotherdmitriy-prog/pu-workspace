@@ -72,7 +72,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     const editor = page.getByRole("dialog", { name: "Проверка финансовых данных" });
     await expect(editor).toBeVisible();
     await editor.getByLabel("Сумма", { exact: true }).fill("321");
-    await editor.getByRole("button", { name: "Подтвердить и создать предложение", exact: true }).click();
+    await editor.getByRole("button", { name: "Подтвердить счёт", exact: true }).click();
     await expect(editor.getByRole("alert")).toContainText("synthetic-invoice-request");
     await expect(editor.getByLabel("Сумма", { exact: true })).toHaveValue("321");
     expect(await editor.evaluate(element => {
