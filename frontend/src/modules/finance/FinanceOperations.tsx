@@ -73,8 +73,10 @@ export function FinanceOperations(props: Props) {
   const contractBaselineIds = new Set(finance?.baselines.filter((row) => row.contract_id === selectedContractId).map((row) => row.id) || []);
   const contractSchedule = finance?.schedule.filter((row) => contractBaselineIds.has(row.baseline_id)) || [];
   const contractBudget = finance?.budget.filter((row) => row.contract_id === selectedContractId) || [];
+  // The planned DDS belongs to the whole project (usually imported on the prime
+  // contract); a subcontract invoice must still land on its plan line.
   const planLines = (finance?.cash_flow || []).filter((row) => row.direction === "outflow"
-    && Number(row.planned_amount) > 0 && (!selectedContractId || row.contract_id === selectedContractId));
+    && Number(row.planned_amount) > 0);
   const importableRows = preview?.rows.filter((row) => row.importable) || [];
   const visiblePreviewRows = (preview?.rows || []).filter((row) =>
     previewFilter === "all" || (previewFilter === "issues" ? row.issues.length > 0 : row.direction === previewFilter)
@@ -103,7 +105,7 @@ export function FinanceOperations(props: Props) {
             const hint = planSuggestions.find((item) => item.plan_entry_id === row.id);
             return <option value={String(row.id)} key={row.id}>{`${hint ? "★ " : ""}${row.title}${row.counterparty ? ` · ${row.counterparty}` : ""} · план ${formatMoney(Number(row.planned_amount))}`}</option>;
           })}
-          <option value="additional">Дополнительные затраты (вне плана)</option>
+          <option value="additional">Дополнительные затраты</option>
         </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planChoice); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
         {invoiceProposal.target_kind === "cash_flow" && !planChoice && <>
           <label>Этап ГПР<select aria-label="Этап ГПР счёта" value={scheduleItemId} onChange={(event) => setScheduleItemId(Number(event.target.value))}><option value={0}>Выберите этап ГПР</option>{contractSchedule.map((row) => <option value={row.id} key={row.id}>{row.title}</option>)}</select></label>
