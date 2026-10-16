@@ -1303,6 +1303,12 @@ def _contract_financial_terms(content: str, source_name: str = "") -> dict:
                 content[appendix_at:], re.IGNORECASE,
             )
         ]
+        # One row per ordinal («Первый аванс» …): an appendix text can appear twice
+        # (document summary + full text), which doubled the total to 11.9M.
+        unique_rows: dict[str, re.Match] = {}
+        for item in schedule:
+            unique_rows.setdefault(re.match(r"\w+", item.group(0)).group(0).casefold(), item)
+        schedule = list(unique_rows.values())
         if len(schedule) >= 2:
             total_advance = sum((_decimal_value(item.group(1)) for item in schedule), Decimal("0"))
             if total_advance > 0:
