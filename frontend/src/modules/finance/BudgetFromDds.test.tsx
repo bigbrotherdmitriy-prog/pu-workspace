@@ -28,7 +28,7 @@ it("lines up additional cost items with the header columns and puts the amount u
   });
 
   render(<BudgetFromDds projectId={7} contractId={null} currency="RUB" />);
-  const extraRow = (await screen.findByText("Дополнительные затраты (вне плана)")).closest("tr")!;
+  const extraRow = (await screen.findByText("Дополнительные затраты")).closest("tr")!;
   fireEvent.click(extraRow);
 
   const item = (await screen.findByText(/Доставка крана/)).closest("tr")!;

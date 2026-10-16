@@ -303,7 +303,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           >
             <td>
               {additionalItems.length > 0 ? <button type="button" className="budget-from-dds-toggle" aria-expanded={extraExpanded} onClick={(event) => { event.stopPropagation(); setExtraExpanded((v) => !v); }}>{extraExpanded ? "▾" : "▸"}</button> : null}
-              Дополнительные затраты (вне плана)
+              Дополнительные затраты
             </td>
             <td className="money">{fmt(additional.plan)}</td>
             <td className="money">{fmt(additional.invoiced)}</td>
