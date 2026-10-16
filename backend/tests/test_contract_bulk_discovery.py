@@ -441,3 +441,16 @@ def test_role_with_gender_ending_in_brackets():
     )
     result = discover_contract_fields("26_02PD.docx", text, ("ДИСИАЙ СОЛЮШНС",))
     assert "Интеллиджент инжиниринг" in (result["counterparty"] or "")
+
+
+def test_split_role_word_and_spaced_quoted_name():
+    from app.api.contract_discovery import discover_contract_fields
+    text = (
+        "Договор № 976 г. Москва « 05 » февраля 202 6 г. Общество с ограниченной ответственностью "
+        "« ДИСИАЙ СОЛЮШНС », именуемое в дальнейшем «Заказчик», и ООО « Э леКС Инжиниринг », именуем ое "
+        "в дальнейшем «Подрядчик», заключили настоящий Договор. 1. ПРЕДМЕТ ДОГОВОРА. 2. ЦЕНА ДОГОВОРА. "
+        "3. ОТВЕТСТВЕННОСТЬ СТОРОН."
+    )
+    result = discover_contract_fields("Договор 859 v3.docx", text, ("ДИСИАЙ СОЛЮШНС",))
+    assert result["number"] == "976"
+    assert result["counterparty"] == "ООО «ЭлеКС Инжиниринг»"

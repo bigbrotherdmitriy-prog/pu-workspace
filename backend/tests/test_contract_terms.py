@@ -274,6 +274,7 @@ def test_advance_schedule_appendix_is_summed():
         "=== Приложение: Приложение №2 - График Авансирования.xlsx ===\n"
         "ГРАФИК АВАНСИРОВАНИЯ РАБОТ\n1\tПервый аванс\t2000000\t3 рабочих дня\n2\tВторой аванс\t2000000\t01.03.2026\n"
         "1\tТретий аванс\t1000000\t01.04.2026\n2\tЧетвёртый аванс\t500000\t04.05.2026\n2\tПятый аванс\t900000\t01.07.2026\n"
+        "ГРАФИК АВАНСИРОВАНИЯ РАБОТ\n1\tПервый аванс\t2000000\t3 рабочих дня\n2\tВторой аванс\t2000000\t01.03.2026\n"
     )
     assert _contract_financial_terms(text)["advance_amount"] == Decimal("6400000.00")
 
@@ -286,3 +287,17 @@ def test_docx_deleted_tracked_changes_are_not_read():
         '<w:ins><w:r><w:t>976</w:t></w:r></w:ins></w:p></w:body></w:document>'
     ).encode()
     assert _xml_text(xml) == "Договор № 976"
+
+
+def test_identity_refresh_corrects_genitive_counterparty_and_glued_number(db_session):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from app.api import organizations_contracts as oc
+    row = SimpleNamespace(id=9201, number="5202", counterparty="Индивидуального предпринимателя Демиденко Юри я Сергеевича")
+    document = SimpleNamespace(name="52 дог спец.pdf")
+    found = {"number": "52", "counterparty": "ИП Демиденко Юрий Сергеевич"}
+    check = {"applied": []}
+    with patch("app.api.contract_discovery.discover_contract_fields", return_value=found):
+        oc._fill_contract_identity(db_session, 1, row, document, "текст", check)
+    assert row.counterparty == "ИП Демиденко Юрий Сергеевич" and row.number == "52"
+    assert set(check["applied"]) == {"counterparty", "number"}

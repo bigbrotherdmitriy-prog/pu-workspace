@@ -174,13 +174,16 @@ def _discovered_counterparty(text: str, kind: str, own_names: tuple[str, ...] = 
     customers: dict[str, tuple[str, str]] = {}
     for index, match in enumerate(matches):
         company = " ".join(match.group(1).split()).strip(" .,:;()")
+        # OCR/DOCX spacing inside the quoted name: «« Э леКС Инжиниринг »» → «ЭлеКС Инжиниринг».
+        company = re.sub(r"«\s+", "«", re.sub(r"\s+»", "»", company))
+        company = re.sub(r"(?<=«)([А-ЯЁA-Z])\s+(?=[а-яё])", r"\1", company)
         key = _organization_key(company)
         companies.setdefault(key, company)
         # A role belongs only to the current organization, not the next party.
         end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
         tail = body[match.end():min(end, match.end() + 800)]
         role = re.search(
-            r"именуем\w*\s*(?:\(\s*\w{0,4}\s*\)\s*)?(?:в\s+дальнейшем\s+)?[«\"']?\s*"
+            r"именуем\w*(?:\s+[а-яё]{1,3}(?=\s))?\s*(?:\(\s*\w{0,4}\s*\)\s*)?(?:в\s+дальнейшем\s+)?[«\"']?\s*"
             r"(поставщик|покупатель|заказчик|подрядчик|исполнитель)\b", tail, re.IGNORECASE,
         )
         normalized_role = role.group(1).casefold() if role else None
