@@ -1566,8 +1566,6 @@ def _fill_contract_identity(db: Session, project_id: int, row: Contract, documen
     stem = Path(document.name or "").stem.strip()
     compact_number = (row.number or "").replace(" ", "")
     number_from_file = len(compact_number) >= 8 and compact_number in stem.replace(" ", "")
-    if row.counterparty and not number_from_file:
-        return
     project = db.get(Project, project_id)
     organization = db.get(Organization, project.organization_id) if project is not None else None
     own = tuple(filter(None, (organization.name, organization.legal_name))) if organization else ()
@@ -1576,11 +1574,20 @@ def _fill_contract_identity(db: Session, project_id: int, row: Contract, documen
     except Exception:
         return
     counterparty = (found.get("counterparty") or "").strip()
-    if counterparty and not row.counterparty and "counterparty" not in manual:
+    # A counterparty the system stored earlier in the genitive/OCR-broken form
+    # («Индивидуального предпринимателя … Юри я …») is corrected too.
+    garbled = bool(row.counterparty) and bool(re.match(
+        r"(индивидуального\s+предпринимателя|общества\s+с\s+ограниченной|акционерного\s+общества)",
+        row.counterparty.strip(), re.IGNORECASE,
+    ))
+    if counterparty and (not row.counterparty or garbled) and counterparty != row.counterparty and "counterparty" not in manual:
         row.counterparty = counterparty[:500]
         financial_check["applied"].append("counterparty")
     number = (found.get("number") or "").strip()
-    if number and number_from_file and number != row.number and "number" not in manual:
+    # The heading number corrects a number the system took from the file name or
+    # glued together earlier («5202» from «№ 52 02 февраля»).
+    glued = bool(number) and bool(row.number) and row.number.replace(" ", "").startswith(number.replace(" ", "")) and row.number != number
+    if number and (number_from_file or glued) and number != row.number and "number" not in manual:
         taken = db.scalar(select(Contract.id).where(
             Contract.project_id == project_id, Contract.number == number, Contract.id != row.id,
         ))

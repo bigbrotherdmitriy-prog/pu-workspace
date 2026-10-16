@@ -286,3 +286,17 @@ def test_docx_deleted_tracked_changes_are_not_read():
         '<w:ins><w:r><w:t>976</w:t></w:r></w:ins></w:p></w:body></w:document>'
     ).encode()
     assert _xml_text(xml) == "Договор № 976"
+
+
+def test_identity_refresh_corrects_genitive_counterparty_and_glued_number(db_session):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from app.api import organizations_contracts as oc
+    row = SimpleNamespace(id=9201, number="5202", counterparty="Индивидуального предпринимателя Демиденко Юри я Сергеевича")
+    document = SimpleNamespace(name="52 дог спец.pdf")
+    found = {"number": "52", "counterparty": "ИП Демиденко Юрий Сергеевич"}
+    check = {"applied": []}
+    with patch("app.api.contract_discovery.discover_contract_fields", return_value=found):
+        oc._fill_contract_identity(db_session, 1, row, document, "текст", check)
+    assert row.counterparty == "ИП Демиденко Юрий Сергеевич" and row.number == "52"
+    assert set(check["applied"]) == {"counterparty", "number"}
