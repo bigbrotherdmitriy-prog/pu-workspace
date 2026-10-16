@@ -1593,7 +1593,12 @@ def _fill_contract_identity(db: Session, project_id: int, row: Contract, documen
     # The heading number corrects a number the system took from the file name or
     # glued together earlier («5202» from «№ 52 02 февраля»).
     glued = bool(number) and bool(row.number) and row.number.replace(" ", "").startswith(number.replace(" ", "")) and row.number != number
-    if number and (number_from_file or glued) and number != row.number and "number" not in manual:
+    # A stored number that does not occur in the document at all (taken from an
+    # old file name, «859» for contract «№ 976») is replaced by the heading number.
+    absent = bool(row.number) and re.search(
+        rf"(?<![\w/-]){re.escape(row.number.strip())}(?![\w/-])", content or "",
+    ) is None
+    if number and (number_from_file or glued or absent) and number != row.number and "number" not in manual:
         taken = db.scalar(select(Contract.id).where(
             Contract.project_id == project_id, Contract.number == number, Contract.id != row.id,
         ))
