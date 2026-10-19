@@ -6,12 +6,13 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
-from app.models.execution_finance import CashFlowEntry, CostCategory
+from app.models.execution_finance import BudgetLine, CashFlowEntry, CostCategory
 from app.models.project import Project
 from app.models.user import User
 
@@ -38,6 +39,28 @@ def _money(value: Decimal | None) -> str:
     if value is None:
         value = ZERO
     return f"{value.quantize(Decimal('0.01')):.2f}"
+
+
+class BudgetLineCategoryUpdate(BaseModel):
+    cost_category_id: int
+
+
+class RecordPaymentRequest(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0)
+    percent: Decimal | None = Field(default=None, gt=0, le=100)
+    actual_date: date
+
+    @field_validator("amount", "percent", mode="before")
+    @classmethod
+    def _money_before(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        return Decimal(str(value))
+
+    @field_validator("amount", "percent")
+    @classmethod
+    def _exactly_one(cls, value: Decimal | None, info: Any) -> Decimal | None:
+        return value
 
 
 def _parse_month(value: str, field: str) -> date:
@@ -115,6 +138,28 @@ def budget_from_dds(
             select(CostCategory.id, CostCategory.name).where(CostCategory.id.in_(category_ids))
         ).all()
         category_names = {row[0]: row[1] for row in rows}
+
+    budget_lines: list[BudgetLine] = []
+    if entries:
+        lines_statement = select(BudgetLine).where(BudgetLine.project_id == project_id)
+        if contract_id is not None:
+            lines_statement = lines_statement.where(BudgetLine.contract_id == contract_id)
+        lines_statement = lines_statement.order_by(BudgetLine.id)
+        budget_lines = list(db.scalars(lines_statement).all())
+
+    budget_line_categories: dict[int, str] = {}
+    line_category_ids = {line.cost_category_id for line in budget_lines if line.cost_category_id is not None}
+    if line_category_ids:
+        rows = db.execute(
+            select(CostCategory.id, CostCategory.name).where(CostCategory.id.in_(line_category_ids))
+        ).all()
+        budget_line_categories = {row[0]: row[1] for row in rows}
+
+    entries_by_line: dict[int, list[CashFlowEntry]] = {}
+    for entry in entries:
+        if entry.budget_line_id is None:
+            continue
+        entries_by_line.setdefault(entry.budget_line_id, []).append(entry)
 
     income = _Bucket()
     expense = _Bucket()
@@ -282,6 +327,72 @@ def budget_from_dds(
     additional_plan_str = _money(additional_plan)
     additional_fact_str = _money(additional_fact)
 
+    expense_by_article: list[dict[str, Any]] = []
+    for line in budget_lines:
+        line_entries = entries_by_line.get(line.id)
+        if not line_entries:
+            continue
+        category_name = None
+        if line.cost_category_id is not None:
+            category_name = budget_line_categories.get(line.cost_category_id)
+        if _is_additional_cost(category_name=category_name, fallback_category=line.category):
+            continue
+
+        plan_total = ZERO
+        invoiced_total = ZERO
+        paid_total = ZERO
+        invoice_rows: list[dict[str, Any]] = []
+        title: str | None = None
+        fallback_title: str | None = None
+
+        for entry in line_entries:
+            planned_amount = entry.planned_amount or ZERO
+            actual_amount = entry.actual_amount or ZERO
+            invoiced_amount = getattr(entry, "invoiced_amount", None) or ZERO
+            planned_date = entry.planned_date
+            actual_date = entry.actual_date
+            plan_in_range = planned_date is not None and (
+                (from_month is None or planned_date >= from_month)
+                and (to_month is None or _month_key(planned_date) <= _month_key(to_month))
+            )
+            fact_in_range = actual_date is not None and (
+                (from_month is None or actual_date >= from_month)
+                and (to_month is None or _month_key(actual_date) <= _month_key(to_month))
+            )
+            if fallback_title is None:
+                fallback_title = entry.title
+            if entry.entry_kind == "plan_forecast" and title is None:
+                title = entry.title
+            if plan_in_range:
+                plan_total += planned_amount
+                invoiced_total += invoiced_amount
+            if fact_in_range:
+                paid_total += actual_amount
+            if invoiced_amount > ZERO:
+                invoice_rows.append({
+                    "entry_id": entry.id,
+                    "title": entry.title,
+                    "counterparty": entry.counterparty,
+                    "invoiced": _money(invoiced_amount),
+                    "paid": _money(actual_amount),
+                    "planned_date": None if planned_date is None else planned_date.isoformat(),
+                    "actual_date": None if actual_date is None else actual_date.isoformat(),
+                    "status": entry.status,
+                    "document_id": entry.source_document_id,
+                })
+
+        expense_by_article.append({
+            "budget_line_id": line.id,
+            "title": title or fallback_title or line.category,
+            "category_id": line.cost_category_id,
+            "category": category_name or line.category,
+            "plan": _money(plan_total),
+            "invoiced": _money(invoiced_total),
+            "paid": _money(paid_total),
+            "remaining": _money(plan_total - invoiced_total),
+            "invoices": invoice_rows,
+        })
+
     sorted_additional = sorted(
         additional_items,
         key=lambda item: item["_sort_fact"],
@@ -407,6 +518,7 @@ def budget_from_dds(
             "items": additional_items_out,
         },
         "expense_by_category": expense_by_category,
+        "expense_by_article": expense_by_article,
         "profit": {"plan": _money(profit_plan), "fact": _money(profit_fact)},
         "margin_pct": {
             "plan": None if margin_plan is None else _money(margin_plan),
@@ -415,3 +527,99 @@ def budget_from_dds(
         "by_month": by_month,
         "other_currency_entries_count": other_currency_count,
     }
+
+
+@router.patch("/{project_id}/budget-lines/{line_id}/category")
+def update_budget_line_category(
+    project_id: int,
+    line_id: int,
+    payload: BudgetLineCategoryUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    require_project_role(db, user, project_id, "manager")
+
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    line = db.get(BudgetLine, line_id)
+    if not line or line.project_id != project_id:
+        raise HTTPException(404, "Статья бюджета не найдена")
+
+    category = db.get(CostCategory, payload.cost_category_id)
+    if (
+        not category
+        or category.organization_id != project.organization_id
+        or not getattr(category, "is_active", True)
+    ):
+        raise HTTPException(422, "Категория не найдена")
+
+    old_category_id = line.cost_category_id
+    line.cost_category_id = category.id
+
+    db.execute(
+        CashFlowEntry.__table__.update()
+        .where(CashFlowEntry.budget_line_id == line.id)
+        .values(cost_category_id=category.id)
+    )
+
+    from app.models.execution_finance import AuditLog
+
+    db.add(AuditLog(
+        action="budget_line_category_changed",
+        entity_type="budget_line",
+        entity_id=line.id,
+        details=f"from={old_category_id}; to={category.id}; user={user.id}",
+    ))
+    db.commit()
+
+    return {
+        "budget_line_id": line.id,
+        "cost_category_id": category.id,
+        "category": category.name,
+    }
+
+
+@router.post("/{project_id}/cash-flow/{entry_id}/record-payment")
+def record_cash_flow_payment(
+    project_id: int,
+    entry_id: int,
+    payload: RecordPaymentRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> Any:
+    require_project_role(db, user, project_id, "manager")
+
+    entry = db.get(CashFlowEntry, entry_id)
+    if not entry or entry.project_id != project_id:
+        raise HTTPException(404, "Запись ДДС не найдена")
+
+    if entry.direction != "outflow" or (entry.invoiced_amount or ZERO) <= ZERO:
+        raise HTTPException(422, "Это не счёт")
+
+    if (payload.amount is None) == (payload.percent is None):
+        raise HTTPException(422, "Укажите сумму или процент")
+
+    invoiced_amount = entry.invoiced_amount or ZERO
+    if payload.amount is not None:
+        payment_amount = Decimal(payload.amount)
+    else:
+        payment_amount = (invoiced_amount * Decimal(payload.percent) / Decimal("100")).quantize(
+            Decimal("0.01")
+        )
+
+    if payment_amount > invoiced_amount:
+        raise HTTPException(422, "Оплата больше суммы счёта")
+
+    if entry.status == "proposed":
+        entry.status = "approved"
+
+    from app.api.execution_finance import PaymentConfirmation, confirm_payment
+
+    return confirm_payment(
+        entry_id,
+        PaymentConfirmation(actual_amount=payment_amount, actual_date=payload.actual_date),
+        db=db,
+        user=user,
+    )
