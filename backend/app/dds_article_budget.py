@@ -9,7 +9,7 @@ import json
 import unicodedata
 from datetime import date, datetime, timezone
 from decimal import Decimal, localcontext
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -121,53 +121,164 @@ def ensure_default_categories(db: Session, organization_id: int) -> None:
     db.expire_all()
 
 
-def _suggest_category_by_keywords(title: str) -> tuple[str | None, str | None]:
+# (normalized_name.title -> canonical category name).  Order matters: earlier rules win.
+_KEYWORD_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("фот", "зарплат", "накладн"), "Накладные", "по ключевому слову: ФОТ/зарплата/накладные"),
+    (("тех.отчет", "техотчет", "технический отчет", "пнр",
+      "пусконалад", "наладк"), "ПНР", "по ключевому слову: технический отчёт/ПНР"),
+    (("щит", "siemens", "калорифер", "ибп", "кондиционер",
+      "скпт", "сктп кондиц", "шкаф", "оборуд", "зип"),
+     "Оборудование", "по ключевому слову: оборудование/ЗИП"),
+    (("рам", "доставк", "непредвид"), "Прочие прямые",
+     "по ключевому слову: рамы/доставка/непредвиденные"),
+    (("материал", "бетон", "кабел"), "Материалы", "по ключевому слову: материал"),
+    (("работ", "монтаж", "смр", "эм работ", "демонтаж"), "СМР",
+     "по ключевому слову: работы/монтаж"),
+    (("проект", "изыскан", " рд "), "Проектирование", "по ключевому слову: проектирование"),
+    (("scada", "асду", "асу", "скуд"), "Оборудование", "по ключевому слову: АСУ/SCADA"),
+    ((" ар ",), "Проектирование", "по ключевому слову: АР"),
+)
+
+
+def _suggest_category_by_keywords(
+    title: str, available_names: set[str] | None = None,
+) -> tuple[str | None, str | None]:
+    """Return (category_name, reason).  ``available_names`` (casefold) gates rules."""
     text = " " + unicodedata.normalize("NFKC", title).casefold() + " "
-    has_material = "материал" in text or "бетон" in text or "кабел" in text
-    has_work = ("работ" in text or "монтаж" in text or "смр" in text
-                or "эм работ" in text or "демонтаж" in text)
-    if has_material:
-        return "Материалы", "по ключевому слову: материал"
-    if "оборуд" in text or "зип" in text or "ибп" in text or "кондиционер" in text \
-            or "скпт" in text or "шкаф" in text:
-        return "Оборудование", "по ключевому слову: оборудование/ЗИП"
-    if "пнр" in text or "пусконалад" in text or "наладк" in text:
-        return "ПНР", "по ключевому слову: ПНР"
-    if has_work:
-        return "СМР", "по ключевому слову: работы/монтаж"
-    if "проект" in text or "изыскан" in text or " рд " in text:
-        return "Проектирование", "по ключевому слову: проектирование"
-    if "scada" in text or "асду" in text or "асу" in text or "скуд" in text:
-        return "Оборудование", "по ключевому слову: АСУ/SCADA"
-    if " ар " in text:
-        return "Проектирование", "по ключевому слову: АР"
+    for needles, category, reason in _KEYWORD_RULES:
+        if not any(needle in text for needle in needles):
+            continue
+        if available_names is not None and category.casefold() not in available_names:
+            continue
+        return category, reason
     return None, None
 
 
-def _suggest_category_with_ai(title: str) -> tuple[str, str]:
-    allowed = ["Оборудование", "Материалы", "СМР", "ПНР", "Проектирование", "Прочие прямые"]
+class BatchSuggestion(NamedTuple):
+    category: str
+    reason: str
+
+
+def _previous_category_for_article(
+    db: Session, organization_id: int, normalized_name: str,
+) -> int | None:
+    """Return cost_category_id of the most recent BudgetLine for the same organization."""
+    row = db.scalar(select(BudgetLine).join(Project, Project.id == BudgetLine.project_id)
+                    .where(Project.organization_id == organization_id,
+                           BudgetLine.article_normalized_name == normalized_name,
+                           BudgetLine.cost_category_id.is_not(None))
+                    .order_by(BudgetLine.id.desc()).limit(1))
+    return row.cost_category_id if row is not None else None
+
+
+# Process-memory cache for AI suggestions, keyed by (organization_id, normalized_name).
+_AI_CACHE: dict[tuple[int, str], BatchSuggestion] = {}
+
+
+def _ai_suggest_batch(
+    db: Session, organization_id: int, titles: list[tuple[str, str]],
+    categories: list[CostCategory],
+) -> dict[str, BatchSuggestion]:
+    """Suggest categories for many titles in one AI call.  Titles are (normalized, title)."""
+    if not titles:
+        return {}
+    cache_hits: dict[str, BatchSuggestion] = {}
+    pending: list[tuple[str, str]] = []
+    seen = set()
+    for normalized, title in titles:
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        cached = _AI_CACHE.get((organization_id, normalized))
+        if cached is not None:
+            cache_hits[normalized] = cached
+        else:
+            pending.append((normalized, title))
+    if not pending:
+        return cache_hits
+
+    active_by_casefold = {c.name.casefold(): c for c in categories if c.is_active}
+    active_names = [c.name for c in categories if c.is_active]
+    allowed = active_names or ["Прочие прямые"]
+    fallback = BatchSuggestion("Прочие прямые", "AI недоступен")
+
+    from app import gemini_analysis
+
+    if gemini_analysis.deepseek_configured():
+        provider = "deepseek"
+    elif gemini_analysis.gemini_configured():
+        provider = "gemini"
+    else:
+        provider = None
+
+    if provider is None:
+        for normalized, _ in pending:
+            _AI_CACHE[(organization_id, normalized)] = fallback
+        cache_hits.update({normalized: fallback for normalized, _ in pending})
+        return cache_hits
+
     schema = {
         "type": "object",
         "properties": {
-            "category": {"type": "string", "enum": allowed},
-            "reason": {"type": "string"},
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "category": {"type": "string", "enum": allowed},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["title", "category", "reason"],
+                },
+            }
         },
-        "required": ["category", "reason"],
+        "required": ["items"],
     }
+    system_prompt = (
+        "Ты классификатор статей бюджета ДДС. Для каждой статьи выбери ровно одну категорию "
+        "из списка: " + ", ".join(allowed) + ". Ответь строго JSON-объектом по схеме."
+    )
+    payload = {"items": [{"title": title} for _, title in pending]}
+    user_prompt = json.dumps(payload, ensure_ascii=False)
+
+    parsed_items: list[dict] = []
     try:
-        from app import gemini_analysis
-        if not gemini_analysis.gemini_configured():
-            return "Прочие прямые", "AI недоступен"
-        prompt = (
-            "Ты классификатор статей бюджета. Определи категорию статьи из списка: "
-            + ", ".join(allowed) + ". Ответь JSON по схеме. Статья: " + title
-        )
-        result = gemini_analysis.generate_json(prompt, schema)
-        if isinstance(result, dict) and result.get("category") in allowed:
-            return result["category"], str(result.get("reason") or "предложено AI")
+        if provider == "deepseek":
+            result = gemini_analysis._try_deepseek(system_prompt, user_prompt, schema)
+        else:
+            result = gemini_analysis._deepseek_first(system_prompt, user_prompt, schema)
+            if result is None:
+                # DeepSeek-first unavailable; use the Gemini path via the module's own callable.
+                generate = getattr(gemini_analysis, "generate_json", None)
+                if generate is None:
+                    raise RuntimeError("Gemini JSON generator is unavailable")
+                result = generate(system_prompt + "\n" + user_prompt, schema)
+        if isinstance(result, dict):
+            items = result.get("items")
+            if isinstance(items, list):
+                parsed_items = [item for item in items if isinstance(item, dict)]
     except Exception:
-        pass
-    return "Прочие прямые", "AI недоступен"
+        parsed_items = []
+
+    resolved: dict[str, BatchSuggestion] = {}
+    for item in parsed_items:
+        raw_title = item.get("title")
+        category = item.get("category")
+        if not isinstance(raw_title, str) or not isinstance(category, str):
+            continue
+        matched = active_by_casefold.get(category.casefold())
+        if matched is None:
+            continue
+        reason = str(item.get("reason") or "предложено AI")
+        normalized = normalize_article(raw_title)
+        resolved[normalized] = BatchSuggestion(matched.name, reason)
+
+    for normalized, _ in pending:
+        suggestion = resolved.get(normalized, fallback)
+        _AI_CACHE[(organization_id, normalized)] = suggestion
+        cache_hits[normalized] = suggestion
+    return cache_hits
 
 
 def _preview(document_id, payload, db):
@@ -213,7 +324,9 @@ def _preview(document_id, payload, db):
     article_ids = {article["article_id"] for article in articles}
     if set(payload.category_by_article) - article_ids:
         conflicts.append({"code": "UNKNOWN_ARTICLE", "message": "Категория задана нерасходной/отсутствующей статье"})
+    active_casefold = {item.name.casefold() for item in categories if item.is_active}
     seen_names = set()
+    ai_pending: list[tuple[str, str]] = []
     for article in articles:
         name = normalize_article(article["title"])
         article.update(normalized_name=name, budget_line_id=None,
@@ -223,28 +336,65 @@ def _preview(document_id, payload, db):
         seen_names.add(name)
         category = category_by_id.get(article["cost_category_id"])
         if article["cost_category_id"] is None:
-            # Propose a category automatically (owner rule: system fills, human confirms).
-            suggested_name, reason = _suggest_category_by_keywords(article["title"])
+            # Propose a category: 1) reuse owner's past choice, 2) keywords, 3) AI (batched).
+            suggested_name: str | None = None
+            reason: str | None = None
+            prior_category_id = _previous_category_for_article(
+                db, project.organization_id, name)
+            prior_category = category_by_id.get(prior_category_id) if prior_category_id else None
+            if prior_category is not None and prior_category.is_active:
+                article["cost_category_id"] = None
+                article["suggested_category_id"] = prior_category.id
+                article["suggested_category_name"] = prior_category.name
+                article["suggestion_reason"] = "как в прошлый раз"
+                article["category_name"] = None
+                continue
+            suggested_name, reason = _suggest_category_by_keywords(
+                article["title"], active_casefold)
             if suggested_name is None:
-                suggested_name, reason = _suggest_category_with_ai(article["title"])
-            suggested_category = category_by_name.get(suggested_name.casefold())
-            if suggested_category is None:
-                suggested_category = next(
-                    (item for item in categories if item.name == suggested_name), None)
+                ai_pending.append((name, article["title"]))
             article["cost_category_id"] = None
             article["category_name"] = None
+            keyword_category = category_by_name.get(suggested_name.casefold()) if suggested_name else None
             article["suggested_category_name"] = suggested_name
+            article["suggested_category_id"] = keyword_category.id if keyword_category is not None else None
+            article["suggestion_reason"] = reason
+        elif category is None or not category.is_active:
+            conflicts.append({"code": "CATEGORY_UNAVAILABLE", "article_id": article["article_id"], "message": "Категория недоступна в проекте"})
+        article["category_name"] = category.name if category else None
+    if ai_pending:
+        ai_suggestions = _ai_suggest_batch(db, project.organization_id, ai_pending, categories)
+        for article in articles:
+            if article["category_name"] is not None:
+                continue
+            if article["suggested_category_name"] is not None:
+                continue
+            suggestion = ai_suggestions.get(article["normalized_name"])
+            if suggestion is None:
+                continue  # explicit owner category; nothing to propose
+            suggested_category = category_by_name.get(suggestion.category.casefold())
+            article["suggested_category_name"] = suggestion.category
             article["suggested_category_id"] = (suggested_category.id
                                                  if suggested_category is not None else None)
-            article["suggestion_reason"] = reason
+            article["suggestion_reason"] = suggestion.reason
+    for article in articles:
+        name = article["normalized_name"]  # per-article name (the first loop's variable is stale here)
+        if article["cost_category_id"] is None and article["category_name"] is None:
+            suggested_name = article["suggested_category_name"] or "Прочие прямые"
+            reason = article["suggestion_reason"] or "AI недоступен"
+            if not article.get("suggested_category_id"):
+                fallback = category_by_name.get(suggested_name.casefold())
+                article["suggested_category_name"] = suggested_name
+                article["suggested_category_id"] = fallback.id if fallback is not None else None
+                article["suggestion_reason"] = reason
             conflicts.append({
                 "code": "CATEGORY_CONFIRMATION_REQUIRED",
                 "article_id": article["article_id"],
                 "message": f"Подтвердите категорию: предложено «{suggested_name}» ({reason})",
             })
-        elif category is None or not category.is_active:
-            conflicts.append({"code": "CATEGORY_UNAVAILABLE", "article_id": article["article_id"], "message": "Категория недоступна в проекте"})
-        article["category_name"] = category.name if category else None
+        elif article["cost_category_id"] is not None:
+            category = category_by_id.get(article["cost_category_id"])
+            article["category_name"] = category.name if category else None
         candidates = [item for item in budget if item.line_kind == "analytical_expense"
                       and normalize_article(item.description) == name]
         if len(candidates) > 1:

@@ -812,21 +812,28 @@ def _check_task(db: Session, project_id: int, task_id: int | None) -> None:
 def _validate_invoice_control_chain(
     db: Session, *, project_id: int, contract_id: int | None,
     schedule_item_id: int | None, budget_line_id: int | None, currency: str,
-) -> tuple[Contract, ScheduleItem, BudgetLine]:
-    """Validate the canonical Contract -> GPR/Budget junction used by invoices."""
-    if contract_id is None or schedule_item_id is None or budget_line_id is None:
-        raise HTTPException(422, "Для счёта обязательны договор, этап ГПР и строка бюджета")
+) -> tuple[Contract, ScheduleItem | None, BudgetLine | None]:
+    """Validate the Contract -> (optional GPR stage) -> (optional budget line) junction.
+
+    Owner decision 16.10.2026: invoices are not tied to GPR stages; a contract is
+    required, a stage and a budget line are validated only when given."""
+    if contract_id is None:
+        raise HTTPException(422, "Для счёта обязателен договор")
     contract = db.scalar(select(Contract).where(
         Contract.id == contract_id, Contract.project_id == project_id,
     ))
     if contract is None:
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
-    schedule_item = db.get(ScheduleItem, schedule_item_id)
-    if schedule_item is None or schedule_item.project_id != project_id:
-        raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
-    baseline = db.get(ScheduleBaseline, schedule_item.baseline_id)
-    if baseline is None or baseline.project_id != project_id or baseline.contract_id != contract_id:
-        raise HTTPException(422, "Этап ГПР не связан с выбранным договором")
+    schedule_item = None
+    if schedule_item_id is not None:
+        schedule_item = db.get(ScheduleItem, schedule_item_id)
+        if schedule_item is None or schedule_item.project_id != project_id:
+            raise HTTPException(422, "Этап ГПР не принадлежит выбранному проекту")
+        baseline = db.get(ScheduleBaseline, schedule_item.baseline_id)
+        if baseline is None or baseline.project_id != project_id or baseline.contract_id != contract_id:
+            raise HTTPException(422, "Этап ГПР не связан с выбранным договором")
+    if budget_line_id is None:
+        return contract, schedule_item, None
     budget = db.get(BudgetLine, budget_line_id)
     if budget is None or budget.project_id != project_id:
         raise HTTPException(422, "Строка бюджета не принадлежит выбранному проекту")
