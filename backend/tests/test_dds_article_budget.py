@@ -334,6 +334,101 @@ def test_undo_keeps_shared_budget_unchanged(world):
     assert line.status == "proposed" and line.planned_amount == Decimal("6.00")
 
 
+def _active_category(db, organization_id: int, name: str) -> CostCategory:
+    row = db.scalar(select(CostCategory).where(
+        CostCategory.organization_id == organization_id,
+        CostCategory.name == name))
+    if row is None:
+        row = CostCategory(organization_id=organization_id, name=name,
+                           normalized_name=name.lower(), is_active=True)
+        db.add(row); db.flush()
+    return row
+
+
+def _preview_with_titles(world, titles):
+    db, _, _, _, _, _, version = world
+    header = "Статья\tГодовой итог\tянварь\tфевраль\tмарт\n"
+    version.content = header + "".join(f"{title}\t3\t1\t1\t1\n" for title in titles)
+    db.flush()
+    return preview(world, category_by_article={})
+
+
+def _suggestion_by_title(result, title):
+    article = next(item for item in result["articles"]
+                   if item["title"].casefold() == title.casefold())
+    return article
+
+
+def test_keyword_rules_cover_owner_edits(world):
+    db, _, project, _, _, _, _ = world
+    for name in ("Накладные", "ПНР", "Оборудование", "Прочие прямые"):
+        _active_category(db, project.organization_id, name)
+    result = _preview_with_titles(world, [
+        "ФОТ и накладные", "городец тех.отчет", "ЭМ Щиты", "Рамы Дубна",
+    ])
+    assert _suggestion_by_title(result, "ФОТ и накладные")["suggested_category_name"] == "Накладные"
+    assert _suggestion_by_title(result, "городец тех.отчет")["suggested_category_name"] == "ПНР"
+    assert _suggestion_by_title(result, "ЭМ Щиты")["suggested_category_name"] == "Оборудование"
+    assert _suggestion_by_title(result, "Рамы Дубна")["suggested_category_name"] == "Прочие прямые"
+
+
+def test_keyword_rule_skipped_when_category_missing(world):
+    # "Рамы" would map to "Прочие прямые" but that category is not present in this org.
+    result = _preview_with_titles(world, ["Рамы Дубна"])
+    assert _suggestion_by_title(result, "Рамы Дубна")["suggested_category_name"] in (None, "Прочие прямые")
+
+
+def test_previous_choice_wins_over_keywords(world):
+    db, _, project, contract, _, _, _ = world
+    pnr = _active_category(db, project.organization_id, "ПНР")
+    from app.dds_article_budget import normalize_article
+    db.add(BudgetLine(project_id=project.id, contract_id=contract.id,
+                      line_kind="analytical_expense", direction="outflow",
+                      budget_period=2025, budget_revision=1,
+                      article_normalized_name=normalize_article("городец тех.отчет"),
+                      cost_category_id=pnr.id, category=pnr.name,
+                      description="городец тех.отчет",
+                      planned_amount=Decimal("1"), forecast_amount=Decimal("1"),
+                      currency="RUB", status="approved"))
+    db.flush()
+    result = _preview_with_titles(world, ["городец тех.отчет"])
+    article = _suggestion_by_title(result, "городец тех.отчет")
+    assert article["suggested_category_id"] == pnr.id
+    assert article["suggestion_reason"] == "как в прошлый раз"
+
+
+def test_ai_called_once_for_many_unrecognized_titles(world, monkeypatch):
+    db, _, project, _, _, _, _ = world
+    _active_category(db, project.organization_id, "Прочие прямые")
+    from app import gemini_analysis
+    monkeypatch.setattr(gemini_analysis, "deepseek_configured", lambda: True)
+    calls = {"n": 0}
+    def fake_try_deepseek(system_prompt, user_prompt, schema):
+        calls["n"] += 1
+        import json as _json
+        payload = _json.loads(user_prompt)
+        items = []
+        for entry in payload["items"]:
+            items.append({"title": entry["title"],
+                          "category": "Прочие прямые",
+                          "reason": "тест AI"})
+        return {"items": items}
+    monkeypatch.setattr(gemini_analysis, "_try_deepseek", fake_try_deepseek)
+    # Ensure cache is clean for the organization to avoid leaking pre-populated suggestions.
+    from app import dds_article_budget
+    for key in list(dds_article_budget._AI_CACHE):
+        if key[0] == project.organization_id:
+            dds_article_budget._AI_CACHE.pop(key, None)
+    result = _preview_with_titles(world, [
+        "Странная статья 1", "Странная статья 2", "Странная статья 3",
+    ])
+    assert calls["n"] == 1
+    for title in ("Странная статья 1", "Странная статья 2", "Странная статья 3"):
+        article = _suggestion_by_title(result, title)
+        assert article["suggested_category_name"] == "Прочие прямые"
+        assert article["suggestion_reason"] == "тест AI"
+
+
 def test_26_article_creation_preserves_every_monthly_sum_and_annual_warning(world):
     db, _, _, _, category, _, version = world
     header = "Статья\tГодовой итог\tянварь\tфевраль\tмарт\n"
