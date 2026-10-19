@@ -122,9 +122,10 @@ def test_ai_invoice_requires_full_chain_and_stores_it(db_session, user_factory):
     )
     db_session.add(proposal); db_session.flush()
 
-    with pytest.raises(HTTPException, match="обязательны договор, этап ГПР и строка бюджета"):
+    # Owner 16.10.2026: invoices need a contract; a GPR stage is optional.
+    with pytest.raises(HTTPException):
         confirm_invoice_extraction(
-            proposal.id, InvoiceExtractionConfirm(contract_id=contract.id), db_session, user,
+            proposal.id, InvoiceExtractionConfirm(), db_session, user,
         )
 
     result = confirm_invoice_extraction(
@@ -197,8 +198,9 @@ def test_editor_cannot_link_existing_document_cash_flow_controls(db_session, use
 
 def test_document_cash_flow_cannot_be_approved_before_controls_are_linked(db_session, user_factory):
     user, project, contract, _stage, _budget, _category, document, version = _world(db_session, user_factory)
+    # Owner 16.10.2026: the contract is the mandatory control; a GPR stage is optional.
     row = CashFlowEntry(
-        project_id=project.id, contract_id=contract.id,
+        project_id=project.id, contract_id=None,
         source_document_id=document.id, source_document_version_id=version.id,
         source_document_sha256=hashlib.sha256(version.content.encode()).hexdigest(),
         direction="outflow", title="Unlinked payable", planned_date=date(2026, 9, 25),
@@ -207,7 +209,7 @@ def test_document_cash_flow_cannot_be_approved_before_controls_are_linked(db_ses
     )
     db_session.add(row); db_session.flush()
 
-    with pytest.raises(HTTPException, match="обязательны договор, этап ГПР и строка бюджета"):
+    with pytest.raises(HTTPException, match="обязателен договор"):
         update_status("cash-flow", row.id, StatusUpdate(status="approved"), db_session, user)
     assert row.status == "proposed"
 

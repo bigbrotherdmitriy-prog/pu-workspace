@@ -50,7 +50,36 @@ type MonthRow = {
   cumulative_fact: string;
 };
 
+type ArticleInvoice = {
+  entry_id: number;
+  title: string;
+  counterparty: string | null;
+  invoiced: string;
+  paid: string;
+  planned_date: string | null;
+  actual_date: string | null;
+  status: string;
+  document_id: number | null;
+};
+
+type ExpenseByArticle = {
+  budget_line_id: number;
+  title: string;
+  category_id: number | null;
+  category: string;
+  plan: string;
+  invoiced: string;
+  paid: string;
+  remaining: string;
+  invoices: ArticleInvoice[];
+};
+
+type CostCategoryOption = { id: number; name: string; is_active: boolean };
+
+type PaymentDraft = { entryId: number; mode: "percent" | "amount"; value: string; date: string; error: string; busy: boolean };
+
 type BudgetFromDdsResponse = {
+  expense_by_article?: ExpenseByArticle[];
   currency: string;
   income: MoneyPair;
   expense_total: MoneyPair;
@@ -159,6 +188,55 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
   const [error, setError] = useState("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [extraExpanded, setExtraExpanded] = useState(false);
+  // Owner 16.10.2026: the budget shows the rows of the uploaded DDS file; categories are a toggle.
+  const [view, setView] = useState<"articles" | "categories">("articles");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [categories, setCategories] = useState<CostCategoryOption[]>([]);
+  const [actionError, setActionError] = useState("");
+  const [payment, setPayment] = useState<PaymentDraft | null>(null);
+
+  useEffect(() => {
+    if (projectId <= 0) return;
+    let active = true;
+    api<{ categories: CostCategoryOption[] }>(`/execution/cost-categories?project_id=${projectId}`)
+      .then((response) => { if (active) setCategories(response.categories || []); })
+      .catch(() => { if (active) setCategories([]); });
+    return () => { active = false; };
+  }, [projectId, reloadKey]);
+
+  async function changeCategory(lineId: number, categoryId: number) {
+    setActionError("");
+    try {
+      await api(`/projects/${projectId}/budget-lines/${lineId}/category`, {
+        method: "PATCH", body: JSON.stringify({ cost_category_id: categoryId }),
+      });
+      setReloadKey((value) => value + 1);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Не удалось сменить категорию");
+    }
+  }
+
+  async function savePayment() {
+    if (!payment) return;
+    const number = Number(payment.value.replace(",", "."));
+    if (!Number.isFinite(number) || number <= 0) {
+      setPayment({ ...payment, error: "Введите число больше нуля" });
+      return;
+    }
+    setPayment({ ...payment, busy: true, error: "" });
+    try {
+      await api(`/projects/${projectId}/cash-flow/${payment.entryId}/record-payment`, {
+        method: "POST",
+        body: JSON.stringify(payment.mode === "percent"
+          ? { percent: number, actual_date: payment.date }
+          : { amount: number, actual_date: payment.date }),
+      });
+      setPayment(null);
+      setReloadKey((value) => value + 1);
+    } catch (err) {
+      setPayment((current) => current && { ...current, busy: false, error: err instanceof Error ? err.message : "Не удалось сохранить оплату" });
+    }
+  }
 
   useEffect(() => {
     if (projectId <= 0) {
@@ -170,8 +248,6 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    setExpandedCategories(new Set());
-    setExtraExpanded(false);
     const params = new URLSearchParams();
     if (contractId) params.set("contract_id", String(contractId));
     const query = params.toString();
@@ -189,7 +265,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
         setLoading(false);
       });
     return () => controller.abort();
-  }, [projectId, contractId]);
+  }, [projectId, contractId, reloadKey]);
 
   const months = useMemo(() => (data ? fillMissingMonths(data.by_month) : []), [data]);
 
@@ -233,13 +309,78 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
     return <td className={`money${overrun ? " budget-overrun" : ""}`}>{fmt(value)}</td>;
   };
 
+  const articles = data.expense_by_article ?? [];
+  const showArticles = view === "articles" && articles.length > 0;
+  const activeCategories = categories.filter((item) => item.is_active);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const articleRows = articles.map((row) => (
+    <Fragment key={`article-${row.budget_line_id}`}>
+      <tr className="budget-from-dds-category budget-from-dds-article">
+        <td>{row.title}</td>
+        <td>
+          <select aria-label={`Категория статьи ${row.title}`} value={row.category_id ?? ""}
+            onChange={(event) => { const next = Number(event.target.value); if (next) void changeCategory(row.budget_line_id, next); }}>
+            {row.category_id === null && <option value="">Выберите категорию</option>}
+            {activeCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            {row.category_id !== null && !activeCategories.some((item) => item.id === row.category_id)
+              && <option value={row.category_id}>{row.category}</option>}
+          </select>
+        </td>
+        <td className="money">{fmt(row.plan)}</td>
+        <td className="money">{fmt(row.invoiced)}</td>
+        <td className="money">{fmt(row.paid)}</td>
+        {remainingCell(row.plan, row.paid, row.remaining)}
+        <td>{completionPct(row.paid, row.plan) ?? "—"}</td>
+      </tr>
+      {row.invoices.map((invoice) => {
+        const open = payment?.entryId === invoice.entry_id;
+        const label = `Счёт: ${invoice.title}${invoice.counterparty ? ` · ${invoice.counterparty}` : ""}`;
+        return <Fragment key={`invoice-${invoice.entry_id}`}>
+          <tr className="budget-from-dds-counterparty budget-from-dds-invoice">
+            <td colSpan={2}>{label}</td>
+            <td className="money">—</td>
+            <td className="money">{fmt(invoice.invoiced)}</td>
+            <td className="money">{fmt(invoice.paid)}</td>
+            <td className="money">—</td>
+            <td>
+              {toNumber(invoice.paid) < toNumber(invoice.invoiced) && <button type="button" aria-label={`Отметить оплату ${invoice.title}`}
+                onClick={() => setPayment({ entryId: invoice.entry_id, mode: "percent", value: "100", date: today, error: "", busy: false })}>Оплачено</button>}
+            </td>
+          </tr>
+          {open && payment && <tr className="budget-from-dds-payment"><td colSpan={7}>
+            <div className="budget-from-dds-payment-form" role="group" aria-label="Оплата счёта">
+              <label><input type="radio" name={`pay-mode-${invoice.entry_id}`} checked={payment.mode === "percent"}
+                onChange={() => setPayment({ ...payment, mode: "percent", value: "100" })} /> Процент</label>
+              <label><input type="radio" name={`pay-mode-${invoice.entry_id}`} checked={payment.mode === "amount"}
+                onChange={() => setPayment({ ...payment, mode: "amount", value: String(toNumber(invoice.invoiced)) })} /> Сумма</label>
+              <input aria-label={payment.mode === "percent" ? "Процент оплаты" : "Сумма оплаты"} inputMode="decimal" value={payment.value}
+                onChange={(event) => setPayment({ ...payment, value: event.target.value })} />
+              <input aria-label="Дата оплаты" type="date" value={payment.date}
+                onChange={(event) => setPayment({ ...payment, date: event.target.value })} />
+              <button type="button" disabled={payment.busy || !payment.date} onClick={() => void savePayment()}>Сохранить оплату</button>
+              <button type="button" className="secondary" disabled={payment.busy} onClick={() => setPayment(null)}>Отмена</button>
+              {payment.error && <p className="budget-from-dds-error" role="alert">{payment.error}</p>}
+            </div>
+          </td></tr>}
+        </Fragment>;
+      })}
+    </Fragment>
+  ));
+
   return <div className="budget-from-dds">
     <p className="budget-from-dds-caption">Бюджет собирается автоматически из планового ДДС. Счета и оплаты вне плана попадают в «Дополнительные затраты».</p>
+    {articles.length > 0 && <div className="budget-from-dds-view" role="tablist" aria-label="Вид бюджета">
+      <button type="button" role="tab" aria-selected={view === "articles"} className={view === "articles" ? "selected" : "secondary"} onClick={() => setView("articles")}>По статьям</button>
+      <button type="button" role="tab" aria-selected={view === "categories"} className={view === "categories" ? "selected" : "secondary"} onClick={() => setView("categories")}>По категориям</button>
+    </div>}
+    {actionError && <p className="budget-from-dds-error" role="alert">{actionError}</p>}
     <div className="budget-from-dds-table-wrap">
       <table className="budget-from-dds-table">
         <thead>
           <tr>
             <th>Статья</th>
+            {showArticles && <th>Категория</th>}
             <th>План, {currencyLabel}</th>
             <th>Выставлено, {currencyLabel}</th>
             <th>Оплачено, {currencyLabel}</th>
@@ -250,6 +391,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
         <tbody>
           <tr className="budget-from-dds-income">
             <td>Доходы</td>
+            {showArticles && <td />}
             <td className="money positive">{fmt(data.income.plan)}</td>
             <td className="money">—</td>
             <td className="money positive">{fmt(data.income.fact)}</td>
@@ -258,13 +400,14 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           </tr>
           <tr className="budget-from-dds-expense-total">
             <td>Прямые расходы (по плановому ДДС)</td>
+            {showArticles && <td />}
             <td className="money">{fmt(direct.plan)}</td>
             <td className="money">{fmt(direct.invoiced)}</td>
             <td className="money">{fmt(direct.fact)}</td>
             {remainingTotalCell(direct.plan, direct.fact, direct.invoiced)}
             <td>{completionPct(direct.fact, direct.plan) ?? "—"}</td>
           </tr>
-          {data.expense_by_category.map((row) => {
+          {showArticles ? articleRows : data.expense_by_category.map((row) => {
             const key = row.category_id !== null ? `cat-${row.category_id}` : `name-${row.category}`;
             const expanded = expandedCategories.has(key);
             const hasCounterparties = row.counterparties.length > 0;
@@ -305,6 +448,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
               {additionalItems.length > 0 ? <button type="button" className="budget-from-dds-toggle" aria-expanded={extraExpanded} onClick={(event) => { event.stopPropagation(); setExtraExpanded((v) => !v); }}>{extraExpanded ? "▾" : "▸"}</button> : null}
               Дополнительные затраты
             </td>
+            {showArticles && <td />}
             <td className="money">{fmt(additional.plan)}</td>
             <td className="money">{fmt(additional.invoiced)}</td>
             <td className="money">{fmt(additional.fact)}</td>
@@ -317,6 +461,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
                 {item.title}
                 <small>{[item.counterparty, formatDate(item.actual_date || item.planned_date)].filter((part) => part && part !== "—").join(" · ")}</small>
               </td>
+              {showArticles && <td />}
               <td className="money">—</td>
               <td className="money">{fmt(item.invoiced)}</td>
               <td className="money">{fmt(item.fact)}</td>
@@ -326,6 +471,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           ))}
           <tr className="budget-from-dds-expense-total">
             <td>Расходы всего</td>
+            {showArticles && <td />}
             <td className="money">{fmt(data.expense_total.plan)}</td>
             <td className="money">{fmt(data.expense_total.invoiced)}</td>
             <td className="money">{fmt(data.expense_total.fact)}</td>
@@ -334,6 +480,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           </tr>
           <tr className="budget-from-dds-profit">
             <td>Прибыль</td>
+            {showArticles && <td />}
             <td className={`money ${toNumber(data.profit.plan) < 0 ? "negative" : "positive"}`}>{fmt(data.profit.plan)}</td>
             <td className="money">—</td>
             <td className={`money ${toNumber(data.profit.fact) < 0 ? "negative" : "positive"}`}>{fmt(data.profit.fact)}</td>
@@ -342,6 +489,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
           </tr>
           <tr className="budget-from-dds-margin">
             <td>Рентабельность, %</td>
+            {showArticles && <td />}
             <td>{data.margin_pct.plan !== null ? `${data.margin_pct.plan}%` : "—"}</td>
             <td>—</td>
             <td>{data.margin_pct.fact !== null ? `${data.margin_pct.fact}%` : "—"}</td>

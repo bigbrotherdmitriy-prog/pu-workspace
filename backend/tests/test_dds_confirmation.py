@@ -78,7 +78,9 @@ def test_forecast_cannot_become_invoice_without_schedule(world):
 
 @pytest.mark.parametrize("direction", ["outflow", "inflow"])
 def test_ordinary_invoice_without_schedule_is_still_rejected(world, direction):
+    # Owner 16.10.2026: a GPR stage is optional, the contract is still mandatory.
     w = world
+    w.row.contract_id = None
     w.row.entry_kind = "invoice_commitment"
     w.row.direction = direction
     w.row.source_document_id = None
@@ -100,6 +102,7 @@ def test_batch_88_with_one_invalid_row_confirms_none_and_reports_every_row(world
         w.db.add(r); rows.append(r)
     rows[-1].direction = "outflow"
     rows[-1].entry_kind = "invoice_commitment"
+    rows[-1].contract_id = None  # invalid: no contract (a GPR stage is optional since 16.10.2026)
     w.db.commit()
     ids = [r.id for r in rows]
     with pytest.raises(HTTPException) as error:
@@ -163,12 +166,11 @@ def test_batch_success_keeps_amounts_dates_and_writes_one_audit_per_row(world):
 
 
 def test_ordinary_invoice_creation_requires_schedule(world):
+    # Owner 16.10.2026: invoices are not tied to GPR stages — creation without a stage succeeds.
     w = world
-    with pytest.raises(HTTPException) as error:
-        api.create_invoice_proposal(api.InvoiceProposalCreate(project_id=w.project.id, contract_id=w.contract.id,
-            budget_line_id=w.budget.id, direction="outflow", title="Synthetic invoice", planned_date=w.row.planned_date,
-            planned_amount=Decimal("1")), w.db, w.user)
-    assert error.value.status_code == 422
+    api.create_invoice_proposal(api.InvoiceProposalCreate(project_id=w.project.id, contract_id=w.contract.id,
+        budget_line_id=w.budget.id, direction="outflow", title="Synthetic invoice", planned_date=w.row.planned_date,
+        planned_amount=Decimal("1")), w.db, w.user)
 
 
 def test_forecast_cannot_be_paid_directly(world):
@@ -231,7 +233,7 @@ def test_explicit_invoice_conversion_requires_full_chain_and_preserves_money(wor
     assert result["entry_kind"] == "invoice_commitment" and w.row.schedule_item_id == schedule.id
     assert before == (w.row.planned_amount, w.row.planned_date, w.row.actual_amount, w.row.actual_date)
     assert w.budget.committed_amount == Decimal("1")
-    w.row.schedule_item_id = None; w.db.commit()
+    w.row.contract_id = None; w.db.commit()  # the contract stays mandatory
     with pytest.raises(HTTPException) as error:
         api.confirm_payment(w.row.id, api.PaymentConfirmation(actual_amount=Decimal("1")), w.db, w.user)
     assert error.value.status_code == 422 and w.db.query(PaymentEvent).count() == 0
@@ -255,6 +257,7 @@ def test_manual_unclassified_outflow_has_no_forecast_exception(world):
     w = world
     w.row.entry_kind = "legacy_unclassified"
     w.row.source_document_id = w.row.source_document_version_id = w.row.source_document_sha256 = None
+    w.row.contract_id = None
     w.db.commit()
     with pytest.raises(HTTPException) as error:
         api.update_status("cash-flow", w.row.id, api.StatusUpdate(status="approved"), w.db, w.user)
