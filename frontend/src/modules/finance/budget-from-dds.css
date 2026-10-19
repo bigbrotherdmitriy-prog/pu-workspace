@@ -217,3 +217,9 @@
 :root[data-display-theme="dark"] .budget-from-dds-extra-item td {
   color: var(--read-text-muted, #9ca3af);
 }
+
+.budget-from-dds-view { display: flex; gap: 8px; margin: 8px 0; }
+.budget-from-dds-article select { max-width: 220px; }
+.budget-from-dds-invoice td:first-child { padding-left: 28px; font-size: 0.92em; }
+.budget-from-dds-payment-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0 8px 28px; }
+.budget-from-dds-payment-form input[inputmode="decimal"] { width: 120px; }

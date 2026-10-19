@@ -107,10 +107,6 @@ export function FinanceOperations(props: Props) {
           })}
           <option value="additional">Дополнительные затраты</option>
         </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planChoice); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
-        {invoiceProposal.target_kind === "cash_flow" && !planChoice && <>
-          <label>Этап ГПР<select aria-label="Этап ГПР счёта" value={scheduleItemId} onChange={(event) => setScheduleItemId(Number(event.target.value))}><option value={0}>Выберите этап ГПР</option>{contractSchedule.map((row) => <option value={row.id} key={row.id}>{row.title}</option>)}</select></label>
-          <label>Строка бюджета<select aria-label="Строка бюджета счёта" value={budgetLineId} onChange={(event) => setBudgetLineId(Number(event.target.value))}><option value={0}>Выберите строку бюджета</option>{contractBudget.map((row) => <option value={row.id} key={row.id}>{row.description}</option>)}</select></label>
-        </>}
       </div>
       <div className="invoice-evidence">
         <strong>Основания из документа</strong>
@@ -122,7 +118,6 @@ export function FinanceOperations(props: Props) {
       <div className="structured-actions"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Новая категория" /><button className="secondary" disabled={!newCategory.trim()} onClick={() => { onAddCostCategory?.(newCategory); setNewCategory(""); }}>Добавить в справочник</button></div>
       {(() => {
         const anchored = invoiceProposal.target_kind === "cash_flow" && planChoice !== "";
-        const requiresChain = invoiceProposal.target_kind === "cash_flow" && !anchored;
         // v5.5 / MVP-4 шаг 8г: кнопка не просто недоступна — система называет
         // недостающее звено, а не молчит. Самый частый случай — у договора
         // вообще нет ни одного этапа ГПР (пустой список для выбора).
@@ -131,12 +126,8 @@ export function FinanceOperations(props: Props) {
         if (!invoiceProposal.payment_purpose) missing.push("назначение платежа");
         if (!anchored && !invoiceProposal.selected_cost_category_id) missing.push("категория затрат");
         if (anchored && !selectedContractId) missing.push("договор");
-        if (requiresChain && !selectedContractId) missing.push("договор");
-        if (requiresChain && selectedContractId && !contractSchedule.length) missing.push("этап ГПР (у договора нет ни одного этапа — добавьте его в разделе «ГПР»)");
-        else if (requiresChain && !scheduleItemId) missing.push("этап ГПР");
-        if (requiresChain && selectedContractId && !contractBudget.length) missing.push("строка бюджета (у договора нет ни одной строки бюджета)");
-        else if (requiresChain && !budgetLineId) missing.push("строка бюджета");
-        if (requiresChain && !invoiceProposal.planned_date) missing.push("плановая дата");
+        // Owner 16.10.2026: invoices are not linked to GPR stages — only to a plan DDS line or «Дополнительные затраты».
+        if (invoiceProposal.target_kind === "cash_flow" && !planChoice) missing.push("строка планового ДДС или «Дополнительные затраты»");
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
           <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={() => onConfirmInvoice?.(planChoice === "additional" ? { additional: true } : planChoice ? { plan_entry_id: Number(planChoice) } : undefined)}>Подтвердить счёт</button></div>
           {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}

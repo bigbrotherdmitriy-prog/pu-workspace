@@ -158,24 +158,19 @@ describe("DdsWorkspace", () => {
     expect(onConfirmMany).toHaveBeenCalledWith("cash-flow", [2], "approved");
   });
 
-  it("links a document-derived proposal before it can be confirmed", () => {
-    const onLinkControls = vi.fn();
+  it("confirms a document-derived proposal with a contract without a GPR stage (owner 16.10.2026)", () => {
+    const onConfirmMany = vi.fn().mockResolvedValue(undefined);
     const unlinked = {
       ...finance,
-      baselines: [{ id: 70, contract_id: 4, name: "ГПР", version: 1, status: "approved" }],
-      schedule: [{ id: 71, baseline_id: 70, title: "Монтаж", planned_progress: 0, actual_progress: 0, status: "planned" }],
-      budget: [{ id: 72, contract_id: 4, category: "Работы", description: "Монтаж", planned_amount: 400, committed_amount: 0, actual_amount: 0, remaining_amount: 400, overrun_amount: 0, forecast_amount: 400, currency: "RUB", status: "approved" }],
-      cash_flow: [{ ...finance.cash_flow[1], id: 9, source_document_id: 90 }],
+      cash_flow: [{ ...finance.cash_flow[1], id: 9, source_document_id: 90, contract_id: 4, schedule_item_id: undefined, budget_line_id: undefined }],
     } as FinanceOverview;
-    render(<DdsWorkspace finance={unlinked} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={onLinkControls} />);
+    render(<DdsWorkspace finance={unlinked} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={onConfirmMany} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Детализация" }));
-    expect(screen.queryByRole("button", { name: "Подтвердить" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Этап ГПР для Щиты"), { target: { value: "71" } });
-    fireEvent.change(screen.getByLabelText("Строка бюджета для Щиты"), { target: { value: "72" } });
-    fireEvent.click(screen.getByRole("button", { name: "Связать с контролями" }));
-
-    expect(onLinkControls).toHaveBeenCalledWith(9, 4, 71, 72);
+    const confirm = screen.getAllByRole("button", { name: "Подтвердить" })[0];
+    expect(confirm).not.toBeDisabled();
+    fireEvent.click(confirm);
+    expect(onConfirmMany).toHaveBeenCalledWith("cash-flow", [9], "approved");
   });
 
   it("backfills a budget line onto an already-approved row that has none (ADR-V6-05-INCOME-BUDGET-RU)", () => {
