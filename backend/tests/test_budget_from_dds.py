@@ -417,9 +417,12 @@ def test_record_payment_partial_creates_remainder(world):
     client = world["client"]
     project = world["project"]
 
+    contract = Contract(project_id=project.id, number="С-1", title="Поставка", amount=Decimal("1000000.00"))
+    db.add(contract); db.flush()
     invoice = _add_invoice(
         db,
         project.id,
+        contract_id=contract.id,
         title="Счёт №1",
         invoiced_amount=Decimal("373620.00"),
         counterparty="ООО Ромашка",

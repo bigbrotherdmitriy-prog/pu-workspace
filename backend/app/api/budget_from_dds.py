@@ -664,9 +664,10 @@ def record_cash_flow_payment(
     if payment_amount < invoiced_amount:
         remainder_entry = CashFlowEntry(
             entry_kind=entry.entry_kind or "legacy_unclassified",
-            matrix_article_id=entry.matrix_article_id,
-            matrix_month=entry.matrix_month,
-            matrix_operation_id=entry.matrix_operation_id,
+            # A remainder is an invoice tranche, never a matrix forecast cell.
+            matrix_article_id=None,
+            matrix_month=None,
+            matrix_operation_id=None,
             project_id=entry.project_id,
             contract_id=entry.contract_id,
             schedule_item_id=entry.schedule_item_id,
