@@ -1434,6 +1434,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
     )))
     confirmed_budget = confirmed_budget_for_totals(budget, known_control_ids)
     relevant_cash = [x for x in cash if x.status in {"approved", "paid", "received"}]
+    from app.cash_gap import plan_cash_gaps
     currencies = [currency]
     summary_by_currency: dict[str, dict] = {}
     for currency in currencies:
@@ -1446,6 +1447,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
         expense_budget = [x for x in currency_budget if x.direction != "inflow"]
         income_budget = [x for x in currency_budget if x.direction == "inflow"]
         currency_cash = [x for x in relevant_cash if x.currency == currency]
+        plan_cash_gap = plan_cash_gaps([x for x in cash if x.currency == currency])
         planned = sum((x.planned_amount for x in expense_budget), Decimal("0"))
         actual = sum((x.actual_amount for x in expense_budget), Decimal("0"))
         forecast = sum(((x.forecast_amount or x.planned_amount) for x in expense_budget), Decimal("0"))
@@ -1474,6 +1476,7 @@ def overview(project_id: int, db: Session = Depends(get_db), user: User = Depend
             "cash_balance_forecast": balance,
             "cash_gap": minimum,
             "cash_gap_date": gap_date,
+            "plan_cash_gap": plan_cash_gap,
         }
     mixed_currency = False
     legacy_money = summary_by_currency[currency]
