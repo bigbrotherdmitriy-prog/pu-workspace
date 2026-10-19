@@ -64,7 +64,7 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
     }
     if (request.method() === "POST" && url.pathname === "/execution/invoice-extraction-proposals/501/confirm") {
       const payload = JSON.parse(request.postData() || "{}");
-      expect(payload).toMatchObject({ contract_id: 41, schedule_item_id: 72, budget_line_id: 81 });
+      expect(payload).toMatchObject({ additional: true });
       proposal.status = "confirmed"; proposal.created_cash_flow_id = 82;
       cashFlow.push({
         id: 82, contract_id: 41, schedule_item_id: 72, budget_line_id: 81,
@@ -121,8 +121,8 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   await dds.locator("summary", { hasText: "Найденные документы" }).click();
   await dds.getByRole("button", { name: "Проверить и использовать" }).click();
-  await dds.getByLabel("Этап ГПР счёта").selectOption("72");
-  await dds.getByLabel("Строка бюджета счёта").selectOption("81");
+  // Owner 16.10.2026: invoices are booked on a plan DDS line or «Дополнительные затраты», no GPR stage.
+  await dds.getByLabel("Строка планового ДДС счёта").selectOption("additional");
   await dds.getByRole("button", { name: "Подтвердить счёт" }).click();
 
   await dds.getByRole("tab", { name: "Детализация" }).click();
