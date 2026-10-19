@@ -80,7 +80,7 @@ it("ambiguous preview never enables apply", async () => {
   mockApi.mockImplementation(async (path) => path.includes("budget-link-operations?") ? [] : {
     ...proposal, apply_allowed: false, conflicts: [{ code: "ARTICLE_AMBIGUOUS", message: "Дубликат", cash_flow_id: 1101 }],
   });
-  render(<ExistingBudgetLinksPanel {...options} />); await screen.findByText(/ARTICLE_AMBIGUOUS/);
+  render(<ExistingBudgetLinksPanel {...options} />); await screen.findByText(/Статья определена неоднозначно/);
   expect(screen.getByRole("button", { name: "Подтвердить применение связей" }).hasAttribute("disabled")).toBe(true);
   expect(writes()).toHaveLength(0);
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../../api/client";
+import { ERROR_CODE_LABELS, humanizeErrorText, humanizeStatus } from "../../i18n/humanize";
 
 type Props = { projectId: number; contractId: number; documentId: number; planYear: number;
   budgetRevision: number; refreshToken?: number; onApplied: () => void };
@@ -121,10 +122,14 @@ export function ExistingBudgetLinksPanel({ projectId, contractId, documentId, pl
     {error && <p role="alert" className="finance-warning">{error}</p>}
     {preview && <>
       <p>Расходов: {preview.rows.length}; сумма: {preview.expense_total} {preview.currency}. Бюджет: {preview.budget_total}; разница: {preview.difference}. Суммы не подгоняются.</p>
-      {preview.conflicts.map((item, index) => <p role="alert" className="finance-warning" key={index}>{item.code}{item.cash_flow_id ? ` · ДДС #${item.cash_flow_id}` : ""}: {item.message}</p>)}
+      {preview.conflicts.map((item, index) => {
+        const label = ERROR_CODE_LABELS[item.code] ?? humanizeErrorText(item.code);
+        const extra = item.message && item.message !== label ? `: ${item.message}` : "";
+        return <p role="alert" className="finance-warning" key={index}>{label}{item.cash_flow_id ? ` · ДДС #${item.cash_flow_id}` : ""}{extra}</p>;
+      })}
       <div className="structured-table"><table><thead><tr><th>Расход</th><th>Сумма / дата</th><th>Статус / версия</th><th>budget_line_id до → после</th><th>Строка бюджета / категория</th></tr></thead><tbody>
         {preview.rows.map((row) => <tr key={row.id}><td>#{row.id} · {row.title}</td><td>{row.amount} {preview.currency}<br />{row.planned_date}</td>
-          <td>{row.status} · v{row.record_version}</td><td>{row.current_budget_line_id ?? "нет"} → {row.budget_line_id ?? "не определено"}</td>
+          <td>{humanizeStatus(row.status)} · версия {row.record_version}</td><td>{row.current_budget_line_id ?? "нет"} → {row.budget_line_id ?? "не определено"}</td>
           <td>{row.budget_title ?? "—"}<br />{row.category ?? "—"}</td></tr>)}
       </tbody></table></div>
     </>}

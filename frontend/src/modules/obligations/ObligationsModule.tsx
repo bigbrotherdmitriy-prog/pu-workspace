@@ -1,4 +1,5 @@
 import { ClipboardCheck } from "lucide-react";
+import { humanizeStatus } from "../../i18n/humanize";
 
 export type ObligationRow = {
   id: number;
@@ -54,7 +55,7 @@ export function ObligationsModule({ collapsed, obligations, filter = "all", onCl
             <article key={item.id}>
               <div>
                 <span className={`management-status ${item.status}`}>
-                  {item.status}
+                  {humanizeStatus(item.status)}
                 </span>
                 <h3>{item.title}</h3>
                 <p>
