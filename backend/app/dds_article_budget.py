@@ -348,11 +348,6 @@ def _preview(document_id, payload, db):
                 article["suggested_category_name"] = prior_category.name
                 article["suggestion_reason"] = "как в прошлый раз"
                 article["category_name"] = None
-                conflicts.append({
-                    "code": "CATEGORY_CONFIRMATION_REQUIRED",
-                    "article_id": article["article_id"],
-                    "message": f"Подтвердите категорию: предложено «{prior_category.name}» (как в прошлый раз)",
-                })
                 continue
             suggested_name, reason = _suggest_category_by_keywords(
                 article["title"], active_casefold)
@@ -360,8 +355,9 @@ def _preview(document_id, payload, db):
                 ai_pending.append((name, article["title"]))
             article["cost_category_id"] = None
             article["category_name"] = None
+            keyword_category = category_by_name.get(suggested_name.casefold()) if suggested_name else None
             article["suggested_category_name"] = suggested_name
-            article["suggested_category_id"] = None
+            article["suggested_category_id"] = keyword_category.id if keyword_category is not None else None
             article["suggestion_reason"] = reason
         elif category is None or not category.is_active:
             conflicts.append({"code": "CATEGORY_UNAVAILABLE", "article_id": article["article_id"], "message": "Категория недоступна в проекте"})
@@ -382,9 +378,15 @@ def _preview(document_id, payload, db):
                                                  if suggested_category is not None else None)
             article["suggestion_reason"] = suggestion.reason
     for article in articles:
+        name = article["normalized_name"]  # per-article name (the first loop's variable is stale here)
         if article["cost_category_id"] is None and article["category_name"] is None:
             suggested_name = article["suggested_category_name"] or "Прочие прямые"
             reason = article["suggestion_reason"] or "AI недоступен"
+            if not article.get("suggested_category_id"):
+                fallback = category_by_name.get(suggested_name.casefold())
+                article["suggested_category_name"] = suggested_name
+                article["suggested_category_id"] = fallback.id if fallback is not None else None
+                article["suggestion_reason"] = reason
             conflicts.append({
                 "code": "CATEGORY_CONFIRMATION_REQUIRED",
                 "article_id": article["article_id"],

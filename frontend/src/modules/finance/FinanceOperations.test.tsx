@@ -73,6 +73,7 @@ describe("invoice extraction review", () => {
     render(<FinanceOperations {...props({ onConfirmInvoice })} />);
 
     expect(screen.getByText(/Итого 125 400,50 руб\./)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Строка планового ДДС счёта"), { target: { value: "additional" } });
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить счёт" }));
     expect(onConfirmInvoice).toHaveBeenCalledTimes(1);
   });
@@ -109,16 +110,10 @@ describe("invoice extraction review", () => {
     expect(screen.getByRole("button", { name: "Подтвердить счёт" })).toBeDisabled();
   });
 
-  it("requires and exposes the contract schedule and budget controls", () => {
-    const setScheduleItemId = vi.fn();
-    const setBudgetLineId = vi.fn();
-    render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0, setScheduleItemId, setBudgetLineId })} />);
-
-    expect(screen.getByRole("button", { name: "Подтвердить счёт" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Этап ГПР счёта"), { target: { value: "52" } });
-    fireEvent.change(screen.getByLabelText("Строка бюджета счёта"), { target: { value: "61" } });
-    expect(setScheduleItemId).toHaveBeenCalledWith(52);
-    expect(setBudgetLineId).toHaveBeenCalledWith(61);
+  it("does not ask for a GPR stage or budget line on an invoice (owner 16.10.2026)", () => {
+    render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0 })} />);
+    expect(screen.queryByLabelText("Этап ГПР счёта")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Строка бюджета счёта")).not.toBeInTheDocument();
   });
 
   it("lets a manual budget line be marked as income or expense (ADR-V6-05-INCOME-BUDGET-RU)", () => {
@@ -138,22 +133,12 @@ describe("invoice extraction review", () => {
     expect(screen.queryByLabelText("Направление строки бюджета")).not.toBeInTheDocument();
   });
 
-  it("names the missing link instead of silently disabling confirmation", () => {
+  it("names the missing plan line instead of silently disabling confirmation", () => {
     render(<FinanceOperations {...props({ scheduleItemId: 0, budgetLineId: 0 })} />);
 
     expect(screen.getByRole("button", { name: "Подтвердить счёт" })).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent(/этап ГПР/);
-    expect(screen.getByRole("alert")).toHaveTextContent(/строка бюджета/);
-  });
-
-  it("explains that the contract has no GPR stage at all, not just an unselected one", () => {
-    render(<FinanceOperations {...props({
-      scheduleItemId: 0, budgetLineId: 0,
-      finance: { baselines: [{ id: 51, contract_id: 41 }], schedule: [], budget: [] } as unknown as FinanceOverview,
-    })} />);
-
-    expect(screen.getByRole("alert")).toHaveTextContent(/у договора нет ни одного этапа/i);
-    expect(screen.getByRole("alert")).toHaveTextContent(/у договора нет ни одной строки бюджета/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/строка планового ДДС/);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/этап ГПР/);
   });
 
   it("offers AI retry only for a temporary provider fallback", () => {

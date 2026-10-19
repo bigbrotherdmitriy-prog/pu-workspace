@@ -498,3 +498,11 @@ def test_old_matrix_route_cannot_create_expenses_without_article_budget(world, o
                           contract_id=world[3].id, kind="cash-flow", plan_year=2026,
                           source_rows=[2003], row_overrides=overrides), world[0], world[1])
     assert world[0].query(CashFlowEntry).count() == 0
+
+
+def test_keyword_and_fallback_suggestions_carry_category_ids():
+    from app import dds_article_budget as m
+    import inspect
+    source = inspect.getsource(m._preview)
+    assert 'article["suggested_category_id"] = keyword_category.id' in source
+    assert 'name = article["normalized_name"]' in source
