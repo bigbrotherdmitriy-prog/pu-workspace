@@ -64,6 +64,14 @@ function amount(row: CashRow) {
   return Number(row.planned_amount);
 }
 
+// An invoice row has no planned amount of its own (the plan line carries it);
+// show the invoiced sum instead of «0,00 ₽» (owner run 16.10.2026).
+function shownAmount(row: CashRow) {
+  const planned = Number(row.planned_amount);
+  const invoiced = Number((row as { invoiced_amount?: string | number | null }).invoiced_amount ?? 0);
+  return planned === 0 && invoiced > 0 ? invoiced : planned;
+}
+
 function actualAmount(row: CashRow) {
   return row.actual_date ? Number(row.actual_amount) : 0;
 }
@@ -229,7 +237,8 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
 
   const canConfirm = (row: CashRow) => row.status === "proposed" && (row.confirmation_allowed ?? (
     row.direction !== "outflow" || !row.source_document_id
-    || Boolean(row.contract_id && row.schedule_item_id && row.budget_line_id)
+    // Owner 16.10.2026: invoices are not linked to GPR stages; a contract is enough.
+    || Boolean(row.contract_id)
   ));
   const proposedRows = visibleRows.filter(canConfirm);
   const selectedVisibleIds = proposedRows.filter((row) => selectedProposed.has(row.id)).map((row) => row.id);
@@ -465,7 +474,7 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
       const controlsComplete = Boolean(row.contract_id && row.schedule_item_id && row.budget_line_id);
       const options = linkOptions(row);
       const draft = linkDrafts[row.id] || { scheduleItemId: row.schedule_item_id || 0, budgetLineId: row.budget_line_id || 0 };
-      return <tr id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td data-label="№">{index + 1}</td><td data-label="Плановая дата">{dateFormat.format(new Date(`${row.planned_date}T00:00:00Z`))}</td><td data-label="Месяц">{monthLong.format(monthDate(monthKey(row.planned_date)))}</td><td data-label="Объект">{row.object}</td><td data-label="Статья">{row.category}</td><td data-label="Тип операции"><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money" data-label="План">{formatMoney(amount(row))}</td><td className="money" data-label="Факт">{row.actual_date ? `${formatMoney(actualAmount(row))} · ${dateFormat.format(new Date(`${row.actual_date}T00:00:00Z`))}` : "—"}</td><td data-label="Описание">{row.note}</td><td data-label="Статус">{row.status}{(row.entry_kind === "plan_forecast" || row.confirmation_kind === "plan_forecast") && <small> · <span>Прогноз</span></small>}{row.status === "proposed" && row.confirmation_error && <small> · {row.confirmation_error.message}</small>}</td><td data-label="Связь">{row.schedule_item_id ? <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button> : "—"}</td><td className="dds-row-actions">
+      return <tr id={`dds-row-${row.schedule_item_id || 0}`} key={row.id}><td>{canConfirm(row) && <input type="checkbox" aria-label={`Выбрать операцию ${row.title}`} checked={selectedProposed.has(row.id)} onChange={() => toggleProposed(row.id)} />}</td><td data-label="№">{index + 1}</td><td data-label="Плановая дата">{dateFormat.format(new Date(`${row.planned_date}T00:00:00Z`))}</td><td data-label="Месяц">{monthLong.format(monthDate(monthKey(row.planned_date)))}</td><td data-label="Объект">{row.object}</td><td data-label="Статья">{row.category}</td><td data-label="Тип операции"><span className={`dds-direction ${row.direction}`}>{directionLabel(row.direction)}</span></td><td className="money" data-label="План">{formatMoney(shownAmount(row))}</td><td className="money" data-label="Факт">{row.actual_date ? `${formatMoney(actualAmount(row))} · ${dateFormat.format(new Date(`${row.actual_date}T00:00:00Z`))}` : "—"}</td><td data-label="Описание">{row.note}</td><td data-label="Статус">{row.status}{(row.entry_kind === "plan_forecast" || row.confirmation_kind === "plan_forecast") && <small> · <span>Прогноз</span></small>}{row.status === "proposed" && row.confirmation_error && <small> · {row.confirmation_error.message}</small>}</td><td data-label="Связь">{row.schedule_item_id ? <button type="button" className="dds-schedule-link" onClick={() => onOpenSchedule?.(row.schedule_item_id!)}>ГПР #{row.schedule_item_id}</button> : "—"}</td><td className="dds-row-actions">
         {row.status === "proposed" && row.direction === "outflow" && row.source_document_id && !controlsComplete && !canConfirm(row) ? <div className="dds-control-links"><select aria-label={`Этап ГПР для ${row.title}`} value={draft.scheduleItemId} onChange={(event) => setLinkDraft(row.id, { scheduleItemId: Number(event.target.value) })}><option value={0}>Этап ГПР</option>{options.schedule.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><select aria-label={`Строка бюджета для ${row.title}`} value={draft.budgetLineId} onChange={(event) => setLinkDraft(row.id, { budgetLineId: Number(event.target.value) })}><option value={0}>Строка бюджета</option>{options.budget.map((item) => <option value={item.id} key={item.id}>{item.description}</option>)}</select><button type="button" disabled={!options.contractId || !draft.scheduleItemId || !draft.budgetLineId} onClick={() => onLinkControls(row.id, options.contractId, draft.scheduleItemId, draft.budgetLineId)}>Связать с контролями</button></div>
           : row.status === "proposed" ? <button type="button" disabled={!canConfirm(row) || confirmingMany} onClick={() => void confirmRows([row.id])}>Подтвердить</button>
           : row.status === "approved" && !row.budget_line_id && onLinkApprovedBudgetLine ? (() => {
