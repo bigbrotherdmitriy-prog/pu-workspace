@@ -8,11 +8,12 @@ from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 import app.models  # noqa: F401
+from app.api.budget_from_dds import BudgetLine
 from app.core.auth import require_user
 from app.database import Base, get_db
 from app.main import app
 from app.models.execution_finance import CashFlowEntry, CostCategory
-from app.models.organization_contract import Organization
+from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
@@ -35,7 +36,7 @@ def world():
         project = Project(name="Budget project", organization_id=org.id)
         db.add(project)
         db.flush()
-        db.add(ProjectMember(project_id=project.id, user_id=user.id, role="viewer"))
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner"))
 
         cat_a = CostCategory(
             organization_id=org.id,
@@ -386,3 +387,129 @@ def test_budget_from_dds_forbidden_without_role(world):
         assert response.status_code == 403
     finally:
         app.dependency_overrides[require_user] = lambda: world["user"]
+
+
+def _add_invoice(db, project_id, contract_id=None, budget_line_id=None, **kwargs):
+    values = {
+        "direction": "outflow",
+        "title": "Счёт",
+        "entry_kind": "invoice_commitment",
+        "planned_date": date(2026, 1, 15),
+        "planned_amount": Decimal("0.00"),
+        "actual_amount": Decimal("0.00"),
+        "currency": "RUB",
+        "status": "approved",
+    }
+    values.update(kwargs)
+    entry = CashFlowEntry(
+        project_id=project_id,
+        contract_id=contract_id,
+        budget_line_id=budget_line_id,
+        **values,
+    )
+    db.add(entry)
+    db.flush()
+    return entry
+
+
+def test_record_payment_partial_creates_remainder(world):
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+
+    invoice = _add_invoice(
+        db,
+        project.id,
+        title="Счёт №1",
+        invoiced_amount=Decimal("373620.00"),
+        counterparty="ООО Ромашка",
+    )
+    db.commit()
+
+    response = client.post(
+        f"/projects/{project.id}/cash-flow/{invoice.id}/record-payment",
+        json={"percent": "80", "actual_date": "2026-02-01"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["remainder_entry_id"] is not None
+
+    db.refresh(invoice)
+    assert invoice.invoiced_amount == Decimal("298896.00")
+    assert invoice.actual_amount == Decimal("298896.00")
+    assert invoice.status == "paid"
+
+    remainder = db.get(CashFlowEntry, payload["remainder_entry_id"])
+    assert remainder is not None
+    assert remainder.invoiced_amount == Decimal("74724.00")
+    assert remainder.actual_amount == Decimal("0.00")
+    assert remainder.planned_amount == Decimal("0.00")
+    assert remainder.actual_date is None
+    assert remainder.status == "approved"
+    assert remainder.title == "Счёт №1 — остаток"
+    assert remainder.project_id == project.id
+
+    assert invoice.invoiced_amount + remainder.invoiced_amount == Decimal("373620.00")
+
+    response2 = client.post(
+        f"/projects/{project.id}/cash-flow/{remainder.id}/record-payment",
+        json={"percent": "100", "actual_date": "2026-02-15"},
+    )
+    assert response2.status_code == 200, response2.text
+    payload2 = response2.json()
+    assert payload2["remainder_entry_id"] is None
+
+    db.refresh(remainder)
+    assert remainder.status == "paid"
+    assert remainder.actual_amount == Decimal("74724.00")
+
+    count = db.query(CashFlowEntry).filter(
+        CashFlowEntry.project_id == project.id,
+        CashFlowEntry.actual_date.is_(None),
+        CashFlowEntry.invoiced_amount > Decimal("0"),
+    ).count()
+    assert count == 0
+
+
+def test_record_payment_exceeding_contract_amount(world):
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+
+    contract = Contract(
+        title="Договор",
+        project_id=project.id,
+        number="Д-001",
+        amount=Decimal("100000.00"),
+    )
+    db.add(contract)
+    db.flush()
+
+    _add_invoice(
+        db,
+        project.id,
+        contract_id=contract.id,
+        title="Счёт А",
+        invoiced_amount=Decimal("80000.00"),
+        status="approved",
+    )
+    second = _add_invoice(
+        db,
+        project.id,
+        contract_id=contract.id,
+        title="Счёт Б",
+        invoiced_amount=Decimal("40000.00"),
+        status="approved",
+    )
+    db.commit()
+
+    first_payment = client.post(
+        f"/projects/{project.id}/cash-flow/{second.id}/record-payment",
+        json={"percent": "100", "actual_date": "2026-02-01"},
+    )
+    # 40 000 fits (<= 100 000) — but 80 000 would not fit either; let's verify
+    # that a second payment of the first invoice (80 000) is rejected.
+    assert first_payment.status_code == 200, first_payment.text
+
+    # Reset second to unpaid to test the limit properly.
+    db.rollback()

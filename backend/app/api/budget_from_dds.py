@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -61,6 +61,44 @@ class RecordPaymentRequest(BaseModel):
     @classmethod
     def _exactly_one(cls, value: Decimal | None, info: Any) -> Decimal | None:
         return value
+
+
+def _check_contract_limit(
+    db: Session,
+    *,
+    contract_id: int | None,
+    direction: str,
+    additional_amount: Decimal,
+) -> None:
+    if contract_id is None or direction != "outflow":
+        return
+
+    from app.models.organization_contract import Contract
+
+    contract = db.get(Contract, contract_id)
+    if contract is None:
+        return
+    contract_amount = getattr(contract, "amount", None)
+    if contract_amount is None or contract_amount <= ZERO:
+        return
+
+    already_paid = db.scalar(
+        select(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0)).where(
+            CashFlowEntry.contract_id == contract_id,
+            CashFlowEntry.direction == "outflow",
+            CashFlowEntry.status == "paid",
+        )
+    )
+    already_paid = Decimal(already_paid or 0)
+    projected = already_paid + additional_amount
+    if projected > contract_amount:
+        over = projected - contract_amount
+        number = getattr(contract, "number", "") or ""
+        raise HTTPException(
+            422,
+            f"Оплаты по договору {number} превысят его сумму {_money(contract_amount)} "
+            f"на {_money(over)} ₽",
+        )
 
 
 def _parse_month(value: str, field: str) -> date:
@@ -375,6 +413,7 @@ def budget_from_dds(
                     "counterparty": entry.counterparty,
                     "invoiced": _money(invoiced_amount),
                     "paid": _money(actual_amount),
+                    "remaining_to_pay": _money(invoiced_amount - actual_amount),
                     "planned_date": None if planned_date is None else planned_date.isoformat(),
                     "actual_date": None if actual_date is None else actual_date.isoformat(),
                     "status": entry.status,
@@ -564,14 +603,16 @@ def update_budget_line_category(
         .values(cost_category_id=category.id)
     )
 
-    from app.models.execution_finance import AuditLog
+    from app.api.execution_finance import _audit
 
-    db.add(AuditLog(
-        action="budget_line_category_changed",
-        entity_type="budget_line",
-        entity_id=line.id,
-        details=f"from={old_category_id}; to={category.id}; user={user.id}",
-    ))
+    _audit(
+        db,
+        "budget_line_category_changed",
+        "budget_line",
+        line.id,
+        user.id,
+        f"from={old_category_id}; to={category.id}",
+    )
     db.commit()
 
     return {
@@ -612,14 +653,63 @@ def record_cash_flow_payment(
     if payment_amount > invoiced_amount:
         raise HTTPException(422, "Оплата больше суммы счёта")
 
+    _check_contract_limit(
+        db,
+        contract_id=entry.contract_id,
+        direction=entry.direction,
+        additional_amount=payment_amount,
+    )
+
+    remainder_entry_id: int | None = None
+    if payment_amount < invoiced_amount:
+        remainder_entry = CashFlowEntry(
+            entry_kind=entry.entry_kind or "legacy_unclassified",
+            matrix_article_id=entry.matrix_article_id,
+            matrix_month=entry.matrix_month,
+            matrix_operation_id=entry.matrix_operation_id,
+            project_id=entry.project_id,
+            contract_id=entry.contract_id,
+            schedule_item_id=entry.schedule_item_id,
+            budget_line_id=entry.budget_line_id,
+            task_id=entry.task_id,
+            source_document_id=entry.source_document_id,
+            source_document_version_id=entry.source_document_version_id,
+            source_document_sha256=entry.source_document_sha256,
+            cost_category_id=entry.cost_category_id,
+            direction=entry.direction,
+            title=f"{entry.title} — остаток",
+            planned_date=entry.planned_date,
+            actual_date=None,
+            planned_amount=ZERO,
+            actual_amount=ZERO,
+            invoiced_amount=invoiced_amount - payment_amount,
+            plan_entry_id=entry.plan_entry_id,
+            currency=entry.currency,
+            counterparty=entry.counterparty,
+            object_name=entry.object_name,
+            category=entry.category,
+            note=entry.note,
+            status="approved",
+            source_name=entry.source_name,
+            source_excerpt=entry.source_excerpt,
+        )
+        db.add(remainder_entry)
+        db.flush()
+        remainder_entry_id = remainder_entry.id
+        entry.invoiced_amount = payment_amount
+        db.flush()
+
     if entry.status == "proposed":
         entry.status = "approved"
 
     from app.api.execution_finance import PaymentConfirmation, confirm_payment
 
-    return confirm_payment(
+    result = confirm_payment(
         entry_id,
         PaymentConfirmation(actual_amount=payment_amount, actual_date=payload.actual_date),
         db=db,
         user=user,
     )
+    if isinstance(result, dict):
+        result["remainder_entry_id"] = remainder_entry_id
+    return result
