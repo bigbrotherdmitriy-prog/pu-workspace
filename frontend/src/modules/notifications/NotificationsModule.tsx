@@ -1,4 +1,5 @@
 import { Bell } from "lucide-react";
+import { humanizeEntity, humanizeStatus } from "../../i18n/humanize";
 
 export type NotificationItem = {
   id: number;
@@ -135,7 +136,7 @@ export function NotificationsModule({
             <strong>{new Date(`${digest.local_date}T00:00:00`).toLocaleDateString("ru-RU")} · {digest.item_count}</strong>
             <ul>
               {digest.item_refs.map((item) => <li key={`${item.entity_type}-${item.entity_id}`}>
-                {item.entity_type} #{item.entity_id}{item.status ? ` · ${item.status}` : ""}
+                {humanizeEntity(item.entity_type)} #{item.entity_id}{item.status ? ` · ${humanizeStatus(item.status)}` : ""}
                 {item.proposal_origin?.evidence_id ? " · основание закреплено" : ""}
               </li>)}
             </ul>

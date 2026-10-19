@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { ERROR_CODE_LABELS, humanizeErrorText, humanizeStatus } from "../../i18n/humanize";
 import type { CostCategory } from "./types";
 import { ExistingBudgetLinksPanel } from "./ExistingBudgetLinksPanel";
 
@@ -154,7 +155,15 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
       const other = preview?.conflicts.filter((conflict) => conflict.code !== "CATEGORY_CONFIRMATION_REQUIRED") || [];
       return <>
         {categoryConflicts.length > 0 && <p role="alert" className="finance-warning">Проверьте предложенные категории: {categoryConflicts.length} стат{categoryConflicts.length === 1 ? "ья" : "ей"}.</p>}
-        {other.map((conflict, index) => <p role="alert" className="finance-warning" key={index}>{conflict.message}</p>)}
+        {other.map((conflict, index) => {
+          const hasRussianMessage = Boolean(conflict.message && /[А-Яа-яЁё]/.test(conflict.message));
+          const label = hasRussianMessage
+            ? conflict.message
+            : (ERROR_CODE_LABELS[conflict.code] ?? humanizeErrorText(conflict.code));
+          const extra = !hasRussianMessage && conflict.message && conflict.message !== label
+            ? `: ${conflict.message}` : "";
+          return <p role="alert" className="finance-warning" key={index}>{label}{extra}</p>;
+        })}
       </>;
     })()}
     {preview && <><p>Расходных статей: {preview.articles.length}. Всего: {preview.expense_total} {preview.currency}.</p>
@@ -172,7 +181,7 @@ export function ArticleBudgetPreviewPanel({ projectId, contractId, documentId, p
         {preview.existing_expense_difference != null && <p>Текущие расходы: {preview.existing_expense_total}; отличие от бюджета: {preview.existing_expense_difference}. Суммы не подгоняются.</p>}
         <div className="structured-table"><table><thead><tr><th>ID / источник</th><th>Статья / сумма / дата</th><th>Статус / версия</th><th>Связи до → предложение</th></tr></thead><tbody>
           {preview.existing_rows.map((row) => <tr key={row.id}><td>#{row.id} · {row.source_coordinate}</td><td>{row.title}<br />{row.amount} · {row.planned_date}{row.source_difference !== null && row.source_difference !== "0.00" && <p>Ручное отличие: {row.source_difference}</p>}</td>
-            <td>{row.status} · v{row.record_version}</td><td>{row.current_budget_line_id ?? "нет"} → {row.proposed_budget_line_id ? `#${row.proposed_budget_line_id}` : row.proposed_article_id ? `статья ${row.proposed_article_id}` : "не определено"}. Связи применяются отдельно ниже.</td></tr>)}
+            <td>{humanizeStatus(row.status)} · версия {row.record_version}</td><td>{row.current_budget_line_id ?? "нет"} → {row.proposed_budget_line_id ? `#${row.proposed_budget_line_id}` : row.proposed_article_id ? `статья ${row.proposed_article_id}` : "не определено"}. Связи применяются отдельно ниже.</td></tr>)}
         </tbody></table></div>
       </details>
     </>}

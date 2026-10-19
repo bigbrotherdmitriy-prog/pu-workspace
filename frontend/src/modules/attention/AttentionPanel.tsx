@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CheckCircle2, Filter } from "lucide-react";
 import { api } from "../../api/client";
+import { humanizeStatus } from "../../i18n/humanize";
 import "./attention.css";
 
 type AttentionOrigin = {
@@ -118,7 +119,7 @@ export function AttentionPanel({ projectId, onOpenSection }: Props) {
       {items.map((item) => <article key={`${item.kind}-${item.entity_id}`} className={`priority-${item.priority}`}>
         <div className="attention-register-icon">{item.priority === "critical" ? <AlertTriangle /> : <CheckCircle2 />}</div>
         <div>
-          <span>{kindLabels[item.kind] || item.kind} · {item.status}{item.effective_date ? ` · ${new Date(`${item.effective_date}T00:00:00`).toLocaleDateString("ru-RU")}` : ""}</span>
+          <span>{kindLabels[item.kind] || item.kind} · {humanizeStatus(item.status)}{item.effective_date ? ` · ${new Date(`${item.effective_date}T00:00:00`).toLocaleDateString("ru-RU")}` : ""}</span>
           <strong>{item.title}</strong>
           <p>{item.explanation}</p>
           <small>Источник: {item.origin.name || `${item.origin.type} · ${item.origin.id}`}{item.origin.source_version_id ? ` · версия ${item.origin.source_version_id}` : ""}{item.origin.excerpt ? ` · ${item.origin.excerpt}` : ""}</small>

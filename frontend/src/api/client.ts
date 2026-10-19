@@ -1,3 +1,4 @@
+import { humanizeErrorText } from "../i18n/humanize";
 import { reportServerReachable } from "../offline/connectivity";
 
 export class ApiError extends Error {
@@ -56,7 +57,12 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     const responseRequestId = response.headers.get("X-Request-ID") || requestId;
     const code = typeof body.detail === "object" && body.detail !== null
       && typeof body.detail.code === "string" ? body.detail.code : undefined;
-    const detail = typeof body.detail === "string" ? body.detail : code || `HTTP ${response.status}`;
+    const detailMessage = typeof body.detail === "object" && body.detail !== null
+      && typeof (body.detail as { message?: unknown }).message === "string"
+      ? (body.detail as { message: string }).message : undefined;
+    const rawDetail = detailMessage
+      ?? (typeof body.detail === "string" ? body.detail : code || `HTTP ${response.status}`);
+    const detail = humanizeErrorText(rawDetail);
     const message = detail.includes(responseRequestId)
       ? detail
       : `${detail}. Код обращения: ${responseRequestId}`;

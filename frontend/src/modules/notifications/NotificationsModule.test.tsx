@@ -69,7 +69,7 @@ describe("NotificationsModule digest settings", () => {
       onPolicyChange={vi.fn()}
       onSavePolicy={vi.fn()}
     />);
-    expect(screen.getByText("risk #41 · confirmed · основание закреплено")).toBeInTheDocument();
+    expect(screen.getByText("Риск #41 · Подтверждено · основание закреплено")).toBeInTheDocument();
     expect(screen.queryByText(/PRIVATE BODY/)).not.toBeInTheDocument();
   });
 
