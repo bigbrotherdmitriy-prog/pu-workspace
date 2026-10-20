@@ -112,6 +112,7 @@ const ObligationsModule = lazy(() => import("./modules/obligations/ObligationsMo
 const MeetingsModule = lazy(() => import("./modules/meetings/MeetingsModule").then((m) => ({ default: m.MeetingsModule })));
 const ContactsModule = lazy(() => import("./modules/contacts/ContactsModule").then((m) => ({ default: m.ContactsModule })));
 const AnalyticsModule = lazy(() => import("./modules/analytics/AnalyticsModule").then((m) => ({ default: m.AnalyticsModule })));
+const InvoiceQuickConfirm = lazy(() => import("./modules/finance/InvoiceQuickConfirm").then((m) => ({ default: m.InvoiceQuickConfirm })));
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const SettingsModule = lazy(() => import("./modules/settings/SettingsModule").then((m) => ({ default: m.SettingsModule })));
 const TasksModule = lazy(() => import("./modules/tasks/TasksModule").then((m) => ({ default: m.TasksModule })));
@@ -381,6 +382,12 @@ function snapshotActionError(error: unknown) {
 
 export function App() {
   const { projectId, projectIdRef, rememberProject: persistProjectSelection, initialProjectId } = useProjectSelection();
+  // A push «Счёт из почты» opens ?project_id=…&invoice=… straight into the one-tap confirmation card.
+  const [quickInvoice, setQuickInvoice] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = Number(params.get("invoice")), project = Number(params.get("project_id"));
+    return Number.isSafeInteger(id) && id > 0 && Number.isSafeInteger(project) && project > 0 ? { id, projectId: project } : null;
+  });
   const [ready, setReady] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [mobile, setMobile] = useState(false),
@@ -3728,6 +3735,7 @@ export function App() {
           }
         }}
       />
+      {quickInvoice && <InvoiceQuickConfirm projectId={quickInvoice.projectId} proposalId={quickInvoice.id} onClose={() => { setQuickInvoice(null); window.history.replaceState({}, "", window.location.pathname); }} onConfirmed={() => void load()} />}
       {active === "Портфель" && <PortfolioModule onOpenProject={(id) => { void activateProject(id); setActive("ГПР и ДДС"); }} />}
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (

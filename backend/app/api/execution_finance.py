@@ -2399,6 +2399,15 @@ def update_invoice_extraction(proposal_id: int, payload: InvoiceExtractionUpdate
     return _invoice_proposal_payload(item)
 
 
+@router.get("/invoice-extraction-proposals/{proposal_id}")
+def get_invoice_extraction(proposal_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    item = db.get(InvoiceExtractionProposal, proposal_id)
+    if item is None:
+        raise HTTPException(404, "Предложение счёта не найдено")
+    require_project_role(db, user, item.project_id, "viewer")
+    return _invoice_proposal_payload(item)
+
+
 @router.post("/invoice-extraction-proposals/{proposal_id}/confirm")
 def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfirm,
                                db: Session = Depends(get_db), user: User = Depends(require_user)):
