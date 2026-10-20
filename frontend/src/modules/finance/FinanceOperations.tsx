@@ -77,6 +77,30 @@ export function FinanceOperations(props: Props) {
   // contract); a subcontract invoice must still land on its plan line.
   const planLines = (finance?.cash_flow || []).filter((row) => row.direction === "outflow"
     && Number(row.planned_amount) > 0);
+  // One plan article = several monthly payments. Offer the article once (total and
+  // what is left) and book the invoice into the earliest month that still covers it.
+  const invoiceAmount = Number(invoiceProposal?.amount || 0);
+  const planArticles = (() => {
+    const groups = new Map<string, typeof planLines>();
+    for (const row of planLines) {
+      const key = `${row.title.trim().toLowerCase()}|${(row.counterparty || "").trim().toLowerCase()}`;
+      groups.set(key, [...(groups.get(key) || []), row]);
+    }
+    return [...groups.values()].map((rows) => {
+      const sorted = [...rows].sort((a, b) => String(a.planned_date).localeCompare(String(b.planned_date)) || a.id - b.id);
+      const left = (row: (typeof rows)[number]) => Number(row.planned_amount) - Number(row.invoiced_amount || 0);
+      const suggested = sorted.find((row) => planSuggestions.some((item) => item.plan_entry_id === row.id));
+      const target = suggested || sorted.find((row) => left(row) >= invoiceAmount) || [...sorted].sort((a, b) => left(b) - left(a))[0];
+      return {
+        id: target.id, ids: sorted.map((row) => row.id), title: sorted[0].title, counterparty: sorted[0].counterparty,
+        total: sorted.reduce((sum, row) => sum + Number(row.planned_amount), 0),
+        remaining: sorted.reduce((sum, row) => sum + Math.max(0, left(row)), 0),
+        suggested: Boolean(suggested),
+      };
+    });
+  })();
+  const planValue = planChoice === "additional" || !planChoice ? planChoice
+    : String(planArticles.find((article) => article.ids.includes(Number(planChoice)))?.id ?? planChoice);
   const importableRows = preview?.rows.filter((row) => row.importable) || [];
   const visiblePreviewRows = (preview?.rows || []).filter((row) =>
     previewFilter === "all" || (previewFilter === "issues" ? row.issues.length > 0 : row.direction === previewFilter)
@@ -99,14 +123,11 @@ export function FinanceOperations(props: Props) {
         <label className="wide">Назначение платежа<input value={invoiceProposal.payment_purpose || ""} onChange={(event) => onEditInvoice?.({ payment_purpose: event.target.value })} /></label>
         <label>Куда импортировать<select value={invoiceProposal.target_kind} onChange={(event) => onEditInvoice?.({ target_kind: event.target.value as "cash_flow" | "budget" })}><option value="cash_flow">ДДС</option><option value="budget">Бюджет</option></select></label>
         <label>Категория затрат<select aria-label="Категория затрат счёта" value={invoiceProposal.selected_cost_category_id || ""} onChange={(event) => onEditInvoice?.({ selected_cost_category_id: Number(event.target.value) || undefined })}><option value="">Выберите категорию</option>{costCategories.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        {invoiceProposal.target_kind === "cash_flow" && <label className="wide">Строка планового ДДС<select aria-label="Строка планового ДДС счёта" value={planChoice} onChange={(event) => setPlanChoice(event.target.value)}>
+        {invoiceProposal.target_kind === "cash_flow" && <label className="wide">Строка планового ДДС<select aria-label="Строка планового ДДС счёта" value={planValue} onChange={(event) => setPlanChoice(event.target.value)}>
           <option value="">Выберите строку плана или «Дополнительные затраты»</option>
-          {planLines.map((row) => {
-            const hint = planSuggestions.find((item) => item.plan_entry_id === row.id);
-            return <option value={String(row.id)} key={row.id}>{`${hint ? "★ " : ""}${row.title}${row.counterparty ? ` · ${row.counterparty}` : ""} · план ${formatMoney(Number(row.planned_amount))}`}</option>;
-          })}
+          {planArticles.map((article) => <option value={String(article.id)} key={article.id}>{`${article.suggested ? "★ " : ""}${article.title}${article.counterparty ? ` · ${article.counterparty}` : ""} · план ${formatMoney(article.total)}, остаток ${formatMoney(article.remaining)}`}</option>)}
           <option value="additional">Дополнительные затраты</option>
-        </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planChoice); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
+        </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planValue); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
       </div>
       <div className="invoice-evidence">
         <strong>Основания из документа</strong>
@@ -129,7 +150,7 @@ export function FinanceOperations(props: Props) {
         // Owner 16.10.2026: invoices are not linked to GPR stages — only to a plan DDS line or «Дополнительные затраты».
         if (invoiceProposal.target_kind === "cash_flow" && !planChoice) missing.push("строка планового ДДС или «Дополнительные затраты»");
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
-          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={() => onConfirmInvoice?.(planChoice === "additional" ? { additional: true } : planChoice ? { plan_entry_id: Number(planChoice) } : undefined)}>Подтвердить счёт</button></div>
+          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={() => onConfirmInvoice?.(planValue === "additional" ? { additional: true } : planValue ? { plan_entry_id: Number(planValue) } : undefined)}>Подтвердить счёт</button></div>
           {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}
         </div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>;
       })()}

@@ -368,6 +368,7 @@ def get_plan_line_suggestions(
                 ai_reason = reason_text
 
     suggestions.sort(key=lambda row: (-row["score"], row["plan_entry_id"]))
+    suggestions = _collapse_by_article(suggestions, entry_meta)
     top = suggestions[:TOP_LIMIT]
 
     recommended: int | None = None
@@ -390,6 +391,26 @@ def get_plan_line_suggestions(
     if ai_reason is not None:
         result["ai_reason"] = ai_reason
     return result
+
+
+def _collapse_by_article(suggestions: list[dict[str, Any]], entry_meta: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    """One plan article is several monthly payments; show it once with summed plan and
+    remaining. The best-scored month stays the booking target (plan_entry_id)."""
+    totals: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
+    for meta in entry_meta.values():
+        key = (_normalize(meta["title"]), _normalize(meta["counterparty"]))
+        planned, remaining = totals.get(key, (ZERO, ZERO))
+        totals[key] = (planned + Decimal(meta["planned_amount"]), remaining + meta["remaining_raw"])
+    seen: set[tuple[str, str]] = set()
+    collapsed: list[dict[str, Any]] = []
+    for row in suggestions:
+        key = (_normalize(row["title"]), _normalize(row["counterparty"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        planned, remaining = totals.get(key, (Decimal(row["planned_amount"]), Decimal(row["remaining"])))
+        collapsed.append({**row, "planned_amount": _money(planned), "remaining": _money(remaining)})
+    return collapsed
 
 
 def _select_ai_candidates(

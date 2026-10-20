@@ -97,6 +97,23 @@ describe("invoice extraction review", () => {
     expect(onConfirmInvoice).toHaveBeenLastCalledWith({ additional: true });
   });
 
+  it("offers one plan article with its total and books the invoice into the month that still covers it", () => {
+    const onConfirmInvoice = vi.fn();
+    const finance = { baselines: [], schedule: [], budget: [], cash_flow: [
+      { id: 191, contract_id: 41, direction: "outflow", title: "Материалы для ЭМ", planned_date: "2026-02-28", planned_amount: 2378718, invoiced_amount: 2378718 },
+      { id: 192, contract_id: 41, direction: "outflow", title: "Материалы для ЭМ", planned_date: "2026-07-31", planned_amount: 14000, invoiced_amount: 0 },
+    ] } as unknown as FinanceOverview;
+    render(<FinanceOperations {...props({ finance, onConfirmInvoice, invoiceProposal: { ...proposal, amount: 5000 } })} />);
+    const select = screen.getByLabelText("Строка планового ДДС счёта");
+    const options = within(select).getAllByRole("option", { name: /Материалы для ЭМ/ });
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toMatch(/план 2\s?392\s?718/);
+    expect(options[0].textContent).toMatch(/остаток 14\s?000/);
+    fireEvent.change(select, { target: { value: options[0].getAttribute("value") } });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить счёт" }));
+    expect(onConfirmInvoice).toHaveBeenLastCalledWith({ plan_entry_id: 192 });
+  });
+
   it("lets the manager override the AI category before import", () => {
     const onEditInvoice = vi.fn();
     render(<FinanceOperations {...props({ onEditInvoice })} />);
