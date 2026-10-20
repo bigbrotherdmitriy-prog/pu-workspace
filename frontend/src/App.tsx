@@ -1227,11 +1227,12 @@ export function App() {
       setError(message);
     }
   }
-  async function discoverBulkContracts(documentIds: number[]): Promise<BulkContractProposal[]> {
+  async function discoverBulkContracts(documentIds: number[], allowEmpty = false): Promise<BulkContractProposal[]> {
     const result = await api(`/projects/${projectId}/contracts/discover-bulk`, {
       method: "POST", body: JSON.stringify({ document_ids: documentIds }),
     });
     const proposals = result.proposals || [];
+    if (allowEmpty && !proposals.length) return proposals;
     if (!proposals.length && result.rejected_count) {
       throw new Error(`Самостоятельные договоры не найдены. Исключены приложения и связанные файлы: ${result.rejected_count}.`);
     }
@@ -1267,7 +1268,13 @@ export function App() {
   async function prepareDroppedContracts(documentIds: number[], parentContractId?: number) {
     try {
       setError("");
-      const proposals = await discoverBulkContracts(documentIds);
+      const proposals = await discoverBulkContracts(documentIds, Boolean(parentContractId));
+      if (!proposals.length && parentContractId) {
+        // Dropped on a contract but it is not a contract itself (an appendix,
+        // specification, drawing): attach it to that contract instead of failing.
+        await attachDocumentsToContract(documentIds, parentContractId);
+        return;
+      }
       if (!proposals.length) throw new Error("Файл распознан, но самостоятельный договор не найден. Откройте массовый мастер и выберите тип вручную.");
       setDroppedContractProposals(proposals.map((item) => {
         if (!parentContractId || item.parent_contract_id || item.parent_document_id) return item;
@@ -1305,6 +1312,33 @@ export function App() {
       await load(); await prepareDroppedContracts(documentIds, parentContractId);
     } catch (reason) { const message = (reason as Error).message; setContractDropStatus(`Загрузка не завершена: ${message}`); setError(message); }
   }
+  async function attachDocumentsToContract(documentIds: number[], contractId: number) {
+    const contract = contracts.find((item) => item.id === contractId);
+    if (!contract?.record_version) throw new Error("Версия договора не загружена. Обновите карточку.");
+    const requestedProjectId = projectId;
+    const epoch = contractProjectEpochRef.current;
+    const attached = await api(`/projects/${projectId}/contracts/${contractId}/applications`, { method: "POST", body: JSON.stringify({ expected_record_version: contract.record_version, document_ids: documentIds }) });
+    await synchronizeAttachedContract(contractId, attached.record_version, requestedProjectId, epoch);
+    const label = contract.number || contract.title || `№${contractId}`;
+    setContractDropStatus(`Файл — не отдельный договор, а приложение. Прикреплён к договору ${label}.`);
+    await load();
+    setNotice(`Файлов прикреплено к договору ${label}: ${documentIds.length}. ИИ проверяет пакет договора в фоне — можно работать дальше.`);
+    checkContractPackageInBackground(contractId, () => projectIdRef.current === requestedProjectId && contractProjectEpochRef.current === epoch);
+  }
+  // The AI package check takes ~10–20 s; files are already attached, so it runs
+  // without blocking the user and reports when done.
+  function checkContractPackageInBackground(contractId: number, current: () => boolean) {
+    setContractDropStatus("ИИ проверяет пакет договора…");
+    void api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" })
+      .then(async (checked) => {
+        if (!current()) return;
+        const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
+        setContractDropStatus("Пакет договора проверен.");
+        setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
+        await load();
+      })
+      .catch((reason) => { if (current()) { setContractDropStatus(""); setError(`Проверка пакета не завершена: ${(reason as Error).message}`); } });
+  }
   async function uploadContractApplications(files: File[], contractId: number) {
     const requestedProjectId = projectId;
     const epoch = contractProjectEpochRef.current;
@@ -1328,11 +1362,10 @@ export function App() {
       if (!current()) return;
       await synchronizeAttachedContract(contractId, attached.record_version, requestedProjectId, epoch);
       if (!current()) return;
-      const checked = await api(`/projects/${projectId}/contracts/${contractId}/analyze-package`, { method: "POST" });
-      if (!current()) return;
-      const direction = checked.financial_direction === "inflow" ? "приход" : checked.financial_direction === "outflow" ? "затраты" : "контекст без движения денег";
-      setNotice(`Пакет договора проверен: документов ${checked.documents}, ошибок/расхождений ${checked.issue_count}, финансовых предложений ${checked.financial_entries} (${direction}). Оплаты не подтверждены автоматически.`);
       await load();
+      if (!current()) return;
+      setNotice(`Приложений прикреплено: ${documentIds.length}. ИИ проверяет пакет договора в фоне — можно работать дальше.`);
+      checkContractPackageInBackground(contractId, current);
     } catch (reason) { if (current()) setError((reason as Error).message); }
   }
   async function synchronizeAttachedContract(contractId: number, recordVersion: number | undefined, requestedProjectId: number, epoch: number) {
