@@ -7,6 +7,11 @@ It only reads: disk/memory stats, `docker ps`, read-only SQL through
 reported to Telegram once per problem per REPEAT_AFTER seconds, and a
 "восстановлено" message is sent when a problem clears.
 
+Short stops during deployments (containers and the DB are down for ~1 minute)
+must not page anyone: a non-disk/non-memory problem is reported only if it
+persists for MIN_PROBLEM_AGE seconds (default 3 minutes, see first_seen in the
+state file). Disk and memory problems are reported immediately.
+
 Standard library only: it runs on the host's python3, not inside a container.
 Secrets (the bot token) are read from the prod env file at send time and are
 never printed.
@@ -46,6 +51,7 @@ MEM_THRESHOLD = 10.0           # percent available
 HEARTBEAT_MAX_AGE = 5 * 60     # seconds
 GMAIL_MAX_AGE = 30 * 60        # seconds
 REPEAT_AFTER = 6 * 60 * 60     # seconds between repeated alerts for one problem
+MIN_PROBLEM_AGE = int(os.getenv("PU_WATCHDOG_MIN_PROBLEM_AGE", "180"))  # seconds a problem must persist
 
 
 @dataclass(frozen=True)
@@ -116,12 +122,16 @@ def health_problem(code: int | None, url: str = HEALTH_URL) -> Problem | None:
 
 
 def decide(state: dict, problems: list[Problem], now: float, *, repeat_after: int = REPEAT_AFTER,
-           silenced: bool = False) -> tuple[list[Problem], list[str], dict]:
+           silenced: bool = False, min_age: int = MIN_PROBLEM_AGE) -> tuple[list[Problem], list[str], dict]:
     """Return (alerts to send, recovered keys, new state).
 
     state: {key: {"first_seen": ts, "last_alert": ts, "message": str}}.
     While silenced nothing is sent and last_alert is not advanced, so an
     unresolved problem is reported as soon as the silence ends.
+    A problem alerts only after it persists for min_age seconds (disk:/memory:
+    no delay) so a short deployment stop does not page anyone. A problem that
+    clears before the delay is dropped from the state silently; "recovered" is
+    sent only for keys that were actually alerted before.
     """
     alerts: list[Problem] = []
     new_state: dict = {}
@@ -130,7 +140,9 @@ def decide(state: dict, problems: list[Problem], now: float, *, repeat_after: in
         entry = dict(state.get(key) or {"first_seen": now, "last_alert": None})
         entry["message"] = problem.message
         last = entry.get("last_alert")
-        if not silenced and (last is None or now - last >= repeat_after):
+        age = now - entry["first_seen"]
+        delay = 0 if key.startswith("disk:") or key == "memory" else min_age
+        if not silenced and age >= delay and (last is None or now - last >= repeat_after):
             alerts.append(problem)
             entry["last_alert"] = now
         new_state[key] = entry

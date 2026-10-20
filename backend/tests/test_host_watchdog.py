@@ -117,6 +117,43 @@ def test_silence_sends_nothing_and_alerts_after_silence_ends():
     assert wd.decide(state, [], now=60)[1] == []
 
 
+def test_deployment_stop_shorter_than_min_age_does_not_alert():
+    container = P("container:puw-primary-next-primary-db", "db down")
+    alerts, recovered, state = wd.decide({}, [container], now=1000)
+    assert alerts == [] and recovered == []
+    assert state[container.key]["first_seen"] == 1000
+    assert state[container.key]["last_alert"] is None
+    # Still down but only 60s have passed.
+    alerts, _, state = wd.decide(state, [container], now=1060)
+    assert alerts == []
+
+
+def test_same_problem_after_min_age_then_alerts():
+    container = P("container:puw-primary-next-primary-db", "db down")
+    _, _, state = wd.decide({}, [container], now=1000)
+    alerts, _, state = wd.decide(state, [container], now=1060)
+    assert alerts == []
+    alerts, _, state = wd.decide(state, [container], now=1200)
+    assert alerts == [container]
+    assert state[container.key]["first_seen"] == 1000
+    assert state[container.key]["last_alert"] == 1200
+
+
+def test_problem_cleared_before_min_age_is_silent():
+    container = P("container:puw-primary-next-worker-1", "worker down")
+    _, _, state = wd.decide({}, [container], now=1000)
+    alerts, recovered, state = wd.decide(state, [], now=1060)
+    assert alerts == [] and recovered == [] and state == {}
+
+
+def test_disk_and_memory_alert_immediately():
+    disk, mem = P("disk:/", "d"), P("memory", "m")
+    alerts, _, _ = wd.decide({}, [disk], now=1000)
+    assert alerts == [disk]
+    alerts, _, _ = wd.decide({}, [mem], now=1000)
+    assert alerts == [mem]
+
+
 def test_env_file_parsing_and_durations():
     env = wd.parse_env_file("# c\nexport TELEGRAM_BOT_TOKEN='a:b'\nTELEGRAM_CHAT_ID=\"42\"\nBAD\nX=1=2\n")
     assert env == {"TELEGRAM_BOT_TOKEN": "a:b", "TELEGRAM_CHAT_ID": "42", "X": "1=2"}
@@ -146,6 +183,19 @@ def test_real_run_sends_and_keeps_state_for_retry_on_failure(tmp_path, monkeypat
     wd.main([])
     wd.main([])
     assert len(sent) == 1
+
+
+def test_main_does_not_alert_for_fresh_container_problem(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(wd, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(wd, "collect", lambda: [P("container:puw-primary-next-primary-db", "db down")])
+    sent = []
+    monkeypatch.setattr(wd, "send", lambda text: sent.append(text) or True)
+    assert wd.main([]) == 0
+    assert sent == []
+    state = wd.load_state(tmp_path / "state.json")
+    assert state["container:puw-primary-next-primary-db"]["last_alert"] is None
+    out = capsys.readouterr().out
+    assert "alerts=0" in out
 
 
 def test_secret_values_are_never_printed():
