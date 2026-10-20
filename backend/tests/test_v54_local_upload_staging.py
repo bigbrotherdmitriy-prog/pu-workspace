@@ -727,3 +727,12 @@ def test_business_processor_has_no_external_notification_or_provider_side_effect
     assert "notify_telegram" not in source
     assert "integrations" not in source
     assert "content_base64" not in source
+
+
+def test_every_admitted_upload_type_can_be_sealed_as_source_object():
+    # A type admitted at upload but unknown to the seal step failed as
+    # local_upload_lifecycle_unavailable (legacy .doc, 20.10.2026).
+    from app.local_upload_staging import DEFAULT_ALLOWED_MIME_TYPES
+    from app.staging.lifecycle import _SOURCE_MEDIA
+
+    assert DEFAULT_ALLOWED_MIME_TYPES <= _SOURCE_MEDIA

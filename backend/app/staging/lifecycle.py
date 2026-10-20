@@ -31,7 +31,12 @@ _MEDIA = frozenset({
     "text/markdown; charset=utf-8", "application/json",
     "application/json; charset=utf-8",
 })
+# Must accept every type local upload admits (app.local_upload_staging
+# DEFAULT_ALLOWED_MIME_TYPES): a type admitted there but missing here failed
+# only at seal time as "local_upload_lifecycle_unavailable" (legacy .doc).
 _SOURCE_MEDIA = frozenset({
+    "application/msword",
+    "application/octet-stream",
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
