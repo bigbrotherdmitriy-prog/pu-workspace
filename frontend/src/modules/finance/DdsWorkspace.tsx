@@ -6,6 +6,7 @@ import { formatMoney } from "../../utils/numberFormat";
 import type { FinanceOverview } from "./types";
 import { DdsMobileMonth } from "./DdsMobileMonth";
 import { BudgetFromDds } from "./BudgetFromDds";
+import { DdsPlanVersions } from "./DdsPlanVersions";
 import "./gpr-dds-mobile.css";
 
 type Props = {
@@ -30,7 +31,7 @@ type Props = {
   onImportCashFlow?: (files: File[]) => void;
 };
 
-type Tab = "months" | "calendar" | "details" | "summary" | "budget";
+type Tab = "months" | "calendar" | "details" | "summary" | "budget" | "versions";
 type CashRow = NonNullable<FinanceOverview>["cash_flow"][number] & {
   object: string;
   category: string;
@@ -48,6 +49,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "details", label: "Детализация" },
   { id: "summary", label: "Сводка" },
   { id: "budget", label: "Бюджет" },
+  { id: "versions", label: "Версии плана" },
 ];
 const monthLong = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
@@ -490,6 +492,7 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
     })}</tbody></table>{!visibleRows.length && <p className="dds-empty">Нет операций по выбранным фильтрам.</p>}</div>}
 
     {tab === "budget" && <BudgetFromDds projectId={projectId} contractId={selectedContractId || null} currency={selectedCurrency} />}
+    {tab === "versions" && <DdsPlanVersions projectId={projectId} contractId={selectedContractId || null} currency={selectedCurrency} />}
     {tab === "summary" && <div className="dds-summary">
       <section><h3>По объектам</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Объект</th><th>План прихода, {selectedCurrency}</th><th>План расхода, {selectedCurrency}</th><th>Плановый поток, {selectedCurrency}</th></tr></thead><tbody>{objectSummary.map((item) => <tr key={item.object}><td>{item.object}</td><td className="money positive" data-label="Приход">{formatMoney(item.inflow)}</td><td className="money" data-label="Расход">{formatMoney(item.outflow)}</td><td className={`money ${item.net < 0 ? "negative" : "positive"}`} data-label="Поток">{formatMoney(item.net)}</td></tr>)}<tr className="total"><td>ИТОГО</td><td className="money" data-label="Приход">{formatMoney(totals.inflow)}</td><td className="money" data-label="Расход">{formatMoney(totals.outflow)}</td><td className="money" data-label="Поток">{formatMoney(totals.net)}</td></tr></tbody></table></div></section>
       <section><h3>Расходы по статьям</h3><div className="dds-table-wrap"><table className="dds-table"><thead><tr><th>Статья затрат</th><th>План, {selectedCurrency}</th><th>Доля, %</th></tr></thead><tbody>{categorySummary.map((item) => <tr key={item.category}><td>{item.category}</td><td className="money" data-label="План">{formatMoney(item.value)}</td><td data-label="Доля"><div className="dds-share"><span style={{ width: `${Math.max(3, item.share * 100)}%` }}></span></div>{(item.share * 100).toFixed(1)}%</td></tr>)}<tr className="total"><td>ИТОГО расходы</td><td className="money" data-label="План">{formatMoney(totals.outflow)}</td><td data-label="Доля">100%</td></tr></tbody></table></div></section>
