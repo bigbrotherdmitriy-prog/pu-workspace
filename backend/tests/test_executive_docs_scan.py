@@ -289,6 +289,99 @@ def test_match_requirements_orders_distributed_one_to_one(world):
     assert matches[1]["status"] == "present"
 
 
+def test_requirements_from_contract_prefers_tz(world, monkeypatch):
+    from app.models.document import Document
+    from app.models.document_version import DocumentVersion
+    from app.models.organization_contract import Contract
+    from app.models.contract_document_link import ContractDocumentLink
+
+    db = world["db"]
+    project = world["project"]
+
+    monkeypatch.setattr(ed, "extract_id_requirements_ai", lambda text: None)
+
+    contract = Contract(name="Договор", project_id=project.id)
+    db.add(contract)
+    db.flush()
+
+    big = Document(name="для ДДС.xlsx", project_id=project.id)
+    tz = Document(name="Приложение №1 ТЗ.docx", project_id=project.id)
+    db.add_all([big, tz])
+    db.flush()
+
+    db.add(DocumentVersion(document_id=big.id, version_number=1, content_text="x" * 250_000))
+    db.add(DocumentVersion(
+        document_id=tz.id, version_number=1,
+        content_text=(
+            "Перечень исполнительной документации: Журнал работ; "
+            "Технический отчет испытаний; Гарантии"
+        ),
+    ))
+    big.current_version = 1
+    tz.current_version = 1
+    db.add_all([
+        ContractDocumentLink(contract_id=contract.id, document_id=big.id),
+        ContractDocumentLink(contract_id=contract.id, document_id=tz.id),
+    ])
+    db.commit()
+
+    ed.requirements_from_contract(
+        db, project.id, contract.id, None, ["ЭМ"],
+    )
+    db.commit()
+
+    reqs = db.query(IdRequirement).filter(
+        IdRequirement.project_id == project.id,
+        IdRequirement.contract_id == contract.id,
+    ).all()
+    tz_items = [r for r in reqs if r.source == "tz"]
+    norm_items = [r for r in reqs if r.source == "norm"]
+    assert len(tz_items) == 2
+    assert all(r.required_if_applicable is True for r in norm_items)
+
+
+def test_scan_source_skips_read_when_unchanged(world, monkeypatch):
+    db = world["db"]
+    project = world["project"]
+
+    calls = {"n": 0}
+
+    class CountingStorage(FakeStorage):
+        def read_bytes(self, obj_id, max_size):
+            calls["n"] += 1
+            return super().read_bytes(obj_id, max_size)
+
+    monkeypatch.setattr(
+        ed, "_extract_text_from_bytes",
+        lambda data, mime, name: "Ведомость № 4 смонтированного электрооборудования",
+    )
+
+    source = IdSource(
+        project_id=project.id, object_name="Объект А",
+        provider="google_drive", folder_id="root",
+    )
+    db.add(source)
+    db.commit()
+
+    tree = [
+        _folder("root", "Проект", ""),
+        _file(
+            "doc1", "Акт.docx", "root",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            modified="2026-01-10T12:00:00+00:00", size=1000,
+        ),
+    ]
+    storage = CountingStorage(tree, contents={"doc1": (b"fake-docx", "application/msword")})
+    ed.scan_source(db, source, storage)
+    db.commit()
+    first_calls = calls["n"]
+    assert first_calls > 0
+
+    ed.scan_source(db, source, storage)
+    db.commit()
+    assert calls["n"] == first_calls
+
+
 def test_scan_source_pdf_contained_kinds(world, monkeypatch):
     db = world["db"]
     project = world["project"]
