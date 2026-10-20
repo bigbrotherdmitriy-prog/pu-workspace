@@ -53,5 +53,5 @@ def test_schedule_daily_scan_disabled(monkeypatch):
 
 
 def test_executive_docs_router_registered():
-    paths = {getattr(r, "path", None) for r in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/projects/{project_id}/executive-docs/report" in paths

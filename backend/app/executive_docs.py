@@ -1,5 +1,7 @@
 import os
 import re
+
+from app.jobs.queue import enqueue
 from datetime import datetime, timezone
 
 KINDS = (
@@ -673,7 +675,7 @@ def object_report(db, project_id: int, object_name: str) -> dict:
 
 def scan_all_sources_job(payload: dict) -> dict:
     from app.database import SessionLocal
-    from app.core.storage_registry import storage_for_project
+    from app.integrations.storage import storage_for_project
     from app.models.executive_docs import IdSource
 
     db = SessionLocal()
@@ -712,7 +714,6 @@ def _local_now(now: datetime | None) -> datetime:
 
 
 def schedule_daily_scan(db, now: datetime | None = None) -> None:
-    from app.jobs.queue import enqueue
 
     if os.getenv("PU_ID_SCAN_ENABLED", "true").strip().lower() in ("false", "0", "no"):
         return

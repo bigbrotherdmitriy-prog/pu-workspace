@@ -3,7 +3,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
-from app.core.storage_registry import storage_for_project
 from app.database import get_db
 from app.executive_docs import object_report, requirements_from_contract, scan_source
 from app.models.executive_docs import IdRequirement, IdSource
@@ -131,6 +130,7 @@ def scan_one_source(
     ).first()
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
+    from app.integrations.storage import storage_for_project
     storage = storage_for_project(project_id, db)
     scan_source(db, source, storage)
     report = object_report(db, project_id, source.object_name)
