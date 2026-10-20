@@ -109,7 +109,10 @@ def _project_stats(db, project: Project, today: date, since: datetime) -> dict:
             overspend_sum += (actual - planned)
 
     gap = plan_cash_gaps(cash)
-    worst = gap.get("worst")
+    # A morning digest is about what is ahead: the deepest gap from this month on.
+    current_month = today.strftime("%Y-%m")
+    upcoming = [g for g in gap.get("gaps") or [] if g.get("month", "") >= current_month]
+    worst = min(upcoming, key=lambda g: Decimal(g["cumulative"])) if upcoming else None
 
     return {
         "to_confirm": to_confirm,
