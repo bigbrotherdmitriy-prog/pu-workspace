@@ -121,6 +121,20 @@ def test_classify_order():
     assert ed.classify_file("Общее", "Приказ о назначении ответственного ООО Ромашка.pdf")["kind"] == "order"
 
 
+def test_parse_id_requirements_skips_non_executive_docs():
+    text = (
+        "Перечень исполнительной документации "
+        "Счет на оплату; Счет-фактура; "
+        "Комплект исполнительной документации по Объекту; "
+        "Акты освидетельствования скрытых работ; "
+        "Технический отчет испытаний"
+    )
+    items = ed.parse_id_requirements(text)
+    assert len(items) == 2
+    kinds = {it["doc_kind"] for it in items}
+    assert kinds == {"aosr", "report"}
+
+
 def test_build_requirements_always_required_orders(monkeypatch):
     from app import executive_docs
 
