@@ -37,6 +37,8 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
             created += int(job.status == "queued" and job.attempts == 0)
         from app.management_digest import schedule_digest_jobs
         created += schedule_digest_jobs(db, now=now)
+        from app.morning_digest import schedule_morning_digest
+        created += schedule_morning_digest(db, now=now)
     from app.pilot_dispatch import recover_installed
     from app.pilot_incidents import notify_product_auto_incidents_once
     from app.local_upload_staging import recover_local_upload_retention
