@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { contractMoney, vatLabel, type VatMode } from "./contractCommercial";
 import { ContractStagesRegister } from "./ContractStagesRegister";
 import "./contract-details.css";
@@ -62,8 +62,7 @@ export function ContractDetails({ contract, children, currency = "RUB", projectI
         </li>)}</ol> : <p>Снимков истории пока нет.</p>}
       </details>
     </div>
-    {projectId !== undefined && <section aria-label="Этапы и поступления"><h4>Этапы и поступления</h4>
-      <ContractStagesRegister projectId={projectId} contractId={contract.id} currency={currency} /></section>}
+    {projectId !== undefined && <StagesSection projectId={projectId} contractId={contract.id} currency={currency} />}
     {children}
   </article>;
 }
@@ -90,4 +89,13 @@ export function ContractTermsFields({ draft, onChange, disabled = false, creatin
     <label>Гарантия до<input aria-label={creating ? "Гарантия нового договора до" : "Гарантия до"} disabled={disabled} type="date"
       aria-invalid={Boolean(fieldErrors.warranty_until)} value={draft.warrantyUntil} onChange={(event) => onChange("warrantyUntil", event.target.value)} /></label>
   </>;
+}
+
+// Collapsed by default: the register is loaded only when someone opens it.
+function StagesSection({ projectId, contractId, currency }: { projectId: number; contractId: number; currency: string }) {
+  const [open, setOpen] = useState(false);
+  return <details aria-label="Этапы и поступления" onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <summary>Этапы и поступления</summary>
+    {open && <ContractStagesRegister projectId={projectId} contractId={contractId} currency={currency} />}
+  </details>;
 }
