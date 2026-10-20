@@ -73,6 +73,9 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "finance.morning_digest":
         from app.morning_digest import run_morning_digest_job
         return run_morning_digest_job(payload)
+    if kind == "executive_docs.scan":
+        from app.executive_docs import scan_all_sources_job
+        return scan_all_sources_job(payload)
     if kind == "ai_secretary.materialize_bulk":
         from app.api.ai_secretary import _materialize_bulk_job
         return _materialize_bulk_job(payload)

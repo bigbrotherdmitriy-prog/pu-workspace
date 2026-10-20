@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import datetime, timezone
 
@@ -668,6 +669,62 @@ def object_report(db, project_id: int, object_name: str) -> dict:
         source.last_report = merged
         db.flush()
     return report
+
+
+def scan_all_sources_job(payload: dict) -> dict:
+    from app.database import SessionLocal
+    from app.core.storage_registry import storage_for_project
+    from app.models.executive_docs import IdSource
+
+    db = SessionLocal()
+    sources = 0
+    failed = 0
+    try:
+        rows = db.query(IdSource).all()
+        for source in rows:
+            sources += 1
+            try:
+                storage = storage_for_project(source.project_id, db)
+                scan_source(db, source, storage)
+                object_report(db, source.project_id, source.object_name)
+            except Exception:
+                failed += 1
+                db.rollback()
+                continue
+        db.commit()
+    finally:
+        db.close()
+    return {"sources": sources, "failed": failed}
+
+
+def _local_now(now: datetime | None) -> datetime:
+    tz_name = os.getenv("PU_ID_SCAN_TZ", "Europe/Moscow")
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now.astimezone(tz)
+
+
+def schedule_daily_scan(db, now: datetime | None = None) -> None:
+    from app.jobs.queue import enqueue
+
+    if os.getenv("PU_ID_SCAN_ENABLED", "true").strip().lower() in ("false", "0", "no"):
+        return
+    try:
+        hour = int(os.getenv("PU_ID_SCAN_HOUR", "6"))
+    except ValueError:
+        hour = 6
+    local_now = _local_now(now)
+    if local_now.hour < hour:
+        return
+    local_date = local_now.date().isoformat()
+    enqueue(db, "executive_docs.scan", {"day": local_date}, idempotency_key=f"executive_docs.scan:{local_date}")
 
 
 def requirements_from_contract(
