@@ -127,7 +127,9 @@ export function FinanceOperations(props: Props) {
           <option value="">Выберите строку плана или «Дополнительные затраты»</option>
           {planArticles.map((article) => <option value={String(article.id)} key={article.id}>{`${article.suggested ? "★ " : ""}${article.title}${article.counterparty ? ` · ${article.counterparty}` : ""} · план ${formatMoney(article.total)}, остаток ${formatMoney(article.remaining)}`}</option>)}
           <option value="additional">Дополнительные затраты</option>
-        </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planValue); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
+        </select>{(() => { const chosen = planArticles.find((article) => String(article.id) === planValue); return chosen && invoiceAmount > chosen.remaining
+          ? <small className="bad">Счёт больше остатка статьи на {formatMoney(invoiceAmount - chosen.remaining)} ₽ — статья уйдёт в перерасход. Если это вне плана, выберите «Дополнительные затраты».</small> : null; })()}
+        {(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planValue); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
       </div>
       <div className="invoice-evidence">
         <strong>Основания из документа</strong>

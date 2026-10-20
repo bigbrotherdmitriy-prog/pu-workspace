@@ -721,6 +721,35 @@ def _finance_document_hints(name: str, content: str) -> dict:
     return {"amount": amount, "date": suggested_date, "number": number_match.group(1) if number_match else None}
 
 
+def _normalized_party(value: str | None) -> str:
+    text = re.sub(r"[«»\"'`]", " ", (value or "").lower())
+    text = re.sub(r"\b(ооо|ао|пао|зао|оао|ип|общество с ограниченной ответственностью|акционерное общество)\b", " ", text)
+    return " ".join(text.split())
+
+
+def _infer_invoice_contract_id(db: Session, project_id: int, counterparty: str | None) -> int | None:
+    """Contract for an invoice when the manager did not pick one: the contract with
+    the same counterparty; otherwise the contract that carries the project's planned
+    DDS (most outflow plan rows); otherwise the only contract of the project."""
+    contracts = list(db.scalars(select(Contract).where(Contract.project_id == project_id).order_by(Contract.id)))
+    if not contracts:
+        return None
+    party = _normalized_party(counterparty)
+    if party:
+        for contract in contracts:
+            if _normalized_party(contract.counterparty) == party:
+                return contract.id
+    plan_owner = db.execute(
+        select(CashFlowEntry.contract_id, func.count(CashFlowEntry.id))
+        .where(CashFlowEntry.project_id == project_id, CashFlowEntry.direction == "outflow",
+               CashFlowEntry.planned_amount > 0, CashFlowEntry.contract_id.is_not(None))
+        .group_by(CashFlowEntry.contract_id).order_by(func.count(CashFlowEntry.id).desc())
+    ).first()
+    if plan_owner is not None:
+        return int(plan_owner[0])
+    return contracts[0].id if len(contracts) == 1 else None
+
+
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
     if contract_id is not None and not db.scalar(select(Contract.id).where(Contract.id == contract_id, Contract.project_id == project_id)):
         raise HTTPException(422, "Договор не принадлежит выбранному проекту")
@@ -2446,6 +2475,12 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
             "schedule_item_id": payload.schedule_item_id or plan_entry.schedule_item_id,
             "budget_line_id": payload.budget_line_id or plan_entry.budget_line_id,
         })
+    if payload.contract_id is None and (plan_entry is not None or payload.additional):
+        # «Дополнительные затраты» or a plan line without a contract: the system
+        # picks the contract itself — never ask the manager for a field it can infer.
+        inferred = _infer_invoice_contract_id(db, item.project_id, item.counterparty)
+        if inferred is not None:
+            payload = payload.model_copy(update={"contract_id": inferred})
     if item.amount is None or not item.payment_purpose:
         raise HTTPException(422, "Перед подтверждением укажите сумму и назначение платежа")
     _require_project_currency(db, item.project_id, item.currency)
