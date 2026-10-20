@@ -127,6 +127,64 @@ def test_signed_creates_cash_flow_entry(world):
     assert Decimal(entries[0].planned_amount) == Decimal("100000.00")
 
 
+def test_create_act_with_explicit_number(world):
+    db = world["db"]
+    result = api.create_act_endpoint(
+        project_id=world["project"].id,
+        contract_id=world["contract"].id,
+        stage_id=world["stage"].id,
+        payload=api.CreateActPayload(number="12"),
+        db=db,
+        user=world["user"],
+    )
+    assert result["number"] == "12"
+
+
+def test_create_act_duplicate_number_conflict(world):
+    db = world["db"]
+    second = ContractStage(
+        project_id=world["project"].id,
+        contract_id=world["contract"].id,
+        stage_number=2,
+        title="Второй этап",
+        object_name=None,
+        amount=Decimal("50000.00"),
+        status="confirmed",
+    )
+    db.add(second)
+    db.commit()
+
+    api.create_act_endpoint(
+        project_id=world["project"].id,
+        contract_id=world["contract"].id,
+        stage_id=world["stage"].id,
+        payload=api.CreateActPayload(number="12"),
+        db=db,
+        user=world["user"],
+    )
+    with pytest.raises(HTTPException) as exc:
+        api.create_act_endpoint(
+            project_id=world["project"].id,
+            contract_id=world["contract"].id,
+            stage_id=second.id,
+            payload=api.CreateActPayload(number="12"),
+            db=db,
+            user=world["user"],
+        )
+    assert exc.value.status_code == 409
+
+
+def test_stage_register_has_next_act_number(world):
+    db = world["db"]
+    body = api.stage_register(
+        project_id=world["project"].id,
+        contract_id=world["contract"].id,
+        db=db,
+        user=world["viewer"],
+    )
+    assert body["next_act_number"] == "1"
+
+
 def test_viewer_cannot_create_act(world):
     db = world["db"]
     with pytest.raises(HTTPException) as exc:

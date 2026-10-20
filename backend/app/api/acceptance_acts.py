@@ -18,6 +18,7 @@ from app.acceptance_acts import (
     build_act_data,
     create_stage_act,
     mark_act_signed,
+    next_act_number,
     payment_days,
 )
 from app.contract_stages import contract_text
@@ -210,7 +211,12 @@ def stage_register(
             "remaining": f"{(total_price - total_acted):.2f}",
         },
         "by_object": by_object,
+        "next_act_number": next_act_number(db, contract.id),
     }
+
+
+class CreateActPayload(BaseModel):
+    number: str | None = None
 
 
 @router.post("/{project_id}/contracts/{contract_id}/stages/{stage_id}/act")
@@ -218,13 +224,21 @@ def create_act_endpoint(
     project_id: int,
     contract_id: int,
     stage_id: int,
+    payload: CreateActPayload | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     require_project_role(db, user, project_id, "manager")
     contract = _get_contract(db, project_id, contract_id)
     stage = _get_stage(db, contract, stage_id)
-    act = create_stage_act(db, project_id, contract, stage, user)
+    act = create_stage_act(
+        db,
+        project_id,
+        contract,
+        stage,
+        user,
+        number=payload.number if payload is not None else None,
+    )
     db.commit()
     db.refresh(act)
     return {"id": act.id, "number": act.number, "status": act.status}

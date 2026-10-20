@@ -85,11 +85,6 @@ def payment_days(text: str) -> tuple[int, bool]:
     return (10, True)
 
 
-__all__ = [
-    "act_text_lines" if False else None,  # placeholder removed below
-]
-
-
 def add_working_days(start: date, days: int) -> date:
     current = start
     remaining = max(days, 0)
@@ -128,7 +123,9 @@ def build_act_data(db: Session, project_id: int, contract, stage: ContractStage,
     )
 
     our_name = our_org.name if our_org else ""
-    counterparty_name = counterparty_org.name if counterparty_org else ""
+    counterparty_org_name = counterparty_org.name if counterparty_org else ""
+    counterparty_fallback = (getattr(contract, "counterparty", None) or "").strip()
+    counterparty_name = counterparty_org_name or counterparty_fallback
 
     if getattr(contract, "contract_kind", None) in ("customer", "prime_reference"):
         customer_name = counterparty_name
@@ -137,20 +134,43 @@ def build_act_data(db: Session, project_id: int, contract, stage: ContractStage,
         customer_name = our_name
         contractor_name = counterparty_name
 
-    signer_position = "генерального директора"
-    signer_name = our_org.director_name if (our_org and our_org.director_name) else "____________"
+    our_signer_name = our_org.director_name if (our_org and our_org.director_name) else "____________"
+    counterparty_signer_name = (
+        counterparty_org.director_name if (counterparty_org and counterparty_org.director_name) else ""
+    )
+
+    def _position(signer_name: str) -> str:
+        return "генерального директора" if signer_name else ""
+
+    our_signer_position = _position(our_signer_name)
+    counterparty_signer_position = _position(counterparty_signer_name)
+
+    if getattr(contract, "contract_kind", None) in ("customer", "prime_reference"):
+        customer_name = counterparty_name
+        contractor_name = our_name
+        customer_signer_position = counterparty_signer_position
+        customer_signer_name = counterparty_signer_name
+        contractor_signer_position = our_signer_position
+        contractor_signer_name = our_signer_name
+    else:
+        customer_name = our_name
+        contractor_name = counterparty_name
+        customer_signer_position = our_signer_position
+        customer_signer_name = our_signer_name
+        contractor_signer_position = counterparty_signer_position
+        contractor_signer_name = counterparty_signer_name
 
     customer = ActParty(
         name=customer_name,
         role="customer",
-        signer_position=signer_position,
-        signer_name=signer_name,
+        signer_position=customer_signer_position,
+        signer_name=customer_signer_name,
     )
     contractor = ActParty(
         name=contractor_name,
         role="contractor",
-        signer_position=signer_position,
-        signer_name=signer_name,
+        signer_position=contractor_signer_position,
+        signer_name=contractor_signer_name,
     )
 
     vat_rate = None
@@ -190,13 +210,38 @@ def build_act_data(db: Session, project_id: int, contract, stage: ContractStage,
     )
 
 
-def create_stage_act(db: Session, project_id: int, contract, stage: ContractStage, user) -> AcceptanceAct:
+def create_stage_act(
+    db: Session,
+    project_id: int,
+    contract,
+    stage: ContractStage,
+    user,
+    number: str | None = None,
+) -> AcceptanceAct:
     existing = db.query(AcceptanceAct).filter(
         AcceptanceAct.stage_id == stage.id,
         AcceptanceAct.status != "cancelled",
     ).first()
     if existing is not None:
         return existing
+
+    if number is not None:
+        normalized = number.strip()
+        if normalized:
+            conflict = db.query(AcceptanceAct).filter(
+                AcceptanceAct.contract_id == contract.id,
+                AcceptanceAct.number == normalized,
+                AcceptanceAct.status != "cancelled",
+            ).first()
+            if conflict is not None:
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Акт № {normalized} по этому договору уже есть",
+                )
+            number = normalized
+        else:
+            number = None
 
     total = object_total(db, stage)
     quantity = stage_quantity(stage.amount, total)
@@ -213,7 +258,7 @@ def create_stage_act(db: Session, project_id: int, contract, stage: ContractStag
         project_id=project_id,
         contract_id=contract.id,
         stage_id=stage.id,
-        number=next_act_number(db, contract.id),
+        number=number if number is not None else next_act_number(db, contract.id),
         title=title,
         act_date=None,
         amount=stage.amount,
