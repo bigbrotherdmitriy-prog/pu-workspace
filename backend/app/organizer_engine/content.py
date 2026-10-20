@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import io
+import logging
 import os
 import re
 import shutil
@@ -17,8 +19,12 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+import httpx
+
 from app.ocr_quality.xlsx_cells import XlsxExtractionError, extract_xlsx_cells
 
+
+logger = logging.getLogger(__name__)
 
 MAX_EXTRACTED_CHARS = 50_000
 XLSX_COORDINATE_MARKER = "__PU_SOURCE_COORD__"
@@ -44,6 +50,10 @@ OCR_REVIEW_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("OCR_REVIEW_CONFIDENCE
 OCR_PARALLEL_PAGES = max(1, min(4, int(os.getenv("OCR_PARALLEL_PAGES", "2"))))
 OCR_PAGE_SECONDS = max(5, min(120, int(os.getenv("OCR_PAGE_SECONDS", "25"))))
 OCR_DOCUMENT_MAX_SECONDS = max(60, min(1800, int(os.getenv("OCR_DOCUMENT_MAX_SECONDS", "600"))))
+YANDEX_OCR_URL = os.getenv("YANDEX_OCR_URL", "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText")
+OCR_CLOUD_PARALLEL = max(1, min(8, int(os.getenv("OCR_CLOUD_PARALLEL", "4"))))
+OCR_CLOUD_DPI = max(150, min(300, int(os.getenv("OCR_CLOUD_DPI", "200"))))
+OCR_CLOUD_TIMEOUT_SECONDS = max(5, min(120, int(os.getenv("OCR_CLOUD_TIMEOUT_SECONDS", "30"))))
 
 OCR_ORPHAN_ENDINGS = frozenset({"ый", "ий", "ая", "яя", "ое", "ые", "ую", "юю", "ых", "ым", "ть", "ться", "го"})
 NUMBERED_PROSE_RE = re.compile(
@@ -397,6 +407,97 @@ def _ocr_enabled() -> bool:
     return os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _yandex_ocr_configured() -> bool:
+    if os.getenv("OCR_PROVIDER", "auto").strip().lower() == "local":
+        return False
+    return bool(
+        os.getenv("YANDEX_VISION_API_KEY", "").strip()
+        and os.getenv("YANDEX_FOLDER_ID", "").strip()
+    )
+
+
+def _yandex_ocr_page(image: Path, page_number: int) -> PageExtraction | None:
+    """Recognize one rendered page through Yandex Vision OCR; None triggers local OCR."""
+    api_key = os.getenv("YANDEX_VISION_API_KEY", "").strip()
+    folder_id = os.getenv("YANDEX_FOLDER_ID", "").strip()
+    if not api_key or not folder_id:
+        return None
+    try:
+        payload = {
+            "mimeType": "JPEG",
+            "languageCodes": ["ru", "en"],
+            "model": "page",
+            "content": base64.b64encode(image.read_bytes()).decode("ascii"),
+        }
+        headers = {
+            "Authorization": f"Api-Key {api_key}",
+            "x-folder-id": folder_id,
+            "Content-Type": "application/json",
+        }
+        response = httpx.post(
+            YANDEX_OCR_URL, json=payload, headers=headers, timeout=OCR_CLOUD_TIMEOUT_SECONDS
+        )
+        if response.status_code == 429 or response.status_code >= 500:
+            time.sleep(1)
+            response = httpx.post(
+                YANDEX_OCR_URL, json=payload, headers=headers, timeout=OCR_CLOUD_TIMEOUT_SECONDS
+            )
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        annotation = (data.get("result") or {}).get("textAnnotation") or {}
+        try:
+            width = int(annotation.get("width") or 0)
+            height = int(annotation.get("height") or 0)
+        except (TypeError, ValueError):
+            width, height = 0, 0
+        tokens: list[OcrToken] = []
+        line_texts: list[str] = []
+        for block_index, block in enumerate(annotation.get("blocks") or []):
+            for line_index, line in enumerate(block.get("lines") or []):
+                line_text = line.get("text")
+                if isinstance(line_text, str):
+                    line_texts.append(line_text)
+                for word_index, word in enumerate(line.get("words") or []):
+                    text_value = word.get("text")
+                    if not isinstance(text_value, str) or not text_value.strip():
+                        continue
+                    vertices = ((word.get("boundingBox") or {}).get("vertices") or [])
+                    xs: list[int] = []
+                    ys: list[int] = []
+                    for vertex in vertices:
+                        try:
+                            xs.append(int(float(vertex.get("x") or 0)))
+                            ys.append(int(float(vertex.get("y") or 0)))
+                        except (TypeError, ValueError, AttributeError):
+                            continue
+                    if xs and ys:
+                        bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+                    else:
+                        bbox = (0, 0, 0, 0)
+                    tokens.append(OcrToken(
+                        text=text_value, confidence=0.95, bbox=bbox,
+                        line_id=(0, block_index, line_index),
+                    ))
+                    del word_index
+        full_text = annotation.get("fullText")
+        if not isinstance(full_text, str) or not full_text.strip():
+            full_text = "\n".join(item for item in line_texts if item)
+        if not tokens and not full_text.strip():
+            return None
+        page = _page_from_tokens(page_number, tokens, width, height, ["yandex_vision_ocr"])
+        page.text = full_text
+        if not page.text.strip():
+            return None
+        return page
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.warning("yandex ocr page %s failed: %s", page_number, exc)
+        return None
+    except Exception as exc:
+        logger.warning("yandex ocr page %s failed: %s", page_number, exc)
+        return None
+
+
 def _ocr_env() -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("OMP_THREAD_LIMIT", "1")
@@ -582,6 +683,22 @@ def _ocr_image_page(data: bytes, suffix: str) -> PageExtraction:
     with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
         source = Path(temp) / f"source.{suffix or 'png'}"
         source.write_bytes(data)
+        if _yandex_ocr_configured():
+            cloud_path = source
+            if suffix.lower() not in {"jpg", "jpeg"}:
+                try:
+                    from PIL import Image
+
+                    cloud_path = Path(temp) / "source.jpg"
+                    with Image.open(source) as opened:
+                        opened.convert("RGB").save(cloud_path, "JPEG", quality=90)
+                except Exception as exc:
+                    logger.warning("yandex ocr page 1 failed: %s", exc)
+                    cloud_path = source
+            if cloud_path == source or cloud_path.exists():
+                cloud = _yandex_ocr_page(cloud_path, 1)
+                if cloud is not None:
+                    return cloud
         return _tesseract_page(source, 1)
 
 
@@ -792,6 +909,9 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtract
         max(OCR_TIMEOUT_SECONDS, OCR_PAGE_SECONDS * len(ordered)),
     )
     deadline = time.monotonic() + budget
+    use_cloud = _yandex_ocr_configured()
+    render_dpi = OCR_CLOUD_DPI if use_cloud else OCR_DPI
+    max_workers = OCR_CLOUD_PARALLEL if use_cloud else OCR_PARALLEL_PAGES
     with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
         temp_dir = Path(temp)
         source = temp_dir / "source.pdf"
@@ -806,13 +926,17 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtract
             rendered = subprocess.run(
                 [
                     "pdftoppm", "-f", str(page_number), "-l", str(page_number),
-                    "-singlefile", "-r", str(OCR_DPI), "-jpeg", str(source), str(prefix),
+                    "-singlefile", "-r", str(render_dpi), "-jpeg", str(source), str(prefix),
                 ],
                 capture_output=True, timeout=remaining, check=False,
             )
             image = prefix.with_suffix(".jpg")
             if rendered.returncode != 0 or not image.exists():
                 return None
+            if use_cloud:
+                cloud = _yandex_ocr_page(image, page_number)
+                if cloud is not None:
+                    return page_number, cloud
             remaining = deadline - time.monotonic()
             if remaining <= 1:
                 return None
@@ -820,7 +944,7 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtract
             return page_number, _coerce_page(text, page_number)
 
         result: dict[int, PageExtraction] = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_PARALLEL_PAGES) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = [pool.submit(_process, rank, page_number) for rank, page_number in enumerate(ordered)]
             for future in concurrent.futures.as_completed(futures):
                 try:
