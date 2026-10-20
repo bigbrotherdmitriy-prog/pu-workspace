@@ -99,7 +99,8 @@ def _add_proposal(db, project_id, **kwargs):
     return proposal
 
 
-def test_matching_counterparty_is_recommended(world):
+def test_matching_counterparty_is_recommended(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "false")
     db = world["db"]
     client = world["client"]
     project = world["project"]
@@ -142,7 +143,8 @@ def test_matching_counterparty_is_recommended(world):
     assert payload["suggestions"][0]["score"] >= 50
 
 
-def test_unknown_counterparty_triggers_additional_recommended(world):
+def test_unknown_counterparty_triggers_additional_recommended(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "false")
     db = world["db"]
     client = world["client"]
     project = world["project"]
@@ -182,7 +184,8 @@ def test_unknown_counterparty_triggers_additional_recommended(world):
     assert payload["recommended"] is None
 
 
-def test_proposal_from_other_project_is_not_visible(world):
+def test_proposal_from_other_project_is_not_visible(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "false")
     db = world["db"]
     client = world["client"]
     project = world["project"]
@@ -203,7 +206,8 @@ def test_proposal_from_other_project_is_not_visible(world):
     assert response.status_code == 404, response.text
 
 
-def test_foreign_project_is_forbidden(world):
+def test_foreign_project_is_forbidden(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "false")
     db = world["db"]
     client = world["client"]
     other_project = world["other_project"]
@@ -221,3 +225,183 @@ def test_foreign_project_is_forbidden(world):
         f"/projects/{other_project.id}/invoice-extraction-proposals/{proposal.id}/plan-line-suggestions"
     )
     assert response.status_code in (403, 404), response.text
+
+
+def test_ai_picks_semantic_match(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "true")
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+
+    semantic_entry = _add_entry(
+        db,
+        project.id,
+        title="СКТП кондиционеры",
+        counterparty="ООО Поставщик",
+        category="Оборудование",
+        planned_amount=Decimal("500000.00"),
+    )
+    _add_entry(
+        db,
+        project.id,
+        title="Логистика",
+        counterparty="ООО Лютик",
+        category="Логистика",
+        planned_amount=Decimal("1000.00"),
+    )
+    proposal = _add_proposal(
+        db,
+        project.id,
+        amount=Decimal("250000.00"),
+        counterparty="ООО Другой поставщик",
+        payment_purpose="Кондиционеры прецизионные для серверной",
+    )
+    db.commit()
+
+    import app.api.invoice_plan_match as mod
+
+    def fake_ai(invoice, candidates):
+        return {
+            "plan_entry_id": semantic_entry.id,
+            "confidence": 0.9,
+            "reason": "счёт на кондиционеры для серверной",
+        }
+
+    monkeypatch.setattr(mod, "_ai_pick", fake_ai)
+
+    response = client.get(
+        f"/projects/{project.id}/invoice-extraction-proposals/{proposal.id}/plan-line-suggestions"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["recommended"] == semantic_entry.id
+    top = payload["suggestions"][0]
+    assert top["plan_entry_id"] == semantic_entry.id
+    assert any(r.startswith("По смыслу:") for r in top["reasons"]), top["reasons"]
+    assert payload["ai_used"] is True
+
+
+def test_ai_null_marks_additional_recommended(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "true")
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+
+    _add_entry(
+        db,
+        project.id,
+        title="Оплата материалов",
+        counterparty="ООО Ромашка",
+        category="Материалы",
+        planned_amount=Decimal("1000.00"),
+    )
+    proposal = _add_proposal(
+        db,
+        project.id,
+        amount=Decimal("100.00"),
+        counterparty="ООО Неизвестный",
+        payment_purpose="Оплата по счёту без соответствия",
+    )
+    db.commit()
+
+    import app.api.invoice_plan_match as mod
+
+    def fake_ai(invoice, candidates):
+        return {
+            "plan_entry_id": None,
+            "confidence": 0.9,
+            "reason": "ничего не подходит",
+        }
+
+    monkeypatch.setattr(mod, "_ai_pick", fake_ai)
+
+    response = client.get(
+        f"/projects/{project.id}/invoice-extraction-proposals/{proposal.id}/plan-line-suggestions"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["additional_recommended"] is True
+    assert payload["recommended"] is None
+    assert payload["ai_used"] is True
+    assert payload.get("ai_reason") == "ничего не подходит"
+
+
+def test_ai_unknown_id_is_ignored(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "true")
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+
+    _add_entry(
+        db,
+        project.id,
+        title="Оплата материалов",
+        counterparty="ООО Ромашка",
+        category="Материалы",
+        planned_amount=Decimal("1000.00"),
+    )
+    proposal = _add_proposal(
+        db,
+        project.id,
+        amount=Decimal("100.00"),
+        counterparty="ООО Неизвестный",
+        payment_purpose="Оплата по счёту без соответствия",
+    )
+    db.commit()
+
+    import app.api.invoice_plan_match as mod
+
+    def fake_ai(invoice, candidates):
+        return {
+            "plan_entry_id": 999999,
+            "confidence": 0.9,
+            "reason": "неверная строка",
+        }
+
+    monkeypatch.setattr(mod, "_ai_pick", fake_ai)
+
+    response = client.get(
+        f"/projects/{project.id}/invoice-extraction-proposals/{proposal.id}/plan-line-suggestions"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["recommended"] is None
+    assert payload["additional_recommended"] is True
+
+
+def test_word_stems_match_without_ai(world, monkeypatch):
+    monkeypatch.setenv("PLAN_MATCH_AI", "false")
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+
+    stem_entry = _add_entry(
+        db,
+        project.id,
+        title="Кондиционеры",
+        counterparty="ООО Климат",
+        category="Оборудование",
+        planned_amount=Decimal("500000.00"),
+    )
+    proposal = _add_proposal(
+        db,
+        project.id,
+        amount=Decimal("250000.00"),
+        counterparty="ООО Другой",
+        payment_purpose="поставка кондиционеров",
+    )
+    db.commit()
+
+    response = client.get(
+        f"/projects/{project.id}/invoice-extraction-proposals/{proposal.id}/plan-line-suggestions"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    rows = {row["plan_entry_id"]: row for row in payload["suggestions"]}
+    assert stem_entry.id in rows, payload
+    reasons = rows[stem_entry.id]["reasons"]
+    assert any("совпадают" in r for r in reasons), reasons

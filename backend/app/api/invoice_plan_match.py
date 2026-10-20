@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -20,6 +22,33 @@ ZERO = Decimal("0.00")
 MIN_SCORE = 30
 RECOMMENDED_SCORE = 50
 TOP_LIMIT = 5
+
+AI_BONUS = 60
+AI_MIN_CONFIDENCE = 0.6
+AI_MAX_CANDIDATES = 80
+_AI_CACHE: dict[tuple, dict | None] = {}
+
+_AI_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "plan_entry_id": {"type": ["integer", "null"]},
+        "confidence": {"type": "number"},
+        "reason": {"type": "string"},
+    },
+    "required": ["plan_entry_id", "confidence", "reason"],
+}
+
+_AI_SYSTEM_PROMPT = (
+    "Ты финансовый контролёр строительного проекта. Подбери к счёту одну строку "
+    "планового ДДС по смыслу: что покупается или за какие работы, раздел (ЭМ, АСДУ, СКТП, "
+    "АР, ПНР и т.п.), объект, контрагент, сумма. Строки плана — укрупнённые статьи, поэтому "
+    "выбирай БЛИЖАЙШУЮ по смыслу статью: например, комплектующие к автоматам и щитам — "
+    "материалы ЭМ или ЭМ Щиты; двери — АР. Если объект в счёте не указан, выбери любую "
+    "подходящую статью и скажи об этом в reason. plan_entry_id = null (это «Дополнительные "
+    "затраты») — только если счёт явно не относится ни к одной статье (другой вид затрат). "
+    "confidence — твоя уверенность от 0 до 1. reason — одно короткое предложение по-русски. "
+    "Ответ строго JSON."
+)
 
 _LEGAL_FORMS = ("ооо", "ип", "ао", "пао", "зао", "оао", "нко")
 _QUOTES_RE = re.compile(r"[\"«»'`]+")
@@ -61,7 +90,11 @@ def _inn_matches(inn: str | None, entry_text: str | None) -> bool:
 
 def _word_tokens(value: str | None) -> set[str]:
     normalized = _normalize(value)
-    return {t for t in normalized.split() if len(t) >= 4}
+    tokens: set[str] = set()
+    for t in normalized.split():
+        if len(t) >= 4:
+            tokens.add(t[:5])
+    return tokens
 
 
 def _purpose_overlap(purpose: str | None, *sources: str | None) -> bool:
@@ -85,6 +118,56 @@ def _to_decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except Exception:
         return ZERO
+
+
+def _ai_enabled() -> bool:
+    raw = os.environ.get("PLAN_MATCH_AI", "true")
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _build_ai_user_prompt(
+    invoice: dict, candidates: list[dict]
+) -> str:
+    lines: list[str] = []
+    lines.append("Счёт:")
+    lines.append(f"контрагент: {invoice.get('counterparty') or '—'}")
+    lines.append(f"назначение платежа: {invoice.get('payment_purpose') or '—'}")
+    quote = invoice.get("payment_purpose_evidence_quote")
+    if quote:
+        lines.append(f"цитата назначения: {quote}")
+    lines.append(f"сумма: {invoice.get('amount') or '—'}")
+    lines.append(f"валюта: {invoice.get('currency') or '—'}")
+    lines.append("")
+    lines.append("Строки плана:")
+    for c in candidates:
+        cid = c.get("id")
+        title = c.get("title") or ""
+        category = c.get("category") or "—"
+        cp = c.get("counterparty") or "—"
+        remaining = c.get("remaining") or "—"
+        month = c.get("month") or "—"
+        lines.append(
+            f"id={cid} | {title} | категория: {category} | контрагент: {cp} "
+            f"| остаток: {remaining} | месяц: {month}"
+        )
+    return "\n".join(lines)
+
+
+def _ai_pick(invoice: dict, candidates: list[dict]) -> dict | None:
+    try:
+        from app import gemini_analysis  # noqa: F401
+
+        if not gemini_analysis.deepseek_configured():
+            return None
+        user_prompt = _build_ai_user_prompt(invoice, candidates)
+        result = gemini_analysis._try_deepseek(
+            _AI_SYSTEM_PROMPT, user_prompt, _AI_SCHEMA
+        )
+        if isinstance(result, dict):
+            return result
+        return None
+    except Exception:
+        return None
 
 
 def _extract_inn(proposal: InvoiceExtractionProposal) -> str | None:
@@ -143,6 +226,7 @@ def get_plan_line_suggestions(
     invoice_contract_id = getattr(proposal, "contract_id", None)
     invoice_inn = _extract_inn(proposal)
 
+    entry_meta: dict[int, dict[str, Any]] = {}
     suggestions: list[dict[str, Any]] = []
     for entry in entries:
         planned_amount = _to_decimal(entry.planned_amount)
@@ -180,6 +264,18 @@ def get_plan_line_suggestions(
             score += 10
             reasons.append("Совпадает договор")
 
+        entry_meta[entry.id] = {
+            "plan_entry_id": entry.id,
+            "title": entry.title,
+            "counterparty": entry.counterparty,
+            "category": entry.category,
+            "schedule_item_id": entry.schedule_item_id,
+            "planned_amount": _money(planned_amount),
+            "remaining": _money(remaining),
+            "planned_date": entry.planned_date,
+            "remaining_raw": remaining,
+        }
+
         if score < MIN_SCORE:
             continue
 
@@ -197,6 +293,80 @@ def get_plan_line_suggestions(
             }
         )
 
+    ai_used = False
+    ai_reason: str | None = None
+
+    if _ai_enabled():
+        ai_candidates = _select_ai_candidates(entry_meta, suggestions, invoice_amount)
+        cache_key = (
+            proposal.id,
+            str(invoice_amount),
+            tuple(sorted(c["id"] for c in ai_candidates)),
+        )
+        if cache_key in _AI_CACHE:
+            ai_result = _AI_CACHE[cache_key]
+        else:
+            invoice_payload = {
+                "counterparty": invoice_cp,
+                "payment_purpose": invoice_purpose,
+                "payment_purpose_evidence_quote": getattr(
+                    proposal, "payment_purpose_evidence_quote", None
+                ),
+                "amount": _money(invoice_amount),
+                "currency": proposal.currency,
+            }
+            ai_result = _ai_pick(invoice_payload, ai_candidates)
+            _AI_CACHE[cache_key] = ai_result
+
+        if isinstance(ai_result, dict):
+            ai_used = True
+            try:
+                picked_id = ai_result.get("plan_entry_id")
+                confidence = float(ai_result.get("confidence") or 0.0)
+            except Exception:
+                picked_id = None
+                confidence = 0.0
+            reason_text = str(ai_result.get("reason") or "")
+
+            candidate_ids = {c["id"] for c in ai_candidates}
+
+            if (
+                picked_id is not None
+                and confidence >= AI_MIN_CONFIDENCE
+                and picked_id in candidate_ids
+            ):
+                target = None
+                for row in suggestions:
+                    if row["plan_entry_id"] == picked_id:
+                        target = row
+                        break
+                if target is None:
+                    meta = entry_meta.get(picked_id)
+                    if meta is not None:
+                        target = {
+                            "plan_entry_id": meta["plan_entry_id"],
+                            "title": meta["title"],
+                            "counterparty": meta["counterparty"],
+                            "category": meta["category"],
+                            "schedule_item_id": meta["schedule_item_id"],
+                            "planned_amount": meta["planned_amount"],
+                            "remaining": meta["remaining"],
+                            "score": AI_BONUS,
+                            "reasons": [],
+                        }
+                        suggestions.append(target)
+                if target is not None:
+                    if target["score"] < AI_BONUS:
+                        target["score"] = AI_BONUS
+                    else:
+                        target["score"] += AI_BONUS
+                    target["reasons"].append(f"По смыслу: {reason_text}")
+            elif (
+                picked_id is None
+                and confidence >= AI_MIN_CONFIDENCE
+            ):
+                ai_reason = reason_text
+
     suggestions.sort(key=lambda row: (-row["score"], row["plan_entry_id"]))
     top = suggestions[:TOP_LIMIT]
 
@@ -208,12 +378,78 @@ def get_plan_line_suggestions(
 
     best_score = top[0]["score"] if top else 0
     additional_recommended = best_score < RECOMMENDED_SCORE
+    if ai_reason is not None and best_score < RECOMMENDED_SCORE:
+        additional_recommended = True
 
-    return {
+    result: dict[str, Any] = {
         "suggestions": top,
         "recommended": recommended,
         "additional_recommended": additional_recommended,
+        "ai_used": ai_used,
     }
+    if ai_reason is not None:
+        result["ai_reason"] = ai_reason
+    return result
+
+
+def _select_ai_candidates(
+    entry_meta: dict[int, dict[str, Any]],
+    suggestions: list[dict[str, Any]],
+    invoice_amount: Decimal,
+) -> list[dict[str, Any]]:
+    scores_by_id = {row["plan_entry_id"]: row["score"] for row in suggestions}
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for meta in entry_meta.values():
+        remaining_raw = meta["remaining_raw"]
+        if remaining_raw <= ZERO:
+            continue
+        key = _normalize(meta["title"])
+        groups.setdefault(key, []).append(meta)
+
+    selected: list[dict[str, Any]] = []
+    for group in groups.values():
+        covering = [m for m in group if m["remaining_raw"] >= invoice_amount]
+        if covering:
+            covering.sort(
+                key=lambda m: (
+                    m["planned_date"] or date.min,
+                    m["plan_entry_id"],
+                )
+            )
+            chosen = covering[0]
+        else:
+            chosen = max(
+                group, key=lambda m: (m["remaining_raw"], -m["plan_entry_id"])
+            )
+        selected.append(chosen)
+
+    if len(selected) > AI_MAX_CANDIDATES:
+        selected.sort(
+            key=lambda m: (
+                -scores_by_id.get(m["plan_entry_id"], 0),
+                m["plan_entry_id"],
+            )
+        )
+        selected = selected[:AI_MAX_CANDIDATES]
+
+    def _month(m: dict[str, Any]) -> str | None:
+        pd = m.get("planned_date")
+        if pd is None:
+            return None
+        return f"{pd.year:04d}-{pd.month:02d}"
+
+    return [
+        {
+            "id": m["plan_entry_id"],
+            "title": m["title"],
+            "category": m["category"],
+            "counterparty": m["counterparty"],
+            "remaining": m["remaining"],
+            "month": _month(m),
+        }
+        for m in selected
+    ]
 
 
 def _collect_invoiced_totals(
