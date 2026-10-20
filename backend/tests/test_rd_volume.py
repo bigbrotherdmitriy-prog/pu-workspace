@@ -121,3 +121,21 @@ def test_volume_summary_includes_main_set_and_references():
     refs = {r["code"] for r in summary["referenced_volumes"]}
     assert "Д/ФНС.2024-ЭМ" in refs
     assert len(summary["norms"]) == 3
+
+
+STAMP_TEXT = (
+    "П2200175-11-021-РЗ Лист 1 Общие данные "
+    "П2200175-11-021-РЗ Лист 2 Схема "
+    "ГОСТ 2.104-2006 Правила оформления "
+)
+
+
+def test_volume_code_generic_with_stamps():
+    assert parse_volume_code(STAMP_TEXT) == "П2200175-11-021-РЗ"
+    assert section_of(parse_volume_code(STAMP_TEXT) or "") == "РЗА"
+
+
+def test_section_of_new_groups():
+    assert section_of("П2200171-11-027-КХ") == "КХ"
+    assert section_of("П2200171-11-023-УА") == "АСУ ТП"
+    assert section_of("Х-11-ZZZ") == "ZZZ"

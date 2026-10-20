@@ -1,8 +1,12 @@
 import re
 
 _VOLUME_RE = re.compile(
-    r"[А-ЯЁA-Z0-9][А-ЯЁA-Z0-9./_-]{2,40}-(ЭМ|ЭО|ЭС|ЭН|АР|АС|КЖ|КМ|ОВ|ВК|СС|АСДУ|АК|АТХ|СКТП|ТХ|ПБ|ПТ|ГП|ПОС|СКС|ОД|ПЗ)\b"
+    # «Д/ФНС.2024-ЭМ», «П2200175-11-021-РЗ», «123-45-ИОС1.1»: segments joined by «-»,
+    # the last one is the section code; the code must contain a digit somewhere.
+    r"(?<![\w/])([А-ЯЁA-Z0-9][А-ЯЁA-Z0-9./_]*(?:-[А-ЯЁA-Z0-9./_]+){0,6}-(?P<sec>[А-ЯЁA-Z]{2,5}\d?(?:\.\d{1,2})?))(?![\w])"
 )
+
+_NORM_PREFIXES = ("ГОСТ", "СП", "СНиП", "ТУ", "СТО")
 
 _SHEET_RE = re.compile(
     r"(?P<code>[А-ЯЁA-Z0-9][А-ЯЁA-Z0-9./_-]{2,40}-[А-ЯЁA-Z]{2,5}(?:[.-][А-ЯЁA-Z]{1,4})?)(?:\s*л\.?\s*(?P<sheet>\d{1,3}))?"
@@ -28,36 +32,87 @@ _CELL_STOP_MARKERS = (
 def parse_volume_code(text: str) -> str | None:
     if not text:
         return None
-    match = _VOLUME_RE.search(text)
-    if not match:
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for match in _VOLUME_RE.finditer(text):
+        code = match.group(1)
+        upper = code.upper()
+        if any(upper.startswith(prefix) for prefix in _NORM_PREFIXES):
+            continue
+        if not any(ch.isdigit() for ch in code[: len(code) - len(match.group("sec"))]):
+            continue
+        if code not in counts:
+            counts[code] = 0
+            order.append(code)
+        counts[code] += 1
+    if not counts:
         return None
-    return match.group(0)
+    best: str | None = None
+    best_count = -1
+    for code in order:
+        cnt = counts[code]
+        if cnt > best_count:
+            best = code
+            best_count = cnt
+    return best
+
+
+_SECTION_MAP: dict[str, str] = {}
+for _codes, _target in (
+    (("ЭМ", "ЭО", "ЭС", "ЭН"), "ЭМ"),
+    (("АР",), "АР"),
+    (("АС", "КЖ", "КМ"), "КЖ"),
+    (("ОВ", "СКТП"), "ОВиК"),
+    (("АСДУ", "АК", "АТХ"), "АСДУ"),
+    (("РЗ", "РЗА", "РЗиА"), "РЗА"),
+    (("УА", "АСУ", "АСУТП", "ТМ", "ТМС"), "АСУ ТП"),
+    (("КХ", "КЖЭ"), "КХ"),
+    (("ОРУ", "ЗРУ", "КРУ", "КРУН", "ПС", "ЭТ", "ТП"), "ЭТ"),
+    (("СС", "СКС", "ВОЛС"), "СС"),
+    (("ПБ", "АПС", "АПТ", "СОУЭ"), "ПБ"),
+    (("ВК",), "ВК"),
+    (("ТХ",), "ТХ"),
+    (("ПТ",), "ПТ"),
+    (("ГП",), "ГП"),
+    (("ПОС",), "ПОС"),
+    (("ОД",), "ОД"),
+    (("ПЗ",), "ПЗ"),
+):
+    for _code in _codes:
+        _SECTION_MAP[_code.upper()] = _target
+
+_SECTION_KEYS_SORTED = sorted(_SECTION_MAP, key=len, reverse=True)
+
+
+def _last_segment(code: str) -> str | None:
+    if not code:
+        return None
+    parts = code.split("-")
+    if len(parts) < 2:
+        return None
+    seg = parts[-1]
+    seg = re.sub(r"[0-9.]+$", "", seg)
+    return seg.strip() or None
 
 
 def section_of(code: str) -> str | None:
     if not code:
         return None
-    upper = code.upper()
-    for section in ("АСДУ", "СКТП"):
-        if f"-{section}" in upper:
-            if section == "АСДУ":
-                return "АСДУ"
-            return "ОВиК"
-    for section in ("ЭМ", "ЭО", "ЭС", "ЭН"):
-        if f"-{section}" in upper:
-            return "ЭМ"
-    if "-АР" in upper:
-        return "АР"
-    for section in ("АС", "КЖ", "КМ"):
-        if f"-{section}" in upper:
-            return "КЖ"
-    for section in ("ОВ",):
-        if f"-{section}" in upper:
-            return "ОВиК"
-    for section in ("АК", "АТХ"):
-        if f"-{section}" in upper:
-            return "АСДУ"
-    return None
+    seg = _last_segment(code)
+    if not seg:
+        return None
+    upper = seg.upper()
+    # ИОС with optional decimal suffix, e.g. ИОС1.1
+    ios_match = re.match(r"^ИОС\d?(?:\.\d{1,2})?$", upper)
+    if ios_match:
+        return "ИОС"
+    if upper in _SECTION_MAP:
+        return _SECTION_MAP[upper]
+    # Prefix fallback for longer codes like АСУТП1
+    for key in _SECTION_KEYS_SORTED:
+        if upper.startswith(key):
+            return _SECTION_MAP[key]
+    return seg
 
 
 def _classify(title: str) -> str:
@@ -93,12 +148,27 @@ def _clean_title(raw: str) -> str:
 def parse_sheet_list(text: str, volume_code: str | None = None) -> list[dict]:
     if not text:
         return []
-    matches = list(_SHEET_RE.finditer(text))
+    if volume_code:
+        sheet_re = re.compile(
+            r"(?P<code>"
+            + re.escape(volume_code)
+            + r"(?:[.-][А-ЯЁA-Z]{1,4})?"
+            # other volumes (from «Состав проекта») so they land in referenced_volumes
+            + r"|(?<![\w/])[А-ЯЁA-Z0-9][А-ЯЁA-Z0-9./_]*(?:-[А-ЯЁA-Z0-9./_]+){0,6}-[А-ЯЁA-Z]{2,5}\d?(?:\.\d{1,2})?(?![\w])"
+            + r")(?:\s*(?:л\.?\s*(?P<sheet_l>\d{1,3})|Лист\s*(?P<sheet_w>\d{1,3})))?"
+        )
+    else:
+        sheet_re = _SHEET_RE
+    matches = list(sheet_re.finditer(text))
     results: list[dict] = []
     seen: set[tuple[str, int | None]] = set()
     for i, match in enumerate(matches):
         code = match.group("code")
-        sheet_raw = match.group("sheet")
+        groups = match.groupdict()
+        if "sheet_l" in groups:
+            sheet_raw = groups.get("sheet_l") or groups.get("sheet_w")
+        else:
+            sheet_raw = groups.get("sheet")
         sheet: int | None = int(sheet_raw) if sheet_raw else None
         start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
