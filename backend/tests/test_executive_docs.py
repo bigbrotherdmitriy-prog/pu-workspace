@@ -113,5 +113,20 @@ def test_normative_items_are_recommended_when_tz_has_its_own_list(monkeypatch):
     monkeypatch.setattr(executive_docs, "extract_id_requirements_ai", lambda _text: None)
     text = "Перечень исполнительной документации Журнал производства работ; Технический отчет испытаний; Гарантийные обязательства"
     items = executive_docs.build_requirements(text, ["ЭМ"])
-    assert all(i["required_if_applicable"] for i in items if i["source"] == "norm")
+    assert all(i["required_if_applicable"] for i in items if i["source"] == "norm" and i["doc_kind"] != "order")
     assert all(not i["required_if_applicable"] for i in items if i["source"] == "tz")
+
+
+def test_classify_order():
+    assert ed.classify_file("Общее", "Приказ о назначении ответственного ООО Ромашка.pdf")["kind"] == "order"
+
+
+def test_build_requirements_always_required_orders(monkeypatch):
+    from app import executive_docs
+
+    monkeypatch.setattr(executive_docs, "extract_id_requirements_ai", lambda _text: None)
+    text = "Перечень исполнительной документации Журнал производства работ; Технический отчет испытаний; Гарантийные обязательства"
+    items = executive_docs.build_requirements(text, ["ЭМ"])
+    orders = [i for i in items if i["doc_kind"] == "order"]
+    assert len(orders) == 2
+    assert all(i["required_if_applicable"] is False for i in orders)

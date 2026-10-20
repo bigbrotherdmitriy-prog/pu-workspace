@@ -8,7 +8,7 @@ KINDS = (
     "aosr", "act", "protocol", "passport", "certificate", "declaration",
     "refusal_letter", "scheme", "drawing_source", "journal", "register", "toir",
     "report", "photo", "video", "manual", "specification", "statement", "cover",
-    "other", "service",
+    "order", "other", "service",
 )
 
 _SERVICE_EXTS = (".bak", ".dst", ".dwl", ".dwl2", ".tmp")
@@ -80,6 +80,8 @@ def _detect_kind(path: str, name: str, mime_type: str | None) -> str:
         return "drawing_source"
     if ext in _VIDEO_EXTS:
         return "video"
+    if "приказ" in text or "распоряжени" in text:
+        return "order"
     if "аоср" in text or ("освидетельствован" in text and "скрыт" in text):
         return "aosr"
     if "протокол" in text:
@@ -148,6 +150,7 @@ def draft_issues(text: str, mime_type: str | None, name: str) -> list[str]:
 
 
 _CONTAINED_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("order", ("приказ", "распоряжение")),
     ("aosr", ("акт освидетельствования скрытых работ",)),
     ("act", (
         "акт технической готовности",
@@ -335,6 +338,12 @@ def extract_id_requirements_ai(text: str) -> list[dict] | None:
     return result
 
 
+ALWAYS_REQUIRED: list[dict] = [
+    {"title": "Приказ (распорядительный документ) о назначении ответственных лиц со стороны заказчика", "doc_kind": "order", "norm_ref": "Приказ Минстроя России № 344/пр (представители в актах освидетельствования)"},
+    {"title": "Приказ (распорядительный документ) о назначении ответственных лиц со стороны подрядчика", "doc_kind": "order", "norm_ref": "Приказ Минстроя России № 344/пр (представители в актах освидетельствования)"},
+]
+
+
 NORM_SETS: dict[str, list[dict]] = {
     "Общее": [
         {"title": "Общий журнал работ", "doc_kind": "journal", "norm_ref": "Приказ Минстроя России № 1026/пр"},
@@ -427,6 +436,11 @@ def build_requirements(text: str, sections: list[str]) -> list[dict]:
         item = _empty_item(norm["title"], norm["doc_kind"], "Общее", "norm", norm["norm_ref"])
         item["required_if_applicable"] = tz_has_list
         result.append(item)
+    if not any(r["doc_kind"] == "order" for r in result):
+        for norm in ALWAYS_REQUIRED:
+            item = _empty_item(norm["title"], norm["doc_kind"], "Общее", "norm", norm["norm_ref"])
+            item["required_if_applicable"] = False
+            result.append(item)
     return result
 
 
@@ -642,12 +656,26 @@ def _sections_compatible(req_section: str | None, file_section: str | None) -> b
 
 def match_requirements(requirements, files) -> list[dict]:
     result: list[dict] = []
+    order_used: set[int] = set()
     for req in requirements:
-        candidates = [
-            f for f in files
-            if f.kind == req.doc_kind or req.doc_kind in (f.contained_kinds or [])
-        ]
-        candidates = [f for f in candidates if _sections_compatible(req.section, f.section)]
+        if req.doc_kind == "order":
+            candidates = [
+                f for f in files
+                if (f.kind == "order" or "order" in (f.contained_kinds or []))
+                and id(f) not in order_used
+                and _sections_compatible(req.section, f.section)
+            ]
+            if candidates:
+                order_used.add(id(candidates[0]))
+                candidates = [candidates[0]]
+            else:
+                candidates = []
+        else:
+            candidates = [
+                f for f in files
+                if f.kind == req.doc_kind or req.doc_kind in (f.contained_kinds or [])
+            ]
+            candidates = [f for f in candidates if _sections_compatible(req.section, f.section)]
         required = not bool(req.required_if_applicable)
         if not candidates:
             status = "missing"

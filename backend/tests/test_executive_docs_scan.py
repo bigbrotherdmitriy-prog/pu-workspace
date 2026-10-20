@@ -249,6 +249,46 @@ def test_match_requirements_contained_kinds(world):
     assert matches[0]["status"] == "present"
 
 
+def test_match_requirements_orders_distributed_one_to_one(world):
+    db = world["db"]
+    project = world["project"]
+
+    source = IdSource(
+        project_id=project.id, object_name="Объект А",
+        provider="google_drive", folder_id="root",
+    )
+    db.add(source)
+    db.flush()
+
+    order1 = _mk_req(
+        db, project.id, title="Приказ заказчик", doc_kind="order", section="Общее",
+        required_if_applicable=False, object_name="Объект А",
+    )
+    order2 = _mk_req(
+        db, project.id, title="Приказ подрядчик", doc_kind="order", section="Общее",
+        required_if_applicable=False, object_name="Объект А",
+    )
+    _mk_file(
+        db, project.id, source.id, external_id="o1",
+        path="Общее/Приказ.docx", name="Приказ.docx", kind="order", section="Общее",
+    )
+    db.commit()
+
+    matches = ed.match_requirements([order1, order2], db.query(IdFile).all())
+    assert matches[0]["status"] == "present"
+    assert matches[1]["status"] == "missing"
+
+    _mk_file(
+        db, project.id, source.id, external_id="o2",
+        path="Общее/Приказ2.docx", name="Приказ2.docx", kind="order", section="Общее",
+    )
+    db.commit()
+
+    matches = ed.match_requirements([order1, order2], db.query(IdFile).all())
+    assert matches[0]["status"] == "present"
+    assert matches[1]["status"] == "present"
+
+
 def test_scan_source_pdf_contained_kinds(world, monkeypatch):
     db = world["db"]
     project = world["project"]
