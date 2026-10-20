@@ -112,6 +112,7 @@ const ObligationsModule = lazy(() => import("./modules/obligations/ObligationsMo
 const MeetingsModule = lazy(() => import("./modules/meetings/MeetingsModule").then((m) => ({ default: m.MeetingsModule })));
 const ContactsModule = lazy(() => import("./modules/contacts/ContactsModule").then((m) => ({ default: m.ContactsModule })));
 const AnalyticsModule = lazy(() => import("./modules/analytics/AnalyticsModule").then((m) => ({ default: m.AnalyticsModule })));
+const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const SettingsModule = lazy(() => import("./modules/settings/SettingsModule").then((m) => ({ default: m.SettingsModule })));
 const TasksModule = lazy(() => import("./modules/tasks/TasksModule").then((m) => ({ default: m.TasksModule })));
 const GovernanceModule = lazy(() => import("./modules/governance/GovernanceModule").then((m) => ({ default: m.GovernanceModule })));
@@ -348,7 +349,7 @@ const navigationGroups = [
   ] },
   { label: "Контроль", items: [
     [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
-    [CalendarRange, "ГПР и ДДС"], [BarChart3, "Аналитика"],
+    [CalendarRange, "ГПР и ДДС"], [BarChart3, "Портфель"], [BarChart3, "Аналитика"],
     [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
   ] },
   { label: "Система", items: [
@@ -3727,6 +3728,7 @@ export function App() {
           }
         }}
       />
+      {active === "Портфель" && <PortfolioModule onOpenProject={(id) => { void activateProject(id); setActive("ГПР и ДДС"); }} />}
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (
         <GprDdsContainer
