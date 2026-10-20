@@ -1,4 +1,11 @@
-from app.rd_volume import parse_sheet_list, parse_volume_code, section_of, volume_summary
+from app.rd_volume import (
+    parse_main_set_sheets,
+    parse_referenced_norms,
+    parse_sheet_list,
+    parse_volume_code,
+    section_of,
+    volume_summary,
+)
 
 
 TEXT = (
@@ -55,3 +62,62 @@ def test_volume_summary_counts():
 def test_section_of_returns_expected_groups():
     assert section_of("Д/ФНС.2024-АР") == "АР"
     assert section_of("X-СКТП") == "ОВиК"
+
+
+AR_TEXT = (
+    "Ведомость основных комплектов рабочих чертежей Обозначение Наименование Примечание "
+    "Пояснительная записка Д/ФНС.2024-АР Архитектурные решения "
+    "Д/ФНС.2024-ЭМ Система электроснабжение "
+    "Ведомость ссылочных и прилагаемых документов Обозначение Наименование Примечание "
+    "Ссылочные документы "
+    "СНиП 21.01-97* Пожарная безопасность зданий и сооружений "
+    "СП 131.13330.2020 Строительная климатология "
+    "СП 68.13330.2017 Приемка в эксплуатацию законченных строительством объектов. "
+    "Ведомость рабочих чертежей основного комплекта Лист Наименование Примечание "
+    "Общие данные Лист №1-11 Д/ФНС.2024-АР Дверные проемы Лист №12 "
+    "Инв. № подл. Подпись и дата Взам. инв. № Д/ФНС.2024-АР"
+)
+
+
+def test_main_set_sheets_parsed():
+    entries = parse_main_set_sheets(AR_TEXT, "Д/ФНС.2024-АР")
+    common = next(e for e in entries if e["sheet"] == 1)
+    assert common["sheet_to"] == 11
+    assert common["title"] == "Общие данные"
+    assert common["kind"] == "text"
+    doors = next(e for e in entries if e["sheet"] == 12)
+    assert doors["code"] == "Д/ФНС.2024-АР"
+    assert doors["sheet_to"] is None
+    assert doors["title"] == "Дверные проемы"
+    assert doors["kind"] == "drawing"
+
+
+def test_referenced_norms_parsed():
+    norms = parse_referenced_norms(AR_TEXT)
+    assert len(norms) == 3
+    assert norms[1] == {"code": "СП 131.13330.2020", "title": "Строительная климатология"}
+
+
+def test_volume_summary_includes_main_set_and_references():
+    summary = volume_summary(AR_TEXT)
+    assert summary["volume_code"] == "Д/ФНС.2024-АР"
+    sheets = summary["sheets"]
+    target = {
+        "code": "Д/ФНС.2024-АР",
+        "sheet": 12,
+        "sheet_to": None,
+        "title": "Дверные проемы",
+        "kind": "drawing",
+    }
+    assert target in sheets
+    common = {
+        "code": "Д/ФНС.2024-АР",
+        "sheet": 1,
+        "sheet_to": 11,
+        "title": "Общие данные",
+        "kind": "text",
+    }
+    assert common in sheets
+    refs = {r["code"] for r in summary["referenced_volumes"]}
+    assert "Д/ФНС.2024-ЭМ" in refs
+    assert len(summary["norms"]) == 3
