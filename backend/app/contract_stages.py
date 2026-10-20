@@ -255,9 +255,9 @@ def _sum_amounts(stages: list[dict]) -> Decimal:
 
 def renumber_in_order(stages: list[dict]) -> tuple[list[dict], list[str]]:
     """Stages go in document order; a typo in the printed numbers (3 → 5) must not
-    leave a hole. Each object is renumbered 1..N; every gap or repeat becomes a warning."""
-    warnings: list[str] = []
+    leave a hole. Each object is renumbered 1..N with one warning per object."""
     counters: dict[str | None, int] = {}
+    changed: dict[str | None, list[tuple[int, int]]] = {}
     result: list[dict] = []
     for stage in stages:
         obj = stage.get("object_name")
@@ -265,11 +265,16 @@ def renumber_in_order(stages: list[dict]) -> tuple[list[dict], list[str]]:
         ordinal = counters[obj]
         printed = stage.get("stage_number")
         if printed != ordinal:
-            where = f" ({obj})" if obj else ""
-            warnings.append(
-                f"В документе{where} этап напечатан как «{printed}-й», по порядку это {ordinal}-й — принят номер {ordinal}."
-            )
+            changed.setdefault(obj, []).append((printed, ordinal))
         result.append({**stage, "stage_number": ordinal})
+    warnings = []
+    for obj, pairs in changed.items():
+        where = f" ({obj})" if obj else ""
+        first_printed, first_ordinal = pairs[0]
+        last_printed, last_ordinal = pairs[-1]
+        span = (f"«{first_printed}-й» … «{last_printed}-й» приняты как {first_ordinal}–{last_ordinal}"
+                if len(pairs) > 1 else f"«{first_printed}-й» принят как {first_ordinal}-й")
+        warnings.append(f"В документе{where} нумерация этапов не по порядку: {span}.")
     return result, warnings
 
 

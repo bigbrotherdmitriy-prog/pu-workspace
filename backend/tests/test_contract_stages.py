@@ -186,5 +186,4 @@ def test_printed_numbering_gap_is_renumbered_in_order_with_warning():
     )
     stages, warnings = renumber_in_order(parse_stages_regex(text))
     assert [s["stage_number"] for s in stages] == [1, 2, 3]
-    assert len(warnings) == 3
-    assert "«5-й»" in warnings[1] and "2-й" in warnings[1]
+    assert warnings == ["В документе (ГОРОДЕЦ) нумерация этапов не по порядку: «3-й» … «6-й» приняты как 1–3."]
