@@ -1,6 +1,7 @@
 from app.models.project import Project
 from app.models.user import User
 from app.models.project_member import ProjectMember
+from app.models.dds_plan_version import DdsPlanVersion
 from app.models.project_service_settings import ProjectServiceSettings
 from app.models.drive_connection import DriveConnection
 from app.models.document import Document
@@ -143,6 +144,7 @@ __all__ = [
     "UserDeviceToken",
     "TenantWorkspace",
     "TenantWorkspaceMember",
+    "DdsPlanVersion",
 ]
 
 # Registers the Notification -> push outbox hook wherever models are loaded
