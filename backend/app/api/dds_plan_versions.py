@@ -42,10 +42,9 @@ def _rows_for(db: Session, project_id: int, contract_id: int | None) -> list[dic
         .where(~CashFlowEntry.status.in_(EXCLUDED_STATUSES))
         .where(CashFlowEntry.planned_amount > 0)
     )
+    # Without a contract the version is a snapshot of the whole project plan.
     if contract_id is not None:
         stmt = stmt.where(CashFlowEntry.contract_id == contract_id)
-    else:
-        stmt = stmt.where(CashFlowEntry.contract_id.is_(None))
     stmt = stmt.order_by(CashFlowEntry.id)
     rows: list[dict] = []
     for entry in db.scalars(stmt).all():
