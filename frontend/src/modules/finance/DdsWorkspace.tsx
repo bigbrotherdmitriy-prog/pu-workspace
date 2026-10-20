@@ -86,6 +86,9 @@ function groupCalendarRows(rows: CashRow[], planRows: CashRow[] = rows): Calenda
   const groups = new Map<string, CalendarRowGroup>();
   const planById = new Map(planRows.map((row) => [row.id, row]));
   rows.forEach((row) => {
+    // Invoices and payments without a plan of their own (against a plan line or
+    // «Дополнительные затраты») are facts: not in the plan grid — «Детализация» shows them.
+    if (Number(row.planned_amount) === 0 && (row.plan_entry_id || Number(row.invoiced_amount || 0) > 0 || Number(row.actual_amount || 0) > 0)) return;
     // A confirmed invoice is a fact against its plan line: show it under that
     // article, not as its own article with a zero plan.
     const article = (row.plan_entry_id && planById.get(row.plan_entry_id)) || row;
