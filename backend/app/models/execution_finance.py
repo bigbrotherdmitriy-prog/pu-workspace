@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -413,10 +413,16 @@ class AcceptanceAct(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True)
+    stage_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contract_stages.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     budget_line_id: Mapped[int | None] = mapped_column(
         ForeignKey("budget_lines.id", ondelete="SET NULL"), nullable=True, index=True,
     )
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True)
+    cash_flow_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cash_flow_entries.id", ondelete="SET NULL"), nullable=True,
+    )
     source_document_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("document_versions.id", ondelete="RESTRICT"), nullable=True, index=True,
     )
@@ -425,6 +431,9 @@ class AcceptanceAct(Base):
     title: Mapped[str] = mapped_column(String(500))
     act_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 5), nullable=True)
+    vat_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    generated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
     status: Mapped[str] = mapped_column(String(30), default="proposed", index=True)
     source_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
