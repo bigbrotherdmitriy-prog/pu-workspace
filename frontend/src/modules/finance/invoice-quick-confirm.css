@@ -82,3 +82,5 @@
     border-radius: 12px 12px 0 0;
   }
 }
+
+.iqc-warning { color: #c0392b; font-weight: 600; }

@@ -490,3 +490,18 @@ def test_get_invoice_extraction_returns_proposal_for_push_card(db_session, user_
     assert loaded["status"] == "proposed"
     with pytest.raises(finance_api.HTTPException):
         finance_api.get_invoice_extraction(999999, db_session, user)
+
+
+def test_additional_cost_invoice_gets_a_contract_without_asking(db_session, user_factory, monkeypatch):
+    user, project, document, _version = _world(db_session, user_factory)
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, None) is None
+    _control_chain(db_session, user, project)
+    other = Contract(project_id=project.id, number="SUB-2", title="Sub", counterparty="ООО «Бетон»", status="active")
+    db_session.add(other); db_session.flush()
+    only_contract = db_session.query(Contract).filter_by(number="INV-1").one()
+    # same counterparty wins, quotes and legal form ignored
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, 'ООО "Бетон"') == other.id
+    # no counterparty match and no plan rows: two contracts -> cannot guess
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, "ИП Иванов") is None
+    db_session.delete(other); db_session.flush()
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, "ИП Иванов") == only_contract.id

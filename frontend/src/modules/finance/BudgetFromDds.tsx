@@ -338,7 +338,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
         const label = `Счёт: ${invoice.title}${invoice.counterparty ? ` · ${invoice.counterparty}` : ""}`;
         return <Fragment key={`invoice-${invoice.entry_id}`}>
           <tr className="budget-from-dds-counterparty budget-from-dds-invoice">
-            <td colSpan={2}>{label}</td>
+            <td colSpan={2}><span className="budget-from-dds-invoice-label" title={label}>{label}</span></td>
             <td className="money">—</td>
             <td className="money">{fmt(invoice.invoiced)}</td>
             <td className="money">{fmt(invoice.paid)}</td>

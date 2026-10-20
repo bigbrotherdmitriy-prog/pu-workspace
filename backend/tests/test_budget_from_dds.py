@@ -516,3 +516,19 @@ def test_record_payment_exceeding_contract_amount(world):
 
     # Reset second to unpaid to test the limit properly.
     db.rollback()
+
+
+def test_part_paid_invoice_is_shown_as_one_invoice():
+    from app.api.budget_from_dds import _merge_invoice_parts
+
+    rows = [
+        {"entry_id": 255, "title": "Счёт № 12", "counterparty": "ООО Э", "invoiced": "96630.98", "paid": "96630.98",
+         "remaining_to_pay": "0.00", "planned_date": "2026-01-21", "actual_date": "2026-10-20", "status": "paid", "document_id": 7},
+        {"entry_id": 256, "title": "Счёт № 12 — остаток", "counterparty": "ООО Э", "invoiced": "24157.75", "paid": "0.00",
+         "remaining_to_pay": "24157.75", "planned_date": "2026-01-21", "actual_date": None, "status": "approved", "document_id": 7},
+    ]
+    merged = _merge_invoice_parts(rows)
+    assert len(merged) == 1
+    one = merged[0]
+    assert (one["entry_id"], one["title"], one["invoiced"], one["paid"], one["remaining_to_pay"], one["status"]) == (
+        256, "Счёт № 12", "120788.73", "96630.98", "24157.75", "partially_paid")

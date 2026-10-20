@@ -146,6 +146,13 @@ export function InvoiceQuickConfirm({
                   <option value="additional">Дополнительные затраты (вне плана)</option>
                 </select>
                 {hint ? <div className="iqc-hint">{hint}</div> : null}
+                {(() => {
+                  const chosen = suggestions.suggestions.find((s) => String(s.plan_entry_id) === choice);
+                  const over = chosen ? Number(proposal.amount || 0) - Number(chosen.remaining || 0) : 0;
+                  return chosen && over > 0
+                    ? <div className="iqc-hint iqc-warning">Счёт больше остатка статьи на {formatMoney(over)} ₽ — статья уйдёт в перерасход.</div>
+                    : null;
+                })()}
               </div>
             ) : null}
 

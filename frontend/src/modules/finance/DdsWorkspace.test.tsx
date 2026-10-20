@@ -261,6 +261,15 @@ describe("DdsWorkspace", () => {
     expect(screen.getAllByText("АР", { exact: true })).toHaveLength(1);
   });
 
+  it("keeps an additional-cost invoice (no plan of its own) out of the plan grid", () => {
+    const withExtra = { ...finance, cash_flow: [
+      finance.cash_flow[0],
+      { ...finance.cash_flow[1], id: 70, title: "Доставка крана", planned_date: "2026-02-10", planned_amount: 0, invoiced_amount: 50000 },
+    ] } as FinanceOverview;
+    render(<DdsWorkspace finance={withExtra} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+    expect(screen.queryByText("Доставка крана", { exact: true })).not.toBeInTheDocument();
+  });
+
   it("edits, moves, copies and undoes only a proposed plan cell", async () => {
     const onMutatePlan = vi.fn().mockResolvedValue({ mutation_id: 81 });
     const onUndoPlanMutation = vi.fn().mockResolvedValue(undefined);
