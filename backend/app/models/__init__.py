@@ -64,7 +64,7 @@ from app.models.v54_provider_action import (
 )
 from app.models.mobile_sync import MobileSyncCommand, MobileSyncConflict
 from app.models.workspace_tenant import TenantWorkspace, TenantWorkspaceMember
-from app.models.executive_docs import IdFile, IdRequirement
+from app.models.executive_docs import IdFile, IdRequirement, IdSource
 
 __all__ = [
     "Project",
@@ -150,6 +150,7 @@ __all__ = [
     "DdsPlanVersion",
     "IdRequirement",
     "IdFile",
+    "IdSource",
 ]
 
 # Registers the Notification -> push outbox hook wherever models are loaded

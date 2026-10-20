@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 
 KINDS = (
     "aosr", "act", "protocol", "passport", "certificate", "declaration",
@@ -389,3 +390,356 @@ def build_requirements(text: str, sections: list[str]) -> list[dict]:
         item["required_if_applicable"] = tz_has_list
         result.append(item)
     return result
+
+
+def build_tree_paths(items) -> dict[str, str]:
+    """Return {id: "a/b/name"} for each item, paths relative to tree roots.
+
+    Roots are items whose parent_id is not the id of any other item in the
+    list. Children of missing parents are treated as roots as well."""
+    by_id: dict[str, object] = {}
+    for it in items:
+        iid = getattr(it, "id", None)
+        if iid is None:
+            continue
+        by_id[str(iid)] = it
+    paths: dict[str, str] = {}
+    in_progress: set[str] = set()
+
+    def path_of(iid: str) -> str:
+        if iid in paths:
+            return paths[iid]
+        it = by_id.get(iid)
+        if it is None:
+            return ""
+        if iid in in_progress:
+            return getattr(it, "name", "") or ""
+        in_progress.add(iid)
+        name = getattr(it, "name", "") or ""
+        parent = getattr(it, "parent_id", None)
+        parent_key = str(parent) if parent is not None else ""
+        if parent_key and parent_key in by_id and parent_key != iid:
+            parent_path = path_of(parent_key)
+            full = f"{parent_path}/{name}" if parent_path else name
+        else:
+            full = name
+        paths[iid] = full
+        in_progress.discard(iid)
+        return full
+
+    for iid in by_id:
+        path_of(iid)
+    return paths
+
+
+_READABLE_DOC_EXTS = (".doc", ".docx", ".odt")
+_READER_LIMIT = 3_000_000
+
+
+def _extract_text_from_bytes(data: bytes, mime_type: str | None, name: str) -> str:
+    from app.organizer_engine import content as content_mod
+    return content_mod.extract_text(data, mime_type, name)
+
+
+def _parse_modified(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        s = value.replace("Z", "+00:00")
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
+    from app.models.executive_docs import IdFile
+
+    items = list(storage.walk_tree(source.folder_id) or [])
+    paths = build_tree_paths(items)
+    seen_ids: set[str] = set()
+    file_count = 0
+    folder_files: dict[str, int] = {}
+    folder_items: list = []
+    file_paths: list[str] = []
+
+    for it in items:
+        iid = str(getattr(it, "id", ""))
+        name = getattr(it, "name", "") or ""
+        is_folder = bool(getattr(it, "is_folder", False))
+        path = paths.get(iid, name)
+        if is_folder:
+            folder_items.append((iid, path))
+            folder_files.setdefault(iid, 0)
+            continue
+        seen_ids.add(iid)
+        file_paths.append(path)
+        cls = classify_file(path, name, getattr(it, "mime_type", None))
+        kind = cls["kind"]
+        section = cls["section"]
+        issues = list(cls["issues"])
+        size = getattr(it, "size", None)
+        if (
+            read_text
+            and _ext(name) in _READABLE_DOC_EXTS
+            and (size or 0) <= _READER_LIMIT
+        ):
+            try:
+                data, mime = storage.read_bytes(iid, _READER_LIMIT)
+                text = _extract_text_from_bytes(data, mime, name)
+                extra = draft_issues(text, mime, name)
+                for e in extra:
+                    if e not in issues:
+                        issues.append(e)
+            except Exception:
+                if "unreadable" not in issues:
+                    issues.append("unreadable")
+
+        existing = db.query(IdFile).filter_by(
+            project_id=source.project_id, provider=source.provider, external_id=iid,
+        ).first()
+        if existing is None:
+            existing = IdFile(
+                project_id=source.project_id,
+                provider=source.provider,
+                external_id=iid,
+            )
+            db.add(existing)
+        existing.path = path
+        existing.name = name
+        existing.mime_type = getattr(it, "mime_type", None)
+        existing.size = size
+        existing.modified_at = _parse_modified(getattr(it, "modified_time", None))
+        existing.kind = kind
+        existing.section = section
+        existing.object_name = source.object_name
+        existing.issues = issues
+        existing.source_id = source.id
+        file_count += 1
+
+    if seen_ids:
+        db.query(IdFile).filter(
+            IdFile.source_id == source.id,
+            ~IdFile.external_id.in_(list(seen_ids)),
+        ).delete(synchronize_session=False)
+    else:
+        db.query(IdFile).filter(IdFile.source_id == source.id).delete(synchronize_session=False)
+
+    # empty folders: no files directly or transitively inside
+    has_files: set[str] = set()
+    children: dict[str, list[str]] = {}
+    for it in items:
+        iid = str(getattr(it, "id", ""))
+        parent = getattr(it, "parent_id", None)
+        parent_key = str(parent) if parent is not None else ""
+        if parent_key:
+            children.setdefault(parent_key, []).append(iid)
+    for f in seen_ids:
+        stack = [f]
+        visited: set[str] = set()
+        while stack:
+            cur = stack.pop()
+            parent = None
+            for it in items:
+                if str(getattr(it, "id", "")) == cur:
+                    parent = getattr(it, "parent_id", None)
+                    break
+            if parent is None:
+                break
+            pk = str(parent)
+            if pk in visited:
+                break
+            visited.add(pk)
+            stack.append(pk)
+        for v in visited:
+            has_files.add(v)
+
+    empty_folders: list[str] = []
+    for iid, fpath in folder_items:
+        if iid not in has_files and iid not in seen_ids:
+            empty_folders.append(fpath)
+
+    duplicates = duplicate_names(file_paths)
+    source.last_scan_at = datetime.now(timezone.utc)
+    source.last_report = {
+        "files": file_count,
+        "empty_folders": empty_folders,
+        "duplicates": duplicates,
+    }
+    db.flush()
+    return {"files": file_count, "empty_folders": empty_folders, "duplicates": duplicates}
+
+
+_DRAFT_ISSUES = {"editable_format_not_signed", "blank_fields", "draft_name"}
+
+
+def _sections_compatible(req_section: str | None, file_section: str | None) -> bool:
+    if req_section is None or file_section is None:
+        return True
+    if req_section == "Общее" or file_section == "Общее":
+        return True
+    return req_section == file_section
+
+
+def match_requirements(requirements, files) -> list[dict]:
+    result: list[dict] = []
+    for req in requirements:
+        candidates = [f for f in files if f.kind == req.doc_kind]
+        candidates = [f for f in candidates if _sections_compatible(req.section, f.section)]
+        required = not bool(req.required_if_applicable)
+        if not candidates:
+            status = "missing"
+        else:
+            all_draft = all(
+                any((issue in _DRAFT_ISSUES) for issue in (f.issues or []))
+                for f in candidates
+            )
+            status = "draft" if all_draft else "present"
+        result.append({
+            "requirement_id": req.id,
+            "title": req.title,
+            "doc_kind": req.doc_kind,
+            "section": req.section,
+            "required": required,
+            "status": status,
+            "files": [f.path for f in candidates[:5]],
+        })
+    return result
+
+
+def object_report(db, project_id: int, object_name: str) -> dict:
+    from sqlalchemy import or_
+    from app.models.executive_docs import IdFile, IdRequirement, IdSource
+
+    requirements = db.query(IdRequirement).filter(
+        IdRequirement.project_id == project_id,
+        or_(IdRequirement.object_name == object_name, IdRequirement.object_name.is_(None)),
+    ).all()
+    files = db.query(IdFile).filter(
+        IdFile.project_id == project_id,
+        IdFile.object_name == object_name,
+    ).all()
+    matches = match_requirements(requirements, files)
+    required = [m for m in matches if m["required"]]
+    present_required = sum(1 for m in required if m["status"] == "present")
+    percent = round(100 * present_required / len(required)) if required else 100
+    missing = [m["title"] for m in required if m["status"] == "missing"]
+    recommended_missing = [m["title"] for m in matches if (not m["required"]) and m["status"] == "missing"]
+    file_issues = [
+        {"path": f.path, "issues": list(f.issues or [])}
+        for f in files
+        if f.issues
+    ]
+    kinds: dict[str, int] = {}
+    for f in files:
+        kinds[f.kind] = kinds.get(f.kind, 0) + 1
+
+    source = db.query(IdSource).filter(
+        IdSource.project_id == project_id,
+        IdSource.object_name == object_name,
+    ).first()
+    last_report = source.last_report if source is not None else None
+    empty_folders = (last_report or {}).get("empty_folders") if isinstance(last_report, dict) else None
+    duplicates = (last_report or {}).get("duplicates") if isinstance(last_report, dict) else None
+    last_scan_at = source.last_scan_at if source is not None else None
+
+    report = {
+        "object_name": object_name,
+        "percent": percent,
+        "required_total": len(required),
+        "present": sum(1 for m in required if m["status"] == "present"),
+        "draft": sum(1 for m in required if m["status"] == "draft"),
+        "missing": missing,
+        "recommended_missing": recommended_missing,
+        "matches": matches,
+        "file_issues": file_issues,
+        "kinds": kinds,
+        "empty_folders": empty_folders,
+        "duplicates": duplicates,
+        "last_scan_at": last_scan_at.isoformat() if last_scan_at is not None else None,
+    }
+    if source is not None:
+        merged = dict(last_report) if isinstance(last_report, dict) else {}
+        merged.update(report)
+        source.last_report = merged
+        db.flush()
+    return report
+
+
+def requirements_from_contract(
+    db, project_id: int, contract_id: int | None, object_name: str | None, sections: list[str],
+) -> int:
+    from app.models.executive_docs import IdRequirement
+    from app.models.organization_contract import Contract
+    from app.models.contract_document_link import ContractDocumentLink
+    from app.models.document import Document
+    from app.models.document_version import DocumentVersion
+
+    text_parts: list[str] = []
+    if contract_id is not None:
+        contract = db.query(Contract).filter(Contract.id == contract_id).first()
+        doc_ids: list[int] = []
+        if contract is not None and getattr(contract, "source_document_id", None):
+            doc_ids.append(contract.source_document_id)
+        links = db.query(ContractDocumentLink).filter(
+            ContractDocumentLink.contract_id == contract_id,
+        ).all() if contract is not None else []
+        for link in links:
+            did = getattr(link, "document_id", None)
+            if did:
+                doc_ids.append(did)
+        total = 0
+        for did in doc_ids:
+            doc = db.query(Document).filter(Document.id == did).first()
+            if doc is None:
+                continue
+            cur = getattr(doc, "current_version", None)
+            if cur is None:
+                continue
+            version = db.query(DocumentVersion).filter(
+                DocumentVersion.document_id == did,
+                DocumentVersion.version_number == cur,
+            ).first()
+            if version is None:
+                continue
+            text = getattr(version, "content_text", None) or getattr(version, "text", None)
+            if not text:
+                continue
+            remaining = 200_000 - total
+            if remaining <= 0:
+                break
+            chunk = text[:remaining]
+            text_parts.append(chunk)
+            total += len(chunk)
+
+    text = "\n".join(text_parts)
+    q = db.query(IdRequirement).filter(
+        IdRequirement.project_id == project_id,
+        IdRequirement.source.in_(("tz", "norm")),
+    )
+    if contract_id is None:
+        q = q.filter(IdRequirement.contract_id.is_(None))
+    else:
+        q = q.filter(IdRequirement.contract_id == contract_id)
+    if object_name is None:
+        q = q.filter(IdRequirement.object_name.is_(None))
+    else:
+        q = q.filter(IdRequirement.object_name == object_name)
+    q.delete(synchronize_session=False)
+
+    items = build_requirements(text, sections)
+    for it in items:
+        db.add(IdRequirement(
+            project_id=project_id,
+            contract_id=contract_id,
+            object_name=object_name,
+            section=it.get("section"),
+            title=it.get("title") or "",
+            doc_kind=it.get("doc_kind") or "other",
+            copies=it.get("copies"),
+            required_if_applicable=bool(it.get("required_if_applicable")),
+            source=it.get("source") or "tz",
+            norm_ref=it.get("norm_ref"),
+            evidence_quote=it.get("evidence_quote"),
+        ))
+    db.flush()
+    return len(items)

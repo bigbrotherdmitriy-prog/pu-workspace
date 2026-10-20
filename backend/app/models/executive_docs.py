@@ -26,6 +26,27 @@ class IdRequirement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class IdSource(Base):
+    __tablename__ = "id_sources"
+    __table_args__ = (
+        UniqueConstraint("project_id", "provider", "folder_id", name="uq_id_source_folder"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    contract_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True,
+    )
+    object_name: Mapped[str] = mapped_column(String(300))
+    provider: Mapped[str] = mapped_column(String(30), default="google_drive")
+    folder_id: Mapped[str] = mapped_column(String(500))
+    folder_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_report: Mapped[dict | None] = mapped_column(
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class IdFile(Base):
     __tablename__ = "id_files"
     __table_args__ = (
@@ -48,5 +69,8 @@ class IdFile(Base):
     )
     requirement_id: Mapped[int | None] = mapped_column(
         ForeignKey("id_requirements.id", ondelete="SET NULL"), nullable=True,
+    )
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("id_sources.id", ondelete="CASCADE"), nullable=True, index=True,
     )
     scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
