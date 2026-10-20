@@ -340,6 +340,85 @@ def test_requirements_from_contract_prefers_tz(world, monkeypatch):
     assert all(r.required_if_applicable is True for r in norm_items if r.doc_kind != "order")
 
 
+def test_requirements_from_contract_prefers_tz_header_over_incidental_mention(world, monkeypatch):
+    from app.models.document import Document
+    from app.models.document_version import DocumentVersion
+    from app.models.organization_contract import Contract
+    from app.models.contract_document_link import ContractDocumentLink
+
+    db = world["db"]
+    project = world["project"]
+
+    monkeypatch.setattr(ed, "extract_id_requirements_ai", lambda text: None)
+
+    contract = Contract(number="1", title="Договор", project_id=project.id)
+    db.add(contract)
+    db.flush()
+
+    dogovor = Document(name="Договор.pdf", project_id=project.id)
+    tz = Document(name="Приложение №1 ТЗ.docx", project_id=project.id)
+    db.add_all([dogovor, tz])
+    db.flush()
+
+    db.add(DocumentVersion(
+        document_id=dogovor.id, version_number=1,
+        content=(
+            "Подрядчик обязуется передать исполнительную документацию "
+            "заказчику. Копии сертификатов; Документы на специалистов"
+        ),
+    ))
+    db.add(DocumentVersion(
+        document_id=tz.id, version_number=1,
+        content=(
+            "Перечень исполнительной документации Журнал работ; "
+            "Технический отчет испытаний; Гарантии"
+        ),
+    ))
+    dogovor.current_version = 1
+    tz.current_version = 1
+    db.add_all([
+        ContractDocumentLink(project_id=project.id, contract_id=contract.id, document_id=dogovor.id),
+        ContractDocumentLink(project_id=project.id, contract_id=contract.id, document_id=tz.id),
+    ])
+    db.commit()
+
+    ed.requirements_from_contract(db, project.id, contract.id, None, ["ЭМ"])
+    db.commit()
+
+    reqs = db.query(IdRequirement).filter(
+        IdRequirement.project_id == project.id,
+        IdRequirement.contract_id == contract.id,
+        IdRequirement.source == "tz",
+    ).all()
+    kinds = sorted(r.doc_kind for r in reqs)
+    assert kinds == ["journal", "report"], [r.title for r in reqs]
+
+
+def test_match_requirements_certificate_covers_declaration(world):
+    db = world["db"]
+    project = world["project"]
+
+    source = IdSource(
+        project_id=project.id, object_name="Объект А",
+        provider="google_drive", folder_id="root",
+    )
+    db.add(source)
+    db.flush()
+
+    decl_req = _mk_req(
+        db, project.id, title="Декларация соответствия", doc_kind="declaration", section="Общее",
+        required_if_applicable=False, object_name="Объект А",
+    )
+    _mk_file(
+        db, project.id, source.id, external_id="cert1",
+        path="Общее/Сертификат.pdf", name="Сертификат.pdf", kind="certificate", section="Общее",
+    )
+    db.commit()
+
+    matches = ed.match_requirements([decl_req], db.query(IdFile).all())
+    assert matches[0]["status"] == "present"
+
+
 def test_scan_source_skips_read_when_unchanged(world, monkeypatch):
     db = world["db"]
     project = world["project"]

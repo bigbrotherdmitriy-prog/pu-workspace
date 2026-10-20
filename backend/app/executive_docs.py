@@ -751,6 +751,24 @@ def _sections_compatible(req_section: str | None, file_section: str | None) -> b
     return req_section == file_section
 
 
+_CERT_DECL_KINDS = frozenset(("certificate", "declaration"))
+
+
+def _file_matches_req(req, f) -> bool:
+    kind = req.doc_kind
+    fkinds = set(f.contained_kinds or [])
+    if f.kind == kind or kind in fkinds:
+        return True
+    if kind in _CERT_DECL_KINDS:
+        if (f.kind in _CERT_DECL_KINDS) or (fkinds & _CERT_DECL_KINDS):
+            return True
+    if kind == "passport" and f.kind in ("passport", "certificate"):
+        title_n = _norm(req.title or "")
+        if "паспорт" in title_n and "сертификат" in title_n:
+            return True
+    return False
+
+
 def match_requirements(requirements, files) -> list[dict]:
     result: list[dict] = []
     order_used: set[int] = set()
@@ -768,10 +786,7 @@ def match_requirements(requirements, files) -> list[dict]:
             else:
                 candidates = []
         else:
-            candidates = [
-                f for f in files
-                if f.kind == req.doc_kind or req.doc_kind in (f.contained_kinds or [])
-            ]
+            candidates = [f for f in files if _file_matches_req(req, f)]
             candidates = [f for f in candidates if _sections_compatible(req.section, f.section)]
         required = not bool(req.required_if_applicable)
         if not candidates:
@@ -948,13 +963,16 @@ def requirements_from_contract(
                 continue
             doc_texts.append((getattr(doc, "name", "") or "", doc_text))
 
-    def _is_prio(entry: tuple[str, str]) -> bool:
+    def _tz_score(entry: tuple[str, str]) -> int:
         name_n = _norm(entry[0])
-        if "тз" in name_n or "техническ" in name_n or "задани" in name_n:
-            return True
-        return "исполнительной документации" in _norm(entry[1])
+        has_tz = "тз" in name_n or "техническ" in name_n or "задани" in name_n
+        return 0 if has_tz else 1
 
-    ordered = sorted(doc_texts, key=lambda e: 0 if _is_prio(e) else 1)
+    def _order_score(entry: tuple[str, str]) -> tuple[int, int]:
+        header = _HEADER_RE.search(entry[1] or "")
+        return (0 if header else 1, _tz_score(entry))
+
+    ordered = sorted(doc_texts, key=_order_score)
 
     _DOC_LIMIT = 120_000
 
