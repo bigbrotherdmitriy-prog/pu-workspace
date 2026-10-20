@@ -128,6 +128,53 @@ def test_mark_act_signed_creates_one_inflow(world):
     assert len(rows) == 1
 
 
+def test_build_act_data_counterparty_fallback_without_org(world):
+    db = world["db"]
+    project = world["project"]
+    contract = world["contract"]
+    contract.counterparty = "ООО Заказчик"
+    contract.counterparty_organization_id = None
+    contract.contract_kind = "customer"
+    stage = ContractStage(
+        project_id=project.id, contract_id=contract.id,
+        object_name=None, stage_number=1, title="Работы",
+        amount=Decimal("100.00"),
+    )
+    db.add(stage)
+    db.commit()
+
+    data = aa.build_act_data(db, project.id, contract, stage, None)
+    assert data.customer.name == "ООО Заказчик"
+    assert data.customer.signer_name == ""
+
+
+def test_create_stage_act_with_explicit_number(world):
+    db = world["db"]
+    contract = world["contract"]
+    project = world["project"]
+    user = world["user"]
+    first = ContractStage(
+        project_id=project.id, contract_id=contract.id,
+        object_name=None, stage_number=1, title="Работы",
+        amount=Decimal("100.00"),
+    )
+    second = ContractStage(
+        project_id=project.id, contract_id=contract.id,
+        object_name=None, stage_number=2, title="Работы 2",
+        amount=Decimal("200.00"),
+    )
+    db.add_all([first, second])
+    db.commit()
+
+    act = aa.create_stage_act(db, project.id, contract, first, user, number="12")
+    db.commit()
+    assert act.number == "12"
+
+    with pytest.raises(Exception) as exc:
+        aa.create_stage_act(db, project.id, contract, second, user, number="12")
+    assert getattr(exc.value, "status_code", None) == 409
+
+
 def test_stage_register_coefficient(world):
     db = world["db"]
     contract = world["contract"]
