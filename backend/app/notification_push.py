@@ -164,7 +164,8 @@ def _deliver(db: Session, notification_id: int, device_id: int, now: datetime) -
                 idempotency_key=_job_key(notification_id, device_id, f":at:{available_at.isoformat()}"))
         return {"status": "deferred", "available_at": available_at.isoformat()}
     message = push_message_for(kind=notification.kind, project_id=notification.project_id,
-                               entity_type=notification.entity_type, entity_id=notification.entity_id)
+                               entity_type=notification.entity_type, entity_id=notification.entity_id,
+                               body=(notification.body or "")[:180])
     try:
         _adapter_factory().send(device.fcm_token, message)
     except PushTokenRejected as rejected:

@@ -4,9 +4,11 @@ The only secret is a Google service account JSON whose path comes from
 ``FCM_SERVICE_ACCOUNT_JSON_PATH``.  Without it the channel is off and
 readiness reports why; nothing is sent and nothing is queued.
 
-A push carries a fixed title and a deep link only.  Notification titles and
-bodies are never forwarded: they can quote amounts, prices or document text,
-and FCM payloads leave our infrastructure.
+A push carries a fixed title, an optional pre-approved body and a deep link.
+Notification titles and bodies are never forwarded verbatim: only the short,
+server-built body explicitly attached by the notification producer (e.g.
+"invoice_from_mail") is sent, since record text could otherwise leak amounts
+or document content outside our infrastructure.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ KIND_TITLES = {
     "management_digest": "Сводка управления проектом",
     "auto_task_due_soon": "Задача требует внимания",
     "mobile_sync_conflict": "Конфликт синхронизации разрешён",
+    "invoice_from_mail": "Счёт из почты — подтвердить?",
 }
 DEFAULT_TITLE = "Новое уведомление в PU Workspace"
 
@@ -71,27 +74,39 @@ class PushRequestRejected(ValueError):
 class PushMessage:
     title: str
     link: str
+    body: str = ""
 
     def fcm_body(self, token: str) -> dict:
+        notification = {"title": self.title}
+        if self.body:
+            notification["body"] = self.body
         return {"message": {
             "token": token,
-            "notification": {"title": self.title},
+            "notification": notification,
             "data": {"deep_link": self.link},
             "android": {"priority": "high", "notification": {"channel_id": ANDROID_CHANNEL_ID}},
         }}
 
 
-def push_message_for(*, kind: str, project_id: int, entity_type: str = "", entity_id: int | None = None) -> PushMessage:
+def push_message_for(*, kind: str, project_id: int, entity_type: str = "", entity_id: int | None = None,
+                     body: str = "") -> PushMessage:
     """Build a push from identifiers only; no free text from the record.
 
-    A task opens its card in the task list; anything else opens the project's
-    notification list, where the full text is shown after sign-in.
+    A task opens its card in the task list; an invoice extraction proposal
+    opens its confirmation card; anything else opens the project's
+    notification list, where the full text is shown after sign-in.  ``body``
+    is only forwarded for the ``invoice_from_mail`` kind, whose body is
+    assembled server-side from safe fields (counterparty, amount) — other
+    notification texts stay off the lock screen.
     """
-    if entity_type == "task" and entity_id:
+    if entity_type == "invoice_extraction_proposal" and entity_id:
+        link = f"{APP_BASE_URL}?project_id={int(project_id)}&invoice={int(entity_id)}"
+    elif entity_type == "task" and entity_id:
         link = f"{APP_BASE_URL}?project_id={int(project_id)}&task={int(entity_id)}"
     else:
         link = f"{APP_BASE_URL}?project_id={int(project_id)}&section=notifications"
-    return PushMessage(title=KIND_TITLES.get(kind, DEFAULT_TITLE), link=link)
+    push_body = body if kind == "invoice_from_mail" else ""
+    return PushMessage(title=KIND_TITLES.get(kind, DEFAULT_TITLE), link=link, body=push_body)
 
 
 def fcm_service_account_path() -> str:

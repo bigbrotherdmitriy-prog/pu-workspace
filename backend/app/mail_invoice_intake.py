@@ -49,8 +49,8 @@ def _format_amount(amount) -> str:
 def _notification_body(counterparty: str | None, amount) -> str:
     who = counterparty or "Контрагент не распознан"
     if amount is None:
-        return f"{who} — сумма не распознана. Проверьте строку плана и подтвердите."
-    return f"{who} — {_format_amount(amount)} ₽. Проверьте строку плана и подтвердите."
+        return f"{who} — сумма не распознана. Нажмите, чтобы подтвердить."
+    return f"{who} — {_format_amount(amount)} ₽. Нажмите, чтобы подтвердить."
 
 
 def _recipients(db: Session, project_id: int, user_id: int) -> list[int]:

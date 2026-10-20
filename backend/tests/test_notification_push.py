@@ -148,6 +148,8 @@ def test_push_payload_has_title_and_deep_link_only(db_session, fcm, scene):
     message = body["message"]
     assert set(message) == {"token", "notification", "data", "android"}
     assert message["notification"] == {"title": "Приближается срок обязательства"}
+    # No body is forwarded for non-invoice kinds, even when the record has one.
+    assert "body" not in message["notification"]
     assert message["data"] == {"deep_link": f"https://puworkspace.ru/new/?project_id={project.id}&section=notifications"}
     assert message["android"] == {"priority": "high", "notification": {"channel_id": "pu_workspace_alerts"}}
     sent = json.dumps(body, ensure_ascii=False)
@@ -343,6 +345,62 @@ def test_task_push_links_to_the_task_card():
     message = push_message_for(kind="task_assigned", project_id=17, entity_type="task", entity_id=42)
     assert message.title == "Вам назначена задача"
     assert message.link == "https://puworkspace.ru/new/?project_id=17&task=42"
+
+
+def test_invoice_from_mail_push_carries_the_server_built_body(db_session, fcm, scene):
+    fake, _ = fcm
+    user, project, _ = scene
+    _notify(db_session, user, project, kind="invoice_from_mail",
+            title="Счёт из почты",
+            body="ООО «Ромашка» — 1 250 ₽. Нажмите, чтобы подтвердить.",
+            entity_type="invoice_extraction_proposal", entity_id=99)
+    assert _work_once(db_session) == {"status": "sent"}
+    message = fake.bodies[0]["message"]
+    assert message["notification"] == {
+        "title": "Счёт из почты — подтвердить?",
+        "body": "ООО «Ромашка» — 1 250 ₽. Нажмите, чтобы подтвердить.",
+    }
+    assert message["data"] == {"deep_link": f"https://puworkspace.ru/new/?project_id={project.id}&invoice=99"}
+
+
+def test_long_body_is_truncated_to_180_chars(db_session, fcm, scene):
+    fake, _ = fcm
+    user, project, _ = scene
+    long_body = "А" * 500
+    _notify(db_session, user, project, kind="invoice_from_mail", title="Счёт из почты", body=long_body,
+            entity_type="invoice_extraction_proposal", entity_id=99)
+    assert _work_once(db_session) == {"status": "sent"}
+    assert fake.bodies[0]["message"]["notification"]["body"] == "А" * 180
+
+
+def test_invoice_proposal_push_links_to_the_confirmation_card():
+    message = push_message_for(kind="invoice_from_mail", project_id=17,
+                               entity_type="invoice_extraction_proposal", entity_id=99,
+                               body="ООО «Ромашка» — 1 250 ₽. Нажмите, чтобы подтвердить.")
+    assert message.title == "Счёт из почты — подтвердить?"
+    assert message.link == "https://puworkspace.ru/new/?project_id=17&invoice=99"
+    assert "Нажмите, чтобы подтвердить." in message.body
+
+
+def test_body_is_only_forwarded_for_invoice_from_mail():
+    with_body = push_message_for(kind="invoice_from_mail", project_id=17,
+                                 entity_type="invoice_extraction_proposal", entity_id=99,
+                                 body="short safe text")
+    assert with_body.body == "short safe text"
+    for other in ("task_assigned", "deadline", "risk", "unknown_kind"):
+        message = push_message_for(kind=other, project_id=17, entity_type="obligation", entity_id=1,
+                                   body="must not leak")
+        assert message.body == ""
+
+
+def test_fcm_body_includes_notification_body_only_when_set():
+    with_body = push_message_for(kind="invoice_from_mail", project_id=17,
+                                 entity_type="invoice_extraction_proposal", entity_id=99,
+                                 body="Краткий текст")
+    assert with_body.fcm_body(TOKEN)["message"]["notification"] == {
+        "title": "Счёт из почты — подтвердить?", "body": "Краткий текст"}
+    without_body = push_message_for(kind="deadline", project_id=17)
+    assert "body" not in without_body.fcm_body(TOKEN)["message"]["notification"]
 
 
 def test_one_push_per_entity_per_minute(db_session, fcm, scene):
