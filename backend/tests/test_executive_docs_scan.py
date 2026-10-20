@@ -212,3 +212,72 @@ def test_draft_status_for_act(world):
 
     matches = ed.match_requirements([act_req], db.query(IdFile).all())
     assert matches[0]["status"] == "draft"
+
+
+def test_detect_contained_kinds():
+    text = (
+        "АКТ № 1 технической готовности электромонтажных работ ... "
+        "ВЕДОМОСТЬ № 4 смонтированного электрооборудования ... "
+        "ПРОТОКОЛ № 1 осмотра ... ЖУРНАЛ прокладки кабеля"
+    )
+    assert ed.detect_contained_kinds(text) == ["act", "journal", "protocol", "statement"]
+
+
+def test_match_requirements_contained_kinds(world):
+    db = world["db"]
+    project = world["project"]
+
+    source = IdSource(
+        project_id=project.id, object_name="Объект А",
+        provider="google_drive", folder_id="root",
+    )
+    db.add(source)
+    db.flush()
+
+    stmt_req = _mk_req(
+        db, project.id, title="Ведомость", doc_kind="statement", section="ЭМ",
+        required_if_applicable=False, object_name="Объект А",
+    )
+    _mk_file(
+        db, project.id, source.id, external_id="combined1",
+        path="ЭМ/Акты ЭМ 2026.pdf", name="Акты ЭМ 2026.pdf", kind="act", section="ЭМ",
+        contained_kinds=["act", "statement"],
+    )
+    db.commit()
+
+    matches = ed.match_requirements([stmt_req], db.query(IdFile).all())
+    assert matches[0]["status"] == "present"
+
+
+def test_scan_source_pdf_contained_kinds(world, monkeypatch):
+    db = world["db"]
+    project = world["project"]
+
+    monkeypatch.setattr(
+        ed, "extract_text",
+        lambda data, mime, name: "Ведомость № 4 смонтированного электрооборудования", raising=False,
+    )
+    monkeypatch.setattr(
+        ed, "_extract_text_from_bytes",
+        lambda data, mime, name: "Ведомость № 4 смонтированного электрооборудования",
+    )
+
+    source = IdSource(
+        project_id=project.id, object_name="Объект А",
+        provider="google_drive", folder_id="root",
+    )
+    db.add(source)
+    db.commit()
+
+    tree = [
+        _folder("root", "Проект", ""),
+        _file("pdf1", "Акты ЭМ 2026.pdf", "root"),
+    ]
+    storage = FakeStorage(tree, contents={"pdf1": (b"fake-pdf", "application/pdf")})
+    ed.scan_source(db, source, storage)
+    db.commit()
+
+    files = db.query(IdFile).filter(IdFile.source_id == source.id).all()
+    f = next((x for x in files if x.name == "Акты ЭМ 2026.pdf"), None)
+    assert f is not None
+    assert "statement" in (f.contained_kinds or [])

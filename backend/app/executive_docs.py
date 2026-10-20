@@ -147,6 +147,41 @@ def draft_issues(text: str, mime_type: str | None, name: str) -> list[str]:
     return issues
 
 
+_CONTAINED_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("aosr", ("акт освидетельствования скрытых работ",)),
+    ("act", (
+        "акт технической готовности",
+        "акт готовности",
+        "акт приемки",
+        "акт ввода",
+    )),
+    ("statement", ("ведомость",)),
+    ("protocol", ("протокол",)),
+    ("journal", ("журнал",)),
+    ("report", ("технический отчет", "отчет о")),
+    ("scheme", ("исполнительная схема", "принципиальная схема", "однолинейная схема")),
+    ("passport", ("паспорт",)),
+    ("certificate", ("сертификат соответствия",)),
+    ("register", ("реестр исполнительной документации",)),
+)
+
+
+def detect_contained_kinds(text: str) -> list[str]:
+    if not text:
+        return []
+    # «АКТ № 1 технической готовности», «Ведомость № 4 …»: drop document numbers
+    # so phrases match regardless of «№ N» between the words.
+    haystack = re.sub(r"№\s*\d+[\w./-]*\s*", " ", _norm(text))
+    haystack = re.sub(r"\s+", " ", haystack)
+    found: set[str] = set()
+    for kind, phrases in _CONTAINED_RULES:
+        for phrase in phrases:
+            if phrase in haystack:
+                found.add(kind)
+                break
+    return sorted(found)
+
+
 def _normalize_dedup_key(name: str) -> str:
     base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if "." in base:
@@ -441,7 +476,9 @@ def build_tree_paths(items, root_id=None) -> dict[str, str]:
 
 
 _READABLE_DOC_EXTS = (".doc", ".docx", ".odt")
+_READABLE_PDF_EXTS = (".pdf",)
 _READER_LIMIT = 3_000_000
+_PDF_READER_LIMIT = 20_000_000
 
 
 def _extract_text_from_bytes(data: bytes, mime_type: str | None, name: str) -> str:
@@ -486,9 +523,11 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
         section = cls["section"]
         issues = list(cls["issues"])
         size = getattr(it, "size", None)
+        ext = _ext(name)
+        contained_kinds: list[str] | None = None
         if (
             read_text
-            and _ext(name) in _READABLE_DOC_EXTS
+            and ext in _READABLE_DOC_EXTS
             and (size or 0) <= _READER_LIMIT
         ):
             try:
@@ -498,6 +537,18 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
                 for e in extra:
                     if e not in issues:
                         issues.append(e)
+            except Exception:
+                if "unreadable" not in issues:
+                    issues.append("unreadable")
+        elif (
+            read_text
+            and ext in _READABLE_PDF_EXTS
+            and (size or 0) <= _PDF_READER_LIMIT
+        ):
+            try:
+                data, mime = storage.read_bytes(iid, _PDF_READER_LIMIT)
+                text = _extract_text_from_bytes(data, mime, name)
+                contained_kinds = detect_contained_kinds(text)
             except Exception:
                 if "unreadable" not in issues:
                     issues.append("unreadable")
@@ -521,6 +572,7 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
         existing.section = section
         existing.object_name = source.object_name
         existing.issues = issues
+        existing.contained_kinds = contained_kinds
         existing.source_id = source.id
         file_count += 1
 
@@ -591,7 +643,10 @@ def _sections_compatible(req_section: str | None, file_section: str | None) -> b
 def match_requirements(requirements, files) -> list[dict]:
     result: list[dict] = []
     for req in requirements:
-        candidates = [f for f in files if f.kind == req.doc_kind]
+        candidates = [
+            f for f in files
+            if f.kind == req.doc_kind or req.doc_kind in (f.contained_kinds or [])
+        ]
         candidates = [f for f in candidates if _sections_compatible(req.section, f.section)]
         required = not bool(req.required_if_applicable)
         if not candidates:

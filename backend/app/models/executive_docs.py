@@ -67,6 +67,9 @@ class IdFile(Base):
     issues: Mapped[list | None] = mapped_column(
         JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True,
     )
+    contained_kinds: Mapped[list | None] = mapped_column(
+        JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"), nullable=True,
+    )
     requirement_id: Mapped[int | None] = mapped_column(
         ForeignKey("id_requirements.id", ondelete="SET NULL"), nullable=True,
     )
