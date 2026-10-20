@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { contractMoney, vatLabel, type VatMode } from "./contractCommercial";
+import { ContractStagesRegister } from "./ContractStagesRegister";
 import "./contract-details.css";
 
 type DetailsContract = {
@@ -28,7 +29,7 @@ function snapshotValue(field: string, value: unknown, snapshot: Record<string, u
 
 // Controller state belongs to App, above register/scheme mounts. Opening details
 // never creates a second editor or replaces the version of an existing draft.
-export function ContractDetails({ contract, children, currency = "RUB" }: { contract: DetailsContract; children: ReactNode; currency?: string }) {
+export function ContractDetails({ contract, children, currency = "RUB", projectId }: { contract: DetailsContract; children: ReactNode; currency?: string; projectId?: number }) {
   return <article className="card contract-card contract-details" aria-label={`Карточка договора ${contract.number}`}>
     <div className="contract-details-summary">
       <h3>{contract.number} — {contract.title}</h3>
@@ -61,6 +62,8 @@ export function ContractDetails({ contract, children, currency = "RUB" }: { cont
         </li>)}</ol> : <p>Снимков истории пока нет.</p>}
       </details>
     </div>
+    {projectId !== undefined && <section aria-label="Этапы и поступления"><h4>Этапы и поступления</h4>
+      <ContractStagesRegister projectId={projectId} contractId={contract.id} currency={currency} /></section>}
     {children}
   </article>;
 }
