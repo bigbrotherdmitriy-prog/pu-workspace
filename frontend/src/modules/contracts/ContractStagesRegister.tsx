@@ -23,10 +23,12 @@ type StageRegisterResponse = {
   items: StageItem[];
   by_object: Record<string, ObjectTotals>;
   totals: Record<string, unknown>;
+  next_act_number: string;
 };
 type ExtractResponse = { warnings?: string[] } & Partial<StageRegisterResponse>;
 
 const limitText = (value: string, max: number) => value.length > max ? value.slice(0, max) : value;
+const asNumberString = (value: unknown): string => typeof value === "string" ? value : value == null ? "" : String(value);
 const fmtDate = (value: string | null | undefined): string => {
   if (!value) return "—";
   const d = value.slice(0, 10).split("-");
@@ -54,16 +56,21 @@ export function ContractStagesRegister({ projectId, contractId, currency = "RUB"
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [signingInput, setSigningInput] = useState<{ actId: number; value: string } | null>(null);
+  const [actNumber, setActNumber] = useState("");
+  const [actNumberTouched, setActNumberTouched] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ resetActNumber = false }: { resetActNumber?: boolean } = {}) => {
     try {
       const result = await api<StageRegisterResponse>(`/projects/${projectId}/contracts/${contractId}/stage-register`);
       setData(result);
+      if (resetActNumber || !actNumberTouched) {
+        setActNumber(asNumberString(result?.next_act_number));
+      }
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [projectId, contractId]);
+  }, [projectId, contractId, actNumberTouched]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -83,8 +90,13 @@ export function ContractStagesRegister({ projectId, contractId, currency = "RUB"
   const onGenerateAct = async (stageId: number) => {
     setBusy(true);
     try {
-      await api(`/projects/${projectId}/contracts/${contractId}/stages/${stageId}/act`, { method: "POST" });
-      await load();
+      await api(`/projects/${projectId}/contracts/${contractId}/stages/${stageId}/act`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ number: actNumber }),
+      });
+      setActNumberTouched(false);
+      await load({ resetActNumber: true });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -134,6 +146,15 @@ export function ContractStagesRegister({ projectId, contractId, currency = "RUB"
   const colCount = 10;
 
   return <>
+    <label>
+      Номер следующего акта
+      {" "}
+      <input
+        aria-label="Номер следующего акта"
+        value={actNumber}
+        onChange={(e) => { setActNumber(e.target.value); setActNumberTouched(true); }}
+      />
+    </label>
     <div style={{ overflowX: "auto" }}>
       <table className="contract-stages-table">
         <thead>
