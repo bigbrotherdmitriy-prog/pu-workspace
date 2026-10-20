@@ -41,6 +41,8 @@ def schedule_once(now: datetime | None = None, service_id: str = "scheduler") ->
         # Not counted in `created`: the once-a-day digest must not change the
         # per-tick job count other schedulers and their tests rely on.
         schedule_morning_digest(db, now=now)
+        from app.executive_docs import schedule_daily_scan
+        schedule_daily_scan(db, now=now)
     from app.pilot_dispatch import recover_installed
     from app.pilot_incidents import notify_product_auto_incidents_once
     from app.local_upload_staging import recover_local_upload_retention
