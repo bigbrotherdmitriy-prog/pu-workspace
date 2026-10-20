@@ -54,6 +54,18 @@ YANDEX_OCR_URL = os.getenv("YANDEX_OCR_URL", "https://ocr.api.cloud.yandex.net/o
 OCR_CLOUD_PARALLEL = max(1, min(8, int(os.getenv("OCR_CLOUD_PARALLEL", "4"))))
 OCR_CLOUD_DPI = max(150, min(300, int(os.getenv("OCR_CLOUD_DPI", "200"))))
 OCR_CLOUD_TIMEOUT_SECONDS = max(5, min(120, int(os.getenv("OCR_CLOUD_TIMEOUT_SECONDS", "30"))))
+GEMINI_API_BASE = os.getenv(
+    "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta"
+).rstrip("/")
+OCR_GEMINI_MODEL = os.getenv("OCR_GEMINI_MODEL", "")
+GEMINI_OCR_INSTRUCTION = (
+    "Ты система распознавания текста (OCR) для сканов российских договоров, счетов и актов. "
+    "Перепиши ВЕСЬ текст страницы дословно, сохраняя порядок чтения, абзацы и переносы строк. "
+    "Таблицы — строками, ячейки через « | ». Цифры, суммы, номера, даты, ИНН, КПП, БИК, счета — "
+    "точно как на скане, ничего не исправляй и не округляй. Печати и подписи пропускай, рукописные "
+    "пометки — только если читаемы. Не добавляй комментариев, пояснений и разметки Markdown — "
+    "только текст страницы."
+)
 
 OCR_ORPHAN_ENDINGS = frozenset({"ый", "ий", "ая", "яя", "ое", "ые", "ую", "юю", "ых", "ым", "ть", "ться", "го"})
 NUMBERED_PROSE_RE = re.compile(
@@ -416,6 +428,94 @@ def _yandex_ocr_configured() -> bool:
     )
 
 
+def _gemini_ocr_model() -> str:
+    return OCR_GEMINI_MODEL.strip() or os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+
+
+def _gemini_ocr_configured() -> bool:
+    if os.getenv("OCR_PROVIDER", "auto").strip().lower() != "gemini":
+        return False
+    return bool(os.getenv("GEMINI_API_KEY", "").strip())
+
+
+def _gemini_ocr_page(image: Path, page_number: int) -> PageExtraction | None:
+    """Recognize one rendered page through Gemini vision; None triggers local OCR."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    model = _gemini_ocr_model()
+    if not model:
+        return None
+    try:
+        payload = {
+            "systemInstruction": {"parts": [{"text": GEMINI_OCR_INSTRUCTION}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": base64.b64encode(image.read_bytes()).decode("ascii"),
+                            }
+                        },
+                        {"text": "Распознай текст этой страницы."},
+                    ],
+                }
+            ],
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 8192},
+        }
+        headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+        url = f"{GEMINI_API_BASE}/models/{model}:generateContent"
+        response = httpx.post(
+            url, json=payload, headers=headers, timeout=OCR_CLOUD_TIMEOUT_SECONDS
+        )
+        if response.status_code == 429 or response.status_code >= 500:
+            time.sleep(1)
+            response = httpx.post(
+                url, json=payload, headers=headers, timeout=OCR_CLOUD_TIMEOUT_SECONDS
+            )
+        if response.status_code != 200:
+            logger.warning("gemini ocr page %s failed: status %s", page_number, response.status_code)
+            return None
+        data = response.json()
+        candidates = data.get("candidates") or []
+        parts = ((candidates[0] if candidates else {}).get("content") or {}).get("parts") or []
+        texts = [
+            part.get("text")
+            for part in parts
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ]
+        text = "\n".join(texts)
+        if not text.strip():
+            return None
+        return PageExtraction(
+            page=page_number, text=text, confidence=0.95, method="ocr",
+            preprocessing=["gemini_vision_ocr"],
+        )
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as exc:
+        logger.warning("gemini ocr page %s failed: %s", page_number, exc.__class__.__name__)
+        return None
+    except Exception as exc:
+        logger.warning("gemini ocr page %s failed: %s", page_number, exc.__class__.__name__)
+        return None
+
+
+def _cloud_ocr_configured() -> bool:
+    return _gemini_ocr_configured() or _yandex_ocr_configured()
+
+
+def _cloud_ocr_page(image: Path, page_number: int) -> PageExtraction | None:
+    """Select the first explicitly enabled cloud OCR provider; None falls back to local OCR."""
+    if _gemini_ocr_configured():
+        page = _gemini_ocr_page(image, page_number)
+        if page is not None:
+            return page
+    if _yandex_ocr_configured():
+        return _yandex_ocr_page(image, page_number)
+    return None
+
+
 def _yandex_ocr_page(image: Path, page_number: int) -> PageExtraction | None:
     """Recognize one rendered page through Yandex Vision OCR; None triggers local OCR."""
     api_key = os.getenv("YANDEX_VISION_API_KEY", "").strip()
@@ -683,7 +783,7 @@ def _ocr_image_page(data: bytes, suffix: str) -> PageExtraction:
     with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
         source = Path(temp) / f"source.{suffix or 'png'}"
         source.write_bytes(data)
-        if _yandex_ocr_configured():
+        if _cloud_ocr_configured():
             cloud_path = source
             if suffix.lower() not in {"jpg", "jpeg"}:
                 try:
@@ -693,10 +793,10 @@ def _ocr_image_page(data: bytes, suffix: str) -> PageExtraction:
                     with Image.open(source) as opened:
                         opened.convert("RGB").save(cloud_path, "JPEG", quality=90)
                 except Exception as exc:
-                    logger.warning("yandex ocr page 1 failed: %s", exc)
+                    logger.warning("cloud ocr page 1 failed: %s", exc.__class__.__name__)
                     cloud_path = source
             if cloud_path == source or cloud_path.exists():
-                cloud = _yandex_ocr_page(cloud_path, 1)
+                cloud = _cloud_ocr_page(cloud_path, 1)
                 if cloud is not None:
                     return cloud
         return _tesseract_page(source, 1)
@@ -909,7 +1009,7 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtract
         max(OCR_TIMEOUT_SECONDS, OCR_PAGE_SECONDS * len(ordered)),
     )
     deadline = time.monotonic() + budget
-    use_cloud = _yandex_ocr_configured()
+    use_cloud = _cloud_ocr_configured()
     render_dpi = OCR_CLOUD_DPI if use_cloud else OCR_DPI
     max_workers = OCR_CLOUD_PARALLEL if use_cloud else OCR_PARALLEL_PAGES
     with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
@@ -934,7 +1034,7 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtract
             if rendered.returncode != 0 or not image.exists():
                 return None
             if use_cloud:
-                cloud = _yandex_ocr_page(image, page_number)
+                cloud = _cloud_ocr_page(image, page_number)
                 if cloud is not None:
                     return page_number, cloud
             remaining = deadline - time.monotonic()
