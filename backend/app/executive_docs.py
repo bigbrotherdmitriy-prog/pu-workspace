@@ -392,17 +392,20 @@ def build_requirements(text: str, sections: list[str]) -> list[dict]:
     return result
 
 
-def build_tree_paths(items) -> dict[str, str]:
+def build_tree_paths(items, root_id=None) -> dict[str, str]:
     """Return {id: "a/b/name"} for each item, paths relative to tree roots.
 
     Roots are items whose parent_id is not the id of any other item in the
-    list. Children of missing parents are treated as roots as well."""
+    list, or whose parent_id equals ``root_id`` (the source folder). The
+    root folder itself is never part of a path: items whose parent_id equals
+    ``root_id`` get a bare name."""
     by_id: dict[str, object] = {}
     for it in items:
         iid = getattr(it, "id", None)
         if iid is None:
             continue
         by_id[str(iid)] = it
+    root_key = str(root_id) if root_id is not None else ""
     paths: dict[str, str] = {}
     in_progress: set[str] = set()
 
@@ -418,7 +421,9 @@ def build_tree_paths(items) -> dict[str, str]:
         name = getattr(it, "name", "") or ""
         parent = getattr(it, "parent_id", None)
         parent_key = str(parent) if parent is not None else ""
-        if parent_key and parent_key in by_id and parent_key != iid:
+        if parent_key and parent_key == root_key:
+            full = name
+        elif parent_key and parent_key in by_id and parent_key != iid and parent_key != root_key:
             parent_path = path_of(parent_key)
             full = f"{parent_path}/{name}" if parent_path else name
         else:
@@ -455,7 +460,7 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
     from app.models.executive_docs import IdFile
 
     items = list(storage.walk_tree(source.folder_id) or [])
-    paths = build_tree_paths(items)
+    paths = build_tree_paths(items, root_id=source.folder_id)
     seen_ids: set[str] = set()
     file_count = 0
     folder_files: dict[str, int] = {}
@@ -524,39 +529,39 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
     else:
         db.query(IdFile).filter(IdFile.source_id == source.id).delete(synchronize_session=False)
 
-    # empty folders: no files directly or transitively inside
-    has_files: set[str] = set()
-    children: dict[str, list[str]] = {}
+    # empty folders: no files directly or transitively inside; keep only the
+    # topmost empty folder per branch (a fully empty subtree is one line).
+    parent_of: dict[str, str] = {}
     for it in items:
         iid = str(getattr(it, "id", ""))
         parent = getattr(it, "parent_id", None)
         parent_key = str(parent) if parent is not None else ""
         if parent_key:
-            children.setdefault(parent_key, []).append(iid)
+            parent_of[iid] = parent_key
+
+    # folders that contain at least one file (directly or via nested folders)
+    has_files: set[str] = set()
     for f in seen_ids:
-        stack = [f]
+        cur = f
         visited: set[str] = set()
-        while stack:
-            cur = stack.pop()
-            parent = None
-            for it in items:
-                if str(getattr(it, "id", "")) == cur:
-                    parent = getattr(it, "parent_id", None)
-                    break
-            if parent is None:
-                break
-            pk = str(parent)
+        while cur in parent_of:
+            pk = parent_of[cur]
             if pk in visited:
                 break
             visited.add(pk)
-            stack.append(pk)
-        for v in visited:
-            has_files.add(v)
+            has_files.add(pk)
+            cur = pk
 
+    empty_ids: set[str] = {iid for iid, _ in folder_items if iid not in has_files}
     empty_folders: list[str] = []
     for iid, fpath in folder_items:
-        if iid not in has_files and iid not in seen_ids:
-            empty_folders.append(fpath)
+        if iid not in empty_ids:
+            continue
+        parent_key = parent_of.get(iid, "")
+        if parent_key and parent_key in empty_ids:
+            continue  # nested inside another empty folder — covered by its root
+        empty_folders.append(fpath)
+    empty_folders.sort()
 
     duplicates = duplicate_names(file_paths)
     source.last_scan_at = datetime.now(timezone.utc)

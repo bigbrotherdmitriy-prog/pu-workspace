@@ -77,6 +77,10 @@ def _tree_v1():
         ),
         _folder("sktp", "СКТП", "root"),
         _folder("sktp_acts", "Акты", "sktp"),
+        _folder("sktp_schemes", "Схемы", "sktp"),
+        _folder("ar", "АР", "root"),
+        _folder("ar_acts", "Акты", "ar"),
+        _file("ar_plan", "план.pdf", "ar"),
         _folder("proj", "Проект2", "root"),
         _file("proj_bak", "план.bak", "proj", mime="application/octet-stream"),
     ]
@@ -103,14 +107,16 @@ def test_scan_source_tree_and_files(world, monkeypatch):
     db.commit()
 
     files = db.query(IdFile).filter(IdFile.source_id == source.id).all()
-    assert len(files) == 3
-    assert set(f.kind for f in files) >= {"passport", "act", "service"}
+    assert len(files) == 4
+    assert set(f.kind for f in files) >= {"passport", "act", "scheme", "service"}
     act = next(f for f in files if f.name == "Акт ввода 1.docx")
     assert "blank_fields" in (act.issues or [])
     assert "editable_format_not_signed" in (act.issues or [])
     bak = next(f for f in files if f.name == "план.bak")
     assert "service_file" in (bak.issues or [])
-    assert result["empty_folders"] == ["СКТП/Акты"]
+    mod1 = next(f for f in files if f.name == "Модуль 1.pdf")
+    assert mod1.path == "ЭМ/Паспорта/Модуль 1.pdf"
+    assert result["empty_folders"] == ["АР/Акты", "СКТП"]
 
     # repeat scan without .bak -> IdFile removed
     tree_v2 = [i for i in _tree_v1() if i.id != "proj_bak"]
@@ -118,7 +124,7 @@ def test_scan_source_tree_and_files(world, monkeypatch):
     ed.scan_source(db, source, storage2)
     db.commit()
     remaining = db.query(IdFile).filter(IdFile.source_id == source.id).all()
-    assert len(remaining) == 2
+    assert len(remaining) == 3
     assert all(f.name != "план.bak" for f in remaining)
 
 
