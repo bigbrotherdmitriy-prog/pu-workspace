@@ -110,6 +110,17 @@ def test_overdue_outflow(world):
         title="Просрочка",
         planned_date=date(2020, 1, 10),
         planned_amount=Decimal("300.00"),
+        invoiced_amount=Decimal("300.00"),
+        actual_amount=Decimal("0.00"),
+        actual_date=None,
+        status="approved",
+    )
+    _add_entry(
+        db, project.id,
+        direction="outflow",
+        title="План без счёта",
+        planned_date=date(2020, 1, 10),
+        planned_amount=Decimal("900.00"),
         actual_amount=Decimal("0.00"),
         actual_date=None,
         status="approved",

@@ -96,13 +96,11 @@ def get_portfolio(
                     and row.actual_date is None
                     and row.status in _OVERDUE_STATUSES
                 ):
+                    # Only an issued invoice can be overdue; an unpaid plan line is just plan.
                     invoiced = getattr(row, "invoiced_amount", None) or _DECIMAL_ZERO
-                    if planned_amount > 0 or invoiced > 0:
+                    if invoiced > 0:
                         overdue_count += 1
-                        if invoiced > 0:
-                            overdue_amount += invoiced
-                        else:
-                            overdue_amount += planned_amount
+                        overdue_amount += invoiced
 
         gap = plan_cash_gaps(cash)
         worst = gap["worst"]
