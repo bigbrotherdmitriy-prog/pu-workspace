@@ -95,6 +95,7 @@ export type FinanceOverview = {
     planned_amount: number;
     actual_amount: number;
     invoiced_amount?: number;
+    plan_entry_id?: number;
     currency: string;
     actual_date?: string;
     counterparty?: string;
