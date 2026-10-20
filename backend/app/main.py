@@ -23,6 +23,7 @@ from app.api.project_search import router as project_search_router
 from app.api.saved_search_views import router as saved_search_views_router
 from app.api.execution_finance import router as execution_finance_router
 from app.api.budget_from_dds import router as budget_from_dds_router
+from app.api.dds_plan_versions import router as dds_plan_versions_router
 from app.api.service_settings import router as service_settings_router
 from app.api.invoice_plan_match import router as invoice_plan_match_router
 from app.api.gmail import router as gmail_router
@@ -166,6 +167,7 @@ app.include_router(saved_search_views_router)
 app.include_router(service_settings_router)
 app.include_router(execution_finance_router)
 app.include_router(budget_from_dds_router)
+app.include_router(dds_plan_versions_router)
 app.include_router(gmail_router)
 app.include_router(yandex_mail_router)
 app.include_router(ai_policy_router)
