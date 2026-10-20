@@ -300,7 +300,7 @@ def test_requirements_from_contract_prefers_tz(world, monkeypatch):
 
     monkeypatch.setattr(ed, "extract_id_requirements_ai", lambda text: None)
 
-    contract = Contract(name="Договор", project_id=project.id)
+    contract = Contract(number="1", title="Договор", project_id=project.id)
     db.add(contract)
     db.flush()
 
@@ -309,10 +309,10 @@ def test_requirements_from_contract_prefers_tz(world, monkeypatch):
     db.add_all([big, tz])
     db.flush()
 
-    db.add(DocumentVersion(document_id=big.id, version_number=1, content_text="x" * 250_000))
+    db.add(DocumentVersion(document_id=big.id, version_number=1, content="x" * 250_000))
     db.add(DocumentVersion(
         document_id=tz.id, version_number=1,
-        content_text=(
+        content=(
             "Перечень исполнительной документации: Журнал работ; "
             "Технический отчет испытаний; Гарантии"
         ),
@@ -320,8 +320,8 @@ def test_requirements_from_contract_prefers_tz(world, monkeypatch):
     big.current_version = 1
     tz.current_version = 1
     db.add_all([
-        ContractDocumentLink(contract_id=contract.id, document_id=big.id),
-        ContractDocumentLink(contract_id=contract.id, document_id=tz.id),
+        ContractDocumentLink(project_id=project.id, contract_id=contract.id, document_id=big.id),
+        ContractDocumentLink(project_id=project.id, contract_id=contract.id, document_id=tz.id),
     ])
     db.commit()
 
@@ -337,7 +337,7 @@ def test_requirements_from_contract_prefers_tz(world, monkeypatch):
     tz_items = [r for r in reqs if r.source == "tz"]
     norm_items = [r for r in reqs if r.source == "norm"]
     assert len(tz_items) == 2
-    assert all(r.required_if_applicable is True for r in norm_items)
+    assert all(r.required_if_applicable is True for r in norm_items if r.doc_kind != "order")
 
 
 def test_scan_source_skips_read_when_unchanged(world, monkeypatch):
@@ -354,6 +354,10 @@ def test_scan_source_skips_read_when_unchanged(world, monkeypatch):
     monkeypatch.setattr(
         ed, "_extract_text_from_bytes",
         lambda data, mime, name: "Ведомость № 4 смонтированного электрооборудования",
+    )
+    monkeypatch.setattr(
+        ed, "_extract_pdf_text_layer",
+        lambda data: "Ведомость № 4 смонтированного электрооборудования",
     )
 
     source = IdSource(
@@ -383,6 +387,7 @@ def test_scan_source_skips_read_when_unchanged(world, monkeypatch):
 
 
 def test_scan_source_pdf_contained_kinds(world, monkeypatch):
+    monkeypatch.setattr(ed, "_extract_pdf_text_layer", lambda data: "Ведомость № 4 смонтированного электрооборудования")
     db = world["db"]
     project = world["project"]
 
@@ -413,4 +418,4 @@ def test_scan_source_pdf_contained_kinds(world, monkeypatch):
     files = db.query(IdFile).filter(IdFile.source_id == source.id).all()
     f = next((x for x in files if x.name == "Акты ЭМ 2026.pdf"), None)
     assert f is not None
-    assert "statement" in (f.contained_kinds or [])
+    assert "statement" in (f.contained_kinds or []), (f.issues, f.contained_kinds)

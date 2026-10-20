@@ -1,7 +1,10 @@
+import logging
 import os
 import re
 
 from app.jobs.queue import enqueue
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 
 KINDS = (
@@ -509,6 +512,15 @@ def _extract_text_from_bytes(data: bytes, mime_type: str | None, name: str) -> s
 _PDF_LAYER_PAGES = 60
 
 
+def _same_instant(a, b) -> bool:
+    """Stored timestamps may come back without tzinfo (e.g. SQLite); compare as UTC."""
+    def utc_naive(value):
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    return utc_naive(a) == utc_naive(b)
+
+
 def _extract_pdf_text_layer(data: bytes) -> str:
     """Только текстовый слой PDF, без OCR: первые 60 страниц."""
     from io import BytesIO
@@ -573,7 +585,7 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
             existing is not None
             and existing.modified_at is not None
             and modified_at is not None
-            and existing.modified_at == modified_at
+            and _same_instant(existing.modified_at, modified_at)
             and existing.size == size
         )
 
@@ -614,6 +626,7 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
                 text = _extract_pdf_text_layer(data)
                 contained_kinds = detect_contained_kinds(text)
             except Exception:
+                logger.warning("ИД: PDF не прочитан: %s", name, exc_info=True)
                 if "unreadable" not in issues:
                     issues.append("unreadable")
 
@@ -893,7 +906,7 @@ def requirements_from_contract(
             ).first()
             if version is None:
                 continue
-            doc_text = getattr(version, "content_text", None) or getattr(version, "text", None)
+            doc_text = getattr(version, "content", None)
             if not doc_text:
                 continue
             doc_texts.append((getattr(doc, "name", "") or "", doc_text))
