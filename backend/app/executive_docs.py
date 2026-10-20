@@ -1,7 +1,10 @@
+import logging
 import os
 import re
 
 from app.jobs.queue import enqueue
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 
 KINDS = (
@@ -402,12 +405,18 @@ def _empty_item(title: str, doc_kind: str, section: str | None, source: str, nor
     }
 
 
-def build_requirements(text: str, sections: list[str]) -> list[dict]:
+def build_requirements(
+    text: str, sections: list[str], items: list[dict] | None = None,
+) -> list[dict]:
     """ТЗ/contract list first; normative sets fill sections the ТЗ is silent on.
 
     When the ТЗ has its own list, normative items are added as recommended
-    (required_if_applicable=True) — the contract defines what is mandatory."""
-    items = extract_id_requirements_ai(text) or parse_id_requirements(text)
+    (required_if_applicable=True) — the contract defines what is mandatory.
+
+    ``items`` may carry a pre-extracted list (so callers do not invoke the AI
+    twice); when omitted the list is extracted from ``text``."""
+    if items is None:
+        items = extract_id_requirements_ai(text) or parse_id_requirements(text)
     result: list[dict] = []
     for it in items:
         result.append({
@@ -500,6 +509,33 @@ def _extract_text_from_bytes(data: bytes, mime_type: str | None, name: str) -> s
     return content_mod.extract_text(data, mime_type, name)
 
 
+_PDF_LAYER_PAGES = 60
+
+
+def _same_instant(a, b) -> bool:
+    """Stored timestamps may come back without tzinfo (e.g. SQLite); compare as UTC."""
+    def utc_naive(value):
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    return utc_naive(a) == utc_naive(b)
+
+
+def _extract_pdf_text_layer(data: bytes) -> str:
+    """Только текстовый слой PDF, без OCR: первые 60 страниц."""
+    from io import BytesIO
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(data))
+    parts: list[str] = []
+    for page in reader.pages[:_PDF_LAYER_PAGES]:
+        try:
+            parts.append(page.extract_text() or "")
+        except Exception:
+            parts.append("")
+    return "\n".join(parts)
+
+
 def _parse_modified(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -538,8 +574,34 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
         issues = list(cls["issues"])
         size = getattr(it, "size", None)
         ext = _ext(name)
+        modified_at = _parse_modified(getattr(it, "modified_time", None))
         contained_kinds: list[str] | None = None
-        if (
+
+        existing = db.query(IdFile).filter_by(
+            project_id=source.project_id, provider=source.provider, external_id=iid,
+        ).first()
+
+        unchanged = (
+            existing is not None
+            and existing.modified_at is not None
+            and modified_at is not None
+            and _same_instant(existing.modified_at, modified_at)
+            and existing.size == size
+        )
+
+        if unchanged:
+            # переиспользуем прежние результаты чтения файла
+            for e in (existing.issues or []):
+                if e not in issues:
+                    issues.append(e)
+            contained_kinds = list(existing.contained_kinds) if existing.contained_kinds else None
+            # классификация по имени могла дать новые «вложенные» виды — объединяем
+            by_name_kinds = detect_contained_kinds(name)
+            if by_name_kinds:
+                merged = set(contained_kinds or [])
+                merged.update(by_name_kinds)
+                contained_kinds = sorted(merged)
+        elif (
             read_text
             and ext in _READABLE_DOC_EXTS
             and (size or 0) <= _READER_LIMIT
@@ -560,16 +622,14 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
             and (size or 0) <= _PDF_READER_LIMIT
         ):
             try:
-                data, mime = storage.read_bytes(iid, _PDF_READER_LIMIT)
-                text = _extract_text_from_bytes(data, mime, name)
+                data, _mime = storage.read_bytes(iid, _PDF_READER_LIMIT)
+                text = _extract_pdf_text_layer(data)
                 contained_kinds = detect_contained_kinds(text)
             except Exception:
+                logger.warning("ИД: PDF не прочитан: %s", name, exc_info=True)
                 if "unreadable" not in issues:
                     issues.append("unreadable")
 
-        existing = db.query(IdFile).filter_by(
-            project_id=source.project_id, provider=source.provider, external_id=iid,
-        ).first()
         if existing is None:
             existing = IdFile(
                 project_id=source.project_id,
@@ -581,7 +641,7 @@ def scan_source(db, source, storage, *, read_text: bool = True) -> dict:
         existing.name = name
         existing.mime_type = getattr(it, "mime_type", None)
         existing.size = size
-        existing.modified_at = _parse_modified(getattr(it, "modified_time", None))
+        existing.modified_at = modified_at
         existing.kind = kind
         existing.section = section
         existing.object_name = source.object_name
@@ -820,7 +880,7 @@ def requirements_from_contract(
     from app.models.document import Document
     from app.models.document_version import DocumentVersion
 
-    text_parts: list[str] = []
+    doc_texts: list[tuple[str, str]] = []  # (doc_name, text)
     if contract_id is not None:
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
         doc_ids: list[int] = []
@@ -833,7 +893,6 @@ def requirements_from_contract(
             did = getattr(link, "document_id", None)
             if did:
                 doc_ids.append(did)
-        total = 0
         for did in doc_ids:
             doc = db.query(Document).filter(Document.id == did).first()
             if doc is None:
@@ -847,17 +906,34 @@ def requirements_from_contract(
             ).first()
             if version is None:
                 continue
-            text = getattr(version, "content_text", None) or getattr(version, "text", None)
-            if not text:
+            doc_text = getattr(version, "content", None)
+            if not doc_text:
                 continue
-            remaining = 200_000 - total
-            if remaining <= 0:
-                break
-            chunk = text[:remaining]
-            text_parts.append(chunk)
-            total += len(chunk)
+            doc_texts.append((getattr(doc, "name", "") or "", doc_text))
 
-    text = "\n".join(text_parts)
+    def _is_prio(entry: tuple[str, str]) -> bool:
+        name_n = _norm(entry[0])
+        if "тз" in name_n or "техническ" in name_n or "задани" in name_n:
+            return True
+        return "исполнительной документации" in _norm(entry[1])
+
+    ordered = sorted(doc_texts, key=lambda e: 0 if _is_prio(e) else 1)
+
+    _DOC_LIMIT = 120_000
+
+    def _extract(text: str) -> list[dict] | None:
+        return extract_id_requirements_ai(text) or parse_id_requirements(text)
+
+    found_text = ""
+    found_items: list[dict] | None = None
+    for _name, doc_text in ordered:
+        chunk = doc_text[:_DOC_LIMIT]
+        candidate = _extract(chunk)
+        if candidate:
+            found_text = chunk
+            found_items = candidate
+            break
+
     q = db.query(IdRequirement).filter(
         IdRequirement.project_id == project_id,
         IdRequirement.source.in_(("tz", "norm")),
@@ -872,7 +948,7 @@ def requirements_from_contract(
         q = q.filter(IdRequirement.object_name == object_name)
     q.delete(synchronize_session=False)
 
-    items = build_requirements(text, sections)
+    items = build_requirements(found_text, sections, items=found_items)
     for it in items:
         db.add(IdRequirement(
             project_id=project_id,
