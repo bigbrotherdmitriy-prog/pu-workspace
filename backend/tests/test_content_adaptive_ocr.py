@@ -193,7 +193,7 @@ def test_pdf_fallback_is_enabled_for_at_most_first_two_eligible_pages(tmp_path, 
     monkeypatch.setattr("app.organizer_engine.content.tempfile.TemporaryDirectory", lambda **_kwargs: _Directory(tmp_path))
 
     assert set(_ocr_pdf_pages(b"synthetic pdf bytes", {1, 2, 3, 4})) == {1, 2, 3, 4}
-    assert seen == [(1, True), (2, True), (3, False), (4, False)]
+    assert sorted(seen) == [(1, True), (2, True), (3, False), (4, False)]
 
 
 class _Directory:
@@ -205,6 +205,33 @@ class _Directory:
 
     def __exit__(self, *_args):
         return False
+
+
+def test_ocr_env_sets_omp_thread_limit_when_absent(monkeypatch):
+    from app.organizer_engine.content import _ocr_env
+    monkeypatch.delenv("OMP_THREAD_LIMIT", raising=False)
+    assert _ocr_env().get("OMP_THREAD_LIMIT") == "1"
+
+
+def test_ocr_env_preserves_existing_omp_thread_limit(monkeypatch):
+    from app.organizer_engine.content import _ocr_env
+    monkeypatch.setenv("OMP_THREAD_LIMIT", "7")
+    assert _ocr_env().get("OMP_THREAD_LIMIT") == "7"
+
+
+def test_extract_text_result_reports_ocr_incomplete_for_missing_weak_pages(monkeypatch):
+    from app.organizer_engine.content import extract_text_result
+    import pypdf
+
+    fake_reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: "")] * 3)
+    monkeypatch.setattr(pypdf, "PdfReader", lambda *_args, **_kwargs: fake_reader)
+    monkeypatch.setattr(
+        "app.organizer_engine.content._ocr_pdf_pages",
+        lambda _data, _pages: {1: "распознанная страница " * 20},
+    )
+    result = extract_text_result(b"synthetic pdf", "application/pdf", "scan.pdf")
+    assert "ocr_incomplete:2" in result.warnings
+    assert result.needs_review is True
 
 
 def test_primary_and_fallback_share_one_deadline():

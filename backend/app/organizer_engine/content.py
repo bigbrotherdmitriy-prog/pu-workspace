@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import os
 import re
@@ -40,6 +41,9 @@ OCR_FALLBACK_PSM = max(1, min(13, int(os.getenv("OCR_FALLBACK_PSM", "6"))))
 OCR_ADAPTIVE_FALLBACK = os.getenv("OCR_ADAPTIVE_FALLBACK", "true").strip().lower() in {"1", "true", "yes", "on"}
 OCR_FALLBACK_MAX_PAGES = max(0, min(5, int(os.getenv("OCR_FALLBACK_MAX_PAGES", "2"))))
 OCR_REVIEW_CONFIDENCE = max(0.0, min(1.0, float(os.getenv("OCR_REVIEW_CONFIDENCE", "0.72"))))
+OCR_PARALLEL_PAGES = max(1, min(4, int(os.getenv("OCR_PARALLEL_PAGES", "2"))))
+OCR_PAGE_SECONDS = max(5, min(120, int(os.getenv("OCR_PAGE_SECONDS", "25"))))
+OCR_DOCUMENT_MAX_SECONDS = max(60, min(1800, int(os.getenv("OCR_DOCUMENT_MAX_SECONDS", "600"))))
 
 OCR_ORPHAN_ENDINGS = frozenset({"ый", "ий", "ая", "яя", "ое", "ые", "ую", "юю", "ых", "ым", "ть", "ться", "го"})
 NUMBERED_PROSE_RE = re.compile(
@@ -393,6 +397,12 @@ def _ocr_enabled() -> bool:
     return os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _ocr_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("OMP_THREAD_LIMIT", "1")
+    return env
+
+
 def _tesseract_binary() -> str | None:
     """Resolve the local engine explicitly when a service image does not export PATH."""
     configured = os.getenv("TESSERACT_CMD", "").strip()
@@ -424,6 +434,7 @@ def _detect_orientation(path: Path, timeout: float) -> int:
         result = subprocess.run(
             [command, str(path), "stdout", "-l", "osd", "--psm", "0"],
             capture_output=True, timeout=max(1, timeout), check=False,
+            env=_ocr_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return 0
@@ -536,7 +547,7 @@ def _tesseract_page(
             "--psm", str(psm or OCR_PSM),
             "-c", "preserve_interword_spaces=1", "tsv",
         ],
-        capture_output=True, timeout=budget, check=False,
+        capture_output=True, timeout=budget, check=False, env=_ocr_env(),
     )
     output = (
         result.stdout.decode("utf-8", errors="replace")
@@ -562,6 +573,7 @@ def _run_tesseract(path: Path, psm: int, timeout: float) -> str:
         text=True,
         timeout=max(1, timeout),
         check=False,
+        env=_ocr_env(),
     )
     return result.stdout if result.returncode == 0 else ""
 
@@ -771,19 +783,25 @@ def _ocr_text(data: bytes, suffix: str, mime_type: str) -> str:
 
 
 def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtraction]:
-    """OCR selected one-based PDF pages within one total time budget."""
+    """OCR selected one-based PDF pages concurrently within one total time budget."""
     if not page_numbers or not _ocr_enabled() or not shutil.which("pdftoppm"):
         return {}
-    deadline = time.monotonic() + OCR_TIMEOUT_SECONDS
+    ordered = sorted(page_numbers)
+    budget = min(
+        OCR_DOCUMENT_MAX_SECONDS,
+        max(OCR_TIMEOUT_SECONDS, OCR_PAGE_SECONDS * len(ordered)),
+    )
+    deadline = time.monotonic() + budget
     with tempfile.TemporaryDirectory(prefix="pu-ocr-") as temp:
         temp_dir = Path(temp)
         source = temp_dir / "source.pdf"
         source.write_bytes(data)
-        result: dict[int, PageExtraction] = {}
-        for page_number in sorted(page_numbers):
+        fallback_ranks = set(range(min(OCR_FALLBACK_MAX_PAGES, len(ordered))))
+
+        def _process(rank: int, page_number: int) -> tuple[int, PageExtraction] | None:
             remaining = deadline - time.monotonic()
             if remaining <= 1:
-                break
+                return None
             prefix = temp_dir / f"page-{page_number}"
             rendered = subprocess.run(
                 [
@@ -793,15 +811,25 @@ def _ocr_pdf_pages(data: bytes, page_numbers: set[int]) -> dict[int, PageExtract
                 capture_output=True, timeout=remaining, check=False,
             )
             image = prefix.with_suffix(".jpg")
-            if rendered.returncode == 0 and image.exists():
-                remaining = deadline - time.monotonic()
-                if remaining > 1:
-                    text = _tesseract(
-                        image,
-                        remaining,
-                        allow_fallback=len(result) < OCR_FALLBACK_MAX_PAGES,
-                    )
-                    result[page_number] = _coerce_page(text, page_number)
+            if rendered.returncode != 0 or not image.exists():
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 1:
+                return None
+            text = _tesseract(image, remaining, allow_fallback=rank in fallback_ranks)
+            return page_number, _coerce_page(text, page_number)
+
+        result: dict[int, PageExtraction] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=OCR_PARALLEL_PAGES) as pool:
+            futures = [pool.submit(_process, rank, page_number) for rank, page_number in enumerate(ordered)]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    item = future.result()
+                except (OSError, subprocess.SubprocessError):
+                    continue
+                if item is not None:
+                    page_number, page = item
+                    result[page_number] = page
         return result
 
 
@@ -1017,6 +1045,7 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
     except (OSError, subprocess.SubprocessError):
         recognized = {}
         warnings.append("ocr_failed")
+    ocr_incomplete_missing: list[int] = []
     page_results: list[PageExtraction] = []
     if native_pages:
         selected_text: list[str] = []
@@ -1042,7 +1071,11 @@ def extract_text_result(data: bytes, mime_type: str, filename: str = "") -> Extr
     confidence = _result_confidence(page_results, fields)
     attempted_ocr = bool(weak_pages) and _ocr_enabled()
     needs_review = attempted_ocr and confidence < OCR_REVIEW_CONFIDENCE
-    if needs_review:
+    ocr_incomplete_missing = sorted(page for page in weak_pages if page not in recognized)
+    if ocr_incomplete_missing:
+        warnings.append(f"ocr_incomplete:{len(ocr_incomplete_missing)}")
+        needs_review = True
+    if needs_review and "manual_review_required" not in warnings:
         warnings.append("manual_review_required")
     return ExtractionResult(
         text=finalized, method=method, quality=_quality(finalized, used_ocr=used_ocr),
