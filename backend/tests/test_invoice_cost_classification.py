@@ -469,3 +469,24 @@ def test_repeated_counterparty_does_not_auto_apply_prior_category(
     assert second["selected_cost_category_id"] is None
     assert second["status"] == "proposed"
     assert db_session.query(CashFlowEntry).filter_by(project_id=project.id).count() == 1
+
+
+def test_get_invoice_extraction_returns_proposal_for_push_card(db_session, user_factory, monkeypatch):
+    user, project, document, _version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: InvoiceFields(
+        amount=Decimal("120788.73"), amount_evidence_quote="120 788,73", currency="RUB",
+        counterparty="ООО ЭЛСИСТЕМ", counterparty_evidence_quote="ООО ЭЛСИСТЕМ",
+        payment_purpose="комплектующие", payment_purpose_evidence_quote="комплектующие",
+        suggested_category_name="Прямые", category_evidence_quote="комплектующие",
+        planned_date=date(2026, 9, 19), confidence=0.9, extraction_method="llm",
+    ))
+    proposed = create_invoice_extraction(document.id, InvoiceExtractionCreate(project_id=project.id), db_session, user)
+
+    loaded = finance_api.get_invoice_extraction(proposed["id"], db_session, user)
+
+    assert loaded["id"] == proposed["id"]
+    assert loaded["counterparty"] == "ООО ЭЛСИСТЕМ"
+    assert loaded["status"] == "proposed"
+    with pytest.raises(finance_api.HTTPException):
+        finance_api.get_invoice_extraction(999999, db_session, user)
