@@ -38,7 +38,8 @@ def test_vat_from_gross():
 
 
 def test_stage_quantity():
-    assert stage_quantity(Decimal("23446972.13"), Decimal("261692220.86")) == Decimal("0.0895975")
+    assert stage_quantity(Decimal("23446972.13"), Decimal("261692220.86")) == Decimal("0.08960")
+    assert stage_quantity(Decimal("23446972.13"), Decimal("261692220.86"), places=7) == Decimal("0.0895975")
 
 
 def _sample_data() -> ActData:
@@ -65,7 +66,7 @@ def _sample_data() -> ActData:
         stage_title="Работы по этапу",
         okpd2="41.20.40",
         unit="усл. ед.",
-        quantity=Decimal("0.0895975"),
+        quantity=Decimal("0.08960"),
         unit_price=Decimal("261700000.00"),
         amount=Decimal("23446972.13"),
         vat_rate=Decimal("22"),
@@ -78,7 +79,7 @@ def test_act_text_lines_structure():
     assert lines["title"] == "Акт сдачи-приемки выполненных работ № 42"
     assert "Договору № 123/2026" in lines["subtitle"]
     assert len(lines["table_header"]) == 6
-    assert lines["table_row"][3] == "0,0895975"
+    assert lines["table_row"][3] == "0,08960"
     assert "23 446 972,13" in lines["total"]
 
 

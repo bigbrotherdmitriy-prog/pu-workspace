@@ -109,13 +109,14 @@ def vat_from_gross(amount: Decimal, rate: Optional[Decimal]) -> Optional[Decimal
     return vat.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def stage_quantity(amount: Decimal, object_total: Decimal) -> Decimal:
+def stage_quantity(amount: Decimal, object_total: Decimal, places: int = 5) -> Decimal:
+    """Stage share of the object price (усл. ед.); 5 places is what customers accept in acts."""
     amount = Decimal(amount)
     object_total = Decimal(object_total)
     if object_total <= 0:
         return Decimal("1")
     q = amount / object_total
-    return q.quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP)
+    return q.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
 
 
 @dataclass
