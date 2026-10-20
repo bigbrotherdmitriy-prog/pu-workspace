@@ -219,6 +219,39 @@ def duplicate_names(paths: list[str]) -> list[tuple[str, list[str]]]:
 
 
 _HEADER_RE = re.compile(r"(перечень|состав)\s+исполнительной\s+документации", re.IGNORECASE)
+
+_NOT_EXECUTIVE_PHRASES = (
+    "счет-фактур",
+    "счет на оплату",
+    "акт сдачи-приемки",
+    "акт сдачи приемки",
+    "акт выполненных работ",
+    "кс-2",
+    "кс-3",
+    "товарная накладная",
+    "упд",
+    "универсальный передаточный",
+)
+
+_NOT_EXECUTIVE_PREFIXES = (
+    "комплект исполнительной документации",
+    "исполнительная документация",
+)
+
+
+def _is_not_executive(title: str) -> bool:
+    if not title:
+        return False
+    t = _norm(title).strip()
+    for phrase in _NOT_EXECUTIVE_PHRASES:
+        if phrase in t:
+            return True
+    if re.search(r"\bсчет\b", t) is not None:
+        return True
+    for prefix in _NOT_EXECUTIVE_PREFIXES:
+        if t.startswith(prefix):
+            return True
+    return False
 _STOP_RES = (
     re.compile(r"Гаранти"),
     re.compile(r"Требования к"),
@@ -245,6 +278,8 @@ def parse_id_requirements(text: str) -> list[dict]:
     for part in parts:
         title = part.strip(" .,;:")
         if len(title) < 5:
+            continue
+        if _is_not_executive(title):
             continue
         copies: int | None = None
         cm = _COPIES_RE.search(title)
@@ -321,6 +356,8 @@ def extract_id_requirements_ai(text: str) -> list[dict] | None:
         title = it.get("title") or ""
         quote = it.get("evidence_quote") or ""
         if not title:
+            continue
+        if _is_not_executive(title):
             continue
         if _norm_text(quote) not in norm_text:
             continue
@@ -922,7 +959,11 @@ def requirements_from_contract(
     _DOC_LIMIT = 120_000
 
     def _extract(text: str) -> list[dict] | None:
-        return extract_id_requirements_ai(text) or parse_id_requirements(text)
+        items = extract_id_requirements_ai(text)
+        if items:
+            return items
+        parsed = parse_id_requirements(text)
+        return parsed or None
 
     found_text = ""
     found_items: list[dict] | None = None
