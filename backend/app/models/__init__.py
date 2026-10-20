@@ -42,6 +42,7 @@ from app.models.external_resource import ExternalResourceLink
 from app.models.project_contact import ContactConflict, ProjectContact
 from app.models.task_completion_suggestion import TaskCompletionSuggestion
 from app.models.contract_document_link import ContractDocumentLink
+from app.models.contract_stage import ContractStage
 from app.models.job import BackgroundJob, ServiceHeartbeat
 from app.models.notification_device import UserDeviceToken
 from app.models.mail_settings import MailUserSettings
@@ -130,6 +131,7 @@ __all__ = [
     "ContactConflict",
     "TaskCompletionSuggestion",
     "ContractDocumentLink",
+    "ContractStage",
     "BackgroundJob",
     "ServiceHeartbeat",
     "MailUserSettings",
