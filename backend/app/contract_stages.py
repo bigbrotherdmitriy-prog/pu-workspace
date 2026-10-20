@@ -253,6 +253,26 @@ def _sum_amounts(stages: list[dict]) -> Decimal:
     return total
 
 
+def renumber_in_order(stages: list[dict]) -> tuple[list[dict], list[str]]:
+    """Stages go in document order; a typo in the printed numbers (3 → 5) must not
+    leave a hole. Each object is renumbered 1..N; every gap or repeat becomes a warning."""
+    warnings: list[str] = []
+    counters: dict[str | None, int] = {}
+    result: list[dict] = []
+    for stage in stages:
+        obj = stage.get("object_name")
+        counters[obj] = counters.get(obj, 0) + 1
+        ordinal = counters[obj]
+        printed = stage.get("stage_number")
+        if printed != ordinal:
+            where = f" ({obj})" if obj else ""
+            warnings.append(
+                f"В документе{where} этап напечатан как «{printed}-й», по порядку это {ordinal}-й — принят номер {ordinal}."
+            )
+        result.append({**stage, "stage_number": ordinal})
+    return result, warnings
+
+
 def extract_contract_stages(db: Session, project_id: int, contract) -> dict:
     texts = contract_text(db, project_id, contract)
     method = "none"
@@ -277,6 +297,8 @@ def extract_contract_stages(db: Session, project_id: int, contract) -> dict:
             method = "regex"
             chosen = best
             source_document_id = best_doc_id
+
+    chosen, numbering_warnings = renumber_in_order(chosen)
 
     confirmed = db.query(ContractStage).filter(
         ContractStage.contract_id == contract.id,
@@ -324,7 +346,7 @@ def extract_contract_stages(db: Session, project_id: int, contract) -> dict:
         action="contract_stages_extracted",
         entity_type="contract",
         entity_id=contract.id,
-        details=f"method={method}; count={len(created)}",
+        details=f"method={method}; count={len(created)}; renumbered={len(numbering_warnings)}",
     ))
 
     return {
@@ -342,4 +364,5 @@ def extract_contract_stages(db: Session, project_id: int, contract) -> dict:
         ],
         "total": str(total),
         "by_object": {k: str(v) for k, v in by_object.items()},
+        "warnings": numbering_warnings,
     }

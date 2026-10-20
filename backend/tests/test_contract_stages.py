@@ -173,3 +173,18 @@ def test_get_returns_by_object_and_total(world):
     assert result["total"] == "150000.00"
     assert result["by_object"][""] == "150000.00"
     assert len(result["items"]) == 2
+
+
+def test_printed_numbering_gap_is_renumbered_in_order_with_warning():
+    from app.contract_stages import parse_stages_regex, renumber_in_order
+
+    text = (
+        "ГОРОДЕЦ Начало Окончание Стоимость этапа "
+        "3-й этап Подготовка 01.02.2026 30.04.2026 54 336 733,87 "
+        "5-й этап Поставка 01.03.2026 30.06.2026 81 790 938,22 "
+        "6-й этап Поставка 2 02.03.2026 30.06.2026 81 838 748,22"
+    )
+    stages, warnings = renumber_in_order(parse_stages_regex(text))
+    assert [s["stage_number"] for s in stages] == [1, 2, 3]
+    assert len(warnings) == 3
+    assert "«5-й»" in warnings[1] and "2-й" in warnings[1]
