@@ -405,3 +405,21 @@ def test_word_stems_match_without_ai(world, monkeypatch):
     assert stem_entry.id in rows, payload
     reasons = rows[stem_entry.id]["reasons"]
     assert any("совпадают" in r for r in reasons), reasons
+
+
+def test_monthly_payments_of_one_article_are_offered_once_with_summed_plan(monkeypatch):
+    from app.api import invoice_plan_match as m
+
+    entry_meta = {
+        1: {"title": "Материалы для ЭМ", "counterparty": None, "planned_amount": "2378718.00", "remaining_raw": m.Decimal("0")},
+        2: {"title": "Материалы для ЭМ", "counterparty": None, "planned_amount": "14000.00", "remaining_raw": m.Decimal("14000")},
+    }
+    rows = [
+        {"plan_entry_id": 2, "title": "Материалы для ЭМ", "counterparty": None, "planned_amount": "14000.00", "remaining": "14000.00", "score": 90, "reasons": []},
+        {"plan_entry_id": 1, "title": "Материалы для ЭМ", "counterparty": None, "planned_amount": "2378718.00", "remaining": "0.00", "score": 70, "reasons": []},
+    ]
+    collapsed = m._collapse_by_article(rows, entry_meta)
+    assert len(collapsed) == 1
+    assert collapsed[0]["plan_entry_id"] == 2
+    assert collapsed[0]["planned_amount"] == "2392718.00"
+    assert collapsed[0]["remaining"] == "14000.00"
