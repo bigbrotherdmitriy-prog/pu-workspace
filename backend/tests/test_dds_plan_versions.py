@@ -233,3 +233,20 @@ def test_list_accessible_for_viewer(world):
     )
     assert len(items) >= 1
     assert items[0]["version_number"] == 1
+
+
+def test_project_wide_version_includes_contract_rows(world):
+    db = world["db"]
+    project = world["project"]
+    _add_entry(db, project.id, title="По договору", planned_amount=Decimal("500.00"), contract_id=999)
+    _add_entry(db, project.id, title="Без договора", planned_amount=Decimal("200.00"))
+    db.commit()
+
+    created = api.create_dds_plan_version(
+        project_id=project.id,
+        payload=api.DdsPlanVersionCreate(label="Весь проект"),
+        db=db,
+        user=world["user"],
+    )
+    assert created["rows_count"] == 2
+    assert created["totals"]["outflow"] == "700.00"
