@@ -248,6 +248,19 @@ describe("DdsWorkspace", () => {
     expect(within(row).getByLabelText("План ЭМ Щиты 2026-03")).toHaveValue(600);
   });
 
+  it("shows a confirmed invoice under its plan article, not as a separate zero-plan article", () => {
+    const withInvoice = { ...finance, cash_flow: [
+      finance.cash_flow[0],
+      { ...finance.cash_flow[1], id: 60, title: "АР", category: "Прочие прямые", planned_date: "2026-02-28", planned_amount: 400 },
+      { ...finance.cash_flow[1], id: 251, title: "Оплата по счету № 92 за двери", category: "Проектирование", planned_date: "2026-02-02", planned_amount: 0, invoiced_amount: 373620, plan_entry_id: 60 },
+    ] } as FinanceOverview;
+
+    render(<DdsWorkspace finance={withInvoice} projectId={1} selectedContractId={4} onPrepare={vi.fn()} onConfirm={vi.fn()} onConfirmMany={vi.fn()} onConfirmPayment={vi.fn()} onLinkControls={vi.fn()} />);
+
+    expect(screen.queryByText("Оплата по счету № 92 за двери", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getAllByText("АР", { exact: true })).toHaveLength(1);
+  });
+
   it("edits, moves, copies and undoes only a proposed plan cell", async () => {
     const onMutatePlan = vi.fn().mockResolvedValue({ mutation_id: 81 });
     const onUndoPlanMutation = vi.fn().mockResolvedValue(undefined);

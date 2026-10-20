@@ -82,11 +82,15 @@ function normalizedCalendarLabel(value: string) {
   return value.trim().replace(/\s+/gu, " ").toLocaleLowerCase("ru-RU");
 }
 
-function groupCalendarRows(rows: CashRow[]): CalendarRowGroup[] {
+function groupCalendarRows(rows: CashRow[], planRows: CashRow[] = rows): CalendarRowGroup[] {
   const groups = new Map<string, CalendarRowGroup>();
+  const planById = new Map(planRows.map((row) => [row.id, row]));
   rows.forEach((row) => {
-    const title = row.title.trim() || row.title;
-    const key = [row.object, row.direction, normalizedCalendarLabel(row.category), normalizedCalendarLabel(title)].join("\u0000");
+    // A confirmed invoice is a fact against its plan line: show it under that
+    // article, not as its own article with a zero plan.
+    const article = (row.plan_entry_id && planById.get(row.plan_entry_id)) || row;
+    const title = article.title.trim() || article.title;
+    const key = [row.object, row.direction, normalizedCalendarLabel(article.category), normalizedCalendarLabel(title)].join("\u0000");
     const existing = groups.get(key);
     if (existing) existing.items.push(row);
     else groups.set(key, { key, title, items: [row] });
@@ -398,7 +402,7 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
           const matching = objectRows.filter((row) => row.category === category);
           if (!matching.length) return;
           data.push(["Статья", category, "", ...months.map((key) => matching.filter((row) => monthKey(row.planned_date) === key).reduce((sum, row) => sum + amount(row), 0)), matching.reduce((sum, row) => sum + amount(row), 0)]);
-          groupCalendarRows(matching).forEach((group) => data.push(["Операция", group.title, directionLabel(group.items[0].direction), ...months.map((key) => rowMonthTotal(group.items, key) || ""), rowTotal(group.items)]));
+          groupCalendarRows(matching, visibleRows).forEach((group) => data.push(["Операция", group.title, directionLabel(group.items[0].direction), ...months.map((key) => rowMonthTotal(group.items, key) || ""), rowTotal(group.items)]));
         });
       });
       downloadCsv(`ДДС_календарь_${suffix}.csv`, data);
@@ -466,8 +470,8 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
 
     {tab === "calendar" && <div className="dds-calendar-shell">{pendingDrop && <div className="dds-drop-choice" role="dialog" aria-label="Действие с плановой суммой"><strong>{pendingDrop.rows[0].title}{pendingDrop.rows.length > 1 ? ` · ${pendingDrop.rows.length} операций` : ""}: {monthLong.format(monthDate(monthKey(pendingDrop.rows[0].planned_date)))} → {monthLong.format(monthDate(pendingDrop.month))}</strong><button type="button" onClick={() => void applyDrop("move")}>Переместить</button><button type="button" className="secondary" onClick={() => void applyDrop("copy")}>Копировать</button><button type="button" className="secondary" onClick={() => setPendingDrop(null)}>Отмена</button></div>}<div className="dds-table-wrap dds-calendar" onWheel={(event) => { if (event.shiftKey) event.currentTarget.scrollLeft += event.deltaY; }}><table className="dds-table dds-template"><thead><tr><th>Статья ДДС</th><th>Итого за {calendarYearLabel}, {selectedCurrency}</th>{months.map((key) => <th key={key}>{monthLong.format(monthDate(key)).replace(/\s+\d{4}.*/, "")}</th>)}</tr></thead><tbody>
       <tr className="group inflow primary"><td>Платежи — всего</td><td className="money">{formatMoney(totals.inflow)}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(byMonth.find((item) => item.key === key)?.inflow || 0)}</td>)}</tr>
-      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "inflow"); if (!items.length) return []; return [<tr className="group inflow" key={`in-${object}`}><td>{object} — всего поступлений</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items).map(calendarOperationRow)]; })}
-      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "outflow"); if (!items.length) return []; return [<tr className="group outflow" key={`out-${object}`}><td>{object} — всего затрат</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items).map(calendarOperationRow)]; })}
+      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "inflow"); if (!items.length) return []; return [<tr className="group inflow" key={`in-${object}`}><td>{object} — всего поступлений</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items, visibleRows).map(calendarOperationRow)]; })}
+      {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "outflow"); if (!items.length) return []; return [<tr className="group outflow" key={`out-${object}`}><td>{object} — всего затрат</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items, visibleRows).map(calendarOperationRow)]; })}
       <tr className="dds-expense-total"><td>Расходы по месяцам</td><td className="money">{formatMoney(totals.outflow)}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(byMonth.find((item) => item.key === key)?.outflow || 0)}</td>)}</tr>
       <tr className="dds-balance"><td>Баланс накопленным итогом</td><td className="money">{formatMoney(totals.net)}</td>{months.map((key) => <td className={`money ${(cumulative[key] || 0) < 0 ? "negative" : ""}`} key={key}>{formatMoney(cumulative[key] || 0)}</td>)}</tr>
     </tbody></table>{!visibleRows.length && <p className="dds-empty">Календарь появится после добавления операций.</p>}</div></div>}
