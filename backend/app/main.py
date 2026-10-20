@@ -26,6 +26,7 @@ from app.api.budget_from_dds import router as budget_from_dds_router
 from app.api.portfolio import router as portfolio_router
 from app.api.dds_plan_versions import router as dds_plan_versions_router
 from app.api.contract_stages import router as contract_stages_router
+from app.api.acceptance_acts import router as acceptance_acts_router
 from app.api.service_settings import router as service_settings_router
 from app.api.invoice_plan_match import router as invoice_plan_match_router
 from app.api.gmail import router as gmail_router
@@ -173,6 +174,7 @@ app.include_router(budget_from_dds_router)
 app.include_router(portfolio_router)
 app.include_router(dds_plan_versions_router)
 app.include_router(contract_stages_router)
+app.include_router(acceptance_acts_router)
 app.include_router(gmail_router)
 app.include_router(yandex_mail_router)
 app.include_router(ai_policy_router)

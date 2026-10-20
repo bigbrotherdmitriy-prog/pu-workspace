@@ -85,6 +85,11 @@ def payment_days(text: str) -> tuple[int, bool]:
     return (10, True)
 
 
+__all__ = [
+    "act_text_lines" if False else None,  # placeholder removed below
+]
+
+
 def add_working_days(start: date, days: int) -> date:
     current = start
     remaining = max(days, 0)
