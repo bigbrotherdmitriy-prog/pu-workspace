@@ -12,6 +12,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
+from . import gemini_analysis
 from .cable_journal import _join_rows, _looks_like_data, rows_from_tsv
 
 
@@ -308,6 +309,143 @@ def rows_from_layout_text(text: str) -> list[list[str]]:
         cells = re.split(r"\s{2,}", stripped)
         result.append(cells)
     return result
+
+
+_AI_CHUNK_SIZE = 3500  # a bigger chunk makes the JSON answer exceed the model output limit
+
+_AI_SYSTEM = (
+    "Это текст спецификации оборудования, изделий и материалов (ГОСТ 21.110) из PDF. "
+    "Верни позиции таблицы: позиция, наименование (полностью, включая строки продолжения), "
+    "тип/марка, изготовитель, единица, количество, раздел. "
+    "evidence — дословный фрагмент строки позиции из текста, содержащий наименование и количество. "
+    "Не выдумывай."
+)
+
+_AI_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "pos": {"type": ["string", "null"]},
+                    "name": {"type": "string"},
+                    "type": {"type": ["string", "null"]},
+                    "maker": {"type": ["string", "null"]},
+                    "unit": {"type": ["string", "null"]},
+                    "qty": {"type": ["number", "null"]},
+                    "section": {"type": ["string", "null"]},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["name", "evidence"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+
+
+def _ai_norm(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").lower()).strip()
+
+
+def _qty_str(qty: float | None) -> str | None:
+    if qty is None:
+        return None
+    try:
+        d = Decimal(str(qty))
+    except InvalidOperation:
+        return None
+    s = format(d.normalize(), "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
+
+def _split_ai_chunks(text: str) -> list[str]:
+    if not text:
+        return []
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in text.split("\n"):
+        add = len(line) + (1 if current else 0)
+        if size + add > _AI_CHUNK_SIZE and current:
+            chunks.append("\n".join(current))
+            current = [line]
+            size = len(line)
+        else:
+            current.append(line)
+            size += add
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def _accept_ai_item(item: dict, chunk_norm: str) -> dict | None:
+    evidence = item.get("evidence") or ""
+    name = item.get("name") or ""
+    if not name or not evidence:
+        return None
+    if _ai_norm(evidence) not in chunk_norm:
+        return None
+    qty = item.get("qty")
+    if qty is not None:
+        qty_text = _qty_str(qty)
+        if qty_text is not None and qty_text not in evidence:
+            return None
+    return {
+        "pos": item.get("pos") or "",
+        "name": name,
+        "type": item.get("type") or "",
+        "maker": item.get("maker") or "",
+        "unit": item.get("unit") or "",
+        "qty": (Decimal(str(qty)) if qty is not None else None),
+        "section": item.get("section") or "",
+    }
+
+
+def extract_specification_ai(text: str) -> list[dict] | None:
+    try:
+        if not gemini_analysis.deepseek_configured():
+            return None
+    except Exception:
+        return None
+
+    chunks = _split_ai_chunks(text)
+    if not chunks:
+        return None
+
+    result: list[dict] = []
+    for chunk in chunks:
+        try:
+            response = gemini_analysis._try_deepseek(_AI_SYSTEM, chunk, _AI_SCHEMA)
+        except Exception:
+            continue
+        if not response:
+            continue
+        items = response.get("items") if isinstance(response, dict) else None
+        if not isinstance(items, list):
+            continue
+        chunk_norm = _ai_norm(chunk)
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            item = _accept_ai_item(raw, chunk_norm)
+            if item is not None:
+                result.append(item)
+
+    if not result:
+        return None
+    return result
+
+
+def specification_from_text(text: str) -> tuple[list[dict], str]:
+    ai_items = extract_specification_ai(text)
+    if ai_items is not None:
+        return ai_items, "ai"
+    return parse_specification(rows_from_layout_text(text)), "layout"
 
 
 _UNIT_PIECES = {"шт", "шт.", "компл", "компл.", "к-т", "комплект"}
