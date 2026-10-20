@@ -2867,7 +2867,7 @@ export function App() {
     const currency = projects.find((project) => project.id === projectId)?.currency || "RUB";
     const currencyLabel = currency === "RUB" ? "₽" : currency;
     return (
-    <ContractDetails contract={item} currency={currency}>
+    <ContractDetails contract={item} currency={currency} projectId={projectId}>
         <div>
           <span className={`contract-status ${item.status}`}>
             {item.contract_kind === "prime_reference" ? "ГЕНПОДРЯД · КОНТЕКСТ" : item.contract_kind === "revenue_subcontract" ? "НАШ СУБПОДРЯД · ДОХОД" : item.contract_kind === "downstream_subcontract" ? "НАШ ИСПОЛНИТЕЛЬ · РАСХОД" : item.contract_kind === "supply" ? "ПОСТАВКА · РАСХОД" : "ПРЯМОЙ ДОГОВОР · ДОХОД"} · {item.status}

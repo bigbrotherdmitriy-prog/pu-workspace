@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { contractMoney, vatLabel, type VatMode } from "./contractCommercial";
+import { ContractStagesRegister } from "./ContractStagesRegister";
 import "./contract-details.css";
 
 type DetailsContract = {
@@ -28,7 +29,7 @@ function snapshotValue(field: string, value: unknown, snapshot: Record<string, u
 
 // Controller state belongs to App, above register/scheme mounts. Opening details
 // never creates a second editor or replaces the version of an existing draft.
-export function ContractDetails({ contract, children, currency = "RUB" }: { contract: DetailsContract; children: ReactNode; currency?: string }) {
+export function ContractDetails({ contract, children, currency = "RUB", projectId }: { contract: DetailsContract; children: ReactNode; currency?: string; projectId?: number }) {
   return <article className="card contract-card contract-details" aria-label={`Карточка договора ${contract.number}`}>
     <div className="contract-details-summary">
       <h3>{contract.number} — {contract.title}</h3>
@@ -61,6 +62,7 @@ export function ContractDetails({ contract, children, currency = "RUB" }: { cont
         </li>)}</ol> : <p>Снимков истории пока нет.</p>}
       </details>
     </div>
+    {projectId !== undefined && <StagesSection projectId={projectId} contractId={contract.id} currency={currency} />}
     {children}
   </article>;
 }
@@ -87,4 +89,13 @@ export function ContractTermsFields({ draft, onChange, disabled = false, creatin
     <label>Гарантия до<input aria-label={creating ? "Гарантия нового договора до" : "Гарантия до"} disabled={disabled} type="date"
       aria-invalid={Boolean(fieldErrors.warranty_until)} value={draft.warrantyUntil} onChange={(event) => onChange("warrantyUntil", event.target.value)} /></label>
   </>;
+}
+
+// Collapsed by default: the register is loaded only when someone opens it.
+function StagesSection({ projectId, contractId, currency }: { projectId: number; contractId: number; currency: string }) {
+  const [open, setOpen] = useState(false);
+  return <details aria-label="Этапы и поступления" onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <summary>Этапы и поступления</summary>
+    {open && <ContractStagesRegister projectId={projectId} contractId={contractId} currency={currency} />}
+  </details>;
 }
