@@ -105,7 +105,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
       .filter((row) => row.direction === "inflow" && n(row.planned_amount) > 0 && !row.plan_entry_id && !["cancelled", "deleted", "rejected", "received", "paid"].includes(row.status))
       .map((row) => ({ row, left: n(row.planned_amount) - (factByPlan.get(row.id) || 0) }))
       .filter((item) => item.left > 0.009)
-      .sort((a, b) => a.row.planned_date.localeCompare(b.row.planned_date));
+      .sort((a, b) => (a.row.planned_date || "").localeCompare(b.row.planned_date || ""));
   }, [cashFlow]);
 
   if (error) return <p className="dds-board-status" role="alert">{error}</p>;
@@ -116,7 +116,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
   const last = months[months.length - 1];
   const gaps = months.filter((m) => n(m.cumulative_plan) < 0);
   const articles = data.expense_by_article ?? [];
-  const unpaid = articles.flatMap((article) => article.invoices
+  const unpaid = articles.flatMap((article) => (article.invoices || [])
     .filter((inv) => n(inv.invoiced) - n(inv.paid) > 0.009)
     .map((inv) => ({ ...inv, article: article.title, left: n(inv.invoiced) - n(inv.paid) })));
   const extra = data.additional_costs?.items ?? [];
@@ -200,7 +200,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
 
         <section className="dds-board-card" aria-label="Ожидаемые приходы">
           <div className="dds-board-card-head"><h3>Ожидаемые приходы</h3><span>{receipts.length ? formatMoney(receipts.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
-          {receipts.length ? <ul className="dds-board-list">{receipts.map(({ row, left }) => <li key={row.id} className={row.planned_date < today() ? "late" : ""}>
+          {receipts.length ? <ul className="dds-board-list">{receipts.map(({ row, left }) => <li key={row.id} className={row.planned_date && row.planned_date < today() ? "late" : ""}>
             <div><strong>{row.title}</strong><small>{row.counterparty || row.object_name || "Заказчик"} · {day(row.planned_date)}</small></div>
             <b>{formatMoney(left)}</b>
             <button type="button" disabled={busy === row.id} onClick={() => void act(row.id, `/projects/${projectId}/cash-flow/${row.id}/record-fact`, { amount: left.toFixed(2), actual_date: today() })}>Получено</button>

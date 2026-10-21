@@ -173,7 +173,7 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
   const rows = useMemo(() => allRows.filter((row) => (row.currency || "RUB") === selectedCurrency), [allRows, selectedCurrency]);
   useEffect(() => {
     if (!focusScheduleItemId) return;
-    setTab("calendar");
+    setTab("details");
     window.setTimeout(() => document.getElementById(`dds-row-${focusScheduleItemId}`)?.scrollIntoView({ block: "center" }), 0);
   }, [focusScheduleItemId]);
   const objects = useMemo(() => Array.from(new Set(rows.map((row) => row.object))).sort((a, b) => a.localeCompare(b, "ru")), [rows]);
