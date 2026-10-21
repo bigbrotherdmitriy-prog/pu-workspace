@@ -29,7 +29,7 @@ it("shows the plan balance, the critical point and only unpaid invoices", async 
   mockApi.mockResolvedValue(response);
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
   expect(await screen.findByText("Критическая точка")).toBeTruthy();
-  expect(screen.getByText(/разрыва нет/)).toBeTruthy();
+  expect(screen.getByText(/кассовый разрыв/)).toBeTruthy();
   expect(screen.getByLabelText("График баланса по ДДС")).toBeTruthy();
   expect(screen.getByText("ООО Провод")).toBeTruthy();
   expect(screen.queryByText("ООО Кабель")).toBeNull();
