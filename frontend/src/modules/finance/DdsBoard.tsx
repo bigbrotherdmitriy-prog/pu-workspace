@@ -37,7 +37,7 @@ const day = (value: string | null | undefined) => (value ? dayFormat.format(new 
 const today = () => new Date().toISOString().slice(0, 10);
 
 function BalanceChart({ months, currentKey }: { months: MonthRow[]; currentKey: string }) {
-  const width = 800, height = 220, left = 8, right = 8, top = 22, bottom = 26;
+  const width = 1200, height = 240, left = 8, right = 8, top = 22, bottom = 26;
   const plan = months.map((m) => n(m.cumulative_plan));
   const factIdx = months.map((m, i) => (m.month <= currentKey ? i : -1)).filter((i) => i >= 0);
   const fact = factIdx.map((i) => n(months[i].cumulative_fact));
@@ -81,7 +81,11 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
     const controller = new AbortController();
     const query = contractId ? `?contract_id=${contractId}` : "";
     api<Response>(`/projects/${projectId}/budget-from-dds${query}`, { signal: controller.signal })
-      .then((response) => { setData(response); setError(""); })
+      .then((response) => {
+        // An unexpected payload must not take the DDS screen down.
+        if (response && response.income && response.expense_total) { setData(response); setError(""); }
+        else setError("ДДС пока не загружен — загрузите плановый ДДС");
+      })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Не удалось загрузить ДДС");
@@ -108,8 +112,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
   if (!data) return <p className="dds-board-status">Загружаем ДДС…</p>;
 
   const months = [...(data.by_month || [])].sort((a, b) => a.month.localeCompare(b.month));
-  const future = months.filter((m) => m.month >= currentKey);
-  const critical = (future.length ? future : months).reduce<MonthRow | null>((acc, m) => (!acc || n(m.cumulative_plan) < n(acc.cumulative_plan) ? m : acc), null);
+  const critical = months.reduce<MonthRow | null>((acc, m) => (!acc || n(m.cumulative_plan) < n(acc.cumulative_plan) ? m : acc), null);
   const last = months[months.length - 1];
   const gaps = months.filter((m) => n(m.cumulative_plan) < 0);
   const articles = data.expense_by_article ?? [];
@@ -162,13 +165,13 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
       </section>
 
       {months.length > 0 && <section className="dds-board-card" aria-label="Баланс по ДДС">
-        <header><h3>Баланс по начальному ДДС</h3><span className="dds-board-legend"><i className="plan" /> план <i className="fact" /> факт</span></header>
+        <div className="dds-board-card-head"><h3>Баланс по начальному ДДС</h3><span className="dds-board-legend"><i className="plan" /> план <i className="fact" /> факт</span></div>
         <BalanceChart months={months} currentKey={currentKey} />
         {gaps.length > 0 && <ul className="dds-board-gaps">{gaps.map((m) => <li key={m.month}>{monthLabel(m.month)} — {formatMoney(n(m.cumulative_plan))}</li>)}</ul>}
       </section>}
 
       <section className="dds-board-card" aria-label="Статьи ДДС">
-        <header><h3>Статьи расходов</h3><span>план · оплачено · остаток</span></header>
+        <div className="dds-board-card-head"><h3>Статьи расходов</h3><span>план · оплачено · остаток</span></div>
         <div className="dds-board-articles">
           {articles.map((a) => {
             const plan = n(a.plan), paid = n(a.paid), over = paid > plan;
@@ -187,7 +190,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
 
       <div className="dds-board-columns">
         <section className="dds-board-card" aria-label="К оплате">
-          <header><h3>К оплате</h3><span>{unpaid.length ? formatMoney(unpaid.reduce((s, i) => s + i.left, 0)) : ""}</span></header>
+          <div className="dds-board-card-head"><h3>К оплате</h3><span>{unpaid.length ? formatMoney(unpaid.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
           {unpaid.length ? <ul className="dds-board-list">{unpaid.map((inv) => <li key={inv.entry_id}>
             <div><strong>{inv.counterparty || inv.title}</strong><small>{inv.article} · {day(inv.planned_date)}</small></div>
             <b>{formatMoney(inv.left)}</b>
@@ -196,7 +199,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
         </section>
 
         <section className="dds-board-card" aria-label="Ожидаемые приходы">
-          <header><h3>Ожидаемые приходы</h3><span>{receipts.length ? formatMoney(receipts.reduce((s, i) => s + i.left, 0)) : ""}</span></header>
+          <div className="dds-board-card-head"><h3>Ожидаемые приходы</h3><span>{receipts.length ? formatMoney(receipts.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
           {receipts.length ? <ul className="dds-board-list">{receipts.map(({ row, left }) => <li key={row.id} className={row.planned_date < today() ? "late" : ""}>
             <div><strong>{row.title}</strong><small>{row.counterparty || row.object_name || "Заказчик"} · {day(row.planned_date)}</small></div>
             <b>{formatMoney(left)}</b>
@@ -206,7 +209,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
       </div>
 
       <section className="dds-board-card" aria-label="Дополнительные расходы">
-        <header><h3>Дополнительные расходы</h3><span>{formatMoney(n(data.additional_costs?.fact))} оплачено · {formatMoney(n(data.additional_costs?.invoiced))} выставлено</span></header>
+        <div className="dds-board-card-head"><h3>Дополнительные расходы</h3><span>{formatMoney(n(data.additional_costs?.fact))} оплачено · {formatMoney(n(data.additional_costs?.invoiced))} выставлено</span></div>
         {extra.length ? <div className="dds-board-table"><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Сумма</th><th>Описание</th></tr></thead><tbody>{extra.map((item, index) => {
           const id = item.entry_id;
           const value = id ? notes[id] ?? item.note ?? item.title : item.note ?? item.title;
