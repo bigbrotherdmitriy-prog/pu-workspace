@@ -1,0 +1,21 @@
+/* Owner 21.10.2026: compact, readable stage register (columns were squeezed to one letter). */
+.contract-stages-table { width: 100%; min-width: 1080px; border-collapse: separate; border-spacing: 0; font-size: 12.5px; color: var(--read-text, #1f2937); }
+.contract-stages-table th { position: sticky; top: 0; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--read-muted, #6b7280); padding: 6px 8px; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.15)); white-space: nowrap; background: var(--read-surface, #fff); }
+.contract-stages-table td { padding: 6px 8px; vertical-align: middle; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.08)); line-height: 1.3; }
+.contract-stages-table tbody tr:hover td { background: rgba(127, 127, 127, 0.07); }
+.contract-stages-table td:nth-child(1) { white-space: nowrap; font-weight: 700; width: 48px; }
+.contract-stages-table td:nth-child(2) { width: 34%; min-width: 240px; }
+.contract-stages-work { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.contract-stages-table td:nth-child(3) { white-space: nowrap; color: var(--read-muted, #6b7280); }
+.contract-stages-table td:nth-child(4), .contract-stages-table td:nth-child(5), .contract-stages-table td:nth-child(6) { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.contract-stages-table td:nth-child(4) { font-weight: 600; }
+.contract-stages-table td:nth-child(5), .contract-stages-table td:nth-child(6) { color: var(--read-muted, #6b7280); }
+.contract-stages-table td:nth-child(7), .contract-stages-table td:nth-child(8), .contract-stages-table td:nth-child(9) { white-space: nowrap; }
+.contract-stages-table td:nth-child(10) { white-space: nowrap; }
+.contract-stages-table td:nth-child(10) button { padding: 3px 9px; font-size: 12px; margin: 2px 4px 2px 0; }
+.contract-stages-table td:nth-child(10) input { font-size: 12px; padding: 2px 4px; margin-right: 4px; }
+.contract-stages-act { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); }
+.contract-stages-act.signed { border-color: #22c55e; }
+.contract-stages-act.paid { border-color: #3b82f6; }
+.contract-stages-table tr.contract-stages-object th { position: static; padding: 14px 8px 6px; font-size: 13px; letter-spacing: 0; color: var(--read-text, #1f2937); }
+.contract-stages-table tr.overdue td:nth-child(8) { color: #ef4444; font-weight: 600; }

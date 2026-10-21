@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
+import "./contract-stages.css";
 
 type StageAct = { id: number; number: string; status: string; act_date: string | null };
 type StageItem = {
@@ -27,7 +28,6 @@ type StageRegisterResponse = {
 };
 type ExtractResponse = { warnings?: string[] } & Partial<StageRegisterResponse>;
 
-const limitText = (value: string, max: number) => value.length > max ? value.slice(0, max) : value;
 const asNumberString = (value: unknown): string => typeof value === "string" ? value : value == null ? "" : String(value);
 const fmtDate = (value: string | null | undefined): string => {
   if (!value) return "—";
@@ -247,12 +247,12 @@ function StageRow({
   return (
     <tr className={item.overdue ? "overdue" : undefined}>
       <td>{item.stage_number}-й</td>
-      <td title={item.title}>{limitText(item.title, 160)}</td>
-      <td>{fmtPeriod(item.planned_start, item.planned_finish)}</td>
+      <td title={item.title}><span className="contract-stages-work">{item.title}</span></td>
+      <td>{fmtPeriod(item.planned_start, item.planned_finish).replace("с ", "").replace(" по ", " – ")}</td>
       <td>{formatMoney(item.amount)}</td>
       <td>{item.coefficient}</td>
-      <td>{item.vat}</td>
-      <td>{act ? `№ ${act.number}, ${actStatusLabel(act.status)}` : "—"}</td>
+      <td>{formatMoney(Number(item.vat) || 0)}</td>
+      <td>{act ? <span className={`contract-stages-act ${act.status}`}>№ {act.number} · {actStatusLabel(act.status)}</span> : "—"}</td>
       <td>
         {fmtDate(item.planned_receipt_date)}
         {item.overdue && <> <span>просрочен</span></>}

@@ -41,7 +41,16 @@ function badgeText(item: Item): string {
   return `через ${item.days_left} дн.`;
 }
 
-export function MoneyCalendar({ projectId, onOpenFinance }: { projectId: number; onOpenFinance?: () => void }) {
+const actionLabels: Record<Item["kind"], string> = {
+  pay_invoice: "Отметить оплату",
+  pay_plan: "Отметить оплату",
+  sign_act: "К актам",
+  receive: "Отметить приход",
+};
+
+export type MoneyCalendarItem = Item;
+
+export function MoneyCalendar({ projectId, onOpenFinance, onOpenItem }: { projectId: number; onOpenFinance?: () => void; onOpenItem?: (item: Item) => void }) {
   const [data, setData] = useState<Response | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -106,6 +115,7 @@ export function MoneyCalendar({ projectId, onOpenFinance }: { projectId: number;
                   {item.contract_number && <span className="money-calendar-contract">№ {item.contract_number}</span>}
                 </div>
                 <div className="money-calendar-amount">{formatMoney(item.amount)} ₽</div>
+                {onOpenItem && <button type="button" className="money-calendar-action" onClick={() => onOpenItem(item)}>{actionLabels[item.kind]}</button>}
               </li>
             );
           })}

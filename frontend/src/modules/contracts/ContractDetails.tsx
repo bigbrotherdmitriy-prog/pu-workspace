@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { contractMoney, vatLabel, type VatMode } from "./contractCommercial";
 import { ContractStagesRegister } from "./ContractStagesRegister";
 import "./contract-details.css";
@@ -92,9 +92,18 @@ export function ContractTermsFields({ draft, onChange, disabled = false, creatin
 }
 
 // Collapsed by default: the register is loaded only when someone opens it.
+// Opened directly from the work center («К актам») via the #contract-stages hash.
+const STAGES_HASH = "#contract-stages";
+
 function StagesSection({ projectId, contractId, currency }: { projectId: number; contractId: number; currency: string }) {
-  const [open, setOpen] = useState(false);
-  return <details aria-label="Этапы и поступления" onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+  const [open, setOpen] = useState(() => typeof window !== "undefined" && window.location.hash === STAGES_HASH);
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (window.location.hash !== STAGES_HASH) return;
+    ref.current?.scrollIntoView({ block: "start" });
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
+  return <details ref={ref} open={open || undefined} aria-label="Этапы и поступления" onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
     <summary>Этапы и поступления</summary>
     {open && <ContractStagesRegister projectId={projectId} contractId={contractId} currency={currency} />}
   </details>;
