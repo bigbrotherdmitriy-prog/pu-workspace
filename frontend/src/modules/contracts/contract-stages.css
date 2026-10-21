@@ -1,0 +1,13 @@
+/* Owner 21.10.2026: the stage register squeezed the right columns to one letter. */
+.contract-stages-table { width: 100%; min-width: 1150px; border-collapse: collapse; font-size: 13px; color: var(--read-text, #1f2937); }
+.contract-stages-table th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--read-muted, #6b7280); padding: 6px 8px; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.15)); white-space: nowrap; }
+.contract-stages-table td { padding: 8px; vertical-align: top; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.08)); }
+.contract-stages-table td:nth-child(1) { white-space: nowrap; font-weight: 600; }
+.contract-stages-table td:nth-child(2) { min-width: 260px; max-width: 420px; }
+.contract-stages-table td:nth-child(3) { min-width: 150px; }
+.contract-stages-table td:nth-child(4), .contract-stages-table td:nth-child(5), .contract-stages-table td:nth-child(6) { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.contract-stages-table td:nth-child(7), .contract-stages-table td:nth-child(8), .contract-stages-table td:nth-child(9) { white-space: nowrap; }
+.contract-stages-table td:nth-child(10) { min-width: 210px; }
+.contract-stages-table td:nth-child(10) button { margin: 0 6px 6px 0; }
+.contract-stages-table tr.contract-stages-object th { padding-top: 14px; font-size: 13px; color: var(--read-text, #1f2937); }
+.contract-stages-table tr.overdue td:nth-child(8) { color: #ef4444; font-weight: 600; }

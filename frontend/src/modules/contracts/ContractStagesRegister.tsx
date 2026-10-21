@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
+import "./contract-stages.css";
 
 type StageAct = { id: number; number: string; status: string; act_date: string | null };
 type StageItem = {
@@ -251,7 +252,7 @@ function StageRow({
       <td>{fmtPeriod(item.planned_start, item.planned_finish)}</td>
       <td>{formatMoney(item.amount)}</td>
       <td>{item.coefficient}</td>
-      <td>{item.vat}</td>
+      <td>{formatMoney(Number(item.vat) || 0)}</td>
       <td>{act ? `№ ${act.number}, ${actStatusLabel(act.status)}` : "—"}</td>
       <td>
         {fmtDate(item.planned_receipt_date)}
