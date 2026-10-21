@@ -47,6 +47,23 @@ class IdSource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class IdParticipant(Base):
+    __tablename__ = "id_participants"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    object_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    role: Mapped[str] = mapped_column(String(30))
+    position: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    full_name: Mapped[str] = mapped_column(String(300))
+    order_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    nrs_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    org_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    org_ogrn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    org_inn: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    org_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class IdFile(Base):
     __tablename__ = "id_files"
     __table_args__ = (

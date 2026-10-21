@@ -47,6 +47,7 @@ from app.api.mobile_sync import router as mobile_sync_router
 from app.api.notification_devices import router as notification_devices_router
 from app.api.evidence_trail import router as evidence_trail_router
 from app.api.executive_docs import router as executive_docs_router
+from app.api.id_documents import router as id_documents_router
 
 from app.api.access import router as access_router
 from app.api.documents import router as documents_router
@@ -195,6 +196,7 @@ app.include_router(mobile_sync_router)
 app.include_router(notification_devices_router)
 app.include_router(evidence_trail_router)
 app.include_router(executive_docs_router)
+app.include_router(id_documents_router)
 app.include_router(google_drive_router)
 app.include_router(mvp1_google_oauth_router)
 app.include_router(yandex_disk_router)
