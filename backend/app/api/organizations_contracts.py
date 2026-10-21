@@ -2012,8 +2012,7 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
             CashFlowEntry.project_id == row.project_id,
             CashFlowEntry.contract_id == row.id,
             CashFlowEntry.source_document_id.is_not(None),
-            func.coalesce(CashFlowEntry.invoiced_amount, 0) == 0,
-            CashFlowEntry.plan_entry_id.is_(None),
+            # Invoice and fact rows carry no plan amount of their own.
             CashFlowEntry.planned_amount > 0,
         )))
         linked_document_ids.update(db.scalars(select(ContractDocumentLink.document_id).where(
