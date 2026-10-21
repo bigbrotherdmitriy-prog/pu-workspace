@@ -66,3 +66,16 @@ it("names the contract stage behind a monthly receipt and records it with an edi
   await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/167/record-fact",
     { method: "POST", body: JSON.stringify({ amount: "14383829.50", actual_date: "2026-10-30" }) }));
 });
+
+it("lists our act to the customer as an expected receipt and settles it against its plan line", async () => {
+  mockApi.mockResolvedValue(response);
+  const plan = { id: 172, direction: "inflow", title: "Этапы Городец", planned_date: "2099-10-31", planned_amount: 100, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1 };
+  const act = { id: 300, direction: "inflow", title: "Акт № 17", planned_date: "2099-10-20", planned_amount: 0, invoiced_amount: 40, actual_amount: 0, plan_entry_id: 172, counterparty: "ООО «БУЛАТ»", currency: "RUB", status: "approved", record_version: 1 };
+  render(<DdsBoard projectId={5} currency="RUB" cashFlow={[plan, act] as never} />);
+  expect(await screen.findByText("Акт № 17")).toBeTruthy();
+  expect(screen.getByText("60,00 ₽")).toBeTruthy();
+  fireEvent.click(screen.getAllByText("Получено")[0]);
+  fireEvent.click(screen.getByText("Сохранить"));
+  await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/172/record-fact",
+    { method: "POST", body: expect.stringContaining('"basis_entry_id":300') }));
+});

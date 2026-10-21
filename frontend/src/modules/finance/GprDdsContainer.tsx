@@ -139,7 +139,7 @@ export function GprDdsContainer({ state, active, setActive, collapsed, projectId
           focusScheduleItemId={focusedScheduleItemId}
           onOpenSchedule={(scheduleItemId) => { setFocusedScheduleItemId(scheduleItemId); setGprDdsTab("gpr"); }}
           onDropInvoices={uploadDdsInvoices}
-          onReviewInvoice={(documentId) => reviewUploadedFinanceDocuments([documentId])}
+          onReviewInvoice={(documentId) => { setFinanceEditorOpen(true); void reviewUploadedFinanceDocuments([documentId]); }}
           onImportCashFlow={(files) => void uploadContractFinance(files, selectedFinanceContractId, "cash-flow")}
           onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
         />
