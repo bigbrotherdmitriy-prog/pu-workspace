@@ -16,6 +16,6 @@ def get_money_calendar(
     horizon_days: int = Query(45, ge=1, le=365),
     db: Session = Depends(get_db),
     user=Depends(require_user),
-    _=Depends(require_project_role("viewer")),
 ):
+    require_project_role(db, user, project_id, "viewer")
     return build_money_calendar(db, project_id, today=date.today(), horizon_days=horizon_days)
