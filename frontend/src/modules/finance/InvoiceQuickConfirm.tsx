@@ -10,6 +10,7 @@ type Proposal = {
   currency: string;
   payment_purpose: string | null;
   status: string;
+  fallback_reason?: string | null;
   planned_date: string | null;
 };
 
@@ -110,6 +111,11 @@ export function InvoiceQuickConfirm({
         <h2 className="iqc-title">Счёт из почты</h2>
         {loading ? (
           <p>Загружаем счёт…</p>
+        ) : proposal && proposal.fallback_reason === "own_outgoing_invoice" && proposal.status === "proposed" ? (
+          <>
+            <p>Это ваш исходящий счёт: поставщик — ваша компания. В расходы он не записывается.</p>
+            <button className="secondary" onClick={onClose}>Закрыть</button>
+          </>
         ) : proposal && proposal.status !== "proposed" ? (
           <>
             <p>Этот счёт уже обработан</p>

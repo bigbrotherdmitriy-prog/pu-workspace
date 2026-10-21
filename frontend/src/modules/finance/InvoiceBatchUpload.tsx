@@ -5,9 +5,11 @@ import { invoiceFileSupported, type InvoiceUploadResult } from "./invoiceUploadT
 export type InvoiceBatchUploadProps = {
   onUpload: (files: File[], onProgress: (message: string) => void) => Promise<InvoiceUploadResult[]>;
   onReview?: (documentId: number) => void | Promise<void>;
+  /** Source documents whose invoice is already booked (confirmed into DDS/budget). */
+  confirmedDocumentIds?: ReadonlySet<number>;
 };
 
-export function InvoiceBatchUpload({ onUpload, onReview }: InvoiceBatchUploadProps) {
+export function InvoiceBatchUpload({ onUpload, onReview, confirmedDocumentIds }: InvoiceBatchUploadProps) {
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
@@ -62,7 +64,7 @@ export function InvoiceBatchUpload({ onUpload, onReview }: InvoiceBatchUploadPro
     {!!files.length && <details><summary>Выбрано счетов: {files.length}</summary><ul>{files.map((file, index) => <li key={index}>{file.webkitRelativePath || file.name}</li>)}</ul></details>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
-    {!!results.length && <ul aria-label="Результаты загрузки счетов">{results.map((item, index) => <li key={index}><strong>{item.name}</strong> — {item.error || "Готов к проверке"}{item.documentIds.map((id) => <button key={id} type="button" disabled={!onReview || reviewing || busy} onClick={async () => {
+    {!!results.length && <ul aria-label="Результаты загрузки счетов">{results.map((item, index) => <li key={index}><strong>{item.name}</strong> — {item.error || (item.documentIds.length && item.documentIds.every((id) => confirmedDocumentIds?.has(id)) ? "Подтверждён ✓" : "Готов к проверке")}{item.documentIds.filter((id) => !confirmedDocumentIds?.has(id)).map((id) => <button key={id} type="button" disabled={!onReview || reviewing || busy} onClick={async () => {
       setReviewing(true); setError("");
       try { await onReview?.(id); } catch (reason) { setError((reason as Error).message); } finally { setReviewing(false); }
     }}>Проверить счёт</button>)}</li>)}</ul>}

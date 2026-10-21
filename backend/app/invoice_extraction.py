@@ -177,6 +177,9 @@ def buyer_name(text: str) -> str | None:
     if not match:
         return None
     name = match.group(1).strip()
+    # Flattened invoice text runs on into the next block: stop at the next label.
+    name = re.split(r"\s+(?:Получатель|Поставщик|Плательщик|Грузополучатель|Адрес|КПП|ОГРН|Тел\.?|№|Товары|Счет|Счёт|Основание)\b", name, maxsplit=1)[0]
+    name = name.strip(" ,;:")
     return name[:200] or None
 
 

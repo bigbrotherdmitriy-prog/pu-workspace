@@ -32,3 +32,8 @@ def test_supplier_inn_only_after_supplier_words():
 
 def test_buyer_name():
     assert buyer_name('Покупатель: ООО "БУЛАТ", ИНН 7700000000') == 'ООО "БУЛАТ"'
+
+
+def test_buyer_name_stops_at_the_next_label():
+    from app.invoice_extraction import buyer_name
+    assert buyer_name("Покупатель: ИП ШМЕЛЕВ НИКИТА ВИКТОРОВИЧ Получатель № Товары (работы, услуги)") == "ИП ШМЕЛЕВ НИКИТА ВИКТОРОВИЧ"
