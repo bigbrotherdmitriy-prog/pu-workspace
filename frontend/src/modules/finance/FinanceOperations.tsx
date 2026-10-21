@@ -149,7 +149,7 @@ export function FinanceOperations(props: Props) {
         if (!invoiceProposal.amount) missing.push("сумма");
         if (!invoiceProposal.payment_purpose) missing.push("назначение платежа");
         if (!anchored && !invoiceProposal.selected_cost_category_id) missing.push("категория затрат");
-        if (anchored && !selectedContractId) missing.push("договор");
+        // The contract is inferred on the server (counterparty → plan DDS contract), never asked.
         // Owner 16.10.2026: invoices are not linked to GPR stages — only to a plan DDS line or «Дополнительные затраты».
         if (invoiceProposal.target_kind === "cash_flow" && !planChoice) missing.push("строка планового ДДС или «Дополнительные затраты»");
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
