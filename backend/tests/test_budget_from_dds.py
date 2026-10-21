@@ -532,3 +532,31 @@ def test_part_paid_invoice_is_shown_as_one_invoice():
     one = merged[0]
     assert (one["entry_id"], one["title"], one["invoiced"], one["paid"], one["remaining_to_pay"], one["status"]) == (
         256, "Счёт № 12", "120788.73", "96630.98", "24157.75", "partially_paid")
+
+
+def test_additional_cost_note_is_editable(world):
+    db = world["db"]
+    client = world["client"]
+    project = world["project"]
+    entry = _add_entry(
+        db,
+        project.id,
+        title="Счёт № 7",
+        planned_date=date(2026, 3, 9),
+        planned_amount=Decimal("30.00"),
+        cost_category_id=world["cat_extra"].id,
+    )
+    db.commit()
+
+    item = client.get(f"/projects/{project.id}/budget-from-dds").json()["additional_costs"]["items"][0]
+    assert item["entry_id"] == entry.id
+    assert item["note"] is None
+
+    response = client.patch(f"/projects/{project.id}/cash-flow/{entry.id}/note", json={"note": "  Аренда крана  "})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"id": entry.id, "note": "Аренда крана"}
+    item = client.get(f"/projects/{project.id}/budget-from-dds").json()["additional_costs"]["items"][0]
+    assert item["note"] == "Аренда крана"
+
+    assert client.patch(f"/projects/{project.id}/cash-flow/{entry.id}/note", json={"note": "   "}).status_code == 422
+    assert client.patch(f"/projects/{project.id + 1}/cash-flow/{entry.id}/note", json={"note": "x"}).status_code in (403, 404)

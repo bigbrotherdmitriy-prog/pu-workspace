@@ -167,6 +167,7 @@ test.describe("desktop", () => {
     await expect(page.getByRole("list", { name: "Этапы и вехи ГПР" })).toBeHidden();
     await expect(page.getByRole("button", { name: "Действия" })).toBeHidden();
     await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+    await page.getByRole("tab", { name: "Таблица ДДС" }).click();
     await expect(page.locator(".dds-calendar")).toBeVisible();
     await expect(page.locator(".dds-mobile-month")).toBeHidden();
     await page.getByRole("tab", { name: "Детализация" }).click();

@@ -6,11 +6,14 @@ import { formatMoney } from "../../utils/numberFormat";
 import type { FinanceOverview } from "./types";
 import { DdsMobileMonth } from "./DdsMobileMonth";
 import { BudgetFromDds } from "./BudgetFromDds";
+import { DdsBoard } from "./DdsBoard";
 import { DdsPlanVersions } from "./DdsPlanVersions";
 import "./gpr-dds-mobile.css";
 
 type Props = {
   finance: FinanceOverview | null;
+  onReloadFinance?: () => void;
+  initialTab?: Tab;
   projectId: number;
   selectedContractId: number;
   onPrepare: (kind: "cash-in" | "cash-out") => void;
@@ -31,7 +34,7 @@ type Props = {
   onImportCashFlow?: (files: File[]) => void;
 };
 
-type Tab = "months" | "calendar" | "details" | "summary" | "budget" | "versions";
+export type Tab = "board" | "months" | "calendar" | "details" | "summary" | "budget" | "versions";
 type CashRow = NonNullable<FinanceOverview>["cash_flow"][number] & {
   object: string;
   category: string;
@@ -43,13 +46,14 @@ type CalendarRowGroup = {
   items: CashRow[];
 };
 
-const tabs: { id: Tab; label: string }[] = [
-  { id: "months", label: "ДДС по месяцам" },
+// Owner 21.10.2026: the main DDS screen plus the plan table where only dates are moved;
+// the detailed views stay reachable as small secondary tabs.
+const tabs: { id: Tab; label: string; secondary?: boolean }[] = [
+  { id: "board", label: "Обзор" },
   { id: "calendar", label: "Таблица ДДС" },
-  { id: "details", label: "Детализация" },
-  { id: "summary", label: "Сводка" },
-  { id: "budget", label: "Бюджет" },
-  { id: "versions", label: "Версии плана" },
+  { id: "details", label: "Детализация", secondary: true },
+  { id: "summary", label: "Сводка", secondary: true },
+  { id: "months", label: "ДДС по месяцам", secondary: true },
 ];
 const monthLong = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
@@ -121,9 +125,9 @@ function downloadCsv(filename: string, data: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onReversePayment, onRefreshVat, onLinkControls, onLinkApprovedBudgetLine, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow }: Props) {
+export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare, onConfirm, onConfirmMany, onConfirmPayment, onReversePayment, onRefreshVat, onLinkControls, onLinkApprovedBudgetLine, onMutatePlan, onUndoPlanMutation, onOpenSchedule, focusScheduleItemId, onDropInvoices, onReviewInvoice, onPrepareAdditionalExpense, onImportCashFlow, onReloadFinance, initialTab }: Props) {
   const cashFlowImportInput = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<Tab>("calendar");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "board");
   const [objectFilter, setObjectFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -457,8 +461,8 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
     </div>
     {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice}
       confirmedDocumentIds={new Set((finance?.cash_flow || []).filter((row) => Number(row.invoiced_amount || 0) > 0 && row.source_document_id).map((row) => Number(row.source_document_id)))} />}
-    <div className="dds-tabs" role="tablist" aria-label="Разделы ДДС">{tabs.map((item) => <button type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
-    <div className="dds-filters">
+    <div className="dds-tabs" role="tablist" aria-label="Разделы ДДС">{tabs.map((item) => <button type="button" role="tab" aria-selected={tab === item.id} className={`${tab === item.id ? "active" : ""}${item.secondary ? " dds-tab-secondary" : ""}`} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
+    {tab !== "board" && <div className="dds-filters">
       <label><ListFilter /><select aria-label="Фильтр по объекту" value={objectFilter} onChange={(event) => setObjectFilter(event.target.value)}><option value="all">Все объекты</option>{objects.map((object) => <option key={object}>{object}</option>)}</select></label>
       <label><select aria-label="Фильтр по статье" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Все статьи</option>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
       <label><select aria-label="Фильтр по статусу" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="active">Текущие операции</option><option value="all">Все, включая удалённые</option><option value="proposed">Предложено</option><option value="approved">Подтверждено</option><option value="paid">Оплачено</option><option value="received">Получено</option><option value="cancelled">Удалённые</option></select></label>
@@ -467,12 +471,13 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
       <label><input aria-label="Период по" type="month" value={finishMonth} onChange={(event) => setFinishMonth(event.target.value)} /></label>
       <label className="dds-search"><Search /><input aria-label="Поиск по ДДС" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти операцию или контрагента" /></label>
       <span>{visibleRows.length} операций</span>
-    </div>
+    </div>}
 
+    {tab === "board" && <DdsBoard projectId={projectId} contractId={selectedContractId || null} currency={selectedCurrency} cashFlow={finance?.cash_flow || []} onChanged={onReloadFinance} />}
     {(tab === "months" || tab === "calendar") && <DdsMobileMonth rows={visibleRows} currency={selectedCurrency} />}
     {tab === "months" && <div className="dds-table-wrap dds-months"><table className="dds-table dds-monthly-table"><thead><tr><th>Месяц</th><th>План прихода, {selectedCurrency}</th><th>План расхода, {selectedCurrency}</th><th>Плановый поток, {selectedCurrency}</th><th>Плановый остаток, {selectedCurrency}</th><th>Факт, {selectedCurrency}</th></tr></thead><tbody>{byMonth.map((item) => { const actual = visibleRows.filter((row) => row.actual_date && monthKey(row.actual_date) === item.key && row.status !== "cancelled").reduce((sum, row) => sum + (row.direction === "inflow" ? actualAmount(row) : -actualAmount(row)), 0); return <tr key={item.key}><td>{monthLong.format(monthDate(item.key))}</td><td className="money positive">{formatMoney(item.inflow)}</td><td className="money">{formatMoney(item.outflow)}</td><td className={`money ${item.net < 0 ? "negative" : "positive"}`}>{formatMoney(item.net)}</td><td className={`money ${cumulative[item.key] < 0 ? "negative" : ""}`}>{formatMoney(cumulative[item.key])}</td><td className="money">{formatMoney(actual)}</td></tr>; })}<tr className="total"><td>ИТОГО</td><td className="money">{formatMoney(totals.inflow)}</td><td className="money">{formatMoney(totals.outflow)}</td><td className="money">{formatMoney(totals.net)}</td><td className="money">{formatMoney(totals.net)}</td><td className="money">{formatMoney(visibleRows.reduce((sum, row) => sum + (row.direction === "inflow" ? actualAmount(row) : -actualAmount(row)), 0))}</td></tr></tbody></table>{!byMonth.length && <p className="dds-empty">Добавьте первую плановую операцию ДДС.</p>}</div>}
 
-    {tab === "calendar" && <div className="dds-calendar-shell">{pendingDrop && <div className="dds-drop-choice" role="dialog" aria-label="Действие с плановой суммой"><strong>{pendingDrop.rows[0].title}{pendingDrop.rows.length > 1 ? ` · ${pendingDrop.rows.length} операций` : ""}: {monthLong.format(monthDate(monthKey(pendingDrop.rows[0].planned_date)))} → {monthLong.format(monthDate(pendingDrop.month))}</strong><button type="button" onClick={() => void applyDrop("move")}>Переместить</button><button type="button" className="secondary" onClick={() => void applyDrop("copy")}>Копировать</button><button type="button" className="secondary" onClick={() => setPendingDrop(null)}>Отмена</button></div>}<div className="dds-table-wrap dds-calendar" onWheel={(event) => { if (event.shiftKey) event.currentTarget.scrollLeft += event.deltaY; }}><table className="dds-table dds-template"><thead><tr><th>Статья ДДС</th><th>Итого за {calendarYearLabel}, {selectedCurrency}</th>{months.map((key) => <th key={key}>{monthLong.format(monthDate(key)).replace(/\s+\d{4}.*/, "")}</th>)}</tr></thead><tbody>
+    {tab === "calendar" && <div className="dds-calendar-shell">{pendingDrop && <div className="dds-drop-choice" role="dialog" aria-label="Действие с плановой суммой"><strong>{pendingDrop.rows[0].title}{pendingDrop.rows.length > 1 ? ` · ${pendingDrop.rows.length} операций` : ""}: {monthLong.format(monthDate(monthKey(pendingDrop.rows[0].planned_date)))} → {monthLong.format(monthDate(pendingDrop.month))}</strong><button type="button" onClick={() => void applyDrop("move")}>Переместить</button><button type="button" className="secondary" onClick={() => setPendingDrop(null)}>Отмена</button></div>}<div className="dds-table-wrap dds-calendar" onWheel={(event) => { if (event.shiftKey) event.currentTarget.scrollLeft += event.deltaY; }}><table className="dds-table dds-template"><thead><tr><th>Статья ДДС</th><th>Итого за {calendarYearLabel}, {selectedCurrency}</th>{months.map((key) => <th key={key}>{monthLong.format(monthDate(key)).replace(/\s+\d{4}.*/, "")}</th>)}</tr></thead><tbody>
       <tr className="group inflow primary"><td>Платежи — всего</td><td className="money">{formatMoney(totals.inflow)}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(byMonth.find((item) => item.key === key)?.inflow || 0)}</td>)}</tr>
       {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "inflow"); if (!items.length) return []; return [<tr className="group inflow" key={`in-${object}`}><td>{object} — всего поступлений</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items, visibleRows).map(calendarOperationRow)]; })}
       {visibleObjects.flatMap((object) => { const items = visibleRows.filter((row) => row.object === object && row.direction === "outflow"); if (!items.length) return []; return [<tr className="group outflow" key={`out-${object}`}><td>{object} — всего затрат</td><td className="money">{formatMoney(rowTotal(items))}</td>{months.map((key) => <td className="money" key={key}>{formatMoney(rowMonthTotal(items, key))}</td>)}</tr>, ...groupCalendarRows(items, visibleRows).map(calendarOperationRow)]; })}

@@ -315,6 +315,8 @@ def budget_from_dds(
 
         if is_additional and (plan_in_range or fact_in_range):
             additional_items.append({
+                "entry_id": entry.id,
+                "note": entry.note,
                 "title": entry.title,
                 "counterparty": entry.counterparty,
                 "planned_date": None if planned_date is None else planned_date.isoformat(),
@@ -481,6 +483,8 @@ def budget_from_dds(
     )[:200]
     additional_items_out = [
         {
+            "entry_id": item["entry_id"],
+            "note": item["note"],
             "title": item["title"],
             "counterparty": item["counterparty"],
             "planned_date": item["planned_date"],
@@ -662,6 +666,38 @@ def update_budget_line_category(
         "cost_category_id": category.id,
         "category": category.name,
     }
+
+
+class CashFlowNoteUpdate(BaseModel):
+    note: str = Field(min_length=1, max_length=300)
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def _strip(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+
+@router.patch("/{project_id}/cash-flow/{entry_id}/note")
+def update_cash_flow_note(
+    project_id: int,
+    entry_id: int,
+    payload: CashFlowNoteUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    """Short editable description of an invoice row (used for additional costs)."""
+    require_project_role(db, user, project_id, "manager")
+    entry = db.get(CashFlowEntry, entry_id)
+    if not entry or entry.project_id != project_id:
+        raise HTTPException(404, "Запись ДДС не найдена")
+    old = entry.note
+    entry.note = payload.note
+
+    from app.api.execution_finance import _audit
+
+    _audit(db, "cash_flow_note_changed", "cash_flow", entry.id, user.id, f"from={old!r}; to={payload.note!r}")
+    db.commit()
+    return {"id": entry.id, "note": entry.note}
 
 
 class RecordFactRequest(BaseModel):

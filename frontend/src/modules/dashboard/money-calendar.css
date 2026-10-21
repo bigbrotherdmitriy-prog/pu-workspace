@@ -148,3 +148,32 @@
 }
 
 .money-calendar-empty { color: var(--read-text, #1f2937); }
+
+/* Owner 21.10.2026: rows were spread over the whole width (amount far from the title)
+   and light badges had light text. Compact rows: badge, what to do, amount side by side. */
+.dashboard-money-row > * { min-width: 0; }
+.money-calendar { min-width: 0; max-width: 100%; box-sizing: border-box; overflow: hidden; container-type: inline-size; }
+.money-calendar-list { max-width: 1100px; }
+.money-calendar-row { min-width: 0; padding: 7px 12px; gap: 10px; }
+.money-calendar-main { display: grid; grid-template-columns: 190px minmax(0, 1fr); column-gap: 12px; row-gap: 2px; align-items: baseline; }
+.money-calendar-badge { justify-self: start; font-weight: 600; }
+.money-calendar-kind { grid-column: 2; font-size: 11.5px; opacity: 0.75; }
+.money-calendar-title { grid-column: 2; white-space: normal; overflow-wrap: anywhere; font-size: 14px; line-height: 1.3; }
+.money-calendar-counterparty, .money-calendar-contract { grid-column: 2; opacity: 0.75; }
+.money-calendar-badge { grid-row: 1 / span 3; align-self: center; }
+.money-calendar-amount { min-width: 130px; text-align: right; font-size: 14px; }
+.money-calendar .money-calendar-badge.level-ok,
+.money-calendar .money-calendar-badge.level-near,
+.money-calendar .money-calendar-badge.level-none { color: #052e16; }
+.money-calendar .money-calendar-badge.level-soon { color: #422006; }
+.money-calendar .money-calendar-badge.level-critical { background: #c2410c; color: #fff; }
+.money-calendar .money-calendar-badge.level-overdue { background: #dc2626; color: #fff; }
+.money-calendar .money-calendar-chip.level-overdue { color: #7f1d1d; }
+.money-calendar .money-calendar-chip.level-critical { color: #7c2d12; }
+.money-calendar .money-calendar-chip.level-soon { color: #713f12; }
+@container (max-width: 640px) {
+  .money-calendar-row { flex-wrap: wrap; align-items: flex-start; }
+  .money-calendar-main { grid-template-columns: minmax(0, 1fr); flex: 1 1 calc(100% - 20px); }
+  .money-calendar-badge, .money-calendar-kind, .money-calendar-title, .money-calendar-counterparty, .money-calendar-contract { grid-column: 1; grid-row: auto; }
+  .money-calendar-amount { margin-left: 14px; text-align: left; }
+}

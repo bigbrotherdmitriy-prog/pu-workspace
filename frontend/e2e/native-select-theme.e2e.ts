@@ -49,6 +49,7 @@ for (const theme of ["light", "dark"]) {
 
     await page.locator("aside nav").getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
     await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+    await page.getByRole("tab", { name: "Таблица ДДС" }).click();
     const filters = page.locator(".dds-filters select");
     expect(await filters.count()).toBeGreaterThan(0);
     for (const filter of await filters.all()) await readableOptions(filter);
