@@ -112,6 +112,20 @@ app = FastAPI(
 app.middleware("http")(observe_request)
 
 
+@app.middleware("http")
+async def refresh_session_cookie(request: Request, call_next):
+    response = await call_next(request)
+    refresh = getattr(request.state, "session_refresh", None)
+    if refresh:
+        token, expires = refresh
+        secure = request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https"
+        response.set_cookie("pu_session", token, expires=expires, httponly=True, secure=secure, samesite="strict", path="/")
+        csrf = request.cookies.get("pu_csrf")
+        if csrf:
+            response.set_cookie("pu_csrf", csrf, expires=expires, httponly=False, secure=secure, samesite="strict", path="/")
+    return response
+
+
 @app.exception_handler(StorageCredentialsExpired)
 async def storage_credentials_expired_handler(_: Request, exc: StorageCredentialsExpired):
     return JSONResponse({"detail": str(exc)}, status_code=401)
