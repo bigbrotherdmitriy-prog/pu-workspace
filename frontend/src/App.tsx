@@ -114,6 +114,7 @@ const ContactsModule = lazy(() => import("./modules/contacts/ContactsModule").th
 const AnalyticsModule = lazy(() => import("./modules/analytics/AnalyticsModule").then((m) => ({ default: m.AnalyticsModule })));
 const InvoiceQuickConfirm = lazy(() => import("./modules/finance/InvoiceQuickConfirm").then((m) => ({ default: m.InvoiceQuickConfirm })));
 const ProjectMoneyRings = lazy(() => import("./modules/dashboard/ProjectMoneyRings").then((m) => ({ default: m.ProjectMoneyRings })));
+import { PaymentAlarm } from "./modules/dashboard/PaymentAlarm";
 const MoneyCalendar = lazy(() => import("./modules/dashboard/MoneyCalendar").then((m) => ({ default: m.MoneyCalendar })));
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const SettingsModule = lazy(() => import("./modules/settings/SettingsModule").then((m) => ({ default: m.SettingsModule })));
@@ -3374,6 +3375,7 @@ export function App() {
                 onOpenNotifications={() => { setNotificationFilter("unread"); setActive("Уведомления"); }}
               />
               {projectId > 0 && <section className="dashboard-money-row">
+                <PaymentAlarm projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
                 <ProjectMoneyRings projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
                 <MoneyCalendar projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
               </section>}
