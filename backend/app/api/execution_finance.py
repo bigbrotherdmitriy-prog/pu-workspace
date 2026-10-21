@@ -2349,6 +2349,14 @@ def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate
     ))
     if existing is not None:
         return _invoice_proposal_payload(existing)
+    # Owner 21.10.2026: the same file uploaded again is not a new invoice.
+    same_file = db.scalar(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.project_id == payload.project_id,
+        InvoiceExtractionProposal.source_document_sha256 == digest,
+        InvoiceExtractionProposal.status.in_(("proposed", "confirmed")),
+    ).order_by(InvoiceExtractionProposal.id))
+    if same_file is not None:
+        return _invoice_proposal_payload(same_file)
     organization_id = _project_organization_id(db, payload.project_id)
     categories = [row for row in _ensure_default_categories(db, organization_id) if row.is_active]
     fields = extract_invoice_fields(
@@ -2478,6 +2486,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
         return _invoice_proposal_payload(item)
     if item.status != "proposed":
         raise HTTPException(409, "Отклонённое предложение нельзя подтвердить")
+    _refuse_repeated_invoice(db, item)
     if item.fallback_reason == OWN_OUTGOING_INVOICE:
         return _confirm_income_document(db, item, payload, user)
     if payload.plan_entry_id is not None and payload.additional:
@@ -2591,6 +2600,37 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
            f"vat_before={json.dumps(vat_before, ensure_ascii=False)}; vat_after={json.dumps(item.vat_snapshot, ensure_ascii=False)}")
     db.commit()
     return _invoice_proposal_payload(item)
+
+
+_INVOICE_NUMBER = re.compile(r"(?:№|N|No\.?)\s*([0-9A-Za-zА-Яа-я/\-]+)")
+
+
+def _invoice_number(text: str | None) -> str:
+    match = _INVOICE_NUMBER.search(text or "")
+    return match.group(1).lower() if match else ""
+
+
+def _refuse_repeated_invoice(db: Session, item: InvoiceExtractionProposal) -> None:
+    """Owner 21.10.2026: a repeated invoice (same supplier, number and amount, or the same
+    supplier and amount on the same date) is not booked a second time."""
+    if item.amount is None:
+        return
+    party = _normalized_party(item.counterparty)
+    number = _invoice_number(item.payment_purpose)
+    for other in db.scalars(select(InvoiceExtractionProposal).where(
+        InvoiceExtractionProposal.project_id == item.project_id,
+        InvoiceExtractionProposal.id != item.id,
+        InvoiceExtractionProposal.status == "confirmed",
+        InvoiceExtractionProposal.amount == item.amount,
+    )):
+        if _normalized_party(other.counterparty) != party:
+            continue
+        other_number = _invoice_number(other.payment_purpose)
+        same = (number and number == other_number) or (
+            not (number and other_number) and other.planned_date == item.planned_date)
+        if same or other.source_document_sha256 == item.source_document_sha256:
+            document = db.get(Document, other.source_document_id)
+            raise HTTPException(409, f"Повторный счёт: такой счёт уже подтверждён — «{document.name if document else other.source_document_id}». Отклоните этот.")
 
 
 def _open_income_documents(db: Session, plan_id: int) -> Decimal:

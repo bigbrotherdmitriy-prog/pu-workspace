@@ -570,3 +570,30 @@ def test_document_to_our_customer_becomes_an_expected_receipt(db_session, user_f
     assert doc_row.actual_date == date(2099, 10, 25)
     receive = [i for i in money_calendar(db_session, project.id, today=date(2099, 9, 1), horizon_days=36500)["items"] if i["kind"] == "receive"]
     assert [i["amount"] for i in receive] == ["100.00"]
+
+
+def test_repeated_invoice_is_not_booked_twice(db_session, user_factory, monkeypatch):
+    user, project, document, _version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    versions = [_version]
+    for number in (2, 3):
+        extra = DocumentVersion(document_id=document.id, version_number=number, content="Счёт")
+        db_session.add(extra); db_session.flush(); versions.append(extra)
+    first = InvoiceExtractionProposal(project_id=project.id, source_document_id=document.id,
+                                      source_document_version_id=versions[0].id, source_document_sha256="a" * 64,
+                                      amount=Decimal("100.00"), counterparty='АО "ЛИНДЕКС"', payment_purpose="Оплата по счёту № 2018",
+                                      planned_date=date(2026, 2, 2), status="confirmed", target_kind="cash_flow", extraction_method="llm", confidence=0.9)
+    again = InvoiceExtractionProposal(project_id=project.id, source_document_id=document.id,
+                                      source_document_version_id=versions[1].id, source_document_sha256="b" * 64,
+                                      amount=Decimal("100.00"), counterparty="АО «ЛИНДЕКС»", payment_purpose="Счет на оплату № 2018 от 02.02.2026",
+                                      planned_date=date(2026, 2, 5), status="proposed", target_kind="cash_flow", extraction_method="llm", confidence=0.9)
+    other = InvoiceExtractionProposal(project_id=project.id, source_document_id=document.id,
+                                      source_document_version_id=versions[2].id, source_document_sha256="c" * 64,
+                                      amount=Decimal("100.00"), counterparty="АО «ЛИНДЕКС»", payment_purpose="Счет на оплату № 4015",
+                                      planned_date=date(2026, 2, 5), status="proposed", target_kind="cash_flow", extraction_method="llm", confidence=0.9)
+    db_session.add_all([first, again, other]); db_session.flush()
+    with pytest.raises(HTTPException) as refused:
+        finance_api._refuse_repeated_invoice(db_session, again)
+    assert refused.value.status_code == 409
+    assert "Повторный счёт" in refused.value.detail
+    finance_api._refuse_repeated_invoice(db_session, other)  # another number — a different invoice
