@@ -18,9 +18,11 @@ from app.acceptance_acts import (
     build_act_data,
     create_stage_act,
     mark_act_signed,
+    object_total,
     next_act_number,
     payment_days,
 )
+from app.acceptance_act_form import FORM_PATH, object_texts, render_act_from_form
 from app.contract_stages import contract_text
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
@@ -127,6 +129,7 @@ def stage_register(
     totals: dict[str, dict[str, Decimal]] = {}
     items: list[dict] = []
 
+    object_totals: dict = {}
     for stage in stages:
         amount = stage.amount if stage.amount is not None else Decimal("0.00")
         act = act_by_stage.get(stage.id)
@@ -154,7 +157,7 @@ def stage_register(
             "planned_start": stage.planned_start.isoformat() if stage.planned_start else None,
             "planned_finish": stage.planned_finish.isoformat() if stage.planned_finish else None,
             "amount": f"{amount:.2f}",
-            "coefficient": str(stage_quantity(amount, amount) if amount else Decimal("0")),
+            "coefficient": str(stage_quantity(amount, object_totals.setdefault(stage.object_name, object_total(db, stage))) if amount else Decimal("0")),
             "vat": f"{vat_value:.2f}",
             "act": (
                 {
@@ -265,7 +268,12 @@ def download_act_docx(
 
     data = build_act_data(db, project_id, contract, stage, act.act_date)
     data.number = act.number
-    payload = render_act_docx(data)
+    if getattr(contract, "contract_kind", None) == "customer" and FORM_PATH.exists():
+        # Owner 21.10.2026: acts to the customer are filled into the owner's own Word form.
+        joined = "\n".join(text for _, _, text in contract_text(db, project_id, contract))
+        payload = render_act_from_form(data, object_texts(joined, stage.object_name))
+    else:
+        payload = render_act_docx(data)
 
     filename = f"Акт_№{act.number}.docx"
     return Response(
