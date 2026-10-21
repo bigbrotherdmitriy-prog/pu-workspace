@@ -30,7 +30,7 @@ function routes(post: () => Promise<unknown> = async () => ({ changed: true })) 
 describe("explicit pending VAT refresh", () => {
   it("shows the proposed VAT and refresh action in the main DDS details view", () => {
     const refresh = vi.fn(), noop = vi.fn();
-    render(<DdsWorkspace finance={{ ...overview, cash_flow: [{ ...row,
+    render(<DdsWorkspace initialTab="calendar" finance={{ ...overview, cash_flow: [{ ...row,
       vat_proposed_snapshot: { schema_version: 1, source_contract_id: 41, source_contract_record_version: 3,
         mode: "rate", rate: "0.00" } }] } as FinanceOverview}
       projectId={1} selectedContractId={41} onPrepare={noop} onConfirm={noop} onConfirmMany={noop}

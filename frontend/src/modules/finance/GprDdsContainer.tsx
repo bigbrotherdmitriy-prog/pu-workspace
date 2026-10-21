@@ -121,6 +121,7 @@ export function GprDdsContainer({ state, active, setActive, collapsed, projectId
         <DdsWorkspace
           key={projectId}
           finance={finance}
+          onReloadFinance={() => void loadFinance()}
           projectId={projectId}
           selectedContractId={selectedFinanceContractId}
           onRefreshVat={(kind, id) => void refreshFinanceVat(kind, id)}
