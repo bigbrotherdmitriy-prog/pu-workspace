@@ -664,6 +664,92 @@ def update_budget_line_category(
     }
 
 
+class RecordFactRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
+    actual_date: date
+    note: str | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _amount_before(cls, value: Any) -> Any:
+        return Decimal(str(value))
+
+
+@router.post("/{project_id}/cash-flow/{entry_id}/record-fact")
+def record_plan_fact(
+    project_id: int,
+    entry_id: int,
+    payload: RecordFactRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    require_project_role(db, user, project_id, "manager")
+
+    plan = db.get(CashFlowEntry, entry_id)
+    if not plan or plan.project_id != project_id:
+        raise HTTPException(404, "Запись ДДС не найдена")
+
+    if (plan.planned_amount or ZERO) <= ZERO or plan.status in EXCLUDED_STATUSES:
+        raise HTTPException(422, "Это не строка плана")
+
+    already_fact = db.scalar(
+        select(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0)).where(
+            CashFlowEntry.plan_entry_id == plan.id,
+            CashFlowEntry.actual_date.is_not(None),
+        )
+    )
+    already_fact = Decimal(already_fact or 0)
+    remaining = (plan.planned_amount or ZERO) - already_fact
+    if payload.amount > remaining + Decimal("0.01"):
+        raise HTTPException(422, f"Больше остатка по строке плана: {_money(remaining)}")
+
+    status = "received" if plan.direction == "inflow" else "paid"
+    new_entry = CashFlowEntry(
+        entry_kind="fact",
+        project_id=plan.project_id,
+        contract_id=plan.contract_id,
+        direction=plan.direction,
+        title=plan.title,
+        category=plan.category,
+        cost_category_id=plan.cost_category_id,
+        budget_line_id=plan.budget_line_id,
+        object_name=plan.object_name,
+        counterparty=plan.counterparty,
+        currency=plan.currency,
+        planned_date=payload.actual_date,
+        planned_amount=ZERO,
+        actual_amount=payload.amount,
+        actual_date=payload.actual_date,
+        invoiced_amount=ZERO,
+        status=status,
+        plan_entry_id=plan.id,
+        source_name="plan_fact",
+        note=payload.note,
+    )
+    db.add(new_entry)
+    db.flush()
+
+    from app.api.execution_finance import _audit
+
+    _audit(
+        db,
+        "plan_fact_recorded",
+        "cash_flow",
+        new_entry.id,
+        user.id,
+        f"plan={plan.id}; amount={payload.amount}; date={payload.actual_date}",
+    )
+    db.commit()
+
+    return {
+        "id": new_entry.id,
+        "plan_entry_id": plan.id,
+        "actual_amount": _money(payload.amount),
+        "actual_date": payload.actual_date.isoformat(),
+        "plan_remaining": _money(remaining - payload.amount),
+    }
+
+
 @router.post("/{project_id}/cash-flow/{entry_id}/record-payment")
 def record_cash_flow_payment(
     project_id: int,

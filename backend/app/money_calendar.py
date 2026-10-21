@@ -112,7 +112,14 @@ def money_calendar(
             .filter(CashFlowEntry.plan_entry_id == entry.id)
             .scalar()
         )
-        amount = planned_amount - _to_decimal(invoiced_linked)
+        fact_linked = (
+            db.query(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0))
+            .filter(CashFlowEntry.plan_entry_id == entry.id)
+            .filter(CashFlowEntry.actual_date.is_not(None))
+            .filter(func.coalesce(CashFlowEntry.invoiced_amount, 0) == 0)
+            .scalar()
+        )
+        amount = planned_amount - _to_decimal(invoiced_linked) - _to_decimal(fact_linked)
         if amount <= 0:
             continue
         days_left = _days_left(due, today)
@@ -193,6 +200,21 @@ def money_calendar(
             continue
         if due > horizon_date:
             continue
+        invoiced_linked = (
+            db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
+            .filter(CashFlowEntry.plan_entry_id == entry.id)
+            .scalar()
+        )
+        fact_linked = (
+            db.query(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0))
+            .filter(CashFlowEntry.plan_entry_id == entry.id)
+            .filter(CashFlowEntry.actual_date.is_not(None))
+            .filter(func.coalesce(CashFlowEntry.invoiced_amount, 0) == 0)
+            .scalar()
+        )
+        amount = planned_amount - _to_decimal(invoiced_linked) - _to_decimal(fact_linked)
+        if amount <= 0:
+            continue
         days_left = _days_left(due, today)
         items.append({
             "kind": "receive",
@@ -200,11 +222,11 @@ def money_calendar(
             "counterparty": entry.counterparty,
             "contract_id": entry.contract_id,
             "contract_number": None,
-            "amount": _money(planned_amount),
+            "amount": _money(amount),
             "due_date": due.isoformat() if due else None,
             "days_left": days_left,
             "level": _level(days_left),
-            "_amount_dec": planned_amount,
+            "_amount_dec": amount,
         })
 
     # Plan payments/receipts long past with no recorded fact are usually just not
