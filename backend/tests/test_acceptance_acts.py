@@ -128,6 +128,28 @@ def test_mark_act_signed_creates_one_inflow(world):
     assert len(rows) == 1
 
 
+def test_mark_act_signed_does_not_duplicate_plan_dds_receipt(world):
+    db = world["db"]
+    contract = world["contract"]
+    project = world["project"]
+    user = world["user"]
+    db.add(CashFlowEntry(project_id=project.id, contract_id=contract.id, direction="inflow", title="Этапы Городец",
+                         planned_date=date(2026, 9, 30), planned_amount=Decimal("100.00"), actual_amount=Decimal("0"),
+                         currency="RUB", status="proposed", source_name="для PU ДДС.xlsx, ДДС!K4"))
+    stage = ContractStage(project_id=project.id, contract_id=contract.id, object_name=None, stage_number=1,
+                          title="Работы", amount=Decimal("100.00"))
+    db.add(stage)
+    db.commit()
+
+    act = aa.create_stage_act(db, project.id, contract, stage, user)
+    db.commit()
+    aa.mark_act_signed(db, act, date(2026, 10, 23), user)
+    db.commit()
+    assert act.status == "signed"
+    assert act.cash_flow_entry_id is None
+    assert db.query(CashFlowEntry).filter(CashFlowEntry.direction == "inflow").count() == 1
+
+
 def test_build_act_data_counterparty_fallback_without_org(world):
     db = world["db"]
     project = world["project"]

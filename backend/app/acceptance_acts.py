@@ -6,7 +6,7 @@ import re
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.acceptance_act_document import (
@@ -284,7 +284,19 @@ def mark_act_signed(db: Session, act: AcceptanceAct, act_date: date, user) -> Ac
     act.status = "signed"
     act.act_date = act_date
 
-    if act.cash_flow_entry_id is None:
+    # Owner 21.10.2026: the uploaded plan DDS already holds the customer receipts by stage;
+    # a signed act must not add a second expected receipt next to it.
+    plan_has_receipts = act.contract_id is not None and db.query(CashFlowEntry.id).filter(
+        CashFlowEntry.project_id == act.project_id,
+        CashFlowEntry.contract_id == act.contract_id,
+        CashFlowEntry.direction == "inflow",
+        CashFlowEntry.planned_amount > 0,
+        CashFlowEntry.plan_entry_id.is_(None),
+        or_(CashFlowEntry.source_name.is_(None), ~CashFlowEntry.source_name.like("acceptance_act:%")),
+        CashFlowEntry.status.notin_(("cancelled", "deleted", "rejected")),
+    ).first() is not None
+
+    if act.cash_flow_entry_id is None and not plan_has_receipts:
         project = db.get(Project, act.project_id)
         contract = None
         if act.contract_id is not None and project is not None:
