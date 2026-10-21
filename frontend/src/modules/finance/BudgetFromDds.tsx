@@ -56,6 +56,7 @@ type ArticleInvoice = {
   counterparty: string | null;
   invoiced: string;
   paid: string;
+  remaining_to_pay?: string;
   planned_date: string | null;
   actual_date: string | null;
   status: string;
@@ -342,7 +343,7 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
             <td className="money">—</td>
             <td className="money">{fmt(invoice.invoiced)}</td>
             <td className="money">{fmt(invoice.paid)}</td>
-            <td className="money">—</td>
+            <td className="money">{toNumber(invoice.remaining_to_pay) > 0 ? fmt(invoice.remaining_to_pay) : "—"}</td>
             <td>
               {toNumber(invoice.paid) < toNumber(invoice.invoiced) && <button type="button" aria-label={`Отметить оплату ${invoice.title}`}
                 onClick={() => setPayment({ entryId: invoice.entry_id, mode: "percent", value: "100", date: today, error: "", busy: false })}>Оплачено</button>}
