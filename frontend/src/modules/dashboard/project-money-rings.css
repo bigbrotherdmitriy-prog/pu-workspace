@@ -1,0 +1,176 @@
+.project-money-rings {
+  margin-top: 16px;
+}
+
+.project-money-rings__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.project-money-rings__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--read-text, #1f2937);
+}
+
+.project-money-rings__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #2563eb);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.project-money-rings__loading,
+.project-money-rings__error {
+  font-size: 13px;
+  color: var(--read-muted, #6b7280);
+  margin: 0;
+}
+
+.project-money-rings__error {
+  color: var(--read-danger, #b91c1c);
+}
+
+.project-money-rings__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .project-money-rings__grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
+
+.project-money-rings__card {
+  border-radius: 12px;
+  background: var(--card-bg, var(--read-surface, #fff));
+  color: var(--read-text, #1f2937);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.project-money-rings__chart {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.project-money-rings__chart svg {
+  display: block;
+}
+
+.project-money-rings__percent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--read-text, #1f2937);
+  pointer-events: none;
+}
+
+.project-money-rings__arc {
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-money-rings__arc {
+    transition: none;
+  }
+}
+
+.project-money-rings__ring--good .project-money-rings__arc {
+  stroke: #15803d;
+}
+
+.project-money-rings__ring--neutral .project-money-rings__arc {
+  stroke: #2563eb;
+}
+
+.project-money-rings__ring--warn .project-money-rings__arc {
+  stroke: #d97706;
+}
+
+.project-money-rings__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--read-text, #1f2937);
+}
+
+.project-money-rings__caption {
+  font-size: 13px;
+  color: var(--read-muted, #6b7280);
+}
+
+.project-money-rings__cash {
+  justify-content: center;
+  gap: 6px;
+}
+
+.project-money-rings__cash-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--read-text, #1f2937);
+}
+
+.project-money-rings__cash-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.project-money-rings__cash-value--positive {
+  color: var(--read-accent, #15803d);
+}
+
+.project-money-rings__cash-value--negative {
+  color: var(--read-danger, #b91c1c);
+}
+
+.project-money-rings__cash-caption {
+  font-size: 13px;
+  color: var(--read-muted, #6b7280);
+}
+
+.project-money-rings__cash-note {
+  font-size: 12px;
+  color: var(--read-muted, #6b7280);
+  margin-top: 4px;
+}
+
+.dashboard-money-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin: 16px 0;
+}
+
+/* The work center has its own dark/glass theme: give the block its own readable
+   surface and text instead of inheriting a colour meant for another background. */
+.project-money-rings {
+  background: var(--read-surface, #ffffff);
+  color: var(--read-text, #1f2937);
+  border-radius: 12px;
+  padding: 16px;
+}
+.project-money-rings h2, .project-money-rings h3, .project-money-rings p, .project-money-rings span, .project-money-rings button {
+  color: inherit;
+}

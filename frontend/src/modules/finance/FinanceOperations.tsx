@@ -114,6 +114,7 @@ export function FinanceOperations(props: Props) {
   return <>
     {includeEditor && invoiceProposal && <section className="card structured-import invoice-extraction-review" id="invoice-extraction-review">
       <div className="card-head"><div><span className="eyebrow">СЧЁТ · ПРЕДЛОЖЕНИЕ AI</span><h2>Проверьте данные перед импортом</h2><p>Ни одно поле не попадёт в бюджет или ДДС без подтверждения менеджером.</p></div><button className="secondary" onClick={onCloseInvoice}>Закрыть</button></div>
+      {invoiceProposal.fallback_reason === "own_outgoing_invoice" && <div className="finance-warning" role="status">Это ваш исходящий счёт: поставщик — ваша компания. В расходы он не записывается. Нажмите «Отклонить».</div>}
       {invoiceProposal.extraction_method === "regex" && <div className="finance-warning">AI недоступен ({invoiceProposal.fallback_reason || "fallback"}). Сумма найдена резервным правилом; заполните остальные поля вручную.{invoiceProposal.status === "proposed" && invoiceProposal.fallback_reason === "temporarily_unavailable" && <button className="secondary" disabled={invoiceAiRetrying} onClick={onRetryInvoiceAi}>{invoiceAiRetrying ? "Повторный анализ…" : "Повторить AI-анализ"}</button>}</div>}
       <div className="invoice-review-grid">
         <label>Сумма<input type="number" min="0.01" value={invoiceProposal.amount ?? ""} onChange={(event) => onEditInvoice?.({ amount: Number(event.target.value) || undefined })} /></label>
@@ -127,7 +128,9 @@ export function FinanceOperations(props: Props) {
           <option value="">Выберите строку плана или «Дополнительные затраты»</option>
           {planArticles.map((article) => <option value={String(article.id)} key={article.id}>{`${article.suggested ? "★ " : ""}${article.title}${article.counterparty ? ` · ${article.counterparty}` : ""} · план ${formatMoney(article.total)}, остаток ${formatMoney(article.remaining)}`}</option>)}
           <option value="additional">Дополнительные затраты</option>
-        </select>{(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planValue); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
+        </select>{(() => { const chosen = planArticles.find((article) => String(article.id) === planValue); return chosen && invoiceAmount > chosen.remaining
+          ? <small className="bad">Счёт больше остатка статьи на {formatMoney(invoiceAmount - chosen.remaining)} ₽ — статья уйдёт в перерасход. Если это вне плана, выберите «Дополнительные затраты».</small> : null; })()}
+        {(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planValue); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
       </div>
       <div className="invoice-evidence">
         <strong>Основания из документа</strong>
@@ -146,11 +149,11 @@ export function FinanceOperations(props: Props) {
         if (!invoiceProposal.amount) missing.push("сумма");
         if (!invoiceProposal.payment_purpose) missing.push("назначение платежа");
         if (!anchored && !invoiceProposal.selected_cost_category_id) missing.push("категория затрат");
-        if (anchored && !selectedContractId) missing.push("договор");
+        // The contract is inferred on the server (counterparty → plan DDS contract), never asked.
         // Owner 16.10.2026: invoices are not linked to GPR stages — only to a plan DDS line or «Дополнительные затраты».
         if (invoiceProposal.target_kind === "cash_flow" && !planChoice) missing.push("строка планового ДДС или «Дополнительные затраты»");
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
-          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={() => onConfirmInvoice?.(planValue === "additional" ? { additional: true } : planValue ? { plan_entry_id: Number(planValue) } : undefined)}>Подтвердить счёт</button></div>
+          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0 || invoiceProposal.fallback_reason === "own_outgoing_invoice"} onClick={() => onConfirmInvoice?.(planValue === "additional" ? { additional: true } : planValue ? { plan_entry_id: Number(planValue) } : undefined)}>Подтвердить счёт</button></div>
           {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}
         </div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>;
       })()}

@@ -56,6 +56,7 @@ type ArticleInvoice = {
   counterparty: string | null;
   invoiced: string;
   paid: string;
+  remaining_to_pay?: string;
   planned_date: string | null;
   actual_date: string | null;
   status: string;
@@ -338,11 +339,11 @@ export function BudgetFromDds({ projectId, contractId, currency }: Props) {
         const label = `Счёт: ${invoice.title}${invoice.counterparty ? ` · ${invoice.counterparty}` : ""}`;
         return <Fragment key={`invoice-${invoice.entry_id}`}>
           <tr className="budget-from-dds-counterparty budget-from-dds-invoice">
-            <td colSpan={2}>{label}</td>
+            <td colSpan={2}><span className="budget-from-dds-invoice-label" title={label}>{label}</span></td>
             <td className="money">—</td>
             <td className="money">{fmt(invoice.invoiced)}</td>
             <td className="money">{fmt(invoice.paid)}</td>
-            <td className="money">—</td>
+            <td className="money">{toNumber(invoice.remaining_to_pay) > 0 ? fmt(invoice.remaining_to_pay) : "—"}</td>
             <td>
               {toNumber(invoice.paid) < toNumber(invoice.invoiced) && <button type="button" aria-label={`Отметить оплату ${invoice.title}`}
                 onClick={() => setPayment({ entryId: invoice.entry_id, mode: "percent", value: "100", date: today, error: "", busy: false })}>Оплачено</button>}

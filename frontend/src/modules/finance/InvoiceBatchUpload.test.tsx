@@ -28,6 +28,18 @@ describe("invoice batch selection", () => {
     await waitFor(() => expect(onReview).toHaveBeenCalledWith(92));
   });
 
+  it("shows a booked invoice as confirmed and offers no second review", async () => {
+    const onUpload = vi.fn().mockResolvedValue([{ name: "a.pdf", documentIds: [91] }, { name: "b.pdf", documentIds: [92] }]);
+    const { rerender } = render(<InvoiceBatchUpload onUpload={onUpload} onReview={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Выбрать файлы счетов"), { target: { files: [new File(["pdf"], "a.pdf", { type: "application/pdf" }), new File(["pdf"], "b.pdf", { type: "application/pdf" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и разобрать (2)" }));
+    await screen.findByRole("list", { name: "Результаты загрузки счетов" });
+    expect(screen.getAllByRole("button", { name: "Проверить счёт" })).toHaveLength(2);
+    rerender(<InvoiceBatchUpload onUpload={onUpload} onReview={vi.fn()} confirmedDocumentIds={new Set([91])} />);
+    expect(screen.getByText(/Подтверждён ✓/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Проверить счёт" })).toHaveLength(1);
+  });
+
   it("accepts more than twenty dragged invoices, deduplicates selection and prevents duplicate submissions", async () => {
     const files = Array.from({ length: 21 }, (_, i) => new File(["pdf"], `${i}.pdf`, { type: "application/pdf" }));
     let finish!: (value: []) => void;

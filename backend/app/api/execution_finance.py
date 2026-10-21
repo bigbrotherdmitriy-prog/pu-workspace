@@ -34,11 +34,11 @@ from app.models.execution_finance import (
     AcceptanceAct, BudgetLine, CashFlowEntry, CashFlowPlanMutation, ContractBudgetProposal, CostCategory, InvoiceExtractionProposal,
     PaymentEvent, ProcurementItem, ScheduleBaseline, ScheduleBudgetLink, ScheduleItem,
 )
-from app.models.organization_contract import Contract
+from app.models.organization_contract import Contract, Organization
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
-from app.invoice_extraction import InvoiceFields, extract_invoice_fields
+from app.invoice_extraction import InvoiceFields, buyer_name, extract_invoice_fields, supplier_inn
 from app.structured_import import parse_structured_rows
 from app.dds_article_budget import (
     ArticleBudgetPreviewRequest, ArticleBudgetApplyRequest,
@@ -719,6 +719,56 @@ def _finance_document_hints(name: str, content: str) -> dict:
             pass
     number_match = re.search(r"(?:№|номер|сч[её]т(?:\s+на\s+оплату)?|акт)\s*[:№-]?\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9./_-]{1,40})", text, re.IGNORECASE)
     return {"amount": amount, "date": suggested_date, "number": number_match.group(1) if number_match else None}
+
+
+def _normalized_party(value: str | None) -> str:
+    text = re.sub(r"[«»\"'`]", " ", (value or "").lower())
+    text = re.sub(r"\b(ооо|ао|пао|зао|оао|ип|общество с ограниченной ответственностью|акционерное общество)\b", " ", text)
+    return " ".join(text.split())
+
+
+def _infer_invoice_contract_id(db: Session, project_id: int, counterparty: str | None) -> int | None:
+    """Contract for an invoice when the manager did not pick one: the contract with
+    the same counterparty; otherwise the contract that carries the project's planned
+    DDS (most outflow plan rows); otherwise the only contract of the project."""
+    contracts = list(db.scalars(select(Contract).where(Contract.project_id == project_id).order_by(Contract.id)))
+    if not contracts:
+        return None
+    party = _normalized_party(counterparty)
+    if party:
+        for contract in contracts:
+            if _normalized_party(contract.counterparty) == party:
+                return contract.id
+    plan_owner = db.execute(
+        select(CashFlowEntry.contract_id, func.count(CashFlowEntry.id))
+        .where(CashFlowEntry.project_id == project_id, CashFlowEntry.direction == "outflow",
+               CashFlowEntry.planned_amount > 0, CashFlowEntry.contract_id.is_not(None))
+        .group_by(CashFlowEntry.contract_id).order_by(func.count(CashFlowEntry.id).desc())
+    ).first()
+    if plan_owner is not None:
+        return int(plan_owner[0])
+    return contracts[0].id if len(contracts) == 1 else None
+
+
+OWN_OUTGOING_INVOICE = "own_outgoing_invoice"
+
+
+def _mark_own_outgoing_invoice(db: Session, item: InvoiceExtractionProposal, content: str) -> None:
+    """An invoice where the supplier is the project's own company is our outgoing
+    invoice (money in), never an expense: mark it and show the buyer instead."""
+    project = db.get(Project, item.project_id)
+    org = db.get(Organization, project.organization_id) if project is not None else None
+    if org is None:
+        return
+    inn = supplier_inn(content or "")
+    names = {_normalized_party(org.name), _normalized_party(getattr(org, "legal_name", None))} - {""}
+    own = bool(inn and org.inn and inn == org.inn) or (_normalized_party(item.counterparty) in names)
+    if not own:
+        return
+    item.fallback_reason = OWN_OUTGOING_INVOICE
+    buyer = buyer_name(content or "")
+    if buyer:
+        item.counterparty = buyer[:500]
 
 
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
@@ -2304,6 +2354,7 @@ def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate
         target_kind=payload.target_kind, status="proposed",
     )
     _apply_invoice_extraction_fields(item, fields, categories)
+    _mark_own_outgoing_invoice(db, item, content)
     db.add(item); db.flush()
     _audit(db, "invoice_extraction_proposed", "invoice_extraction_proposal", item.id, user.id,
            f"document={document.id}; version={version.id}; method={fields.extraction_method}")
@@ -2421,6 +2472,8 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
         return _invoice_proposal_payload(item)
     if item.status != "proposed":
         raise HTTPException(409, "Отклонённое предложение нельзя подтвердить")
+    if item.fallback_reason == OWN_OUTGOING_INVOICE:
+        raise HTTPException(422, "Это ваш исходящий счёт: поставщик — ваша компания. В расходы он не записывается — отклоните его.")
     if payload.plan_entry_id is not None and payload.additional:
         raise HTTPException(422, "Выберите либо строку планового ДДС, либо «Дополнительные затраты»")
     plan_entry = None
@@ -2446,6 +2499,12 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
             "schedule_item_id": payload.schedule_item_id or plan_entry.schedule_item_id,
             "budget_line_id": payload.budget_line_id or plan_entry.budget_line_id,
         })
+    if payload.contract_id is None and (plan_entry is not None or payload.additional):
+        # «Дополнительные затраты» or a plan line without a contract: the system
+        # picks the contract itself — never ask the manager for a field it can infer.
+        inferred = _infer_invoice_contract_id(db, item.project_id, item.counterparty)
+        if inferred is not None:
+            payload = payload.model_copy(update={"contract_id": inferred})
     if item.amount is None or not item.payment_purpose:
         raise HTTPException(422, "Перед подтверждением укажите сумму и назначение платежа")
     _require_project_currency(db, item.project_id, item.currency)

@@ -113,6 +113,8 @@ const MeetingsModule = lazy(() => import("./modules/meetings/MeetingsModule").th
 const ContactsModule = lazy(() => import("./modules/contacts/ContactsModule").then((m) => ({ default: m.ContactsModule })));
 const AnalyticsModule = lazy(() => import("./modules/analytics/AnalyticsModule").then((m) => ({ default: m.AnalyticsModule })));
 const InvoiceQuickConfirm = lazy(() => import("./modules/finance/InvoiceQuickConfirm").then((m) => ({ default: m.InvoiceQuickConfirm })));
+const ProjectMoneyRings = lazy(() => import("./modules/dashboard/ProjectMoneyRings").then((m) => ({ default: m.ProjectMoneyRings })));
+const MoneyCalendar = lazy(() => import("./modules/dashboard/MoneyCalendar").then((m) => ({ default: m.MoneyCalendar })));
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const ExecutiveDocsModule = lazy(() => import("./modules/executive-docs/ExecutiveDocsModule").then((m) => ({ default: m.ExecutiveDocsModule })));
 const SettingsModule = lazy(() => import("./modules/settings/SettingsModule").then((m) => ({ default: m.SettingsModule })));
@@ -3372,6 +3374,10 @@ export function App() {
                 onOpenDecisions={() => { setGovernanceFocus("decisions"); setActive("Риски и решения"); }}
                 onOpenNotifications={() => { setNotificationFilter("unread"); setActive("Уведомления"); }}
               />
+              {projectId > 0 && <section className="dashboard-money-row">
+                <ProjectMoneyRings projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
+                <MoneyCalendar projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
+              </section>}
               <div className="dashboard-command-grid">
                 <section className="card dashboard-attention-card">
                   <div className="card-head">

@@ -490,3 +490,53 @@ def test_get_invoice_extraction_returns_proposal_for_push_card(db_session, user_
     assert loaded["status"] == "proposed"
     with pytest.raises(finance_api.HTTPException):
         finance_api.get_invoice_extraction(999999, db_session, user)
+
+
+def test_additional_cost_invoice_gets_a_contract_without_asking(db_session, user_factory, monkeypatch):
+    user, project, document, _version = _world(db_session, user_factory)
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, None) is None
+    _control_chain(db_session, user, project)
+    other = Contract(project_id=project.id, number="SUB-2", title="Sub", counterparty="ООО «Бетон»", status="active")
+    db_session.add(other); db_session.flush()
+    only_contract = db_session.query(Contract).filter_by(number="INV-1").one()
+    # same counterparty wins, quotes and legal form ignored
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, 'ООО "Бетон"') == other.id
+    # no counterparty match and no plan rows: two contracts -> cannot guess
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, "ИП Иванов") is None
+    db_session.delete(other); db_session.flush()
+    assert finance_api._infer_invoice_contract_id(db_session, project.id, "ИП Иванов") == only_contract.id
+
+
+def test_own_company_as_supplier_is_an_outgoing_invoice_not_an_expense(db_session, user_factory, monkeypatch):
+    user, project, document, _version = _world(db_session, user_factory)
+    org = db_session.get(finance_api.Organization, project.organization_id)
+    org.inn = "7716888076"
+    db_session.flush()
+    item = InvoiceExtractionProposal(project_id=project.id, counterparty='ООО "ДИСИАЙ СОЛЮШНС"')
+    text = ('Счет на оплату № 1324477402 от 02 сентября 2026 г. Поставщик: ООО "ДИСИАЙ СОЛЮШНС", ИНН 7716888076, '
+            'КПП 771601001 Покупатель: ООО "БУЛАТ", ИНН 7700000000')
+    finance_api._mark_own_outgoing_invoice(db_session, item, text)
+    assert item.fallback_reason == finance_api.OWN_OUTGOING_INVOICE
+    assert item.counterparty == 'ООО "БУЛАТ"'
+
+    other = InvoiceExtractionProposal(project_id=project.id, counterparty="ООО Бетон")
+    finance_api._mark_own_outgoing_invoice(db_session, other, "Поставщик: ООО Бетон, ИНН 5000000000")
+    assert other.fallback_reason is None
+
+
+def test_outgoing_invoice_cannot_be_confirmed_as_an_expense(db_session, user_factory, monkeypatch):
+    user, project, document, _version = _world(db_session, user_factory)
+    monkeypatch.setattr(finance_api, "require_project_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(finance_api, "extract_invoice_fields", lambda *_args, **_kwargs: InvoiceFields(
+        amount=Decimal("8500"), amount_evidence_quote="8 500,00", currency="RUB",
+        counterparty="ООО Свои", counterparty_evidence_quote="ООО Свои",
+        payment_purpose="Возмещение затрат", payment_purpose_evidence_quote="Возмещение",
+        suggested_category_name="Прямые", category_evidence_quote="Возмещение",
+        planned_date=date(2026, 9, 2), confidence=0.9, extraction_method="llm",
+    ))
+    proposed = create_invoice_extraction(document.id, InvoiceExtractionCreate(project_id=project.id), db_session, user)
+    db_session.get(InvoiceExtractionProposal, proposed["id"]).fallback_reason = finance_api.OWN_OUTGOING_INVOICE
+    db_session.flush()
+    with pytest.raises(finance_api.HTTPException) as refused:
+        confirm_invoice_extraction(proposed["id"], finance_api.InvoiceExtractionConfirm(additional=True), db_session, user)
+    assert refused.value.status_code == 422

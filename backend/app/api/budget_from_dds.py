@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from datetime import date
 from decimal import Decimal
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,6 +34,46 @@ def _is_additional_cost(
         if value is not None and value.strip().lower() in ADDITIONAL_COST_CATEGORY_NAMES:
             return True
     return False
+
+
+def _merge_invoice_parts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A part-paid invoice is split into the paid row and a remainder row (same
+    source document and title). Show it as one invoice: summed invoiced/paid/left,
+    the open part's entry for the next payment, status «partially_paid»."""
+    groups: dict[tuple, list[dict[str, Any]]] = {}
+    order: list[tuple] = []
+    for row in rows:
+        base_title = re.sub(r"\s*[—-]\s*остаток\s*$", "", (row.get("title") or "").strip())
+        key = (row.get("document_id") or f"entry:{row['entry_id']}", base_title, row.get("counterparty"))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(row)
+    merged: list[dict[str, Any]] = []
+    for key in order:
+        parts = groups[key]
+        if len(parts) == 1:
+            merged.append(parts[0])
+            continue
+        invoiced = sum((Decimal(p["invoiced"]) for p in parts), ZERO)
+        paid = sum((Decimal(p["paid"]) for p in parts), ZERO)
+        left = invoiced - paid
+        open_parts = [p for p in parts if Decimal(p["remaining_to_pay"]) > ZERO]
+        target = open_parts[0] if open_parts else parts[0]
+        actual_dates = [p["actual_date"] for p in parts if p.get("actual_date")]
+        planned_dates = [p["planned_date"] for p in parts if p.get("planned_date")]
+        merged.append({
+            **target,
+            "title": re.sub(r"\s*[—-]\s*остаток\s*$", "", (target.get("title") or "").strip()),
+            "invoiced": _money(invoiced),
+            "paid": _money(paid),
+            "remaining_to_pay": _money(left),
+            "planned_date": min(planned_dates) if planned_dates else None,
+            "actual_date": max(actual_dates) if actual_dates else None,
+            "status": "paid" if left <= ZERO else ("partially_paid" if paid > ZERO else target["status"]),
+            "parts": len(parts),
+        })
+    return merged
 
 
 def _money(value: Decimal | None) -> str:
@@ -420,6 +461,7 @@ def budget_from_dds(
                     "document_id": entry.source_document_id,
                 })
 
+        invoice_rows = _merge_invoice_parts(invoice_rows)
         expense_by_article.append({
             "budget_line_id": line.id,
             "title": title or fallback_title or line.category,
@@ -622,6 +664,92 @@ def update_budget_line_category(
     }
 
 
+class RecordFactRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
+    actual_date: date
+    note: str | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _amount_before(cls, value: Any) -> Any:
+        return Decimal(str(value))
+
+
+@router.post("/{project_id}/cash-flow/{entry_id}/record-fact")
+def record_plan_fact(
+    project_id: int,
+    entry_id: int,
+    payload: RecordFactRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    require_project_role(db, user, project_id, "manager")
+
+    plan = db.get(CashFlowEntry, entry_id)
+    if not plan or plan.project_id != project_id:
+        raise HTTPException(404, "Запись ДДС не найдена")
+
+    if (plan.planned_amount or ZERO) <= ZERO or plan.status in EXCLUDED_STATUSES:
+        raise HTTPException(422, "Это не строка плана")
+
+    already_fact = db.scalar(
+        select(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0)).where(
+            CashFlowEntry.plan_entry_id == plan.id,
+            CashFlowEntry.actual_date.is_not(None),
+        )
+    )
+    already_fact = Decimal(already_fact or 0)
+    remaining = (plan.planned_amount or ZERO) - already_fact
+    if payload.amount > remaining + Decimal("0.01"):
+        raise HTTPException(422, f"Больше остатка по строке плана: {_money(remaining)}")
+
+    status = "received" if plan.direction == "inflow" else "paid"
+    new_entry = CashFlowEntry(
+        entry_kind="fact",
+        project_id=plan.project_id,
+        contract_id=plan.contract_id,
+        direction=plan.direction,
+        title=plan.title,
+        category=plan.category,
+        cost_category_id=plan.cost_category_id,
+        budget_line_id=plan.budget_line_id,
+        object_name=plan.object_name,
+        counterparty=plan.counterparty,
+        currency=plan.currency,
+        planned_date=payload.actual_date,
+        planned_amount=ZERO,
+        actual_amount=payload.amount,
+        actual_date=payload.actual_date,
+        invoiced_amount=ZERO,
+        status=status,
+        plan_entry_id=plan.id,
+        source_name="plan_fact",
+        note=payload.note,
+    )
+    db.add(new_entry)
+    db.flush()
+
+    from app.api.execution_finance import _audit
+
+    _audit(
+        db,
+        "plan_fact_recorded",
+        "cash_flow",
+        new_entry.id,
+        user.id,
+        f"plan={plan.id}; amount={payload.amount}; date={payload.actual_date}",
+    )
+    db.commit()
+
+    return {
+        "id": new_entry.id,
+        "plan_entry_id": plan.id,
+        "actual_amount": _money(payload.amount),
+        "actual_date": payload.actual_date.isoformat(),
+        "plan_remaining": _money(remaining - payload.amount),
+    }
+
+
 @router.post("/{project_id}/cash-flow/{entry_id}/record-payment")
 def record_cash_flow_payment(
     project_id: int,
@@ -678,7 +806,7 @@ def record_cash_flow_payment(
             source_document_sha256=entry.source_document_sha256,
             cost_category_id=entry.cost_category_id,
             direction=entry.direction,
-            title=f"{entry.title} — остаток",
+            title=re.sub(r"\s*[—-]\s*остаток\s*$", "", (entry.title or "").strip()) + " — остаток",
             planned_date=entry.planned_date,
             actual_date=None,
             planned_amount=ZERO,

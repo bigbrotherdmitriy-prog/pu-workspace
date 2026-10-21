@@ -86,6 +86,9 @@ function groupCalendarRows(rows: CashRow[], planRows: CashRow[] = rows): Calenda
   const groups = new Map<string, CalendarRowGroup>();
   const planById = new Map(planRows.map((row) => [row.id, row]));
   rows.forEach((row) => {
+    // Invoices and payments without a plan of their own (against a plan line or
+    // «Дополнительные затраты») are facts: not in the plan grid — «Детализация» shows them.
+    if (Number(row.planned_amount) === 0 && (row.plan_entry_id || Number(row.invoiced_amount || 0) > 0 || Number(row.actual_amount || 0) > 0)) return;
     // A confirmed invoice is a fact against its plan line: show it under that
     // article, not as its own article with a zero plan.
     const article = (row.plan_entry_id && planById.get(row.plan_entry_id)) || row;
@@ -452,7 +455,8 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
       <div><span className="eyebrow">ПЛАТЁЖНЫЙ КАЛЕНДАРЬ</span><h2>Движение денежных средств</h2><p>Все представления считаются из единой детализации. План и факт хранятся и показываются раздельно.</p></div>
       <div className="dds-head-actions">{onImportCashFlow && <button type="button" disabled={!selectedContractId} title={selectedContractId ? "Загрузить Excel или CSV с плановым ДДС" : "Сначала выберите финансовый договор"} onClick={() => cashFlowImportInput.current?.click()}><Upload /> Импортировать плановый ДДС</button>}<button className="secondary" type="button" disabled={!undoStack.length} onClick={() => void undoLast()}><RotateCcw /> Отменить перенос</button><button className="secondary" type="button" onClick={() => exportView()}><Download /> Экспорт: {tabs.find((item) => item.id === tab)?.label}</button><button className="secondary" type="button" onClick={() => exportView("details")}><Download /> Полный ДДС</button><button className="secondary" type="button" onClick={exportAdditionalExpenses}><Download /> Дополнительные расходы</button><button className="secondary" type="button" onClick={() => onPrepare("cash-in")}><Plus /> Приход</button><button type="button" onClick={() => onPrepare("cash-out")}><Plus /> Расход</button>{onPrepareAdditionalExpense && <button type="button" onClick={onPrepareAdditionalExpense}><Plus /> Доп. расход</button>}</div>
     </div>
-    {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice} />}
+    {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice}
+      confirmedDocumentIds={new Set((finance?.cash_flow || []).filter((row) => Number(row.invoiced_amount || 0) > 0 && row.source_document_id).map((row) => Number(row.source_document_id)))} />}
     <div className="dds-tabs" role="tablist" aria-label="Разделы ДДС">{tabs.map((item) => <button type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
     <div className="dds-filters">
       <label><ListFilter /><select aria-label="Фильтр по объекту" value={objectFilter} onChange={(event) => setObjectFilter(event.target.value)}><option value="all">Все объекты</option>{objects.map((object) => <option key={object}>{object}</option>)}</select></label>

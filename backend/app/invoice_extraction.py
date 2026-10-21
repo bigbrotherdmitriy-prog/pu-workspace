@@ -38,13 +38,34 @@ _CATEGORY_GUARDS = {
     "командировки": ("командиров", "проезд", "гостиниц", "суточн"),
 }
 _CURRENCY_CODES = {"RUB", "USD", "EUR", "CNY", "KZT", "BYN"}
+_MONTHS = {
+    "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5,
+    "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10,
+    "ноябр": 11, "декабр": 12,
+}
+_MONTH_GROUP = (
+    r"(?:(январ[ья]|феврал[ья]|марта?|апрел[ья]|ма[йя]|"
+    r"июн[ья]|июл[ья]|августа?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])"
+    r"|(янв|фев|мар|апр|июн|июл|авг|сен|сент|окт|ноя|дек)\.)"
+)
 _DATE_TOKEN = r"(?<!\d)([0-3]?\d)[.\-/]([01]?\d)[.\-/](20\d{2})(?!\d)"
+_TEXT_DATE_TOKEN = (
+    r"[«\"]?(\d{1,2})[»\"]?\s+" + _MONTH_GROUP + r"\s+(20\d{2})"
+)
 _DATE_RE = re.compile(_DATE_TOKEN)
+_TEXT_DATE_RE = re.compile(_TEXT_DATE_TOKEN, re.IGNORECASE)
 _PAYMENT_DEADLINE_RE = re.compile(
     r"(?:срок\s+(?:оплаты|платежа)|дата\s+(?:оплаты|платежа)|"
     r"(?:оплатить|оплата|плат[её]ж)\s+(?:до|не\s+позднее)|"
     r"к\s+оплате\s+(?:до|не\s+позднее))"
     r"[^\d\r\n.!?]{0,24}" + _DATE_TOKEN,
+    re.IGNORECASE,
+)
+_PAYMENT_DEADLINE_TEXT_RE = re.compile(
+    r"(?:срок\s+(?:оплаты|платежа)|дата\s+(?:оплаты|платежа)|"
+    r"(?:оплатить|оплата|плат[её]ж)\s+(?:до|не\s+позднее)|"
+    r"к\s+оплате\s+(?:до|не\s+позднее))"
+    r"[^\d\r\n.!?]{0,24}" + _TEXT_DATE_TOKEN,
     re.IGNORECASE,
 )
 
@@ -80,20 +101,86 @@ def _date_from_match(match: re.Match[str]) -> date | None:
         return None
 
 
-def _date_hint(text: str) -> date | None:
-    match = _DATE_RE.search(text)
-    if not match:
+def _month_number(name: str) -> int | None:
+    word = name.casefold().rstrip(".")
+    for key, number in _MONTHS.items():
+        if word.startswith(key):
+            if key == "ма" and word not in ("май", "мая"):
+                continue
+            return number
+    return None
+
+
+def _text_date_from_match(match: re.Match[str]) -> date | None:
+    groups = match.groups()
+    day = groups[0]
+    month = groups[1] or groups[2]
+    year = groups[3]
+    month_number = _month_number(month or "")
+    if month_number is None:
         return None
-    return _date_from_match(match)
+    try:
+        return date(int(year), month_number, int(day))
+    except ValueError:
+        return None
+
+
+def _date_hint(text: str) -> date | None:
+    best: tuple[int, date] | None = None
+    for regex, builder in ((_DATE_RE, _date_from_match), (_TEXT_DATE_RE, _text_date_from_match)):
+        for match in regex.finditer(text):
+            parsed = builder(match)
+            if parsed is not None:
+                if best is None or match.start() < best[0]:
+                    best = (match.start(), parsed)
+                break
+    return best[1] if best else None
 
 
 def _planned_date_hint(text: str) -> date | None:
     """Prefer an explicitly labelled payment deadline over invoice metadata dates."""
-    for match in _PAYMENT_DEADLINE_RE.finditer(text):
-        parsed = _date_from_match(match)
-        if parsed is not None:
-            return parsed
+    best: tuple[int, date] | None = None
+    for regex, builder in (
+        (_PAYMENT_DEADLINE_RE, _date_from_match),
+        (_PAYMENT_DEADLINE_TEXT_RE, _text_date_from_match),
+    ):
+        for match in regex.finditer(text):
+            parsed = builder(match)
+            if parsed is not None:
+                if best is None or match.start() < best[0]:
+                    best = (match.start(), parsed)
+                break
+    if best is not None:
+        return best[1]
     return _date_hint(text)
+
+
+_SUPPLIER_INN_RE = re.compile(r"ИНН\s*:?\s*(\d{10}|\d{12})", re.IGNORECASE)
+_SUPPLIER_WORDS_RE = re.compile(r"(?:Поставщик|Исполнитель|Получатель)", re.IGNORECASE)
+_BUYER_NAME_RE = re.compile(
+    r"(?:Покупатель|Плательщик|Заказчик)\s*:?\s*([^,\r\n]+?)(?=\s*,\s*|\s+ИНН|\r|\n|$)",
+    re.IGNORECASE,
+)
+
+
+def supplier_inn(text: str) -> str | None:
+    for word in _SUPPLIER_WORDS_RE.finditer(text):
+        window = text[word.start():word.start() + 250]
+        match = _SUPPLIER_INN_RE.search(window)
+        if match:
+            return match.group(1)
+    return None
+
+
+def buyer_name(text: str) -> str | None:
+    match = _BUYER_NAME_RE.search(text)
+    if not match:
+        return None
+    name = match.group(1).strip()
+    # Flattened invoice text runs on into the next block: stop at the next label.
+    name = re.split(r"\s+(?:Получатель|Поставщик|Плательщик|Грузополучатель|Адрес|КПП|ОГРН|Тел\.?|№|Товары|Счет|Счёт|Основание)\b", name, maxsplit=1)[0]
+    name = name.strip(" ,;:")
+    return name[:200] or None
 
 
 def _regex_fallback(text: str, reason: str) -> InvoiceFields:

@@ -75,6 +75,7 @@ def _process_attachment(
 ) -> int | None:
     from app.api.execution_finance import (
         _apply_invoice_extraction_fields,
+        _mark_own_outgoing_invoice,
         _audit,
         _ensure_default_categories,
         _project_organization_id,
@@ -121,6 +122,7 @@ def _process_attachment(
         target_kind="cash_flow", status="proposed",
     )
     _apply_invoice_extraction_fields(proposal, fields, categories)
+    _mark_own_outgoing_invoice(db, proposal, text)
     db.add(proposal)
     db.flush()
     _audit(
@@ -129,6 +131,8 @@ def _process_attachment(
         f"document={document.id}; version={version.id}; method={fields.extraction_method}",
     )
 
+    if proposal.fallback_reason == "own_outgoing_invoice":
+        return proposal.id  # our own outgoing invoice: no «pay this» push
     body = _notification_body(fields.counterparty, fields.amount)
     for uid in _recipients(db, project_id, user_id):
         db.add(Notification(

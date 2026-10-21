@@ -169,7 +169,8 @@ class CashFlowEntry(Base):
     # Amount of confirmed invoices booked against this row (fact "выставлено").
     # The plan DDS line itself keeps planned_amount; an invoice never becomes plan.
     invoiced_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=0, server_default="0")
-    # Fact rows created from an invoice point at the plan DDS line they belong to.
+    # Fact rows created from an invoice or from a plan DDS line point at the plan
+    # DDS line they belong to.
     plan_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("cash_flow_entries.id", ondelete="SET NULL"), nullable=True, index=True,
     )

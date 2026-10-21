@@ -61,6 +61,7 @@ export function humanizeErrorText(text: string): string {
 }
 
 export const STATUS_LABELS: Record<string, string> = {
+  partially_paid: "Частично оплачен",
   proposed: "Предложено",
   approved: "Одобрено",
   rejected: "Отклонено",

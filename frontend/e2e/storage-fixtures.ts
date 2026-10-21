@@ -437,6 +437,10 @@ export class StorageApi {
       documents: { documents: [] }, contracts: { contracts: [] },
       members: { members: [{ user_id: 900, role: "manager", name: "Synthetic Operator", email: "operator@example.invalid" }] },
       "ai-policy": this.aiPolicies.get(projectId) || { project_id: projectId, mode: "local_only", dlp_enabled: true, prompt_version: "v1" },
+      "budget-from-dds": { currency: "RUB", income: { plan: "0.00", fact: "0.00" }, expense_total: { plan: "0.00", fact: "0.00", invoiced: "0.00" },
+        additional_costs: { plan: "0.00", fact: "0.00", items: [] }, expense_by_category: [], expense_by_article: [],
+        profit: { plan: "0.00", fact: "0.00" }, margin_pct: { plan: null, fact: null }, by_month: [] },
+      "money-calendar": { items: [], counts: {}, totals: { to_pay: "0.00", to_receive: "0.00" }, unmarked: { count: 0, amount: "0.00", payments: 0, receipts: 0 } },
     };
     const suffix = path.replace(/^\/projects\/\d+\//, "");
     if (/^\/projects\/\d+\//.test(path) && suffix in scoped) return this.fulfill(route, { body: scoped[suffix] });
