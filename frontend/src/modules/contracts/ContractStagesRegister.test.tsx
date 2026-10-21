@@ -109,7 +109,7 @@ it("shows draft act and signs it via date input", async () => {
   });
 
   render(<ContractStagesRegister projectId={1} contractId={2} currency="RUB" />);
-  expect(await screen.findByText(/№ 4, черновик/)).toBeTruthy();
+  expect(await screen.findByText(/№ 4 · черновик/)).toBeTruthy();
   fireEvent.click(screen.getByText("Подписан"));
   fireEvent.change(screen.getByLabelText("Дата подписания акта"), { target: { value: "2026-10-20" } });
   fireEvent.click(screen.getByText("Сохранить"));

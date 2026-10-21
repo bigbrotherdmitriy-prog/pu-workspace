@@ -399,6 +399,7 @@ export function App() {
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
   const [localUploadPurpose, setLocalUploadPurpose] = useState<"documents" | "finance" | "project-folder">("documents");
+  const [focusContractId, setFocusContractId] = useState<number | null>(null);
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("oauth") === "connected" ? "Запуск проекта" : "Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -3378,7 +3379,14 @@ export function App() {
               {projectId > 0 && <section className="dashboard-money-row">
                 <PaymentAlarm projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
                 <ProjectMoneyRings projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
-                <MoneyCalendar projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
+                <MoneyCalendar projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
+                  onOpenItem={(item) => {
+                    if (item.kind === "sign_act" && item.contract_id) {
+                      window.location.hash = "contract-stages";
+                      setFocusContractId(item.contract_id);
+                      setActive("Договоры");
+                    } else { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }
+                  }} />
               </section>}
               <div className="dashboard-command-grid">
                 <section className="card dashboard-attention-card">
@@ -3893,6 +3901,7 @@ export function App() {
         >
             <section className="contract-list">
               <ContractScheme
+                focusContractId={focusContractId}
                 actions={<ContractBulkImportWizard
                 documents={documentRows}
                 contracts={contracts}

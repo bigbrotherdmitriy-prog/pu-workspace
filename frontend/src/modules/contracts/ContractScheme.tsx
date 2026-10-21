@@ -33,6 +33,7 @@ type Props = {
   currency?: string;
   actions?: ReactNode;
   renderDetails?: (contract: SchemeContract, packageContent: ReactNode) => ReactNode;
+  focusContractId?: number | null;
 };
 
 const nodeWidth = 230;
@@ -87,7 +88,7 @@ function contractAmount(amount: SchemeContract["amount"], currency: string) {
 
 const statusLabels: Record<string, string> = { draft: "Черновик", active: "Действует", completed: "Завершён", terminated: "Расторгнут", archived: "В архиве" };
 
-export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus, currency = "RUB", actions, renderDetails }: Props) {
+export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument, onDelete, onArchive, onDropDocuments, onDropFiles, onDropApplications, onDropFinance, operationStatus, currency = "RUB", actions, renderDetails , focusContractId}: Props) {
   const storageKey = `pu-contract-scheme:${projectId}`;
   const [view, setView] = useState<"register" | "scheme">("register");
   const [query, setQuery] = useState("");
@@ -109,6 +110,10 @@ export function ContractScheme({ projectId, contracts, onConnect, onOpenDocument
     setDropTargetId(null);
     setDropFeedback("");
   }, [projectId]);
+
+  useEffect(() => {
+    if (focusContractId) { setView("register"); setSelectedId(focusContractId); }
+  }, [focusContractId, projectId]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);

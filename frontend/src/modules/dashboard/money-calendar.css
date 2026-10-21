@@ -177,3 +177,6 @@
   .money-calendar-badge, .money-calendar-kind, .money-calendar-title, .money-calendar-counterparty, .money-calendar-contract { grid-column: 1; grid-row: auto; }
   .money-calendar-amount { margin-left: 14px; text-align: left; }
 }
+
+.money-calendar-action { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.25)); background: transparent; color: var(--read-text, #1f2937); cursor: pointer; white-space: nowrap; }
+.money-calendar-action:hover { border-color: var(--read-accent, #2563eb); }
