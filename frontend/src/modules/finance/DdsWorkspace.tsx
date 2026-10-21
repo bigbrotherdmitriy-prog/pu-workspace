@@ -49,7 +49,7 @@ type CalendarRowGroup = {
 // Owner 21.10.2026: the main DDS screen plus the plan table where only dates are moved;
 // the detailed views stay reachable as small secondary tabs.
 const tabs: { id: Tab; label: string; secondary?: boolean }[] = [
-  { id: "board", label: "ДДС" },
+  { id: "board", label: "Обзор" },
   { id: "calendar", label: "Таблица ДДС" },
   { id: "details", label: "Детализация", secondary: true },
   { id: "summary", label: "Сводка", secondary: true },

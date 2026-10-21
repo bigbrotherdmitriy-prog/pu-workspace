@@ -12,6 +12,7 @@ test("combines repeated DDS cost names and distributes their sums by month", asy
   await page.goto("/new/");
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "Таблица ДДС" }).click();
 
   const costRows = page.locator("tr.operation", { has: page.getByText("ЭМ Щиты", { exact: true }) });
   await expect(costRows).toHaveCount(1);
@@ -36,6 +37,7 @@ test("cancels an unlinked DDS proposal with confirmation and persists after relo
   await page.goto("/new/");
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "Таблица ДДС" }).click();
   page.once("dialog", dialog => dialog.dismiss());
   await page.getByRole("button", { name: "Удалить операцию Тестовый счёт" }).click();
   expect(mutations).toBe(0);
@@ -47,6 +49,7 @@ test("cancels an unlinked DDS proposal with confirmation and persists after relo
   await page.reload();
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "Таблица ДДС" }).click();
   await page.getByRole("tab", { name: "Детализация", exact: true }).click();
   await expect(page.getByText("Тестовый счёт", { exact: true })).toHaveCount(0);
   await page.getByLabel("Фильтр по статусу").selectOption("cancelled");
@@ -72,6 +75,7 @@ test("moves an aggregated DDS cell to another month with the visible handle", as
   await page.goto("/new/");
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "Таблица ДДС" }).click();
   const row = page.locator("tr.operation", { has: page.getByText("ЭМ Щиты", { exact: true }) });
   await page.getByRole("button", { name: "Перенести ЭМ Щиты, 2 операций из 2026-02" }).dragTo(row.locator("td").nth(4));
   await expect(page.getByRole("dialog", { name: "Действие с плановой суммой" })).toBeVisible();
@@ -107,6 +111,7 @@ test("uploads several dropped invoices and opens the chosen document for human r
   await page.goto("/new/");
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
+  await page.getByRole("tab", { name: "Таблица ДДС" }).click();
   await expect(page.getByRole("button", { name: "Добавить счета из папки" })).toBeVisible();
   const data = await page.evaluateHandle(() => {
     const transfer = new DataTransfer();

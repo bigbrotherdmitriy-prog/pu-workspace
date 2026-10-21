@@ -46,7 +46,8 @@ def test_dds_workspace_mirrors_reference_workbook_views():
 
     assert "ДДС по месяцам" in module
     assert "Таблица ДДС" in module
-    assert 'useState<Tab>("calendar")' in module
+    assert 'useState<Tab>(initialTab ?? "board")' in module
+    assert "<DdsBoard" in module
     assert "Детализация" in module
     assert "Сводка" in module
     assert "object_name" in module
