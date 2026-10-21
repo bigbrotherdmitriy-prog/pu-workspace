@@ -34,7 +34,7 @@
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: #f3f4f6;
+  background: rgba(127, 127, 127, 0.14);
 }
 .money-calendar-chip.level-overdue { background: #fee2e2; color: #991b1b; }
 .money-calendar-chip.level-critical { background: #ffedd5; color: #9a3412; }
@@ -53,7 +53,8 @@
   gap: 12px;
   padding: 8px 12px;
   border-radius: 8px;
-  background: #f9fafb;
+  background: rgba(127, 127, 127, 0.10);
+  color: inherit;
 }
 .money-calendar-bar {
   width: 4px;
