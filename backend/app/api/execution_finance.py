@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -763,12 +763,18 @@ def _mark_own_outgoing_invoice(db: Session, item: InvoiceExtractionProposal, con
     inn = supplier_inn(content or "")
     names = {_normalized_party(org.name), _normalized_party(getattr(org, "legal_name", None))} - {""}
     own = bool(inn and org.inn and inn == org.inn) or (_normalized_party(item.counterparty) in names)
-    if not own:
+    # Owner 21.10.2026: an act / invoice / КС-3 between us and our customer is money in,
+    # whichever party the extractor picked as the counterparty.
+    customers = {_normalized_party(c.counterparty) for c in db.scalars(select(Contract).where(
+        Contract.project_id == item.project_id, Contract.contract_kind == "customer"))} - {""}
+    with_customer = _normalized_party(item.counterparty) in customers
+    if not own and not with_customer:
         return
     item.fallback_reason = OWN_OUTGOING_INVOICE
-    buyer = buyer_name(content or "")
-    if buyer:
-        item.counterparty = buyer[:500]
+    if own:
+        buyer = buyer_name(content or "")
+        if buyer:
+            item.counterparty = buyer[:500]
 
 
 def _check_contract(db: Session, project_id: int, contract_id: int | None):
@@ -2473,7 +2479,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     if item.status != "proposed":
         raise HTTPException(409, "Отклонённое предложение нельзя подтвердить")
     if item.fallback_reason == OWN_OUTGOING_INVOICE:
-        raise HTTPException(422, "Это ваш исходящий счёт: поставщик — ваша компания. В расходы он не записывается — отклоните его.")
+        return _confirm_income_document(db, item, payload, user)
     if payload.plan_entry_id is not None and payload.additional:
         raise HTTPException(422, "Выберите либо строку планового ДДС, либо «Дополнительные затраты»")
     plan_entry = None
@@ -2583,6 +2589,93 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
            f"target={item.target_kind}; category={category.id}; plan_entry={payload.plan_entry_id}; "
            f"additional={payload.additional}; human_confirmation=true; "
            f"vat_before={json.dumps(vat_before, ensure_ascii=False)}; vat_after={json.dumps(item.vat_snapshot, ensure_ascii=False)}")
+    db.commit()
+    return _invoice_proposal_payload(item)
+
+
+def _open_income_documents(db: Session, plan_id: int) -> Decimal:
+    """Issued, not yet received income documents booked on a plan receipt line."""
+    return Decimal(db.scalar(select(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0)).where(
+        CashFlowEntry.plan_entry_id == plan_id, CashFlowEntry.direction == "inflow",
+        CashFlowEntry.status.notin_(("received", "cancelled", "deleted", "rejected")),
+    )) or 0)
+
+
+def _plan_receipt_remaining(db: Session, plan: CashFlowEntry) -> Decimal:
+    facts = Decimal(db.scalar(select(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0)).where(
+        CashFlowEntry.plan_entry_id == plan.id, CashFlowEntry.actual_date.is_not(None),
+    )) or 0)
+    return Decimal(plan.planned_amount or 0) - facts - _open_income_documents(db, plan.id)
+
+
+def _match_plan_receipt_line(db: Session, project_id: int, amount: Decimal, contract_id: int | None) -> CashFlowEntry | None:
+    """The plan DDS receipt line an income document belongs to: the one whose open
+    remainder equals the amount, otherwise the earliest that still has room."""
+    query = select(CashFlowEntry).where(
+        CashFlowEntry.project_id == project_id, CashFlowEntry.direction == "inflow",
+        CashFlowEntry.planned_amount > 0, CashFlowEntry.plan_entry_id.is_(None),
+        CashFlowEntry.status.notin_(("cancelled", "deleted", "rejected")),
+        or_(CashFlowEntry.source_name.is_(None), ~CashFlowEntry.source_name.like("acceptance_act:%")),
+    ).order_by(CashFlowEntry.planned_date, CashFlowEntry.id)
+    if contract_id is not None:
+        query = query.where(CashFlowEntry.contract_id == contract_id)
+    lines = [(line, _plan_receipt_remaining(db, line)) for line in db.scalars(query)]
+    for line, remaining in lines:
+        if abs(remaining - amount) < Decimal("0.01"):
+            return line
+    for line, remaining in lines:
+        if remaining + Decimal("0.01") >= amount:
+            return line
+    return None
+
+
+def _confirm_income_document(db: Session, item: InvoiceExtractionProposal, payload: InvoiceExtractionConfirm, user: User):
+    """Owner 21.10.2026: our act / invoice / КС-3 to the customer is an expected receipt
+    booked on the plan DDS receipt line; the plan amount itself never changes."""
+    if item.amount is None or item.amount <= 0:
+        raise HTTPException(422, "Перед подтверждением укажите сумму документа")
+    _require_project_currency(db, item.project_id, item.currency)
+    current, digest = _current_document_pin(
+        db, item.project_id, item.source_document_id,
+        item.source_document_version_id, item.source_document_sha256,
+    )
+    if current.id != item.source_document_version_id or digest != item.source_document_sha256:
+        raise HTTPException(409, "SOURCE_VERSION_MISMATCH: документ изменился после извлечения")
+    party = _normalized_party(item.counterparty)
+    customer = next((c for c in db.scalars(select(Contract).where(
+        Contract.project_id == item.project_id, Contract.contract_kind == "customer"))
+        if _normalized_party(c.counterparty) == party), None)
+    contract_id = payload.contract_id or (customer.id if customer else None)
+    plan = None
+    if payload.plan_entry_id is not None:
+        plan = db.get(CashFlowEntry, payload.plan_entry_id)
+        if plan is None or plan.project_id != item.project_id or plan.direction != "inflow" or not plan.planned_amount:
+            raise HTTPException(422, "Строка прихода в плановом ДДС не найдена")
+    else:
+        plan = _match_plan_receipt_line(db, item.project_id, Decimal(item.amount), contract_id)
+    if plan is not None and contract_id is None:
+        contract_id = plan.contract_id
+    document = db.get(Document, item.source_document_id)
+    title = (document.name if document else None) or item.payment_purpose or "Документ на приход"
+    created = CashFlowEntry(
+        project_id=item.project_id, contract_id=contract_id,
+        source_document_id=item.source_document_id,
+        source_document_version_id=item.source_document_version_id,
+        source_document_sha256=item.source_document_sha256,
+        direction="inflow", title=title, category="Приход от заказчика",
+        planned_date=item.planned_date or date.today(), planned_amount=Decimal("0"),
+        invoiced_amount=item.amount, plan_entry_id=plan.id if plan is not None else None,
+        currency=item.currency, counterparty=item.counterparty,
+        note=item.payment_purpose or title, status="approved",
+        source_name=title, source_excerpt=(item.amount_evidence_quote or "")[:2000],
+    )
+    db.add(created); db.flush()
+    item.created_cash_flow_id = created.id
+    item.status = "confirmed"
+    item.confirmed_by_user_id = user.id
+    item.confirmed_at = datetime.now(timezone.utc)
+    _audit(db, "income_document_confirmed", "invoice_extraction_proposal", item.id, user.id,
+           f"cash_flow={created.id}; plan_entry={plan.id if plan is not None else None}; amount={item.amount}; human_confirmation=true")
     db.commit()
     return _invoice_proposal_payload(item)
 

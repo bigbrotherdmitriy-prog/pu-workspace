@@ -110,6 +110,8 @@ def money_calendar(
         invoiced_linked = (
             db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
             .filter(CashFlowEntry.plan_entry_id == entry.id)
+            # A received income document is already counted by its fact row.
+            .filter(CashFlowEntry.status != "received")
             .scalar()
         )
         fact_linked = (
@@ -203,6 +205,8 @@ def money_calendar(
         invoiced_linked = (
             db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
             .filter(CashFlowEntry.plan_entry_id == entry.id)
+            # A received income document is already counted by its fact row.
+            .filter(CashFlowEntry.status != "received")
             .scalar()
         )
         fact_linked = (
