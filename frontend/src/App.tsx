@@ -399,7 +399,7 @@ export function App() {
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
   const [localUploadPurpose, setLocalUploadPurpose] = useState<"documents" | "finance" | "project-folder">("documents");
-  const [focusContractId, setFocusContractId] = useState<number | null>(null);
+  const [focusContract, setFocusContract] = useState<{ id: number; nonce: number } | null>(null);
   const [active, setActive] = useState(() => new URLSearchParams(window.location.search).get("oauth") === "connected" ? "Запуск проекта" : "Рабочий центр"),
     [query, setQuery] = useState(""),
     [newProjectName, setNewProjectName] = useState(""),
@@ -3383,7 +3383,7 @@ export function App() {
                   onOpenItem={(item) => {
                     if (item.kind === "sign_act" && item.contract_id) {
                       window.location.hash = "contract-stages";
-                      setFocusContractId(item.contract_id);
+                      setFocusContract({ id: item.contract_id, nonce: Date.now() });
                       setActive("Договоры");
                     } else { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }
                   }} />
@@ -3901,7 +3901,8 @@ export function App() {
         >
             <section className="contract-list">
               <ContractScheme
-                focusContractId={focusContractId}
+                focusContractId={focusContract?.id ?? null}
+                focusNonce={focusContract?.nonce ?? 0}
                 actions={<ContractBulkImportWizard
                 documents={documentRows}
                 contracts={contracts}
