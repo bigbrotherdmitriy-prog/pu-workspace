@@ -642,7 +642,7 @@ def update_budget_line_category(
     db.execute(
         CashFlowEntry.__table__.update()
         .where(CashFlowEntry.budget_line_id == line.id)
-        .values(cost_category_id=category.id)
+        .values(cost_category_id=category.id, category=category.name)
     )
 
     from app.api.execution_finance import _audit
