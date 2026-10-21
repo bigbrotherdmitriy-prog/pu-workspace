@@ -704,6 +704,8 @@ class RecordFactRequest(BaseModel):
     amount: Decimal = Field(gt=0)
     actual_date: date
     note: str | None = None
+    # Income document (our act / invoice / КС-3) the money arrived for.
+    basis_entry_id: int | None = None
 
     @field_validator("amount", mode="before")
     @classmethod
@@ -739,6 +741,11 @@ def record_plan_fact(
     if payload.amount > remaining + Decimal("0.01"):
         raise HTTPException(422, f"Больше остатка по строке плана: {_money(remaining)}")
 
+    basis = None
+    if payload.basis_entry_id is not None:
+        basis = db.get(CashFlowEntry, payload.basis_entry_id)
+        if basis is None or basis.project_id != project_id or basis.plan_entry_id != plan.id:
+            raise HTTPException(422, "Документ-основание не относится к этой строке плана")
     status = "received" if plan.direction == "inflow" else "paid"
     new_entry = CashFlowEntry(
         entry_kind="fact",
@@ -760,9 +767,13 @@ def record_plan_fact(
         status=status,
         plan_entry_id=plan.id,
         source_name="plan_fact",
-        note=payload.note,
+        note=payload.note or (basis.title if basis is not None else None),
     )
     db.add(new_entry)
+    if basis is not None:
+        # The document stays «выставлено»; it is now settled.
+        basis.status = "received"
+        basis.actual_date = payload.actual_date
     db.flush()
 
     from app.api.execution_finance import _audit

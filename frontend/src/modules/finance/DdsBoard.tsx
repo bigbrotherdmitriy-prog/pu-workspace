@@ -22,6 +22,22 @@ type Response = {
 };
 
 type CashRow = FinanceOverview["cash_flow"][number];
+type Stage = { stage_number: string | number; object_name: string | null; amount: string; planned_finish: string | null };
+type ReceiptDraft = { id: number; amount: string; date: string };
+
+// Plan DDS receipts are monthly rows («Этапы Дубна»); name the contract stage(s) behind them.
+function stageLabel(row: CashRow, left: number, stages: Stage[]): string | null {
+  const text = `${row.title} ${row.object_name || ""}`.toLocaleLowerCase("ru-RU");
+  const own = stages.filter((s) => s.object_name && text.includes(s.object_name.toLocaleLowerCase("ru-RU")));
+  const object = own[0]?.object_name;
+  const nice = object ? object.charAt(0) + object.slice(1).toLocaleLowerCase("ru-RU") : "";
+  const exact = own.find((s) => Math.abs(n(s.amount) - left) < 0.01);
+  if (exact) return `${exact.stage_number}-й этап${nice ? ` · ${nice}` : ""}`;
+  const month = (row.planned_date || "").slice(0, 7);
+  const inMonth = own.filter((s) => (s.planned_finish || "").slice(0, 7) === month);
+  if (inMonth.length) return `этапы ${inMonth.map((s) => s.stage_number).join(", ")}${nice ? ` · ${nice}` : ""}`;
+  return null;
+}
 
 type Props = { projectId: number; contractId?: number | null; currency: string; cashFlow?: CashRow[]; onChanged?: () => void };
 
@@ -75,6 +91,17 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
   const [busy, setBusy] = useState<number | null>(null);
   const [reload, setReload] = useState(0);
   const [notes, setNotes] = useState<Record<number, string>>({});
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [draft, setDraft] = useState<ReceiptDraft | null>(null);
+
+  useEffect(() => {
+    if (projectId <= 0 || !contractId) { setStages([]); return; }
+    let alive = true;
+    api<{ items?: Stage[] }>(`/projects/${projectId}/contracts/${contractId}/stage-register`)
+      .then((res) => { if (alive) setStages(Array.isArray(res?.items) ? res.items : []); })
+      .catch(() => { if (alive) setStages([]); });
+    return () => { alive = false; };
+  }, [projectId, contractId, reload]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -101,12 +128,23 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
     cashFlow.forEach((row) => {
       if (row.plan_entry_id && row.actual_date) factByPlan.set(row.plan_entry_id, (factByPlan.get(row.plan_entry_id) || 0) + n(row.actual_amount));
     });
-    return cashFlow
+    // Our acts / invoices / КС-3 to the customer that are not paid yet (owner 21.10.2026).
+    const docs = cashFlow.filter((row) => row.direction === "inflow" && n(row.invoiced_amount) > 0 && n(row.planned_amount) === 0
+      && !["cancelled", "deleted", "rejected", "received", "paid"].includes(row.status));
+    const docsByPlan = new Map<number, number>();
+    docs.forEach((row) => { if (row.plan_entry_id) docsByPlan.set(row.plan_entry_id, (docsByPlan.get(row.plan_entry_id) || 0) + n(row.invoiced_amount)); });
+    const plan = cashFlow
       .filter((row) => row.direction === "inflow" && n(row.planned_amount) > 0 && !row.plan_entry_id && !["cancelled", "deleted", "rejected", "received", "paid"].includes(row.status))
-      .map((row) => ({ row, left: n(row.planned_amount) - (factByPlan.get(row.id) || 0) }))
+      .map((row) => ({ row, left: n(row.planned_amount) - (factByPlan.get(row.id) || 0) - (docsByPlan.get(row.id) || 0), planId: row.id, doc: false }));
+    return [...docs.map((row) => ({ row, left: n(row.invoiced_amount), planId: row.plan_entry_id || 0, doc: true })), ...plan]
       .filter((item) => item.left > 0.009)
-      .sort((a, b) => (a.row.planned_date || "").localeCompare(b.row.planned_date || ""));
+      .sort((a, b) => Number(b.doc) - Number(a.doc) || (a.row.planned_date || "").localeCompare(b.row.planned_date || ""));
   }, [cashFlow]);
+
+  // Money already received from the customer, newest first.
+  const received = cashFlow
+    .filter((row) => row.direction === "inflow" && row.actual_date && n(row.actual_amount) > 0 && !["cancelled", "deleted", "rejected"].includes(row.status))
+    .sort((a, b) => (b.actual_date || "").localeCompare(a.actual_date || ""));
 
   if (error) return <p className="dds-board-status" role="alert">{error}</p>;
   if (!data) return <p className="dds-board-status">Загружаем ДДС…</p>;
@@ -124,14 +162,16 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
 
   const refresh = () => { setReload((v) => v + 1); onChanged?.(); };
 
-  async function act(id: number, path: string, body: object) {
+  async function act(id: number, path: string, body: object): Promise<boolean> {
     setBusy(id);
     setActionError("");
     try {
       await api(path, { method: "POST", body: JSON.stringify(body) });
       refresh();
+      return true;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Не удалось сохранить");
+      return false;
     } finally {
       setBusy(null);
     }
@@ -200,13 +240,32 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
 
         <section className="dds-board-card" aria-label="Ожидаемые приходы">
           <div className="dds-board-card-head"><h3>Ожидаемые приходы</h3><span>{receipts.length ? formatMoney(receipts.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
-          {receipts.length ? <ul className="dds-board-list">{receipts.map(({ row, left }) => <li key={row.id} className={row.planned_date && row.planned_date < today() ? "late" : ""}>
-            <div><strong>{row.title}</strong><small>{row.counterparty || row.object_name || "Заказчик"} · {day(row.planned_date)}</small></div>
+          {receipts.length ? <ul className="dds-board-list">{receipts.map(({ row, left, planId, doc }) => <li key={row.id} className={row.planned_date && row.planned_date < today() ? "late" : ""}>
+            <div><strong>{doc ? row.title : stageLabel(row, left, stages) || row.title}</strong><small>{doc ? `документ · ${row.counterparty || "заказчик"} · ` : stageLabel(row, left, stages) ? `${row.title} · ` : "по плану · "}срок {day(row.planned_date)}</small></div>
             <b>{formatMoney(left)}</b>
-            <button type="button" disabled={busy === row.id} onClick={() => void act(row.id, `/projects/${projectId}/cash-flow/${row.id}/record-fact`, { amount: left.toFixed(2), actual_date: today() })}>Получено</button>
+            {draft?.id === row.id
+              ? <span className="dds-board-receipt-form">
+                  <input id={`dds-receipt-amount-${row.id}`} aria-label="Сумма поступления" inputMode="decimal" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
+                  <input id={`dds-receipt-date-${row.id}`} aria-label="Дата поступления" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+                  <button type="button" disabled={busy === row.id || !draft.date || !(Number(draft.amount.replace(",", ".")) > 0)}
+                    onClick={() => void act(row.id, `/projects/${projectId}/cash-flow/${planId}/record-fact`, { amount: Number(draft.amount.replace(/\s/g, "").replace(",", ".")).toFixed(2), actual_date: draft.date, ...(doc ? { basis_entry_id: row.id } : {}) }).then((ok) => { if (ok) setDraft(null); })}>Сохранить</button>
+                  <button type="button" className="secondary" onClick={() => setDraft(null)}>Отмена</button>
+                </span>
+              : <button type="button" disabled={busy === row.id || !planId} title={planId ? undefined : "Нет строки прихода в плановом ДДС"} onClick={() => setDraft({ id: row.id, amount: left.toFixed(2), date: today() })}>Получено</button>}
           </li>)}</ul> : <p className="dds-board-empty">Все плановые приходы получены</p>}
         </section>
       </div>
+
+      <section className="dds-board-card" aria-label="Поступило от заказчика">
+        <div className="dds-board-card-head"><h3>Поступило от заказчика</h3><span>получено {formatMoney(n(data.income.fact))} из {formatMoney(n(data.income.plan))} по плану</span></div>
+        {received.length ? <ul className="dds-board-list dds-board-received">{received.map((row) => {
+          const label = stageLabel(row, n(row.actual_amount), stages);
+          return <li key={row.id}>
+            <div><strong>{label || row.title}</strong><small>{label ? `${row.title} · ` : ""}поступило {day(row.actual_date)}</small></div>
+            <b>{formatMoney(n(row.actual_amount))}</b>
+          </li>;
+        })}</ul> : <p className="dds-board-empty">Поступлений пока нет</p>}
+      </section>
 
       <section className="dds-board-card" aria-label="Дополнительные расходы">
         <div className="dds-board-card-head"><h3>Дополнительные расходы</h3><span>{formatMoney(n(data.additional_costs?.fact))} оплачено · {formatMoney(n(data.additional_costs?.invoiced))} выставлено</span></div>

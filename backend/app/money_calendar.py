@@ -110,6 +110,8 @@ def money_calendar(
         invoiced_linked = (
             db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
             .filter(CashFlowEntry.plan_entry_id == entry.id)
+            # A received income document is already counted by its fact row.
+            .filter(CashFlowEntry.status != "received")
             .scalar()
         )
         fact_linked = (
@@ -142,7 +144,41 @@ def money_calendar(
         .filter(ContractStage.project_id == project_id)
         .all()
     )
+    # Owner 21.10.2026: a stage the customer has already paid for needs no «подписать акт».
+    def _stage_order(stage: Any) -> tuple:
+        try:
+            return (int(str(stage.stage_number).strip()), 0)
+        except (TypeError, ValueError):
+            return (10**6, 0)
+
+    received_by_key: Dict[tuple, Decimal] = {}
+    paid_stage_ids: set = set()
+    for key in {(st.contract_id, (st.object_name or "").casefold()) for st in stages}:
+        contract_id, object_key = key
+        facts = (
+            db.query(CashFlowEntry)
+            .filter(CashFlowEntry.project_id == project_id)
+            .filter(CashFlowEntry.direction == "inflow")
+            .filter(CashFlowEntry.actual_date.is_not(None))
+            .filter(CashFlowEntry.status.notin_(_EXCLUDED_STATUSES))
+        )
+        if contract_id is not None:
+            facts = facts.filter(CashFlowEntry.contract_id == contract_id)
+        received = sum(
+            (_to_decimal(f.actual_amount) for f in facts.all()
+             if not object_key or object_key in f"{f.title or ''} {f.object_name or ''}".casefold()),
+            Decimal("0"),
+        )
+        received_by_key[key] = received
+        covered = Decimal("0")
+        for st in sorted((x for x in stages if (x.contract_id, (x.object_name or "").casefold()) == key), key=_stage_order):
+            covered += _to_decimal(st.amount)
+            if covered <= received + Decimal("0.01"):
+                paid_stage_ids.add(st.id)
+
     for stage in stages:
+        if stage.id in paid_stage_ids:
+            continue
         has_act = (
             db.query(AcceptanceAct)
             .filter(AcceptanceAct.stage_id == stage.id)
@@ -203,6 +239,8 @@ def money_calendar(
         invoiced_linked = (
             db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
             .filter(CashFlowEntry.plan_entry_id == entry.id)
+            # A received income document is already counted by its fact row.
+            .filter(CashFlowEntry.status != "received")
             .scalar()
         )
         fact_linked = (

@@ -187,7 +187,8 @@ export function ProjectMoneyRings({ projectId, onOpenFinance }: { projectId: num
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   const incomePlanToDate = months
-    .filter((m) => m.month <= currentMonthKey)
+    // Only months that are over: money due later this month is not late yet (owner 21.10.2026).
+    .filter((m) => m.month < currentMonthKey)
     .reduce((sum, m) => sum + num(m.income_plan), 0);
 
   const incomeOverdue = Math.max(0, incomePlanToDate - incomeFact);

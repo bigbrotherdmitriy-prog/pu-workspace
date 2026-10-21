@@ -86,7 +86,8 @@ export function InvoiceQuickConfirm({
     setSubmitting(true);
     setError(null);
     try {
-      const body = choice === "additional" ? { additional: true } : { plan_entry_id: Number(choice) };
+      const income = proposal?.fallback_reason === "own_outgoing_invoice";
+      const body = income ? {} : choice === "additional" ? { additional: true } : { plan_entry_id: Number(choice) };
       await api(`/execution/invoice-extraction-proposals/${proposalId}/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -111,9 +112,11 @@ export function InvoiceQuickConfirm({
         <h2 className="iqc-title">Счёт из почты</h2>
         {loading ? (
           <p>Загружаем счёт…</p>
-        ) : proposal && proposal.fallback_reason === "own_outgoing_invoice" && proposal.status === "proposed" ? (
+        ) : proposal && proposal.fallback_reason === "own_outgoing_invoice" && proposal.status === "proposed" && !confirmed ? (
           <>
-            <p>Это ваш исходящий счёт: поставщик — ваша компания. В расходы он не записывается.</p>
+            <p><strong>Приход</strong> от {proposal.counterparty || "заказчика"}: документ попадёт в «Ожидаемые приходы» ДДС. Когда деньги придут — нажмите там «Получено».</p>
+            {error && <p role="alert">{error}</p>}
+            <button className="iqc-confirm" onClick={handleConfirm} disabled={submitting}>Записать приход</button>
             <button className="secondary" onClick={onClose}>Закрыть</button>
           </>
         ) : proposal && proposal.status !== "proposed" ? (
