@@ -46,3 +46,23 @@ it("pays an invoice and edits an additional cost description", async () => {
   fireEvent.blur(input);
   await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/21/note", { method: "PATCH", body: JSON.stringify({ note: "Аренда крана" }) }));
 });
+
+it("names the contract stage behind a monthly receipt and records it with an editable date", async () => {
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.includes("stage-register")) return { items: [
+      { stage_number: 8, object_name: "ДУБНА", amount: "27646626.60", planned_finish: "2026-10-31" },
+      { stage_number: 9, object_name: "ДУБНА", amount: "14383829.50", planned_finish: "2026-10-31" },
+    ] };
+    return response;
+  });
+  const row = { id: 167, direction: "inflow", title: "Этапы Дубна", planned_date: "2099-10-31", planned_amount: 70157242.28, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1 };
+  const fact = { id: 268, direction: "inflow", title: "Этапы Дубна", planned_date: "2026-10-13", planned_amount: 0, actual_amount: 55773412.78, actual_date: "2026-10-13", plan_entry_id: 167, currency: "RUB", status: "received", record_version: 1 };
+  render(<DdsBoard projectId={5} contractId={46} currency="RUB" cashFlow={[row, fact] as never} />);
+  expect(await screen.findByText("9-й этап · Дубна")).toBeTruthy();
+  expect(screen.getByText("Поступило от заказчика")).toBeTruthy();
+  fireEvent.click(screen.getByText("Получено"));
+  fireEvent.change(screen.getByLabelText("Дата поступления"), { target: { value: "2026-10-30" } });
+  fireEvent.click(screen.getByText("Сохранить"));
+  await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/167/record-fact",
+    { method: "POST", body: JSON.stringify({ amount: "14383829.50", actual_date: "2026-10-30" }) }));
+});

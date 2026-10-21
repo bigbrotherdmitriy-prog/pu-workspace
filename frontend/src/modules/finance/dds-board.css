@@ -105,3 +105,9 @@
 
 .dds-tabs button.dds-tab-secondary { font-size: 12px; opacity: 0.75; }
 .dds-tabs button.dds-tab-secondary:first-of-type { margin-left: auto; }
+
+.dds-board-receipt-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; grid-column: 1 / -1; justify-content: flex-end; }
+.dds-board-receipt-form input { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.25)); background: transparent; color: var(--read-text, #1f2937); font: inherit; font-size: 13px; }
+.dds-board-receipt-form input[inputmode="decimal"] { width: 140px; text-align: right; }
+
+.dds-board-received li { grid-template-columns: minmax(0, 1fr) auto; border-left-color: #22c55e; }
