@@ -87,6 +87,24 @@ def cleanup_expired_sessions(db: Session) -> int:
     return result.rowcount or 0
 
 
+def _slide_session(db: Session, request: Request, row: AuthSession, token: str, now: datetime, *, from_cookie: bool) -> None:
+    """Keep an actively used browser session alive (owner 21.10.2026: logged out mid-work after 24 h).
+
+    Once less than half of the lifetime is left, the expiry moves forward and the
+    cookie is re-issued by ``refresh_session_cookie`` middleware.
+    """
+    if not from_cookie:
+        return
+    hours = int(os.getenv("AUTH_SESSION_HOURS", "24"))
+    expires = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+    if expires - now > timedelta(hours=hours) / 2:
+        return
+    new_expires = now + timedelta(hours=hours)
+    row.expires_at = new_expires
+    db.commit()
+    request.state.session_refresh = (token, new_expires)
+
+
 def require_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
@@ -115,6 +133,7 @@ def require_user(
     row = db.scalar(select(AuthSession).where(AuthSession.token_hash == token_hash, AuthSession.expires_at > now))
     if not row:
         raise HTTPException(401, "Session is invalid or expired")
+    _slide_session(db, request, row, raw_token, now, from_cookie=bool(cookie_token and not bearer_token))
     user = db.get(User, row.user_id)
     if not user:
         raise HTTPException(401, "User not found")

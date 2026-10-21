@@ -102,3 +102,51 @@ def test_bogus_bearer_undefined_header_does_not_shadow_a_valid_session_cookie():
                 db,
             )
         assert failure.value.status_code == 401
+
+
+def test_active_cookie_session_slides_forward_and_fresh_one_does_not():
+    import hashlib
+    engine = _database()
+    with Session(engine) as db:
+        user = User(name="Owner", email="owner@example.test", is_admin=True)
+        db.add(user)
+        db.flush()
+        old = AuthSession(user_id=user.id, token_hash=hashlib.sha256(b"old").hexdigest(),
+                          expires_at=datetime.now(timezone.utc) + timedelta(hours=2))
+        fresh = AuthSession(user_id=user.id, token_hash=hashlib.sha256(b"fresh").hexdigest(),
+                            expires_at=datetime.now(timezone.utc) + timedelta(hours=23))
+        db.add_all([old, fresh])
+        db.commit()
+
+        request = _request("GET", "pu_session=old")
+        require_user(request, None, db)
+        token, expires = request.state.session_refresh
+        assert token == "old"
+        assert expires - datetime.now(timezone.utc) > timedelta(hours=23)
+        db.refresh(old)
+        stored = old.expires_at if old.expires_at.tzinfo else old.expires_at.replace(tzinfo=timezone.utc)
+        assert stored - datetime.now(timezone.utc) > timedelta(hours=23)
+
+        request = _request("GET", "pu_session=fresh")
+        require_user(request, None, db)
+        assert getattr(request.state, "session_refresh", None) is None
+
+
+def test_refresh_middleware_reissues_both_cookies():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.core.auth import require_user as dep
+
+    @app.get("/__test_slide")
+    def _probe(request: Request):
+        request.state.session_refresh = ("tok", datetime.now(timezone.utc) + timedelta(hours=24))
+        return {"ok": True}
+
+    client = TestClient(app, base_url="https://testserver")
+    client.cookies.set("pu_csrf", "csrf-value")
+    response = client.get("/__test_slide")
+    cookies = response.headers.get_list("set-cookie")
+    assert any(c.startswith("pu_session=tok") and "HttpOnly" in c for c in cookies)
+    assert any(c.startswith("pu_csrf=csrf-value") for c in cookies)
+    app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") != "/__test_slide"]
+    assert dep is require_user
