@@ -133,7 +133,7 @@ export function InvoiceQuickConfirm({
         ) : proposal ? (
           <>
             <div className="iqc-counterparty">{proposal.counterparty}</div>
-            <div className="iqc-amount">{formatMoney(proposal.amount)} ₽</div>
+            <div className="iqc-amount">{formatMoney(proposal.amount)}</div>
             {proposal.payment_purpose ? <div className="iqc-purpose">{proposal.payment_purpose}</div> : null}
 
             {suggestions ? (
@@ -146,7 +146,7 @@ export function InvoiceQuickConfirm({
                 >
                   {suggestions.suggestions.map((s) => (
                     <option key={s.plan_entry_id} value={String(s.plan_entry_id)}>
-                      {`${s.title} — остаток ${formatMoney(s.remaining)} ₽`}
+                      {`${s.title} — остаток ${formatMoney(s.remaining)}`}
                     </option>
                   ))}
                   <option value="additional">Дополнительные затраты (вне плана)</option>
@@ -156,7 +156,7 @@ export function InvoiceQuickConfirm({
                   const chosen = suggestions.suggestions.find((s) => String(s.plan_entry_id) === choice);
                   const over = chosen ? Number(proposal.amount || 0) - Number(chosen.remaining || 0) : 0;
                   return chosen && over > 0
-                    ? <div className="iqc-hint iqc-warning">Счёт больше остатка статьи на {formatMoney(over)} ₽ — статья уйдёт в перерасход.</div>
+                    ? <div className="iqc-hint iqc-warning">Счёт больше остатка статьи на {formatMoney(over)} — статья уйдёт в перерасход.</div>
                     : null;
                 })()}
               </div>
