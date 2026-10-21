@@ -1,0 +1,149 @@
+.money-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--read-border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--read-surface, #ffffff);
+}
+.money-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.money-calendar-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.money-calendar-link {
+  background: transparent;
+  border: none;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 13px;
+}
+.money-calendar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.money-calendar-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+}
+.money-calendar-chip.level-overdue { background: #fee2e2; color: #991b1b; }
+.money-calendar-chip.level-critical { background: #ffedd5; color: #9a3412; }
+.money-calendar-chip.level-soon { background: #fef9c3; color: #854d0e; }
+.money-calendar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.money-calendar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+.money-calendar-bar {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+  flex: 0 0 4px;
+}
+.money-calendar-bar.level-ok { background: #bbf7d0; }
+.money-calendar-bar.level-near { background: #86efac; }
+.money-calendar-bar.level-soon { background: #fde047; }
+.money-calendar-bar.level-critical { background: #fb923c; }
+.money-calendar-bar.level-overdue { background: #dc2626; }
+.money-calendar-bar.level-none { background: #e5e7eb; }
+.money-calendar-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.money-calendar-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #e5e7eb;
+  white-space: nowrap;
+}
+.money-calendar-badge.level-ok { background: #bbf7d0; }
+.money-calendar-badge.level-near { background: #86efac; }
+.money-calendar-badge.level-soon { background: #fde047; }
+.money-calendar-badge.level-critical { background: #fb923c; color: #fff; }
+.money-calendar-badge.level-overdue { background: #dc2626; color: #fff; }
+.money-calendar-badge.level-none { background: #e5e7eb; }
+.money-calendar-kind {
+  font-size: 12px;
+  color: var(--read-text, #41443f);
+}
+.money-calendar-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.money-calendar-counterparty,
+.money-calendar-contract {
+  font-size: 12px;
+  color: var(--read-text, #41443f);
+}
+.money-calendar-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.money-calendar-empty {
+  color: var(--read-text, #41443f);
+  font-size: 13px;
+}
+.money-calendar-more {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--read-border, #e5e7eb);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .money-calendar-row {
+    flex-wrap: wrap;
+  }
+  .money-calendar-amount {
+    flex-basis: 100%;
+    text-align: right;
+  }
+}
+
+.money-calendar-unmarked { display: block; width: 100%; text-align: left; margin: 8px 0; padding: 8px 12px;
+  border-radius: 8px; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.12); color: inherit; font-size: 13px; cursor: pointer; }
+
+/* The work center has its own dark/glass theme: give the block its own readable
+   surface and text instead of inheriting a colour meant for another background. */
+.money-calendar {
+  background: var(--read-surface, #ffffff);
+  color: var(--read-text, #1f2937);
+  border-radius: 12px;
+  padding: 16px;
+}
+.money-calendar h2, .money-calendar h3, .money-calendar p, .money-calendar span, .money-calendar button {
+  color: inherit;
+}
+
+.money-calendar-empty { color: var(--read-text, #1f2937); }
