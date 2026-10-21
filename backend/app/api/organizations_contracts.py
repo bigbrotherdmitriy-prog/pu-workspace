@@ -2006,10 +2006,15 @@ def _contract(row: Contract, db: Session | None = None) -> dict:
         result["version_history"] = [_contract_version(version) for version in versions]
         document = db.get(Document, row.source_document_id) if row.source_document_id else None
         linked_document_ids = {row.source_document_id} if row.source_document_id else set()
+        # Plan files (the uploaded DDS) belong to the contract; supplier invoices booked
+        # against its DDS lines do not (owner 21.10.2026: keep invoices apart from the contract).
         linked_document_ids.update(db.scalars(select(CashFlowEntry.source_document_id).where(
             CashFlowEntry.project_id == row.project_id,
             CashFlowEntry.contract_id == row.id,
             CashFlowEntry.source_document_id.is_not(None),
+            func.coalesce(CashFlowEntry.invoiced_amount, 0) == 0,
+            CashFlowEntry.plan_entry_id.is_(None),
+            CashFlowEntry.planned_amount > 0,
         )))
         linked_document_ids.update(db.scalars(select(ContractDocumentLink.document_id).where(
             ContractDocumentLink.project_id == row.project_id,
