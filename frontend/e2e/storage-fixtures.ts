@@ -444,6 +444,9 @@ export class StorageApi {
     };
     const suffix = path.replace(/^\/projects\/\d+\//, "");
     if (/^\/projects\/\d+\//.test(path) && suffix in scoped) return this.fulfill(route, { body: scoped[suffix] });
+    if (method === "GET" && /^\/projects\/\d+\/contracts\/\d+\/stage-register$/.test(path)) {
+      return this.fulfill(route, { body: { items: [], by_object: {}, totals: {}, next_act_number: "1" } });
+    }
     return this.block(route, `Unexpected ${method} ${path}`);
   }
   private async fulfill(route: Route, reply: Reply) {
