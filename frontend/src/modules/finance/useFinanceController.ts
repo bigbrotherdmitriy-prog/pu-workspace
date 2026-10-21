@@ -228,6 +228,13 @@ export function useFinanceController({ ready, projectId, setNotice, setError }: 
         setNotice(`Загружено финансовых документов: ${uploaded.length}. Выберите нужный в списке для проверки.`);
         return;
       }
+      if (requested.size === 1) {
+        // Owner 21.10.2026: «Проверить счёт» on a file the classifier did not recognise
+        // (marketplace orders, supplier letterheads) still opens it as an invoice.
+        const [documentId] = Array.from(requested);
+        await useFinanceCandidate({ document_id: documentId, name: "", source: "", kind: "invoice", score: 0, reasons: [], hints: {}, already_linked: false, originals_changed: false });
+        return;
+      }
       setNotice("Документ загружен, но не распознан как счёт, акт, ГПР, бюджет или ДДС. Он сохранён в документах проекта.");
     } catch (error) {
       if (current()) setError((error as Error).message);
