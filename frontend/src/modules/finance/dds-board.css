@@ -111,3 +111,7 @@
 .dds-board-receipt-form input[inputmode="decimal"] { width: 140px; text-align: right; }
 
 .dds-board-received li { grid-template-columns: minmax(0, 1fr) auto; border-left-color: #22c55e; }
+
+.dds-board-card.folded > :not(.dds-board-card-head) { display: none; }
+.dds-board-toggle { all: unset; cursor: pointer; font: inherit; color: var(--read-text, #1f2937); }
+.dds-board-toggle:focus-visible { outline: 2px solid var(--read-accent, #2563eb); outline-offset: 2px; border-radius: 4px; }
