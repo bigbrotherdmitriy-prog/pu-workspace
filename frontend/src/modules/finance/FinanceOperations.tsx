@@ -114,6 +114,7 @@ export function FinanceOperations(props: Props) {
   return <>
     {includeEditor && invoiceProposal && <section className="card structured-import invoice-extraction-review" id="invoice-extraction-review">
       <div className="card-head"><div><span className="eyebrow">СЧЁТ · ПРЕДЛОЖЕНИЕ AI</span><h2>Проверьте данные перед импортом</h2><p>Ни одно поле не попадёт в бюджет или ДДС без подтверждения менеджером.</p></div><button className="secondary" onClick={onCloseInvoice}>Закрыть</button></div>
+      {invoiceProposal.duplicate_of && <div className="finance-warning" role="alert">Повторный счёт: такой счёт уже подтверждён — «{invoiceProposal.duplicate_of}». В ДДС он второй раз не попадёт — нажмите «Отклонить».</div>}
       {invoiceProposal.fallback_reason === "own_outgoing_invoice" && <div className="finance-warning" role="status">Приход от {invoiceProposal.counterparty || "заказчика"}: документ попадёт в «Ожидаемые приходы» ДДС, строку плана система выберет сама. Категория и строка расхода не нужны.</div>}
       {invoiceProposal.extraction_method === "regex" && <div className="finance-warning">AI недоступен ({invoiceProposal.fallback_reason || "fallback"}). Сумма найдена резервным правилом; заполните остальные поля вручную.{invoiceProposal.status === "proposed" && invoiceProposal.fallback_reason === "temporarily_unavailable" && <button className="secondary" disabled={invoiceAiRetrying} onClick={onRetryInvoiceAi}>{invoiceAiRetrying ? "Повторный анализ…" : "Повторить AI-анализ"}</button>}</div>}
       <div className="invoice-review-grid">
@@ -154,7 +155,7 @@ export function FinanceOperations(props: Props) {
         // Owner 16.10.2026: invoices are not linked to GPR stages — only to a plan DDS line or «Дополнительные затраты».
         if (!income && invoiceProposal.target_kind === "cash_flow" && !planChoice) missing.push("строка планового ДДС или «Дополнительные затраты»");
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
-          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0} onClick={() => onConfirmInvoice?.(income ? undefined : planValue === "additional" ? { additional: true } : planValue ? { plan_entry_id: Number(planValue) } : undefined)}>{income ? "Записать приход" : "Подтвердить счёт"}</button></div>
+          <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0 || Boolean(invoiceProposal.duplicate_of)} onClick={() => onConfirmInvoice?.(income ? undefined : planValue === "additional" ? { additional: true } : planValue ? { plan_entry_id: Number(planValue) } : undefined)}>{income ? "Записать приход" : "Подтвердить счёт"}</button></div>
           {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}
         </div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>;
       })()}

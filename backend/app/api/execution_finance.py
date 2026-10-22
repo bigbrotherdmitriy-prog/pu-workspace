@@ -2348,7 +2348,7 @@ def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate
         InvoiceExtractionProposal.source_document_version_id == version.id,
     ))
     if existing is not None:
-        return _invoice_proposal_payload(existing)
+        return _proposal_view(db, existing)
     # Owner 21.10.2026: the same file uploaded again is not a new invoice.
     same_file = db.scalar(select(InvoiceExtractionProposal).where(
         InvoiceExtractionProposal.project_id == payload.project_id,
@@ -2356,7 +2356,7 @@ def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate
         InvoiceExtractionProposal.status.in_(("proposed", "confirmed")),
     ).order_by(InvoiceExtractionProposal.id))
     if same_file is not None:
-        return _invoice_proposal_payload(same_file)
+        return _proposal_view(db, same_file)
     organization_id = _project_organization_id(db, payload.project_id)
     categories = [row for row in _ensure_default_categories(db, organization_id) if row.is_active]
     fields = extract_invoice_fields(
@@ -2373,7 +2373,7 @@ def create_invoice_extraction(document_id: int, payload: InvoiceExtractionCreate
     _audit(db, "invoice_extraction_proposed", "invoice_extraction_proposal", item.id, user.id,
            f"document={document.id}; version={version.id}; method={fields.extraction_method}")
     db.commit()
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 @router.post("/invoice-extraction-proposals/{proposal_id}/retry-ai")
@@ -2412,7 +2412,7 @@ def retry_invoice_extraction_ai(proposal_id: int, db: Session = Depends(get_db),
     if item.status != "proposed":
         raise HTTPException(409, "Предложение изменилось во время повторного анализа")
     if item.extraction_method == "llm":
-        return _invoice_proposal_payload(item)
+        return _proposal_view(db, item)
     if item.extraction_method != "regex" or item.fallback_reason != "temporarily_unavailable":
         raise HTTPException(409, "Предложение изменилось во время повторного анализа")
     _current_document_pin(
@@ -2431,7 +2431,7 @@ def retry_invoice_extraction_ai(proposal_id: int, db: Session = Depends(get_db),
     _audit(db, "invoice_extraction_ai_retried", "invoice_extraction_proposal", item.id, user.id,
            f"document={item.source_document_id}; version={item.source_document_version_id}; outcome={outcome}")
     db.commit()
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 @router.patch("/invoice-extraction-proposals/{proposal_id}")
@@ -2461,7 +2461,7 @@ def update_invoice_extraction(proposal_id: int, payload: InvoiceExtractionUpdate
     _audit(db, "invoice_extraction_edited", "invoice_extraction_proposal", item.id, user.id,
            "human_review=true")
     db.commit()
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 @router.get("/invoice-extraction-proposals/{proposal_id}")
@@ -2470,7 +2470,7 @@ def get_invoice_extraction(proposal_id: int, db: Session = Depends(get_db), user
     if item is None:
         raise HTTPException(404, "Предложение счёта не найдено")
     require_project_role(db, user, item.project_id, "viewer")
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 @router.post("/invoice-extraction-proposals/{proposal_id}/confirm")
@@ -2483,7 +2483,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
         raise HTTPException(404, "Предложение счёта не найдено")
     require_project_role(db, user, item.project_id, "manager")
     if item.status == "confirmed":
-        return _invoice_proposal_payload(item)
+        return _proposal_view(db, item)
     if item.status != "proposed":
         raise HTTPException(409, "Отклонённое предложение нельзя подтвердить")
     _refuse_repeated_invoice(db, item)
@@ -2599,7 +2599,7 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
            f"additional={payload.additional}; human_confirmation=true; "
            f"vat_before={json.dumps(vat_before, ensure_ascii=False)}; vat_after={json.dumps(item.vat_snapshot, ensure_ascii=False)}")
     db.commit()
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 _INVOICE_NUMBER = re.compile(r"(?:№|N|No\.?)\s*([0-9A-Za-zА-Яа-я/\-]+)")
@@ -2610,11 +2610,11 @@ def _invoice_number(text: str | None) -> str:
     return match.group(1).lower() if match else ""
 
 
-def _refuse_repeated_invoice(db: Session, item: InvoiceExtractionProposal) -> None:
+def _find_repeated_invoice(db: Session, item: InvoiceExtractionProposal) -> InvoiceExtractionProposal | None:
     """Owner 21.10.2026: a repeated invoice (same supplier, number and amount, or the same
     supplier and amount on the same date) is not booked a second time."""
     if item.amount is None:
-        return
+        return None
     party = _normalized_party(item.counterparty)
     number = _invoice_number(item.payment_purpose)
     for other in db.scalars(select(InvoiceExtractionProposal).where(
@@ -2629,8 +2629,28 @@ def _refuse_repeated_invoice(db: Session, item: InvoiceExtractionProposal) -> No
         same = (number and number == other_number) or (
             not (number and other_number) and other.planned_date == item.planned_date)
         if same or other.source_document_sha256 == item.source_document_sha256:
-            document = db.get(Document, other.source_document_id)
-            raise HTTPException(409, f"Повторный счёт: такой счёт уже подтверждён — «{document.name if document else other.source_document_id}». Отклоните этот.")
+            return other
+    return None
+
+
+def _repeated_invoice_name(db: Session, other: InvoiceExtractionProposal) -> str:
+    document = db.get(Document, other.source_document_id)
+    return document.name if document else f"документ {other.source_document_id}"
+
+
+def _refuse_repeated_invoice(db: Session, item: InvoiceExtractionProposal) -> None:
+    other = _find_repeated_invoice(db, item)
+    if other is not None:
+        raise HTTPException(409, f"Повторный счёт: такой счёт уже подтверждён — «{_repeated_invoice_name(db, other)}». Отклоните этот.")
+
+
+def _proposal_view(db: Session, item: InvoiceExtractionProposal) -> dict:
+    """The proposal plus, while it waits for review, the already confirmed invoice it repeats
+    (owner 22.10.2026: a repeat must be visible before anyone tries to confirm it)."""
+    payload = _invoice_proposal_payload(item)
+    other = _find_repeated_invoice(db, item) if item.status == "proposed" else None
+    payload["duplicate_of"] = _repeated_invoice_name(db, other) if other is not None else None
+    return payload
 
 
 def _open_income_documents(db: Session, plan_id: int) -> Decimal:
@@ -2717,7 +2737,7 @@ def _confirm_income_document(db: Session, item: InvoiceExtractionProposal, paylo
     _audit(db, "income_document_confirmed", "invoice_extraction_proposal", item.id, user.id,
            f"cash_flow={created.id}; plan_entry={plan.id if plan is not None else None}; amount={item.amount}; human_confirmation=true")
     db.commit()
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 @router.post("/invoice-extraction-proposals/{proposal_id}/reject")
@@ -2735,7 +2755,7 @@ def reject_invoice_extraction(proposal_id: int, db: Session = Depends(get_db),
     _audit(db, "invoice_extraction_rejected", "invoice_extraction_proposal", item.id, user.id,
            "human_confirmation=true")
     db.commit()
-    return _invoice_proposal_payload(item)
+    return _proposal_view(db, item)
 
 
 @router.post("/budget")

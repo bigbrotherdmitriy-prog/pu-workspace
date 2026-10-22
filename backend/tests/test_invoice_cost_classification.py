@@ -597,3 +597,6 @@ def test_repeated_invoice_is_not_booked_twice(db_session, user_factory, monkeypa
     assert refused.value.status_code == 409
     assert "Повторный счёт" in refused.value.detail
     finance_api._refuse_repeated_invoice(db_session, other)  # another number — a different invoice
+    view = finance_api._proposal_view(db_session, again)
+    assert view["duplicate_of"] == document.name
+    assert finance_api._proposal_view(db_session, other)["duplicate_of"] is None

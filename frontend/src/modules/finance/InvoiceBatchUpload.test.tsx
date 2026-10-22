@@ -76,4 +76,15 @@ describe("invoice batch selection", () => {
     expect(onUpload).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Загрузить и разобрать (0)" })).toBeDisabled();
   });
+
+  it("marks a repeated invoice right after upload and offers no review for it", async () => {
+    const file = new File(["pdf"], "copy.pdf", { type: "application/pdf" });
+    const onUpload = vi.fn().mockResolvedValue([{ name: "copy.pdf", documentIds: [93] }, { name: "new.pdf", documentIds: [94] }]);
+    const onCheckDuplicate = vi.fn((id: number) => Promise.resolve(id === 93 ? "Счет_№_11_2.pdf" : null));
+    render(<InvoiceBatchUpload onUpload={onUpload} onReview={vi.fn()} onCheckDuplicate={onCheckDuplicate} />);
+    fireEvent.change(screen.getByLabelText("Выбрать файлы счетов"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и разобрать (1)" }));
+    expect(await screen.findByText(/Повтор — уже подтверждён «Счет_№_11_2.pdf»/)).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Проверить счёт" })).toHaveLength(1);
+  });
 });
