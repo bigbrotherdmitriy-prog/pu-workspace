@@ -2602,7 +2602,11 @@ def confirm_invoice_extraction(proposal_id: int, payload: InvoiceExtractionConfi
     return _proposal_view(db, item)
 
 
-_INVOICE_NUMBER = re.compile(r"(?:№|N|No\.?)\s*([0-9A-Za-zА-Яа-я/\-]+)")
+# «№ 11», «No 11», «заказу 0173415668-0025», «счёт-оферта 4302»: a marketplace order has no «№».
+_INVOICE_NUMBER = re.compile(
+    r"(?:№|\bN\b|\bNo\.?|заказ[ау]?|сч[её]т(?:-оферт[аы]?)?[ау]?)\s*(?:на\s+оплату\s*)?(?:№\s*)?([0-9][0-9A-Za-zА-Яа-я/\-]*)",
+    re.IGNORECASE,
+)
 
 
 def _invoice_number(text: str | None) -> str:

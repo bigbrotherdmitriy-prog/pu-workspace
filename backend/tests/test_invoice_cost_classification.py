@@ -600,3 +600,11 @@ def test_repeated_invoice_is_not_booked_twice(db_session, user_factory, monkeypa
     view = finance_api._proposal_view(db_session, again)
     assert view["duplicate_of"] == document.name
     assert finance_api._proposal_view(db_session, other)["duplicate_of"] is None
+
+
+def test_marketplace_orders_with_different_numbers_are_not_repeats():
+    assert finance_api._invoice_number("Оплата по заказу 0173415668-0025 от 14.10.2026 заклепки") == "0173415668-0025"
+    assert finance_api._invoice_number("Оплата по заказу 0173415668-0026 от 14.10.2026 Заклепки") == "0173415668-0026"
+    assert finance_api._invoice_number("Оплата счёта № 11 от 13 февраля 2026 г.") == "11"
+    assert finance_api._invoice_number("Счет на оплату № 2018 от 02.02.2026") == "2018"
+    assert finance_api._invoice_number("Оплата по счету 92 от 19 февраля") == "92"
