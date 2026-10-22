@@ -157,7 +157,7 @@ export function FinanceOperations(props: Props) {
         return invoiceProposal.status === "proposed" ? <div className="structured-actions-column">
           <div className="structured-actions"><button className="secondary" onClick={onRejectInvoice}>Отклонить</button><button disabled={missing.length > 0 || Boolean(invoiceProposal.duplicate_of)} onClick={() => onConfirmInvoice?.(income ? undefined : planValue === "additional" ? { additional: true } : planValue ? { plan_entry_id: Number(planValue) } : undefined)}>{income ? "Записать приход" : "Подтвердить счёт"}</button></div>
           {missing.length > 0 && <p className="finance-warning" role="alert">Нельзя подтвердить — не хватает: {missing.join(", ")}.</p>}
-        </div> : <p><strong>Статус: {invoiceProposal.status}</strong></p>;
+        </div> : <p role="status"><strong>{invoiceProposal.status === "confirmed" ? "Счёт подтверждён ✓ — записан в ДДС. Повторно подтверждать не нужно." : invoiceProposal.status === "rejected" ? "Счёт отклонён — в ДДС не попал." : `Статус: ${invoiceProposal.status}`}</strong></p>;
       })()}
     </section>}
     {includeEditor && preview && <section className="card structured-import structured-import-review" id="structured-import">
