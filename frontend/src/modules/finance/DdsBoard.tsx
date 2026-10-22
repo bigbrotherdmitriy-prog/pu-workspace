@@ -168,10 +168,15 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
   const last = months[months.length - 1];
   const gaps = months.filter((m) => n(m.cumulative_plan) < 0);
   const articles = data.expense_by_article ?? [];
-  const unpaid = articles.flatMap((article) => (article.invoices || [])
-    .filter((inv) => n(inv.invoiced) - n(inv.paid) > 0.009)
-    .map((inv) => ({ ...inv, article: article.title, left: n(inv.invoiced) - n(inv.paid) })));
   const extra = data.additional_costs?.items ?? [];
+  // Owner 22.10.2026: additional-cost invoices are paid from the same «К оплате» list.
+  const unpaid = [
+    ...articles.flatMap((article) => (article.invoices || [])
+      .filter((inv) => n(inv.invoiced) - n(inv.paid) > 0.009)
+      .map((inv) => ({ entry_id: inv.entry_id, title: inv.title, counterparty: inv.counterparty, planned_date: inv.planned_date, article: article.title, left: n(inv.invoiced) - n(inv.paid) }))),
+    ...extra.filter((item) => item.entry_id && n(item.invoiced) - n(item.fact) > 0.009)
+      .map((item) => ({ entry_id: item.entry_id as number, title: item.title, counterparty: item.counterparty, planned_date: item.planned_date, article: "Дополнительные затраты", left: n(item.invoiced) - n(item.fact) })),
+  ];
   const cur = currency || data.currency;
 
   const refresh = () => { setReload((v) => v + 1); onChanged?.(); };
@@ -283,7 +288,7 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
 
       <section className={cardClass("extra")} aria-label="Дополнительные расходы">
         <div className="dds-board-card-head">{foldTitle("extra", "Дополнительные расходы")}<span>{formatMoney(n(data.additional_costs?.fact))} оплачено · {formatMoney(n(data.additional_costs?.invoiced))} выставлено</span></div>
-        {extra.length ? <div className="dds-board-table"><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Сумма</th><th>Описание</th></tr></thead><tbody>{extra.map((item, index) => {
+        {extra.length ? <div className="dds-board-table"><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Сумма</th><th>Описание</th><th>Оплата</th></tr></thead><tbody>{extra.map((item, index) => {
           const id = item.entry_id;
           const value = id ? notes[id] ?? item.note ?? item.title : item.note ?? item.title;
           return <tr key={id ?? index}>
@@ -294,6 +299,9 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
               onChange={(event) => setNotes((cur) => ({ ...cur, [id]: event.target.value }))}
               onBlur={() => void saveNote(item)}
               onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /> : value}</td>
+            <td>{n(item.invoiced) - n(item.fact) > 0.009 && id
+              ? <button type="button" disabled={busy === id} onClick={() => void act(id, `/projects/${projectId}/cash-flow/${id}/record-payment`, { amount: (n(item.invoiced) - n(item.fact)).toFixed(2), actual_date: today() })}>Оплачен</button>
+              : item.actual_date ? `оплачено ${day(item.actual_date)}` : "—"}</td>
           </tr>;
         })}</tbody></table></div> : <p className="dds-board-empty">Дополнительных расходов нет</p>}
       </section>
