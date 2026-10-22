@@ -39,7 +39,7 @@ it("shows the plan balance, the critical point and only unpaid invoices", async 
 it("pays an invoice and edits an additional cost description", async () => {
   mockApi.mockResolvedValue(response);
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
-  fireEvent.click(await screen.findByText("Оплачен"));
+  fireEvent.click((await screen.findAllByText("Оплачен"))[0]);
   await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/12/record-payment", expect.objectContaining({ method: "POST" })));
   const input = screen.getByLabelText("Описание Счёт № 7");
   fireEvent.change(input, { target: { value: "Аренда крана" } });
@@ -88,4 +88,14 @@ it("folds and unfolds a block from its title", async () => {
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(toggle.closest("section")?.className).toContain("folded");
+});
+
+it("pays an additional-cost invoice from its table and lists it under «К оплате»", async () => {
+  mockApi.mockResolvedValue(response);
+  render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Дополнительные расходы/ }));
+  expect(screen.getAllByText("ИП Кран").length).toBeGreaterThan(1);
+  const buttons = screen.getAllByRole("button", { name: "Оплачен" });
+  fireEvent.click(buttons[buttons.length - 1]);
+  await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/21/record-payment", expect.objectContaining({ method: "POST" })));
 });
