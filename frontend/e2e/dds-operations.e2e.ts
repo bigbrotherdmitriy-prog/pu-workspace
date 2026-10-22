@@ -124,9 +124,10 @@ test("uploads several dropped invoices and opens the chosen document for human r
   await page.getByRole("button", { name: "Загрузить и разобрать (2)" }).click();
   await expect(page.getByRole("list", { name: "Результаты загрузки счетов" }).getByRole("button", { name: "Проверить счёт" })).toHaveCount(2);
   expect(uploads).toEqual(["first.pdf", "second.pdf"]);
-  expect(proposals).toEqual([]);
+  // Each uploaded invoice is checked for being a repeat right away (owner 22.10.2026).
+  await expect.poll(() => proposals).toEqual([601, 602]);
   await page.getByRole("list", { name: "Результаты загрузки счетов" }).getByRole("button", { name: "Проверить счёт" }).nth(1).click();
   await expect(page.locator("#invoice-extraction-review")).toBeVisible();
-  expect(proposals).toEqual([602]);
+  expect(proposals).toEqual([601, 602, 602]);
   expect(mock.unexpected).toEqual([]);
 });

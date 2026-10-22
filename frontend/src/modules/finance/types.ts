@@ -160,6 +160,7 @@ export type InvoiceExtractionProposal = {
   confidence: number;
   extraction_method: "llm" | "regex";
   fallback_reason?: string;
+  duplicate_of?: string | null;
   target_kind: "cash_flow" | "budget";
   status: "proposed" | "confirmed" | "rejected";
   created_cash_flow_id?: number;

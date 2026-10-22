@@ -11,6 +11,7 @@ type Proposal = {
   payment_purpose: string | null;
   status: string;
   fallback_reason?: string | null;
+  duplicate_of?: string | null;
   planned_date: string | null;
 };
 
@@ -112,6 +113,11 @@ export function InvoiceQuickConfirm({
         <h2 className="iqc-title">Счёт из почты</h2>
         {loading ? (
           <p>Загружаем счёт…</p>
+        ) : proposal && proposal.duplicate_of && proposal.status === "proposed" ? (
+          <>
+            <p><strong>Повторный счёт</strong>: такой счёт уже подтверждён — «{proposal.duplicate_of}». В ДДС он второй раз не попадёт.</p>
+            <button className="secondary" onClick={onClose}>Закрыть</button>
+          </>
         ) : proposal && proposal.fallback_reason === "own_outgoing_invoice" && proposal.status === "proposed" && !confirmed ? (
           <>
             <p><strong>Приход</strong> от {proposal.counterparty || "заказчика"}: документ попадёт в «Ожидаемые приходы» ДДС. Когда деньги придут — нажмите там «Получено».</p>

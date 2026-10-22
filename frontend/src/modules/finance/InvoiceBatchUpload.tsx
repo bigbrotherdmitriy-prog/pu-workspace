@@ -7,9 +7,11 @@ export type InvoiceBatchUploadProps = {
   onReview?: (documentId: number) => void | Promise<void>;
   /** Source documents whose invoice is already booked (confirmed into DDS/budget). */
   confirmedDocumentIds?: ReadonlySet<number>;
+  /** Returns the already confirmed invoice this document repeats, or null (owner 22.10.2026). */
+  onCheckDuplicate?: (documentId: number) => Promise<string | null>;
 };
 
-export function InvoiceBatchUpload({ onUpload, onReview, confirmedDocumentIds }: InvoiceBatchUploadProps) {
+export function InvoiceBatchUpload({ onUpload, onReview, confirmedDocumentIds, onCheckDuplicate }: InvoiceBatchUploadProps) {
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
@@ -20,6 +22,7 @@ export function InvoiceBatchUpload({ onUpload, onReview, confirmedDocumentIds }:
   const [error, setError] = useState("");
   const [results, setResults] = useState<InvoiceUploadResult[]>([]);
   const [reviewing, setReviewing] = useState(false);
+  const [duplicates, setDuplicates] = useState<Record<number, string>>({});
 
   function select(incoming: File[]) {
     if (busyRef.current) return;
@@ -43,6 +46,13 @@ export function InvoiceBatchUpload({ onUpload, onReview, confirmedDocumentIds }:
       const completed = await onUpload(files, setMessage);
       setResults((current) => [...current, ...completed]);
       setFiles([]);
+      if (onCheckDuplicate) {
+        // A repeated invoice is named right in the list, before anyone opens it.
+        for (const id of completed.flatMap((item) => item.error ? [] : item.documentIds)) {
+          const repeated = await onCheckDuplicate(id).catch(() => null);
+          if (repeated) setDuplicates((current) => ({ ...current, [id]: repeated }));
+        }
+      }
       const failed = completed.filter((item) => item.error).length;
       setMessage(`Обработано: ${completed.length - failed}. С ошибками: ${failed}. Проверьте каждый счёт перед импортом.`);
     } catch (reason) { setError((reason as Error).message); }
@@ -64,7 +74,8 @@ export function InvoiceBatchUpload({ onUpload, onReview, confirmedDocumentIds }:
     {!!files.length && <details><summary>Выбрано счетов: {files.length}</summary><ul>{files.map((file, index) => <li key={index}>{file.webkitRelativePath || file.name}</li>)}</ul></details>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
-    {!!results.length && <ul aria-label="Результаты загрузки счетов">{results.map((item, index) => <li key={index}><strong>{item.name}</strong> — {item.error || (item.documentIds.length && item.documentIds.every((id) => confirmedDocumentIds?.has(id)) ? "Подтверждён ✓" : "Готов к проверке")}{item.documentIds.filter((id) => !confirmedDocumentIds?.has(id)).map((id) => <button key={id} type="button" disabled={!onReview || reviewing || busy} onClick={async () => {
+    {!!results.length && <ul aria-label="Результаты загрузки счетов">{results.map((item, index) => <li key={index}><strong>{item.name}</strong> — {item.error || (item.documentIds.length && item.documentIds.every((id) => confirmedDocumentIds?.has(id)) ? "Подтверждён ✓"
+      : item.documentIds.length && item.documentIds.every((id) => duplicates[id]) ? `Повтор — уже подтверждён «${duplicates[item.documentIds[0]]}», в ДДС не попадёт` : "Готов к проверке")}{item.documentIds.filter((id) => !confirmedDocumentIds?.has(id) && !duplicates[id]).map((id) => <button key={id} type="button" disabled={!onReview || reviewing || busy} onClick={async () => {
       setReviewing(true); setError("");
       try { await onReview?.(id); } catch (reason) { setError((reason as Error).message); } finally { setReviewing(false); }
     }}>Проверить счёт</button>)}</li>)}</ul>}

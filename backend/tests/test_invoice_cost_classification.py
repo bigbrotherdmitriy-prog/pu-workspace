@@ -597,3 +597,23 @@ def test_repeated_invoice_is_not_booked_twice(db_session, user_factory, monkeypa
     assert refused.value.status_code == 409
     assert "Повторный счёт" in refused.value.detail
     finance_api._refuse_repeated_invoice(db_session, other)  # another number — a different invoice
+    view = finance_api._proposal_view(db_session, again)
+    assert view["duplicate_of"] == document.name
+    assert finance_api._proposal_view(db_session, other)["duplicate_of"] is None
+
+
+def test_marketplace_orders_with_different_numbers_are_not_repeats():
+    assert finance_api._invoice_number("Оплата по заказу 0173415668-0025 от 14.10.2026 заклепки") == "0173415668-0025"
+    assert finance_api._invoice_number("Оплата по заказу 0173415668-0026 от 14.10.2026 Заклепки") == "0173415668-0026"
+    assert finance_api._invoice_number("Оплата счёта № 11 от 13 февраля 2026 г.") == "11"
+    assert finance_api._invoice_number("Счет на оплату № 2018 от 02.02.2026") == "2018"
+    assert finance_api._invoice_number("Оплата по счету 92 от 19 февраля") == "92"
+
+
+def test_invoice_date_skips_the_government_decree_in_the_vat_invoice_header():
+    text = ("Приложение №1 к постановлению Правительства Российский Федерации от 26 декабря 2011 г. № 1137 "
+            "(в ред. Постановления правительства РФ от 16.08.2024 №1096) Счет-фактура См00036665 от 01 апреля 2026 г.")
+    assert invoice_extraction._date_hint(text) == date(2026, 4, 1)
+    upd = ("(в Пр Российской рации от 16 августа 2024 г, № 1096) Универсальный Счет-фактура № 1702019220-МСК "
+           "от 17 февраля 2026 г.")
+    assert invoice_extraction._date_hint(upd) == date(2026, 2, 17)

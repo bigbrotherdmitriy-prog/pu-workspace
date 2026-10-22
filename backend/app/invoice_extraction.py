@@ -125,10 +125,23 @@ def _text_date_from_match(match: re.Match[str]) -> date | None:
         return None
 
 
+# Счёт-фактура / УПД print «Постановление Правительства РФ от 26 декабря 2011 г. № 1137
+# (в ред. от 16.08.2024 № 1096)» in the header: those dates are never the document's own.
+_NORMATIVE_CONTEXT = ("постановлен", "правительств", "в ред", "редакци", "приложение №1 к", "российск", "федерац", "(в пр")
+
+
+def _normative_date(text: str, start: int) -> bool:
+    # Only the words right before the date count; a closing «)» ends the decree reference.
+    context = text[max(0, start - 70):start].rsplit(")", 1)[-1].lower()
+    return any(word in context for word in _NORMATIVE_CONTEXT)
+
+
 def _date_hint(text: str) -> date | None:
     best: tuple[int, date] | None = None
     for regex, builder in ((_DATE_RE, _date_from_match), (_TEXT_DATE_RE, _text_date_from_match)):
         for match in regex.finditer(text):
+            if _normative_date(text, match.start()):
+                continue
             parsed = builder(match)
             if parsed is not None:
                 if best is None or match.start() < best[0]:

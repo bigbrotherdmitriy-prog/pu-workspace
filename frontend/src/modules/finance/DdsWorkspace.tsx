@@ -3,6 +3,7 @@ import { CalendarRange, CheckCheck, Download, GripVertical, ListFilter, Plus, Ro
 import { InvoiceBatchUpload, type InvoiceBatchUploadProps } from "./InvoiceBatchUpload";
 import { FinanceVatDetails } from "./FinanceVatDetails";
 import { formatMoney } from "../../utils/numberFormat";
+import { api } from "../../api/client";
 import type { FinanceOverview } from "./types";
 import { DdsMobileMonth } from "./DdsMobileMonth";
 import { BudgetFromDds } from "./BudgetFromDds";
@@ -459,7 +460,7 @@ export function DdsWorkspace({ finance, projectId, selectedContractId, onPrepare
       <div><span className="eyebrow">ПЛАТЁЖНЫЙ КАЛЕНДАРЬ</span><h2>Движение денежных средств</h2><p>Все представления считаются из единой детализации. План и факт хранятся и показываются раздельно.</p></div>
       <div className="dds-head-actions">{onImportCashFlow && <button type="button" disabled={!selectedContractId} title={selectedContractId ? "Загрузить Excel или CSV с плановым ДДС" : "Сначала выберите финансовый договор"} onClick={() => cashFlowImportInput.current?.click()}><Upload /> Импортировать плановый ДДС</button>}<button className="secondary" type="button" disabled={!undoStack.length} onClick={() => void undoLast()}><RotateCcw /> Отменить перенос</button><button className="secondary" type="button" onClick={() => exportView()}><Download /> Экспорт: {tabs.find((item) => item.id === tab)?.label}</button><button className="secondary" type="button" onClick={() => exportView("details")}><Download /> Полный ДДС</button><button className="secondary" type="button" onClick={exportAdditionalExpenses}><Download /> Дополнительные расходы</button><button className="secondary" type="button" onClick={() => onPrepare("cash-in")}><Plus /> Приход</button><button type="button" onClick={() => onPrepare("cash-out")}><Plus /> Расход</button>{onPrepareAdditionalExpense && <button type="button" onClick={onPrepareAdditionalExpense}><Plus /> Доп. расход</button>}</div>
     </div>
-    {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice}
+    {onDropInvoices && <InvoiceBatchUpload onUpload={onDropInvoices} onReview={onReviewInvoice} onCheckDuplicate={projectId > 0 ? (documentId) => api<{ duplicate_of?: string | null }>(`/execution/documents/${documentId}/invoice-extraction-proposals`, { method: "POST", body: JSON.stringify({ project_id: projectId, target_kind: "cash_flow" }) }).then((res) => res?.duplicate_of ?? null) : undefined}
       confirmedDocumentIds={new Set((finance?.cash_flow || []).filter((row) => Number(row.invoiced_amount || 0) > 0 && row.source_document_id).map((row) => Number(row.source_document_id)))} />}
     <div className="dds-tabs" role="tablist" aria-label="Разделы ДДС">{tabs.map((item) => <button type="button" role="tab" aria-selected={tab === item.id} className={`${tab === item.id ? "active" : ""}${item.secondary ? " dds-tab-secondary" : ""}`} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
     {tab !== "board" && <div className="dds-filters">
