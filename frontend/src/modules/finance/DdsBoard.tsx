@@ -84,6 +84,9 @@ function BalanceChart({ months, currentKey }: { months: MonthRow[]; currentKey: 
   );
 }
 
+const FOLD_KEY = "pu-dds-board-folded";
+const DEFAULT_FOLDED: Record<string, boolean> = { articles: true, received: true, extra: true };
+
 export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onChanged }: Props) {
   const [data, setData] = useState<Response | null>(null);
   const [error, setError] = useState("");
@@ -91,6 +94,17 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
   const [busy, setBusy] = useState<number | null>(null);
   const [reload, setReload] = useState(0);
   const [notes, setNotes] = useState<Record<number, string>>({});
+  // Owner 21.10.2026: every block folds so the page is not one long scroll; long lists start folded.
+  const [folded, setFolded] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem(FOLD_KEY) || "null") || DEFAULT_FOLDED; } catch { return DEFAULT_FOLDED; }
+  });
+  const toggleFold = (key: string) => setFolded((current) => {
+    const next = { ...current, [key]: !current[key] };
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(next)); } catch { /* per-viewer convenience only */ }
+    return next;
+  });
+  const cardClass = (key: string) => `dds-board-card${folded[key] ? " folded" : ""}`;
+  const foldTitle = (key: string, text: string) => <h3><button type="button" className="dds-board-toggle" aria-expanded={!folded[key]} onClick={() => toggleFold(key)}>{folded[key] ? "▸" : "▾"} {text}</button></h3>;
   const [stages, setStages] = useState<Stage[]>([]);
   const [draft, setDraft] = useState<ReceiptDraft | null>(null);
 
@@ -204,14 +218,14 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
         </article>
       </section>
 
-      {months.length > 0 && <section className="dds-board-card" aria-label="Баланс по ДДС">
-        <div className="dds-board-card-head"><h3>Баланс по начальному ДДС</h3><span className="dds-board-legend"><i className="plan" /> план <i className="fact" /> факт</span></div>
+      {months.length > 0 && <section className={cardClass("balance")} aria-label="Баланс по ДДС">
+        <div className="dds-board-card-head">{foldTitle("balance", "Баланс по начальному ДДС")}<span className="dds-board-legend"><i className="plan" /> план <i className="fact" /> факт</span></div>
         <BalanceChart months={months} currentKey={currentKey} />
         {gaps.length > 0 && <ul className="dds-board-gaps">{gaps.map((m) => <li key={m.month}>{monthLabel(m.month)} — {formatMoney(n(m.cumulative_plan))}</li>)}</ul>}
       </section>}
 
-      <section className="dds-board-card" aria-label="Статьи ДДС">
-        <div className="dds-board-card-head"><h3>Статьи расходов</h3><span>план · оплачено · остаток</span></div>
+      <section className={cardClass("articles")} aria-label="Статьи ДДС">
+        <div className="dds-board-card-head">{foldTitle("articles", "Статьи расходов")}<span>план · оплачено · остаток</span></div>
         <div className="dds-board-articles">
           {articles.map((a) => {
             const plan = n(a.plan), paid = n(a.paid), over = paid > plan;
@@ -229,8 +243,8 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
       </section>
 
       <div className="dds-board-columns">
-        <section className="dds-board-card" aria-label="К оплате">
-          <div className="dds-board-card-head"><h3>К оплате</h3><span>{unpaid.length ? formatMoney(unpaid.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
+        <section className={cardClass("topay")} aria-label="К оплате">
+          <div className="dds-board-card-head">{foldTitle("topay", "К оплате")}<span>{unpaid.length ? formatMoney(unpaid.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
           {unpaid.length ? <ul className="dds-board-list">{unpaid.map((inv) => <li key={inv.entry_id}>
             <div><strong>{inv.counterparty || inv.title}</strong><small>{inv.article} · {day(inv.planned_date)}</small></div>
             <b>{formatMoney(inv.left)}</b>
@@ -238,8 +252,8 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
           </li>)}</ul> : <p className="dds-board-empty">Неоплаченных счетов нет</p>}
         </section>
 
-        <section className="dds-board-card" aria-label="Ожидаемые приходы">
-          <div className="dds-board-card-head"><h3>Ожидаемые приходы</h3><span>{receipts.length ? formatMoney(receipts.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
+        <section className={cardClass("expected")} aria-label="Ожидаемые приходы">
+          <div className="dds-board-card-head">{foldTitle("expected", "Ожидаемые приходы")}<span>{receipts.length ? formatMoney(receipts.reduce((s, i) => s + i.left, 0)) : ""}</span></div>
           {receipts.length ? <ul className="dds-board-list">{receipts.map(({ row, left, planId, doc }) => <li key={row.id} className={row.planned_date && row.planned_date < today() ? "late" : ""}>
             <div><strong>{doc ? row.title : stageLabel(row, left, stages) || row.title}</strong><small>{doc ? `документ · ${row.counterparty || "заказчик"} · ` : stageLabel(row, left, stages) ? `${row.title} · ` : "по плану · "}срок {day(row.planned_date)}</small></div>
             <b>{formatMoney(left)}</b>
@@ -256,8 +270,8 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
         </section>
       </div>
 
-      <section className="dds-board-card" aria-label="Поступило от заказчика">
-        <div className="dds-board-card-head"><h3>Поступило от заказчика</h3><span>получено {formatMoney(n(data.income.fact))} из {formatMoney(n(data.income.plan))} по плану</span></div>
+      <section className={cardClass("received")} aria-label="Поступило от заказчика">
+        <div className="dds-board-card-head">{foldTitle("received", "Поступило от заказчика")}<span>получено {formatMoney(n(data.income.fact))} из {formatMoney(n(data.income.plan))} по плану</span></div>
         {received.length ? <ul className="dds-board-list dds-board-received">{received.map((row) => {
           const label = stageLabel(row, n(row.actual_amount), stages);
           return <li key={row.id}>
@@ -267,8 +281,8 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
         })}</ul> : <p className="dds-board-empty">Поступлений пока нет</p>}
       </section>
 
-      <section className="dds-board-card" aria-label="Дополнительные расходы">
-        <div className="dds-board-card-head"><h3>Дополнительные расходы</h3><span>{formatMoney(n(data.additional_costs?.fact))} оплачено · {formatMoney(n(data.additional_costs?.invoiced))} выставлено</span></div>
+      <section className={cardClass("extra")} aria-label="Дополнительные расходы">
+        <div className="dds-board-card-head">{foldTitle("extra", "Дополнительные расходы")}<span>{formatMoney(n(data.additional_costs?.fact))} оплачено · {formatMoney(n(data.additional_costs?.invoiced))} выставлено</span></div>
         {extra.length ? <div className="dds-board-table"><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Сумма</th><th>Описание</th></tr></thead><tbody>{extra.map((item, index) => {
           const id = item.entry_id;
           const value = id ? notes[id] ?? item.note ?? item.title : item.note ?? item.title;

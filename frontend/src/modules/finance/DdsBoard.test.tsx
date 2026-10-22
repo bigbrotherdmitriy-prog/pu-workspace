@@ -59,7 +59,7 @@ it("names the contract stage behind a monthly receipt and records it with an edi
   const fact = { id: 268, direction: "inflow", title: "Этапы Дубна", planned_date: "2026-10-13", planned_amount: 0, actual_amount: 55773412.78, actual_date: "2026-10-13", plan_entry_id: 167, currency: "RUB", status: "received", record_version: 1 };
   render(<DdsBoard projectId={5} contractId={46} currency="RUB" cashFlow={[row, fact] as never} />);
   expect(await screen.findByText("9-й этап · Дубна")).toBeTruthy();
-  expect(screen.getByText("Поступило от заказчика")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Поступило от заказчика/ })).toBeTruthy();
   fireEvent.click(screen.getByText("Получено"));
   fireEvent.change(screen.getByLabelText("Дата поступления"), { target: { value: "2026-10-30" } });
   fireEvent.click(screen.getByText("Сохранить"));
@@ -78,4 +78,14 @@ it("lists our act to the customer as an expected receipt and settles it against 
   fireEvent.click(screen.getByText("Сохранить"));
   await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/172/record-fact",
     { method: "POST", body: expect.stringContaining('"basis_entry_id":300') }));
+});
+
+it("folds and unfolds a block from its title", async () => {
+  mockApi.mockResolvedValue(response);
+  render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
+  const toggle = await screen.findByRole("button", { name: /К оплате/ });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(toggle.closest("section")?.className).toContain("folded");
 });
