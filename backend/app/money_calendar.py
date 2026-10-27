@@ -231,32 +231,45 @@ def money_calendar(
         .filter(CashFlowEntry.direction == "inflow")
         .filter(CashFlowEntry.status.notin_(_EXCLUDED_STATUSES))
         .filter(CashFlowEntry.actual_date.is_(None))
+        .filter(CashFlowEntry.status != "received")
         .all()
     )
     for entry in income_entries:
         planned_amount = _to_decimal(entry.planned_amount)
-        if planned_amount <= 0:
+        invoiced_amount = _to_decimal(entry.invoiced_amount)
+        if planned_amount <= 0 and invoiced_amount <= 0:
             continue
         due = entry.planned_date
         if due is None:
             continue
         if due > horizon_date:
             continue
-        invoiced_linked = (
-            db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
-            .filter(CashFlowEntry.plan_entry_id == entry.id)
-            # A received income document is already counted by its fact row.
-            .filter(CashFlowEntry.status != "received")
-            .scalar()
-        )
-        fact_linked = (
-            db.query(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0))
-            .filter(CashFlowEntry.plan_entry_id == entry.id)
-            .filter(CashFlowEntry.actual_date.is_not(None))
-            .filter(func.coalesce(CashFlowEntry.invoiced_amount, 0) == 0)
-            .scalar()
-        )
-        amount = planned_amount - _to_decimal(invoiced_linked) - _to_decimal(fact_linked)
+        if invoiced_amount > 0 and planned_amount == 0:
+            # Unpaid income basis (act / invoice / КС-3 to customer): show
+            # remaining as invoiced minus recorded receipt facts.
+            basis_facts = (
+                db.query(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0))
+                .filter(CashFlowEntry.plan_entry_id == entry.id)
+                .filter(CashFlowEntry.actual_date.is_not(None))
+                .scalar()
+            )
+            amount = invoiced_amount - _to_decimal(basis_facts)
+        else:
+            invoiced_linked = (
+                db.query(func.coalesce(func.sum(CashFlowEntry.invoiced_amount), 0))
+                .filter(CashFlowEntry.plan_entry_id == entry.id)
+                # A received income document is already counted by its fact row.
+                .filter(CashFlowEntry.status != "received")
+                .scalar()
+            )
+            fact_linked = (
+                db.query(func.coalesce(func.sum(CashFlowEntry.actual_amount), 0))
+                .filter(CashFlowEntry.plan_entry_id == entry.id)
+                .filter(CashFlowEntry.actual_date.is_not(None))
+                .filter(func.coalesce(CashFlowEntry.invoiced_amount, 0) == 0)
+                .scalar()
+            )
+            amount = planned_amount - _to_decimal(invoiced_linked) - _to_decimal(fact_linked)
         if amount <= 0:
             continue
         days_left = _days_left(due, today)
