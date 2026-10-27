@@ -25,8 +25,19 @@ const response = {
   additional_costs: { plan: "0", fact: "0", invoiced: "50", items: [{ entry_id: 21, note: null, title: "Счёт № 7", counterparty: "ИП Кран", planned_date: "2026-03-01", actual_date: null, fact: "0", invoiced: "50" }] },
 };
 
+const setupApi = (custom?: (path: string) => unknown) => {
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/receipts-by-basis")) return { contracts: [], totals: { invoiced: "0", received: "0", remaining: "0" } };
+    if (custom) {
+      const result = custom(path);
+      if (result !== undefined) return result;
+    }
+    return response;
+  });
+};
+
 it("shows the plan balance, the critical point and only unpaid invoices", async () => {
-  mockApi.mockResolvedValue(response);
+  setupApi();
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
   expect(await screen.findByText("Критическая точка")).toBeTruthy();
   expect(screen.getByText(/кассовый разрыв/)).toBeTruthy();
@@ -37,7 +48,7 @@ it("shows the plan balance, the critical point and only unpaid invoices", async 
 });
 
 it("pays an invoice and edits an additional cost description", async () => {
-  mockApi.mockResolvedValue(response);
+  setupApi();
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
   fireEvent.click((await screen.findAllByText("Оплачен"))[0]);
   await waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/5/cash-flow/12/record-payment", expect.objectContaining({ method: "POST" })));
@@ -68,7 +79,7 @@ it("names the contract stage behind a monthly receipt and records it with an edi
 });
 
 it("lists our act to the customer as an expected receipt and settles it against its plan line", async () => {
-  mockApi.mockResolvedValue(response);
+  setupApi();
   const plan = { id: 172, direction: "inflow", title: "Этапы Городец", planned_date: "2099-10-31", planned_amount: 100, actual_amount: 0, currency: "RUB", status: "proposed", record_version: 1 };
   const act = { id: 300, direction: "inflow", title: "Акт № 17", planned_date: "2099-10-20", planned_amount: 0, invoiced_amount: 40, actual_amount: 0, plan_entry_id: 172, counterparty: "ООО «БУЛАТ»", currency: "RUB", status: "approved", record_version: 1 };
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[plan, act] as never} />);
@@ -81,7 +92,7 @@ it("lists our act to the customer as an expected receipt and settles it against 
 });
 
 it("folds and unfolds a block from its title", async () => {
-  mockApi.mockResolvedValue(response);
+  setupApi();
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
   const toggle = await screen.findByRole("button", { name: /К оплате/ });
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
@@ -91,7 +102,7 @@ it("folds and unfolds a block from its title", async () => {
 });
 
 it("pays an additional-cost invoice from its table and lists it under «К оплате»", async () => {
-  mockApi.mockResolvedValue(response);
+  setupApi();
   render(<DdsBoard projectId={5} currency="RUB" cashFlow={[]} />);
   fireEvent.click(await screen.findByRole("button", { name: /Дополнительные расходы/ }));
   expect(screen.getAllByText("ИП Кран").length).toBeGreaterThan(1);
