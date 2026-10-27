@@ -68,18 +68,15 @@ test("scheduled theme follows local time and manual theme overrides schedule", a
   await expect(page.locator("html")).toHaveAttribute("data-display-theme", "light");
 });
 
-test("HQ video model renders live frames and opens project finance", async ({ page, mock }) => {
+test("control-room screen renders without 3D and opens project finance", async ({ page, mock }) => {
   await page.goto("/new/");
   await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: "Тёмная", exact: true }).click();
   await page.locator("aside nav").getByRole("button", { name: "Рабочий центр", exact: true }).click();
-  const model = page.getByLabel("Вращающаяся модель центра обработки данных");
-  await expect(model).toBeVisible();
-  const canvas = model.locator("canvas");
-  await expect(canvas).toBeVisible();
-  expect(await canvas.evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0);
-  await expect(model.locator("img")).toHaveCount(0);
-  await page.getByRole("navigation", { name: "Разделы объекта" }).getByRole("button", { name: "ДДС", exact: true }).click();
+  await expect(page.getByLabel("Щит управления")).toBeVisible();
+  await expect(page.getByLabel("Деньги проекта")).toBeVisible();
+  await expect(page.locator("canvas")).toHaveCount(0);
+  await page.getByRole("button", { name: "Финансы", exact: true }).click();
   await expect(page.getByRole("tabpanel", { name: "ДДС" })).toBeVisible();
   expect(mock.unexpected).toEqual([]);
 });

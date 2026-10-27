@@ -113,8 +113,7 @@ const MeetingsModule = lazy(() => import("./modules/meetings/MeetingsModule").th
 const ContactsModule = lazy(() => import("./modules/contacts/ContactsModule").then((m) => ({ default: m.ContactsModule })));
 const AnalyticsModule = lazy(() => import("./modules/analytics/AnalyticsModule").then((m) => ({ default: m.AnalyticsModule })));
 const InvoiceQuickConfirm = lazy(() => import("./modules/finance/InvoiceQuickConfirm").then((m) => ({ default: m.InvoiceQuickConfirm })));
-const ProjectMoneyRings = lazy(() => import("./modules/dashboard/ProjectMoneyRings").then((m) => ({ default: m.ProjectMoneyRings })));
-import { PaymentAlarm } from "./modules/dashboard/PaymentAlarm";
+const WorkCenterHud = lazy(() => import("./modules/dashboard/WorkCenterHud").then((m) => ({ default: m.WorkCenterHud })));
 const MoneyCalendar = lazy(() => import("./modules/dashboard/MoneyCalendar").then((m) => ({ default: m.MoneyCalendar })));
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const ExecutiveDocsModule = lazy(() => import("./modules/executive-docs/ExecutiveDocsModule").then((m) => ({ default: m.ExecutiveDocsModule })));
@@ -3377,8 +3376,15 @@ export function App() {
                 onOpenNotifications={() => { setNotificationFilter("unread"); setActive("Уведомления"); }}
               />
               {projectId > 0 && <section className="dashboard-money-row">
-                <PaymentAlarm projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
-                <ProjectMoneyRings projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }} />
+                <WorkCenterHud projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
+                  onOpenDocuments={() => setActive("Документы")}
+                  onOpenItem={(item) => {
+                    if (item.kind === "sign_act" && item.contract_id) {
+                      window.location.hash = "contract-stages";
+                      setFocusContract({ id: item.contract_id, nonce: Date.now() });
+                      setActive("Договоры");
+                    } else { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }
+                  }} />
                 <MoneyCalendar projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
                   onOpenItem={(item) => {
                     if (item.kind === "sign_act" && item.contract_id) {
