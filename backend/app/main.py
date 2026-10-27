@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import os
+import mimetypes
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -167,6 +168,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 STATIC_DIR = Path(__file__).with_name("static")
+# Slim images can lack a system mime table: the work-center background is .webp (release gate checks it).
+mimetypes.add_type("image/webp", ".webp")
 REACT_DIR = Path(__file__).with_name("react_dist")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

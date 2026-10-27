@@ -47,6 +47,41 @@ def _days_left(due: Optional[date], today: date) -> Optional[int]:
     return (due - today).days
 
 
+def _stage_order(stage: Any) -> tuple:
+    try:
+        return (int(str(stage.stage_number).strip()), 0)
+    except (TypeError, ValueError):
+        return (10**6, 0)
+
+
+def paid_stage_ids_for(db: Session, project_id: int, stages: List[Any]) -> set:
+    """Stages the customer has already paid for: money received on a contract/object is
+    counted against its stages in stage order (owner 21.10.2026)."""
+    paid: set = set()
+    for key in {(st.contract_id, (st.object_name or "").casefold()) for st in stages}:
+        contract_id, object_key = key
+        facts = (
+            db.query(CashFlowEntry)
+            .filter(CashFlowEntry.project_id == project_id)
+            .filter(CashFlowEntry.direction == "inflow")
+            .filter(CashFlowEntry.actual_date.is_not(None))
+            .filter(CashFlowEntry.status.notin_(_EXCLUDED_STATUSES))
+        )
+        if contract_id is not None:
+            facts = facts.filter(CashFlowEntry.contract_id == contract_id)
+        received = sum(
+            (_to_decimal(f.actual_amount) for f in facts.all()
+             if not object_key or object_key in f"{f.title or ''} {f.object_name or ''}".casefold()),
+            Decimal("0"),
+        )
+        covered = Decimal("0")
+        for st in sorted((x for x in stages if (x.contract_id, (x.object_name or "").casefold()) == key), key=_stage_order):
+            covered += _to_decimal(st.amount)
+            if covered <= received + Decimal("0.01"):
+                paid.add(st.id)
+    return paid
+
+
 def money_calendar(
     db: Session,
     project_id: int,
@@ -145,36 +180,7 @@ def money_calendar(
         .all()
     )
     # Owner 21.10.2026: a stage the customer has already paid for needs no «подписать акт».
-    def _stage_order(stage: Any) -> tuple:
-        try:
-            return (int(str(stage.stage_number).strip()), 0)
-        except (TypeError, ValueError):
-            return (10**6, 0)
-
-    received_by_key: Dict[tuple, Decimal] = {}
-    paid_stage_ids: set = set()
-    for key in {(st.contract_id, (st.object_name or "").casefold()) for st in stages}:
-        contract_id, object_key = key
-        facts = (
-            db.query(CashFlowEntry)
-            .filter(CashFlowEntry.project_id == project_id)
-            .filter(CashFlowEntry.direction == "inflow")
-            .filter(CashFlowEntry.actual_date.is_not(None))
-            .filter(CashFlowEntry.status.notin_(_EXCLUDED_STATUSES))
-        )
-        if contract_id is not None:
-            facts = facts.filter(CashFlowEntry.contract_id == contract_id)
-        received = sum(
-            (_to_decimal(f.actual_amount) for f in facts.all()
-             if not object_key or object_key in f"{f.title or ''} {f.object_name or ''}".casefold()),
-            Decimal("0"),
-        )
-        received_by_key[key] = received
-        covered = Decimal("0")
-        for st in sorted((x for x in stages if (x.contract_id, (x.object_name or "").casefold()) == key), key=_stage_order):
-            covered += _to_decimal(st.amount)
-            if covered <= received + Decimal("0.01"):
-                paid_stage_ids.add(st.id)
+    paid_stage_ids = paid_stage_ids_for(db, project_id, stages)
 
     for stage in stages:
         if stage.id in paid_stage_ids:

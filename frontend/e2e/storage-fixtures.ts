@@ -92,6 +92,7 @@ export class StorageApi {
     if (url.origin === origin && method === "GET" && request.resourceType() !== "fetch"
       && (url.pathname === "/new/" || /^\/new\/assets\/[\w.-]+\.(js|css)$/.test(url.pathname)
         || /^\/new\/assets\/future-light\/[\w.-]+\.(png|jpg|webm|mp4)$/.test(url.pathname)
+        || /^\/new\/assets\/control-room\/[\w.-]+\.webp$/.test(url.pathname)
         || ["/new/pu-icon.svg", "/new/manifest.webmanifest"].includes(url.pathname))) {
       await route.continue(); return;
     }
@@ -440,6 +441,7 @@ export class StorageApi {
       "budget-from-dds": { currency: "RUB", income: { plan: "0.00", fact: "0.00" }, expense_total: { plan: "0.00", fact: "0.00", invoiced: "0.00" },
         additional_costs: { plan: "0.00", fact: "0.00", items: [] }, expense_by_category: [], expense_by_article: [],
         profit: { plan: "0.00", fact: "0.00" }, margin_pct: { plan: null, fact: null }, by_month: [] },
+      "work-center/hud": { objects: [], id_readiness: [], invoices_to_check: 0 },
       "money-calendar": { items: [], counts: {}, totals: { to_pay: "0.00", to_receive: "0.00" }, unmarked: { count: 0, amount: "0.00", payments: 0, receipts: 0 } },
     };
     const suffix = path.replace(/^\/projects\/\d+\//, "");

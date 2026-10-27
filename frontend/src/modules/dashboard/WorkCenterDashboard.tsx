@@ -1,5 +1,4 @@
 import { Activity, ArrowRight, Bot, Route } from "lucide-react";
-import { ProjectIsometric } from "./ProjectIsometric";
 
 export type WorkCenterSummary = {
   attention: number;
@@ -87,7 +86,6 @@ export function WorkCenterDashboard({
             <button type="button" className="secondary" onClick={onAskAi}><Bot /> Спросить AI</button>
           </div>
         </div>
-        <ProjectIsometric onDocuments={onOpenDocuments} onSchedule={onOpenSchedule} onFinance={onOpenFinance} />
         <aside className="fl-focus" aria-label="Требует решения">
           <span className="fl-focus-kicker">{summary ? (summary.attention ? "ТРЕБУЕТ РЕШЕНИЯ" : "КОНТУР СТАБИЛЕН") : "ЗАГРУЗКА СВОДКИ"}</span>
           <div className="fl-focus-total"><strong>{summary?.attention ?? "—"}</strong><span>контрольных пунктов</span></div>

@@ -76,8 +76,9 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("padding", "18px 20px");
   await expect(deck.locator(".dashboard-hero-copy")).toHaveCSS("border-radius", "18px");
   expect(v5Layout.focusInsideViewport).toBe(true);
-  await expect(deck.locator(".future-twin-model-wrap canvas")).toBeVisible();
-  await expect(deck.locator(".future-twin-model-wrap canvas")).toHaveAttribute("data-frame-ready", "true");
+  // The control-room screen replaced the rotating 3D model (owner 27.10.2026).
+  await expect(page.getByLabel("Щит управления")).toBeVisible();
+  await expect(page.locator("canvas")).toHaveCount(0);
   const navBoxes = await page.locator(".shell > aside nav button").evaluateAll(elements => elements.map(el => {
     const rect = el.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom };
   }));
