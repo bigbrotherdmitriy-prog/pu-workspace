@@ -15,7 +15,8 @@
   position: absolute; inset: 0; z-index: -1;
   background: linear-gradient(180deg, rgba(5, 25, 55, .6) 0%, rgba(10, 40, 80, .3) 45%, rgba(255, 120, 30, .1) 80%, rgba(0, 0, 0, .6) 100%);
 }
-.hud-board { position: relative; padding: 22px 26px 18px; transform: perspective(2000px) rotateY(-4deg) scale(.97); transform-origin: 0 0; }
+.hud-board { position: relative; padding: 22px 26px 18px; /* The far (right) side recedes, so the board never grows past the page edge at any width. */
+  transform: perspective(2000px) rotateY(4deg); transform-origin: 0 0; }
 .hud-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .hud-stage .hud-title .hud-kicker { font: 600 12px/1.2 "JetBrains Mono", ui-monospace, monospace; letter-spacing: .16em; color: var(--hud-line); }
 .hud-stage.hud-stage .hud-alarm small, .hud-stage.hud-stage .hud-cap { color: var(--hud-muted); }

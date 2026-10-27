@@ -55,3 +55,10 @@ def test_id_readiness_reports_the_number_of_missing_documents(db_session, monkey
     monkeypatch.setattr(executive_docs, "object_report", lambda *_a, **_k: {"percent": 38, "required_total": 8, "missing": ["a", "b", "c", "d", "e"]})
     extra = hud_extra(db_session, project.id, date(2026, 10, 27))
     assert extra["id_readiness"] == [{"object": "ДУБНА", "percent": 38, "required_total": 8, "missing": 5}]
+
+
+def test_webp_is_served_with_its_own_content_type():
+    import mimetypes
+    import app.main  # noqa: F401 - registers the type
+
+    assert mimetypes.guess_type("dusk-lines.webp")[0] == "image/webp"
