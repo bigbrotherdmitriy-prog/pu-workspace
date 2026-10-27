@@ -85,6 +85,11 @@ def run(kind: str, payload: dict) -> dict:
     if kind == "contracts.discover_batch":
         from app.api.contract_discovery import _discover_contract_batch_job
         return _discover_contract_batch_job(payload)
+    if kind == "rd.parse_volume":
+        from app.database import SessionLocal
+        from app.rd_service import parse_volume
+        with SessionLocal() as db:
+            return parse_volume(db, int(payload["volume_id"]))
     raise ValueError(f"Unknown background job kind: {kind}")
 
 
