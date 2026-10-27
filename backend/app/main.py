@@ -27,6 +27,7 @@ from app.api.budget_from_dds import router as budget_from_dds_router
 from app.api.portfolio import router as portfolio_router
 from app.api.dds_plan_versions import router as dds_plan_versions_router
 from app.api.money_calendar import router as money_calendar_router
+from app.api.rd import router as rd_router
 from app.api.receipts_by_basis import router as receipts_by_basis_router
 from app.api.contract_stages import router as contract_stages_router
 from app.api.acceptance_acts import router as acceptance_acts_router
@@ -194,6 +195,7 @@ app.include_router(budget_from_dds_router)
 app.include_router(portfolio_router)
 app.include_router(dds_plan_versions_router)
 app.include_router(money_calendar_router)
+app.include_router(rd_router)
 app.include_router(receipts_by_basis_router)
 app.include_router(contract_stages_router)
 app.include_router(acceptance_acts_router)
