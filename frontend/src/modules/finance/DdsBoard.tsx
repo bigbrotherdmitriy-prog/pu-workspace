@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
 import { formatMoney } from "../../utils/numberFormat";
 import type { FinanceOverview } from "./types";
+import { ReceiptsByBasis } from "./ReceiptsByBasis";
 import "./dds-board.css";
 
 // Owner 21.10.2026: the uploaded DDS is the constant baseline. One screen: balance and
@@ -267,10 +268,15 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
                   <input id={`dds-receipt-amount-${row.id}`} aria-label="Сумма поступления" inputMode="decimal" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
                   <input id={`dds-receipt-date-${row.id}`} aria-label="Дата поступления" type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
                   <button type="button" disabled={busy === row.id || !draft.date || !(Number(draft.amount.replace(",", ".")) > 0)}
-                    onClick={() => void act(row.id, `/projects/${projectId}/cash-flow/${planId}/record-fact`, { amount: Number(draft.amount.replace(/\s/g, "").replace(",", ".")).toFixed(2), actual_date: draft.date, ...(doc ? { basis_entry_id: row.id } : {}) }).then((ok) => { if (ok) setDraft(null); })}>Сохранить</button>
+                    onClick={() => {
+                      const amount = Number(draft.amount.replace(/\s/g, "").replace(",", ".")).toFixed(2);
+                      const path = doc && !planId ? `/projects/${projectId}/cash-flow/${row.id}/record-receipt` : `/projects/${projectId}/cash-flow/${planId}/record-fact`;
+                      const body = doc && !planId ? { amount, actual_date: draft.date } : { amount, actual_date: draft.date, ...(doc ? { basis_entry_id: row.id } : {}) };
+                      void act(row.id, path, body).then((ok) => { if (ok) setDraft(null); });
+                    }}>Сохранить</button>
                   <button type="button" className="secondary" onClick={() => setDraft(null)}>Отмена</button>
                 </span>
-              : <button type="button" disabled={busy === row.id || !planId} title={planId ? undefined : "Нет строки прихода в плановом ДДС"} onClick={() => setDraft({ id: row.id, amount: left.toFixed(2), date: today() })}>Получено</button>}
+              : <button type="button" disabled={busy === row.id} onClick={() => setDraft({ id: row.id, amount: left.toFixed(2), date: today() })}>Получено</button>}
           </li>)}</ul> : <p className="dds-board-empty">Все плановые приходы получены</p>}
         </section>
       </div>
@@ -284,6 +290,11 @@ export function DdsBoard({ projectId, contractId, currency, cashFlow = [], onCha
             <b>{formatMoney(n(row.actual_amount))}</b>
           </li>;
         })}</ul> : <p className="dds-board-empty">Поступлений пока нет</p>}
+      </section>
+
+      <section className={cardClass("basis")} aria-label="Приходы по основаниям">
+        <div className="dds-board-card-head">{foldTitle("basis", "Приходы по основаниям")}</div>
+        <ReceiptsByBasis projectId={projectId} onChanged={() => { setReload((v) => v + 1); onChanged?.(); }} />
       </section>
 
       <section className={cardClass("extra")} aria-label="Дополнительные расходы">
