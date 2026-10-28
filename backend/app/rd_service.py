@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import logging
+import os
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -8,12 +10,54 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.rd import RdSpecItem, RdVolume
+from app.models.rd import RdSheet, RdSpecItem, RdVolume
 from app.rd_ingest import find_spec_pages, spec_pages_label, spec_text, split_pages
+from app.rd_sheets import build_register
 from app.specification import specification_from_text
 
 
+logger = logging.getLogger(__name__)
+
 _SECTION_RE = re.compile(r"^[A-ZА-ЯЁ]{2,6}$")
+
+_OCR_CHUNK = 15
+
+
+def _ocr_blank_pages(pdf_bytes: bytes, pages: list[str], sources: list[str]) -> tuple[list[str], int]:
+    blank = [i for i, s in enumerate(sources) if s == "none"]
+    if not blank:
+        return pages, 0
+    try:
+        limit = int(os.getenv("RD_OCR_MAX_PAGES", "60"))
+    except (TypeError, ValueError):
+        limit = 60
+    if limit < 0:
+        limit = 0
+    targets = blank[:limit]
+    if not targets:
+        return pages, 0
+    from app.organizer_engine.content import _ocr_pdf_pages
+
+    page_numbers = {i + 1 for i in targets}
+    ocr_done = 0
+    ordered = sorted(page_numbers)
+    chunks = [ordered[i:i + _OCR_CHUNK] for i in range(0, len(ordered), _OCR_CHUNK)]
+    for chunk in chunks:
+        try:
+            result = _ocr_pdf_pages(pdf_bytes, set(chunk))
+        except Exception as exc:  # noqa: BLE001 - OCR не должен валить том
+            logger.warning("rd parse ocr failed for volume pages %s: %s", chunk, exc)
+            continue
+        for n, extraction in (result or {}).items():
+            idx = n - 1
+            if idx < 0 or idx >= len(pages):
+                continue
+            text = getattr(extraction, "text", "") or ""
+            if text.strip():
+                pages[idx] = text
+                sources[idx] = "ocr"
+                ocr_done += 1
+    return pages, ocr_done
 
 
 def _strip_ext(name: str) -> str:
@@ -148,16 +192,35 @@ def parse_volume(db: Session, volume_id: int) -> dict:
         svc = drive_service_for_project(vol.project_id, db)
         pdf_bytes = _download(svc, vol.external_id or "")
         pages = split_pages(pdf_bytes)
+        sources = ["native" if len(t.strip()) >= 20 else "none" for t in pages]
+        pages, ocr_done = _ocr_blank_pages(pdf_bytes, pages, sources)
         vol.page_count = len(pages)
 
         nums = find_spec_pages(pages)
         label = spec_pages_label(nums)
         vol.spec_pages = label
 
+        register = build_register(pages, nums, sources)
+        db.execute(select(RdSheet).where(RdSheet.volume_id == vol.id))
+        old_sheets = db.execute(
+            select(RdSheet).where(RdSheet.volume_id == vol.id)
+        ).scalars().all()
+        for sheet in old_sheets:
+            db.delete(sheet)
+        db.flush()
+        for row in register:
+            db.add(RdSheet(volume_id=vol.id, project_id=vol.project_id, **row))
+        db.flush()
+
         if not nums:
             vol.status = "parsed"
             db.commit()
-            return {"items": 0, "spec_pages": ""}
+            return {
+                "items": 0,
+                "spec_pages": "",
+                "sheets": len(register),
+                "ocr_pages": ocr_done,
+            }
 
         parsed_items: list[dict] = []
         page_errors: list[str] = []
@@ -217,7 +280,12 @@ def parse_volume(db: Session, volume_id: int) -> dict:
         if page_errors:
             vol.error_message = "; ".join(page_errors)[:500]
         db.commit()
-        return {"items": len(parsed_items), "spec_pages": label}
+        return {
+            "items": len(parsed_items),
+            "spec_pages": label,
+            "sheets": len(register),
+            "ocr_pages": ocr_done,
+        }
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         vol = db.get(RdVolume, volume_id)
@@ -337,3 +405,24 @@ def item_counts(db: Session, volume_id: int) -> dict:
         if status in counts:
             counts[status] = int(cnt)
     return counts
+
+
+def sheet_dict(s: RdSheet) -> dict:
+    return {
+        "id": s.id,
+        "volume_id": s.volume_id,
+        "page_no": s.page_no,
+        "sheet_no": s.sheet_no,
+        "sheet_title": s.sheet_title,
+        "kind": s.kind,
+        "text_source": s.text_source,
+        "text_len": s.text_len,
+    }
+
+
+def volume_sheet_count(db: Session, volume_id: int) -> int:
+    return int(
+        db.execute(
+            select(func.count(RdSheet.id)).where(RdSheet.volume_id == volume_id)
+        ).scalar_one()
+    )
