@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
+import { PurchaseInvoices } from "./PurchaseInvoices";
+import { PurchaseReport } from "./PurchaseReport";
 import "./purchase.css";
 
 type PurchaseStatus = "need" | "ordered" | "paid" | "received";
@@ -69,6 +71,7 @@ export function PurchaseModule({ projectId }: Props) {
   const [exportBusy, setExportBusy] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [draftQty, setDraftQty] = useState<Record<number, string>>({});
+  const [tab, setTab] = useState<"spec" | "invoices" | "report">("spec");
 
   useEffect(() => {
     if (projectId <= 0) { setItems([]); setSummary(emptySummary); return; }
@@ -186,6 +189,47 @@ export function PurchaseModule({ projectId }: Props) {
 
   return (
     <div className="pr">
+      <div className="pr-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "spec"}
+          className={`pr-tab${tab === "spec" ? " pr-tab-active" : ""}`}
+          onClick={() => setTab("spec")}
+        >
+          Спецификация
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "invoices"}
+          className={`pr-tab${tab === "invoices" ? " pr-tab-active" : ""}`}
+          onClick={() => setTab("invoices")}
+        >
+          Счета
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "report"}
+          className={`pr-tab${tab === "report" ? " pr-tab-active" : ""}`}
+          onClick={() => setTab("report")}
+        >
+          Отчёт
+        </button>
+      </div>
+
+      {tab !== "spec" && (
+        <div className="pr-tab-panel">
+          {tab === "invoices" ? (
+            <PurchaseInvoices projectId={projectId} onChanged={() => setReloadTick((value) => value + 1)} />
+          ) : (
+            <PurchaseReport projectId={projectId} reloadKey={reloadTick} />
+          )}
+        </div>
+      )}
+
+      <div className={`pr-spec${tab === "spec" ? "" : " pr-spec-hidden"}`}>
       <div className="pr-head">
         <h2 className="pr-title">Закупка</h2>
         <div className="pr-actions">
@@ -291,6 +335,7 @@ export function PurchaseModule({ projectId }: Props) {
           </table>
         </div>
       )}
+      </div>
     </div>
   );
 }
