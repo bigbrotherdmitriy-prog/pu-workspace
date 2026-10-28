@@ -223,22 +223,108 @@ amount — число без разделителей тысяч и без ук�
 
 def primary_provider() -> str:
     value = os.getenv("AI_PRIMARY_PROVIDER", "gemini").strip().casefold()
-    return "deepseek" if value == "deepseek" else "gemini"
+    if value == "yandex":
+        return "yandex"
+    if value == "deepseek":
+        return "deepseek"
+    return "gemini"
 
 
 def gemini_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
 
 
+def _yandex_api_key() -> str:
+    return (
+        os.getenv("YANDEX_GPT_API_KEY", "").strip()
+        or os.getenv("YANDEX_VISION_API_KEY", "").strip()
+    )
+
+
+def yandex_configured() -> bool:
+    return bool(_yandex_api_key()) and bool(os.getenv("YANDEX_FOLDER_ID", "").strip())
+
+
 def deepseek_configured() -> bool:
+    if primary_provider() == "yandex":
+        return yandex_configured()
+    if not bool(os.getenv("DEEPSEEK_API_KEY", "").strip()) and yandex_configured():
+        return True
     return bool(os.getenv("DEEPSEEK_API_KEY", "").strip())
 
 
 def ai_configured() -> bool:
-    return gemini_configured() or deepseek_configured()
+    return gemini_configured() or deepseek_configured() or yandex_configured()
 
 
-def _deepseek_json(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
+def _yandex_json(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
+    """Call YandexGPT's completion endpoint and parse a JSON object out of the reply."""
+    import httpx
+
+    api_key = _yandex_api_key()
+    if not api_key:
+        raise RuntimeError("YandexGPT API key is not configured")
+    folder = os.getenv("YANDEX_FOLDER_ID", "").strip()
+    if not folder:
+        raise RuntimeError("YandexGPT folder id is not configured")
+    model = os.getenv("YANDEX_GPT_MODEL", "yandexgpt/latest").strip() or "yandexgpt/latest"
+    url = (
+        os.getenv("YANDEX_GPT_URL", "https://llm.api.cloud.yandex.net/foundationModels/v1/completion")
+        .strip()
+        or "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+    )
+    max_tokens = os.getenv("YANDEX_GPT_MAX_TOKENS", "4000").strip() or "4000"
+    instruction = (
+        system_prompt
+        + "\n\nОтветь строго одним JSON-объектом по этой JSON-схеме, без пояснений и без markdown: "
+        + json.dumps(schema, ensure_ascii=False)
+    )
+    payload = {
+        "modelUri": f"gpt://{folder}/{model}",
+        "completionOptions": {
+            "stream": False,
+            "temperature": 0.2,
+            "maxTokens": str(max_tokens),
+        },
+        "messages": [
+            {"role": "system", "text": instruction},
+            {"role": "user", "text": user_prompt},
+        ],
+    }
+    with httpx.Client(timeout=90.0) as client:
+        response = request_with_retry(
+            client, "POST", url,
+            policy=HEAVY_AI_RETRY,
+            headers={
+                "Authorization": f"Api-Key {api_key}",
+                "x-folder-id": folder,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    raw = response.json()["result"]["alternatives"][0]["message"]["text"]
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text[3:]
+        if text.casefold().startswith("json"):
+            text = text[4:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    try:
+        result = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("YandexGPT returned an unexpected response")
+        result = json.loads(text[start:end + 1])
+    if not isinstance(result, dict):
+        raise ValueError("YandexGPT returned an unexpected response")
+    return result
+
+
+def _deepseek_call(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
     """Call DeepSeek's OpenAI-compatible chat/completions endpoint and parse a JSON object."""
     import httpx
 
@@ -275,8 +361,37 @@ def _deepseek_json(system_prompt: str, user_prompt: str, schema: dict) -> dict[s
     return result
 
 
+def _deepseek_json(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
+    """Pick the alternative provider's call: YandexGPT when primary is yandex,
+    with DeepSeek as a fallback when a DeepSeek key is present; otherwise the
+    previous DeepSeek-first path, falling back to Yandex if only Yandex is set."""
+    prefer_yandex = primary_provider() == "yandex" and yandex_configured()
+    if prefer_yandex:
+        try:
+            result = _yandex_json(system_prompt, user_prompt, schema)
+        except Exception:
+            if not os.getenv("DEEPSEEK_API_KEY", "").strip():
+                raise
+            logger.warning("YandexGPT attempt failed, falling back to DeepSeek")
+        else:
+            if isinstance(result, dict):
+                result.setdefault("_provider", "yandex")
+            return result
+    if os.getenv("DEEPSEEK_API_KEY", "").strip():
+        result = _deepseek_call(system_prompt, user_prompt, schema)
+        if isinstance(result, dict):
+            result.setdefault("_provider", "deepseek")
+        return result
+    if yandex_configured():
+        result = _yandex_json(system_prompt, user_prompt, schema)
+        if isinstance(result, dict):
+            result.setdefault("_provider", "yandex")
+        return result
+    raise RuntimeError("DeepSeek API key is not configured")
+
+
 def _try_deepseek(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any]:
-    logger.warning("Gemini failed, switching to DeepSeek provider")
+    logger.warning("Gemini failed, switching to alternative provider")
     result = _deepseek_json(system_prompt, user_prompt, schema)
     if isinstance(result, dict):
         result.setdefault("_provider", "deepseek")
@@ -284,12 +399,12 @@ def _try_deepseek(system_prompt: str, user_prompt: str, schema: dict) -> dict[st
 
 
 def _deepseek_first(system_prompt: str, user_prompt: str, schema: dict) -> dict[str, Any] | None:
-    """Try DeepSeek first when configured as the primary provider.
+    """Try the alternative provider first when configured as the primary one.
 
-    Returns the DeepSeek result on success, or None so the caller continues
-    with its normal Gemini path (including on any DeepSeek failure).
+    Returns the result on success, or None so the caller continues with its
+    normal Gemini path (including on any alternative-provider failure).
     """
-    if primary_provider() != "deepseek" or not deepseek_configured():
+    if primary_provider() not in ("deepseek", "yandex") or not deepseek_configured():
         return None
     try:
         return _try_deepseek(system_prompt, user_prompt, schema)
