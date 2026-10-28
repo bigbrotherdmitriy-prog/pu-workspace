@@ -388,7 +388,8 @@ def _accept_ai_item(item: dict, chunk_norm: str) -> dict | None:
     name = item.get("name") or ""
     if not name or not evidence:
         return None
-    if _ai_norm(evidence) not in chunk_norm:
+    fragments = [f for f in re.split(r"\.{3}|…", evidence) if len(_ai_norm(f)) >= 3]
+    if not fragments or any(_ai_norm(f) not in chunk_norm for f in fragments):
         return None
     qty = item.get("qty")
     if qty is not None:

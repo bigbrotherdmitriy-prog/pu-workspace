@@ -205,3 +205,19 @@ def test_specification_from_text_falls_back_to_layout(monkeypatch):
     assert len(items) == 1
     assert items[0]["name"] == "Щит ЩР-ИБП-ЦК1"
     assert items[0]["qty"] == Decimal("6")
+
+
+def test_accept_ai_item_allows_ellipsis_in_evidence():
+    from app.specification import _accept_ai_item, _ai_norm
+
+    chunk = "1.1\nМодульный источник питания Импульс в составе:\n- Силовой шкаф 1шт.\n- Силовой блок 6шт.\nИмпульс шт. 6\n1.2 Щит ЩР 1 шт."
+    item = {
+        "pos": "1.1",
+        "name": "Модульный источник питания Импульс",
+        "unit": "шт.",
+        "qty": 6,
+        "evidence": "1.1 Модульный источник питания Импульс в составе: ... Импульс шт. 6",
+    }
+    assert _accept_ai_item(item, _ai_norm(chunk)) is not None
+    item["evidence"] = "1.1 Выдуманная позиция ... Импульс шт. 6"
+    assert _accept_ai_item(item, _ai_norm(chunk)) is None
