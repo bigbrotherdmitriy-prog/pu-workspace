@@ -99,3 +99,10 @@
 }
 
 .dashboard-money-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; }
+
+/* The light display theme paints every button white; the control room stays dark in both themes. */
+.hud-stage .hud-readout { background: rgba(2, 12, 24, .32) !important; background-image: none !important; color: var(--hud-text) !important; }
+.hud-stage button.hud-alarm { background: transparent !important; background-image: none !important; color: var(--hud-text) !important; }
+.hud-stage button.hud-alarm:hover { background: rgba(127, 216, 255, .1) !important; }
+.hud-stage button.hud-alarm strong, .hud-stage .hud-readout strong { color: inherit; }
+.hud-stage .hud-alarm .hud-sub, .hud-stage button.hud-alarm span { color: var(--hud-muted); }
