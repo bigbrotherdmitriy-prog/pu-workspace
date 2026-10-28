@@ -304,7 +304,7 @@ def report(db: Session, project_id: int) -> dict:
             to_pay = Decimal("0")
 
         totals_positions += 1
-        if left == 0:
+        if needed > 0 and left == 0:
             totals_fully_ordered += 1
         if needed > 0 and paid >= needed:
             totals_fully_paid += 1
