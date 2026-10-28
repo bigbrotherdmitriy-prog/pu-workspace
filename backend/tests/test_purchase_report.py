@@ -177,7 +177,7 @@ def test_report_totals(world):
     res = purchase_service.report(db, project.id)
     totals = res["totals"]
     assert totals["positions"] == 3
-    assert totals["fully_ordered"] == 2  # full и empty
+    assert totals["fully_ordered"] == 1  # только full; empty (needed=0) не считается
     assert totals["fully_paid"] == 1  # только full
     assert Decimal(totals["needed_sum"]) == 15
     assert Decimal(totals["ordered_sum"]) == 9
