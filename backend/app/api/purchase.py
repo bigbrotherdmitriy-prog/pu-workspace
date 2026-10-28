@@ -80,6 +80,26 @@ def get_purchase(
     }
 
 
+@router.get("/{project_id}/purchase/report")
+def get_purchase_report(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    return purchase_service.report(db, project_id)
+
+
+@router.get("/{project_id}/purchase/invoices")
+def get_purchase_invoices(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    return {"invoices": purchase_service.invoices_for_matching(db, project_id)}
+
+
 @router.post("/{project_id}/purchase/rebuild")
 def rebuild_purchase(
     project_id: int,

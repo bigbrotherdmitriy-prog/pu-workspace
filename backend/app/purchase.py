@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.execution_finance import CashFlowEntry
+from app.models.invoice_line import InvoiceLine
 from app.models.purchase import PurchaseItem, PurchaseItemSource
 from app.models.rd import RdSpecItem, RdVolume
 
@@ -224,4 +226,168 @@ def summary(db: Session, project_id: int) -> dict:
         result["total"] += 1
         if status in result:
             result[status] += 1
+    return result
+
+
+def _is_paid(entry: CashFlowEntry) -> bool:
+    if entry.status == "paid":
+        return True
+    invoiced = _to_decimal(entry.invoiced_amount)
+    actual = _to_decimal(entry.actual_amount)
+    if actual > 0 and invoiced > 0 and actual >= invoiced:
+        return True
+    return False
+
+
+def report(db: Session, project_id: int) -> dict:
+    items = db.execute(
+        select(PurchaseItem)
+        .where(PurchaseItem.project_id == project_id)
+        .order_by(PurchaseItem.name, PurchaseItem.id)
+    ).scalars().all()
+
+    rows = db.execute(
+        select(InvoiceLine, CashFlowEntry)
+        .join(CashFlowEntry, CashFlowEntry.id == InvoiceLine.cash_flow_entry_id)
+        .where(
+            InvoiceLine.project_id == project_id,
+            InvoiceLine.purchase_item_id.is_not(None),
+        )
+    ).all()
+
+    by_item: dict[int, list[tuple[InvoiceLine, CashFlowEntry]]] = {}
+    for line, entry in rows:
+        if line.match_status != "confirmed":
+            continue
+        by_item.setdefault(line.purchase_item_id, []).append((line, entry))
+
+    result_items: list[dict] = []
+    totals_positions = 0
+    totals_fully_ordered = 0
+    totals_fully_paid = 0
+    totals_needed = Decimal("0")
+    totals_ordered = Decimal("0")
+    totals_paid = Decimal("0")
+
+    for item in items:
+        needed = _to_decimal(item.qty_needed)
+        ordered = Decimal("0")
+        paid = Decimal("0")
+        invoices: list[dict] = []
+        seen_entries: dict[int, dict] = {}
+
+        for line, entry in by_item.get(item.id, []):
+            qty = _to_decimal(line.qty)
+            ordered += qty
+            entry_paid = _is_paid(entry)
+            if entry_paid:
+                paid += qty
+            if entry.id in seen_entries:
+                existing = seen_entries[entry.id]
+                existing["qty"] = str(_to_decimal(existing["qty"]) + qty)
+            else:
+                info = {
+                    "entry_id": entry.id,
+                    "title": entry.title,
+                    "counterparty": entry.counterparty,
+                    "qty": str(qty),
+                    "paid": entry_paid,
+                }
+                seen_entries[entry.id] = info
+                invoices.append(info)
+
+        left = needed - ordered
+        if left < 0:
+            left = Decimal("0")
+        to_pay = ordered - paid
+        if to_pay < 0:
+            to_pay = Decimal("0")
+
+        totals_positions += 1
+        if left == 0:
+            totals_fully_ordered += 1
+        if needed > 0 and paid >= needed:
+            totals_fully_paid += 1
+        totals_needed += needed
+        totals_ordered += ordered
+        totals_paid += paid
+
+        result_items.append({
+            "id": item.id,
+            "name": item.name,
+            "type_mark": item.type_mark,
+            "unit": item.unit,
+            "needed": str(needed),
+            "ordered": str(ordered),
+            "paid": str(paid),
+            "left": str(left),
+            "to_pay": str(to_pay),
+            "status": item.status,
+            "invoices": invoices,
+        })
+
+    unmatched = db.execute(
+        select(InvoiceLine.id).where(
+            InvoiceLine.project_id == project_id,
+            InvoiceLine.match_status != "confirmed",
+        )
+    ).all()
+
+    return {
+        "items": result_items,
+        "totals": {
+            "positions": totals_positions,
+            "fully_ordered": totals_fully_ordered,
+            "fully_paid": totals_fully_paid,
+            "needed_sum": str(totals_needed),
+            "ordered_sum": str(totals_ordered),
+            "paid_sum": str(totals_paid),
+        },
+        "unmatched_lines": len(unmatched),
+    }
+
+
+_EXCLUDED_STATUSES = {"cancelled", "deleted", "rejected"}
+
+
+def invoices_for_matching(db: Session, project_id: int) -> list[dict]:
+    entries = db.execute(
+        select(CashFlowEntry).where(
+            CashFlowEntry.project_id == project_id,
+            CashFlowEntry.direction == "outflow",
+            CashFlowEntry.source_document_id.is_not(None),
+        )
+    ).scalars().all()
+
+    entries = [e for e in entries if e.status not in _EXCLUDED_STATUSES]
+    entries.sort(
+        key=lambda e: (e.planned_date is None, e.planned_date, e.id),
+    )
+    entries.reverse()
+
+    result: list[dict] = []
+    for entry in entries:
+        lines = db.execute(
+            select(InvoiceLine).where(
+                InvoiceLine.project_id == project_id,
+                InvoiceLine.cash_flow_entry_id == entry.id,
+            )
+        ).scalars().all()
+        total = len(lines)
+        confirmed = sum(1 for ln in lines if ln.match_status == "confirmed")
+        suggested = sum(1 for ln in lines if ln.match_status == "suggested")
+        amount = entry.invoiced_amount
+        if amount is None:
+            amount = entry.planned_amount
+        result.append({
+            "entry_id": entry.id,
+            "title": entry.title,
+            "counterparty": entry.counterparty,
+            "planned_date": entry.planned_date.isoformat() if entry.planned_date else None,
+            "amount": str(_to_decimal(amount)),
+            "paid": _is_paid(entry),
+            "lines": total,
+            "confirmed": confirmed,
+            "suggested": suggested,
+        })
     return result
