@@ -54,6 +54,7 @@ test.describe("phone", () => {
     test(`mail is a list first, then one letter with "Назад" (${theme})`, async ({ page, mock: _mock }) => {
       await withMail(page);
       await page.goto("/new/");
+      await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
       await settled(page);
       await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
@@ -110,6 +111,7 @@ test.describe("desktop", () => {
   test("keeps the list and the letter side by side", async ({ page, mock: _mock }) => {
     await withMail(page);
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.locator(".shell > aside").getByRole("button", { name: "Письма", exact: true }).click();
     const list = page.getByRole("region", { name: "Список писем" });

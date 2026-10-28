@@ -45,6 +45,7 @@ async function withData(page: Page) {
 async function open(page: Page, theme: string, tab: "ГПР" | "ДДС") {
   await withData(page);
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await chooseThemeOnPhone(page, theme);
   await page.locator(".android-bottom-nav").getByRole("button", { name: tab, exact: true }).click();
   await expect(page.getByRole("tab", { name: tab, exact: true })).toHaveAttribute("aria-selected", "true");
@@ -160,6 +161,7 @@ test.describe("desktop", () => {
   test("keeps the table, the Gantt chart, the toolbar and the year calendar", async ({ page, mock: _mock }) => {
     await withData(page);
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
     await expect(page.locator(".gpr-split")).toBeVisible();
     await expect(page.locator(".gpr-chart")).toBeVisible();

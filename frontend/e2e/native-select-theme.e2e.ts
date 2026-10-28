@@ -30,6 +30,7 @@ for (const theme of ["light", "dark"]) {
     await page.addInitScript(theme => localStorage.setItem("pu-display-preferences-v1",
       JSON.stringify({ theme, comfort: false })), theme);
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     const project = page.getByRole("combobox", { name: "Текущий проект", exact: true });
     await expect(project.locator("option")).toHaveCount(2);
     await expect(page.locator(".shell")).toHaveClass(/future-light-dashboard/);

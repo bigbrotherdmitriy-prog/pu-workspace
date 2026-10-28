@@ -47,6 +47,7 @@ test("classifies 638 files in four durable batches and creates only after confir
   });
 
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Договоры", exact: true }).click();
   await page.getByRole("button", { name: "Найти договоры" }).click();
   await expect(page.getByText("Найдено кандидатов: 1")).toBeVisible();

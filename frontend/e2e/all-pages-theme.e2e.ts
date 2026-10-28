@@ -16,6 +16,7 @@ for (const theme of ["light", "dark"]) test(`all sections remain readable in ${t
     summary: { budget_planned: 0, budget_committed: 0, budget_actual: 0, budget_forecast: 0, budget_variance: 0, cash_balance_forecast: -30000, cash_gap: 30000, cash_gap_date: "2026-09-25", delayed_schedule: 0, late_procurement: 0, acts_pending: 0, pending_payments: 1, unlinked_invoices: 0 },
   } }));
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   // The reference Work Center has no reading-controls toolbar. Change the
   // application theme on a regular screen, then audit every screen as before.
   await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
@@ -116,6 +117,7 @@ for (const theme of ["light", "dark"]) test(`login and mail settings follow ${th
   await page.addInitScript(theme => localStorage.setItem("pu-display-preferences-v1", JSON.stringify({ theme, comfort: false })), theme);
   await page.route("**/auth/me", route => route.fulfill({ status: 401, json: { detail: "not authenticated" } }));
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await expect(page.locator(".login-card")).toBeVisible();
   const surface = theme === "dark" ? "rgb(16, 36, 60)" : "rgb(245, 244, 240)";
   await expect(page.locator(".login-card")).toHaveCSS("background-color", surface);

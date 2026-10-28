@@ -27,6 +27,7 @@ test.describe("phone", () => {
     });
 
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.locator(".android-bottom-nav").getByRole("button", { name: "Задачи", exact: true }).click();
     // Default filter «Мои активные» shows my overdue tasks.

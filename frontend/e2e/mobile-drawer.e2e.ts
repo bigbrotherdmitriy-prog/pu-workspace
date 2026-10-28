@@ -7,6 +7,7 @@ test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true
 
 for (const theme of ["Тёмная", "Светлая"]) test(`"Ещё" shows a usable drawer (${theme})`, async ({ page, mock }) => {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await settled(page);
   await chooseThemeOnPhone(page, theme);
   await page.getByRole("button", { name: "Открыть всё меню" }).click();

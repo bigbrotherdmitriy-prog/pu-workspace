@@ -14,6 +14,7 @@ test("Ctrl+K performs scoped search with filters, pagination, exact navigation a
     },
   ];
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await expect(page.getByLabel("Текущий проект")).toHaveValue("2");
 
   await page.keyboard.press("Control+K");
@@ -48,6 +49,7 @@ test("Ctrl+K performs scoped search with filters, pagination, exact navigation a
 
 test("project switch clears query and never shows previous project hits", async ({ page, mock }) => {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.keyboard.press("Control+K");
   const input = page.getByLabel("Поиск по проекту");
   await input.fill("акт");

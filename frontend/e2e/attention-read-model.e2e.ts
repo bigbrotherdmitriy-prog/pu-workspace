@@ -11,6 +11,7 @@ test("shows a project-scoped attention item with origin and opens its section", 
   }];
 
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "AI Secretary", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Требует внимания", exact: true })).toBeVisible();
   const card = page.getByRole("article").filter({ hasText: "Риск задержки поставки" });

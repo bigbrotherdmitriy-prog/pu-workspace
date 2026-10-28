@@ -10,6 +10,7 @@ const sections = ["Центр", "Задачи", "Письма"];
 
 async function openTheme(page: Page, theme: string) {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await settled(page);
   await chooseThemeOnPhone(page, theme);
 }
@@ -95,6 +96,7 @@ test.describe("desktop", () => {
   test.use({ viewport: { width: 1440, height: 1000 }, isMobile: false, hasTouch: false });
   test("keeps the full header", async ({ page, mock: _mock }) => {
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.locator(".shell > aside").getByRole("button", { name: "Задачи", exact: true }).click();
     await expect(page.locator(".shell > main > header .page-kicker")).toBeVisible();

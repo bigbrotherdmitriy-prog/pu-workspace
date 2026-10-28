@@ -24,6 +24,7 @@ const completedMeeting = (canManage = true) => ({
 test("binds exact local-upload evidence then confirms one proposal separately", async ({ page, mock }) => {
   mock.meetings = [completedMeeting()];
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Совещания" }).click();
 
   await expect(page.getByLabel("Источник протокола Совещание по акту")).toHaveValue(
@@ -59,6 +60,7 @@ test("shows stale source conflict truthfully and never implies an applied action
     body: { detail: { code: "record_version_conflict" } },
   };
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Совещания" }).click();
   await page.getByRole("button", { name: "Привязать точную версию и подготовить предложения" }).click();
   await expect(page.getByRole("alert")).toContainText("Протокол изменился");
@@ -76,6 +78,7 @@ test("viewer sees evidence but no binding or confirmation controls", async ({ pa
     status: "proposed",
   }]);
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Совещания" }).click();
   await expect(page.getByLabel("Безопасные действия: Совещание по акту").locator("blockquote")).toContainText(
     "Подготовить акт до 25.09.2026",

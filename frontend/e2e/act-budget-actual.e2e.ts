@@ -56,6 +56,7 @@ test("links an act, signs it into budget actual, then revokes the projection", a
   });
 
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   const dds = page.getByRole("tabpanel", { name: "ДДС" });

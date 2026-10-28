@@ -231,6 +231,7 @@ test("active analysis does not capture navigation and progress refreshes after r
 test("explicit missing project never falls back after reload", async ({ page, mock }) => {
   mock.projectRows = mock.projectRows.slice(0, 1);
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await expect(page.getByText(/Проект №2 отсутствует в ответе сервера/)).toBeVisible();
   await page.reload();
   await expect(page.getByRole("combobox").first()).toHaveValue("2");

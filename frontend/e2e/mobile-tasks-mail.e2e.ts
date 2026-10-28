@@ -70,6 +70,7 @@ test.describe("phone", () => {
     test(`task cards are compact with details on demand (${theme})`, async ({ page, mock: _mock }) => {
       await withData(page);
       await page.goto("/new/");
+      await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
       await settled(page);
       await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Задачи", exact: true }).click();
@@ -108,6 +109,7 @@ test.describe("phone", () => {
       const calls = await withData(page);
       await withAutoSourceChainReady(page);
       await page.goto("/new/");
+      await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
       await settled(page);
       await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
@@ -148,6 +150,7 @@ test.describe("phone", () => {
     test(`AUTO for mail is deferred: the phone links a contract instead (${theme})`, async ({ page, mock: _mock }) => {
       const calls = await withData(page);
       await page.goto("/new/");
+      await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
       await settled(page);
       await chooseThemeOnPhone(page, theme);
       await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
@@ -203,6 +206,7 @@ test.describe("desktop", () => {
     await withData(page);
     await withAutoSourceChainReady(page);
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.locator(".shell > aside").getByRole("button", { name: "Задачи", exact: true }).click();
     await page.getByRole("button", { name: "Все", exact: true }).click();
@@ -223,6 +227,7 @@ test.describe("desktop", () => {
   test("hides the desktop AUTO-for-mail button while the source chain is not ready", async ({ page, mock: _mock }) => {
     await withData(page);
     await page.goto("/new/");
+    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.locator(".shell > aside").getByRole("button", { name: "Письма", exact: true }).click();
     await page.getByRole("button", { name: /Исполнительная документация по фасаду/ }).click();
