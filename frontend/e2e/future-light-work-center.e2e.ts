@@ -40,6 +40,7 @@ test("future-light work center uses live totals and works at 1440 and 390", asyn
   await page.route("**/dashboard/project?*", route => route.fulfill({ json: dashboard }));
   await page.route("**/execution/overview?*", route => route.fulfill({ json: finance }));
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
 
   const deck = page.locator(".dashboard-overview-deck");
   await expect(deck).toBeVisible();

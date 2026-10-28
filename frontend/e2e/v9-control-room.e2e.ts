@@ -2,6 +2,7 @@ import { expect, test } from "./storage-fixtures";
 
 test("working center renders the structural engineering control room", async ({ page, mock: _mock }, testInfo) => {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
 
   const deck = page.locator(".dashboard-overview-deck");
   await expect(deck).toBeVisible();

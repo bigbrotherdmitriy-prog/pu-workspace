@@ -6,6 +6,7 @@ test("reading themes retain contrast, legible copy and responsive layout", async
     configured: false, latitude: null, longitude: null, label: null, radius_m: null, accuracy_m: null,
   } }));
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await expect(page.locator(".dashboard-overview-deck")).toBeVisible();
   for (const theme of ["light", "dark"]) {
     await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
@@ -58,6 +59,7 @@ test("reading themes retain contrast, legible copy and responsive layout", async
 test("scheduled theme follows local time and manual theme overrides schedule", async ({ page, mock: _mock }) => {
   await page.clock.install({ time: new Date(2026, 8, 5, 19, 59, 50) });
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: "По времени", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-display-theme", "light");
@@ -70,6 +72,7 @@ test("scheduled theme follows local time and manual theme overrides schedule", a
 
 test("control-room screen renders without 3D and opens project finance", async ({ page, mock }) => {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.locator("aside nav").getByRole("button", { name: "Сегодня", exact: true }).click();
   await page.getByRole("button", { name: "Тёмная", exact: true }).click();
   await page.locator("aside nav").getByRole("button", { name: "Рабочий центр", exact: true }).click();

@@ -2,6 +2,7 @@ import { expect, test } from "./storage-fixtures";
 
 test("sent folder refresh requests Gmail sent mail and renders the imported result", async ({ page, mock }) => {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.locator("aside nav").getByRole("button", { name: /Письма/ }).click();
   await page.getByRole("button", { name: /Отправленные/ }).click();
   await expect(page.getByText("Загруженных писем в этой папке нет")).toBeVisible();
@@ -29,6 +30,7 @@ test("sent folder refresh requests Gmail sent mail and renders the imported resu
 
 test("future-light keeps the production reading surface and the rail outside the content", async ({ page, mock: _mock }) => {
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await expect(page.getByRole("heading", { name: "Штаб управления проектом" })).toBeVisible();
   await expect(page.locator(".shell")).toHaveClass(/future-light-dashboard/);
   await expect(page.locator(".dashboard-hero")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
@@ -59,6 +61,7 @@ test("cached mail remains readable in v9 during provider outage and navigation",
     } });
   };
   await page.goto("/new/");
+  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   for (let visit = 0; visit < 2; visit++) {
     prepare();
     await page.locator("aside nav").getByRole("button", { name: /Письма/ }).click();
