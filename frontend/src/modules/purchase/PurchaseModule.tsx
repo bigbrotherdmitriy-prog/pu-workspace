@@ -142,6 +142,7 @@ export function PurchaseModule({ projectId }: Props) {
         body: JSON.stringify(patch),
       });
       setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
+      setReloadTick((value) => value + 1);
     } catch (err) {
       setRowError({ id, message: err instanceof Error ? err.message : "Не удалось сохранить позицию" });
       setReloadTick((value) => value + 1);

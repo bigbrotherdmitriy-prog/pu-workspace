@@ -116,6 +116,7 @@ const InvoiceQuickConfirm = lazy(() => import("./modules/finance/InvoiceQuickCon
 const WorkCenterHud = lazy(() => import("./modules/dashboard/WorkCenterHud").then((m) => ({ default: m.WorkCenterHud })));
 const MoneyCalendar = lazy(() => import("./modules/dashboard/MoneyCalendar").then((m) => ({ default: m.MoneyCalendar })));
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
+const PurchaseModule = lazy(() => import("./modules/purchase/PurchaseModule").then((m) => ({ default: m.PurchaseModule })));
 const RdModule = lazy(() => import("./modules/rd/RdModule").then((m) => ({ default: m.RdModule })));
 const ExecutiveDocsModule = lazy(() => import("./modules/executive-docs/ExecutiveDocsModule").then((m) => ({ default: m.ExecutiveDocsModule })));
 const WorkCenterDashboard = lazy(() => import("./modules/dashboard/WorkCenterDashboard").then((m) => ({ default: m.WorkCenterDashboard })));
@@ -354,7 +355,7 @@ const navigationGroups = [
   ] },
   { label: "Контроль", items: [
     [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
-    [CalendarRange, "ГПР и ДДС"], [ClipboardCheck, "Исполнительная документация"], [FileText, "Рабочая документация"], [BarChart3, "Портфель"], [BarChart3, "Аналитика"],
+    [CalendarRange, "ГПР и ДДС"], [ClipboardCheck, "Исполнительная документация"], [FileText, "Рабочая документация"], [Wallet, "Закупка"], [BarChart3, "Портфель"], [BarChart3, "Аналитика"],
     [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
   ] },
   { label: "Система", items: [
@@ -3797,6 +3798,7 @@ export function App() {
       {quickInvoice && <InvoiceQuickConfirm projectId={quickInvoice.projectId} proposalId={quickInvoice.id} onClose={() => { setQuickInvoice(null); window.history.replaceState({}, "", window.location.pathname); }} onConfirmed={() => void load()} />}
       {active === "Исполнительная документация" && <ExecutiveDocsModule projectId={projectId} />}
       {active === "Рабочая документация" && <RdModule projectId={projectId} />}
+      {active === "Закупка" && <PurchaseModule projectId={projectId} />}
       {active === "Портфель" && <PortfolioModule onOpenProject={(id) => { void activateProject(id); setActive("ГПР и ДДС"); }} />}
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (
