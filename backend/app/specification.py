@@ -383,13 +383,30 @@ def _split_ai_chunks(text: str) -> list[str]:
     return chunks
 
 
+def _evidence_in_chunk(evidence: str, chunk_norm: str) -> bool:
+    """Quote must appear verbatim; an ellipsis may skip text, but the pieces keep their order."""
+    if not re.search(r"\.{3}|…", evidence):
+        return _ai_norm(evidence) in chunk_norm
+    pos = 0
+    found = False
+    for fragment in re.split(r"\.{3}|…", evidence):
+        frag = _ai_norm(fragment)
+        if not frag:
+            continue
+        at = chunk_norm.find(frag, pos)
+        if at < 0:
+            return False
+        pos = at + len(frag)
+        found = True
+    return found
+
+
 def _accept_ai_item(item: dict, chunk_norm: str) -> dict | None:
     evidence = item.get("evidence") or ""
     name = item.get("name") or ""
     if not name or not evidence:
         return None
-    fragments = [f for f in re.split(r"\.{3}|…", evidence) if len(_ai_norm(f)) >= 3]
-    if not fragments or any(_ai_norm(f) not in chunk_norm for f in fragments):
+    if not _evidence_in_chunk(evidence, chunk_norm):
         return None
     qty = item.get("qty")
     if qty is not None:
