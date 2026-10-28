@@ -47,7 +47,6 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     });
 
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await expect(page.getByLabel("Текущий проект")).toHaveValue("2");
     await page.locator('aside button[title="Договоры"]').click();
     // Initial navigation is common to both runs; the card/editor use the target viewport.

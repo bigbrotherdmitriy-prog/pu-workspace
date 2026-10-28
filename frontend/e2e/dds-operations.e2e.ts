@@ -10,7 +10,6 @@ test("combines repeated DDS cost names and distributes their sums by month", asy
   } }));
 
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "Таблица ДДС" }).click();
@@ -36,7 +35,6 @@ test("cancels an unlinked DDS proposal with confirmation and persists after relo
     await route.fulfill({ json: { id: 9, status: row.status } });
   });
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "Таблица ДДС" }).click();
@@ -75,7 +73,6 @@ test("moves an aggregated DDS cell to another month with the visible handle", as
   });
 
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "Таблица ДДС" }).click();
@@ -112,7 +109,6 @@ test("uploads several dropped invoices and opens the chosen document for human r
     await route.fulfill({ json: { id: 501, project_id: 2, source_document_id: id, amount: 100, currency: "RUB", status: "proposed", target_kind: "cash_flow", extraction_method: "regex", confidence: 0.35, requires_confirmation: true } });
   });
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "ДДС", exact: true }).click();
   await page.getByRole("tab", { name: "Таблица ДДС" }).click();

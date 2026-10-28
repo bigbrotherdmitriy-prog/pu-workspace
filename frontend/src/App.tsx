@@ -3377,7 +3377,7 @@ export function App() {
                     } else { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }
                   }} />
               </section>}
-              <details className="work-center-more"><summary>Ещё: задачи, письма и источники</summary>
+              <div className="work-center-more">
               <WorkCenterDashboard
                 projectName={projects.find((item) => item.id === projectId)?.name || "Текущий проект"}
                 nextStep={dailyBriefing?.next_step}
@@ -3750,7 +3750,7 @@ export function App() {
                   </div>
                 </section>
               </div>
-              </details>
+              </div>
             </>
           ) : null}
         </section>

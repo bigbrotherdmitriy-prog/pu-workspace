@@ -13,7 +13,6 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         body: JSON.stringify({ detail: { code: "RECORD_VERSION_CONFLICT" } }) });
     });
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await expect(page.getByLabel("Текущий проект")).toHaveValue("2");
     await page.locator('aside button[title="Договоры"]').click();
     await page.locator(".contract-register-row").filter({ hasText: "SYN-31" })
@@ -64,7 +63,6 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         body: JSON.stringify({ detail: "Synthetic confirmation refusal" }) });
     });
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await expect(page.getByLabel("Текущий проект")).toHaveValue("2");
     await page.locator('aside button[title="ГПР и ДДС"]').click();
     await page.getByRole("tab", { name: "ДДС", exact: true }).click();

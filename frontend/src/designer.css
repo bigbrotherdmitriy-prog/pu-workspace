@@ -496,6 +496,4 @@ button:not(.icon):not(nav button) { border-radius: var(--pu-radius-sm); }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
-.work-center-more { margin: 16px 0; }
-.work-center-more > summary { cursor: pointer; padding: 10px 14px; border: 1px solid var(--read-rule, #3a4a5c); border-radius: 10px; color: var(--read-muted, #9dbed6); font-weight: 600; list-style: none; }
-.work-center-more[open] > summary { margin-bottom: 16px; }
+.work-center-more { margin: 24px 0 0; padding-top: 8px; }

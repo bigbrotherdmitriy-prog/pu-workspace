@@ -35,7 +35,6 @@ for (const [width, height] of [[1220, 760], [1472, 800], [1920, 1080]]) {
     for (const theme of ["Тёмная", "Светлая"]) test(`long project name keeps the header and content inside main (${theme})`, async ({ page, mock }) => {
       mock.projectRows = [{ id: 1, name: "Persistent Project" }, { id: 2, name: longName }];
       await page.goto("/new/");
-      await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
       await settled(page);
       await page.getByRole("button", { name: theme, exact: true }).first().click();
       for (const section of sections) {

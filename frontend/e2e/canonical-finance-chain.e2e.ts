@@ -105,7 +105,6 @@ test("keeps contract GPR budget invoice payment and act in one confirmed chain",
   });
 
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "ГПР и ДДС", exact: true }).click();
   await expect(page.getByRole("tabpanel", { name: "ГПР" })).toBeVisible();
   await expect(page.getByText("Действующая версия ГПР", { exact: true })).toBeVisible();

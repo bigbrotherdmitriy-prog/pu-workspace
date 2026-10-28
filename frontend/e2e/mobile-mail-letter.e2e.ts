@@ -51,7 +51,6 @@ async function withMail(page: Page, letters: Raw[]) {
 
 async function openMail(page: Page) {
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await settled(page);
   await page.locator(".android-bottom-nav").getByRole("button", { name: "Письма", exact: true }).click();
 }

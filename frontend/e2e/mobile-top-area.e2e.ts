@@ -29,7 +29,6 @@ test.describe("phone", () => {
   test("content starts near the top: no theme row, no idle sync card", async ({ page, mock: _mock }, info) => {
     await connection(page, true);
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     for (const section of ["Центр", "Задачи"]) {
       await show(page, section);
@@ -50,7 +49,6 @@ test.describe("phone", () => {
 
   test("theme switching works from the \"Ещё\" drawer", async ({ page, mock: _mock }, info) => {
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.getByRole("button", { name: "Открыть всё меню" }).click();
     const drawer = page.locator(".shell > aside.mobile-open");
@@ -87,7 +85,6 @@ test.describe("phone", () => {
     }));
     await connection(page, true);
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await show(page, "Задачи");
     await page.evaluate(() => {
@@ -122,7 +119,6 @@ test.describe("desktop", () => {
   test("keeps the theme row and the sync panel", async ({ page, mock: _mock }) => {
     await connection(page, true);
     await page.goto("/new/");
-    await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
     await settled(page);
     await page.locator(".shell > aside").getByRole("button", { name: "Задачи", exact: true }).click();
     const content = page.locator(".shell > main > .content");

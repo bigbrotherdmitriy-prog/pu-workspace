@@ -63,7 +63,6 @@ test("proposes one contract total and manager confirms it into budget", async ({
   });
 
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Договоры", exact: true }).click();
   await expect(page.getByRole("table", { name: "Реестр договоров" })).toBeVisible();
   await expect(page.locator(".contract-register-row").filter({ hasText: "C-41" })).toContainText("100 000,00 ₽");

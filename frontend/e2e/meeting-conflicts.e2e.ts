@@ -2,7 +2,6 @@ import { expect, test } from "./storage-fixtures";
 
 test("warns about an overlapping participant without blocking either meeting", async ({ page, mock }) => {
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Совещания" }).click();
 
   const title = page.getByPlaceholder("Название совещания");
@@ -29,7 +28,6 @@ test("warns about an overlapping participant without blocking either meeting", a
 
 test("warns about the same organization resource without blocking either meeting", async ({ page, mock }) => {
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await page.getByRole("button", { name: "Совещания" }).click();
 
   await page.getByPlaceholder("Название ресурса").fill("Переговорная Север");

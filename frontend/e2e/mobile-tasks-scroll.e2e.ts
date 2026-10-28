@@ -17,7 +17,6 @@ const lastTask = "#task-1027";
 async function openTasks(page: Page) {
   await page.route("**/tasks?project_id=2*", route => route.fulfill({ json: { tasks } }));
   await page.goto("/new/");
-  await page.locator(".work-center-more > summary").click({ timeout: 2000 }).catch(() => {});
   await settled(page);
   await page.locator(".android-bottom-nav").getByRole("button", { name: "Задачи", exact: true }).click();
   await page.getByRole("button", { name: "Все", exact: true }).click();
