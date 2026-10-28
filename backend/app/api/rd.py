@@ -10,15 +10,17 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.jobs.queue import enqueue
-from app.models.rd import RdSpecItem, RdVolume
+from app.models.rd import RdSheet, RdSpecItem, RdVolume
 from app.rd_service import (
     import_folder,
     item_counts,
     item_dict,
     parse_volume,
     set_item_status,
+    sheet_dict,
     update_item,
     volume_dict,
+    volume_sheet_count,
 )
 
 router = APIRouter(prefix="/projects", tags=["rd"])
@@ -62,7 +64,12 @@ def list_volumes(
         .where(RdVolume.project_id == project_id)
         .order_by(RdVolume.id)
     ).scalars().all()
-    return [volume_dict(v, item_counts(db, v.id)) for v in vols]
+    result = []
+    for v in vols:
+        counts = item_counts(db, v.id)
+        counts["sheets"] = volume_sheet_count(db, v.id)
+        result.append(volume_dict(v, counts))
+    return result
 
 
 @router.post("/{project_id}/rd/import")
@@ -104,6 +111,23 @@ def reparse_volume(
     )
     db.commit()
     return volume_dict(vol, item_counts(db, vol.id))
+
+
+@router.get("/{project_id}/rd/volumes/{volume_id}/sheets")
+def list_sheets(
+    project_id: int,
+    volume_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    _get_volume(db, project_id, volume_id)
+    sheets = db.execute(
+        select(RdSheet)
+        .where(RdSheet.volume_id == volume_id)
+        .order_by(RdSheet.page_no, RdSheet.id)
+    ).scalars().all()
+    return [sheet_dict(s) for s in sheets]
 
 
 @router.get("/{project_id}/rd/volumes/{volume_id}/items")
