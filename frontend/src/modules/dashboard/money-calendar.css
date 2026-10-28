@@ -180,3 +180,47 @@
 
 .money-calendar-action { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.25)); background: transparent; color: var(--read-text, #1f2937); cursor: pointer; white-space: nowrap; }
 .money-calendar-action:hover { border-color: var(--read-accent, #2563eb); }
+
+/* Owner 27.10.2026: the work center is a dark control-room screen, so the money
+   block that sits right under the HUD becomes a matching glass panel. */
+.dashboard-money-row .money-calendar {
+  background: rgba(8, 30, 60, .55);
+  border: 1px solid rgba(127, 216, 255, .35);
+  color: #d9f1ff;
+  backdrop-filter: blur(7px);
+}
+.dashboard-money-row .money-calendar h2,
+.dashboard-money-row .money-calendar h3,
+.dashboard-money-row .money-calendar .money-calendar-title,
+.dashboard-money-row .money-calendar .money-calendar-amount {
+  color: #d9f1ff;
+}
+.dashboard-money-row .money-calendar .money-calendar-kind,
+.dashboard-money-row .money-calendar .money-calendar-counterparty,
+.dashboard-money-row .money-calendar .money-calendar-contract,
+.dashboard-money-row .money-calendar .money-calendar-empty {
+  color: #9dbed6;
+}
+.dashboard-money-row .money-calendar .money-calendar-link {
+  color: #d9f1ff;
+}
+.dashboard-money-row .money-calendar .money-calendar-link:hover {
+  color: #9ff0ff;
+}
+.dashboard-money-row .money-calendar .money-calendar-action,
+.dashboard-money-row .money-calendar .money-calendar-more {
+  background: transparent;
+  border: 1px solid rgba(127, 216, 255, .5);
+  color: #d9f1ff;
+}
+.dashboard-money-row .money-calendar .money-calendar-action:hover,
+.dashboard-money-row .money-calendar .money-calendar-more:hover {
+  border-color: rgba(127, 216, 255, .8);
+  color: #9ff0ff;
+}
+.dashboard-money-row .money-calendar .money-calendar-row {
+  background: rgba(2, 12, 24, .35);
+}
+.dashboard-money-row .money-calendar .money-calendar-unmarked {
+  color: #d9f1ff;
+}
