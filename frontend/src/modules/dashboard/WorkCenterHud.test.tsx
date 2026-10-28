@@ -79,3 +79,29 @@ it("reports a cash gap when the plan balance goes below zero after today", async
   expect(await screen.findByText("Кассовый разрыв")).toBeTruthy();
   expect(screen.getByText("Ожидается кассовый разрыв по плану")).toBeTruthy();
 });
+
+it("shows empty states for stages, events and executive docs when nothing is loaded", async () => {
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/budget-from-dds")) return budget;
+    if (path.endsWith("/money-calendar")) return { items: [], counts: {} };
+    return { objects: [], id_readiness: [], invoices_to_check: 0 };
+  });
+  const onOpenDocuments = vi.fn();
+  render(<WorkCenterHud projectId={7} onOpenFinance={vi.fn()} onOpenDocuments={onOpenDocuments} />);
+  expect(await screen.findByText("Этапы по объектам ещё не заведены")).toBeTruthy();
+  expect(screen.getByText("Событий, требующих внимания, нет — всё в порядке")).toBeTruthy();
+  expect(screen.getByText("Данных по исполнительной документации пока нет")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Открыть договоры/ }));
+  expect(onOpenDocuments).toHaveBeenCalled();
+});
+
+it("hides the documents action when onOpenDocuments is not provided", async () => {
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/budget-from-dds")) return budget;
+    if (path.endsWith("/money-calendar")) return { items: [], counts: {} };
+    return { objects: [], id_readiness: [], invoices_to_check: 0 };
+  });
+  render(<WorkCenterHud projectId={7} onOpenFinance={vi.fn()} />);
+  expect(await screen.findByText("Этапы по объектам ещё не заведены")).toBeTruthy();
+  expect(screen.queryByText("Открыть договоры")).toBeNull();
+});

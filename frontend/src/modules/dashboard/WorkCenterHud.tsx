@@ -207,7 +207,12 @@ export function WorkCenterHud({ projectId, onOpenFinance, onOpenItem, onOpenInvo
                   <div className="hud-readout"><span>Осталось актировать</span><b className="led amber">{mln(extra.objects.reduce((t, o) => t + num(o.price) - num(o.acted), 0))}</b><div className="hud-cap">млн ₽ по этапам договора</div></div>
                 </div>
               </>
-              : <p className="hud-muted">{extra ? "Этапы договора ещё не извлечены — раскройте «Этапы и поступления» в договоре." : "Загружаем этапы…"}</p>}
+              : extra
+                ? <>
+                  <p className="hud-empty">Этапы по объектам ещё не заведены</p>
+                  {onOpenDocuments && <div className="hud-readouts" style={{ marginTop: 14 }}><button type="button" className="hud-readout hud-click" onClick={onOpenDocuments}><span>Документы</span><b className="led cyan">→</b><div className="hud-cap">Открыть договоры</div></button></div>}
+                </>
+                : <p className="hud-muted">Загружаем этапы…</p>}
           </section>
 
           <section className="hud-panel" aria-label="Деньги проекта">
@@ -225,7 +230,7 @@ export function WorkCenterHud({ projectId, onOpenFinance, onOpenItem, onOpenInvo
 
           <section className="hud-panel" aria-label="Журнал событий">
             <div className="hud-ptitle">Журнал событий {alarms > 0 && <span className="hud-tag hud-tag-alarm hud-blink">{alarms} АВАР.</span>}</div>
-            {events.length === 0 && toCheck === 0 && <p className="hud-muted">Событий нет.</p>}
+            {events.length === 0 && toCheck === 0 && <p className="hud-empty ok">Событий, требующих внимания, нет — всё в порядке</p>}
             {events.map((item, index) => (
               <button type="button" className="hud-alarm" key={`${item.kind}-${index}`} onClick={() => onOpenItem ? onOpenItem(item) : onOpenFinance()}
                 aria-label={`${kindLabel[item.kind] ?? item.kind}: ${item.title}, ${whenText(item)}`}>
@@ -268,6 +273,7 @@ export function WorkCenterHud({ projectId, onOpenFinance, onOpenItem, onOpenInvo
 
           <section className="hud-panel" aria-label="Исполнительная документация">
             <div className="hud-ptitle">Исполнительная документация</div>
+            {extra && extra.id_readiness.length === 0 && <p className="hud-empty">Данных по исполнительной документации пока нет</p>}
             <div className="hud-readouts">
               {(extra?.id_readiness ?? []).map((r) => (
                 <button type="button" className="hud-readout hud-click" key={r.object} onClick={onOpenDocuments}>
