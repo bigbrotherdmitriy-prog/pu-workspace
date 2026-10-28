@@ -62,3 +62,21 @@ class RdSpecItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     volume: Mapped["RdVolume"] = relationship(back_populates="items")
+
+
+class RdSheet(Base):
+    __tablename__ = "rd_sheets"
+    __table_args__ = (
+        UniqueConstraint("volume_id", "page_no", name="uq_rd_sheet_page"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    volume_id: Mapped[int] = mapped_column(
+        ForeignKey("rd_volumes.id", ondelete="CASCADE"), index=True,
+    )
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    page_no: Mapped[int] = mapped_column(Integer)
+    sheet_no: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sheet_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    text_source: Mapped[str] = mapped_column(String(10))
+    text_len: Mapped[int] = mapped_column(Integer, default=0)
