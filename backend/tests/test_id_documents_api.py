@@ -135,6 +135,91 @@ def test_docx_returns_zip_bytes(world):
     assert "attachment" in cd and "AOSR-" in cd
 
 
+def test_docx_requires_work_dates(world):
+    db = world["db"]
+    payload = _payload(world["contract"].id)
+    payload.work_start = None
+    payload.work_finish = None
+    with pytest.raises(HTTPException) as exc:
+        api.download_aosr_docx(
+            project_id=world["project"].id,
+            body=payload,
+            db=db,
+            user=world["user"],
+        )
+    assert exc.value.status_code == 422
+    assert "Укажите даты начала и окончания работ" in exc.value.detail
+
+
+def test_docx_rejects_finish_before_start(world):
+    db = world["db"]
+    payload = _payload(world["contract"].id)
+    payload.work_start = date(2026, 2, 1)
+    payload.work_finish = date(2026, 1, 1)
+    with pytest.raises(HTTPException) as exc:
+        api.download_aosr_docx(
+            project_id=world["project"].id,
+            body=payload,
+            db=db,
+            user=world["user"],
+        )
+    assert exc.value.status_code == 422
+    assert "Дата окончания работ раньше даты начала" in exc.value.detail
+
+
+def test_docx_with_valid_dates_returns_200(world):
+    db = world["db"]
+    response = api.download_aosr_docx(
+        project_id=world["project"].id,
+        body=_payload(world["contract"].id),
+        db=db,
+        user=world["user"],
+    )
+    assert isinstance(response.body, (bytes, bytearray))
+    assert bytes(response.body)[:2] == b"PK"
+
+
+def test_check_allows_missing_dates(world):
+    db = world["db"]
+    payload = _payload(world["contract"].id)
+    payload.work_start = None
+    payload.work_finish = None
+    result = api.check_aosr(
+        project_id=world["project"].id,
+        body=payload,
+        db=db,
+        user=world["user"],
+    )
+    assert isinstance(result["missing"], list)
+
+
+def test_build_aosr_data_uses_designer_participant(world):
+    db = world["db"]
+    api.create_participant(
+        project_id=world["project"].id,
+        body=api.ParticipantCreate(
+            role="designer",
+            full_name="Сидоров С.С.",
+            org_name="DesignOrg",
+            org_ogrn="1027700000002",
+            org_inn="7700000002",
+            org_address="Design Address",
+        ),
+        db=db,
+        user=world["user"],
+    )
+    data = api._build_aosr_data(
+        db=db,
+        project_id=world["project"].id,
+        body=_payload(world["contract"].id),
+    )
+    assert data.designer is not None
+    assert data.designer.name == "DesignOrg"
+    assert data.designer.ogrn == "1027700000002"
+    assert data.designer.inn == "7700000002"
+    assert data.designer.address == "Design Address"
+
+
 def test_viewer_cannot_create_participant(world):
     db = world["db"]
     with pytest.raises(HTTPException) as exc:

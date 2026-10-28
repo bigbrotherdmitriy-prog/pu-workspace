@@ -162,6 +162,17 @@ def _build_aosr_data(db: Session, project_id: int, body: AosrPayload) -> AosrDat
         Material(name=m.name, quality_doc=m.quality_doc) for m in body.materials
     ]
 
+    designer_org: OrgRequisites | None = None
+    for p in participants:
+        if p.role == "designer" and p.org_name is not None:
+            designer_org = OrgRequisites(
+                name=p.org_name,
+                ogrn=p.org_ogrn,
+                inn=p.org_inn,
+                address=p.org_address,
+            )
+            break
+
     return AosrData(
         object_name=body.object_name,
         object_address=body.object_address,
@@ -169,7 +180,7 @@ def _build_aosr_data(db: Session, project_id: int, body: AosrPayload) -> AosrDat
         act_date=body.act_date,
         developer=developer_org,
         builder=builder_org,
-        designer=None,
+        designer=designer_org,
         representatives=representatives,
         works=body.works,
         design_docs=body.design_docs,
@@ -288,6 +299,16 @@ def download_aosr_docx(
     user=Depends(require_user),
 ):
     require_project_role(db, user, project_id, "manager")
+    if body.work_start is None or body.work_finish is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Укажите даты начала и окончания работ (п. 5 акта)",
+        )
+    if body.work_finish < body.work_start:
+        raise HTTPException(
+            status_code=422,
+            detail="Дата окончания работ раньше даты начала",
+        )
     data = _build_aosr_data(db, project_id, body)
     payload = render_aosr_docx(data)
     ascii_number = "".join(
