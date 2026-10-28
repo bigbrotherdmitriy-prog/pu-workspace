@@ -495,3 +495,5 @@ button:not(.icon):not(nav button) { border-radius: var(--pu-radius-sm); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+.work-center-more { margin: 24px 0 0; padding-top: 8px; }

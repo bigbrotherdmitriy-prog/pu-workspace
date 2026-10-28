@@ -118,10 +118,10 @@ const MoneyCalendar = lazy(() => import("./modules/dashboard/MoneyCalendar").the
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const RdModule = lazy(() => import("./modules/rd/RdModule").then((m) => ({ default: m.RdModule })));
 const ExecutiveDocsModule = lazy(() => import("./modules/executive-docs/ExecutiveDocsModule").then((m) => ({ default: m.ExecutiveDocsModule })));
+const WorkCenterDashboard = lazy(() => import("./modules/dashboard/WorkCenterDashboard").then((m) => ({ default: m.WorkCenterDashboard })));
 const SettingsModule = lazy(() => import("./modules/settings/SettingsModule").then((m) => ({ default: m.SettingsModule })));
 const TasksModule = lazy(() => import("./modules/tasks/TasksModule").then((m) => ({ default: m.TasksModule })));
 const GovernanceModule = lazy(() => import("./modules/governance/GovernanceModule").then((m) => ({ default: m.GovernanceModule })));
-const WorkCenterDashboard = lazy(() => import("./modules/dashboard/WorkCenterDashboard").then((m) => ({ default: m.WorkCenterDashboard })));
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -3358,24 +3358,6 @@ export function App() {
             />
           ) : active === "Рабочий центр" ? (
             <>
-              <WorkCenterDashboard
-                projectName={projects.find((item) => item.id === projectId)?.name || "Текущий проект"}
-                nextStep={dailyBriefing?.next_step}
-                summary={summary}
-                budgetActual={finance?.summary.budget_actual}
-                budgetPlanned={finance?.summary.budget_planned}
-                onOpenPlan={() => setActive("Сегодня")}
-                onAskAi={() => setActive("AI Secretary")}
-                onOpenDocuments={() => setActive("Документы")}
-                onOpenSchedule={() => { setGprDdsTab("gpr"); setActive("ГПР и ДДС"); }}
-                onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
-                onOpenObligations={() => { setObligationFilter("all"); setActive("Обязательства"); }}
-                onOpenOverdueTasks={() => { setTaskFilter("overdue"); setActive("Задачи"); }}
-                onOpenOverdueObligations={() => { setObligationFilter("overdue"); setActive("Обязательства"); }}
-                onOpenRisks={() => { setGovernanceFocus("risks"); setActive("Риски и решения"); }}
-                onOpenDecisions={() => { setGovernanceFocus("decisions"); setActive("Риски и решения"); }}
-                onOpenNotifications={() => { setNotificationFilter("unread"); setActive("Уведомления"); }}
-              />
               {projectId > 0 && <section className="dashboard-money-row">
                 <WorkCenterHud projectId={projectId} onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
                   onOpenDocuments={() => setActive("Документы")}
@@ -3395,6 +3377,25 @@ export function App() {
                     } else { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }
                   }} />
               </section>}
+              <div className="work-center-more">
+              <WorkCenterDashboard
+                projectName={projects.find((item) => item.id === projectId)?.name || "Текущий проект"}
+                nextStep={dailyBriefing?.next_step}
+                summary={summary}
+                budgetActual={finance?.summary.budget_actual}
+                budgetPlanned={finance?.summary.budget_planned}
+                onOpenPlan={() => setActive("Сегодня")}
+                onAskAi={() => setActive("AI Secretary")}
+                onOpenDocuments={() => setActive("Документы")}
+                onOpenSchedule={() => { setGprDdsTab("gpr"); setActive("ГПР и ДДС"); }}
+                onOpenFinance={() => { setGprDdsTab("dds"); setActive("ГПР и ДДС"); }}
+                onOpenObligations={() => { setObligationFilter("all"); setActive("Обязательства"); }}
+                onOpenOverdueTasks={() => { setTaskFilter("overdue"); setActive("Задачи"); }}
+                onOpenOverdueObligations={() => { setObligationFilter("overdue"); setActive("Обязательства"); }}
+                onOpenRisks={() => { setGovernanceFocus("risks"); setActive("Риски и решения"); }}
+                onOpenDecisions={() => { setGovernanceFocus("decisions"); setActive("Риски и решения"); }}
+                onOpenNotifications={() => { setNotificationFilter("unread"); setActive("Уведомления"); }}
+              />
               <div className="dashboard-command-grid">
                 <section className="card dashboard-attention-card">
                   <div className="card-head">
@@ -3748,6 +3749,7 @@ export function App() {
                     ))}
                   </div>
                 </section>
+              </div>
               </div>
             </>
           ) : null}
