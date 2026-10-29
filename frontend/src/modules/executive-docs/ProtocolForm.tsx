@@ -27,7 +27,9 @@ export function ProtocolForm({ projectId, objectName, config }: { projectId: num
     setError("");
     const payload = {
       header,
-      rows: rows.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v.trim() !== ""))),
+      rows: rows
+        .filter((r) => config.columns.some((c) => r[c.key].trim() !== "" && r[c.key] !== (c.default ?? "")))
+        .map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v.trim() !== ""))),
     };
     try {
       const response = await fetch(`/projects/${projectId}/executive-docs/${config.endpoint}`, {

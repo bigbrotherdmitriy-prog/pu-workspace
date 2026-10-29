@@ -61,3 +61,15 @@ it("avr: sends scenario, times and the yes/no action", async () => {
   const body = JSON.parse(String((fetchMock.mock.calls[0][1] as { body: string }).body));
   expect(body.rows[0]).toEqual({ scenario: "Пропадание напряжения на вводе 1", measured_time_s: "0,6", action_ok: "yes" });
 });
+
+it("does not send untouched rows that only carry default values", async () => {
+  const fetchMock = okFetch();
+  render(<ProtocolForm projectId={3} config={PHASE_ZERO_PROTOCOL} />);
+  fireEvent.change(screen.getByLabelText("Цепь / щит / приёмник 1"), { target: { value: "ЩР-1" } });
+  fireEvent.click(screen.getByText("Добавить строку"));
+  fireEvent.click(screen.getByText("Скачать протокол"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  const body = JSON.parse(String((fetchMock.mock.calls[0][1] as { body: string }).body));
+  expect(body.rows).toHaveLength(1);
+  expect(body.rows[0].circuit_name).toBe("ЩР-1");
+});
