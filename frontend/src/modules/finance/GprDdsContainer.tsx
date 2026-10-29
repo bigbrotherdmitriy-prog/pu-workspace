@@ -141,7 +141,7 @@ export function GprDdsContainer({ state, active, setActive, collapsed, projectId
           onDropInvoices={uploadDdsInvoices}
           onReviewInvoice={(documentId) => { setFinanceEditorOpen(true); void reviewUploadedFinanceDocuments([documentId]); }}
           onImportCashFlow={(files) => void uploadContractFinance(files, selectedFinanceContractId, "cash-flow")}
-          onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные расходы"); setFinanceEditorOpen(true); }}
+          onPrepareAdditionalExpense={() => { prepareFinanceItem("cash-out"); setFinanceCategory("Дополнительные затраты"); setFinanceEditorOpen(true); }}
         />
         {financeEditorOpen && <div className="gpr-dds-editor-modal" role="dialog" aria-modal="true" aria-label="Проверка финансовых данных">
           <fieldset className="finance-editor-fields" disabled={invoiceConfirming}>
