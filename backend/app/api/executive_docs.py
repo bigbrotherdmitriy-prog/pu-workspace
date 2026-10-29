@@ -227,7 +227,7 @@ async def upload_to_source(
 def cable_journal_xlsx(project_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
     """Заготовка кабельного журнала по подтверждённым позициям РД (трассы заполняет человек)."""
     require_project_role(db, user, project_id, "viewer")
-    from app.cable_journal import to_xlsx
+    from app.cable_journal_draft import to_xlsx
 
     return Response(
         content=to_xlsx(db, project_id),
