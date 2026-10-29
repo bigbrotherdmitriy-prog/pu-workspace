@@ -169,3 +169,57 @@ def test_schedule_overview_links_plan_and_fact(world):
     assert item["fact_qty"] == "100.000" and item["fact_entries"] == 2 and item["fact_unit"] == "м"
     assert item["fact_first"] == "2026-10-05" and item["fact_last"] == "2026-10-06"
     assert item["overdue"] is True
+
+
+def test_hours_and_crews(world):
+    db, pid = world["db"], world["p"].id
+    crew = wl.add_crew(db, pid, {"name": "Бригада 1", "foreman": "Иванов И.И.", "members": "Петров — монтажник\nСидоров — электрик"})
+    assert crew["members_count"] == 3
+    e = _add(db, pid, crew_id=crew["id"], hours="8,5")
+    assert e["hours"] == "8.50" and e["workers"] == 3 and e["crew_id"] == crew["id"]
+    with pytest.raises(ValueError):
+        _add(db, pid, hours="25")
+    with pytest.raises(LookupError):
+        _add(db, pid, crew_id=99999)
+    other = wl.add_crew(db, world["o"].id, {"name": "Чужая"})
+    with pytest.raises(LookupError):
+        _add(db, pid, crew_id=other["id"])
+    assert wl.summary(db, pid)["man_hours"] == "25.50"  # 8.5 ч × 3 рабочих
+    wl.update_crew(db, pid, crew["id"], {"foreman": "Новый"})
+    assert wl.list_crews(db, pid)[0]["foreman"] == "Новый"
+    with pytest.raises(ValueError):
+        wl.add_crew(db, pid, {"name": " "})
+    from openpyxl import load_workbook
+
+    ws = load_workbook(BytesIO(wl.to_xlsx(db, pid)))["Журнал работ"]
+    assert [c.value for c in ws[1]][7:10] == ["Бригада", "Рабочих", "Часов"]
+    assert ws["H2"].value == "Бригада 1"
+    wl.delete_crew(db, pid, crew["id"])
+    assert wl.list_entries(db, pid)[0]["crew_id"] is None
+    with pytest.raises(LookupError):
+        wl.delete_crew(db, pid, other["id"])
+
+
+def test_api_crews(world):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import work_log as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    db, pid = world["db"], world["p"].id
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    client = TestClient(app)
+    r = client.post(f"/projects/{pid}/work-log/crews", json={"name": "Бригада А", "foreman": "Петров", "members": "Иванов\nСидоров"})
+    assert r.status_code == 200 and r.json()["members_count"] == 3
+    cid = r.json()["id"]
+    assert client.get(f"/projects/{pid}/work-log/crews").json()["crews"][0]["name"] == "Бригада А"
+    assert client.post(f"/projects/{pid}/work-log/crews", json={"name": " "}).status_code == 422
+    r = client.post(f"/projects/{pid}/work-log", json={"work_date": "2026-10-20", "work_name": "Монтаж", "crew_id": cid, "hours": "7,5"})
+    assert r.status_code == 200 and r.json()["hours"] == "7.50" and r.json()["workers"] == 3
+    assert client.patch(f"/projects/{pid}/work-log/crews/{cid}", json={"foreman": "Новый"}).json()["foreman"] == "Новый"
+    assert client.delete(f"/projects/{pid}/work-log/crews/{cid}").json() == {"deleted": cid}
+    assert client.delete(f"/projects/{pid}/work-log/crews/{cid}").status_code == 404

@@ -7,6 +7,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
+class WorkLogCrew(Base):
+    __tablename__ = "work_log_crews"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(300))
+    foreman: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    members: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WorkLogEntry(Base):
     __tablename__ = "work_log_entries"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -20,6 +31,8 @@ class WorkLogEntry(Base):
     location: Mapped[str | None] = mapped_column(String(300), nullable=True)
     weather: Mapped[str | None] = mapped_column(String(200), nullable=True)
     workers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hours: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    crew_id: Mapped[int | None] = mapped_column(ForeignKey("work_log_crews.id", ondelete="SET NULL"), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     rd_spec_item_id: Mapped[int | None] = mapped_column(ForeignKey("rd_spec_items.id", ondelete="SET NULL"), nullable=True)
     schedule_item_id: Mapped[int | None] = mapped_column(ForeignKey("schedule_items.id", ondelete="SET NULL"), nullable=True)

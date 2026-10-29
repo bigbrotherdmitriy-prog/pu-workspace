@@ -20,9 +20,18 @@ class WorkLogBody(BaseModel):
     location: str | None = None
     weather: str | None = None
     workers: int | None = None
+    hours: str | float | None = None
+    crew_id: int | None = None
     note: str | None = None
     rd_spec_item_id: int | None = None
     schedule_item_id: int | None = None
+
+
+class CrewBody(BaseModel):
+    name: str | None = None
+    foreman: str | None = None
+    members: str | None = None
+    note: str | None = None
 
 
 def _translate(exc: Exception) -> HTTPException:
@@ -55,6 +64,48 @@ def list_work_log(
 def work_log_suggestions(project_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     return svc.suggestions(db, project_id)
+
+
+@router.get("/{project_id}/work-log/crews")
+def list_work_log_crews(project_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    return {"crews": svc.list_crews(db, project_id)}
+
+
+@router.post("/{project_id}/work-log/crews")
+def add_work_log_crew(project_id: int, body: CrewBody, db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    try:
+        crew = svc.add_crew(db, project_id, body.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        db.rollback()
+        raise _translate(exc) from exc
+    db.commit()
+    return crew
+
+
+@router.patch("/{project_id}/work-log/crews/{crew_id}")
+def update_work_log_crew(project_id: int, crew_id: int, body: CrewBody, db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    try:
+        crew = svc.update_crew(db, project_id, crew_id, body.model_dump(exclude_unset=True))
+    except (ValueError, LookupError) as exc:
+        db.rollback()
+        raise _translate(exc) from exc
+    db.commit()
+    return crew
+
+
+@router.delete("/{project_id}/work-log/crews/{crew_id}")
+def delete_work_log_crew(project_id: int, crew_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "manager")
+    try:
+        svc.delete_crew(db, project_id, crew_id)
+    except LookupError as exc:
+        db.rollback()
+        raise _translate(exc) from exc
+    db.commit()
+    return {"deleted": crew_id}
 
 
 @router.get("/{project_id}/work-log/schedule")

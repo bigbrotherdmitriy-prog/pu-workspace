@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.rd import RdSpecItem
-from app.models.work_log import WorkLogEntry
+from app.models.work_log import WorkLogCrew, WorkLogEntry
 
 _TEXT_FIELDS = ("object_name", "unit", "location", "weather", "note")
 _MAX_NAME = 1000
@@ -64,6 +64,18 @@ def _clean(data: dict, *, partial: bool) -> dict:
             if not 0 <= workers <= 10000:
                 raise ValueError("Некорректное число рабочих")
             result["workers"] = workers
+    if "hours" in data:
+        raw = data.get("hours")
+        if raw is None or str(raw).strip() == "":
+            result["hours"] = None
+        else:
+            try:
+                hours = Decimal(str(raw).strip().replace(",", "."))
+            except InvalidOperation as exc:
+                raise ValueError("Некорректное число часов") from exc
+            if not Decimal("0") <= hours <= Decimal("24"):
+                raise ValueError("Часов за день может быть от 0 до 24")
+            result["hours"] = hours
     for field in _TEXT_FIELDS:
         if field in data:
             value = data.get(field)
@@ -71,8 +83,22 @@ def _clean(data: dict, *, partial: bool) -> dict:
     return result
 
 
+def _crew_size(crew: WorkLogCrew) -> int:
+    lines = [ln for ln in (crew.members or "").splitlines() if ln.strip()]
+    return len(lines) + (1 if (crew.foreman or "").strip() else 0)
+
+
 def _check_links(db: Session, project_id: int, data: dict) -> dict:
     result: dict = {}
+    if data.get("crew_id") is not None:
+        crew = db.get(WorkLogCrew, int(data["crew_id"]))
+        if crew is None or crew.project_id != project_id:
+            raise LookupError("Бригада не найдена")
+        result["crew_id"] = crew.id
+        if data.get("workers") in (None, ""):
+            size = _crew_size(crew)
+            if size:
+                result["workers"] = size
     if data.get("rd_spec_item_id") is not None:
         item = db.get(RdSpecItem, int(data["rd_spec_item_id"]))
         if item is None or item.project_id != project_id:
@@ -100,6 +126,8 @@ def _to_dict(e: WorkLogEntry) -> dict:
         "location": e.location,
         "weather": e.weather,
         "workers": e.workers,
+        "hours": f"{Decimal(e.hours).quantize(Decimal('0.01')):f}" if e.hours is not None else None,
+        "crew_id": e.crew_id,
         "note": e.note,
         "rd_spec_item_id": e.rd_spec_item_id,
         "schedule_item_id": e.schedule_item_id,
@@ -174,9 +202,11 @@ def summary(db: Session, project_id: int, date_from=None, date_to=None) -> dict:
         bucket["qty"] += e.qty or Decimal("0")
         bucket["entries"] += 1
     ordered = sorted(by_work.values(), key=lambda b: b["qty"], reverse=True)[:50]
+    hours_total = sum((e.hours or Decimal("0")) * (e.workers or 1) for e in rows)
     return {
         "entries": len(rows),
         "days": len({e.work_date for e in rows}),
+        "man_hours": f"{Decimal(hours_total).quantize(Decimal('0.01')):f}",
         "by_work": [
             {"work_name": b["work_name"], "unit": b["unit"], "qty_total": f"{b['qty'].quantize(Decimal('0.001')):f}", "entries": b["entries"]}
             for b in ordered
@@ -216,7 +246,8 @@ def to_xlsx(db: Session, project_id: int, date_from=None, date_to=None) -> bytes
     wb = Workbook()
     ws = wb.active
     ws.title = "Журнал работ"
-    ws.append(["Дата", "Объект", "Наименование работ", "Ед. изм.", "Объём", "Место выполнения", "Погода", "Рабочих", "Примечание"])
+    crews = {c.id: c.name for c in db.execute(select(WorkLogCrew).where(WorkLogCrew.project_id == project_id)).scalars().all()}
+    ws.append(["Дата", "Объект", "Наименование работ", "Ед. изм.", "Объём", "Место выполнения", "Погода", "Бригада", "Рабочих", "Часов", "Примечание"])
     for cell in ws[1]:
         cell.font = Font(bold=True)
     for e in reversed(list_entries(db, project_id, date_from, date_to, limit=100000)):
@@ -224,9 +255,10 @@ def to_xlsx(db: Session, project_id: int, date_from=None, date_to=None) -> bytes
         ws.append([
             d.strftime("%d.%m.%Y"), e["object_name"] or "", e["work_name"], e["unit"] or "",
             float(e["qty"]) if e["qty"] is not None else None,
-            e["location"] or "", e["weather"] or "", e["workers"], e["note"] or "",
+            e["location"] or "", e["weather"] or "", crews.get(e["crew_id"], ""), e["workers"],
+            float(e["hours"]) if e["hours"] is not None else None, e["note"] or "",
         ])
-    for col, width in zip("ABCDEFGHI", (12, 20, 50, 10, 12, 28, 16, 10, 40)):
+    for col, width in zip("ABCDEFGHIJK", (12, 20, 50, 10, 12, 28, 16, 22, 10, 8, 40)):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A2"
     buffer = BytesIO()
@@ -283,3 +315,61 @@ def schedule_overview(db: Session, project_id: int) -> dict:
             "fact_last": f["last"].isoformat() if f else None,
         })
     return {"baseline": {"id": chosen.id, "name": chosen.name, "version": chosen.version, "status": chosen.status}, "items": result}
+
+
+def _crew_dict(c: WorkLogCrew) -> dict:
+    return {
+        "id": c.id, "name": c.name, "foreman": c.foreman, "members": c.members or "",
+        "members_count": _crew_size(c), "note": c.note,
+    }
+
+
+def list_crews(db: Session, project_id: int) -> list[dict]:
+    rows = db.execute(
+        select(WorkLogCrew).where(WorkLogCrew.project_id == project_id).order_by(WorkLogCrew.name, WorkLogCrew.id)
+    ).scalars().all()
+    return [_crew_dict(c) for c in rows]
+
+
+def _crew_values(data: dict, *, partial: bool) -> dict:
+    result: dict = {}
+    if "name" in data or not partial:
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("Укажите название бригады")
+        result["name"] = name[:300]
+    for field in ("foreman", "members", "note"):
+        if field in data:
+            value = data.get(field)
+            result[field] = (str(value).strip() or None) if value is not None else None
+    return result
+
+
+def add_crew(db: Session, project_id: int, data: dict) -> dict:
+    crew = WorkLogCrew(project_id=project_id, **_crew_values(data, partial=False))
+    db.add(crew)
+    db.flush()
+    return _crew_dict(crew)
+
+
+def _get_crew(db: Session, project_id: int, crew_id: int) -> WorkLogCrew:
+    crew = db.get(WorkLogCrew, crew_id)
+    if crew is None or crew.project_id != project_id:
+        raise LookupError("Бригада не найдена")
+    return crew
+
+
+def update_crew(db: Session, project_id: int, crew_id: int, data: dict) -> dict:
+    crew = _get_crew(db, project_id, crew_id)
+    for key, value in _crew_values(data, partial=True).items():
+        setattr(crew, key, value)
+    db.flush()
+    return _crew_dict(crew)
+
+
+def delete_crew(db: Session, project_id: int, crew_id: int) -> None:
+    crew = _get_crew(db, project_id, crew_id)
+    for entry in db.execute(select(WorkLogEntry).where(WorkLogEntry.crew_id == crew.id)).scalars().all():
+        entry.crew_id = None
+    db.delete(crew)
+    db.flush()
