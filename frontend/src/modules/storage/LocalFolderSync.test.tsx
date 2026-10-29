@@ -14,7 +14,36 @@ function dirHandle(name: string, children: Record<string, unknown>) {
   return { kind: "directory" as const, name, entries: async function* () { for (const entry of Object.entries(children)) yield entry; } };
 }
 
+// Minimal in-memory IndexedDB stand-in: one object store with put/get by key.
+function fakeIndexedDb() {
+  const data = new Map<string, unknown>();
+  const store = {
+    put: (value: unknown, key: string) => { data.set(key, value); return {}; },
+    get: (key: string) => {
+      const request: { result?: unknown; onsuccess?: () => void } = {};
+      setTimeout(() => { request.result = data.get(key); request.onsuccess?.(); }, 0);
+      return request;
+    },
+  };
+  const db = {
+    createObjectStore: () => store,
+    transaction: () => {
+      const tx: { oncomplete?: () => void; objectStore: () => typeof store } = { objectStore: () => store };
+      setTimeout(() => tx.oncomplete?.(), 0);
+      return tx;
+    },
+  };
+  return {
+    open: () => {
+      const request: { result: typeof db; onupgradeneeded?: () => void; onsuccess?: () => void } = { result: db };
+      setTimeout(() => { request.onupgradeneeded?.(); request.onsuccess?.(); }, 0);
+      return request;
+    },
+  };
+}
+
 beforeEach(() => {
+  vi.stubGlobal("indexedDB", fakeIndexedDb());
   localStorage.clear();
   mockApi.mockResolvedValue({ id: "pu:/Папка" });
 });
@@ -39,7 +68,7 @@ it("uploads new files, creates folders and skips unchanged files on the second r
   expect(mockApi.mock.calls.some((c) => String(c[0]).endsWith("/pu-storage/folders"))).toBe(true);
   expect(onDone).toHaveBeenCalled();
 
-  fireEvent.click(screen.getByText("Синхронизировать папку с компьютера"));
+  fireEvent.click(await screen.findByText("Обновить из «Проект»"));
   expect(await screen.findByText(/Передано: 0, без изменений: 2/)).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });

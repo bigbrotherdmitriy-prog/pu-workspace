@@ -1,6 +1,5 @@
-import { useRef, useState } from "react";
-import { csrfHeaders } from "../../api/client";
-import { api } from "../../api/client";
+import { useEffect, useRef, useState } from "react";
+import { api, csrfHeaders } from "../../api/client";
 
 // File System Access API (Chrome, Edge, Яндекс Браузер): типы объявляем минимально.
 type FileHandleLike = { kind: "file"; name: string; getFile: () => Promise<File> };
@@ -8,9 +7,46 @@ type DirHandleLike = {
   kind: "directory";
   name: string;
   entries: () => AsyncIterable<[string, FileHandleLike | DirHandleLike]>;
+  requestPermission?: (options: { mode: "read" }) => Promise<"granted" | "denied" | "prompt">;
 };
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const DB_NAME = "pu-local-sync";
+const STORE = "handles";
+
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveHandle(key: string, handle: DirHandleLike): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(handle, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* the folder simply is not remembered */ }
+}
+
+async function loadHandle(key: string): Promise<DirHandleLike | null> {
+  try {
+    const db = await openDb();
+    return await new Promise<DirHandleLike | null>((resolve, reject) => {
+      const request = db.transaction(STORE, "readonly").objectStore(STORE).get(key);
+      request.onsuccess = () => resolve((request.result as DirHandleLike | undefined) ?? null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return null;
+  }
+}
 const storeKey = (projectId: number, folder: string) => `pu-local-sync:${projectId}:${folder}`;
 
 type Known = Record<string, string>;
@@ -45,6 +81,14 @@ export function LocalFolderSync({ projectId, folder, onDone }: { projectId: numb
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const cancel = useRef(false);
+  const [remembered, setRemembered] = useState<DirHandleLike | null>(null);
+  const handleKey = `${projectId}|${folder}`;
+
+  useEffect(() => {
+    let alive = true;
+    if (supported) void loadHandle(handleKey).then((h) => { if (alive) setRemembered(h); });
+    return () => { alive = false; };
+  }, [handleKey, supported]);
 
   async function ensureFolder(parentId: string, name: string, cache: Map<string, string>): Promise<string> {
     const key = `${parentId}/${name}`;
@@ -58,15 +102,33 @@ export function LocalFolderSync({ projectId, folder, onDone }: { projectId: numb
     return res.id;
   }
 
-  async function sync() {
-    setErrors([]);
-    setStatus("");
+  async function pickAndSync() {
     let dir: DirHandleLike;
     try {
       dir = await (window as unknown as { showDirectoryPicker: () => Promise<DirHandleLike> }).showDirectoryPicker();
     } catch {
       return; // the user closed the picker
     }
+    await saveHandle(handleKey, dir);
+    setRemembered(dir);
+    await sync(dir);
+  }
+
+  async function repeatSync() {
+    if (!remembered) return;
+    try {
+      const answer = remembered.requestPermission ? await remembered.requestPermission({ mode: "read" }) : "granted";
+      if (answer !== "granted") { setErrors(["Нет доступа к папке: разрешите чтение в окне браузера или выберите папку заново."]); return; }
+    } catch {
+      setErrors(["Не удалось получить доступ к папке. Выберите её заново."]);
+      return;
+    }
+    await sync(remembered);
+  }
+
+  async function sync(dir: DirHandleLike) {
+    setErrors([]);
+    setStatus("");
     cancel.current = false;
     setBusy(true);
     const key = storeKey(projectId, `${folder}|${dir.name}`);
@@ -123,7 +185,8 @@ export function LocalFolderSync({ projectId, folder, onDone }: { projectId: numb
   }
   return (
     <div className="pus-sync">
-      <button type="button" disabled={busy} onClick={() => void sync()}>Синхронизировать папку с компьютера</button>
+      {remembered && <button type="button" disabled={busy} onClick={() => void repeatSync()}>Обновить из «{remembered.name}»</button>}
+      <button type="button" disabled={busy} onClick={() => void pickAndSync()}>{remembered ? "Выбрать другую папку" : "Синхронизировать папку с компьютера"}</button>
       {busy && <button type="button" onClick={() => { cancel.current = true; }}>Остановить</button>}
       {status && <p className="pus-note" role="status">{status}</p>}
       {errors.length > 0 && <ul className="pus-error" role="alert">{errors.map((e) => <li key={e}>{e}</li>)}</ul>}
