@@ -54,3 +54,7 @@
     grid-template-columns: 1fr;
   }
 }
+
+.id-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.id-tab { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); background: var(--read-surface, #fff); color: var(--read-text, inherit); cursor: pointer; font: inherit; }
+.id-tab-on { border-color: var(--read-accent, #2563eb); font-weight: 600; }

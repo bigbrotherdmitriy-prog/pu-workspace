@@ -283,6 +283,10 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
     }
   };
 
+  const [tab, setTab] = useState<"ready" | "orders" | "forms" | "people" | "aosr">("ready");
+  const tabs: ["ready" | "orders" | "forms" | "people" | "aosr", string][] = [
+    ["ready", "Готовность"], ["orders", "Приказы"], ["forms", "Акты и протоколы"], ["people", "Участники"], ["aosr", "АОСР"],
+  ];
   const objects = report?.objects ?? [];
   const objectNames = objects.map((o) => o.object_name);
 
@@ -290,7 +294,13 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
     <div className="executive-docs">
       {error && <p role="alert">{error}</p>}
 
-      {objects.length === 0 ? (
+      <div className="id-tabs" role="tablist" aria-label="Разделы исполнительной документации">
+        {tabs.map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "id-tab id-tab-on" : "id-tab"} onClick={() => setTab(key)}>{label}</button>
+        ))}
+      </div>
+
+      {tab === "ready" && objects.length === 0 ? (
         <section className="id-object">
           <h3>Папки ИД ещё не подключены</h3>
           <div className="id-form">
@@ -317,19 +327,24 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
         </section>
       ) : null}
 
+      {tab === "forms" && <>
       <p>
         <button type="button" onClick={() => void downloadCableJournal()}>Скачать заготовку кабельного журнала</button>{" "}
         <span>Кабели берутся из подтверждённых позиций рабочей документации; трассы и фактическую длину впишите в таблице.</span>
       </p>
 
-      <IdOrders projectId={projectId} />
+      </>}
+
+      {tab === "orders" && <IdOrders projectId={projectId} />}
+      {tab === "forms" && <>
       <EquipmentTestAct projectId={projectId} objectName={objects[0]?.object_name} />
       <InsulationProtocol projectId={projectId} objectName={objects[0]?.object_name} />
       <ProtocolForm projectId={projectId} objectName={objects[0]?.object_name} config={EARTHING_PROTOCOL} />
       <ProtocolForm projectId={projectId} objectName={objects[0]?.object_name} config={PHASE_ZERO_PROTOCOL} />
       <ProtocolForm projectId={projectId} objectName={objects[0]?.object_name} config={AVR_PROTOCOL} />
+      </>}
 
-      {objects.map((o) => {
+      {tab === "ready" && objects.map((o) => {
         const source = sourceFor(o.object_name);
         const isBusy = !!busy[o.object_name];
         return (
@@ -441,7 +456,7 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
         );
       })}
 
-      <section className="id-object">
+      {tab === "people" && <section className="id-object">
         <h3>Участники и представители</h3>
         <table>
           <thead>
@@ -511,9 +526,9 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
             Добавить участника
           </button>
         </div>
-      </section>
+      </section>}
 
-      <section className="id-object">
+      {tab === "aosr" && <section className="id-object">
         <h3>Сформировать АОСР</h3>
         <div className="id-form">
           <label>
@@ -626,7 +641,7 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
         {aosrOk && aosrMissing && aosrMissing.length === 0 && (
           <p>Все обязательные реквизиты заполнены</p>
         )}
-      </section>
+      </section>}
     </div>
   );
 }
