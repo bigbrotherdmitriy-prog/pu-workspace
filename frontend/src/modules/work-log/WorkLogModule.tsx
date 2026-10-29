@@ -22,7 +22,8 @@ type LaborRow = { person_name: string; hours: string; hourly_rate: string | null
 type Crew = { id: number; name: string; foreman: string | null; members: string; members_count: number; note: string | null };
 
 type Summary = { entries: number; days: number; by_work: { work_name: string; unit: string | null; qty_total: string; entries: number }[] };
-type Suggestions = { works: { work_name: string; unit: string | null }[]; objects: string[]; rd_items: { id: number; name: string; unit: string | null }[] };
+type EstimateLineHint = { id: number; position: string | null; code: string | null; name: string; unit: string | null; qty: string | null };
+type Suggestions = { works: { work_name: string; unit: string | null }[]; objects: string[]; rd_items: { id: number; name: string; unit: string | null }[]; estimate_lines?: EstimateLineHint[] };
 type ListResponse = { entries: Entry[]; summary: Summary };
 type PlanItem = {
   id: number; title: string; is_group: boolean; is_milestone: boolean;
@@ -58,6 +59,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [formHeader, setFormHeader] = useState<Record<string, string>>({});
   const [view, setView] = useState<"all" | "plan" | "crews">("all");
   const [crews, setCrews] = useState<Crew[]>([]);
+  const [estimateLineId, setEstimateLineId] = useState("");
   const [labor, setLabor] = useState<LaborRow[]>([]);
   const [crewForm, setCrewForm] = useState({ id: 0, name: "", foreman: "", members: "" });
 
@@ -109,6 +111,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     setMessage("");
     const body: Record<string, unknown> = { work_date: form.work_date, work_name: workName };
     if (selected) body.schedule_item_id = selected.id;
+    if (estimateLineId) body.estimate_line_id = Number(estimateLineId);
     for (const key of ["object_name", "unit", "qty", "location", "weather", "note"] as const) {
       if (form[key].trim()) body[key] = form[key].trim();
     }
@@ -120,6 +123,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     try {
       await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
       setMessage("Запись добавлена");
+      setEstimateLineId("");
       setLabor([]);
       setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location, unit: selected ? f.unit : "" }));
       setTick((v) => v + 1);
@@ -301,6 +305,19 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
           <input list="wl-objects" value={form.object_name} onChange={(e) => set("object_name", e.target.value)} placeholder="Например, ДУБНА" />
           <datalist id="wl-objects">{suggest.objects.map((o) => <option key={o} value={o} />)}</datalist>
         </label>
+        {(suggest.estimate_lines?.length ?? 0) > 0 && (
+          <label className="wl-wide">Позиция сметы (для КС-2)
+            <select value={estimateLineId} onChange={(e) => {
+              const id = e.target.value;
+              setEstimateLineId(id);
+              const line = suggest.estimate_lines?.find((l) => String(l.id) === id);
+              if (line) setForm((f) => ({ ...f, work_name: line.name, unit: line.unit ?? f.unit }));
+            }}>
+              <option value="">Не из сметы</option>
+              {suggest.estimate_lines?.map((l) => <option key={l.id} value={String(l.id)}>{`${l.position ? `${l.position}. ` : ""}${l.name}${l.unit ? `, ${l.unit}` : ""}`}</option>)}
+            </select>
+          </label>
+        )}
         {!selected && <label className="wl-wide">Какая работа выполнена
           <input list="wl-works" value={form.work_name} onChange={(e) => pickWork(e.target.value)} placeholder="Начните вводить или выберите из спецификации" />
           <datalist id="wl-works">
