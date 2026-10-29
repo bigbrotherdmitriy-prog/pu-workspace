@@ -18,6 +18,14 @@ type Entry = {
 type Summary = { entries: number; days: number; by_work: { work_name: string; unit: string | null; qty_total: string; entries: number }[] };
 type Suggestions = { works: { work_name: string; unit: string | null }[]; objects: string[]; rd_items: { id: number; name: string; unit: string | null }[] };
 type ListResponse = { entries: Entry[]; summary: Summary };
+type PlanItem = {
+  id: number; title: string; is_group: boolean; is_milestone: boolean;
+  planned_start: string | null; planned_finish: string | null;
+  planned_progress: number; actual_progress: number; overdue: boolean;
+  fact_entries: number; fact_qty: string | null; fact_unit: string | null;
+  fact_first: string | null; fact_last: string | null;
+};
+type Schedule = { baseline: { id: number; name: string; version: number; status: string } | null; items: PlanItem[] };
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -39,6 +47,16 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [tick, setTick] = useState(0);
+  const [plan, setPlan] = useState<Schedule>({ baseline: null, items: [] });
+  const [selected, setSelected] = useState<PlanItem | null>(null);
+  const [view, setView] = useState<"plan" | "all">("plan");
+
+  useEffect(() => {
+    if (projectId <= 0) return;
+    api<Schedule>(`/projects/${projectId}/work-log/schedule`)
+      .then((res) => { if (res && Array.isArray(res.items)) setPlan(res); })
+      .catch(() => undefined);
+  }, [projectId, tick]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -67,11 +85,13 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   }
 
   async function save() {
-    if (!form.work_name.trim()) { setError("Укажите, какая работа выполнена"); return; }
+    const workName = selected ? selected.title : form.work_name.trim();
+    if (!workName) { setError("Укажите, какая работа выполнена"); return; }
     setSaving(true);
     setError("");
     setMessage("");
-    const body: Record<string, unknown> = { work_date: form.work_date, work_name: form.work_name.trim() };
+    const body: Record<string, unknown> = { work_date: form.work_date, work_name: workName };
+    if (selected) body.schedule_item_id = selected.id;
     for (const key of ["object_name", "unit", "qty", "location", "weather", "note"] as const) {
       if (form[key].trim()) body[key] = form[key].trim();
     }
@@ -79,7 +99,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     try {
       await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
       setMessage("Запись добавлена");
-      setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location }));
+      setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location, unit: selected ? f.unit : "" }));
       setTick((v) => v + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить запись");
@@ -122,19 +142,56 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
         <button type="button" onClick={() => void downloadExcel()}>Скачать в Excel</button>
       </div>
 
+      <div className="wl-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={view === "plan"} className={view === "plan" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("plan")}>По графику (ГПР)</button>
+        <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("all")}>Все записи</button>
+      </div>
+
+      {view === "plan" && (
+        <div className="wl-plan">
+          {!plan.baseline && <p className="wl-empty">В проекте нет графика работ. Загрузите ГПР в разделе «ГПР и ДДС»: журнал строится по нему.</p>}
+          {plan.baseline && <p className="wl-note">График: {plan.baseline.name} (версия {plan.baseline.version}). Выберите работу, чтобы внести факт.</p>}
+          <ul className="wl-plan-list">
+            {plan.items.filter((i) => !i.is_group && !i.is_milestone).map((i) => (
+              <li key={i.id}>
+                <button
+                  type="button"
+                  className={`wl-plan-item${selected?.id === i.id ? " wl-plan-on" : ""}${i.overdue ? " wl-plan-late" : ""}`}
+                  aria-pressed={selected?.id === i.id}
+                  onClick={() => setSelected(selected?.id === i.id ? null : i)}
+                >
+                  <span className="wl-plan-title">{i.title}</span>
+                  <span className="wl-sub">
+                    План: {i.planned_start ? formatDate(i.planned_start) : "—"} – {i.planned_finish ? formatDate(i.planned_finish) : "—"}
+                    {" · "}выполнено {Math.round(i.actual_progress)}% из {Math.round(i.planned_progress)}% по плану
+                    {i.fact_entries > 0 ? ` · записей: ${i.fact_entries}${i.fact_qty ? `, объём ${i.fact_qty} ${i.fact_unit ?? ""}` : ""}` : ""}
+                    {i.overdue ? " · просрочено" : ""}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {selected && (
+            <div className="wl-selected" role="status">
+              Вносим факт по работе: <b>{selected.title}</b>. Название, график и единицы подставлены автоматически.
+              <button type="button" onClick={() => setSelected(null)}>Другая работа (вне графика)</button>
+            </div>
+          )}
+        </div>
+      )}
       <form className="wl-form" onSubmit={(e) => { e.preventDefault(); void save(); }} aria-label="Новая запись журнала">
         <label>Дата<input type="date" value={form.work_date} onChange={(e) => set("work_date", e.target.value)} /></label>
         <label>Объект
           <input list="wl-objects" value={form.object_name} onChange={(e) => set("object_name", e.target.value)} placeholder="Например, ДУБНА" />
           <datalist id="wl-objects">{suggest.objects.map((o) => <option key={o} value={o} />)}</datalist>
         </label>
-        <label className="wl-wide">Какая работа выполнена
+        {!selected && <label className="wl-wide">Какая работа выполнена
           <input list="wl-works" value={form.work_name} onChange={(e) => pickWork(e.target.value)} placeholder="Начните вводить или выберите из спецификации" />
           <datalist id="wl-works">
             {suggest.works.map((w) => <option key={`w${w.work_name}`} value={w.work_name} />)}
             {suggest.rd_items.map((i) => <option key={`r${i.id}`} value={i.name} />)}
           </datalist>
-        </label>
+        </label>}
         <label>Объём<input inputMode="decimal" value={form.qty} onChange={(e) => set("qty", e.target.value)} placeholder="12,5" /></label>
         <label>Ед. изм.<input value={form.unit} onChange={(e) => set("unit", e.target.value)} placeholder="м, шт" /></label>
         <label>Место<input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Ось, этаж, помещение" /></label>
