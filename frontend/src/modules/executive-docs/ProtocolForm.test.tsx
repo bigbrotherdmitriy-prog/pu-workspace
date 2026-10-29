@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { EARTHING_PROTOCOL, PHASE_ZERO_PROTOCOL, ProtocolForm } from "./ProtocolForm";
+import { AVR_PROTOCOL, EARTHING_PROTOCOL, PHASE_ZERO_PROTOCOL, ProtocolForm } from "./ProtocolForm";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -47,4 +47,17 @@ it("shows the server error and manages rows", async () => {
   expect(screen.queryByLabelText("Цепь / щит / приёмник 2")).toBeNull();
   fireEvent.click(screen.getByText("Скачать протокол"));
   expect((await screen.findByRole("alert")).textContent).toContain("Строка 1");
+});
+
+it("avr: sends scenario, times and the yes/no action", async () => {
+  const fetchMock = okFetch();
+  render(<ProtocolForm projectId={3} config={AVR_PROTOCOL} />);
+  fireEvent.change(screen.getByLabelText("Сценарий 1"), { target: { value: "Пропадание напряжения на вводе 1" } });
+  fireEvent.change(screen.getByLabelText("Измерено, с 1"), { target: { value: "0,6" } });
+  fireEvent.change(screen.getByLabelText("Сработало как ожидалось 1"), { target: { value: "yes" } });
+  fireEvent.click(screen.getByText("Скачать протокол"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  expect(String(fetchMock.mock.calls[0][0])).toContain("/executive-docs/avr-protocol.xlsx");
+  const body = JSON.parse(String((fetchMock.mock.calls[0][1] as { body: string }).body));
+  expect(body.rows[0]).toEqual({ scenario: "Пропадание напряжения на вводе 1", measured_time_s: "0,6", action_ok: "yes" });
 });

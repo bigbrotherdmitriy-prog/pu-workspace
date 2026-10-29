@@ -139,3 +139,24 @@ export const PHASE_ZERO_PROTOCOL: ProtocolConfig = {
     { key: "short_circuit_a", label: "Iкз, А (если измерен)", size: 7 },
   ],
 };
+
+export const AVR_PROTOCOL: ProtocolConfig = {
+  id: "avr",
+  summary: "Протокол проверки устройства АВР (Excel)",
+  hint: "Впишите сценарии проверки: пропадание напряжения на вводе, возврат и т. п. Время переключения сравнивается с допустимым, заключение составится само.",
+  endpoint: "avr-protocol.xlsx",
+  filename: "Протокол АВР.xlsx",
+  headerFields: [
+    ["object_name", "Объект"], ["address", "Адрес"], ["customer", "Заказчик"], ["contractor", "Подрядчик"],
+    ["laboratory", "Лаборатория / исполнитель"], ["protocol_no", "№ протокола"], ["date", "Дата проверки"],
+    ["device", "Устройство АВР (тип, шкаф)"], ["instrument", "Секундомер / осциллограф (тип, №)"], ["instrument_check_date", "Поверка до"],
+    ["input1", "Ввод 1 (источник, напряжение)"], ["input2", "Ввод 2 (источник, напряжение)"], ["tested_by", "Проверку выполнил"], ["checked_by", "Проверил"],
+  ],
+  columns: [
+    { key: "scenario", label: "Сценарий", size: 26, placeholder: "Пропадание напряжения на вводе 1" },
+    { key: "expected", label: "Ожидаемое действие", size: 22, placeholder: "Переход на ввод 2" },
+    { key: "measured_time_s", label: "Измерено, с", size: 5 },
+    { key: "allowed_time_s", label: "Допустимо, с", size: 5, placeholder: "1,0" },
+    { key: "action_ok", label: "Сработало как ожидалось", default: "", options: [["", "—"], ["yes", "Да"], ["no", "Нет"]] },
+  ],
+};

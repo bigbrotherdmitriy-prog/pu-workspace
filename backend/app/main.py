@@ -31,6 +31,7 @@ from app.api.rd import router as rd_router
 from app.api.purchase import router as purchase_router
 from app.api.earthing_protocol import router as earthing_protocol_router
 from app.api.phase_zero_protocol import router as phase_zero_protocol_router
+from app.api.avr_protocol import router as avr_protocol_router
 from app.api.id_orders import router as id_orders_router
 from app.api.id_forms import router as id_forms_router
 from app.api.insulation_protocol import router as insulation_protocol_router
@@ -210,6 +211,7 @@ app.include_router(rd_router)
 app.include_router(purchase_router)
 app.include_router(earthing_protocol_router)
 app.include_router(phase_zero_protocol_router)
+app.include_router(avr_protocol_router)
 app.include_router(id_orders_router)
 app.include_router(id_forms_router)
 app.include_router(insulation_protocol_router)
