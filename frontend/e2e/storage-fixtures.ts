@@ -443,6 +443,7 @@ export class StorageApi {
         profit: { plan: "0.00", fact: "0.00" }, margin_pct: { plan: null, fact: null }, by_month: [] },
       "receipts-by-basis": { contracts: [], totals: { invoiced: "0.00", received: "0.00", remaining: "0.00" } },
       "rd/volumes": [],
+      "onboarding": { items: [], done: 10, total: 10, percent: 100, next: null },
       "work-center/hud": { objects: [], id_readiness: [], invoices_to_check: 0 },
       "money-calendar": { items: [], counts: {}, totals: { to_pay: "0.00", to_receive: "0.00" }, unmarked: { count: 0, amount: "0.00", payments: 0, receipts: 0 } },
     };

@@ -3298,7 +3298,7 @@ export function App() {
         </div></div>, document.body)}
         <section className="content">
           {!phoneLayout && <ComfortControls />}
-          <HelpCenter active={active} />
+          <HelpCenter active={active} projectId={projectId} onNavigate={(screen) => { setActive(screen); setMobile(false); }} />
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
             <TodayModule
