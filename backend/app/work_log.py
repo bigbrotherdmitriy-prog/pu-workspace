@@ -104,6 +104,13 @@ def _check_links(db: Session, project_id: int, data: dict) -> dict:
         if item is None or item.project_id != project_id:
             raise LookupError("Позиция РД не найдена")
         result["rd_spec_item_id"] = item.id
+    if data.get("estimate_line_id") is not None:
+        from app.models.estimates import EstimateLine
+
+        line = db.get(EstimateLine, int(data["estimate_line_id"]))
+        if line is None or line.project_id != project_id:
+            raise LookupError("Позиция сметы не найдена")
+        result["estimate_line_id"] = line.id
     if data.get("schedule_item_id") is not None:
         from app.models.execution_finance import ScheduleItem
 
@@ -181,6 +188,7 @@ def _to_dict(e: WorkLogEntry, labor: list[dict] | None = None) -> dict:
         "note": e.note,
         "rd_spec_item_id": e.rd_spec_item_id,
         "schedule_item_id": e.schedule_item_id,
+        "estimate_line_id": e.estimate_line_id,
         "author_user_id": e.author_user_id,
         "labor": labor if labor is not None else [],
     }
@@ -297,10 +305,22 @@ def suggestions(db: Session, project_id: int) -> dict:
         select(RdSpecItem).where(RdSpecItem.project_id == project_id, RdSpecItem.status == "confirmed")
         .order_by(RdSpecItem.id).limit(100)
     ).scalars().all()
+    from app.models.estimates import Estimate, EstimateLine
+
+    est_lines = db.execute(
+        select(EstimateLine).join(Estimate, Estimate.id == EstimateLine.estimate_id)
+        .where(EstimateLine.project_id == project_id, Estimate.status == "active")
+        .order_by(EstimateLine.estimate_id, EstimateLine.sort_order, EstimateLine.id).limit(500)
+    ).scalars().all()
     return {
         "works": works,
         "objects": objects,
         "rd_items": [{"id": i.id, "name": i.name, "unit": i.unit} for i in items],
+        "estimate_lines": [
+            {"id": l.id, "position": l.position, "code": l.code, "name": l.name, "unit": l.unit,
+             "qty": f"{l.qty:f}" if l.qty is not None else None}
+            for l in est_lines
+        ],
     }
 
 

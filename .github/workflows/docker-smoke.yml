@@ -52,7 +52,7 @@ jobs:
             --receipt ci-reports/frontend-static-verification.json
       - name: Verify migration head and runtime flow
         run: |
-          docker compose exec -T backend alembic heads | grep -Fx 'e5f6a7b8c9d0 (head)'
+          docker compose exec -T backend alembic heads | grep -Fx 'f7a8b9c0d1e2 (head)'
           docker compose exec -T backend alembic current
           docker compose exec -T backend python - <<'PY'
           import json
@@ -62,7 +62,7 @@ jobs:
               readiness = json.load(response)
           schema = readiness.get('checks', {}).get('schema', {})
           assert schema.get('ok') is True
-          assert schema.get('message') == 'e5f6a7b8c9d0'
+          assert schema.get('message') == 'f7a8b9c0d1e2'
           PY
           python scripts/check_ci_smoke.py --seed
       - name: Verify v5.4 runtime composition

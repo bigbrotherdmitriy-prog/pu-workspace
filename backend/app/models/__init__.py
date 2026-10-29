@@ -70,6 +70,7 @@ from app.models.purchase import PurchaseItem, PurchaseItemSource
 from app.models.equipment import EquipmentUnit
 from app.models.work_log import WorkLogCrew, WorkLogEntry, WorkLogLabor
 from app.models.id_orders import IdOrder, IdOrderFile
+from app.models.estimates import Estimate, EstimateLine, KsAct
 from app.models.invoice_line import InvoiceLine
 
 __all__ = [
@@ -169,6 +170,9 @@ __all__ = [
     "WorkLogLabor",
     "IdOrder",
     "IdOrderFile",
+    "Estimate",
+    "EstimateLine",
+    "KsAct",
     "InvoiceLine",
 ]
 
