@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -158,3 +158,66 @@ def get_report(
                 names.append(s.object_name)
     objects = [object_report(db, project_id, n) for n in names]
     return {"objects": objects}
+
+
+MAX_ID_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _write_to_source_folder(project_id: int, db, source, name: str, data: bytes) -> str:
+    """Кладёт файл в папку ИД объекта в том хранилище, где она лежит, и возвращает id файла."""
+    import io
+    import mimetypes
+
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    if source.provider == "pu_storage":
+        from app.integrations.pu_storage import PuStorageAdapter
+
+        return PuStorageAdapter(project_id).write_file(source.folder_id, name, data, mime)
+    if source.provider in {"google_drive", "google_workspace"}:
+        from googleapiclient.http import MediaIoBaseUpload
+        from app.api.google_drive import drive_service_for_project
+
+        service = drive_service_for_project(project_id, db)
+        media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mime, resumable=False)
+        created = service.files().create(
+            body={"name": name, "parents": [source.folder_id]},
+            media_body=media, fields="id", supportsAllDrives=True,
+        ).execute()
+        return str(created["id"])
+    raise HTTPException(status_code=409, detail="Загрузка в это хранилище не поддерживается")
+
+
+@router.post("/{project_id}/executive-docs/sources/{source_id}/upload")
+async def upload_to_source(
+    project_id: int,
+    source_id: int,
+    request: Request,
+    name: str = Query(..., min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Загрузка файла прямо в папку ИД объекта (сырое тело запроса) и пересчёт готовности."""
+    require_project_role(db, user, project_id, "manager")
+    source = db.query(IdSource).filter(
+        IdSource.id == source_id, IdSource.project_id == project_id,
+    ).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_ID_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Файл слишком большой")
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=422, detail="Пустой файл")
+    if len(data) > MAX_ID_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Файл слишком большой")
+    safe_name = name.replace("/", "_").replace("\\", "_").strip()
+    if not safe_name or safe_name in {".", ".."}:
+        raise HTTPException(status_code=422, detail="Некорректное имя файла")
+    file_id = _write_to_source_folder(project_id, db, source, safe_name, data)
+    from app.integrations.storage import storage_for_project
+
+    scan_source(db, source, storage_for_project(project_id, db))
+    report = object_report(db, project_id, source.object_name)
+    db.commit()
+    return {"file_id": file_id, "report": report}

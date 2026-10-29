@@ -88,3 +88,26 @@ it("checks the AOSR and lists missing fields", async () => {
   expect(await screen.findByText("Не хватает:")).toBeTruthy();
   expect(screen.getByText("Приказ о назначении")).toBeTruthy();
 });
+
+it("uploads a missing document straight into the object folder", async () => {
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/report")) return { objects: [{
+      object_name: "ДУБНА", percent: 40, required_total: 10, present: 4, draft: 1,
+      missing: ["Технический отчёт"], recommended_missing: [], file_issues: [], empty_folders: [],
+      duplicates: [], last_scan_at: null,
+    }] };
+    if (path.endsWith("/sources")) return [{ id: 7, object_name: "ДУБНА", folder_name: "f", last_scan_at: null }];
+    if (path.endsWith("/participants")) return [];
+    return {};
+  });
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<ExecutiveDocsModule projectId={3} />);
+  const input = await screen.findByLabelText("Выбрать файлы для ДУБНА");
+  fireEvent.change(input, { target: { files: [new File(["x"], "Отчёт.pdf")] } });
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  expect(String(fetchMock.mock.calls[0][0])).toContain("/projects/3/executive-docs/sources/7/upload?name=");
+  expect(await screen.findByText(/Загружено файлов: 1/)).toBeTruthy();
+  vi.unstubAllGlobals();
+});
