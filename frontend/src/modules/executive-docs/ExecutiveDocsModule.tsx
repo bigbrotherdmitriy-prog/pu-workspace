@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
+import { EquipmentTestAct } from "./EquipmentTestAct";
+import { IdOrders } from "./IdOrders";
 import { InsulationProtocol } from "./InsulationProtocol";
 import { EARTHING_PROTOCOL, PHASE_ZERO_PROTOCOL, ProtocolForm } from "./ProtocolForm";
 import "./executive-docs.css";
@@ -320,6 +322,8 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
         <span>Кабели берутся из подтверждённых позиций рабочей документации; трассы и фактическую длину впишите в таблице.</span>
       </p>
 
+      <IdOrders projectId={projectId} />
+      <EquipmentTestAct projectId={projectId} objectName={objects[0]?.object_name} />
       <InsulationProtocol projectId={projectId} objectName={objects[0]?.object_name} />
       <ProtocolForm projectId={projectId} objectName={objects[0]?.object_name} config={EARTHING_PROTOCOL} />
       <ProtocolForm projectId={projectId} objectName={objects[0]?.object_name} config={PHASE_ZERO_PROTOCOL} />
