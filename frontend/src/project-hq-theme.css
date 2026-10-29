@@ -10,10 +10,10 @@
   --read-accent: #69d9ff;
   --read-accent-fill: #123d60;
   --read-button: #16415f;
-  --read-warn: #ffb568;
-  --read-warn-fill: #382b22;
-  --read-danger: #ff9097;
-  --read-danger-fill: #37232d;
+  --read-warn: #ff9a3d;
+  --read-warn-fill: #3a2616;
+  --read-danger: #ff8a50;
+  --read-danger-fill: #3a2214;
   --hq-violet: #80bdff;
   --hq-violet-fill: #14375b;
   --v9-canvas: var(--read-canvas);
@@ -175,4 +175,18 @@
   background-size: cover;
   background-position: center;
   background-attachment: fixed;
+}
+
+/* Owner 29.10.2026: control-room palette on every tab — neon orange marks what matters, cyan neon draws the lines. */
+:root[data-display-theme="dark"] .shell :is(.module-overlay, .content) :is(.card, .id-object, .pr-counter, .eq-counter, .pus-card) {
+  border-color: rgba(105, 217, 255, .35);
+  box-shadow: 0 0 0 1px rgba(105, 217, 255, .08), 0 0 14px rgba(105, 217, 255, .08);
+}
+:root[data-display-theme="dark"] .shell :is(.module-overlay, .content) :is(.id-missing, .eq-overdue, .finance-warning, .pus-error, .eq-error) {
+  color: var(--read-warn);
+  text-shadow: 0 0 8px rgba(255, 154, 61, .35);
+}
+:root[data-display-theme="dark"] .shell :is(.module-overlay, .content) button:not(:disabled):hover {
+  border-color: #69d9ff;
+  box-shadow: 0 0 10px rgba(105, 217, 255, .35);
 }
