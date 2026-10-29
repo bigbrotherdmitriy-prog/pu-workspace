@@ -28,6 +28,9 @@ _SPEC_PHRASE_RE = re.compile(
     re.IGNORECASE,
 )
 _TABLE_HEADER_RE = re.compile(r"поз.*наименование", re.IGNORECASE | re.DOTALL)
+# Страницы других ведомостей (объёмы работ, демонтаж) — не спецификация оборудования,
+# даже если в них нумерованные строки.
+_NOT_SPEC_RE = re.compile(r"ведомость\s+объ[её]мов|демонтажн\w*\s+работ", re.IGNORECASE)
 _POS_LINE_RE = re.compile(r"^\s*\d+(\.\d+)*\s")
 
 
@@ -90,6 +93,8 @@ def find_spec_pages(pages: list[str]) -> list[int]:
                     break
                 j += 1
                 continue
+            if _NOT_SPEC_RE.search(_norm_page(text)):
+                break
             if _is_spec_continuation(text):
                 empty_run = 0
                 result.append(j + 1)

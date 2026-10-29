@@ -94,3 +94,16 @@ def test_find_spec_pages_table_without_title_phrase():
 def test_find_spec_pages_plain_header_without_title_is_not_a_spec():
     pages = ["Поз. Наименование Количество\n1 Что-то 2"]
     assert find_spec_pages(pages) == []
+
+
+def test_find_spec_pages_stops_at_demolition_list():
+    spec = (
+        "Спецификация оборудования, изделий и материалов\n"
+        "Поз. Наименование Кол.\n1.1 Насос 2\n1.2 Кран 4\n1.3 Фильтр 1\n"
+    )
+    demolition = (
+        "Ведомость объемов демонтажных работ\n№ пп Наименование Ед. изм. Кол-во\n"
+        "1 Демонтаж насоса шт. 2\n2 Демонтаж крана шт. 4\n3 Демонтаж фильтра шт. 1\n"
+    )
+    cont = "4 Демонтаж труб м 10\n5 Демонтаж изоляции м 10\n6 Демонтаж опор шт. 3\n"
+    assert find_spec_pages(["Титул", spec, demolition, cont]) == [2]
