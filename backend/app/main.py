@@ -29,6 +29,8 @@ from app.api.dds_plan_versions import router as dds_plan_versions_router
 from app.api.money_calendar import router as money_calendar_router
 from app.api.rd import router as rd_router
 from app.api.purchase import router as purchase_router
+from app.api.earthing_protocol import router as earthing_protocol_router
+from app.api.phase_zero_protocol import router as phase_zero_protocol_router
 from app.api.insulation_protocol import router as insulation_protocol_router
 from app.api.work_log import router as work_log_router
 from app.api.pu_storage import router as pu_storage_router
@@ -204,6 +206,8 @@ app.include_router(dds_plan_versions_router)
 app.include_router(money_calendar_router)
 app.include_router(rd_router)
 app.include_router(purchase_router)
+app.include_router(earthing_protocol_router)
+app.include_router(phase_zero_protocol_router)
 app.include_router(insulation_protocol_router)
 app.include_router(work_log_router)
 app.include_router(pu_storage_router)
