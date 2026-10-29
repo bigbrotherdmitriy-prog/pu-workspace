@@ -165,3 +165,14 @@
     background: Canvas; color: CanvasText; border-color: CanvasText; box-shadow: none;
   }
 }
+
+/* Owner 29.10.2026: every tab gets the same lighter control-room backdrop as the work center. */
+:root[data-display-theme="dark"] .shell :is(.content, .module-overlay, .documents-overlay, .projects-overlay, .secretary-overlay) {
+  background-color: #0b2a4d;
+  background-image:
+    linear-gradient(180deg, rgba(5, 25, 55, .55) 0%, rgba(10, 40, 80, .25) 45%, rgba(10, 30, 60, .45) 100%),
+    url("/new/assets/control-room/dusk-lines.webp");
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
