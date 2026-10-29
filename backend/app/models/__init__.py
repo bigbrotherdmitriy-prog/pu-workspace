@@ -67,6 +67,7 @@ from app.models.workspace_tenant import TenantWorkspace, TenantWorkspaceMember
 from app.models.executive_docs import IdFile, IdParticipant, IdRequirement, IdSource
 from app.models.rd import RdSheet, RdSpecItem, RdVolume
 from app.models.purchase import PurchaseItem, PurchaseItemSource
+from app.models.equipment import EquipmentUnit
 from app.models.invoice_line import InvoiceLine
 
 __all__ = [
