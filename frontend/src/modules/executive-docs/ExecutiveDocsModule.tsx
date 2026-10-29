@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
+import { InsulationProtocol } from "./InsulationProtocol";
 import "./executive-docs.css";
 
 type FileIssue = { path: string; issues: string[] };
@@ -317,6 +318,8 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
         <button type="button" onClick={() => void downloadCableJournal()}>Скачать заготовку кабельного журнала</button>{" "}
         <span>Кабели берутся из подтверждённых позиций рабочей документации; трассы и фактическую длину впишите в таблице.</span>
       </p>
+
+      <InsulationProtocol projectId={projectId} objectName={objects[0]?.object_name} />
 
       {objects.map((o) => {
         const source = sourceFor(o.object_name);
