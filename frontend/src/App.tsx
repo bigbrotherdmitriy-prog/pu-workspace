@@ -70,6 +70,7 @@ import {
   CalendarDays,
   CalendarRange,
   Calculator,
+  Camera,
   ChevronLeft,
   ClipboardCheck,
   Download,
@@ -122,6 +123,7 @@ const PurchaseModule = lazy(() => import("./modules/purchase/PurchaseModule").th
 const EquipmentModule = lazy(() => import("./modules/equipment/EquipmentModule").then((m) => ({ default: m.EquipmentModule })));
 import { HelpCenter } from "./modules/help/HelpCenter";
 const EstimatesModule = lazy(() => import("./modules/estimates/EstimatesModule").then((m) => ({ default: m.EstimatesModule })));
+const DefectsModule = lazy(() => import("./modules/defects/DefectsModule").then((m) => ({ default: m.DefectsModule })));
 const WorkLogModule = lazy(() => import("./modules/work-log/WorkLogModule").then((m) => ({ default: m.WorkLogModule })));
 const PuStorageModule = lazy(() => import("./modules/storage/PuStorageModule").then((m) => ({ default: m.PuStorageModule })));
 const RdModule = lazy(() => import("./modules/rd/RdModule").then((m) => ({ default: m.RdModule })));
@@ -362,7 +364,7 @@ const navigationGroups = [
   ] },
   { label: "Контроль", items: [
     [AlertTriangle, "Риски и решения"], [ClipboardCheck, "Обязательства"],
-    [CalendarRange, "ГПР и ДДС"], [ClipboardCheck, "Исполнительная документация"], [FileText, "Рабочая документация"], [Wallet, "Закупка"], [Wrench, "Оборудование"], [ClipboardCheck, "Журнал работ"], [Calculator, "Сметы и КС"], [FolderTree, "Файлы проекта"], [BarChart3, "Портфель"], [BarChart3, "Аналитика"],
+    [CalendarRange, "ГПР и ДДС"], [ClipboardCheck, "Исполнительная документация"], [FileText, "Рабочая документация"], [Wallet, "Закупка"], [Wrench, "Оборудование"], [ClipboardCheck, "Журнал работ"], [Camera, "Замечания"], [Calculator, "Сметы и КС"], [FolderTree, "Файлы проекта"], [BarChart3, "Портфель"], [BarChart3, "Аналитика"],
     [GitPullRequest, "Предложения"], [Users, "Совещания"], [Bell, "Уведомления"],
   ] },
   { label: "Система", items: [
@@ -3809,6 +3811,7 @@ export function App() {
       {active === "Закупка" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PurchaseModule projectId={projectId} /></section>}
       {active === "Оборудование" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EquipmentModule projectId={projectId} /></section>}
       {active === "Сметы и КС" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EstimatesModule projectId={projectId} /></section>}
+      {active === "Замечания" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><DefectsModule projectId={projectId} /></section>}
       {active === "Журнал работ" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><WorkLogModule projectId={projectId} /></section>}
       {active === "Файлы проекта" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PuStorageModule projectId={projectId} /></section>}
       {active === "Портфель" && <PortfolioModule onOpenProject={(id) => { void activateProject(id); setActive("ГПР и ДДС"); }} />}
