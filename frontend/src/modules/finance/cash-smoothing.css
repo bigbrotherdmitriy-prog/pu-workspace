@@ -1,0 +1,71 @@
+.cash-smoothing {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.cash-smoothing h3 {
+  margin: 0;
+  color: var(--read-text, #1f2937);
+}
+
+.cash-smoothing-note {
+  color: var(--read-text-muted, #6b7280);
+  font-size: 12px;
+}
+
+.cash-smoothing-variants {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.cash-smoothing-card {
+  border: 1px solid var(--read-border, #e5e7eb);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--read-surface, #ffffff);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cash-smoothing-card h4 {
+  margin: 0;
+  color: var(--read-text, #1f2937);
+}
+
+.cash-smoothing-card p {
+  margin: 0;
+  color: var(--read-text, #1f2937);
+}
+
+.cash-smoothing-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cash-smoothing-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.cash-smoothing-badge.resolved {
+  background: var(--read-positive-bg, #dcfce7);
+  color: var(--read-positive-text, #166534);
+}
+
+.cash-smoothing-badge.partial {
+  background: var(--read-warning-bg, #fef3c7);
+  color: var(--read-warning-text, #92400e);
+}
+
+.cash-smoothing-moves summary {
+  cursor: pointer;
+  color: var(--read-link, #2563eb);
+}
