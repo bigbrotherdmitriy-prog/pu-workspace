@@ -54,6 +54,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [tick, setTick] = useState(0);
   const [plan, setPlan] = useState<Schedule>({ baseline: null, items: [] });
   const [selected, setSelected] = useState<PlanItem | null>(null);
+  const [formHeader, setFormHeader] = useState<Record<string, string>>({});
   const [view, setView] = useState<"all" | "plan" | "crews">("all");
   const [crews, setCrews] = useState<Crew[]>([]);
   const [labor, setLabor] = useState<LaborRow[]>([]);
@@ -174,6 +175,27 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     }
   }
 
+  async function downloadForm() {
+    setError("");
+    try {
+      const response = await fetch(`/projects/${projectId}/work-log/form.docx`, {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ header: formHeader }),
+      });
+      if (!response.ok) throw new Error(`Не удалось сформировать журнал (${response.status})`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "Общий журнал работ.docx";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сформировать журнал");
+    }
+  }
+
   async function downloadExcel() {
     try {
       const response = await fetch(`/projects/${projectId}/work-log/export.xlsx`, { credentials: "same-origin" });
@@ -197,6 +219,15 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
         <h3 className="wl-title">Журнал работ</h3>
         <button type="button" onClick={() => void downloadExcel()}>Скачать в Excel</button>
       </div>
+      <details className="wl-print">
+        <summary>Печатная форма журнала (Word, по РД-11-05-2007)</summary>
+        <div className="wl-form">
+          {([["journal_no", "№ журнала"], ["object_name", "Объект"], ["address", "Адрес"], ["customer", "Застройщик / заказчик"], ["contractor", "Лицо, осуществляющее строительство"], ["designer", "Проектная организация"]] as [string, string][]).map(([k, label]) => (
+            <label key={k}>{label}<input value={formHeader[k] ?? ""} onChange={(e) => setFormHeader((h) => ({ ...h, [k]: e.target.value }))} /></label>
+          ))}
+          <button type="button" className="wl-save" onClick={() => void downloadForm()}>Скачать журнал по бланку (Word)</button>
+        </div>
+      </details>
 
       <div className="wl-tabs" role="tablist">
         <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("all")}>Записи за день</button>
