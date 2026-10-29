@@ -5,7 +5,7 @@
 }
 
 .id-object {
-  border: 1px solid var(--border, #ddd);
+  border: 1px solid var(--read-rule, #ddd);
   border-radius: 6px;
   padding: 12px;
 }
@@ -46,7 +46,7 @@
 }
 
 .id-missing {
-  color: #b00;
+  color: var(--read-danger, #b00);
 }
 
 @media (max-width: 600px) {
