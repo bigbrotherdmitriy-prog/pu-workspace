@@ -15,7 +15,9 @@ type Entry = {
   hours: string | null;
   crew_id: number | null;
   note: string | null;
+  labor?: LaborRow[];
 };
+type LaborRow = { person_name: string; hours: string; hourly_rate: string | null };
 type Crew = { id: number; name: string; foreman: string | null; members: string; members_count: number; note: string | null };
 
 type Summary = { entries: number; days: number; by_work: { work_name: string; unit: string | null; qty_total: string; entries: number }[] };
@@ -54,6 +56,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [selected, setSelected] = useState<PlanItem | null>(null);
   const [view, setView] = useState<"all" | "plan" | "crews">("all");
   const [crews, setCrews] = useState<Crew[]>([]);
+  const [labor, setLabor] = useState<LaborRow[]>([]);
   const [crewForm, setCrewForm] = useState({ id: 0, name: "", foreman: "", members: "" });
 
   useEffect(() => {
@@ -110,9 +113,12 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     if (form.workers.trim()) body.workers = Number(form.workers);
     if (form.hours.trim()) body.hours = form.hours.trim();
     if (form.crew_id) body.crew_id = Number(form.crew_id);
+    const people = labor.filter((r) => r.person_name.trim() && r.hours.trim());
+    if (people.length) body.labor = people.map((r) => ({ person_name: r.person_name.trim(), hours: r.hours.trim(), ...(r.hourly_rate ? { hourly_rate: r.hourly_rate } : {}) }));
     try {
       await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
       setMessage("Запись добавлена");
+      setLabor([]);
       setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location, unit: selected ? f.unit : "" }));
       setTick((v) => v + 1);
     } catch (err) {
@@ -130,6 +136,17 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить запись");
     }
+  }
+
+  function fillLaborFromCrew(crewId: string) {
+    const crew = crews.find((c) => String(c.id) === crewId);
+    if (!crew) return;
+    const names = [crew.foreman ?? "", ...crew.members.split("\n").map((l) => l.split("—")[0].trim())].map((n) => n.trim()).filter(Boolean);
+    setLabor(names.map((n) => ({ person_name: n, hours: form.hours.trim() || "8", hourly_rate: null })));
+  }
+
+  function setLaborRow(index: number, patch: Partial<LaborRow>) {
+    setLabor((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
   async function saveCrew() {
@@ -263,7 +280,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
         <label>Ед. изм.<input value={form.unit} onChange={(e) => set("unit", e.target.value)} placeholder="м, шт" /></label>
         <label>Место<input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Ось, этаж, помещение" /></label>
         <label>Бригада
-          <select value={form.crew_id} onChange={(e) => set("crew_id", e.target.value)}>
+          <select value={form.crew_id} onChange={(e) => { set("crew_id", e.target.value); fillLaborFromCrew(e.target.value); }}>
             <option value="">Без бригады</option>
             {crews.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
           </select>
@@ -272,6 +289,19 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
         <label>Рабочих<input inputMode="numeric" value={form.workers} onChange={(e) => set("workers", e.target.value)} placeholder="по бригаде" /></label>
         <label>Погода<input value={form.weather} onChange={(e) => set("weather", e.target.value)} placeholder="+5, дождь" /></label>
         <label className="wl-wide">Примечание<input value={form.note} onChange={(e) => set("note", e.target.value)} /></label>
+        <fieldset className="wl-wide wl-labor">
+          <legend>Кто сколько отработал</legend>
+          {labor.length === 0 && <p className="wl-note">Необязательно. Выберите бригаду, чтобы подставить людей, или добавьте вручную.</p>}
+          {labor.map((r, i) => (
+            <div className="wl-labor-row" key={i}>
+              <input aria-label={`Работник ${i + 1}`} placeholder="ФИО" value={r.person_name} onChange={(e) => setLaborRow(i, { person_name: e.target.value })} />
+              <input aria-label={`Часов у работника ${i + 1}`} inputMode="decimal" placeholder="Часов" value={r.hours} onChange={(e) => setLaborRow(i, { hours: e.target.value })} />
+              <input aria-label={`Ставка работника ${i + 1}`} inputMode="decimal" placeholder="Ставка ₽/ч (необязательно)" value={r.hourly_rate ?? ""} onChange={(e) => setLaborRow(i, { hourly_rate: e.target.value })} />
+              <button type="button" aria-label={`Убрать работника ${i + 1}`} onClick={() => setLabor((rows) => rows.filter((_, j) => j !== i))}>×</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setLabor((rows) => [...rows, { person_name: "", hours: "8", hourly_rate: null }])}>Добавить работника</button>
+        </fieldset>
         <button type="submit" className="wl-save" disabled={saving}>{saving ? "Сохраняем…" : "Добавить запись"}</button>
       </form>
       {message && <p className="wl-note" role="status">{message}</p>}

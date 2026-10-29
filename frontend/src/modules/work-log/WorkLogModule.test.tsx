@@ -114,3 +114,34 @@ it("sends hours and crew with the entry and manages crews on the crews tab", asy
   fireEvent.click(screen.getByText("Добавить бригаду"));
   await waitFor(() => expect(mockApi.mock.calls.some((c) => String(c[0]).endsWith("/work-log/crews") && (c[1] as { method?: string } | undefined)?.method === "POST")).toBe(true));
 });
+
+
+it("fills people from the crew and sends the timesheet with rates as data", async () => {
+  mockApiOk();
+  render(<WorkLogModule projectId={5} />);
+  await screen.findByText("Прокладка кабеля");
+  fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Монтаж щита" } });
+  fireEvent.change(screen.getByLabelText("Бригада"), { target: { value: "4" } });
+  expect(await screen.findByLabelText("Работник 1")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Часов у работника 1"), { target: { value: "6" } });
+  fireEvent.change(screen.getByLabelText("Ставка работника 1"), { target: { value: "450" } });
+  fireEvent.click(screen.getByText("Добавить запись"));
+  await waitFor(() => {
+    const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/work-log") && (c[1] as { method?: string } | undefined)?.method === "POST");
+    expect(call).toBeTruthy();
+    const body = String((call![1] as { body: string }).body);
+    expect(body).toContain("\"labor\":[");
+    expect(body).toContain("\"hours\":\"6\"");
+    expect(body).toContain("\"hourly_rate\":\"450\"");
+  });
+});
+
+it("adds a worker by hand", async () => {
+  mockApiOk();
+  render(<WorkLogModule projectId={5} />);
+  await screen.findByText("Прокладка кабеля");
+  fireEvent.click(screen.getByText("Добавить работника"));
+  expect(screen.getByLabelText("Работник 1")).toBeTruthy();
+  fireEvent.click(screen.getByLabelText("Убрать работника 1"));
+  expect(screen.queryByLabelText("Работник 1")).toBeNull();
+});

@@ -38,3 +38,7 @@
 .wl-crews { display: flex; flex-direction: column; gap: 10px; }
 .wl-crew-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.12)); }
 .wl-actions { display: flex; gap: 6px; }
+.wl-labor { border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.wl-labor legend { padding: 0 6px; color: var(--read-muted, #64748b); font-size: 12px; }
+.wl-labor-row { display: grid; grid-template-columns: 2fr 1fr 1.4fr auto; gap: 6px; }
+@media (max-width: 600px) { .wl-labor-row { grid-template-columns: 1fr 1fr; } }
