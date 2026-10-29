@@ -145,3 +145,26 @@ it("adds a worker by hand", async () => {
   fireEvent.click(screen.getByLabelText("Убрать работника 1"));
   expect(screen.queryByLabelText("Работник 1")).toBeNull();
 });
+
+
+it("links the entry to an estimate position and fills name and unit from it", async () => {
+  mockApi.mockImplementation(async (path: string, init?: { method?: string }) => {
+    if (path.includes("/work-log/crews")) return { crews: [] };
+    if (path.includes("/work-log/schedule")) return { baseline: null, items: [] };
+    if (path.includes("/suggestions")) return { ...suggestions, estimate_lines: [{ id: 77, position: "3", code: null, name: "Прокладка кабеля ВВГ", unit: "м", qty: "100" }] };
+    if (init?.method === "POST") return { id: 9 };
+    return listing;
+  });
+  render(<WorkLogModule projectId={5} />);
+  await screen.findByText("Прокладка кабеля");
+  fireEvent.change(await screen.findByLabelText(/Позиция сметы/), { target: { value: "77" } });
+  fireEvent.change(screen.getByLabelText("Объём"), { target: { value: "25" } });
+  fireEvent.click(screen.getByText("Добавить запись"));
+  await waitFor(() => {
+    const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/work-log") && (c[1] as { method?: string } | undefined)?.method === "POST");
+    expect(call).toBeTruthy();
+    const body = String((call![1] as { body: string }).body);
+    expect(body).toContain("\"estimate_line_id\":77");
+    expect(body).toContain("Прокладка кабеля ВВГ");
+  });
+});
