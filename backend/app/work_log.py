@@ -232,3 +232,54 @@ def to_xlsx(db: Session, project_id: int, date_from=None, date_to=None) -> bytes
     buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def schedule_overview(db: Session, project_id: int) -> dict:
+    """Работы из ГПР (самая свежая версия) с плановыми сроками и фактом из журнала."""
+    from app.models.execution_finance import ScheduleBaseline, ScheduleItem
+
+    baselines = db.execute(
+        select(ScheduleBaseline).where(ScheduleBaseline.project_id == project_id)
+        .order_by(ScheduleBaseline.version.desc())
+    ).scalars().all()
+    chosen = next((b for b in baselines if b.status == "approved"), baselines[0] if baselines else None)
+    if chosen is None:
+        return {"baseline": None, "items": []}
+    items = db.execute(
+        select(ScheduleItem).where(ScheduleItem.project_id == project_id, ScheduleItem.baseline_id == chosen.id)
+        .order_by(ScheduleItem.sort_order, ScheduleItem.id)
+    ).scalars().all()
+    parents = {i.parent_id for i in items if i.parent_id}
+    entries = db.execute(
+        select(WorkLogEntry).where(WorkLogEntry.project_id == project_id, WorkLogEntry.schedule_item_id.is_not(None))
+    ).scalars().all()
+    fact: dict[int, dict] = {}
+    for e in entries:
+        bucket = fact.setdefault(e.schedule_item_id, {"qty": Decimal("0"), "entries": 0, "first": e.work_date, "last": e.work_date, "unit": e.unit})
+        bucket["qty"] += e.qty or Decimal("0")
+        bucket["entries"] += 1
+        bucket["first"] = min(bucket["first"], e.work_date)
+        bucket["last"] = max(bucket["last"], e.work_date)
+        bucket["unit"] = bucket["unit"] or e.unit
+    today = date.today()
+    result = []
+    for i in items:
+        f = fact.get(i.id)
+        late = bool(i.planned_finish and i.planned_finish < today and (i.actual_progress or 0) < 100 and not i.actual_finish)
+        result.append({
+            "id": i.id,
+            "title": i.title,
+            "is_group": i.id in parents,
+            "is_milestone": bool(i.is_milestone),
+            "planned_start": i.planned_start.isoformat() if i.planned_start else None,
+            "planned_finish": i.planned_finish.isoformat() if i.planned_finish else None,
+            "planned_progress": i.planned_progress or 0,
+            "actual_progress": i.actual_progress or 0,
+            "overdue": late,
+            "fact_entries": f["entries"] if f else 0,
+            "fact_qty": f"{f['qty'].quantize(Decimal('0.001')):f}" if f else None,
+            "fact_unit": f["unit"] if f else None,
+            "fact_first": f["first"].isoformat() if f else None,
+            "fact_last": f["last"].isoformat() if f else None,
+        })
+    return {"baseline": {"id": chosen.id, "name": chosen.name, "version": chosen.version, "status": chosen.status}, "items": result}

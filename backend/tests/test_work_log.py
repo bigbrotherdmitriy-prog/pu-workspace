@@ -142,3 +142,30 @@ def test_api(world, monkeypatch):
     assert client.get(f"/projects/{other}/work-log").status_code == 404
     assert client.delete(f"/projects/{pid}/work-log/{eid}").json() == {"deleted": eid}
     assert client.delete(f"/projects/{pid}/work-log/{eid}").status_code == 404
+
+
+def test_schedule_overview_links_plan_and_fact(world):
+    from app.models.execution_finance import ScheduleBaseline, ScheduleItem
+    from app.models.user import User
+
+    db, pid = world["db"], world["p"].id
+    assert wl.schedule_overview(db, pid) == {"baseline": None, "items": []}
+    user = User(email="u@x.ru", name="U")
+    db.add(user)
+    db.flush()
+    base = ScheduleBaseline(project_id=pid, created_by_user_id=user.id, name="ГПР", version=1, status="approved")
+    db.add(base)
+    db.flush()
+    work = ScheduleItem(project_id=pid, baseline_id=base.id, title="Прокладка кабеля", sort_order=1,
+                        planned_start=date(2026, 10, 1), planned_finish=date(2026, 10, 10))
+    db.add(work)
+    db.flush()
+    wl.add_entry(db, pid, user.id, {"work_date": "2026-10-05", "work_name": "Прокладка кабеля", "qty": "40", "unit": "м", "schedule_item_id": work.id})
+    wl.add_entry(db, pid, user.id, {"work_date": "2026-10-06", "work_name": "Прокладка кабеля", "qty": "60", "unit": "м", "schedule_item_id": work.id})
+    db.commit()
+    res = wl.schedule_overview(db, pid)
+    item = res["items"][0]
+    assert res["baseline"]["name"] == "ГПР"
+    assert item["fact_qty"] == "100.000" and item["fact_entries"] == 2 and item["fact_unit"] == "м"
+    assert item["fact_first"] == "2026-10-05" and item["fact_last"] == "2026-10-06"
+    assert item["overdue"] is True

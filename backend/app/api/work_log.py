@@ -57,6 +57,12 @@ def work_log_suggestions(project_id: int, db: Session = Depends(get_db), user=De
     return svc.suggestions(db, project_id)
 
 
+@router.get("/{project_id}/work-log/schedule")
+def work_log_schedule(project_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    return svc.schedule_overview(db, project_id)
+
+
 @router.get("/{project_id}/work-log/export.xlsx")
 def export_work_log(
     project_id: int,
