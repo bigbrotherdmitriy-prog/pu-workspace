@@ -274,6 +274,27 @@ def parse_volume(db: Session, volume_id: int) -> dict:
                 item.status = "rejected"
         db.flush()
 
+        def _key(pos, name, type_mark, unit, qty, page):
+            return (
+                (pos or "").strip(), (name or "").strip().lower(), (type_mark or "").strip().lower(),
+                (unit or "").strip().lower(), f"{Decimal(qty).normalize():f}" if qty is not None else "", page,
+            )
+
+        kept = {
+            _key(i.pos, i.name, i.type_mark, i.unit, i.qty, i.source_page)
+            for i in db.execute(
+                select(RdSpecItem).where(RdSpecItem.volume_id == vol.id)
+            ).scalars().all()
+        }
+        fresh: list[dict] = []
+        for data in parsed_items:
+            k = _key(data["pos"], data["name"], data["type_mark"], data["unit"], data["qty"], data["page"])
+            if k in kept:
+                continue  # уже есть (подтверждена или отклонена) — копию не создаём
+            kept.add(k)
+            fresh.append(data)
+        parsed_items = fresh
+
         for idx, data in enumerate(parsed_items, start=1):
             db.add(RdSpecItem(
                 volume_id=vol.id,
@@ -288,6 +309,19 @@ def parse_volume(db: Session, volume_id: int) -> dict:
                 source_page=data["page"],
                 status="proposed",
             ))
+
+        db.flush()
+        seen_keys: dict[tuple, RdSpecItem] = {}
+        rank = {"confirmed": 0, "rejected": 1, "proposed": 2}
+        for item in sorted(
+            db.execute(select(RdSpecItem).where(RdSpecItem.volume_id == vol.id)).scalars().all(),
+            key=lambda i: (rank.get(i.status, 3), i.id),
+        ):
+            k = _key(item.pos, item.name, item.type_mark, item.unit, item.qty, item.source_page)
+            if k in seen_keys:
+                db.delete(item)  # точная копия — оставляем лучшую по статусу
+            else:
+                seen_keys[k] = item
 
         vol.status = "parsed"
         if page_errors:

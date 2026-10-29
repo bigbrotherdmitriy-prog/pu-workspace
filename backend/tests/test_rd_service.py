@@ -270,3 +270,31 @@ def test_foreign_project_404(world):
     with pytest.raises(HTTPException) as exc_info3:
         rd_service.set_item_status(db, project.id, item.id, "bogus")
     assert exc_info3.value.status_code == 422
+
+
+def test_parse_volume_does_not_duplicate_confirmed_and_removes_exact_copies(world, monkeypatch):
+    db = world["db"]
+    project = world["project"]
+    vol = _make_volume(db, project.id)
+    for _ in range(2):  # уже накопившийся дубль подтверждённой позиции
+        db.add(RdSpecItem(
+            volume_id=vol.id, project_id=project.id, sort_order=1, pos="1", name="Кабель",
+            type_mark="ВВГ", unit="м", qty=Decimal("10"), source_page=1, status="confirmed",
+        ))
+    db.commit()
+
+    _patch_drive(monkeypatch, [])
+    monkeypatch.setattr(rd_service, "_download", lambda svc, fid: b"pdf-bytes")
+    monkeypatch.setattr(rd_service, "split_pages", lambda b: ["p1"])
+    monkeypatch.setattr(rd_service, "find_spec_pages", lambda pages: [1])
+    monkeypatch.setattr(rd_service, "spec_text", lambda pages, nums: "text")
+    monkeypatch.setattr(rd_service, "specification_from_text", lambda text: ([
+        {"pos": "1", "name": "Кабель", "type": "ВВГ", "unit": "м", "qty": "10", "note": None},
+        {"pos": "2", "name": "Щит", "type": "ЩР", "unit": "шт", "qty": "1", "note": None},
+    ], "llm"))
+
+    res = rd_service.parse_volume(db, vol.id)
+    assert res["items"] == 1  # новая только «Щит»
+    db.expire_all()
+    items = db.execute(select(RdSpecItem).where(RdSpecItem.volume_id == vol.id)).scalars().all()
+    assert sorted((i.name, i.status) for i in items) == [("Кабель", "confirmed"), ("Щит", "proposed")]
