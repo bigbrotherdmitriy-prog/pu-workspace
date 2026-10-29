@@ -30,6 +30,7 @@ from app.api.money_calendar import router as money_calendar_router
 from app.api.rd import router as rd_router
 from app.api.purchase import router as purchase_router
 from app.api.id_orders import router as id_orders_router
+from app.api.id_forms import router as id_forms_router
 from app.api.insulation_protocol import router as insulation_protocol_router
 from app.api.work_log import router as work_log_router
 from app.api.pu_storage import router as pu_storage_router
@@ -206,6 +207,7 @@ app.include_router(money_calendar_router)
 app.include_router(rd_router)
 app.include_router(purchase_router)
 app.include_router(id_orders_router)
+app.include_router(id_forms_router)
 app.include_router(insulation_protocol_router)
 app.include_router(work_log_router)
 app.include_router(pu_storage_router)
