@@ -66,6 +66,7 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [uploadNote, setUploadNote] = useState<Record<string, string>>({});
 
   const [newObjectName, setNewObjectName] = useState("");
   const [newFolderId, setNewFolderId] = useState("");
@@ -141,6 +142,32 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
     } finally {
       setBusy((b) => ({ ...b, [objectName]: false }));
     }
+  };
+
+  const uploadFiles = async (objectName: string, sourceId: number, files: File[]) => {
+    if (!files.length) return;
+    setBusy((b) => ({ ...b, [objectName]: true }));
+    setUploadNote((n) => ({ ...n, [objectName]: "" }));
+    const failed: string[] = [];
+    for (const file of files) {
+      try {
+        const response = await fetch(
+          `/projects/${projectId}/executive-docs/sources/${sourceId}/upload?name=${encodeURIComponent(file.name)}`,
+          { method: "POST", body: file, credentials: "same-origin" },
+        );
+        if (!response.ok) failed.push(`${file.name} (${response.status === 413 ? "слишком большой" : `ошибка ${response.status}`})`);
+      } catch {
+        failed.push(`${file.name} (не удалось загрузить)`);
+      }
+    }
+    setUploadNote((n) => ({
+      ...n,
+      [objectName]: failed.length
+        ? `Не загружено: ${failed.join(", ")}`
+        : `Загружено файлов: ${files.length}. Готовность пересчитана.`,
+    }));
+    try { await load(); } catch { /* the error banner already covers it */ }
+    setBusy((b) => ({ ...b, [objectName]: false }));
   };
 
   const addParticipant = async () => {
@@ -298,6 +325,22 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
             {o.missing.length > 0 && (
               <div>
                 <h4>Нет обязательного</h4>
+                {source && (
+                  <p>
+                    <input
+                      id={`id-upload-${source.id}`}
+                      type="file"
+                      multiple
+                      hidden
+                      aria-label={`Выбрать файлы для ${o.object_name}`}
+                      onChange={(e) => { void uploadFiles(o.object_name, source.id, Array.from(e.target.files ?? [])); e.currentTarget.value = ""; }}
+                    />
+                    <button type="button" disabled={isBusy} onClick={() => document.getElementById(`id-upload-${source.id}`)?.click()}>
+                      Загрузить недостающие документы
+                    </button>
+                  </p>
+                )}
+                {uploadNote[o.object_name] && <p role="status">{uploadNote[o.object_name]}</p>}
                 <ul className="id-missing">
                   {o.missing.map((m) => (
                     <li key={m}>{m}</li>
