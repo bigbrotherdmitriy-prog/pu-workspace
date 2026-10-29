@@ -17,6 +17,7 @@ const schedule = { baseline: { id: 1, name: "ГПР", version: 1, status: "appro
 
 function mockApiOk() {
   mockApi.mockImplementation(async (path: string, init?: { method?: string }) => {
+    if (path.includes("/work-log/crews")) return { crews: [{ id: 4, name: "Бригада 1", foreman: "Иванов", members: "Петров\nСидоров", members_count: 3, note: null }] };
     if (path.includes("/work-log/schedule")) return schedule;
     if (path.includes("/suggestions")) return suggestions;
     if (init?.method === "POST") return { id: 2 };
@@ -28,7 +29,6 @@ function mockApiOk() {
 it("lists entries with summary", async () => {
   mockApiOk();
   render(<WorkLogModule projectId={5} />);
-  fireEvent.click(await screen.findByText("Все записи"));
   expect(await screen.findByText("Прокладка кабеля")).toBeTruthy();
   expect(screen.getByText(/Записей: 1/)).toBeTruthy();
 });
@@ -36,6 +36,7 @@ it("lists entries with summary", async () => {
 it("shows works from the schedule and enters a fact for the chosen work", async () => {
   mockApiOk();
   render(<WorkLogModule projectId={5} />);
+  fireEvent.click(await screen.findByText("Подсказка из графика (ГПР)"));
   fireEvent.click(await screen.findByText("Монтаж кабельных лотков"));
   expect(screen.getByText(/Вносим факт по работе/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Объём"), { target: { value: "30" } });
@@ -52,6 +53,7 @@ it("shows works from the schedule and enters a fact for the chosen work", async 
 it("adds an entry for a work outside the schedule", async () => {
   mockApiOk();
   render(<WorkLogModule projectId={5} />);
+  fireEvent.click(await screen.findByText("Подсказка из графика (ГПР)"));
   fireEvent.click(await screen.findByText("Монтаж кабельных лотков"));
   fireEvent.click(screen.getByText("Другая работа (вне графика)"));
   fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Монтаж щита" } });
@@ -82,10 +84,33 @@ it("deletes an entry and shows the empty state", async () => {
 
 it("shows the empty hint", async () => {
   mockApi.mockImplementation(async (path: string) => {
+    if (path.includes("/work-log/crews")) return { crews: [] };
     if (path.includes("/work-log/schedule")) return { baseline: null, items: [] };
     return path.includes("/suggestions") ? suggestions : { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
   });
   render(<WorkLogModule projectId={5} />);
-  fireEvent.click(await screen.findByText("Все записи"));
   expect(await screen.findByText(/Записей пока нет/)).toBeTruthy();
+});
+
+
+it("sends hours and crew with the entry and manages crews on the crews tab", async () => {
+  mockApiOk();
+  render(<WorkLogModule projectId={5} />);
+  await screen.findByText("Прокладка кабеля");
+  fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Монтаж щита" } });
+  fireEvent.change(screen.getByLabelText("Часов работы"), { target: { value: "8" } });
+  fireEvent.change(screen.getByLabelText("Бригада"), { target: { value: "4" } });
+  fireEvent.click(screen.getByText("Добавить запись"));
+  await waitFor(() => {
+    const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/work-log") && (c[1] as { method?: string } | undefined)?.method === "POST");
+    expect(call).toBeTruthy();
+    const body = String((call![1] as { body: string }).body);
+    expect(body).toContain("\"hours\":\"8\"");
+    expect(body).toContain("\"crew_id\":4");
+  });
+  fireEvent.click(screen.getByText("Бригады"));
+  expect(await screen.findByText(/человек: 3/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Название бригады"), { target: { value: "Бригада 2" } });
+  fireEvent.click(screen.getByText("Добавить бригаду"));
+  await waitFor(() => expect(mockApi.mock.calls.some((c) => String(c[0]).endsWith("/work-log/crews") && (c[1] as { method?: string } | undefined)?.method === "POST")).toBe(true));
 });

@@ -1,5 +1,5 @@
 .wl { display: flex; flex-direction: column; gap: 12px; color: var(--read-text, #1f2937); font-size: 13px; }
-.wl button, .wl input {
+.wl button, .wl input, .wl select, .wl textarea {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2));
@@ -34,3 +34,7 @@
 .wl .wl-plan-late { border-left: 4px solid var(--read-warn, #d97706); }
 .wl-plan-title { font-weight: 600; }
 .wl-selected { padding: 10px; border: 1px solid var(--read-accent, #2563eb); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wl textarea { font: inherit; width: 100%; box-sizing: border-box; }
+.wl-crews { display: flex; flex-direction: column; gap: 10px; }
+.wl-crew-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.12)); }
+.wl-actions { display: flex; gap: 6px; }

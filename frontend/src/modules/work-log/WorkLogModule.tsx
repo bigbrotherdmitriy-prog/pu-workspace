@@ -12,8 +12,11 @@ type Entry = {
   location: string | null;
   weather: string | null;
   workers: number | null;
+  hours: string | null;
+  crew_id: number | null;
   note: string | null;
 };
+type Crew = { id: number; name: string; foreman: string | null; members: string; members_count: number; note: string | null };
 
 type Summary = { entries: number; days: number; by_work: { work_name: string; unit: string | null; qty_total: string; entries: number }[] };
 type Suggestions = { works: { work_name: string; unit: string | null }[]; objects: string[]; rd_items: { id: number; name: string; unit: string | null }[] };
@@ -34,7 +37,7 @@ function formatDate(value: string): string {
   return d && m && y ? `${d}.${m}.${y}` : value;
 }
 
-const emptyForm = () => ({ work_date: today(), object_name: "", work_name: "", unit: "", qty: "", location: "", weather: "", workers: "", note: "" });
+const emptyForm = () => ({ work_date: today(), object_name: "", work_name: "", unit: "", qty: "", location: "", weather: "", workers: "", hours: "", crew_id: "", note: "" });
 
 export function WorkLogModule({ projectId }: { projectId: number }) {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -49,7 +52,16 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [tick, setTick] = useState(0);
   const [plan, setPlan] = useState<Schedule>({ baseline: null, items: [] });
   const [selected, setSelected] = useState<PlanItem | null>(null);
-  const [view, setView] = useState<"plan" | "all">("plan");
+  const [view, setView] = useState<"all" | "plan" | "crews">("all");
+  const [crews, setCrews] = useState<Crew[]>([]);
+  const [crewForm, setCrewForm] = useState({ id: 0, name: "", foreman: "", members: "" });
+
+  useEffect(() => {
+    if (projectId <= 0) return;
+    api<{ crews: Crew[] }>(`/projects/${projectId}/work-log/crews`)
+      .then((res) => { if (res && Array.isArray(res.crews)) setCrews(res.crews); })
+      .catch(() => undefined);
+  }, [projectId, tick]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -96,6 +108,8 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
       if (form[key].trim()) body[key] = form[key].trim();
     }
     if (form.workers.trim()) body.workers = Number(form.workers);
+    if (form.hours.trim()) body.hours = form.hours.trim();
+    if (form.crew_id) body.crew_id = Number(form.crew_id);
     try {
       await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
       setMessage("Запись добавлена");
@@ -115,6 +129,31 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
       setTick((v) => v + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить запись");
+    }
+  }
+
+  async function saveCrew() {
+    if (!crewForm.name.trim()) { setError("Укажите название бригады"); return; }
+    setError("");
+    const body = { name: crewForm.name.trim(), foreman: crewForm.foreman.trim(), members: crewForm.members };
+    try {
+      if (crewForm.id) await api(`/projects/${projectId}/work-log/crews/${crewForm.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      else await api(`/projects/${projectId}/work-log/crews`, { method: "POST", body: JSON.stringify(body) });
+      setCrewForm({ id: 0, name: "", foreman: "", members: "" });
+      setMessage("Бригада сохранена");
+      setTick((v) => v + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить бригаду");
+    }
+  }
+
+  async function removeCrew(id: number) {
+    setError("");
+    try {
+      await api(`/projects/${projectId}/work-log/crews/${id}`, { method: "DELETE" });
+      setTick((v) => v + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить бригаду");
     }
   }
 
@@ -143,14 +182,41 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
       </div>
 
       <div className="wl-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={view === "plan"} className={view === "plan" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("plan")}>По графику (ГПР)</button>
-        <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("all")}>Все записи</button>
+        <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("all")}>Записи за день</button>
+        <button type="button" role="tab" aria-selected={view === "crews"} className={view === "crews" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("crews")}>Бригады</button>
+        <button type="button" role="tab" aria-selected={view === "plan"} className={view === "plan" ? "wl-tab wl-tab-on" : "wl-tab"} onClick={() => setView("plan")}>Подсказка из графика (ГПР)</button>
       </div>
+
+      {view === "crews" && (
+        <div className="wl-crews">
+          <p className="wl-note">Состав бригад вносится здесь, на компьютере. На объекте прораб выбирает бригаду одной кнопкой, число рабочих подставляется само.</p>
+          <form className="wl-form" aria-label="Бригада" onSubmit={(e) => { e.preventDefault(); void saveCrew(); }}>
+            <label>Название бригады<input value={crewForm.name} onChange={(e) => setCrewForm((f) => ({ ...f, name: e.target.value }))} placeholder="Бригада электромонтажников" /></label>
+            <label>Бригадир / ответственный<input value={crewForm.foreman} onChange={(e) => setCrewForm((f) => ({ ...f, foreman: e.target.value }))} placeholder="Фамилия И.О." /></label>
+            <label className="wl-wide">Состав (по одному человеку в строке: ФИО — должность)
+              <textarea rows={4} value={crewForm.members} onChange={(e) => setCrewForm((f) => ({ ...f, members: e.target.value }))} />
+            </label>
+            <button type="submit" className="wl-save">{crewForm.id ? "Сохранить бригаду" : "Добавить бригаду"}</button>
+          </form>
+          {crews.length === 0 && <p className="wl-empty">Бригад пока нет.</p>}
+          <ul className="wl-plan-list">
+            {crews.map((c) => (
+              <li key={c.id} className="wl-crew-row">
+                <span><b>{c.name}</b>{c.foreman ? `, ${c.foreman}` : ""} · человек: {c.members_count}</span>
+                <span className="wl-actions">
+                  <button type="button" onClick={() => setCrewForm({ id: c.id, name: c.name, foreman: c.foreman ?? "", members: c.members })}>Изменить</button>
+                  <button type="button" aria-label={`Удалить бригаду ${c.name}`} onClick={() => void removeCrew(c.id)}>Удалить</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {view === "plan" && (
         <div className="wl-plan">
           {!plan.baseline && <p className="wl-empty">В проекте нет графика работ. Загрузите ГПР в разделе «ГПР и ДДС»: журнал строится по нему.</p>}
-          {plan.baseline && <p className="wl-note">График: {plan.baseline.name} (версия {plan.baseline.version}). Выберите работу, чтобы внести факт.</p>}
+          {plan.baseline && <p className="wl-note">График: {plan.baseline.name} (версия {plan.baseline.version}). Необязательно: выберите работу из графика, и название подставится само.</p>}
           <ul className="wl-plan-list">
             {plan.items.filter((i) => !i.is_group && !i.is_milestone).map((i) => (
               <li key={i.id}>
@@ -179,6 +245,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
           )}
         </div>
       )}
+      {view !== "crews" && <>
       <form className="wl-form" onSubmit={(e) => { e.preventDefault(); void save(); }} aria-label="Новая запись журнала">
         <label>Дата<input type="date" value={form.work_date} onChange={(e) => set("work_date", e.target.value)} /></label>
         <label>Объект
@@ -195,7 +262,14 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
         <label>Объём<input inputMode="decimal" value={form.qty} onChange={(e) => set("qty", e.target.value)} placeholder="12,5" /></label>
         <label>Ед. изм.<input value={form.unit} onChange={(e) => set("unit", e.target.value)} placeholder="м, шт" /></label>
         <label>Место<input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Ось, этаж, помещение" /></label>
-        <label>Рабочих<input inputMode="numeric" value={form.workers} onChange={(e) => set("workers", e.target.value)} /></label>
+        <label>Бригада
+          <select value={form.crew_id} onChange={(e) => set("crew_id", e.target.value)}>
+            <option value="">Без бригады</option>
+            {crews.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+          </select>
+        </label>
+        <label>Часов работы<input inputMode="decimal" value={form.hours} onChange={(e) => set("hours", e.target.value)} placeholder="8" /></label>
+        <label>Рабочих<input inputMode="numeric" value={form.workers} onChange={(e) => set("workers", e.target.value)} placeholder="по бригаде" /></label>
         <label>Погода<input value={form.weather} onChange={(e) => set("weather", e.target.value)} placeholder="+5, дождь" /></label>
         <label className="wl-wide">Примечание<input value={form.note} onChange={(e) => set("note", e.target.value)} /></label>
         <button type="submit" className="wl-save" disabled={saving}>{saving ? "Сохраняем…" : "Добавить запись"}</button>
@@ -212,7 +286,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
       {entries.length > 0 && (
         <div className="wl-wrap">
           <table className="wl-table">
-            <thead><tr><th>Дата</th><th>Объект</th><th>Работа</th><th>Объём</th><th>Место</th><th>Рабочих</th><th></th></tr></thead>
+            <thead><tr><th>Дата</th><th>Объект</th><th>Работа</th><th>Объём</th><th>Место</th><th>Бригада</th><th>Рабочих</th><th>Часов</th><th></th></tr></thead>
             <tbody>
               {entries.map((e) => (
                 <tr key={e.id}>
@@ -221,7 +295,9 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
                   <td>{e.work_name}{e.note ? <div className="wl-sub">{e.note}</div> : null}</td>
                   <td>{e.qty ? `${e.qty} ${e.unit ?? ""}`.trim() : "—"}</td>
                   <td>{e.location || "—"}</td>
+                  <td>{crews.find((c) => c.id === e.crew_id)?.name ?? "—"}</td>
                   <td>{e.workers ?? "—"}</td>
+                  <td>{e.hours ?? "—"}</td>
                   <td><button type="button" aria-label={`Удалить запись ${e.work_name}`} onClick={() => void remove(e.id)}>Удалить</button></td>
                 </tr>
               ))}
@@ -229,6 +305,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
           </table>
         </div>
       )}
+      </>}
     </div>
   );
 }
