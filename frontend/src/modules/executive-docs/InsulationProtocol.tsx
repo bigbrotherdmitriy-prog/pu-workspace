@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { csrfHeaders } from "../../api/client";
 
 const PAIRS = ["A-B", "B-C", "C-A", "A-N", "B-N", "C-N", "A-PE", "B-PE", "C-PE", "N-PE"] as const;
 type Row = { line_name: string; cable_mark: string; length_m: string; voltage_v: string; pairs: Record<string, string> };
@@ -35,7 +36,7 @@ export function InsulationProtocol({ projectId, objectName }: { projectId: numbe
       const response = await fetch(`/projects/${projectId}/executive-docs/insulation-protocol.xlsx`, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify(payload),
       });
       if (!response.ok) {

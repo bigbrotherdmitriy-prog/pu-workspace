@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
 import { LocalFolderSync } from "./LocalFolderSync";
 import "./pu-storage.css";
@@ -88,7 +89,7 @@ export function PuStorageModule({ projectId }: { projectId: number }) {
       try {
         const response = await fetch(
           `/projects/${projectId}/pu-storage/upload?parent_id=${encodeURIComponent(folder)}&name=${encodeURIComponent(file.name)}`,
-          { method: "POST", body: file, credentials: "same-origin" },
+          { method: "POST", body: file, credentials: "same-origin", headers: csrfHeaders() },
         );
         if (!response.ok) {
           errors.push(`${file.name}: ${response.status === 413 ? "не хватает места или файл слишком большой" : `ошибка ${response.status}`}`);

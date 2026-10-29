@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { csrfHeaders } from "../../api/client";
 
 export type ProtocolColumn = { key: string; label: string; options?: [string, string][]; size?: number; placeholder?: string; default?: string };
 export type ProtocolConfig = {
@@ -33,7 +34,7 @@ export function ProtocolForm({ projectId, objectName, config }: { projectId: num
     };
     try {
       const response = await fetch(`/projects/${projectId}/executive-docs/${config.endpoint}`, {
-        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...csrfHeaders() }, body: JSON.stringify(payload),
       });
       if (!response.ok) {
         let detail = `Не удалось сформировать протокол (${response.status})`;

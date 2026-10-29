@@ -25,6 +25,12 @@ function cookie(name: string): string {
   return value ? decodeURIComponent(value.slice(prefix.length)) : "";
 }
 
+/** CSRF header for state-changing requests sent with plain fetch (cookie session). */
+export function csrfHeaders(): Record<string, string> {
+  const token = cookie("pu_csrf");
+  return token ? { "X-CSRF-Token": token } : {};
+}
+
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const requestId = newRequestId();
   const method = (options.method || "GET").toUpperCase();

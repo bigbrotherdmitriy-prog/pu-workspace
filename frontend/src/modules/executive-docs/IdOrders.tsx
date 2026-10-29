@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
 
 type Catalog = { kind: string; title: string; certificate: string };
@@ -96,7 +97,7 @@ export function IdOrders({ projectId }: { projectId: number }) {
     for (const file of files) {
       try {
         const response = await fetch(`/projects/${projectId}/id-orders/${order.id}/certificate?name=${encodeURIComponent(file.name)}`, {
-          method: "POST", body: file, credentials: "same-origin", headers: { "Content-Type": file.type || "application/octet-stream" },
+          method: "POST", body: file, credentials: "same-origin", headers: { "Content-Type": file.type || "application/octet-stream", ...csrfHeaders() },
         });
         if (!response.ok) {
           let detail = `Не удалось загрузить ${file.name} (${response.status})`;

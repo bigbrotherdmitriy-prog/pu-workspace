@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../../api/client";
+import { api, csrfHeaders } from "../../api/client";
 
 // File System Access API (Chrome, Edge, Яндекс Браузер): типы объявляем минимально.
 type FileHandleLike = { kind: "file"; name: string; getFile: () => Promise<File> };
@@ -155,7 +155,7 @@ export function LocalFolderSync({ projectId, folder, onDone }: { projectId: numb
           for (const part of parts.slice(0, -1)) parent = await ensureFolder(parent, part, folderCache);
           const response = await fetch(
             `/projects/${projectId}/pu-storage/upload?parent_id=${encodeURIComponent(parent)}&name=${encodeURIComponent(file.name)}`,
-            { method: "POST", body: file, credentials: "same-origin" },
+            { method: "POST", body: file, credentials: "same-origin", headers: csrfHeaders() },
           );
           if (!response.ok) {
             failed.push(`${path}: ${response.status === 413 ? "не хватает места" : `ошибка ${response.status}`}`);

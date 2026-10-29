@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
 import "./work-log.css";
 
@@ -179,7 +180,7 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     setError("");
     try {
       const response = await fetch(`/projects/${projectId}/work-log/form.docx`, {
-        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ header: formHeader }),
       });
       if (!response.ok) throw new Error(`Не удалось сформировать журнал (${response.status})`);
