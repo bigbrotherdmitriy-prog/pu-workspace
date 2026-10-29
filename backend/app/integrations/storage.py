@@ -32,6 +32,9 @@ def validate_storage_locator(provider: str, locator: str) -> str:
     elif provider in {"google_drive", "google_workspace"}:
         if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in locator):
             raise HTTPException(422, "Google folder selection requires an opaque Drive ID")
+    elif provider == "pu_storage":
+        if not locator.startswith("pu:/") or any(part in {".", ".."} for part in locator.split("/")):
+            raise HTTPException(422, "PU storage folder selection requires a pu:/ path")
     else:
         raise HTTPException(409, "Selected storage provider is unavailable")
     return locator
@@ -108,4 +111,8 @@ def storage_for_project(project_id: int, db: Session, connection: DriveConnectio
         if not token:
             raise HTTPException(401, "Yandex Disk is not authorized")
         return YandexDiskStorageAdapter(token)
+    if provider == "pu_storage":
+        from app.integrations.pu_storage import PuStorageAdapter
+
+        return PuStorageAdapter(project_id)
     raise HTTPException(503, f"Storage provider '{provider}' is unavailable")
