@@ -78,3 +78,19 @@ def test_split_pages_minimal_pdf():
     pages = split_pages(buf.getvalue())
     assert isinstance(pages, list)
     assert len(pages) == 1
+
+
+def test_find_spec_pages_table_without_title_phrase():
+    # Лист «Общие данные» (АР): таблица спецификации без заголовка «Спецификация оборудования, изделий и материалов».
+    table = (
+        "Поз. Наименование и техническая характеристика Тип, марка, обозначение документа, опросного листа "
+        "Код оборудования, изделия, материала Завод-изготовитель Единица измерения Кол. Масса единицы, кг Примечание\n"
+        "1.1 Дверь противопожарная двухстворчатая с окном ДП-2 (2400х1500) EI60 НПО Пульс шт. 2\n"
+    )
+    pages = ["Титульный лист", table, "Ведомость"]
+    assert find_spec_pages(pages) == [2]
+
+
+def test_find_spec_pages_plain_header_without_title_is_not_a_spec():
+    pages = ["Поз. Наименование Количество\n1 Что-то 2"]
+    assert find_spec_pages(pages) == []

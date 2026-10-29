@@ -39,11 +39,19 @@ def _has_table_header(text: str) -> bool:
     return bool(_TABLE_HEADER_RE.search(text))
 
 
+_TABLE_HEADER_STRONG_RE = re.compile(
+    r"поз.*наименование\s+и\s+техническая\s+характеристика.*завод.{0,3}изготовитель",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def _is_spec_start(text: str) -> bool:
     norm = _norm_page(text)
-    if not _SPEC_PHRASE_RE.search(norm):
-        return False
-    return _has_table_header(norm)
+    if _SPEC_PHRASE_RE.search(norm) and _has_table_header(norm):
+        return True
+    # Таблица спецификации на листе «Общие данные» без отдельного заголовка:
+    # узнаём её по полной шапке (Поз., Наименование и техническая характеристика, Завод-изготовитель).
+    return bool(_TABLE_HEADER_STRONG_RE.search(norm))
 
 
 def _count_pos_lines(text: str) -> int:
