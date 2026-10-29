@@ -225,6 +225,11 @@ export function EquipmentModule({ projectId }: { projectId: number }) {
                   <td>
                     {formatDate(u.next_service_date)}
                     {u.service_overdue && <span className="eq-overdue"> просрочено</span>}
+                    {u.service_interval_months ? (
+                      <div>
+                        <button type="button" aria-label={`ТО выполнено ${u.name} ${u.unit_no}`} onClick={() => void patch(u.id, { last_service_date: new Date().toISOString().slice(0, 10) })}>ТО выполнено сегодня</button>
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               ))}

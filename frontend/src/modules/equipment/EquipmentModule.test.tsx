@@ -66,3 +66,15 @@ it("shows empty state", async () => {
   render(<EquipmentModule projectId={7} />);
   expect(await screen.findByText(/Оборудования пока нет/)).toBeTruthy();
 });
+
+
+it("marks the service as done today", async () => {
+  mockApi.mockImplementation(async (_p: string, init?: { method?: string }) => (init?.method === "PATCH" ? { ...unit, service_overdue: false } : { units: [unit], summary }));
+  render(<EquipmentModule projectId={7} />);
+  fireEvent.click(await screen.findByLabelText("ТО выполнено Насос Grundfos 1"));
+  await waitFor(() => {
+    const call = mockApi.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === "PATCH");
+    expect(call).toBeTruthy();
+    expect(String((call![1] as { body: string }).body)).toContain("last_service_date");
+  });
+});
