@@ -415,7 +415,6 @@ export class StorageApi {
       "/management/digests": { digests: [], next_cursor: null, external_actions_created: false },
       "/management/attention": { items: this.attentionItems, count: this.attentionItems.length, next_cursor: null },
       "/management/resources": { resources: this.resources },
-      "/onboarding": { items: [], done: 10, total: 10, percent: 100, next: null },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },
       "/integrations/project": { project_id: projectId, adapters: [
@@ -444,6 +443,7 @@ export class StorageApi {
         profit: { plan: "0.00", fact: "0.00" }, margin_pct: { plan: null, fact: null }, by_month: [] },
       "receipts-by-basis": { contracts: [], totals: { invoiced: "0.00", received: "0.00", remaining: "0.00" } },
       "rd/volumes": [],
+      "onboarding": { items: [], done: 10, total: 10, percent: 100, next: null },
       "work-center/hud": { objects: [], id_readiness: [], invoices_to_check: 0 },
       "money-calendar": { items: [], counts: {}, totals: { to_pay: "0.00", to_receive: "0.00" }, unmarked: { count: 0, amount: "0.00", payments: 0, receipts: 0 } },
     };
