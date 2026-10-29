@@ -36,6 +36,7 @@ class WorkLogEntry(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     rd_spec_item_id: Mapped[int | None] = mapped_column(ForeignKey("rd_spec_items.id", ondelete="SET NULL"), nullable=True)
     schedule_item_id: Mapped[int | None] = mapped_column(ForeignKey("schedule_items.id", ondelete="SET NULL"), nullable=True)
+    estimate_line_id: Mapped[int | None] = mapped_column(ForeignKey("estimate_lines.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -32,6 +32,7 @@ class WorkLogBody(BaseModel):
     note: str | None = None
     rd_spec_item_id: int | None = None
     schedule_item_id: int | None = None
+    estimate_line_id: int | None = None
 
 
 class CrewBody(BaseModel):
