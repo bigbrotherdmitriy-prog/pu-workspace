@@ -68,6 +68,7 @@ from app.models.executive_docs import IdFile, IdParticipant, IdRequirement, IdSo
 from app.models.rd import RdSheet, RdSpecItem, RdVolume
 from app.models.purchase import PurchaseItem, PurchaseItemSource
 from app.models.equipment import EquipmentUnit
+from app.models.work_log import WorkLogCrew, WorkLogEntry, WorkLogLabor
 from app.models.invoice_line import InvoiceLine
 
 __all__ = [
@@ -162,6 +163,9 @@ __all__ = [
     "PurchaseItem",
     "PurchaseItemSource",
     "EquipmentUnit",
+    "WorkLogCrew",
+    "WorkLogEntry",
+    "WorkLogLabor",
     "InvoiceLine",
 ]
 
