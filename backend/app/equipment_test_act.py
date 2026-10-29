@@ -29,7 +29,7 @@ def validate(header: dict, items: list[dict]) -> list[dict]:
     for idx, item in enumerate(items or [], start=1):
         name = (item.get("name") or "").strip()
         if not name:
-            if any(str(v).strip() for v in item.values() if v is not None):
+            if any(str(v).strip() for k, v in item.items() if v is not None and k != "result"):
                 raise ValueError(f"Строка {idx}: укажите наименование оборудования")
             continue
         result = (item.get("result") or "pass").strip().lower()

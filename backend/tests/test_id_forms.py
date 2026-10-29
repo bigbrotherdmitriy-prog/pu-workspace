@@ -38,6 +38,9 @@ def test_equipment_test_act_content_and_validation():
         eta.render({}, [{"name": "X", "result": "maybe"}])
     with pytest.raises(ValueError):
         eta.render({}, [{"type_mark": "только марка"}])
+    # пустая строка формы (только итог по умолчанию) просто пропускается
+    xml2 = _xml(eta.render({}, [{"name": "", "result": "pass"}, {"name": "Щит", "result": "pass"}]))
+    assert "Щит" in xml2
 
 
 @pytest.fixture
