@@ -17,7 +17,7 @@ def test_expected_schema_revision_matches_single_alembic_head():
 
     assert len(heads) == 1, f"Expected one Alembic head, got {heads}"
     assert CURRENT_SCHEMA_REVISION == heads[0]
-    assert CURRENT_SCHEMA_REVISION == "a8b9c0d1e2f3"
+    assert CURRENT_SCHEMA_REVISION == "b9c0d1e2f3a4"
 
 
 def test_offline_migration_does_not_disable_application_loggers(monkeypatch):
