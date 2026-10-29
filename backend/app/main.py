@@ -29,6 +29,7 @@ from app.api.dds_plan_versions import router as dds_plan_versions_router
 from app.api.money_calendar import router as money_calendar_router
 from app.api.rd import router as rd_router
 from app.api.purchase import router as purchase_router
+from app.api.cash_smoothing import router as cash_smoothing_router
 from app.api.invoice_lines import router as invoice_lines_router
 from app.api.receipts_by_basis import router as receipts_by_basis_router
 from app.api.contract_stages import router as contract_stages_router
@@ -199,6 +200,7 @@ app.include_router(dds_plan_versions_router)
 app.include_router(money_calendar_router)
 app.include_router(rd_router)
 app.include_router(purchase_router)
+app.include_router(cash_smoothing_router)
 app.include_router(invoice_lines_router)
 app.include_router(receipts_by_basis_router)
 app.include_router(contract_stages_router)
