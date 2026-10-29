@@ -219,9 +219,7 @@ export function RdModule({ projectId }: Props) {
                     <td className="rd-num">{proposed} / {confirmed}</td>
                     <td className="rd-action">
                       <button type="button" onClick={() => setOpenId(volume.id)}>Открыть</button>
-                      {volume.status === "failed" && (
-                        <button type="button" disabled={parseBusy === volume.id} onClick={() => void reparse(volume)}>Разобрать заново</button>
-                      )}
+                      <button type="button" disabled={parseBusy === volume.id} onClick={() => void reparse(volume)}>Разобрать заново</button>
                     </td>
                   </tr>
                 );
