@@ -161,6 +161,7 @@ __all__ = [
     "RdVolume",
     "PurchaseItem",
     "PurchaseItemSource",
+    "EquipmentUnit",
     "InvoiceLine",
 ]
 
