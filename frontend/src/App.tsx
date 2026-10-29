@@ -119,6 +119,7 @@ const MoneyCalendar = lazy(() => import("./modules/dashboard/MoneyCalendar").the
 const PortfolioModule = lazy(() => import("./modules/portfolio/PortfolioModule").then((m) => ({ default: m.PortfolioModule })));
 const PurchaseModule = lazy(() => import("./modules/purchase/PurchaseModule").then((m) => ({ default: m.PurchaseModule })));
 const EquipmentModule = lazy(() => import("./modules/equipment/EquipmentModule").then((m) => ({ default: m.EquipmentModule })));
+import { HelpCenter } from "./modules/help/HelpCenter";
 const PuStorageModule = lazy(() => import("./modules/storage/PuStorageModule").then((m) => ({ default: m.PuStorageModule })));
 const RdModule = lazy(() => import("./modules/rd/RdModule").then((m) => ({ default: m.RdModule })));
 const ExecutiveDocsModule = lazy(() => import("./modules/executive-docs/ExecutiveDocsModule").then((m) => ({ default: m.ExecutiveDocsModule })));
@@ -3296,6 +3297,7 @@ export function App() {
         </div></div>, document.body)}
         <section className="content">
           {!phoneLayout && <ComfortControls />}
+          <HelpCenter active={active} />
           {notice && <div className="notice">{notice}</div>}
           {active === "Сегодня" && (
             <TodayModule
