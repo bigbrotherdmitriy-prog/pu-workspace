@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
+import { LocalFolderSync } from "./LocalFolderSync";
 import "./pu-storage.css";
 
 type FileRow = { id: string; name: string; is_folder: boolean; size: number | null; modified_time: string | null; mime_type: string };
@@ -149,6 +150,7 @@ export function PuStorageModule({ projectId }: { projectId: number }) {
           <input ref={input} hidden multiple type="file" aria-label="Выбрать файлы" onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.currentTarget.value = ""; }} />
         </div>
       </div>
+      <LocalFolderSync projectId={projectId} folder={folder} onDone={() => setTick((v) => v + 1)} />
       <nav className="pus-crumbs" aria-label="Путь">
         {crumbs(folder).map((c, i, all) => (
           <span key={c.id}>
