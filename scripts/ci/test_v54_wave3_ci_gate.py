@@ -4,7 +4,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_HEAD = "f3a4b5c6d7e8"
+EXPECTED_HEAD = "c9d8e7f6a5b4"
 WAVE3_BRANCH = "codex/v54-wave3-integration"
 
 
