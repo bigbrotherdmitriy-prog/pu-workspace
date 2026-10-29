@@ -58,6 +58,7 @@ it("adds a participant", async () => {
   });
 
   render(<ExecutiveDocsModule projectId={3} />);
+  fireEvent.click(await screen.findByRole("tab", { name: "Участники" }));
   fireEvent.change(await screen.findByLabelText("ФИО"), { target: { value: "Иванов И.И." } });
   fireEvent.click(screen.getByText("Добавить участника"));
   await vi.waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/3/executive-docs/participants",
@@ -81,7 +82,7 @@ it("checks the AOSR and lists missing fields", async () => {
   });
 
   render(<ExecutiveDocsModule projectId={3} />);
-  await screen.findByText("ДУБНА — готовность 40%");
+  fireEvent.click(await screen.findByRole("tab", { name: "АОСР" }));
   fireEvent.click(screen.getByText("Проверить"));
   await vi.waitFor(() => expect(mockApi).toHaveBeenCalledWith("/projects/3/executive-docs/aosr/check",
     expect.objectContaining({ method: "POST" })));
@@ -125,6 +126,7 @@ it("downloads the cable journal draft", async () => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined }));
   render(<ExecutiveDocsModule projectId={3} />);
+  fireEvent.click(await screen.findByRole("tab", { name: "Акты и протоколы" }));
   fireEvent.click(await screen.findByText("Скачать заготовку кабельного журнала"));
   await vi.waitFor(() => expect(String(fetchMock.mock.calls[0][0])).toContain("/projects/3/executive-docs/cable-journal.xlsx"));
   vi.unstubAllGlobals();
