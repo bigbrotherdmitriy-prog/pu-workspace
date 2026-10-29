@@ -39,6 +39,7 @@ class ActBody(BaseModel):
 
 class StatusBody(BaseModel):
     status: str
+    header: dict[str, str | None] | None = None
 
 
 class FormBody(BaseModel):
@@ -168,7 +169,7 @@ def create_act(project_id: int, estimate_id: int, body: ActBody, db: Session = D
 def set_act_status(project_id: int, act_id: int, body: StatusBody, db: Session = Depends(get_db), user=Depends(require_user)):
     require_project_role(db, user, project_id, "manager")
     try:
-        res = svc.set_act_status(db, project_id, act_id, body.status)
+        res = svc.set_act_status(db, project_id, act_id, body.status, body.header)
     except (ValueError, LookupError) as exc:
         db.rollback()
         raise _fail(exc) from exc

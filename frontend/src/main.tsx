@@ -1,6 +1,7 @@
 import React, { Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { CustomerGate } from "./modules/customer/CustomerGate";
 import "./styles.css";
 import "./source.css";
 import "./brand.css";
@@ -28,7 +29,9 @@ captureFcmTokenFromLocation();
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Suspense fallback={<div className="app-route-loading" role="status">Загружаю экран…</div>}>
-      <App />
+      <CustomerGate>
+        <App />
+      </CustomerGate>
     </Suspense>
   </React.StrictMode>,
 );

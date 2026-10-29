@@ -390,6 +390,7 @@ export class StorageApi {
       "/mobile-sync/status": { conflicts: [], count: 0 },
       "/organizations/current/requisites": { id: 901, name: "Synthetic Organization", requisites_status: "draft" },
       "/projects/": { projects: this.projectRows },
+      "/customer/projects": { projects: [] },
       "/api/readiness": { ready: true, google_drive_ready: true, telegram_ready: false, checks: {} },
       "/history/audit": { logs: [] },
       "/tasks": { tasks: [] }, "/governance/risks": { risks: [] }, "/governance/decisions": { decisions: [] },

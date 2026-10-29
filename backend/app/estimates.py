@@ -186,6 +186,8 @@ def _act_dict(a: KsAct) -> dict:
         "period_from": a.period_from.isoformat(), "period_to": a.period_to.isoformat(),
         "act_date": a.act_date.isoformat() if a.act_date else None, "status": a.status,
         "total_ex_vat": _s(a.total_ex_vat), "lines_count": len(lines),
+        "customer_status": a.customer_status, "customer_comment": a.customer_comment,
+        "customer_decided_at": a.customer_decided_at.isoformat() if a.customer_decided_at else None,
     }
 
 
@@ -259,11 +261,18 @@ def _get_act(db: Session, project_id: int, act_id: int) -> KsAct:
     return a
 
 
-def set_act_status(db: Session, project_id: int, act_id: int, status: str) -> dict:
+def set_act_status(db: Session, project_id: int, act_id: int, status: str, header: dict | None = None) -> dict:
     a = _get_act(db, project_id, act_id)
-    if status not in {"draft", "signed"}:
-        raise ValueError("Статус акта: draft или signed")
+    if status not in {"draft", "sent", "signed"}:
+        raise ValueError("Статус акта: draft, sent или signed")
+    if a.status == "signed" and status != "signed":
+        raise ValueError("Подписанный акт изменить нельзя")
     a.status = status
+    if header is not None:
+        a.header_json = json.dumps({k: v for k, v in header.items() if v}, ensure_ascii=False)
+    if status == "draft":
+        a.customer_status = "pending"
+        a.customer_comment = None
     db.flush()
     return _act_dict(a)
 

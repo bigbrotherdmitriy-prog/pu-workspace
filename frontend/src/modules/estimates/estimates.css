@@ -1,0 +1,25 @@
+.est { display: flex; flex-direction: column; gap: 12px; color: var(--read-text, #1f2937); font-size: 13px; }
+.est button, .est input, .est select {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2));
+  background: var(--read-surface, #fff); color: var(--read-text, #1f2937); font: inherit; font-size: 13px; min-width: 0;
+}
+.est button { cursor: pointer; }
+.est .est-main { border-color: var(--read-accent, #2563eb); font-weight: 600; }
+.est-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.est-title { margin: 0; font-size: 16px; font-weight: 600; flex: 1 1 auto; }
+.est-sub { margin: 8px 0 0; font-size: 14px; }
+.est-box { border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.est-box > summary { cursor: pointer; font-weight: 600; }
+.est-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; align-items: end; }
+.est-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--read-muted, #64748b); }
+.est-wrap { overflow-x: auto; }
+.est-table { border-collapse: collapse; width: 100%; min-width: 860px; }
+.est-table th, .est-table td { padding: 5px 7px; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.12)); text-align: left; vertical-align: top; }
+.est-table td input { width: 100%; padding: 3px 5px; }
+.est-section td { font-weight: 600; background: var(--read-secondary, rgba(15, 23, 42, 0.06)); }
+.est-note { margin: 0; color: var(--read-muted, #64748b); }
+.est-error { margin: 0; color: var(--read-danger, #b91c1c); }
+.est-empty { margin: 0; padding: 12px; border: 1px dashed var(--read-rule, rgba(15, 23, 42, 0.3)); border-radius: 8px; }
+.est-acts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.est-acts li { padding: 8px 10px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+.est-actions { display: flex; gap: 6px; flex-wrap: wrap; }
