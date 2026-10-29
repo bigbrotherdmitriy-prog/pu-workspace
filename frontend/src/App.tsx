@@ -3801,11 +3801,11 @@ export function App() {
         }}
       />
       {quickInvoice && <InvoiceQuickConfirm projectId={quickInvoice.projectId} proposalId={quickInvoice.id} onClose={() => { setQuickInvoice(null); window.history.replaceState({}, "", window.location.pathname); }} onConfirmed={() => void load()} />}
-      {active === "Исполнительная документация" && <ExecutiveDocsModule projectId={projectId} />}
-      {active === "Рабочая документация" && <RdModule projectId={projectId} />}
-      {active === "Закупка" && <PurchaseModule projectId={projectId} />}
-      {active === "Оборудование" && <EquipmentModule projectId={projectId} />}
-      {active === "Файлы проекта" && <PuStorageModule projectId={projectId} />}
+      {active === "Исполнительная документация" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><ExecutiveDocsModule projectId={projectId} /></section>}
+      {active === "Рабочая документация" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><RdModule projectId={projectId} /></section>}
+      {active === "Закупка" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PurchaseModule projectId={projectId} /></section>}
+      {active === "Оборудование" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EquipmentModule projectId={projectId} /></section>}
+      {active === "Файлы проекта" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PuStorageModule projectId={projectId} /></section>}
       {active === "Портфель" && <PortfolioModule onOpenProject={(id) => { void activateProject(id); setActive("ГПР и ДДС"); }} />}
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}
       {["ГПР и ДДС", "График работ", "Исполнение и финансы"].includes(active) && (
