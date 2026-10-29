@@ -170,6 +170,23 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
     setBusy((b) => ({ ...b, [objectName]: false }));
   };
 
+  const downloadCableJournal = async () => {
+    try {
+      const response = await fetch(`/projects/${projectId}/executive-docs/cable-journal.xlsx`, { credentials: "same-origin" });
+      if (!response.ok) throw new Error(`Не удалось скачать файл (${response.status})`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "Кабельный журнал.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const addParticipant = async () => {
     try {
       await api(`/projects/${projectId}/executive-docs/participants`, {
@@ -295,6 +312,11 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
           </div>
         </section>
       ) : null}
+
+      <p>
+        <button type="button" onClick={() => void downloadCableJournal()}>Скачать заготовку кабельного журнала</button>{" "}
+        <span>Кабели берутся из подтверждённых позиций рабочей документации; трассы и фактическую длину впишите в таблице.</span>
+      </p>
 
       {objects.map((o) => {
         const source = sourceFor(o.object_name);
