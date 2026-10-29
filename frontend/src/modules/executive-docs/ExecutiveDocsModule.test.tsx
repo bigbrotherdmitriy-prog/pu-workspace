@@ -111,3 +111,21 @@ it("uploads a missing document straight into the object folder", async () => {
   expect(await screen.findByText(/Загружено файлов: 1/)).toBeTruthy();
   vi.unstubAllGlobals();
 });
+
+
+it("downloads the cable journal draft", async () => {
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/report")) return { objects: [] };
+    if (path.endsWith("/sources")) return [];
+    if (path.endsWith("/participants")) return [];
+    return {};
+  });
+  const blob = new Blob(["x"]);
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => blob });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined }));
+  render(<ExecutiveDocsModule projectId={3} />);
+  fireEvent.click(await screen.findByText("Скачать заготовку кабельного журнала"));
+  await vi.waitFor(() => expect(String(fetchMock.mock.calls[0][0])).toContain("/projects/3/executive-docs/cable-journal.xlsx"));
+  vi.unstubAllGlobals();
+});

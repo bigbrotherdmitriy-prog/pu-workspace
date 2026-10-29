@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -221,3 +221,16 @@ async def upload_to_source(
     report = object_report(db, project_id, source.object_name)
     db.commit()
     return {"file_id": file_id, "report": report}
+
+
+@router.get("/{project_id}/executive-docs/cable-journal.xlsx")
+def cable_journal_xlsx(project_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    """Заготовка кабельного журнала по подтверждённым позициям РД (трассы заполняет человек)."""
+    require_project_role(db, user, project_id, "viewer")
+    from app.cable_journal import to_xlsx
+
+    return Response(
+        content=to_xlsx(db, project_id),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename*=UTF-8''%D0%9A%D0%B0%D0%B1%D0%B5%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9%20%D0%B6%D1%83%D1%80%D0%BD%D0%B0%D0%BB.xlsx"},
+    )

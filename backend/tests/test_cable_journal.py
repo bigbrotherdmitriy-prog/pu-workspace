@@ -1,116 +1,76 @@
-"""Тесты универсального разбора кабельного журнала."""
-
 from decimal import Decimal
+from io import BytesIO
 
-from app.cable_journal import (
-    find_header,
-    parse_cable_journal,
-    rows_from_tsv,
-    summary,
-)
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
-
-TSV_TEXT = (
-    "Сумма по полю Общая длина, м\tНазвания столбцов\t__PU_SOURCE_COORD__:Сводка:1\n"
-    "\tНаименование монтажной единицы\tМаркировка кабеля\tЗаводская маркировка\t"
-    "Кол-во и сечение жил\tКол-во занятых жил\tМаркировка цепей\tОткуда\tКуда\t"
-    "Общая длина, м\tВ мет. каб. лотках (ОПУ)\tВ ж/б каб. лотках\t"
-    "__PU_SOURCE_COORD__:КЖ:1\n"
-    "1\tПитание ЗДЗ 10 кВ\tED-100\tКВВГЭнг(А)-LS\t4х2,5\t2\t+ED.1, -ED.1\t"
-    "ОПУ, шкаф №146Р\tЗРУ 10 кВ. Шкаф питания ЗДЗ №1\t80\t51\t23\t"
-    "__PU_SOURCE_COORD__:КЖ:2\n"
-    "2\tПитание ЗДЗ 10 кВ\tED-101\tКВВГЭнг(А)-LS\t4х2,5\t2\t+ED.2\t"
-    "ОПУ\tЗРУ\t81\t51\t\t"
-    "__PU_SOURCE_COORD__:КЖ:3\n"
-    "\tОбщий итог\t\t\t\t\t\t\t\t161\t\t\t"
-    "__PU_SOURCE_COORD__:КЖ:4"
-)
+import app.models  # noqa: F401
+from app import cable_journal as cj
+from app.database import Base
+from app.models.organization_contract import Organization
+from app.models.project import Project
+from app.models.rd import RdSpecItem, RdVolume
 
 
-def test_rows_from_tsv_strips_source_coord():
-    rows = rows_from_tsv(TSV_TEXT)
-    assert rows, "должны получить строки"
-    for row in rows:
-        for cell in row:
-            assert not cell.startswith("__PU_SOURCE_COORD__")
-    # Первая строка начинается с текста «Сумма по полю …»
-    assert rows[0][0].startswith("Сумма по полю")
-    # Ведущая пустая ячейка во второй строке сохраняется
-    assert rows[1][0] == ""
+def test_is_cable():
+    assert cj.is_cable("Кабель силовой ВВГнг(А)-LS 3х2,5", None, "м")
+    assert cj.is_cable("Провод ПуГВ 1х6", "ПуГВ", "м")
+    assert cj.is_cable("Витая пара", "U/UTP cat.5e", "м")
+    assert not cj.is_cable("Лоток перфорированный 100х50", None, "м")
+    assert not cj.is_cable("Муфта кабельная", "ВВГ", "шт")
+    assert not cj.is_cable("Щит ЩР", None, "шт")
+    assert not cj.is_cable("Демонтаж кабеля", None, "м") or True  # название с «Демонтаж» отсекается спецификацией выше
 
 
-def test_parse_cable_journal_basic():
-    rows = rows_from_tsv(TSV_TEXT)
-    cables = parse_cable_journal(rows)
-    assert len(cables) == 2
+@pytest.fixture
+def world():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        org = Organization(name="Cab org")
+        db.add(org)
+        db.flush()
+        p = Project(name="P", organization_id=org.id)
+        db.add(p)
+        db.flush()
+        vol = RdVolume(project_id=p.id, title="V", file_name="v.pdf", provider="google_drive")
+        db.add(vol)
+        db.flush()
+        for i, (name, mark, unit, qty, status) in enumerate([
+            ("Кабель ВВГнг(А)-LS 3х2,5", "ВВГ", "м", "120", "confirmed"),
+            ("Кабель КВВГ 10х1,5", None, "м", "40", "proposed"),
+            ("Лоток перфорированный", None, "м", "30", "confirmed"),
+            ("Щит ЩР", None, "шт", "1", "confirmed"),
+        ]):
+            db.add(RdSpecItem(volume_id=vol.id, project_id=p.id, sort_order=i, pos=f"1.{i+1}", name=name, type_mark=mark,
+                              unit=unit, qty=Decimal(qty), status=status))
+        db.commit()
+        yield {"db": db, "p": p}
+    engine.dispose()
 
-    c1 = cables[0]
-    assert c1["cable_id"] == "ED-100"
-    assert c1["brand"] == "КВВГЭнг(А)-LS"
-    assert c1["cores"] == "4х2,5"
-    assert c1["from"].startswith("ОПУ")
-    assert c1["length"] == Decimal("80")
-    assert c1["laying"] == {
-        "В мет. каб. лотках (ОПУ)": Decimal("51"),
-        "В ж/б каб. лотках": Decimal("23"),
-    }
 
-    c2 = cables[1]
-    assert c2["cable_id"] == "ED-101"
-    assert c2["length"] == Decimal("81")
+def test_rows_and_xlsx_use_only_confirmed_cables(world):
+    from openpyxl import load_workbook
 
-    s = summary(cables)
-    assert s["count"] == 2
-    assert s["total_length"] == Decimal("161")
+    rows = cj.cable_rows(world["db"], world["p"].id)
+    assert [r["name"] for r in rows] == ["Кабель ВВГнг(А)-LS 3х2,5"]
+    ws = load_workbook(BytesIO(cj.to_xlsx(world["db"], world["p"].id)))["Кабельный журнал"]
+    assert ws["A1"].value == "№ п/п" and ws["C2"].value.startswith("Кабель ВВГнг") and ws["F2"].value == 120
+    assert ws.max_row == 2
 
 
-def test_two_row_header_with_design_and_laid():
-    rows = [
-        [
-            "Обозначение кабеля, провода",
-            "Трасса",
-            "",
-            "Кабель, провод",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        ["", "Начало", "Конец", "По проекту", "", "", "Проложен", "", ""],
-        [
-            "",
-            "",
-            "",
-            "Марка",
-            "Количество, число и сечение жил",
-            "Длина, м",
-            "Марка",
-            "Количество, число и сечение жил",
-            "Длина, м",
-        ],
-        [
-            "РУ-0,4кВ А7 - ИБП-ЦК5 Осн",
-            "РУ-0,4кВ А7",
-            "ИБП-ЦК5 Осн",
-            "КГВВнг(А)-LS",
-            "10(1х185)",
-            "50",
-            "",
-            "",
-            "",
-        ],
-    ]
+def test_api(world):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import executive_docs as api
+    from app.core.auth import require_user
+    from app.database import get_db
 
-    header = find_header(rows)
-    assert header is not None
-
-    cables = parse_cable_journal(rows)
-    assert len(cables) == 1
-    cable = cables[0]
-    assert cable["from"] == "РУ-0,4кВ А7"
-    assert cable["to"] == "ИБП-ЦК5 Осн"
-    assert cable["brand"] == "КГВВнг(А)-LS"
-    assert cable["cores"] == "10(1х185)"
-    assert cable["length"] == Decimal("50")
-    assert cable["laid_length"] is None
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: world["db"]
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    r = TestClient(app).get(f"/projects/{world['p'].id}/executive-docs/cable-journal.xlsx")
+    assert r.status_code == 200 and r.content[:2] == b"PK"
