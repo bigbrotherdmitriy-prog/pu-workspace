@@ -228,7 +228,7 @@ def render_docx(o: IdOrder) -> bytes:
     ))
     p.append(_para(""))
     p.append(_para("ПРИКАЗЫВАЮ:", bold=True))
-    p.append(_para(f"1. Назначить {_t(o.position)} {person} ответственным за {spec['duty']} на объекте «{_t(o.object_name)}»."))
+    p.append(_para(f"1. Назначить ответственным за {spec['duty']} на объекте «{_t(o.object_name)}» работника: {person}, {_t(o.position)}."))
     p.append(_para("2. Возложить на ответственного обязанности:"))
     for i, d in enumerate(spec["duties"], start=1):
         p.append(_para(f"2.{i}. {d[0].upper()}{d[1:]};" if i < len(spec["duties"]) else f"2.{i}. {d[0].upper()}{d[1:]}."))
