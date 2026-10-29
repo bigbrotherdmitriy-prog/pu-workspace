@@ -1,7 +1,7 @@
 .help-fab {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: 150px;
   z-index: 60;
   width: 40px;
   height: 40px;
@@ -17,10 +17,10 @@
 .help-panel {
   position: fixed;
   right: 16px;
-  bottom: 64px;
+  bottom: 198px;
   z-index: 61;
   width: min(420px, calc(100vw - 32px));
-  max-height: calc(100vh - 96px);
+  max-height: calc(100vh - 230px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;

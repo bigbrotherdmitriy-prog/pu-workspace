@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { generalGuide, helpTopics, type HelpTopic } from "./helpContent";
 import "./help.css";
 
@@ -22,7 +23,7 @@ export function HelpCenter({ active }: { active: string }) {
   const current = topics.find((t) => t.screen === active) ?? null;
   const shown = picked ? topics.find((t) => t.id === picked) ?? null : query.trim() || showAll ? null : current;
 
-  return (
+  return createPortal(
     <>
       <button type="button" className="help-fab" aria-label="Справка и справочник" title="Как пользоваться" onClick={() => setOpen(true)}>?</button>
       {open && (
@@ -67,6 +68,7 @@ export function HelpCenter({ active }: { active: string }) {
           )}
         </div>
       )}
-    </>
+    </>,
+    document.body,
   );
 }
