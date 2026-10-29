@@ -71,6 +71,7 @@ from app.models.equipment import EquipmentUnit
 from app.models.work_log import WorkLogCrew, WorkLogEntry, WorkLogLabor
 from app.models.id_orders import IdOrder, IdOrderFile
 from app.models.estimates import CustomerAccess, Estimate, EstimateLine, KsAct
+from app.models.defects import Defect, DefectComment, DefectPhoto
 from app.models.invoice_line import InvoiceLine
 
 __all__ = [
@@ -174,6 +175,9 @@ __all__ = [
     "EstimateLine",
     "KsAct",
     "CustomerAccess",
+    "Defect",
+    "DefectComment",
+    "DefectPhoto",
     "InvoiceLine",
 ]
 
