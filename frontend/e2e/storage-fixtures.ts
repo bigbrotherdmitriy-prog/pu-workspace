@@ -415,6 +415,7 @@ export class StorageApi {
       "/management/digests": { digests: [], next_cursor: null, external_actions_created: false },
       "/management/attention": { items: this.attentionItems, count: this.attentionItems.length, next_cursor: null },
       "/management/resources": { resources: this.resources },
+      "/onboarding": { items: [], done: 10, total: 10, percent: 100, next: null },
       "/dashboard/project": { summary: { attention: 0, documents: 0, open_tasks: 0, overdue_tasks: 0, open_risks: 0,
         pending_decisions: 0, drafts: 0, open_obligations: 0, overdue_obligations: 0, upcoming_meetings: 0, unread_notifications: 0 }, documents: [] },
       "/integrations/project": { project_id: projectId, adapters: [
