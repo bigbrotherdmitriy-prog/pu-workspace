@@ -54,3 +54,14 @@
 .help-empty { color: var(--read-muted, #64748b); }
 .help-guide details { padding: 4px 0; border-top: 1px solid var(--read-rule, rgba(15, 23, 42, 0.12)); }
 .help-guide summary { cursor: pointer; font-weight: 600; }
+.help-tabs { display: flex; gap: 6px; }
+.help-panel .help-tab-on { border-color: var(--read-accent, #2563eb); font-weight: 600; }
+.help-bar { height: 6px; border-radius: 999px; background: var(--read-rule, rgba(15, 23, 42, 0.12)); overflow: hidden; }
+.help-bar-fill { height: 100%; background: var(--read-accent, #2563eb); }
+.help-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.help-step { display: flex; gap: 8px; align-items: flex-start; }
+.help-step > span:last-child { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.help-step-mark { width: 18px; flex: none; text-align: center; }
+.help-step-done { opacity: .6; }
+.help-step-next > span:last-child b { color: var(--read-accent, #2563eb); }
+.help-step-hint { color: var(--read-muted, #64748b); font-size: 12px; }
