@@ -65,3 +65,5 @@
 .help-step-done { opacity: .6; }
 .help-step-next > span:last-child b { color: var(--read-accent, #2563eb); }
 .help-step-hint { color: var(--read-muted, #64748b); font-size: 12px; }
+.help-fab { position: fixed; }
+.help-dot { position: absolute; top: 4px; right: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--read-warn, #d97706); box-shadow: 0 0 6px var(--read-warn, #d97706); }

@@ -21,6 +21,7 @@ export function HelpCenter({ active, projectId = 0, onNavigate }: { active: stri
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"start" | "ref">("ref");
   const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
+  const [hint, setHint] = useState(false);
 
   useEffect(() => {
     if (projectId <= 0) { setOnboarding(null); return; }
@@ -31,11 +32,7 @@ export function HelpCenter({ active, projectId = 0, onNavigate }: { active: stri
         setOnboarding(res);
         let seen = false;
         try { seen = localStorage.getItem(`pu-onboarding-seen:${projectId}`) === "1"; } catch { /* storage is optional */ }
-        if (!seen && res.done < 3) {
-          setTab("start");
-          setOpen(true);
-          try { localStorage.setItem(`pu-onboarding-seen:${projectId}`, "1"); } catch { /* storage is optional */ }
-        }
+        setHint(!seen && res.done < 3);
       })
       .catch(() => undefined);
     return () => { alive = false; };
@@ -50,7 +47,14 @@ export function HelpCenter({ active, projectId = 0, onNavigate }: { active: stri
 
   return createPortal(
     <>
-      <button type="button" className="help-fab" aria-label="Справка и справочник" title="Как пользоваться" onClick={() => setOpen(true)}>?</button>
+      <button type="button" className="help-fab" aria-label="Справка и справочник" title="Как пользоваться" onClick={() => {
+        setOpen(true);
+        if (hint) {
+          setTab("start");
+          setHint(false);
+          try { localStorage.setItem(`pu-onboarding-seen:${projectId}`, "1"); } catch { /* storage is optional */ }
+        }
+      }}>?{hint && <span className="help-dot" aria-label="Есть рекомендации для начала работы" />}</button>
       {open && (
         <div className="help-panel" role="dialog" aria-label="Справочник">
           <div className="help-top">

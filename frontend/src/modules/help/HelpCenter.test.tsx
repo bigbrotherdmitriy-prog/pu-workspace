@@ -45,22 +45,25 @@ const onboarding = { done: 1, total: 3, percent: 33, next: "dds", items: [
   { key: "rd", title: "Загрузите тома рабочей документации", done: false, screen: "Рабочая документация", hint: "h3" },
 ] };
 
-it("opens the new-user checklist on the first visit and navigates to the next step", async () => {
+it("marks the help button for a new project and opens the checklist on click", async () => {
   mockApi.mockResolvedValue(onboarding);
   const go = vi.fn();
   render(<HelpCenter active="Проекты" projectId={7} onNavigate={go} />);
+  await screen.findByLabelText("Есть рекомендации для начала работы");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByLabelText("Справка и справочник"));
   expect(await screen.findByText(/Готово 1 из 3/)).toBeTruthy();
   fireEvent.click(screen.getAllByText(/Перейти: ГПР и ДДС/)[0]);
   expect(go).toHaveBeenCalledWith("ГПР и ДДС");
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("does not open by itself the second time for the same project", async () => {
+it("does not mark the button again after the checklist was seen", async () => {
   localStorage.setItem("pu-onboarding-seen:7", "1");
   mockApi.mockResolvedValue(onboarding);
   render(<HelpCenter active="Проекты" projectId={7} />);
   await vi.waitFor(() => expect(mockApi).toHaveBeenCalled());
-  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByLabelText("Есть рекомендации для начала работы")).toBeNull();
   fireEvent.click(screen.getByLabelText("Справка и справочник"));
   fireEvent.click(screen.getByRole("tab", { name: "С чего начать" }));
   expect(await screen.findByText(/Готово 1 из 3/)).toBeTruthy();
