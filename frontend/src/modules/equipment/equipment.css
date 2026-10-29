@@ -1,0 +1,29 @@
+.eq { display: flex; flex-direction: column; gap: 14px; color: var(--read-text, #1f2937); font-size: 13px; }
+.eq button, .eq input, .eq select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2));
+  background: var(--read-surface, #fff);
+  color: var(--read-text, #1f2937);
+  font: inherit;
+  font-size: 13px;
+}
+.eq button { cursor: pointer; }
+.eq button:hover:not(:disabled) { border-color: var(--read-accent, #2563eb); }
+.eq button:disabled { opacity: 0.6; cursor: default; }
+.eq-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.eq-title { margin: 0; font-size: 16px; font-weight: 600; flex: 1 1 auto; }
+.eq-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.eq-counters { display: flex; gap: 8px; flex-wrap: wrap; }
+.eq-counter { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); }
+.eq-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.eq-filters input { flex: 1 1 220px; min-width: 0; }
+.eq-wrap { overflow-x: auto; }
+.eq-table { border-collapse: collapse; width: 100%; min-width: 860px; }
+.eq-table th, .eq-table td { padding: 6px 8px; border-bottom: 1px solid var(--read-rule, rgba(15, 23, 42, 0.12)); text-align: left; vertical-align: top; }
+.eq-table td input, .eq-table td select { width: 100%; min-width: 90px; }
+.eq-sub { color: var(--read-muted, #64748b); font-size: 12px; }
+.eq-overdue { color: var(--read-danger, #b91c1c); font-weight: 600; }
+.eq-note { margin: 0; color: var(--read-muted, #64748b); }
+.eq-error { margin: 0; color: var(--read-danger, #b91c1c); }
+.eq-empty { margin: 0; padding: 14px; border: 1px dashed var(--read-rule, rgba(15, 23, 42, 0.3)); border-radius: 8px; }
