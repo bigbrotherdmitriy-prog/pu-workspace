@@ -1036,6 +1036,8 @@ body:has(.contract-document-modal) .ai-hover-bubble, body:has(.contract-document
 .structured-import button { padding: 9px 12px; border: 1px solid #0b9068; border-radius: 8px; background: #087a59; color: #fff; font-weight: 700; cursor: pointer; }
 .structured-import button.secondary { background: #fff; color: #526071; border-color: #cfd7df; }
 .structured-import button:disabled { opacity: .5; cursor: default; }
+.invoice-review-lock { border: 0; margin: 0; padding: 0; min-width: 0; }
+.invoice-review-lock:disabled { opacity: .75; }
 .invoice-review-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .invoice-review-grid label { display: grid; gap: 6px; color: #526071; font-size: 12px; font-weight: 700; }
 .invoice-review-grid label.wide { grid-column: span 2; }

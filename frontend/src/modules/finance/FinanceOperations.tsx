@@ -117,6 +117,8 @@ export function FinanceOperations(props: Props) {
       {invoiceProposal.duplicate_of && <div className="finance-warning" role="alert">Повторный счёт: такой счёт уже подтверждён — «{invoiceProposal.duplicate_of}». В ДДС он второй раз не попадёт — нажмите «Отклонить».</div>}
       {invoiceProposal.fallback_reason === "own_outgoing_invoice" && <div className="finance-warning" role="status">Приход от {invoiceProposal.counterparty || "заказчика"}: документ попадёт в «Ожидаемые приходы» ДДС, строку плана система выберет сама. Категория и строка расхода не нужны.</div>}
       {invoiceProposal.extraction_method === "regex" && <div className="finance-warning">AI недоступен ({invoiceProposal.fallback_reason || "fallback"}). Сумма найдена резервным правилом; заполните остальные поля вручную.{invoiceProposal.status === "proposed" && invoiceProposal.fallback_reason === "temporarily_unavailable" && <button className="secondary" disabled={invoiceAiRetrying} onClick={onRetryInvoiceAi}>{invoiceAiRetrying ? "Повторный анализ…" : "Повторить AI-анализ"}</button>}</div>}
+      {invoiceProposal.status === "confirmed" && <div className="finance-warning" role="status">Этот счёт уже подтверждён и записан в ДДС. Изменить его здесь нельзя.</div>}
+      <fieldset className="invoice-review-lock" disabled={invoiceProposal.status !== "proposed"}>
       <div className="invoice-review-grid">
         <label>Сумма<input type="number" min="0.01" value={invoiceProposal.amount ?? ""} onChange={(event) => onEditInvoice?.({ amount: Number(event.target.value) || undefined })} /></label>
         <label>Валюта<input value={invoiceProposal.currency} disabled /></label>
@@ -133,6 +135,7 @@ export function FinanceOperations(props: Props) {
           ? <small className="bad">Счёт больше остатка статьи на {formatMoney(invoiceAmount - chosen.remaining)} ₽ — статья уйдёт в перерасход. Если это вне плана, выберите «Дополнительные затраты».</small> : null; })()}
         {(() => { const hint = planSuggestions.find((item) => String(item.plan_entry_id) === planValue); return hint ? <small>Предложено AI-секретарём: {(hint.reasons || []).join("; ")}</small> : planChoice === "additional" ? <small>Счёт уйдёт в «Дополнительные затраты» и уменьшит прибыль.</small> : null; })()}</label>}
       </div>
+      </fieldset>
       <div className="invoice-evidence">
         <strong>Основания из документа</strong>
         <small>Сумма: {invoiceProposal.amount_evidence_quote || "не найдено"}</small>
@@ -140,7 +143,9 @@ export function FinanceOperations(props: Props) {
         <small>Назначение: {invoiceProposal.payment_purpose_evidence_quote || "не найдено"}</small>
         <small>Категория: {invoiceProposal.category_evidence_quote || "нет подтверждаемой цитаты"}</small>
       </div>
+      <fieldset className="invoice-review-lock" disabled={invoiceProposal.status !== "proposed"}>
       <div className="structured-actions"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Новая категория" /><button className="secondary" disabled={!newCategory.trim()} onClick={() => { onAddCostCategory?.(newCategory); setNewCategory(""); }}>Добавить в справочник</button></div>
+      </fieldset>
       {(() => {
         const anchored = invoiceProposal.target_kind === "cash_flow" && planChoice !== "";
         // v5.5 / MVP-4 шаг 8г: кнопка не просто недоступна — система называет
