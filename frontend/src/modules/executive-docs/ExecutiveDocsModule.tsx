@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
 import { EquipmentTestAct } from "./EquipmentTestAct";
 import { IdOrders } from "./IdOrders";
@@ -157,7 +158,7 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
       try {
         const response = await fetch(
           `/projects/${projectId}/executive-docs/sources/${sourceId}/upload?name=${encodeURIComponent(file.name)}`,
-          { method: "POST", body: file, credentials: "same-origin" },
+          { method: "POST", body: file, credentials: "same-origin", headers: csrfHeaders() },
         );
         if (!response.ok) failed.push(`${file.name} (${response.status === 413 ? "слишком большой" : `ошибка ${response.status}`})`);
       } catch {

@@ -73,3 +73,15 @@ it("does not send untouched rows that only carry default values", async () => {
   expect(body.rows).toHaveLength(1);
   expect(body.rows[0].circuit_name).toBe("ЩР-1");
 });
+
+it("sends the CSRF token with the cookie session (plain fetch POST)", async () => {
+  document.cookie = "pu_csrf=tok-123";
+  const fetchMock = okFetch();
+  render(<ProtocolForm projectId={3} config={EARTHING_PROTOCOL} />);
+  fireEvent.change(screen.getByLabelText("Заземляющее устройство / точка 1"), { target: { value: "ЗУ-1" } });
+  fireEvent.click(screen.getByText("Скачать протокол"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  const headers = (fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers;
+  expect(headers["X-CSRF-Token"]).toBe("tok-123");
+  document.cookie = "pu_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+});

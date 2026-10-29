@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { csrfHeaders } from "../../api/client";
 
 type Item = { name: string; type_mark: string; serial: string; location: string; program: string; values: string; result: "pass" | "fail" };
 const emptyItem = (): Item => ({ name: "", type_mark: "", serial: "", location: "", program: "", values: "", result: "pass" });
@@ -22,7 +23,7 @@ export function EquipmentTestAct({ projectId, objectName }: { projectId: number;
     setError("");
     try {
       const response = await fetch(`/projects/${projectId}/executive-docs/equipment-test-act.docx`, {
-        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ header, items }),
       });
       if (!response.ok) {

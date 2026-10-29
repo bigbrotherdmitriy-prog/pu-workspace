@@ -57,3 +57,16 @@ it("shows empty folder hint", async () => {
   render(<PuStorageModule projectId={7} />);
   expect(await screen.findByText(/Папка пуста/)).toBeTruthy();
 });
+
+it("sends the CSRF token with an upload", async () => {
+  document.cookie = "pu_csrf=tok-9";
+  mockApi.mockResolvedValue(listing);
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<PuStorageModule projectId={7} />);
+  await screen.findByText("a.pdf");
+  fireEvent.change(screen.getByLabelText("Выбрать файлы") as HTMLInputElement, { target: { files: [new File(["x"], "d.txt")] } });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  expect((fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers["X-CSRF-Token"]).toBe("tok-9");
+  document.cookie = "pu_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+});
