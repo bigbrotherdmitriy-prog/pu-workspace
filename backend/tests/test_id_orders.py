@@ -78,6 +78,7 @@ def test_docx_contains_name_duties_and_certificate_clause(world):
     from app.models.id_orders import IdOrder
 
     xml = _docx_text(svc.render_docx(db.get(IdOrder, o["id"])))
+    assert "работника: Петров П.П., инженера" in xml
     for needle in ("ПРИКАЗ", "№ 5", "Петров П.П.", "электробезопасность", "группа по электробезопасности", "октября", "С приказом ознакомлен", "копия удостоверения"):
         assert needle.lower() in xml.lower(), needle
 

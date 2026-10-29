@@ -158,7 +158,7 @@ export function IdOrders({ projectId }: { projectId: number }) {
           </select>
         </label>
         <label>ФИО ответственного<input value={draft.person_name} onChange={(e) => setDraft((d) => ({ ...d, person_name: e.target.value }))} placeholder="Иванов Иван Иванович" /></label>
-        <label>Должность (в родительном падеже)<input value={draft.position} onChange={(e) => setDraft((d) => ({ ...d, position: e.target.value }))} placeholder="прораба" /></label>
+        <label>Должность<input value={draft.position} onChange={(e) => setDraft((d) => ({ ...d, position: e.target.value }))} placeholder="прораб" /></label>
         <label>№ приказа<input value={draft.number} onChange={(e) => setDraft((d) => ({ ...d, number: e.target.value }))} /></label>
         <label>Дата<input type="date" value={draft.order_date} onChange={(e) => setDraft((d) => ({ ...d, order_date: e.target.value }))} /></label>
         <button type="button" onClick={() => void create()}>Добавить приказ</button>
