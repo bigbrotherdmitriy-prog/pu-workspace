@@ -260,6 +260,19 @@ def parse_volume(db: Session, volume_id: int) -> dict:
         for item in old:
             db.delete(item)
         db.flush()
+        # Подтверждённые позиции со страниц, которые больше не считаются спецификацией
+        # (например, ведомость демонтажных работ), отклоняем — в закупку они не должны попадать.
+        spec_set = set(nums)
+        stale = db.execute(
+            select(RdSpecItem).where(
+                RdSpecItem.volume_id == vol.id,
+                RdSpecItem.status == "confirmed",
+            )
+        ).scalars().all()
+        for item in stale:
+            if item.source_page is not None and item.source_page not in spec_set:
+                item.status = "rejected"
+        db.flush()
 
         for idx, data in enumerate(parsed_items, start=1):
             db.add(RdSpecItem(

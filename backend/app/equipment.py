@@ -174,13 +174,24 @@ def _unit_to_dict(unit: EquipmentUnit, today: date | None = None) -> dict:
     }
 
 
+def _active_units_stmt(project_id: int):
+    """Единицы проекта, кроме тех, чья позиция РД позже отклонена."""
+    rejected = select(RdSpecItem.id).where(
+        RdSpecItem.project_id == project_id, RdSpecItem.status != "confirmed",
+    )
+    return select(EquipmentUnit).where(
+        EquipmentUnit.project_id == project_id,
+        EquipmentUnit.rd_spec_item_id.not_in(rejected) | EquipmentUnit.rd_spec_item_id.is_(None),
+    )
+
+
 def list_units(
     db: Session,
     project_id: int,
     status: str | None = None,
     q: str | None = None,
 ) -> list[dict]:
-    stmt = select(EquipmentUnit).where(EquipmentUnit.project_id == project_id)
+    stmt = _active_units_stmt(project_id)
     if status:
         stmt = stmt.where(EquipmentUnit.status == status)
     stmt = stmt.order_by(
@@ -281,9 +292,7 @@ def update_unit(db: Session, project_id: int, unit_id: int, data: dict) -> dict:
 
 
 def summary(db: Session, project_id: int) -> dict:
-    units = db.execute(
-        select(EquipmentUnit).where(EquipmentUnit.project_id == project_id)
-    ).scalars().all()
+    units = db.execute(_active_units_stmt(project_id)).scalars().all()
     result = {
         "total": 0,
         "by_status": {k: 0 for k in _ALLOWED_STATUSES},
@@ -331,8 +340,7 @@ def to_xlsx(db: Session, project_id: int) -> bytes:
         cell.font = bold
 
     units = db.execute(
-        select(EquipmentUnit)
-        .where(EquipmentUnit.project_id == project_id)
+        _active_units_stmt(project_id)
         .order_by(
             EquipmentUnit.name, EquipmentUnit.type_mark, EquipmentUnit.unit_no,
         )

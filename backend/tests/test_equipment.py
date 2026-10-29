@@ -354,3 +354,25 @@ def test_api_equipment(world, monkeypatch):
     wb = load_workbook(BytesIO(r.content))
     ws = wb.active
     assert ws.title == "Оборудование"
+
+
+def test_units_of_rejected_rd_items_are_hidden(world):
+    from app import equipment as eq
+    from app.models.rd import RdSpecItem, RdVolume
+
+    db, project = world["db"], world["project"]
+    vol = RdVolume(project_id=project.id, title="V", file_name="v.pdf", provider="google_drive")
+    db.add(vol)
+    db.flush()
+    keep = RdSpecItem(volume_id=vol.id, project_id=project.id, name="Насос", unit="шт", qty=1, status="confirmed")
+    drop = RdSpecItem(volume_id=vol.id, project_id=project.id, name="Демонтаж насоса", unit="шт", qty=1, status="confirmed")
+    db.add_all([keep, drop])
+    db.flush()
+    eq.generate(db, project.id)
+    db.commit()
+    assert len(eq.list_units(db, project.id)) == 2
+    drop.status = "rejected"
+    db.commit()
+    names = [u["name"] for u in eq.list_units(db, project.id)]
+    assert names == ["Насос"]
+    assert eq.summary(db, project.id)["total"] == 1
