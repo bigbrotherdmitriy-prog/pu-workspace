@@ -37,3 +37,14 @@ class WorkLogEntry(Base):
     rd_spec_item_id: Mapped[int | None] = mapped_column(ForeignKey("rd_spec_items.id", ondelete="SET NULL"), nullable=True)
     schedule_item_id: Mapped[int | None] = mapped_column(ForeignKey("schedule_items.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkLogLabor(Base):
+    """Табель: кто и сколько часов отработал в день записи. Ставка хранится справочно, ни к чему не привязана."""
+    __tablename__ = "work_log_labor"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    entry_id: Mapped[int] = mapped_column(ForeignKey("work_log_entries.id", ondelete="CASCADE"), index=True)
+    person_name: Mapped[str] = mapped_column(String(300))
+    hours: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    hourly_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)

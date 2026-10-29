@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.rd import RdSpecItem
-from app.models.work_log import WorkLogCrew, WorkLogEntry
+from app.models.work_log import WorkLogCrew, WorkLogEntry, WorkLogLabor
 
 _TEXT_FIELDS = ("object_name", "unit", "location", "weather", "note")
 _MAX_NAME = 1000
@@ -114,7 +114,57 @@ def _check_links(db: Session, project_id: int, data: dict) -> dict:
     return result
 
 
-def _to_dict(e: WorkLogEntry) -> dict:
+def _parse_labor(raw) -> list[dict]:
+    rows: list[dict] = []
+    for item in raw or []:
+        name = (item.get("person_name") or "").strip() if isinstance(item, dict) else ""
+        if not name:
+            continue
+        try:
+            hours = Decimal(str(item.get("hours")).strip().replace(",", "."))
+        except (InvalidOperation, AttributeError) as exc:
+            raise ValueError(f"Некорректные часы у {name}") from exc
+        if not Decimal("0") <= hours <= Decimal("24"):
+            raise ValueError(f"Часов у {name} может быть от 0 до 24")
+        rate_raw = item.get("hourly_rate")
+        rate = None
+        if rate_raw not in (None, ""):
+            try:
+                rate = Decimal(str(rate_raw).strip().replace(",", ".").replace(" ", ""))
+            except InvalidOperation as exc:
+                raise ValueError(f"Некорректная ставка у {name}") from exc
+            if rate < 0:
+                raise ValueError("Ставка не может быть отрицательной")
+        rows.append({"person_name": name[:300], "hours": hours, "hourly_rate": rate})
+    return rows
+
+
+def _labor_of(db: Session, entry_id: int) -> list[dict]:
+    rows = db.execute(
+        select(WorkLogLabor).where(WorkLogLabor.entry_id == entry_id).order_by(WorkLogLabor.id)
+    ).scalars().all()
+    return [
+        {
+            "person_name": r.person_name,
+            "hours": f"{Decimal(r.hours).quantize(Decimal('0.01')):f}",
+            "hourly_rate": f"{Decimal(r.hourly_rate).quantize(Decimal('0.01')):f}" if r.hourly_rate is not None else None,
+        }
+        for r in rows
+    ]
+
+
+def _replace_labor(db: Session, project_id: int, entry: WorkLogEntry, rows: list[dict]) -> None:
+    for old in db.execute(select(WorkLogLabor).where(WorkLogLabor.entry_id == entry.id)).scalars().all():
+        db.delete(old)
+    db.flush()
+    for row in rows:
+        db.add(WorkLogLabor(project_id=project_id, entry_id=entry.id, **row))
+    if rows and entry.workers is None:
+        entry.workers = len(rows)
+    db.flush()
+
+
+def _to_dict(e: WorkLogEntry, labor: list[dict] | None = None) -> dict:
     return {
         "id": e.id,
         "project_id": e.project_id,
@@ -132,16 +182,19 @@ def _to_dict(e: WorkLogEntry) -> dict:
         "rd_spec_item_id": e.rd_spec_item_id,
         "schedule_item_id": e.schedule_item_id,
         "author_user_id": e.author_user_id,
+        "labor": labor if labor is not None else [],
     }
 
 
 def add_entry(db: Session, project_id: int, user_id: int | None, data: dict) -> dict:
     values = _clean(data, partial=False)
     values.update(_check_links(db, project_id, data))
+    labor = _parse_labor(data.get("labor"))
     entry = WorkLogEntry(project_id=project_id, author_user_id=user_id, **values)
     db.add(entry)
     db.flush()
-    return _to_dict(entry)
+    _replace_labor(db, project_id, entry, labor)
+    return _to_dict(entry, _labor_of(db, entry.id))
 
 
 def _get(db: Session, project_id: int, entry_id: int) -> WorkLogEntry:
@@ -155,14 +208,20 @@ def update_entry(db: Session, project_id: int, entry_id: int, data: dict) -> dic
     entry = _get(db, project_id, entry_id)
     values = _clean(data, partial=True)
     values.update(_check_links(db, project_id, data))
+    labor = _parse_labor(data.get("labor")) if "labor" in data else None
     for key, value in values.items():
         setattr(entry, key, value)
     db.flush()
-    return _to_dict(entry)
+    if labor is not None:
+        _replace_labor(db, project_id, entry, labor)
+    return _to_dict(entry, _labor_of(db, entry.id))
 
 
 def delete_entry(db: Session, project_id: int, entry_id: int) -> None:
-    db.delete(_get(db, project_id, entry_id))
+    entry = _get(db, project_id, entry_id)
+    for lab in db.execute(select(WorkLogLabor).where(WorkLogLabor.entry_id == entry.id)).scalars().all():
+        db.delete(lab)
+    db.delete(entry)
     db.flush()
 
 
@@ -186,7 +245,7 @@ def list_entries(
     for e in rows:
         if needle and needle not in " ".join(filter(None, [e.work_name, e.location, e.note])).lower():
             continue
-        result.append(_to_dict(e))
+        result.append(_to_dict(e, _labor_of(db, e.id)))
         if len(result) >= limit:
             break
     return result
@@ -202,7 +261,13 @@ def summary(db: Session, project_id: int, date_from=None, date_to=None) -> dict:
         bucket["qty"] += e.qty or Decimal("0")
         bucket["entries"] += 1
     ordered = sorted(by_work.values(), key=lambda b: b["qty"], reverse=True)[:50]
-    hours_total = sum((e.hours or Decimal("0")) * (e.workers or 1) for e in rows)
+    labor_by_entry: dict[int, Decimal] = {}
+    for lab in db.execute(select(WorkLogLabor).where(WorkLogLabor.project_id == project_id)).scalars().all():
+        labor_by_entry[lab.entry_id] = labor_by_entry.get(lab.entry_id, Decimal("0")) + lab.hours
+    hours_total = sum(
+        labor_by_entry[e.id] if e.id in labor_by_entry else (e.hours or Decimal("0")) * (e.workers or 1)
+        for e in rows
+    )
     return {
         "entries": len(rows),
         "days": len({e.work_date for e in rows}),
@@ -261,6 +326,20 @@ def to_xlsx(db: Session, project_id: int, date_from=None, date_to=None) -> bytes
     for col, width in zip("ABCDEFGHIJK", (12, 20, 50, 10, 12, 28, 16, 22, 10, 8, 40)):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A2"
+    sheet = wb.create_sheet("Табель")
+    sheet.append(["Дата", "Работник", "Часов", "Ставка, ₽/ч", "Работа"])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for e in reversed(list_entries(db, project_id, date_from, date_to, limit=100000)):
+        d = date.fromisoformat(e["work_date"])
+        for lab in e["labor"]:
+            sheet.append([
+                d.strftime("%d.%m.%Y"), lab["person_name"], float(lab["hours"]),
+                float(lab["hourly_rate"]) if lab["hourly_rate"] is not None else None, e["work_name"],
+            ])
+    for col, width in zip("ABCDE", (12, 32, 10, 14, 50)):
+        sheet.column_dimensions[col].width = width
+    sheet.freeze_panes = "A2"
     buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue()

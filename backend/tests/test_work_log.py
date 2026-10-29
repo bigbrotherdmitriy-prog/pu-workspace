@@ -223,3 +223,36 @@ def test_api_crews(world):
     assert client.patch(f"/projects/{pid}/work-log/crews/{cid}", json={"foreman": "Новый"}).json()["foreman"] == "Новый"
     assert client.delete(f"/projects/{pid}/work-log/crews/{cid}").json() == {"deleted": cid}
     assert client.delete(f"/projects/{pid}/work-log/crews/{cid}").status_code == 404
+
+
+def test_labor_timesheet_per_person(world):
+    from openpyxl import load_workbook
+
+    db, pid = world["db"], world["p"].id
+    e = _add(db, pid, labor=[
+        {"person_name": "Петров И.", "hours": "8", "hourly_rate": "450,50"},
+        {"person_name": "Сидоров А.", "hours": "6"},
+        {"person_name": "  ", "hours": "5"},  # пустое имя пропускается
+    ])
+    assert e["workers"] == 2
+    assert e["labor"] == [
+        {"person_name": "Петров И.", "hours": "8.00", "hourly_rate": "450.50"},
+        {"person_name": "Сидоров А.", "hours": "6.00", "hourly_rate": None},
+    ]
+    assert wl.summary(db, pid)["man_hours"] == "14.00"  # табель важнее «часы × рабочие»
+    with pytest.raises(ValueError):
+        _add(db, pid, labor=[{"person_name": "Х", "hours": "30"}])
+    with pytest.raises(ValueError):
+        _add(db, pid, labor=[{"person_name": "Х", "hours": "abc"}])
+    with pytest.raises(ValueError):
+        _add(db, pid, labor=[{"person_name": "Х", "hours": "1", "hourly_rate": "-5"}])
+    upd = wl.update_entry(db, pid, e["id"], {"labor": [{"person_name": "Петров И.", "hours": "9"}]})
+    assert [r["hours"] for r in upd["labor"]] == ["9.00"]
+    assert wl.list_entries(db, pid)[0]["labor"][0]["hours"] == "9.00"
+    ws = load_workbook(BytesIO(wl.to_xlsx(db, pid)))["Табель"]
+    assert [c.value for c in ws[1]] == ["Дата", "Работник", "Часов", "Ставка, ₽/ч", "Работа"]
+    assert ws["B2"].value == "Петров И." and ws["C2"].value == 9
+    wl.delete_entry(db, pid, e["id"])
+    from app.models.work_log import WorkLogLabor
+
+    assert db.query(WorkLogLabor).count() == 0

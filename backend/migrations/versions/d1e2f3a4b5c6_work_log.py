@@ -48,9 +48,23 @@ def upgrade() -> None:
     )
     op.create_index("ix_work_log_entries_project_id", "work_log_entries", ["project_id"])
     op.create_index("ix_work_log_entries_work_date", "work_log_entries", ["work_date"])
+    op.create_table(
+        "work_log_labor",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("entry_id", sa.Integer(), sa.ForeignKey("work_log_entries.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("person_name", sa.String(length=300), nullable=False),
+        sa.Column("hours", sa.Numeric(5, 2), nullable=False),
+        sa.Column("hourly_rate", sa.Numeric(12, 2), nullable=True),
+    )
+    op.create_index("ix_work_log_labor_project_id", "work_log_labor", ["project_id"])
+    op.create_index("ix_work_log_labor_entry_id", "work_log_labor", ["entry_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_work_log_labor_entry_id", table_name="work_log_labor")
+    op.drop_index("ix_work_log_labor_project_id", table_name="work_log_labor")
+    op.drop_table("work_log_labor")
     op.drop_index("ix_work_log_entries_work_date", table_name="work_log_entries")
     op.drop_index("ix_work_log_entries_project_id", table_name="work_log_entries")
     op.drop_table("work_log_entries")

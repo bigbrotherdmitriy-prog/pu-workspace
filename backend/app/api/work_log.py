@@ -11,7 +11,14 @@ from app.database import get_db
 router = APIRouter(prefix="/projects", tags=["work-log"])
 
 
+class LaborRow(BaseModel):
+    person_name: str
+    hours: str | float
+    hourly_rate: str | float | None = None
+
+
 class WorkLogBody(BaseModel):
+    labor: list[LaborRow] | None = None
     work_date: str | None = None
     work_name: str | None = None
     object_name: str | None = None
