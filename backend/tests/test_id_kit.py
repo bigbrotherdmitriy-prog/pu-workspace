@@ -37,6 +37,7 @@ def world():
         db.add(e)
         db.flush()
         db.add(EstimateLine(project_id=p.id, estimate_id=e.id, name="Устройство заземления"))
+        db.add(EstimateLine(project_id=p.id, estimate_id=e.id, name="Разработка траншеи, обратная засыпка песком"))
         db.commit()
         yield {"db": db, "p": p}
     engine.dispose()
@@ -65,6 +66,8 @@ def test_proposal_from_rd_and_estimates(world):
     for need in ("Ведомость смонтированного оборудования", "Реестр исполнительной документации", "Акт ввода в эксплуатацию"):
         assert need in titles
     assert any("72 часа" in t for t in titles)
+    assert "Акт разбивки осей объекта" in titles and "Акт приёмки геодезической разбивочной основы" in titles
+    assert any("обратная засыпка" in t for t in titles)  # земляные работы есть в смете
     assert all(i["checked"] for i in data["items"])
     cable = next(i for i in data["items"] if "кабельных линий" in i["title"] and i["doc_kind"] == "aosr")
     assert "в РД" in cable["reason"]
