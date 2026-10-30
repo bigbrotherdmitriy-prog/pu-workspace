@@ -3,7 +3,7 @@
 import json
 import os
 import pathlib
-import re
+import time
 import sys
 import urllib.error
 import urllib.request
@@ -61,24 +61,38 @@ def main():
         "https://api.deepseek.com/chat/completions", data=payload,
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
         method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            result = json.load(response)
-    except urllib.error.HTTPError as error:
-        raise RuntimeError("DeepSeek API HTTP " + str(error.code)) from None
+    result = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.load(response)
+            break
+        except urllib.error.HTTPError as error:
+            if error.code not in (429, 500, 502, 503, 504) or attempt == 2:
+                raise RuntimeError("DeepSeek API HTTP " + str(error.code)) from None
+        except (TimeoutError, urllib.error.URLError):
+            if attempt == 2:
+                raise
+        time.sleep(2 ** attempt)
+    if result is None:
+        raise RuntimeError("DeepSeek returned no result")
     message = result["choices"][0]["message"]["content"]
     files = json.loads(message)["files"]
     if not isinstance(files, list) or len(files) > len(names):
         raise ValueError("Invalid model output")
     if len({f.get("path") for f in files}) != len(files):
         raise ValueError("Duplicate paths")
+    # Validate the entire model response before writing any file.
+    validated = []
     for file in files:
         name, body = file["path"], file["content"]
         if name not in names or not isinstance(body, str):
             raise ValueError("Unexpected output path or content")
         if len(body.encode("utf-8")) > MAX_BYTES:
             raise ValueError("Output file too large")
-        checked_path(name).write_text(body, encoding="utf-8")
+        validated.append((checked_path(name), body))
+    for path, body in validated:
+        path.write_text(body, encoding="utf-8")
     print("Proposed source files:", len(files))
 
 if __name__ == "__main__":
