@@ -22,6 +22,39 @@ python scripts/check_ci_smoke.py --env-file .env.ci --seed
 
 Это локальная CI-среда, а не публичный staging. Для настоящих Google Workspace проверок используйте отдельное защищённое test-only окружение и тестовый Google-аккаунт. Не направляйте синтетические загрузки на production.
 
+### Ошибка `STAGING_HOST resolves to the production host`
+
+После перевода прежнего EU staging-сервера в production работа старого тестового URL или уже запущенных контейнеров не означает, что безопасный независимый автодеплой staging готов. [`validate_staging_settings.py`](../scripts/validate_staging_settings.py) намеренно останавливает preflight, если `STAGING_HOST` разрешается в production-адрес. Совпадение DNS или использование общего с production Docker daemon либо deploy-пользователя не позволяют независимо обновлять стенды: такой staging нужно считать production, а для staging подготовить отдельный хост по правилам выше. Guard не отключайте и не обходите; [`deploy-staging.sh`](../scripts/deploy-staging.sh) также требует выделенный хост и блокирует production footprint.
+
+Проверьте DNS с рабочей станции, подставив только публичные имена staging и production (команды ничего не изменяют):
+
+```bash
+getent ahosts staging.example.test | awk '{print $1}' | sort -u
+getent ahosts puworkspace.ru | awk '{print $1}' | sort -u
+```
+
+Если адреса пересекаются, сначала выделите отдельный staging-сервер и исправьте DNS штатным способом, затем дождитесь обновления DNS и повторите preflight. На предполагаемом выделенном сервере можно только прочитать имя активного релиза; команда ниже не выводит `.env`, marker или секреты:
+
+```bash
+ssh puw_staging@staging.example.test '
+current=/opt/pu-workspace-staging/current
+if ! test -L "$current"; then
+  echo "current отсутствует или не является символической ссылкой" >&2
+  exit 1
+fi
+target=$(readlink -f "$current") || target=
+if ! test -d "$target"; then
+  echo "current отсутствует или ссылка повреждена" >&2
+  exit 1
+fi
+case "$target" in
+  /opt/pu-workspace-staging/releases/*) basename "$target" ;;
+  *) echo "current указывает вне каталога staging releases" >&2; exit 1 ;;
+esac'
+```
+
+Отсутствующий или повреждённый `current` означает, что на этом хосте нет подтверждённого активного staging-релиза. Не запускайте deploy для проверки и не подключайте staging workflow к старому production-хосту.
+
 ## Linear и выпуск
 
 Для Linear требуется привязанный аккаунт, установленная интеграция Codex for Linear и облачное окружение репозитория `bigbrotherdmitriy-prog/pu-workspace`. Установка этих внешних компонентов не подтверждается файлами репозитория.
