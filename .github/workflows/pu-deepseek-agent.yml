@@ -47,7 +47,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="agent/deepseek-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           git switch -c "$branch"
-          git add -u -- backend frontend tests docs
+          for source_dir in backend frontend tests docs; do
+            if [ -d "$source_dir" ]; then
+              git add -u -- "$source_dir"
+            fi
+          done
           git diff --cached --check
           git commit -m "agent: propose bounded changes"
           git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push "https://github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
