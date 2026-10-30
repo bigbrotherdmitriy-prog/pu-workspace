@@ -35,11 +35,13 @@ jobs:
         run: python .github/agent/deepseek_propose.py
       - name: Validate proposal without executing generated code
         shell: bash
+        env:
+          TARGET_PATH: ${{ inputs.target_path }}
         run: |
           set -euo pipefail
           git diff --check
           test "$(git diff --name-only | wc -l)" -eq 1
-          git diff --name-only | grep -Fx -- "${{ inputs.target_path }}"
+          git diff --name-only | grep -Fx -- "$TARGET_PATH"
           python -m compileall -q backend/app backend/tests
       - name: Open reviewable pull request
         shell: bash
@@ -55,7 +57,8 @@ jobs:
           git switch -c "$branch"
           git add -- "$TARGET_PATH"
           git commit -m "agent: DeepSeek proposal for $TARGET_PATH"
-          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push origin "$branch"
+          gh auth setup-git
+          git push origin "$branch"
           gh pr create --base main --head "$branch" \
             --title "agent: DeepSeek proposal for $TARGET_PATH" \
             --body "Automated single-file DeepSeek proposal. Syntax validated only; full CI and human review required. Task supplied via manual dispatch." \
