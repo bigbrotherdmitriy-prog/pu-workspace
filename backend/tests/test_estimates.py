@@ -244,5 +244,5 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").status_code == 422
-    assert c.get(f"/projects/{pid}/ks-acts/{aid}").status_code == 200
+    assert any(a["id"] == aid and a["status"] == "signed" for a in c.get(f"/projects/{pid}/estimates/{eid}/ks-acts").json()["acts"])
     assert c.get(f"/projects/{pid}/estimates/{eid}").status_code == 200
