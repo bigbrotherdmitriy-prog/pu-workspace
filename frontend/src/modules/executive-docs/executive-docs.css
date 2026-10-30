@@ -58,3 +58,11 @@
 .id-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .id-tab { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); background: var(--read-surface, #fff); color: var(--read-text, inherit); cursor: pointer; font: inherit; }
 .id-tab-on { border-color: var(--read-accent, #2563eb); font-weight: 600; }
+
+.id-hint { opacity: 0.75; font-size: 0.9em; }
+.id-error { color: var(--read-danger, #b91c1c); }
+.id-ok { color: var(--read-accent, #15803d); }
+.id-kit-group { border: 1px solid var(--read-rule, rgba(15, 23, 42, 0.2)); border-radius: 8px; margin: 10px 0; padding: 8px 12px; display: grid; gap: 6px; }
+.id-kit-item { display: flex; gap: 8px; align-items: flex-start; }
+.id-kit-add, .id-kit-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.id-kit-add input { flex: 1 1 260px; min-width: 0; }

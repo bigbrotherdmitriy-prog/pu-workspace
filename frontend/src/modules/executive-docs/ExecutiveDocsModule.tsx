@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
 import { EquipmentTestAct } from "./EquipmentTestAct";
+import { IdKit } from "./IdKit";
 import { IdOrders } from "./IdOrders";
 import { InsulationProtocol } from "./InsulationProtocol";
 import { AVR_PROTOCOL, EARTHING_PROTOCOL, PHASE_ZERO_PROTOCOL, ProtocolForm } from "./ProtocolForm";
@@ -284,9 +285,9 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
     }
   };
 
-  const [tab, setTab] = useState<"ready" | "orders" | "forms" | "people" | "aosr">("ready");
-  const tabs: ["ready" | "orders" | "forms" | "people" | "aosr", string][] = [
-    ["ready", "Готовность"], ["orders", "Приказы"], ["forms", "Акты и протоколы"], ["people", "Участники"], ["aosr", "АОСР"],
+  const [tab, setTab] = useState<"ready" | "kit" | "orders" | "forms" | "people" | "aosr">("ready");
+  const tabs: ["ready" | "kit" | "orders" | "forms" | "people" | "aosr", string][] = [
+    ["ready", "Готовность"], ["kit", "Состав комплекта"], ["orders", "Приказы"], ["forms", "Акты и протоколы"], ["people", "Участники"], ["aosr", "АОСР"],
   ];
   const objects = report?.objects ?? [];
   const objectNames = objects.map((o) => o.object_name);
@@ -336,6 +337,7 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
 
       </>}
 
+      {tab === "kit" && <IdKit projectId={projectId} objectNames={objects.map((o) => o.object_name)} onSaved={() => void load()} />}
       {tab === "orders" && <IdOrders projectId={projectId} />}
       {tab === "forms" && <>
       <EquipmentTestAct projectId={projectId} objectName={objects[0]?.object_name} />

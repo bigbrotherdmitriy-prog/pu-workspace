@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
+from app.id_kit import propose_kit, save_kit
 from app.executive_docs import object_report, requirements_from_contract, scan_source
 from app.models.executive_docs import IdRequirement, IdSource
 
@@ -84,6 +85,45 @@ def build_requirements(
     count = requirements_from_contract(
         db, project_id, body.contract_id, body.object_name, body.sections,
     )
+    db.commit()
+    return {"created": count}
+
+
+class KitItem(BaseModel):
+    title: str
+    doc_kind: str = "other"
+    section: str | None = None
+    norm_ref: str | None = None
+    reason: str | None = None
+
+
+class KitSave(BaseModel):
+    object_name: str | None = None
+    items: list[KitItem]
+
+
+@router.get("/{project_id}/executive-docs/kit/proposal")
+def kit_proposal(
+    project_id: int,
+    object_name: str | None = None,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    require_project_role(db, user, project_id, "viewer")
+    return propose_kit(db, project_id, object_name)
+
+
+@router.post("/{project_id}/executive-docs/kit")
+def kit_save(
+    project_id: int,
+    body: KitSave,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    require_project_role(db, user, project_id, "manager")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Отметьте хотя бы один документ")
+    count = save_kit(db, project_id, body.object_name, [i.model_dump() for i in body.items])
     db.commit()
     return {"created": count}
 
