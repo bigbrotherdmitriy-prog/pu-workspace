@@ -113,7 +113,7 @@ def delete_estimate(project_id: int, estimate_id: int, db: Session = Depends(get
     require_project_role(db, user, project_id, "manager")
     try:
         svc.delete_estimate(db, project_id, estimate_id)
-    except LookupError as exc:
+    except (ValueError, LookupError) as exc:
         db.rollback()
         raise _fail(exc) from exc
     db.commit()
