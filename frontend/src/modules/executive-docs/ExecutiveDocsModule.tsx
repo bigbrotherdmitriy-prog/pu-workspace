@@ -3,6 +3,7 @@ import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
 import { EquipmentTestAct } from "./EquipmentTestAct";
 import { IdKit } from "./IdKit";
+import { HandoverDocs } from "./HandoverDocs";
 import { IdOrders } from "./IdOrders";
 import { InsulationProtocol } from "./InsulationProtocol";
 import { AVR_PROTOCOL, EARTHING_PROTOCOL, PHASE_ZERO_PROTOCOL, ProtocolForm } from "./ProtocolForm";
@@ -340,6 +341,7 @@ export function ExecutiveDocsModule({ projectId }: { projectId: number }) {
       {tab === "kit" && <IdKit projectId={projectId} objectNames={objects.map((o) => o.object_name)} onSaved={() => void load()} />}
       {tab === "orders" && <IdOrders projectId={projectId} />}
       {tab === "forms" && <>
+      <HandoverDocs projectId={projectId} objectName={objects[0]?.object_name} />
       <EquipmentTestAct projectId={projectId} objectName={objects[0]?.object_name} />
       <InsulationProtocol projectId={projectId} objectName={objects[0]?.object_name} />
       <ProtocolForm projectId={projectId} objectName={objects[0]?.object_name} config={EARTHING_PROTOCOL} />
