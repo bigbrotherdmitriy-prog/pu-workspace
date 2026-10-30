@@ -142,6 +142,13 @@ def get_estimate(db: Session, project_id: int, estimate_id: int) -> dict:
 
 def delete_estimate(db: Session, project_id: int, estimate_id: int) -> None:
     e = _get(db, project_id, estimate_id)
+    # ks_acts.estimate_id has ON DELETE CASCADE. Without this guard deleting
+    # the estimate also silently deletes signed acceptance documents.
+    has_acts = db.scalar(
+        select(KsAct.id).where(KsAct.project_id == project_id, KsAct.estimate_id == estimate_id).limit(1)
+    )
+    if has_acts is not None:
+        raise ValueError("Смету с актами КС-2/КС-3 удалять нельзя. Сначала разберите связанные акты.")
     db.delete(e)
     db.flush()
 
