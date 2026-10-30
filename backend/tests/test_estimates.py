@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -15,6 +15,7 @@ from app import work_log as wl
 from app.database import Base
 from app.models.organization_contract import Organization
 from app.models.project import Project
+from app.models.work_log import WorkLogEntry
 
 PARSED = {
     "lines": [
@@ -151,6 +152,44 @@ def test_estimate_without_ks_acts_can_be_deleted(world):
     with pytest.raises(LookupError):
         svc.get_estimate(db, pid, estimate_id)
 
+
+
+def test_estimate_with_work_log_cannot_be_deleted(world):
+    """Keep the fact-to-estimate link intact even when no KS act exists."""
+    db, pid = world["db"], world["p"].id
+    estimate_id = world["est"]["id"]
+    line_id = world["lines"][0]["id"]
+    _log(db, pid, line_id, "2026-10-05", "10")
+    db.commit()
+
+    with pytest.raises(ValueError, match="журнала фактических работ"):
+        svc.delete_estimate(db, pid, estimate_id)
+    db.rollback()
+    assert svc.get_estimate(db, pid, estimate_id)["id"] == estimate_id
+    assert db.scalar(select(WorkLogEntry.estimate_line_id).where(WorkLogEntry.project_id == pid)) == line_id
+
+
+def test_api_rejects_estimate_deletion_with_work_log(world):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import estimates as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    db, pid = world["db"], world["p"].id
+    estimate_id = world["est"]["id"]
+    line_id = world["lines"][0]["id"]
+    _log(db, pid, line_id, "2026-10-05", "10")
+    db.commit()
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    client = TestClient(app)
+    assert client.delete(f"/projects/{pid}/estimates/{estimate_id}").status_code == 422
+    assert client.get(f"/projects/{pid}/estimates/{estimate_id}").status_code == 200
+    assert db.scalar(select(WorkLogEntry.estimate_line_id).where(WorkLogEntry.project_id == pid)) == line_id
 
 def test_line_edit_validation(world):
     db, pid = world["db"], world["p"].id

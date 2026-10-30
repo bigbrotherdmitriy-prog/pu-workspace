@@ -149,6 +149,17 @@ def delete_estimate(db: Session, project_id: int, estimate_id: int) -> None:
     )
     if has_acts is not None:
         raise ValueError("Смету с актами КС-2/КС-3 удалять нельзя. Сначала разберите связанные акты.")
+    # WorkLogEntry.estimate_line_id uses ON DELETE SET NULL. Deleting the
+    # estimate would otherwise silently detach journal facts from their source.
+    has_facts = db.scalar(
+        select(WorkLogEntry.id)
+        .join(EstimateLine, WorkLogEntry.estimate_line_id == EstimateLine.id)
+        .where(EstimateLine.project_id == project_id, EstimateLine.estimate_id == estimate_id,
+               WorkLogEntry.project_id == project_id)
+        .limit(1)
+    )
+    if has_facts is not None:
+        raise ValueError("Смету с записями журнала фактических работ удалять нельзя.")
     db.delete(e)
     db.flush()
 
