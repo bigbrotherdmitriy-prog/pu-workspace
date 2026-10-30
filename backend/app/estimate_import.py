@@ -112,6 +112,26 @@ def _is_numeric_str(value: Any) -> bool:
     return _is_number(value)
 
 
+def _is_finite_decimal(d: Decimal) -> bool:
+    return d.is_finite()
+
+
+def _parse_finite_decimal(value: Any, field: str) -> Decimal | None:
+    """Разобрать числовое значение и отвергнуть нечисловые спецзначения.
+
+    NaN/sNaN/Infinity/-Infinity (в т.ч. строковые) не должны попадать
+    в результат: на границе parser поднимаем понятный ValueError.
+    """
+    d = _parse_decimal(value)
+    if d is None:
+        return None
+    if not _is_finite_decimal(d):
+        raise ValueError(
+            f"Недопустимое числовое значение в колонке «{field}»: {value!r}"
+        )
+    return d
+
+
 def _to_str(d: Decimal | None) -> str | None:
     if d is None:
         return None
@@ -418,7 +438,7 @@ def parse_estimate_xlsx(data: bytes) -> dict:
             texts = [str(v).strip() for v in row if v is not None and str(v).strip() and not isinstance(v, (int, float))]
             if texts and _is_total_row_name(texts[0]):
                 if _is_grand_total_name(texts[0]) and total_idx is not None:
-                    t = _parse_decimal(_cell(row, total_idx))
+                    t = _parse_finite_decimal(_cell(row, total_idx), "Всего")
                     if t is not None:
                         grand_total = _to_str(t)
                 continue
@@ -433,7 +453,7 @@ def parse_estimate_xlsx(data: bytes) -> dict:
         # Итоговые строки — пропускаем.
         if _is_total_row_name(name):
             if _is_grand_total_name(name) and total_idx is not None:
-                t = _parse_decimal(_cell(row, total_idx))
+                t = _parse_finite_decimal(_cell(row, total_idx), "Всего")
                 if t is not None:
                     grand_total = _to_str(t)
             continue
@@ -457,9 +477,17 @@ def parse_estimate_xlsx(data: bytes) -> dict:
         # позицию/код. Иначе это может быть «шум».
         position_str = _cell_str(row, pos_idx) if pos_idx is not None else ""
 
-        qty = _parse_decimal(qty_val)
-        unit_price = _parse_decimal(_cell(row, price_idx)) if price_idx is not None else None
-        total = _parse_decimal(_cell(row, total_idx)) if total_idx is not None else None
+        qty = _parse_finite_decimal(qty_val, "Количество")
+        unit_price = (
+            _parse_finite_decimal(_cell(row, price_idx), "Цена")
+            if price_idx is not None
+            else None
+        )
+        total = (
+            _parse_finite_decimal(_cell(row, total_idx), "Всего")
+            if total_idx is not None
+            else None
+        )
 
         unit_str = _cell_str(row, unit_idx) if unit_idx is not None else ""
         cleaned_name = name
