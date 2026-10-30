@@ -1,0 +1,46 @@
+name: PU Workspace host diagnostics (read-only)
+
+# Trusted default-branch workflow only. No pull_request, push, or checkout.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pu-host-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    # Never use a bare self-hosted label on a production-adjacent machine.
+    runs-on: [self-hosted, Linux, X64, pu-diagnostics]
+    timeout-minutes: 3
+    env:
+      GIT_CONFIG_NOSYSTEM: "1"
+    steps:
+      - name: Read-only host health (no secrets, Docker or project checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== UTC ==="
+          date -u '+%Y-%m-%dT%H:%M:%SZ'
+          echo "=== UPTIME ==="
+          uptime
+          echo "=== MEMORY ==="
+          free -h
+          echo "=== ROOT FILESYSTEM ==="
+          df -h /
+          echo "=== ROOT FILESYSTEM INODES ==="
+          df -i /
+          echo "=== RUNNER IDENTITY ==="
+          id -un
+          if id -nG | grep -Eq '(^| )(docker|sudo)( |$)'; then
+            echo "::error::Runner has elevated group membership; investigate."
+            exit 1
+          fi
+          echo "=== HEALTH CHECK ==="
+          curl --noproxy '*' --fail --silent --show-error --max-time 8 \
+            --output /dev/null --write-out 'backend_http_status=%{http_code}\n' \
+            http://127.0.0.1:3020/ || true
+          echo "=== COMPLETE ==="
