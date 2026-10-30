@@ -62,6 +62,9 @@ def test_proposal_from_rd_and_estimates(world):
     assert not any("воздуховод" in t.lower() for t in titles)  # отклонённая позиция РД не учитывается
     assert any(i["section"] == "Общее" for i in data["items"])
     assert data["sections"] == ["ЭМ"]
+    for need in ("Ведомость смонтированного оборудования", "Реестр исполнительной документации", "Акт ввода в эксплуатацию"):
+        assert need in titles
+    assert any("72 часа" in t for t in titles)
     assert all(i["checked"] for i in data["items"])
     cable = next(i for i in data["items"] if "кабельных линий" in i["title"] and i["doc_kind"] == "aosr")
     assert "в РД" in cable["reason"]
