@@ -1,6 +1,8 @@
 name: PU DeepSeek coding agent (PR only)
 
 on:
+  issues:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       task:
@@ -22,13 +24,14 @@ concurrency:
 
 jobs:
   propose:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'deepseek-ready'
     # NEVER use the production self-hosted runner for untrusted code.
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-      TASK: ${{ inputs.task }}
-      CONTEXT_FILES: ${{ inputs.context_files }}
+      TASK: ${{ github.event_name == 'issues' && github.event.issue.title || inputs.task }}
+      CONTEXT_FILES: ${{ github.event_name == 'issues' && github.event.issue.body || inputs.context_files }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +50,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="agent/deepseek-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           git switch -c "$branch"
-          git add -u -- backend frontend tests docs
+          git add -u
           git diff --cached --check
           git commit -m "agent: propose bounded changes"
           git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push "https://github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
