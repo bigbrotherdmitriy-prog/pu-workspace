@@ -1,0 +1,65 @@
+name: DeepSeek constrained code proposal
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Change requested (one existing Python file)"
+        required: true
+        type: string
+      target_path:
+        description: "Existing file, e.g. backend/app/services/example.py"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  propose:
+    if: github.ref == 'refs/heads/main' && github.actor == 'bigbrotherdmitriy-prog'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create a constrained single-file proposal
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AGENT_TASK: ${{ inputs.task }}
+          TARGET_PATH: ${{ inputs.target_path }}
+        run: python .github/agent/deepseek_propose.py
+      - name: Validate proposal without executing generated code
+        shell: bash
+        env:
+          TARGET_PATH: ${{ inputs.target_path }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          test "$(git diff --name-only | wc -l)" -eq 1
+          git diff --name-only | grep -Fx -- "$TARGET_PATH"
+          python -m compileall -q backend/app backend/tests
+      - name: Open reviewable pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TASK_TITLE: ${{ inputs.task }}
+          TARGET_PATH: ${{ inputs.target_path }}
+        run: |
+          set -euo pipefail
+          branch="agent/deepseek-${GITHUB_RUN_ID}"
+          git config user.name "pu-workspace-agent"
+          git config user.email "pu-workspace-agent@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -- "$TARGET_PATH"
+          git commit -m "agent: DeepSeek proposal for $TARGET_PATH"
+          gh auth setup-git
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "agent: DeepSeek proposal for $TARGET_PATH" \
+            --body "Automated single-file DeepSeek proposal. Syntax validated only; full CI and human review required. Task supplied via manual dispatch." \
+            --draft
