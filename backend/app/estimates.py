@@ -161,6 +161,8 @@ def update_line(db: Session, project_id: int, line_id: int, data: dict) -> dict:
             value = _dec(data[field])
             if data[field] not in (None, "") and value is None:
                 raise ValueError("Число указано неверно")
+            if value is not None and not value.is_finite():
+                raise ValueError("Число должно быть конечным")
             if value is not None and value < 0:
                 raise ValueError("Значение не может быть отрицательным")
             setattr(l, field, value)
