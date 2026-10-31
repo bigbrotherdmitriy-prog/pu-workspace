@@ -10,6 +10,11 @@ class Validation(unittest.TestCase):
  def test_shape(self):
   for x in ({'task':'x'},{'task':'x','context_files':'docs/a.md','token':'x'},{'task':'x'*4901,'context_files':'docs/a.md'}):
    with self.assertRaises(ValueError):d.validate(x)
+ def test_immutable_source_ref(self):
+  data={'task':'Fix reviewed PR','context_files':'backend/tests/test_estimates.py','source_ref':'a'*40}
+  self.assertEqual(d.validate(data)['source_ref'],'a'*40)
+  for ref in ('main','../../etc','a'*40+';id','A'*40):
+   with self.subTest(ref=ref),self.assertRaises(ValueError):d.validate(dict(data,source_ref=ref))
  def test_no_symlink(self):
   if os.name=='nt':self.skipTest('Linux queue')
   with tempfile.TemporaryDirectory() as t:

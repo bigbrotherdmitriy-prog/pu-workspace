@@ -6,8 +6,10 @@ ROOT = pathlib.Path('/home/codex-worker/workspace/autonomy/deepseek')
 SAFE_PATH = re.compile(r'(?:backend/(?:app|tests)/|frontend/(?:src|tests)/|docs/)[A-Za-z0-9_./-]+\.(?:py|ts|tsx|css|md)\Z')
 
 def validate(data):
-    if not isinstance(data, dict) or set(data) != {'task', 'context_files'}:
-        raise ValueError('Expected task and context_files only')
+    if not isinstance(data, dict) or not {'task', 'context_files'} <= set(data) or set(data) - {'task', 'context_files', 'source_ref'}:
+        raise ValueError('Expected task, context_files and optional immutable source_ref')
+    if 'source_ref' in data and not re.fullmatch('[0-9a-f]{40}', str(data['source_ref'])):
+        raise ValueError('source_ref must be an immutable lowercase commit SHA')
     task = data['task']
     if not isinstance(task, str) or not task.strip() or len(task) > 4900:
         raise ValueError('Task must contain 1-4900 characters')
@@ -21,7 +23,10 @@ def validate(data):
             raise ValueError('Source path outside allowlist')
         if re.search(r'secret|credential|private|token|password', p, re.I):
             raise ValueError('Sensitive path blocked')
-    return {'task': task, 'context_files': ','.join(paths)}
+    result = {'task': task, 'context_files': ','.join(paths)}
+    if 'source_ref' in data:
+        result['source_ref'] = data['source_ref']
+    return result
 
 def api(path, method='GET', body=None):
     token = os.environ['GH_TOKEN']

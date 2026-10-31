@@ -8,6 +8,10 @@ on:
         description: "Specific coding task; no secrets or credentials"
         required: true
         type: string
+      source_ref:
+        description: "Optional exact 40-character source commit SHA"
+        required: false
+        type: string
       request_id:
         description: "Optional local queue correlation ID"
         required: false
@@ -36,11 +40,22 @@ jobs:
       CONTEXT_FILES: ${{ inputs.context_files }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Validate immutable source reference
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: python3 -c "import os,re; assert not os.environ['SOURCE_REF'] or re.fullmatch('[0-9a-f]{40}',os.environ['SOURCE_REF']), 'Use exact commit SHA'"
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Checkout trusted proposal generator separately
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .pu-agent-control
           persist-credentials: false
       - name: Generate bounded source changes
-        run: python3 .github/scripts/deepseek_pr_agent.py
+        run: python3 .pu-agent-control/.github/scripts/deepseek_pr_agent.py
       - name: Create pull request for review
         shell: bash
         run: |
