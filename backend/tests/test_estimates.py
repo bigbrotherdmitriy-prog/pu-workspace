@@ -288,7 +288,8 @@ def test_api_import_preview_is_repeatable_and_does_not_persist(world):
     names = [l["name"] for l in body1["lines"]]
     assert names == ["Прокладка кабеля", "Монтаж щита"]
     prices = [l.get("unit_price") for l in body1["lines"]]
-    assert prices == ["50.00", "2000.00"]
+    assert prices == ["50", "2000"]
+    assert [Decimal(p) for p in prices] == [Decimal("50"), Decimal("2000")]
 
     after = _db_snapshot(db)
     assert after == before
