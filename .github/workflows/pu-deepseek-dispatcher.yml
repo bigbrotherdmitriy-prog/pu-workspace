@@ -1,0 +1,46 @@
+name: PU DeepSeek server queue
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/pu-deepseek-dispatcher.yml
+      - .github/scripts/deepseek_queue_dispatcher.py
+      - .github/scripts/test_deepseek_queue_dispatcher.py
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: pu-deepseek-server-queue
+  cancel-in-progress: false
+
+jobs:
+  policy-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s .github/scripts -p test_deepseek_queue_dispatcher.py
+
+  dispatch:
+    needs: policy-tests
+    if: github.ref == 'refs/heads/main' && github.repository == 'bigbrotherdmitriy-prog/pu-workspace' && (github.event_name == 'schedule' || github.actor == github.repository_owner)
+    runs-on: [pu-codex-dispatch]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Dispatch bounded local requests with temporary job credentials
+        run: python3 .github/scripts/deepseek_queue_dispatcher.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_SECONDS: '240'
