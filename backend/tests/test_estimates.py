@@ -128,6 +128,30 @@ def test_empty_period_and_status_rules(world):
         svc.set_act_status(db, pid, act["id"], "weird")
 
 
+
+def test_estimate_with_ks_acts_cannot_be_deleted(world):
+    db, pid = world["db"], world["p"].id
+    estimate_id = world["est"]["id"]
+    _log(db, pid, world["lines"][0]["id"], "2026-10-05", "10")
+    db.commit()
+    act = svc.create_act(db, pid, estimate_id, date(2026, 10, 1), date(2026, 10, 31))
+    svc.set_act_status(db, pid, act["id"], "signed")
+    db.commit()
+
+    with pytest.raises(ValueError, match="актами КС"):
+        svc.delete_estimate(db, pid, estimate_id)
+    assert svc.get_estimate(db, pid, estimate_id)["id"] == estimate_id
+    assert svc.act_with_totals(db, pid, act["id"])["act"]["status"] == "signed"
+
+
+def test_estimate_without_ks_acts_can_be_deleted(world):
+    db, pid = world["db"], world["p"].id
+    estimate_id = world["est"]["id"]
+    svc.delete_estimate(db, pid, estimate_id)
+    with pytest.raises(LookupError):
+        svc.get_estimate(db, pid, estimate_id)
+
+
 def test_line_edit_validation(world):
     db, pid = world["db"], world["p"].id
     lid = world["lines"][0]["id"]
@@ -219,4 +243,6 @@ def test_api_import_ks_flow(world):
     assert c.patch(f"/projects/{pid}/ks-acts/{aid}", json={"status": "signed"}).json()["status"] == "signed"
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
-    assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+    assert c.delete(f"/projects/{pid}/estimates/{eid}").status_code == 422
+    assert any(a["id"] == aid and a["status"] == "signed" for a in c.get(f"/projects/{pid}/estimates/{eid}/ks-acts").json()["acts"])
+    assert c.get(f"/projects/{pid}/estimates/{eid}").status_code == 200
