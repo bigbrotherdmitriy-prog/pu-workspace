@@ -220,3 +220,101 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+def _xlsx_no_header_bytes():
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Просто", "данные", "без", "шапки"])
+    ws.append([1, 2, 3, 4])
+    b = io.BytesIO()
+    wb.save(b)
+    return b.getvalue()
+
+
+def _db_snapshot(db):
+    from app.models.estimates import Estimate, EstimateLine, KsAct
+
+    def _row(obj, cols):
+        return tuple(getattr(obj, c) for c in cols)
+
+    est_cols = ("id", "project_id", "contract_id", "name", "source_name", "total", "vat_rate", "status", "created_at")
+    line_cols = ("id", "project_id", "estimate_id", "sort_order", "section", "position", "code", "name", "unit", "qty", "unit_price", "total", "note")
+    act_cols = ("id", "project_id", "estimate_id", "number", "period_from", "period_to", "act_date", "status", "lines_json", "total_ex_vat", "header_json", "customer_status", "customer_comment", "customer_decided_at", "customer_decided_by", "created_at")
+    return {
+        "estimates": [_row(o, est_cols) for o in db.query(Estimate).order_by(Estimate.id).all()],
+        "lines": [_row(o, line_cols) for o in db.query(EstimateLine).order_by(EstimateLine.id).all()],
+        "acts": [_row(o, act_cols) for o in db.query(KsAct).order_by(KsAct.id).all()],
+    }
+
+
+def _preview_client(world):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import estimates as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    db = world["db"]
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    return TestClient(app)
+
+
+def test_api_import_preview_is_repeatable_and_does_not_persist(world):
+    db, pid = world["db"], world["p"].id
+    c = _preview_client(world)
+    before = _db_snapshot(db)
+
+    r1 = c.post(f"/projects/{pid}/estimates/import", params={"name": "Смета", "preview": "true"}, content=_xlsx_bytes())
+    assert r1.status_code == 200
+    body1 = r1.json()
+    assert body1["lines_total"] == 2
+
+    r2 = c.post(f"/projects/{pid}/estimates/import", params={"name": "Смета", "preview": "true"}, content=_xlsx_bytes())
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert body2["lines_total"] == 2
+
+    assert body1["lines"] == body2["lines"]
+    assert body1["total"] == body2["total"]
+    assert body1["detected"] == body2["detected"]
+    assert body1["warnings"] == body2["warnings"]
+
+    names = [l["name"] for l in body1["lines"]]
+    assert names == ["Прокладка кабеля", "Монтаж щита"]
+    prices = [l.get("unit_price") for l in body1["lines"]]
+    assert prices == ["50.00", "2000.00"]
+
+    after = _db_snapshot(db)
+    assert after == before
+    assert len(after["estimates"]) == 1 and after["estimates"][0][0] == world["est"]["id"]
+    assert len(after["lines"]) == 3
+    assert after["acts"] == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(b"", id="empty-body"),
+        pytest.param(b"not an excel file", id="non-excel-bytes"),
+        pytest.param(_xlsx_no_header_bytes(), id="xlsx-without-required-header"),
+    ],
+)
+def test_api_import_preview_rejects_invalid_without_persisting(world, payload):
+    db, pid = world["db"], world["p"].id
+    c = _preview_client(world)
+    before = _db_snapshot(db)
+
+    r = c.post(f"/projects/{pid}/estimates/import", params={"name": "Смета", "preview": "true"}, content=payload)
+    assert r.status_code == 422
+
+    after = _db_snapshot(db)
+    assert after == before
+    assert len(after["estimates"]) == 1 and after["estimates"][0][0] == world["est"]["id"]
+    assert len(after["lines"]) == 3
+    assert after["acts"] == []
