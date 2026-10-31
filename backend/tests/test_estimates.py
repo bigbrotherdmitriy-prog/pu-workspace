@@ -220,3 +220,77 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+def _preview_client(db):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import estimates as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    return TestClient(app)
+
+
+def _snapshot(db):
+    from app.models.estimate import Estimate, EstimateLine
+    from app.models.ks_act import KsAct
+
+    def rows(model):
+        return sorted(
+            (tuple(sorted((c.name, repr(getattr(r, c.name))) for c in model.__table__.columns)) for r in db.query(model).all()),
+            key=repr,
+        )
+
+    return {"estimates": rows(Estimate), "lines": rows(EstimateLine), "acts": rows(KsAct)}
+
+
+def _xlsx_without_header():
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["просто", "какие-то", "данные"])
+    ws.append(["без", "обязательной", "шапки"])
+    b = io.BytesIO()
+    wb.save(b)
+    return b.getvalue()
+
+
+def test_api_import_preview_is_repeatable_and_does_not_persist(world):
+    db, pid = world["db"], world["p"].id
+    c = _preview_client(db)
+    before = _snapshot(db)
+
+    r1 = c.post(f"/projects/{pid}/estimates/import", params={"name": "Смета", "preview": "true"}, content=_xlsx_bytes())
+    r2 = c.post(f"/projects/{pid}/estimates/import", params={"name": "Смета", "preview": "true"}, content=_xlsx_bytes())
+    assert r1.status_code == 200 and r2.status_code == 200
+    j1, j2 = r1.json(), r2.json()
+    assert j1["lines_total"] == 2 and j2["lines_total"] == 2
+    assert [(l["name"], l["unit"], l["qty"], l["unit_price"], l["total"]) for l in j1["lines"]] == \
+        [(l["name"], l["unit"], l["qty"], l["unit_price"], l["total"]) for l in j2["lines"]]
+    assert j1["total"] == j2["total"]
+
+    after = _snapshot(db)
+    assert after == before
+    assert len(svc.list_estimates(db, pid)) == 1
+    assert svc.get_estimate(db, pid, world["est"]["id"])["lines_count"] == 3
+
+
+@pytest.mark.parametrize("payload", [b"", b"not an excel file", _xlsx_without_header()], ids=["empty", "not-excel", "no-header"])
+def test_api_import_preview_rejects_bad_input_without_persisting(world, payload):
+    db, pid = world["db"], world["p"].id
+    c = _preview_client(db)
+    before = _snapshot(db)
+
+    r = c.post(f"/projects/{pid}/estimates/import", params={"name": "Смета", "preview": "true"}, content=payload)
+    assert r.status_code == 422
+
+    after = _snapshot(db)
+    assert after == before
+    assert len(svc.list_estimates(db, pid)) == 1
+    assert svc.get_estimate(db, pid, world["est"]["id"])["lines_count"] == 3
