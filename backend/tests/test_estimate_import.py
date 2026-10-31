@@ -155,3 +155,54 @@ def test_too_many_lines_raises():
 
     with pytest.raises(ValueError):
         parse_estimate_xlsx(_wb_bytes(wb))
+
+
+_SPECIAL_VALUES = ("NaN", "sNaN", "Infinity", "-Infinity")
+
+
+def _special_wb(qty, price, total) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["№", "Наименование", "Количество", "Цена", "Всего"])
+    ws.append([1, "Тест", qty, price, total])
+    return _wb_bytes(wb)
+
+
+@pytest.mark.parametrize("special", _SPECIAL_VALUES)
+@pytest.mark.parametrize("column", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("case", ["lower", "upper", "mixed"])
+def test_special_numeric_values_raise(special, column, case):
+    value = {"lower": special.lower(), "upper": special.upper(), "mixed": special}[case]
+    cells = {"qty": "1", "unit_price": "50", "total": "100"}
+    cells[column] = value
+    data = _special_wb(cells["qty"], cells["unit_price"], cells["total"])
+
+    with pytest.raises(ValueError):
+        parse_estimate_xlsx(data)
+
+
+@pytest.mark.parametrize("special", _SPECIAL_VALUES)
+def test_special_grand_total_raises(special):
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["№", "Наименование", "Количество", "Цена", "Всего"])
+    ws.append([1, "Тест", 1, 50, 100])
+    ws.append(["Итого по смете", "", "", "", special])
+
+    with pytest.raises(ValueError):
+        parse_estimate_xlsx(_wb_bytes(wb))
+
+
+def test_regular_numbers_control():
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["№", "Наименование", "Количество", "Цена", "Всего"])
+    ws.append([1, "Тест", 2, 50, 100])
+
+    result = parse_estimate_xlsx(_wb_bytes(wb))
+    lines = result["lines"]
+    assert len(lines) == 1
+    assert lines[0]["qty"] == "2"
+    assert lines[0]["unit_price"] == "50"
+    assert lines[0]["total"] == "100"
+    assert result["warnings"] == []
