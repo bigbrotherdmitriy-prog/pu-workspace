@@ -2,7 +2,7 @@
 import datetime, json, os, pathlib, re, stat, time, urllib.request, urllib.error
 
 REPO = 'bigbrotherdmitriy-prog/pu-workspace'
-ROOT = pathlib.Path('/home/codex-worker/workspace/autonomy/deepseek')
+ROOT = pathlib.Path('/home/codex-worker/workspace/pu-workspace/.pu-autonomy/deepseek')
 SAFE_PATH = re.compile(r'(?:backend/(?:app|tests)/|frontend/(?:src|tests)/|docs/)[A-Za-z0-9_./-]+\.(?:py|ts|tsx|css|md)\Z')
 
 def validate(data):
