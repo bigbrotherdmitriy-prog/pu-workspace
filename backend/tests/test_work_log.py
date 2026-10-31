@@ -38,6 +38,23 @@ def _add(db, pid, **kw):
     return wl.add_entry(db, pid, 1, data)
 
 
+def _synthetic_estimate(db, pid):
+    """Смета с одной позицией 100 м × 50 = 5000; возвращает (estimate_id, line_id)."""
+    from app import estimates as est_svc
+
+    parsed = {"lines": [{"sort_order": 1, "position": "1", "name": "Прокладка кабеля", "unit": "м",
+                         "qty": "100", "unit_price": "50.00", "total": "5000.00"}], "total": "5000.00"}
+    est = est_svc.create_estimate(db, pid, "Смета журнала", parsed)
+    line_id = est_svc.get_estimate(db, pid, est["id"])["lines"][0]["id"]
+    return est["id"], line_id
+
+
+def _line(db, pid, est_id, line_id):
+    from app import estimates as est_svc
+
+    return next(l for l in est_svc.get_estimate(db, pid, est_id)["lines"] if l["id"] == line_id)
+
+
 def test_add_list_update_delete(world):
     db, pid = world["db"], world["p"].id
     e = _add(db, pid)
@@ -256,3 +273,67 @@ def test_labor_timesheet_per_person(world):
     from app.models.work_log import WorkLogLabor
 
     assert db.query(WorkLogLabor).count() == 0
+
+
+def test_journal_fact_drives_estimate_and_period_preview(world):
+    from app import estimates as est_svc
+
+    db, pid = world["db"], world["p"].id
+    est_id, line_id = _synthetic_estimate(db, pid)
+    db.commit()
+
+    e = _add(db, pid, work_date="2026-10-05", qty="10", estimate_line_id=line_id)
+    db.commit()
+    assert e["estimate_line_id"] == line_id
+    row = _line(db, pid, est_id, line_id)
+    assert row["fact_qty"] == "10.000" and row["done_percent"] == 10.0
+
+    wl.update_entry(db, pid, e["id"], {"qty": "12,5"})
+    db.commit()
+    row = _line(db, pid, est_id, line_id)
+    assert row["fact_qty"] == "12.500" and row["done_percent"] == 12.5
+    prev = est_svc.preview_act(db, pid, est_id, date(2026, 10, 1), date(2026, 10, 10))
+    assert len(prev["lines"]) == 1
+    assert prev["lines"][0]["qty"] == "12.500" and prev["total_ex_vat"] == "625.00"
+
+    wl.update_entry(db, pid, e["id"], {"work_date": "2026-10-20"})
+    db.commit()
+    assert est_svc.preview_act(db, pid, est_id, date(2026, 10, 1), date(2026, 10, 10))["lines"] == []
+    moved = est_svc.preview_act(db, pid, est_id, date(2026, 10, 11), date(2026, 10, 31))
+    assert len(moved["lines"]) == 1 and moved["lines"][0]["qty"] == "12.500"
+
+    wl.delete_entry(db, pid, e["id"])
+    db.commit()
+    row = _line(db, pid, est_id, line_id)
+    assert row["fact_qty"] == "0.000" and row["done_percent"] == 0.0
+    assert est_svc.preview_act(db, pid, est_id, date(2026, 10, 1), date(2026, 10, 10))["lines"] == []
+    assert est_svc.preview_act(db, pid, est_id, date(2026, 10, 11), date(2026, 10, 31))["lines"] == []
+
+
+def test_act_snapshot_survives_journal_changes(world):
+    from app import estimates as est_svc
+
+    db, pid = world["db"], world["p"].id
+    est_id, line_id = _synthetic_estimate(db, pid)
+    e = _add(db, pid, work_date="2026-10-05", qty="10", estimate_line_id=line_id)
+    db.commit()
+    act = est_svc.create_act(db, pid, est_id, date(2026, 10, 1), date(2026, 10, 31))
+    db.commit()
+    snapshot = est_svc.act_with_totals(db, pid, act["id"])
+    snap_lines = [(l["line_id"], l["qty"], l["amount"]) for l in snapshot["lines"]]
+    snap_total = snapshot["period_total"]
+    assert snap_lines == [(line_id, "10.000", "500.00")] and snap_total == "500.00"
+
+    wl.update_entry(db, pid, e["id"], {"qty": "25", "work_date": "2026-10-20"})
+    db.commit()
+    assert _line(db, pid, est_id, line_id)["fact_qty"] == "25.000"
+    after_edit = est_svc.act_with_totals(db, pid, act["id"])
+    assert [(l["line_id"], l["qty"], l["amount"]) for l in after_edit["lines"]] == snap_lines
+    assert after_edit["period_total"] == snap_total
+
+    wl.delete_entry(db, pid, e["id"])
+    db.commit()
+    assert _line(db, pid, est_id, line_id)["fact_qty"] == "0.000"
+    after_delete = est_svc.act_with_totals(db, pid, act["id"])
+    assert [(l["line_id"], l["qty"], l["amount"]) for l in after_delete["lines"]] == snap_lines
+    assert after_delete["period_total"] == snap_total
