@@ -15,6 +15,9 @@ TWO = Decimal("0.01")
 THREE = Decimal("0.001")
 ZERO = Decimal("0")
 
+# Целая часть, помещающаяся в Numeric(18,3) / Numeric(18,2): 15 / 16 цифр.
+_INT_DIGITS = {"qty": 15, "unit_price": 16, "total": 16}
+
 
 def _dec(value) -> Decimal | None:
     if value is None or str(value).strip() == "":
@@ -146,16 +149,21 @@ def delete_estimate(db: Session, project_id: int, estimate_id: int) -> None:
     db.flush()
 
 
+def _check_numeric(field: str, value: Decimal | None) -> None:
+    """Отклонить конечные значения, заведомо не помещающиеся в Numeric(18,scale)."""
+    if value is None:
+        return
+    limit = Decimal(10) ** _INT_DIGITS[field]
+    if value >= limit:
+        raise ValueError("Значение слишком велико")
+
+
 def update_line(db: Session, project_id: int, line_id: int, data: dict) -> dict:
     l = db.get(EstimateLine, line_id)
     if l is None or l.project_id != project_id:
         raise LookupError("Позиция сметы не найдена")
-    for field in ("name", "unit", "code", "position", "section", "note"):
-        if field in data:
-            value = (str(data[field]).strip() if data[field] is not None else "")
-            if field == "name" and not value:
-                raise ValueError("Название позиции не может быть пустым")
-            setattr(l, field, value or None)
+    # Сначала валидируем все числовые поля, чтобы не менять строку при ошибке.
+    numeric: dict[str, Decimal | None] = {}
     for field in ("qty", "unit_price", "total"):
         if field in data:
             value = _dec(data[field])
@@ -165,7 +173,16 @@ def update_line(db: Session, project_id: int, line_id: int, data: dict) -> dict:
                 raise ValueError("Число должно быть конечным")
             if value is not None and value < 0:
                 raise ValueError("Значение не может быть отрицательным")
-            setattr(l, field, value)
+            _check_numeric(field, value)
+            numeric[field] = value
+    for field in ("name", "unit", "code", "position", "section", "note"):
+        if field in data:
+            value = (str(data[field]).strip() if data[field] is not None else "")
+            if field == "name" and not value:
+                raise ValueError("Название позиции не может быть пустым")
+            setattr(l, field, value or None)
+    for field, value in numeric.items():
+        setattr(l, field, value)
     db.flush()
     return {"id": l.id}
 
