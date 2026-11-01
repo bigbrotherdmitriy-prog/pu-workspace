@@ -129,3 +129,178 @@ def test_api_isolation_and_downloads(world):
     current["user"] = world["stranger"]
     assert c.get(f"/customer/projects/{pid}/summary").status_code == 403
     assert c.get("/customer/projects").json()["projects"] == []
+
+
+# --- synthetic regressions: права, повторное решение, изоляция актов -------------------------------
+
+def _client(world):
+    """Изолированный роутер кабинета заказчика без app.main/startup и реальных учёток."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import customer as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    db = world["db"]
+    current = {"user": world["customer"]}
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": current["user"].id, "is_active": True, "is_admin": False})()
+    return TestClient(app), current
+
+
+def _act_state(db, pid, aid):
+    a = est.list_acts(db, pid, world_est_id(db, pid))[0] if False else None  # placeholder, replaced below
+    return a
+
+
+def world_est_id(db, pid):
+    return None
+
+
+def _snapshot(db, pid, aid):
+    from app.models.estimates import KsAct
+    a = db.get(KsAct, aid)
+    return (a.status, a.customer_status, a.customer_comment, a.customer_decided_at, a.customer_decided_by)
+
+
+def test_api_matrix_both_users_allowed_and_foreign(world):
+    db, pid, oid, aid = world["db"], world["p"].id, world["o"].id, world["act"]["id"]
+    cp.invite(db, pid, "zak@example.ru", None)
+    est.set_act_status(db, pid, aid, "sent", {"customer": "ФНС"})
+    db.commit()
+    c, current = _client(world)
+
+    for user, allowed in ((world["customer"], True), (world["stranger"], False)):
+        current["user"] = user
+        expected = 200 if allowed else 403
+        assert c.get(f"/customer/projects/{pid}/summary").status_code == expected
+        assert c.get(f"/customer/projects/{pid}/progress").status_code == expected
+        assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks2.docx").status_code == expected
+        assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks3.docx").status_code == expected
+        # чужой проект всегда 403 для обоих
+        assert c.get(f"/customer/projects/{oid}/summary").status_code == 403
+        assert c.get(f"/customer/projects/{oid}/progress").status_code == 403
+        assert c.get(f"/customer/projects/{oid}/ks-acts/{aid}/ks2.docx").status_code == 403
+        assert c.get(f"/customer/projects/{oid}/ks-acts/{aid}/ks3.docx").status_code == 403
+        assert c.post(f"/customer/projects/{oid}/ks-acts/{aid}/decision", json={"decision": "approved"}).status_code == 403
+
+    current["user"] = world["stranger"]
+    assert c.get("/customer/projects").json()["projects"] == []
+    current["user"] = world["customer"]
+    assert [p["id"] for p in c.get("/customer/projects").json()["projects"]] == [pid]
+
+
+def test_api_revoke_blocks_all_customer_routes(world):
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
+    acc = cp.invite(db, pid, "zak@example.ru", None)
+    est.set_act_status(db, pid, aid, "sent", {"customer": "ФНС"})
+    db.commit()
+    c, current = _client(world)
+    current["user"] = world["customer"]
+    assert c.get(f"/customer/projects/{pid}/summary").status_code == 200
+
+    cp.revoke(db, pid, acc["id"])
+    db.commit()
+
+    assert c.get("/customer/projects").json()["projects"] == []
+    assert c.get(f"/customer/projects/{pid}/summary").status_code == 403
+    assert c.get(f"/customer/projects/{pid}/progress").status_code == 403
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks2.docx").status_code == 403
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks3.docx").status_code == 403
+    before = _snapshot(db, pid, aid)
+    assert c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"}).status_code == 403
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+
+
+def test_api_foreign_act_id_with_allowed_project_is_404_and_no_mutation(world):
+    db, pid, oid, aid = world["db"], world["p"].id, world["o"].id, world["act"]["id"]
+    cp.invite(db, pid, "zak@example.ru", None)
+    est.set_act_status(db, pid, aid, "sent", {"customer": "ФНС"})
+    db.commit()
+    c, current = _client(world)
+    current["user"] = world["customer"]
+    before = _snapshot(db, pid, aid)
+
+    # act_id принадлежит чужому проекту, но project_id доступен -> 404, без изменений
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/ks2.docx").status_code == 404
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/ks3.docx").status_code == 404
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/decision", json={"decision": "approved"})
+    assert r.status_code == 404
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+
+
+def test_api_draft_act_not_downloadable_nor_decidable(world):
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
+    cp.invite(db, pid, "zak@example.ru", None)
+    db.commit()
+    c, current = _client(world)
+    current["user"] = world["customer"]
+    before = _snapshot(db, pid, aid)
+    assert before[0] == "draft"
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks2.docx").status_code == 404
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks3.docx").status_code == 404
+    assert c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"}).status_code == 404
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+
+
+def test_api_customer_without_manager_cannot_manage_access(world):
+    db, pid = world["db"], world["p"].id
+    acc = cp.invite(db, pid, "zak@example.ru", None)
+    db.commit()
+    c, current = _client(world)
+    current["user"] = world["customer"]
+
+    assert c.get(f"/projects/{pid}/customer-access").status_code == 403
+    assert c.post(f"/projects/{pid}/customer-access", json={"email": "x@example.ru"}).status_code == 403
+    assert c.delete(f"/projects/{pid}/customer-access/{acc['id']}").status_code == 403
+    db.rollback()
+    # существующий доступ не удалён после forbidden DELETE
+    assert cp.has_access(db, world["customer"].id, pid) is True
+    assert [x["id"] for x in cp.list_access(db, pid)] == [acc["id"]]
+
+
+def test_service_repeat_decision_after_approved_is_rejected(world):
+    """RED (подтверждено куратором): decide сейчас разрешает approved -> rejected без draft/resend.
+
+    Ожидаемый контракт: повторное решение по уже решённому акту (sent + approved) должно
+    поднимать ValueError и не перезаписывать первое решение. Тест намеренно не помечен
+    xfail/skip и не маскирует текущее поведение.
+    """
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
+    est.set_act_status(db, pid, aid, "sent")
+    first = cp.decide(db, pid, aid, world["customer"].id, "approved", None)
+    assert first["customer_status"] == "approved"
+    db.commit()
+    before = _snapshot(db, pid, aid)
+
+    with pytest.raises(ValueError):
+        cp.decide(db, pid, aid, world["customer"].id, "rejected", "Передумали")
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+
+    with pytest.raises(ValueError):
+        cp.decide(db, pid, aid, world["customer"].id, "approved", None)
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+
+
+def test_service_decision_after_explicit_draft_resend_allowed(world):
+    """Существующий контракт: после явного возврата draft -> sent новое решение разрешено; signed запрещён."""
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
+    est.set_act_status(db, pid, aid, "sent")
+    assert cp.decide(db, pid, aid, world["customer"].id, "rejected", "Объём")["customer_status"] == "rejected"
+    est.set_act_status(db, pid, aid, "draft")
+    assert est.list_acts(db, pid, world["est"]["id"])[0]["customer_status"] == "pending"
+    est.set_act_status(db, pid, aid, "sent")
+    assert cp.decide(db, pid, aid, world["customer"].id, "approved", None)["customer_status"] == "approved"
+    est.set_act_status(db, pid, aid, "signed")
+    before = _snapshot(db, pid, aid)
+    with pytest.raises(ValueError):
+        cp.decide(db, pid, aid, world["customer"].id, "rejected", "Поздно")
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
