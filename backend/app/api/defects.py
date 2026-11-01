@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, StrictInt
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy.orm import Session
 
 from app import defects as svc
@@ -31,17 +33,7 @@ class CommentBody(BaseModel):
 
 
 class RdVersionBody(BaseModel):
-    rd_version_id: StrictInt
-
-    @classmethod
-    def __get_validators__(cls):
-        yield cls._validate_positive
-
-    @classmethod
-    def _validate_positive(cls, value):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError("Некорректный идентификатор версии РД")
-        return value
+    rd_version_id: Annotated[StrictInt, Field(gt=0)]
 
 
 def _fail(exc: Exception) -> HTTPException:
