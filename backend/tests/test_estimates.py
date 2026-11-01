@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 from datetime import date
 from decimal import Decimal
@@ -256,3 +257,102 @@ def test_service_ks_overlap_includes_only_new_fact(world):
     assert len(prev["lines"]) == 1 and prev["lines"][0]["qty"] == "10.000" and prev["total_ex_vat"] == "500.00"
     snap = svc.act_with_totals(db, pid, act["id"])
     assert snap["period_total"] == "2000.00" and snap["lines"][0]["qty"] == "40.000"
+
+
+def _qty(value):
+    return Decimal(str(value)).quantize(Decimal("0.001"))
+
+
+def _money(value):
+    return Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def _snap(db, pid, act_id):
+    data = svc.act_with_totals(db, pid, act_id)
+    return _money(data["period_total"]), [(l["line_id"], _qty(l["qty"])) for l in data["lines"]]
+
+
+def _act_count(db, pid, eid):
+    return db.query(KsAct).filter(KsAct.project_id == pid, KsAct.estimate_id == eid).count()
+
+
+def test_service_ks_entry_edit_keeps_snapshot_and_caps_preview(world):
+    db, pid, eid = world["db"], world["p"].id, world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    entry = _log(db, pid, cable, "2026-10-05", "40")
+    db.commit()
+    act = svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    db.commit()
+    snap = _snap(db, pid, act["id"])
+    assert snap == (Decimal("2000.00"), [(cable, Decimal("40.000"))])
+    wl.update_entry(db, pid, entry["id"], {"qty": "55"})
+    db.commit()
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    assert len(prev["lines"]) == 1 and _qty(prev["lines"][0]["qty"]) == Decimal("15.000")
+    assert _money(prev["total_ex_vat"]) == Decimal("750.00")
+    wl.update_entry(db, pid, entry["id"], {"qty": "30"})
+    db.commit()
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    assert prev["lines"] == [] and _money(prev["total_ex_vat"]) == Decimal("0.00")
+    assert _snap(db, pid, act["id"]) == snap
+
+
+def test_service_ks_delete_draft_frees_entry_reservation(world):
+    db, pid, eid = world["db"], world["p"].id, world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    _log(db, pid, cable, "2026-10-05", "40")
+    db.commit()
+    act = svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    db.commit()
+    assert _act_count(db, pid, eid) == 1
+    svc.delete_act(db, pid, act["id"])
+    db.commit()
+    assert _act_count(db, pid, eid) == 0
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    assert len(prev["lines"]) == 1 and _qty(prev["lines"][0]["qty"]) == Decimal("40.000")
+    assert _money(prev["total_ex_vat"]) == Decimal("2000.00")
+    assert _act_count(db, pid, eid) == 0
+
+
+def test_service_ks_relink_entry_to_new_estimate_keeps_project_reservation(world):
+    db, pid, eid = world["db"], world["p"].id, world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    entry = _log(db, pid, cable, "2026-10-05", "40")
+    db.commit()
+    act = svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    db.commit()
+    snap = _snap(db, pid, act["id"])
+    new_est = svc.create_estimate(db, pid, "Смета 2", PARSED)
+    new_line = svc.get_estimate(db, pid, new_est["id"])["lines"][0]["id"]
+    wl.update_entry(db, pid, entry["id"], {"estimate_line_id": new_line})
+    db.commit()
+    prev = svc.preview_act(db, pid, new_est["id"], date(2026, 10, 1), date(2026, 10, 31))
+    assert prev["lines"] == [] and _money(prev["total_ex_vat"]) == Decimal("0.00")
+    assert _snap(db, pid, act["id"]) == snap
+
+
+def test_service_ks_legacy_act_without_allocations_blocks_overlap(world):
+    db, pid, eid = world["db"], world["p"].id, world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    _log(db, pid, cable, "2026-10-05", "40")
+    db.commit()
+    act = svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 10))
+    db.commit()
+    row = db.get(KsAct, act["id"])
+    lines = json.loads(row.lines_json)
+    for l in lines:
+        l.pop("entry_allocations", None)
+    row.lines_json = json.dumps(lines, ensure_ascii=False)
+    db.commit()
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 10))
+    assert prev["lines"] == [] and any("legacy-акт" in w for w in prev["warnings"])
+    with pytest.raises(ValueError) as exc:
+        svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 10))
+    assert "legacy" in str(exc.value)
+    db.rollback()
+    assert _act_count(db, pid, eid) == 1
+    _log(db, pid, cable, "2026-10-15", "10")
+    db.commit()
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 11), date(2026, 10, 20))
+    assert len(prev["lines"]) == 1 and _qty(prev["lines"][0]["qty"]) == Decimal("10.000")
+    assert _money(prev["total_ex_vat"]) == Decimal("500.00")
