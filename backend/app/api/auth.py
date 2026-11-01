@@ -25,6 +25,22 @@ from app.models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _bearer_token(authorization: str) -> str:
+    """Extract a bearer token case-insensitively, mirroring require_user.
+
+    The scheme match is case-insensitive (``Bearer``/``bearer``/``BEARER``).
+    Literal ``undefined``/``null`` credentials are treated as absent so a stray
+    header injected by browser extensions cannot shadow a valid cookie.
+    """
+    scheme, _, value = authorization.strip().partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    token = value.strip()
+    if token in ("undefined", "null"):
+        return ""
+    return token
+
+
 class Credentials(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=12, max_length=256)
@@ -100,7 +116,9 @@ def me(user: User = Depends(require_user)):
 
 @router.post("/logout")
 def logout(request: Request, response: Response, user: User = Depends(require_user), authorization: str = Header(default=""), db: Session = Depends(get_db)):
-    raw = authorization.removeprefix("Bearer ").strip() or request.cookies.get("pu_session", "")
+    bearer_token = _bearer_token(authorization)
+    cookie_token = request.cookies.get("pu_session", "")
+    raw = bearer_token or cookie_token
     if raw:
         row = db.scalar(select(AuthSession).where(AuthSession.token_hash == hashlib.sha256(raw.encode()).hexdigest(), AuthSession.user_id == user.id))
         if row:
