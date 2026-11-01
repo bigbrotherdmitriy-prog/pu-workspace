@@ -252,3 +252,42 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+def _api_client(db):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import estimates as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_api_nonfinite_patch_rejected_and_snapshot_kept(world, field, value):
+    db, pid = world["db"], world["p"].id
+    c = _api_client(db)
+    lid = world["lines"][0]["id"]
+    before = c.get(f"/projects/{pid}/estimates/{world['est']['id']}")
+    assert before.status_code == 200
+    r = c.patch(f"/projects/{pid}/estimate-lines/{lid}", json={field: value})
+    assert r.status_code == 422
+    after = c.get(f"/projects/{pid}/estimates/{world['est']['id']}")
+    assert after.status_code == 200 and after.json() == before.json()
+
+
+def test_api_mixed_patch_rolls_back_partial_write(world):
+    db, pid = world["db"], world["p"].id
+    c = _api_client(db)
+    lid = world["lines"][0]["id"]
+    before = c.get(f"/projects/{pid}/estimates/{world['est']['id']}").json()
+    r = c.patch(f"/projects/{pid}/estimate-lines/{lid}", json={"qty": "55,5", "unit_price": "NaN"})
+    assert r.status_code == 422
+    after = c.get(f"/projects/{pid}/estimates/{world['est']['id']}").json()
+    assert after == before
