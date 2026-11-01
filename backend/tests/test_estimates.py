@@ -174,6 +174,36 @@ def test_service_blank_edit_clears_field(world, field, value):
     assert line[field] is None
 
 
+# --- finite values beyond declared Numeric(18,3)/(18,2) column bounds ---
+# DB declared precision is the sole bound; no new business max rules here.
+# 1e100 is finite but cannot fit Numeric(18,3)/(18,2): must be rejected as
+# ValueError by the service before flush, not surface as SQL/data error.
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+def test_service_oversized_finite_edit_rejected_and_snapshot_kept(world, field):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, lid, {field: "1e100"})
+    db.rollback()
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("field,value", [
+    ("qty", "123456.789"),
+    ("unit_price", "123456.78"),
+    ("total", "123456.78"),
+])
+def test_service_reasonable_large_finite_edit_accepted(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert Decimal(line[field]) == Decimal(value)
+
+
 def test_forms_render(world):
     from openpyxl import load_workbook
 
