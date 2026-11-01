@@ -116,7 +116,10 @@ def test_terminal_statuses_are_not_retried_and_sleep_is_empty(status):
 
 
 def test_exhaustion_makes_three_requests_two_delays_and_raises_last_error():
-    client = FakeClient([response(503), response(503), response(503)])
+    first_response = response(503)
+    middle_response = response(502)
+    last_response = response(504)
+    client = FakeClient([first_response, middle_response, last_response])
     delays = []
 
     with pytest.raises(httpx.HTTPStatusError) as excinfo:
@@ -126,7 +129,8 @@ def test_exhaustion_makes_three_requests_two_delays_and_raises_last_error():
             sleep=delays.append, random_value=lambda: 0.0,
         )
 
-    assert excinfo.value.response.status_code == 503
+    assert excinfo.value.response is last_response
+    assert excinfo.value.response.status_code == 504
     assert client.calls == 3
     assert delays == [1, 2]
 
@@ -180,15 +184,14 @@ def test_rate_limit_only_policy_retries_429_then_succeeds():
 
 def test_headers_body_and_idempotency_key_are_passed_unchanged_on_retry():
     client = FakeClient([response(503), response(200)])
-    headers = {"X-Fake-Header": "fake-value"}
+    headers = {"X-Fake-Header": "fake-value", "Idempotency-Key": "fake-idempotency-key"}
     body = b"fake-body"
-    idempotency_key = "fake-idempotency-key"
 
     result = request_with_retry(
         client, "GET", "https://provider.test/resource",
         policy=RetryPolicy(attempts=3, base_delay=1, max_delay=10, jitter=0),
         sleep=lambda _: None, random_value=lambda: 0.0,
-        headers=headers, content=body, idempotency_key=idempotency_key,
+        headers=headers, content=body,
     )
 
     assert result.status_code == 200
@@ -198,7 +201,42 @@ def test_headers_body_and_idempotency_key_are_passed_unchanged_on_retry():
         assert call["url"] == "https://provider.test/resource"
         assert call["kwargs"]["headers"] == headers
         assert call["kwargs"]["content"] == body
-        assert call["kwargs"]["idempotency_key"] == idempotency_key
+        assert "idempotency_key" not in call["kwargs"]
+
+
+def test_real_httpx_client_signature_accepts_headers_and_content_via_mock_transport():
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if len(captured) == 1:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, request=request)
+
+    transport = httpx.MockTransport(handler)
+    headers = {"X-Fake-Header": "fake-value", "Idempotency-Key": "fake-idempotency-key"}
+    body = b"fake-body"
+    delays = []
+
+    with httpx.Client(transport=transport) as client:
+        result = request_with_retry(
+            client, "POST", "https://provider.test/resource",
+            policy=RetryPolicy(attempts=3, base_delay=1, max_delay=10, jitter=0),
+            sleep=delays.append, random_value=lambda: 0.0,
+            headers=headers, content=body,
+        )
+
+    assert result.status_code == 200
+    assert len(captured) == 2
+    assert delays == [1]
+    first, second = captured
+    assert first.method == second.method == "POST"
+    assert first.url == second.url == httpx.URL("https://provider.test/resource")
+    assert first.headers.get("Idempotency-Key") == "fake-idempotency-key"
+    assert second.headers.get("Idempotency-Key") == "fake-idempotency-key"
+    assert first.headers.get("X-Fake-Header") == "fake-value"
+    assert second.headers.get("X-Fake-Header") == "fake-value"
+    assert first.content == second.content == body
 
 
 @pytest.mark.parametrize("retry_after", [None, "not-a-number"])
