@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.defects import Defect, DefectComment, DefectPhoto
+from app.models.rd import RdVolume, RdVolumeVersion
 
 STATUSES = ("open", "in_progress", "fixed", "accepted")
 STATUS_LABEL = {"open": "Открыто", "in_progress": "В работе", "fixed": "Устранено", "accepted": "Принято"}
@@ -57,6 +58,7 @@ def _defect_dict(db: Session, d: Defect, full: bool = False) -> dict:
         "overdue": bool(d.due_date and d.status in ("open", "in_progress") and d.due_date < date.today()),
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "closed_at": d.closed_at.isoformat() if d.closed_at else None,
+        "rd_version_id": d.rd_version_id,
         "photos": [_photo_dict(p) for p in photos],
     }
     if full:
@@ -98,6 +100,37 @@ def _get(db: Session, project_id: int, defect_id: int) -> Defect:
 
 def get_defect(db: Session, project_id: int, defect_id: int) -> dict:
     return _defect_dict(db, _get(db, project_id, defect_id), full=True)
+
+
+def bind_rd_version(db: Session, project_id: int, defect_id: int, version_id: int) -> dict:
+    """Привязать замечание к конкретной версии РД (rd_version_id).
+
+    - version_id должен быть положительным int (bool отклоняется) -> ValueError.
+    - Замечание ищется в рамках проекта через _get -> LookupError.
+    - Версия должна существовать и принадлежать тому же проекту (через RdVolume);
+      отсутствующая и чужая версия неразличимы -> LookupError.
+    - Первичная привязка разрешена; повторная привязка к той же версии идемпотентна;
+      привязка к другой версии отклоняется (ValueError), чтобы сохранить исходный
+      контекст чертежа. Явный сценарий перепривязки — отдельная задача.
+    - При ошибке состояние не меняется. Выполняется flush без commit.
+    """
+    if isinstance(version_id, bool) or not isinstance(version_id, int) or version_id <= 0:
+        raise ValueError("Некорректный идентификатор версии РД")
+    d = _get(db, project_id, defect_id)
+    row = db.execute(
+        select(RdVolumeVersion.id)
+        .join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id)
+        .where(RdVolumeVersion.id == version_id, RdVolume.project_id == project_id)
+    ).scalar_one_or_none()
+    if row is None:
+        raise LookupError("Версия РД не найдена")
+    if d.rd_version_id is not None:
+        if d.rd_version_id == version_id:
+            return _defect_dict(db, d, full=True)
+        raise ValueError("Замечание уже привязано к другой версии РД")
+    d.rd_version_id = version_id
+    db.flush()
+    return _defect_dict(db, d, full=True)
 
 
 def list_defects(db: Session, project_id: int, status: str | None = None, q: str | None = None) -> dict:
