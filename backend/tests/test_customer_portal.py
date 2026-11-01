@@ -150,19 +150,25 @@ def _client(world):
     return TestClient(app), current
 
 
-def _act_state(db, pid, aid):
-    a = est.list_acts(db, pid, world_est_id(db, pid))[0] if False else None  # placeholder, replaced below
-    return a
-
-
-def world_est_id(db, pid):
-    return None
-
-
 def _snapshot(db, pid, aid):
+    """Полный снимок акта: статусы решения заказчика + header/lines/totals, чтобы ловить любую мутацию."""
     from app.models.estimates import KsAct
     a = db.get(KsAct, aid)
-    return (a.status, a.customer_status, a.customer_comment, a.customer_decided_at, a.customer_decided_by)
+    return (a.status, a.customer_status, a.customer_comment, a.customer_decided_at, a.customer_decided_by,
+            a.header_json, a.lines_json, a.total_ex_vat, a.number, a.period_from, a.period_to, a.act_date)
+
+
+def _foreign_act(world):
+    """Создаёт отдельную synthetic смету и акт в чужом проекте world['o'] и возвращает id акта."""
+    db, oid = world["db"], world["o"].id
+    fe = est.create_estimate(db, oid, "Чужая смета", PARSED)
+    fline = est.get_estimate(db, oid, fe["id"])["lines"][0]["id"]
+    wl.add_entry(db, oid, None, {"work_date": "2026-10-06", "work_name": "Кабель", "qty": "10", "unit": "м", "hours": "2",
+                                 "estimate_line_id": fline, "labor": [{"person_name": "Петров", "hours": "2", "hourly_rate": "500"}]})
+    fact = est.create_act(db, oid, fe["id"], date(2026, 10, 1), date(2026, 10, 28))
+    est.set_act_status(db, oid, fact["id"], "sent", {"customer": "Чужая ФНС"})
+    db.commit()
+    return fact["id"]
 
 
 def test_api_matrix_both_users_allowed_and_foreign(world):
@@ -216,7 +222,34 @@ def test_api_revoke_blocks_all_customer_routes(world):
 
 
 def test_api_foreign_act_id_with_allowed_project_is_404_and_no_mutation(world):
-    db, pid, oid, aid = world["db"], world["p"].id, world["o"].id, world["act"]["id"]
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
+    cp.invite(db, pid, "zak@example.ru", None)
+    est.set_act_status(db, pid, aid, "sent", {"customer": "ФНС"})
+    db.commit()
+    foreign_aid = _foreign_act(world)
+    c, current = _client(world)
+    current["user"] = world["customer"]
+
+    # настоящий чужой акт существует и виден в своём проекте
+    from app.models.estimates import KsAct
+    assert db.get(KsAct, foreign_aid) is not None
+    assert db.get(KsAct, foreign_aid).project_id == world["o"].id
+
+    before = _snapshot(db, pid, aid)
+    foreign_before = _snapshot(db, world["o"].id, foreign_aid)
+
+    # act_id принадлежит чужому проекту, но project_id доступен -> 404, без изменений
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/ks2.docx").status_code == 404
+    assert c.get(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/ks3.docx").status_code == 404
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/decision", json={"decision": "approved"})
+    assert r.status_code == 404
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+    assert _snapshot(db, world["o"].id, foreign_aid) == foreign_before
+
+
+def test_api_missing_act_id_with_allowed_project_is_404_and_no_mutation(world):
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
     cp.invite(db, pid, "zak@example.ru", None)
     est.set_act_status(db, pid, aid, "sent", {"customer": "ФНС"})
     db.commit()
@@ -224,7 +257,7 @@ def test_api_foreign_act_id_with_allowed_project_is_404_and_no_mutation(world):
     current["user"] = world["customer"]
     before = _snapshot(db, pid, aid)
 
-    # act_id принадлежит чужому проекту, но project_id доступен -> 404, без изменений
+    # несуществующий act_id при доступном проекте -> 404, без изменений
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/ks2.docx").status_code == 404
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/ks3.docx").status_code == 404
     r = c.post(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/decision", json={"decision": "approved"})
@@ -299,8 +332,27 @@ def test_service_decision_after_explicit_draft_resend_allowed(world):
     est.set_act_status(db, pid, aid, "sent")
     assert cp.decide(db, pid, aid, world["customer"].id, "approved", None)["customer_status"] == "approved"
     est.set_act_status(db, pid, aid, "signed")
+    # фиксируем подготовленный signed baseline ДО snapshot, чтобы rollback не вернул fixture draft
+    db.commit()
     before = _snapshot(db, pid, aid)
+    assert before[0] == "signed"
     with pytest.raises(ValueError):
         cp.decide(db, pid, aid, world["customer"].id, "rejected", "Поздно")
+    db.rollback()
+    assert _snapshot(db, pid, aid) == before
+
+
+def test_api_stranger_forbidden_decision_on_allowed_project_no_mutation(world):
+    db, pid, aid = world["db"], world["p"].id, world["act"]["id"]
+    cp.invite(db, pid, "zak@example.ru", None)
+    est.set_act_status(db, pid, aid, "sent", {"customer": "ФНС"})
+    db.commit()
+    c, current = _client(world)
+    current["user"] = world["stranger"]
+    before = _snapshot(db, pid, aid)
+
+    # чужой пользователь не имеет доступа к проекту -> 403 на решение, акт не изменён
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"})
+    assert r.status_code == 403
     db.rollback()
     assert _snapshot(db, pid, aid) == before
