@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Integer, Numeric, String, Text,
+    BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, Text,
     UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -80,3 +80,28 @@ class RdSheet(Base):
     kind: Mapped[str] = mapped_column(String(20))
     text_source: Mapped[str] = mapped_column(String(10))
     text_len: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RdVolumeVersion(Base):
+    """Bounded metadata snapshot for a future RD volume version.
+
+    Stores only immutable digest metadata; no external mutable URL and no raw
+    bytes. Project scope is derived from the volume FK. Append-only lifecycle
+    enforcement and blob/content retention are separate follow-up tasks.
+    """
+
+    __tablename__ = "rd_volume_versions"
+    __table_args__ = (
+        UniqueConstraint("volume_id", "content_sha256", name="uq_rd_volume_version_digest"),
+        CheckConstraint("size_bytes >= 0", name="ck_rd_volume_version_size_nonneg"),
+        CheckConstraint("length(content_sha256) = 64", name="ck_rd_volume_version_digest_len"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    volume_id: Mapped[int] = mapped_column(
+        ForeignKey("rd_volumes.id", ondelete="RESTRICT"), index=True,
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    file_name: Mapped[str] = mapped_column(String(500))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
