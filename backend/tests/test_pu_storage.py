@@ -633,14 +633,28 @@ def test_rd_content_put_parent_dir_swap_never_writes_other_project(tmp_path, mon
     aside = base / "1.aside"
     state = {"fired": False, "swapped": False}
 
-    def hook(path, *args, **kwargs):
+    def _basename(path, kwargs):
         try:
             name = os.fspath(path)
         except TypeError:
             name = None
-        if not state["fired"] and isinstance(name, (str, bytes)):
-            text = name.decode() if isinstance(name, bytes) else name
-            if text.endswith(os.sep + d) or text == d:
+        if isinstance(name, bytes):
+            name = name.decode()
+        if isinstance(name, str):
+            return name
+        dir_fd = kwargs.get("dir_fd")
+        if isinstance(dir_fd, int) and dir_fd >= 0:
+            try:
+                return os.readlink(f"/proc/self/fd/{dir_fd}")
+            except OSError:
+                return None
+        return None
+
+    def hook(path, *args, **kwargs):
+        name = _basename(path, kwargs)
+        if not state["fired"] and isinstance(name, str):
+            leaf = os.path.basename(name.rstrip(os.sep))
+            if leaf.startswith(".tmp-"):
                 state["fired"] = True
                 os.rename(project1, aside)
                 os.symlink(project2, project1)
