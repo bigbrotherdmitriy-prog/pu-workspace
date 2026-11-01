@@ -30,6 +30,22 @@ RD_VERSION_CONTENT_DIR = ".rd-version-content"
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _require_unix_open_flags() -> tuple[int, int]:
+    """Return mandatory ``(O_NOFOLLOW, O_NONBLOCK)`` or fail closed.
+
+    These flags are the only thing preventing a final-component symlink from
+    being followed and a FIFO/device from blocking ``os.open`` before the
+    ``fstat`` type check can run. Silently degrading to ``0`` would disable
+    that protection, so an unsupported platform raises ``StorageUnavailable``
+    instead of falling back to an unsafe open.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if not isinstance(nofollow, int) or not isinstance(nonblock, int) or nofollow == 0 or nonblock == 0:
+        raise StorageUnavailable("Platform lacks required O_NOFOLLOW/O_NONBLOCK open flags")
+    return nofollow, nonblock
+
+
 def _default_root() -> Path:
     raw = os.environ.get("PU_STORAGE_ROOT")
     if raw:
@@ -542,11 +558,14 @@ class RdVersionContentStore:
         """Inter-process per-project flock for CAS writers.
 
         Returns an open file object holding the lock; the caller must close it
-        to release. The lock file is opened with ``O_NOFOLLOW`` and must be a
-        regular file, so a symlinked lock cannot redirect the lock elsewhere.
+        to release. The lock file is opened with ``O_NOFOLLOW`` and
+        ``O_NONBLOCK`` and must be a regular file, so a symlinked lock cannot
+        redirect the lock elsewhere and a FIFO/device cannot block the open
+        before the ``fstat`` type check runs.
         """
         lock_path = self._lock_path(project_id)
-        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        nofollow, nonblock = _require_unix_open_flags()
+        flags = os.O_RDWR | os.O_CREAT | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0)
         try:
             fd = os.open(lock_path, flags, 0o600)
         except OSError as exc:
@@ -566,13 +585,16 @@ class RdVersionContentStore:
 
     @staticmethod
     def _open_regular_nofollow(path: Path) -> int:
-        """Open ``path`` read-only with O_NOFOLLOW and verify it is a regular file.
+        """Open ``path`` read-only with O_NOFOLLOW|O_NONBLOCK and verify type.
 
         Returns a raw fd; the caller owns it. Raises ``FileNotFoundError`` when
         the path does not exist and ``StorageAccessDenied`` when the final
-        component is a symlink or not a regular file.
+        component is a symlink or not a regular file (FIFO, device, socket,
+        directory). ``O_NONBLOCK`` is required so that opening a FIFO or device
+        cannot block in the kernel before the ``fstat`` type check runs.
         """
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        nofollow, nonblock = _require_unix_open_flags()
+        flags = os.O_RDONLY | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0)
         try:
             fd = os.open(path, flags)
         except FileNotFoundError:
@@ -668,7 +690,8 @@ class RdVersionContentStore:
                 raise StorageQuotaExceeded("Private content quota exceeded")
             tmp = project_dir / f".tmp-{uuid.uuid4().hex}"
             try:
-                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+                nofollow, nonblock = _require_unix_open_flags()
+                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0)
                 fd = os.open(tmp, flags, 0o600)
                 try:
                     view = memoryview(data)
