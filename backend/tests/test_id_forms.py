@@ -3,7 +3,7 @@ import zipfile
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -193,3 +193,114 @@ def test_collect_weekly_report_validation(weekly_world):
         work_log_form.collect_weekly_report(db, pid, "not-a-date", "2026-10-20")
     with pytest.raises(LookupError):
         work_log_form.collect_weekly_report(db, 999999, "2026-10-20", "2026-10-26")
+
+
+# --- DS14C: регрессии на реальном SQLAlchemy/SQLite (без моков) ---
+
+
+def _capture_statements(db: Session):
+    """Подключить before_cursor_execute и вернуть (список SQL, detach-функцию)."""
+    statements: list[str] = []
+
+    def _before(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(db.get_bind(), "before_cursor_execute", _before)
+
+    def _detach():
+        event.remove(db.get_bind(), "before_cursor_execute", _before)
+
+    return statements, _detach
+
+
+def _seed_photo(db: Session, project_id: int, defect_id: int, filename: str, data: bytes) -> DefectPhoto:
+    photo = DefectPhoto(project_id=project_id, defect_id=defect_id, filename=filename,
+                        mime_type="image/jpeg", size_bytes=len(data), data=data)
+    db.add(photo)
+    db.flush()
+    return photo
+
+
+def test_collect_weekly_report_photo_select_omits_binary(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+
+    d1 = Defect(project_id=p1.id, number=1, title="Трещина", status="open")
+    db.add(d1)
+    db.flush()
+    _seed_photo(db, p1.id, d1.id, "a.jpg", b"\x00\x01\x02\x03")
+    db.commit()
+
+    statements, detach = _capture_statements(db)
+    try:
+        result = work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+    finally:
+        detach()
+
+    photo_selects = [s for s in statements if "defect_photos" in s.lower() and s.lstrip().lower().startswith("select")]
+    assert photo_selects, "ожидался SELECT по defect_photos"
+    for sql in photo_selects:
+        lowered = sql.lower()
+        assert "defect_photos.data" not in lowered, sql
+        assert "defect_photos.data as" not in lowered, sql
+
+    assert len(result["defect_photos"]) == 1
+    photo = result["defect_photos"][0]
+    assert photo["filename"] == "a.jpg"
+    assert "data" not in photo
+
+
+def test_collect_weekly_report_does_not_flush_pending(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+
+    pending = Project(name="Проект В", organization_id=p1.organization_id)
+    db.add(pending)
+    assert pending.id is None
+    assert pending in db.new
+
+    statements, detach = _capture_statements(db)
+    try:
+        work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+    finally:
+        detach()
+
+    assert pending.id is None
+    assert pending in db.new
+    for sql in statements:
+        head = sql.lstrip().lower()
+        assert not head.startswith("insert"), sql
+        assert not head.startswith("update"), sql
+
+    db.rollback()
+    assert pending not in db.new
+    assert db.get(Project, pending.id) is None if pending.id is not None else True
+
+    # после rollback обычный запрос вне захвата допустим
+    assert db.execute(select(Project.id).where(Project.id == p1.id)).scalar_one() == p1.id
+
+
+def test_collect_weekly_report_skips_cross_project_photo(weekly_world):
+    db = weekly_world["db"]
+    p1, p2 = weekly_world["p1"], weekly_world["p2"]
+
+    d1 = Defect(project_id=p1.id, number=1, title="Трещина", status="open")
+    d2 = Defect(project_id=p2.id, number=1, title="Чужой дефект", status="open")
+    db.add_all([d1, d2])
+    db.flush()
+
+    good = _seed_photo(db, p1.id, d1.id, "good.jpg", b"\x10\x11")
+    # project_id указывает на p1, но defect_id принадлежит дефекту p2 (FK валиден, но кросс-проект)
+    bad = _seed_photo(db, p1.id, d2.id, "bad.jpg", b"\x20\x21")
+    db.commit()
+
+    result = work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+
+    filenames = [p["filename"] for p in result["defect_photos"]]
+    assert "good.jpg" in filenames
+    assert "bad.jpg" not in filenames
+    ids = [p["id"] for p in result["defect_photos"]]
+    assert good.id in ids and bad.id not in ids
+    for p in result["defect_photos"]:
+        assert p["defect_id"] == d1.id
+        assert "data" not in p
