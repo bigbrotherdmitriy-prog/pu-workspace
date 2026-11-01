@@ -175,14 +175,6 @@ def test_api_conflicting_provider_and_quota(world, monkeypatch):
     assert r.status_code == 413
 
 
-# ---------------------------------------------------------------------------
-# DS-11I stage6: RdVersionContentStore red tests (tests only).
-# These are expected to be RED against the current implementation; they are
-# not skipped/xfailed. Parent-dir TOCTOU and global (shared) quota remain
-# unresolved separate blockers and are NOT claimed fixed here.
-# ---------------------------------------------------------------------------
-
-
 def _store(tmp_path, quota=1 << 20):
     return RdVersionContentStore(root=tmp_path, quota_bytes=quota)
 
@@ -235,7 +227,7 @@ def test_rd_content_corrupt_existing_rejects_put_and_read(tmp_path):
         s.put(7, data)
     with pytest.raises((StorageUnavailable, StorageAccessDenied)):
         s.read(7, d, 1024)
-    assert blob.read_bytes() == b"bad"  # not repaired/overwritten
+    assert blob.read_bytes() == b"bad"
 
 
 def test_rd_content_quota_bounded_includes_mutable_root(tmp_path):
@@ -368,14 +360,6 @@ def test_rd_content_concurrent_cas_small_quota(tmp_path):
     assert total <= 64
 
 
-# ---------------------------------------------------------------------------
-# DS-11J: distinct-content race at quota, atomic publication hook, write
-# failure injection, and read max_bytes rejection. Tests only; no provider,
-# API, TestClient, network or production paths. Parent-directory TOCTOU and
-# shared mutable/CAS quota remain unresolved and are NOT claimed covered.
-# ---------------------------------------------------------------------------
-
-
 def _race_worker(root, pid, payload, start_evt, q):
     try:
         s = RdVersionContentStore(root=root, quota_bytes=48)
@@ -496,41 +480,11 @@ def test_rd_content_read_max_bytes_rejects_oversized(tmp_path):
     assert s.read(7, d, len(data) + 100) == data
 
 
-# ---------------------------------------------------------------------------
-# DS-11K: parent-directory TOCTOU regression (tests only).
-#
-# The current RdVersionContentStore.read() flow is:
-#   1. _project_dir() does lstat() on the project directory (symlink check).
-#   2. _open_regular_nofollow() calls os.open(<absolute path>, O_NOFOLLOW).
-# O_NOFOLLOW only protects the *final* path component. Between the lstat in
-# step 1 and the os.open in step 2 the project directory pathname can be
-# renamed aside and replaced with a symlink to another project's directory.
-# The final O_NOFOLLOW does not protect the parent component, so the open
-# follows the swapped parent and reads the other project's blob.
-#
-# These tests are expected to be RED against the current implementation.
-# They are not skipped/xfailed and the security assertion is not weakened.
-# All fixtures are synthetic under tmp_path; no threads, no sleeping, no
-# realpath tricks, no network, no API. The os.open hook only fires for the
-# actual digest open (after the directory checks) and always delegates to the
-# real os.open with the original args/kwargs, so a future dir_fd-anchored
-# implementation still runs the real open and the race is genuinely triggered.
-# ---------------------------------------------------------------------------
-
-
 def _swap_project_dir_hook(monkeypatch, base, pid, digest, other_pid):
-    """Hook os.open so that, on the digest open, project ``pid`` is swapped.
-
-    The hook is narrow: it only acts when the opened path names the digest
-    blob for ``pid`` (i.e. after the initial directory checks have run). It
-    renames ``base/pid`` aside and replaces it with a symlink to
-    ``base/other_pid``, then calls the real ``os.open`` with the original
-    args/kwargs. Returns a dict recording whether the swap fired.
-    """
     real_open = os.open
     project_dir = base / str(pid)
     aside = base / f"{pid}.aside"
-    state = {"fired": False}
+    state = {"fired": False, "swapped": False}
 
     def hook(path, *args, **kwargs):
         try:
@@ -540,18 +494,11 @@ def _swap_project_dir_hook(monkeypatch, base, pid, digest, other_pid):
         if not state["fired"] and isinstance(name, (str, bytes)):
             text = name.decode() if isinstance(name, bytes) else name
             if text.endswith(os.sep + digest) or text == digest:
-                # Only swap when the path actually targets this project's
-                # digest blob, i.e. after the directory checks have passed.
                 if str(project_dir) in text or text == digest:
                     state["fired"] = True
-                    try:
-                        os.rename(project_dir, aside)
-                    except OSError:
-                        pass
-                    try:
-                        os.symlink(base / str(other_pid), project_dir)
-                    except OSError:
-                        pass
+                    os.rename(project_dir, aside)
+                    os.symlink(base / str(other_pid), project_dir)
+                    state["swapped"] = True
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", hook)
@@ -567,9 +514,6 @@ def test_rd_content_parent_dir_swap_never_reads_other_project(tmp_path, monkeypa
     project1.mkdir()
     project2.mkdir()
 
-    # Seed the blob ONLY in project2. project1 stays empty, so the only way
-    # read(1, digest) can return the payload is by following the swapped
-    # parent symlink into project2.
     data = b"project2-private-bytes"
     d = _digest(data)
     (project2 / d).write_bytes(data)
@@ -582,18 +526,14 @@ def test_rd_content_parent_dir_swap_never_reads_other_project(tmp_path, monkeypa
     except (StorageAccessDenied, StorageUnavailable, FileNotFoundError):
         result = None
 
-    # The race must actually have been triggered by the hook.
     assert state["fired"] is True
+    assert state["swapped"] is True
+    assert project1.is_symlink()
+    assert (base / "1.aside").is_dir()
 
-    # Security assertion: read(1, d) must never return project2's bytes.
-    # Either it rejects (AccessDenied/Unavailable/FileNotFound) or, for a
-    # future dir_fd-anchored implementation, it reads the original retained
-    # project1 (which is empty -> FileNotFoundError). It must never surface
-    # the bytes that live only in project2.
     assert result != data
     assert result is None
 
-    # project2's bytes are untouched.
     assert (project2 / d).read_bytes() == data
 
 
@@ -616,23 +556,19 @@ def test_rd_content_parent_dir_swap_denied_or_notfound(tmp_path, monkeypatch):
         s.read(1, d, 1024)
 
     assert state["fired"] is True
+    assert state["swapped"] is True
+    assert project1.is_symlink()
+    assert (base / "1.aside").is_dir()
     assert (project2 / d).read_bytes() == data
 
 
 def test_rd_content_private_base_swap_never_reads_other_project(tmp_path, monkeypatch):
-    """Analogous case: the private base itself is swapped for a symlink.
-
-    The base ``.rd-version-content`` is renamed aside and replaced with a
-    symlink to a sibling directory that holds a different project's blob.
-    The digest open must not follow the swapped base into the sibling.
-    """
     s = _store(tmp_path)
     base = tmp_path / ".rd-version-content"
     base.mkdir()
     project1 = base / "1"
     project1.mkdir()
 
-    # Sibling directory outside the private base holding the payload.
     sibling = tmp_path / "sibling-base"
     sibling.mkdir()
     (sibling / "1").mkdir()
@@ -642,7 +578,7 @@ def test_rd_content_private_base_swap_never_reads_other_project(tmp_path, monkey
 
     real_open = os.open
     aside = tmp_path / ".rd-version-content.aside"
-    state = {"fired": False}
+    state = {"fired": False, "swapped": False}
 
     def hook(path, *args, **kwargs):
         try:
@@ -653,14 +589,9 @@ def test_rd_content_private_base_swap_never_reads_other_project(tmp_path, monkey
             text = name.decode() if isinstance(name, bytes) else name
             if text.endswith(os.sep + d) or text == d:
                 state["fired"] = True
-                try:
-                    os.rename(base, aside)
-                except OSError:
-                    pass
-                try:
-                    os.symlink(sibling, base)
-                except OSError:
-                    pass
+                os.rename(base, aside)
+                os.symlink(sibling, base)
+                state["swapped"] = True
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", hook)
@@ -671,6 +602,69 @@ def test_rd_content_private_base_swap_never_reads_other_project(tmp_path, monkey
         result = None
 
     assert state["fired"] is True
+    assert state["swapped"] is True
+    assert base.is_symlink()
+    assert aside.is_dir()
     assert result != data
     assert result is None
     assert (sibling / "1" / d).read_bytes() == data
+
+
+def _snapshot_dir(path):
+    if not path.is_dir():
+        return None
+    return {p.name: p.read_bytes() for p in path.iterdir() if p.is_file()}
+
+
+def test_rd_content_put_parent_dir_swap_never_writes_other_project(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    base = tmp_path / ".rd-version-content"
+    base.mkdir()
+    project1 = base / "1"
+    project2 = base / "2"
+    project1.mkdir()
+    project2.mkdir()
+
+    data = b"put-race-payload"
+    d = _digest(data)
+    before2 = _snapshot_dir(project2)
+
+    real_open = os.open
+    aside = base / "1.aside"
+    state = {"fired": False, "swapped": False}
+
+    def hook(path, *args, **kwargs):
+        try:
+            name = os.fspath(path)
+        except TypeError:
+            name = None
+        if not state["fired"] and isinstance(name, (str, bytes)):
+            text = name.decode() if isinstance(name, bytes) else name
+            if text.endswith(os.sep + d) or text == d:
+                state["fired"] = True
+                os.rename(project1, aside)
+                os.symlink(project2, project1)
+                state["swapped"] = True
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", hook)
+
+    try:
+        result = s.put(1, data)
+    except (StorageAccessDenied, StorageUnavailable, FileNotFoundError):
+        result = None
+
+    assert state["fired"] is True
+    assert state["swapped"] is True
+    assert project1.is_symlink()
+    assert aside.is_dir()
+
+    after2 = _snapshot_dir(project2)
+    assert after2 == before2
+    assert d not in after2
+    assert not [n for n in after2 if n.startswith(".tmp-")]
+
+    if result is not None:
+        assert result == d
+        assert (aside / d).is_file()
+        assert (aside / d).read_bytes() == data
