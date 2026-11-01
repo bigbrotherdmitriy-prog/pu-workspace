@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 import os
+import re
 import shutil
 import uuid
 from collections import deque
@@ -22,6 +23,8 @@ from app.integrations.contracts import (
 FOLDER_MIME = "inode/directory"
 DEFAULT_QUOTA_MB = 2048
 SERVICE_DIRS = {".trash"}
+RD_VERSION_CONTENT_DIR = ".rd-version-content"
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _default_root() -> Path:
@@ -134,6 +137,8 @@ class PuStorageAdapter:
             if "/" in part or "\\" in part:
                 raise StorageAccessDenied("Invalid path segment")
             if part.startswith(".") and part in SERVICE_DIRS:
+                raise StorageAccessDenied("Service directory is hidden")
+            if part == RD_VERSION_CONTENT_DIR:
                 raise StorageAccessDenied("Service directory is hidden")
             cleaned.append(part)
         if not cleaned:
@@ -427,3 +432,122 @@ class PuStorageAdapter:
                 continue
             id_map[item.id] = f"{copy_root_id.rstrip('/')}/{rel}"
         return StorageCopyResult(copy_root_id, candidate.name, id_map, len(items))
+
+
+class RdVersionContentStore:
+    """Bounded, content-addressed primitive for future RD version workflow.
+
+    Private namespace: ``root/.rd-version-content/{project_id}/{sha256}``.
+    This is NOT a public feature and is NOT wired into any caller yet.
+
+    Remaining integration blocker: this store keeps its own project-local
+    quota and does not share a lock or quota accounting with
+    ``PuStorageAdapter``. ``PuStorageAdapter.usage()`` does not count bytes
+    under ``.rd-version-content`` and its writes do not see this store's
+    quota, so a private quota here must not be presented as the full global
+    project quota. Shared quota/lock integration is a separate follow-up task.
+    """
+
+    def __init__(self, root: Path, quota_bytes: int) -> None:
+        if root is None or quota_bytes is None:
+            raise StorageUnavailable("RdVersionContentStore requires explicit root and quota")
+        self._root = Path(root)
+        self.quota_bytes = int(quota_bytes)
+        if self.quota_bytes <= 0:
+            raise StorageUnavailable("RdVersionContentStore quota must be positive")
+
+    def _project_dir(self, project_id: int) -> Path:
+        if not isinstance(project_id, int) or isinstance(project_id, bool) or project_id <= 0:
+            raise StorageAccessDenied("Invalid project id")
+        base = self._root / RD_VERSION_CONTENT_DIR
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            resolved_base = base.resolve()
+            resolved_base.relative_to(self._root.resolve())
+        except (OSError, ValueError) as exc:
+            raise StorageUnavailable("Cannot prepare private content namespace") from exc
+        project_dir = resolved_base / str(project_id)
+        try:
+            project_dir.mkdir(exist_ok=True)
+            resolved = project_dir.resolve()
+            resolved.relative_to(resolved_base)
+        except (OSError, ValueError) as exc:
+            raise StorageUnavailable("Cannot prepare private project directory") from exc
+        return resolved
+
+    def _used_bytes(self, project_id: int) -> int:
+        total = 0
+        private_dir = self._project_dir(project_id)
+        for entry in private_dir.iterdir():
+            if entry.is_file() and not entry.name.startswith(".tmp-"):
+                try:
+                    total += entry.stat().st_size
+                except OSError:
+                    continue
+        mutable_dir = self._root / str(project_id)
+        if mutable_dir.is_dir():
+            for walk_root, dirs, files in os.walk(mutable_dir):
+                dirs[:] = [d for d in dirs if d not in SERVICE_DIRS]
+                for name in files:
+                    try:
+                        total += (Path(walk_root) / name).stat().st_size
+                    except OSError:
+                        continue
+        return total
+
+    def put(self, project_id: int, content: bytes) -> str:
+        if not isinstance(content, (bytes, bytearray)):
+            raise StorageAccessDenied("Content must be bytes")
+        data = bytes(content)
+        digest = hashlib.sha256(data).hexdigest()
+        project_dir = self._project_dir(project_id)
+        target = project_dir / digest
+        if target.exists():
+            existing = target.read_bytes()
+            if hashlib.sha256(existing).hexdigest() == digest:
+                return digest
+            raise StorageUnavailable("Existing content blob is corrupt")
+        if self._used_bytes(project_id) + len(data) > self.quota_bytes:
+            raise StorageQuotaExceeded("Private content quota exceeded")
+        tmp = project_dir / f".tmp-{uuid.uuid4().hex}"
+        try:
+            with tmp.open("xb") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+            try:
+                os.link(tmp, target)
+            except FileExistsError:
+                existing = target.read_bytes()
+                if hashlib.sha256(existing).hexdigest() != digest:
+                    raise StorageUnavailable("Existing content blob is corrupt")
+        except OSError as exc:
+            raise StorageUnavailable("Cannot publish content blob") from exc
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        return digest
+
+    def read(self, project_id: int, digest: str, max_bytes: int) -> bytes:
+        if not isinstance(digest, str) or not _DIGEST_RE.match(digest):
+            raise StorageAccessDenied("Invalid content digest")
+        if not isinstance(max_bytes, int) or max_bytes < 0:
+            raise StorageAccessDenied("Invalid read budget")
+        project_dir = self._project_dir(project_id)
+        target = project_dir / digest
+        try:
+            resolved = target.resolve()
+            resolved.relative_to(project_dir)
+        except (OSError, ValueError) as exc:
+            raise StorageAccessDenied("Content path escapes private namespace") from exc
+        if not resolved.is_file():
+            raise FileNotFoundError("Content blob not found")
+        size = resolved.stat().st_size
+        if size > max_bytes:
+            raise StorageQuotaExceeded("Content blob exceeds read budget")
+        data = resolved.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise StorageUnavailable("Content blob checksum mismatch")
+        return data
