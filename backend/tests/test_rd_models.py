@@ -203,8 +203,9 @@ def test_volume_version_duplicate_digest_same_volume_rejected(world):
     _make_version(db, vol.id, digest="c" * 64)
     db.commit()
 
-    with db.begin_nested():
-        _make_version(db, vol.id, digest="c" * 64)
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            _make_version(db, vol.id, digest="c" * 64)
     db.rollback()
 
     rows = db.execute(
@@ -243,8 +244,9 @@ def test_volume_version_invalid_digest_or_size_rejected(world, digest, size_byte
     vol = _make_volume(db, project.id)
     db.commit()
 
-    with db.begin_nested():
-        _make_version(db, vol.id, digest=digest, size_bytes=size_bytes)
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            _make_version(db, vol.id, digest=digest, size_bytes=size_bytes)
     db.rollback()
 
     rows = db.execute(
@@ -260,15 +262,16 @@ def test_volume_version_required_columns_not_null(world):
     vol = _make_volume(db, project.id)
     db.commit()
 
-    with db.begin_nested():
-        db.add(RdVolumeVersion(
-            volume_id=vol.id,
-            content_sha256=None,
-            size_bytes=10,
-            file_name="x.pdf",
-            mime_type="application/pdf",
-        ))
-        db.flush()
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            db.add(RdVolumeVersion(
+                volume_id=vol.id,
+                content_sha256=None,
+                size_bytes=10,
+                file_name="x.pdf",
+                mime_type="application/pdf",
+            ))
+            db.flush()
     db.rollback()
 
     rows = db.execute(
@@ -288,9 +291,10 @@ def test_volume_delete_with_version_restricted(world):
     volume_id = vol.id
     version_id = ver.id
 
-    with db.begin_nested():
-        db.delete(db.get(RdVolume, volume_id))
-        db.flush()
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            db.delete(db.get(RdVolume, volume_id))
+            db.flush()
     db.rollback()
 
     db.expire_all()
