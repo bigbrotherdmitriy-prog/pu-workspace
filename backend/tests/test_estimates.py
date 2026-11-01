@@ -13,6 +13,7 @@ from app import estimates as svc
 from app import ks_forms
 from app import work_log as wl
 from app.database import Base
+from app.models.estimates import KsAct
 from app.models.organization_contract import Organization
 from app.models.project import Project
 
@@ -220,3 +221,38 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+def test_service_ks_repeat_without_new_fact(world):
+    db, pid, eid = world["db"], world["p"].id, world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    _log(db, pid, cable, "2026-10-05", "40")
+    db.commit()
+    act = svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    db.commit()
+    snap = svc.act_with_totals(db, pid, act["id"])
+    assert snap["period_total"] == "2000.00" and snap["lines"][0]["qty"] == "40.000"
+    assert db.query(KsAct).filter(KsAct.project_id == pid, KsAct.estimate_id == eid).count() == 1
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    assert prev["lines"] == [] and prev["total_ex_vat"] == "0.00"
+    with pytest.raises(ValueError):
+        svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 31))
+    db.rollback()
+    assert db.query(KsAct).filter(KsAct.project_id == pid, KsAct.estimate_id == eid).count() == 1
+    assert svc.act_with_totals(db, pid, act["id"]) == snap
+
+
+def test_service_ks_overlap_includes_only_new_fact(world):
+    db, pid, eid = world["db"], world["p"].id, world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    _log(db, pid, cable, "2026-10-05", "40")
+    db.commit()
+    act = svc.create_act(db, pid, eid, date(2026, 10, 1), date(2026, 10, 10))
+    db.commit()
+    assert svc.preview_act(db, pid, eid, date(2026, 10, 5), date(2026, 10, 20))["lines"] == []
+    _log(db, pid, cable, "2026-10-15", "10")
+    db.commit()
+    prev = svc.preview_act(db, pid, eid, date(2026, 10, 5), date(2026, 10, 20))
+    assert len(prev["lines"]) == 1 and prev["lines"][0]["qty"] == "10.000" and prev["total_ex_vat"] == "500.00"
+    snap = svc.act_with_totals(db, pid, act["id"])
+    assert snap["period_total"] == "2000.00" and snap["lines"][0]["qty"] == "40.000"
