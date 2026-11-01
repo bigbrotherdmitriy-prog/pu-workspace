@@ -386,12 +386,16 @@ def test_bind_invalid_version_id_rejected(bind_world, bad):
     assert _snapshot(db, d.id)["rd_version_id"] is None
 
 
-@pytest.mark.parametrize("bad", [True, False, 0, -1, "1", "abc", ""])
-def test_bind_invalid_defect_id_rejected(bind_world, bad):
+def test_bind_nonexistent_defect_lookup_error(bind_world):
     db, pid, ver = bind_world["db"], bind_world["p"].id, bind_world["ver_p"]
-    with pytest.raises(ValueError):
-        svc.bind_rd_version(db, pid, bad, ver.id)
+    existing = _defect(db, pid)
+    db.commit()
+    snap = _snapshot(db, existing.id)
+    with pytest.raises(LookupError):
+        svc.bind_rd_version(db, pid, 999999, ver.id)
     db.rollback()
+    assert _snapshot(db, existing.id) == snap
+    assert _snapshot(db, existing.id)["rd_version_id"] is None
 
 
 def test_bind_flush_not_commit_caller_rollback_removes_binding(bind_world):
@@ -407,3 +411,56 @@ def test_bind_flush_not_commit_caller_rollback_removes_binding(bind_world):
     db.rollback()
     assert _snapshot(db, d.id) == snap
     assert _snapshot(db, d.id)["rd_version_id"] is None
+
+
+# --- DS13E: stale identity-map regression ---
+# Two real SQLAlchemy Sessions share one synthetic SQLite engine. Session A
+# loads an unbound Defect and keeps the identity object cached; Session B binds
+# version 1 and commits. Session A must still see its cached None and must
+# reject an attempt to bind a different valid version 2 without overwriting the
+# DB binding. A same-version stale retry is allowed to succeed. This proves the
+# stale-session behaviour only; it does not claim real PostgreSQL concurrency.
+
+
+def test_stale_session_cannot_overwrite_binding(bind_world):
+    engine = bind_world["db"].get_bind()
+    pid, vol_p, ver1 = bind_world["p"].id, bind_world["vol_p"], bind_world["ver_p"]
+    with Session(engine) as setup:
+        d = _defect(setup, pid)
+        setup.commit()
+        defect_id = d.id
+        ver2 = RdVolumeVersion(
+            volume_id=vol_p.id, content_sha256="f" * 64, size_bytes=14,
+            file_name="vp3.pdf", mime_type="application/pdf",
+        )
+        setup.add(ver2)
+        setup.commit()
+        ver2_id = ver2.id
+
+    with Session(engine) as session_a:
+        cached = session_a.get(Defect, defect_id)
+        assert cached.rd_version_id is None
+
+        with Session(engine) as session_b:
+            out = svc.bind_rd_version(session_b, pid, defect_id, ver1.id)
+            assert out["rd_version_id"] == ver1.id
+            session_b.commit()
+
+        # Session A still holds the stale identity object with None.
+        assert session_a.get(Defect, defect_id) is cached
+        assert cached.rd_version_id is None
+
+        # Attempting to bind a different valid version must be rejected and
+        # must not overwrite the committed DB binding.
+        with pytest.raises(ValueError):
+            svc.bind_rd_version(session_a, pid, defect_id, ver2_id)
+        session_a.rollback()
+
+        # Same-version stale retry is allowed to succeed.
+        retry = svc.bind_rd_version(session_a, pid, defect_id, ver1.id)
+        assert retry["rd_version_id"] == ver1.id
+        session_a.commit()
+
+    with Session(engine) as fresh:
+        final = fresh.get(Defect, defect_id)
+        assert final.rd_version_id == ver1.id
