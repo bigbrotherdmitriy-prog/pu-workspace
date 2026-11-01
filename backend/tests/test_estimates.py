@@ -142,6 +142,38 @@ def test_line_edit_validation(world):
         svc.update_line(db, world["o"].id, lid, {"name": "x"})
 
 
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_service_nonfinite_edit_rejected(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, lid, {field: value})
+    db.rollback()
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value,expected", [("55,5", Decimal("55.5")), ("0", Decimal("0"))])
+def test_service_finite_edit_controls(world, field, value, expected):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert Decimal(line[field]) == expected
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", [None, ""])
+def test_service_blank_edit_clears_field(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert line[field] is None
+
+
 def test_forms_render(world):
     from openpyxl import load_workbook
 
