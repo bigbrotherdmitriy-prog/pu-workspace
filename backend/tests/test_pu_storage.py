@@ -1,4 +1,8 @@
+import hashlib
+import multiprocessing
 import os
+import stat
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -8,8 +12,12 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.database import Base
-from app.integrations.contracts import StorageAccessDenied, StorageQuotaExceeded
-from app.integrations.pu_storage import PuStorageAdapter
+from app.integrations.contracts import (
+    StorageAccessDenied,
+    StorageQuotaExceeded,
+    StorageUnavailable,
+)
+from app.integrations.pu_storage import PuStorageAdapter, RdVersionContentStore
 from app.integrations.storage import validate_storage_locator
 from app.models.drive_connection import DriveConnection
 from app.models.organization_contract import Organization
@@ -165,3 +173,196 @@ def test_api_conflicting_provider_and_quota(world, monkeypatch):
     big = b"x" * (2 * 1024 * 1024)
     r = client.post(f"/projects/{other}/pu-storage/upload", params={"parent_id": "pu:/", "name": "big.bin"}, content=big)
     assert r.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# DS-11I stage6: RdVersionContentStore red tests (tests only).
+# These are expected to be RED against the current implementation; they are
+# not skipped/xfailed. Parent-dir TOCTOU and global (shared) quota remain
+# unresolved separate blockers and are NOT claimed fixed here.
+# ---------------------------------------------------------------------------
+
+
+def _store(tmp_path, quota=1 << 20):
+    return RdVersionContentStore(root=tmp_path, quota_bytes=quota)
+
+
+def _digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _blob(tmp_path, pid, digest):
+    return tmp_path / ".rd-version-content" / str(pid) / digest
+
+
+def test_rd_content_put_read_digest(tmp_path):
+    s = _store(tmp_path)
+    data = b"payload-bytes"
+    d = s.put(7, data)
+    assert d == _digest(data)
+    assert s.read(7, d, 1024) == data
+    assert _blob(tmp_path, 7, d).is_file()
+
+
+def test_rd_content_dedup_same_digest_no_overwrite(tmp_path):
+    s = _store(tmp_path)
+    data = b"same-content"
+    d1 = s.put(7, data)
+    before = _blob(tmp_path, 7, d1).stat()
+    d2 = s.put(7, data)
+    after = _blob(tmp_path, 7, d1).stat()
+    assert d1 == d2
+    assert before.st_ino == after.st_ino and before.st_mtime_ns == after.st_mtime_ns
+    assert len([p for p in (tmp_path / ".rd-version-content" / "7").iterdir() if not p.name.startswith(".")]) == 1
+
+
+def test_rd_content_changed_bytes_separate(tmp_path):
+    s = _store(tmp_path)
+    d1 = s.put(7, b"one")
+    d2 = s.put(7, b"two")
+    assert d1 != d2
+    assert s.read(7, d1, 1024) == b"one"
+    assert s.read(7, d2, 1024) == b"two"
+
+
+def test_rd_content_corrupt_existing_rejects_put_and_read(tmp_path):
+    s = _store(tmp_path)
+    data = b"good"
+    d = s.put(7, data)
+    blob = _blob(tmp_path, 7, d)
+    blob.write_bytes(b"bad")
+    with pytest.raises((StorageUnavailable, StorageAccessDenied)):
+        s.put(7, data)
+    with pytest.raises((StorageUnavailable, StorageAccessDenied)):
+        s.read(7, d, 1024)
+    assert blob.read_bytes() == b"bad"  # not repaired/overwritten
+
+
+def test_rd_content_quota_bounded_includes_mutable_root(tmp_path):
+    s = _store(tmp_path, quota=10)
+    mutable = tmp_path / "7"
+    mutable.mkdir()
+    (mutable / "existing.bin").write_bytes(b"123456")
+    with pytest.raises(StorageQuotaExceeded):
+        s.put(7, b"123456")
+    assert not _blob(tmp_path, 7, _digest(b"123456")).exists()
+
+
+def test_rd_content_symlink_project_alias_rejected(tmp_path):
+    s = _store(tmp_path)
+    base = tmp_path / ".rd-version-content"
+    base.mkdir()
+    (base / "1").mkdir()
+    (base / "2").symlink_to(base / "1")
+    with pytest.raises(StorageAccessDenied):
+        s.put(2, b"x")
+    with pytest.raises(StorageAccessDenied):
+        s.read(2, _digest(b"x"), 1024)
+
+
+def test_rd_content_digest_symlink_outside_rejected(tmp_path):
+    s = _store(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret"
+    secret.write_bytes(b"secret")
+    data = b"secret"
+    d = _digest(data)
+    base = tmp_path / ".rd-version-content"
+    (base / "7").mkdir(parents=True)
+    (base / "7" / d).symlink_to(secret)
+    with pytest.raises(StorageAccessDenied):
+        s.read(7, d, 1024)
+    with pytest.raises(StorageAccessDenied):
+        s.put(7, data)
+    assert secret.read_bytes() == b"secret"
+
+
+def test_rd_content_missing_project_read_no_dirs(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        s.read(9, _digest(b"x"), 1024)
+    assert not (tmp_path / ".rd-version-content" / "9").exists()
+
+
+def test_rd_content_missing_flags_fail_unavailable(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    with pytest.raises(StorageUnavailable):
+        s.put(7, b"x")
+    monkeypatch.undo()
+    monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
+    with pytest.raises(StorageUnavailable):
+        s.put(7, b"x")
+
+
+def _fifo_worker(root, pid, digest, q):
+    try:
+        s = RdVersionContentStore(root=root, quota_bytes=1 << 20)
+        try:
+            s.read(pid, digest, 1024)
+            q.put("read-ok")
+        except StorageAccessDenied:
+            q.put("denied")
+        except BaseException as exc:  # noqa: BLE001
+            q.put(f"other:{type(exc).__name__}")
+    except BaseException as exc:  # noqa: BLE001
+        q.put(f"init:{type(exc).__name__}")
+
+
+def test_rd_content_fifo_reaches_kernel_no_stub(tmp_path):
+    s = _store(tmp_path)
+    data = b"fifo"
+    d = _digest(data)
+    base = tmp_path / ".rd-version-content"
+    (base / "7").mkdir(parents=True)
+    os.mkfifo(base / "7" / d)
+    ctx = multiprocessing.get_context("fork")
+    q = ctx.Queue()
+    proc = ctx.Process(target=_fifo_worker, args=(tmp_path, 7, d, q))
+    proc.start()
+    proc.join(2.0)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(2.0)
+        pytest.fail("FIFO read blocked in kernel; O_NONBLOCK guard missing")
+    assert proc.exitcode == 0
+    assert q.get(timeout=1.0) == "denied"
+
+
+def _cas_worker(root, pid, payloads, q):
+    try:
+        s = RdVersionContentStore(root=root, quota_bytes=64)
+        out = []
+        for p in payloads:
+            try:
+                out.append(s.put(pid, p))
+            except StorageQuotaExceeded:
+                out.append("quota")
+        q.put(out)
+    except BaseException as exc:  # noqa: BLE001
+        q.put(f"err:{type(exc).__name__}")
+
+
+def test_rd_content_concurrent_cas_small_quota(tmp_path):
+    ctx = multiprocessing.get_context("fork")
+    q = ctx.Queue()
+    same = b"a" * 16
+    procs = [ctx.Process(target=_cas_worker, args=(tmp_path, 7, [same, same], q)) for _ in range(3)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(5.0)
+    for p in procs:
+        if p.is_alive():
+            p.terminate()
+            p.join(2.0)
+            pytest.fail("CAS worker hung")
+    results = [q.get(timeout=1.0) for _ in procs]
+    assert all(isinstance(r, list) for r in results), results
+    project_dir = tmp_path / ".rd-version-content" / "7"
+    blobs = [p for p in project_dir.iterdir() if not p.name.startswith(".")]
+    assert [p.name for p in blobs] == [_digest(same)]
+    assert not [p for p in project_dir.iterdir() if p.name.startswith(".tmp-")]
+    total = sum(p.stat().st_size for p in blobs)
+    assert total <= 64

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import errno
+import fcntl
 import hashlib
 import mimetypes
 import os
+import re
 import shutil
+import stat
 import uuid
 from collections import deque
 from datetime import datetime, timezone
@@ -22,6 +26,24 @@ from app.integrations.contracts import (
 FOLDER_MIME = "inode/directory"
 DEFAULT_QUOTA_MB = 2048
 SERVICE_DIRS = {".trash"}
+RD_VERSION_CONTENT_DIR = ".rd-version-content"
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _require_unix_open_flags() -> tuple[int, int]:
+    """Return mandatory ``(O_NOFOLLOW, O_NONBLOCK)`` or fail closed.
+
+    These flags are the only thing preventing a final-component symlink from
+    being followed and a FIFO/device from blocking ``os.open`` before the
+    ``fstat`` type check can run. Silently degrading to ``0`` would disable
+    that protection, so an unsupported platform raises ``StorageUnavailable``
+    instead of falling back to an unsafe open.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if not isinstance(nofollow, int) or not isinstance(nonblock, int) or nofollow == 0 or nonblock == 0:
+        raise StorageUnavailable("Platform lacks required O_NOFOLLOW/O_NONBLOCK open flags")
+    return nofollow, nonblock
 
 
 def _default_root() -> Path:
@@ -134,6 +156,8 @@ class PuStorageAdapter:
             if "/" in part or "\\" in part:
                 raise StorageAccessDenied("Invalid path segment")
             if part.startswith(".") and part in SERVICE_DIRS:
+                raise StorageAccessDenied("Service directory is hidden")
+            if part == RD_VERSION_CONTENT_DIR:
                 raise StorageAccessDenied("Service directory is hidden")
             cleaned.append(part)
         if not cleaned:
@@ -427,3 +451,291 @@ class PuStorageAdapter:
                 continue
             id_map[item.id] = f"{copy_root_id.rstrip('/')}/{rel}"
         return StorageCopyResult(copy_root_id, candidate.name, id_map, len(items))
+
+
+class RdVersionContentStore:
+    """Bounded, content-addressed primitive for future RD version workflow.
+
+    Private namespace: ``root/.rd-version-content/{project_id}/{sha256}``.
+    This is NOT a public feature and is NOT wired into any caller yet.
+
+    Remaining integration blocker: this store keeps its own project-local
+    quota and does not share a lock or quota accounting with
+    ``PuStorageAdapter``. ``PuStorageAdapter.usage()`` does not count bytes
+    under ``.rd-version-content`` and its writes do not see this store's
+    quota, so a private quota here must not be presented as the full global
+    project quota. Shared quota/lock integration is a separate follow-up task.
+    """
+
+    def __init__(self, root: Path, quota_bytes: int) -> None:
+        if root is None or quota_bytes is None:
+            raise StorageUnavailable("RdVersionContentStore requires explicit root and quota")
+        self._root = Path(root)
+        self.quota_bytes = int(quota_bytes)
+        if self.quota_bytes <= 0:
+            raise StorageUnavailable("RdVersionContentStore quota must be positive")
+
+    # ------------------------------------------------------------- internals
+    @staticmethod
+    def _validate_project_id(project_id: int) -> int:
+        if not isinstance(project_id, int) or isinstance(project_id, bool) or project_id <= 0:
+            raise StorageAccessDenied("Invalid project id")
+        return project_id
+
+    def _private_base(self, *, create: bool) -> Path:
+        """Return the private namespace base, rejecting symlinked components.
+
+        The base is ``root/.rd-version-content``. It must be a real directory
+        (not a symlink) and must live directly under the trusted root. When
+        ``create`` is False and the base is missing, ``FileNotFoundError`` is
+        raised without creating anything.
+        """
+        base = self._root / RD_VERSION_CONTENT_DIR
+        try:
+            st = os.lstat(base)
+        except FileNotFoundError:
+            if not create:
+                raise
+            try:
+                base.mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise StorageUnavailable("Cannot prepare private content namespace") from exc
+            try:
+                st = os.lstat(base)
+            except OSError as exc:
+                raise StorageUnavailable("Cannot prepare private content namespace") from exc
+        except OSError as exc:
+            raise StorageUnavailable("Cannot prepare private content namespace") from exc
+        if stat.S_ISLNK(st.st_mode):
+            raise StorageAccessDenied("Private content namespace is a symlink")
+        if not stat.S_ISDIR(st.st_mode):
+            raise StorageUnavailable("Private content namespace is not a directory")
+        return base
+
+    def _project_dir(self, project_id: int, *, create: bool) -> Path:
+        """Return the private per-project directory, rejecting symlinks.
+
+        The project directory must be a real directory directly under the
+        private base. Symlinked components (including the project directory
+        itself) are rejected rather than resolved, so an alias to another
+        project's directory cannot be used.
+        """
+        pid = self._validate_project_id(project_id)
+        base = self._private_base(create=create)
+        project_dir = base / str(pid)
+        try:
+            st = os.lstat(project_dir)
+        except FileNotFoundError:
+            if not create:
+                raise
+            try:
+                project_dir.mkdir(exist_ok=False)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise StorageUnavailable("Cannot prepare private project directory") from exc
+            try:
+                st = os.lstat(project_dir)
+            except OSError as exc:
+                raise StorageUnavailable("Cannot prepare private project directory") from exc
+        except OSError as exc:
+            raise StorageUnavailable("Cannot prepare private project directory") from exc
+        if stat.S_ISLNK(st.st_mode):
+            raise StorageAccessDenied("Private project directory is a symlink")
+        if not stat.S_ISDIR(st.st_mode):
+            raise StorageUnavailable("Private project directory is not a directory")
+        return project_dir
+
+    def _lock_path(self, project_id: int) -> Path:
+        """Lock file lives in the private base, outside mutable root/{project}."""
+        pid = self._validate_project_id(project_id)
+        base = self._private_base(create=True)
+        return base / f".lock-{pid}"
+
+    def _acquire_project_lock(self, project_id: int):
+        """Inter-process per-project flock for CAS writers.
+
+        Returns an open file object holding the lock; the caller must close it
+        to release. The lock file is opened with ``O_NOFOLLOW`` and
+        ``O_NONBLOCK`` and must be a regular file, so a symlinked lock cannot
+        redirect the lock elsewhere and a FIFO/device cannot block the open
+        before the ``fstat`` type check runs.
+        """
+        lock_path = self._lock_path(project_id)
+        nofollow, nonblock = _require_unix_open_flags()
+        flags = os.O_RDWR | os.O_CREAT | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(lock_path, flags, 0o600)
+        except OSError as exc:
+            raise StorageUnavailable("Cannot open private content lock") from exc
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise StorageAccessDenied("Private content lock is not a regular file")
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError as exc:
+            os.close(fd)
+            raise StorageUnavailable("Cannot acquire private content lock") from exc
+        except BaseException:
+            os.close(fd)
+            raise
+        return os.fdopen(fd, "rb", closefd=True)
+
+    @staticmethod
+    def _open_regular_nofollow(path: Path) -> int:
+        """Open ``path`` read-only with O_NOFOLLOW|O_NONBLOCK and verify type.
+
+        Returns a raw fd; the caller owns it. Raises ``FileNotFoundError`` when
+        the path does not exist and ``StorageAccessDenied`` when the final
+        component is a symlink or not a regular file (FIFO, device, socket,
+        directory). ``O_NONBLOCK`` is required so that opening a FIFO or device
+        cannot block in the kernel before the ``fstat`` type check runs.
+        """
+        nofollow, nonblock = _require_unix_open_flags()
+        flags = os.O_RDONLY | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.EMLINK}:
+                raise StorageAccessDenied("Content blob is a symlink") from exc
+            raise StorageUnavailable("Cannot open content blob") from exc
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise StorageAccessDenied("Content blob is not a regular file")
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+    def _read_blob_bounded(self, path: Path, digest: str, max_bytes: int) -> bytes:
+        """Read a blob with size bound and checksum, never trusting symlinks."""
+        fd = self._open_regular_nofollow(path)
+        try:
+            st = os.fstat(fd)
+            if st.st_size > max_bytes:
+                raise StorageQuotaExceeded("Content blob exceeds read budget")
+            chunks: list[bytes] = []
+            remaining = max_bytes + 1
+            while remaining > 0:
+                chunk = os.read(fd, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(chunks)
+        except OSError as exc:
+            raise StorageUnavailable("Cannot read content blob") from exc
+        finally:
+            os.close(fd)
+        if len(data) > max_bytes:
+            raise StorageQuotaExceeded("Content blob exceeds read budget")
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise StorageUnavailable("Content blob checksum mismatch")
+        return data
+
+    def _used_bytes(self, project_id: int) -> int:
+        total = 0
+        try:
+            private_dir = self._project_dir(project_id, create=False)
+        except FileNotFoundError:
+            private_dir = None
+        if private_dir is not None:
+            for entry in private_dir.iterdir():
+                if entry.name.startswith(".tmp-"):
+                    continue
+                try:
+                    st = os.lstat(entry)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode):
+                    total += st.st_size
+        mutable_dir = self._root / str(project_id)
+        if mutable_dir.is_dir():
+            for walk_root, dirs, files in os.walk(mutable_dir):
+                dirs[:] = [d for d in dirs if d not in SERVICE_DIRS]
+                for name in files:
+                    try:
+                        total += (Path(walk_root) / name).stat().st_size
+                    except OSError:
+                        continue
+        return total
+
+    # ------------------------------------------------------------- public
+    def put(self, project_id: int, content: bytes) -> str:
+        if not isinstance(content, (bytes, bytearray)):
+            raise StorageAccessDenied("Content must be bytes")
+        data = bytes(content)
+        digest = hashlib.sha256(data).hexdigest()
+        pid = self._validate_project_id(project_id)
+        project_dir = self._project_dir(pid, create=True)
+        target = project_dir / digest
+        lock = self._acquire_project_lock(pid)
+        try:
+            # Dedup: an existing blob must be a regular file with matching
+            # content; a corrupt or symlinked blob is never overwritten.
+            try:
+                existing = self._read_blob_bounded(target, digest, len(data))
+            except FileNotFoundError:
+                existing = None
+            except StorageQuotaExceeded:
+                raise StorageUnavailable("Existing content blob is corrupt")
+            if existing is not None:
+                return digest
+            if self._used_bytes(pid) + len(data) > self.quota_bytes:
+                raise StorageQuotaExceeded("Private content quota exceeded")
+            tmp = project_dir / f".tmp-{uuid.uuid4().hex}"
+            try:
+                nofollow, nonblock = _require_unix_open_flags()
+                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0)
+                fd = os.open(tmp, flags, 0o600)
+                try:
+                    view = memoryview(data)
+                    while view:
+                        written = os.write(fd, view)
+                        if written <= 0:
+                            raise OSError(errno.EIO, "short write")
+                        view = view[written:]
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                try:
+                    os.link(tmp, target)
+                except FileExistsError:
+                    # Another writer published first; verify it is intact.
+                    try:
+                        self._read_blob_bounded(target, digest, len(data))
+                    except FileNotFoundError:
+                        raise StorageUnavailable("Existing content blob is corrupt")
+                    except StorageQuotaExceeded:
+                        raise StorageUnavailable("Existing content blob is corrupt")
+            except OSError as exc:
+                raise StorageUnavailable("Cannot publish content blob") from exc
+            finally:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+            return digest
+        finally:
+            try:
+                lock.close()
+            except OSError:
+                pass
+
+    def read(self, project_id: int, digest: str, max_bytes: int) -> bytes:
+        if not isinstance(digest, str) or not _DIGEST_RE.match(digest):
+            raise StorageAccessDenied("Invalid content digest")
+        if not isinstance(max_bytes, int) or max_bytes < 0:
+            raise StorageAccessDenied("Invalid read budget")
+        pid = self._validate_project_id(project_id)
+        try:
+            project_dir = self._project_dir(pid, create=False)
+        except FileNotFoundError:
+            raise FileNotFoundError("Content blob not found")
+        target = project_dir / digest
+        return self._read_blob_bounded(target, digest, max_bytes)
