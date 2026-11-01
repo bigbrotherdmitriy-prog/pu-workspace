@@ -204,6 +204,45 @@ def test_service_reasonable_large_finite_edit_accepted(world, field, value):
     assert Decimal(line[field]) == Decimal(value)
 
 
+# --- DS03G: create_estimate vat_rate non-finite regression (service level) ---
+# Existing range check 0<=rate<=30 does not reject NaN/sNaN (comparisons are
+# False) and accepts Infinity only via range; non-finite must raise ValueError
+# before any write. Baseline count/estimate snapshot must survive rollback.
+
+
+def _baseline(db, pid):
+    return len(svc.list_estimates(db, pid)), svc.get_estimate(db, pid, None) if False else None
+
+
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_create_estimate_nonfinite_vat_rate_rejected_and_baseline_kept(world, value):
+    db, pid = world["db"], world["p"].id
+    count_before = len(svc.list_estimates(db, pid))
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.create_estimate(db, pid, "НДС", PARSED, vat_rate=value)
+    db.rollback()
+    assert len(svc.list_estimates(db, pid)) == count_before
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("value", ["0", "22", "30"])
+def test_create_estimate_valid_vat_rate_accepted(world, value):
+    db, pid = world["db"], world["p"].id
+    est = svc.create_estimate(db, pid, "НДС", PARSED, vat_rate=value)
+    assert Decimal(est["vat_rate"]) == Decimal(value)
+
+
+@pytest.mark.parametrize("value", ["-1", "31"])
+def test_create_estimate_out_of_range_vat_rate_rejected(world, value):
+    db, pid = world["db"], world["p"].id
+    count_before = len(svc.list_estimates(db, pid))
+    with pytest.raises(ValueError):
+        svc.create_estimate(db, pid, "НДС", PARSED, vat_rate=value)
+    db.rollback()
+    assert len(svc.list_estimates(db, pid)) == count_before
+
+
 def test_forms_render(world):
     from openpyxl import load_workbook
 
