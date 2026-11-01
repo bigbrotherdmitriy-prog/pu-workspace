@@ -366,3 +366,131 @@ def test_rd_content_concurrent_cas_small_quota(tmp_path):
     assert not [p for p in project_dir.iterdir() if p.name.startswith(".tmp-")]
     total = sum(p.stat().st_size for p in blobs)
     assert total <= 64
+
+
+# ---------------------------------------------------------------------------
+# DS-11J: distinct-content race at quota, atomic publication hook, write
+# failure injection, and read max_bytes rejection. Tests only; no provider,
+# API, TestClient, network or production paths. Parent-directory TOCTOU and
+# shared mutable/CAS quota remain unresolved and are NOT claimed covered.
+# ---------------------------------------------------------------------------
+
+
+def _race_worker(root, pid, payload, start_evt, q):
+    try:
+        s = RdVersionContentStore(root=root, quota_bytes=48)
+        start_evt.wait(5.0)
+        try:
+            q.put(("ok", s.put(pid, payload)))
+        except StorageQuotaExceeded:
+            q.put(("quota", None))
+        except BaseException as exc:  # noqa: BLE001
+            q.put((f"err:{type(exc).__name__}", None))
+    except BaseException as exc:  # noqa: BLE001
+        q.put((f"init:{type(exc).__name__}", None))
+
+
+def test_rd_content_distinct_race_at_quota(tmp_path):
+    ctx = multiprocessing.get_context("fork")
+    q = ctx.Queue()
+    start_evt = ctx.Event()
+    payloads = [bytes([65 + i]) * 32 for i in range(3)]
+    procs = [ctx.Process(target=_race_worker, args=(tmp_path, 7, p, start_evt, q)) for p in payloads]
+    for p in procs:
+        p.start()
+    start_evt.set()
+    for p in procs:
+        p.join(5.0)
+    for p in procs:
+        if p.is_alive():
+            p.terminate()
+            p.join(2.0)
+            pytest.fail("distinct-content race worker hung")
+    assert [p.exitcode for p in procs] == [0, 0, 0]
+    results = [q.get(timeout=1.0) for _ in procs]
+    kinds = [r[0] for r in results]
+    assert kinds.count("ok") == 1, results
+    assert kinds.count("quota") == 2, results
+    winner_digest = next(r[1] for r in results if r[0] == "ok")
+    project_dir = tmp_path / ".rd-version-content" / "7"
+    blobs = [p for p in project_dir.iterdir() if not p.name.startswith(".")]
+    assert [p.name for p in blobs] == [winner_digest]
+    assert not [p for p in project_dir.iterdir() if p.name.startswith(".tmp-")]
+    data = blobs[0].read_bytes()
+    assert len(data) == 32 and hashlib.sha256(data).hexdigest() == winner_digest
+    assert sum(p.stat().st_size for p in blobs) <= 48
+
+
+def test_rd_content_atomic_publication_hook(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    data = b"atomic-publish-payload"
+    d = _digest(data)
+    target = _blob(tmp_path, 7, d)
+    real_link = os.link
+    observed = {}
+
+    def hook(src, dst, *a, **kw):
+        observed["src"] = src
+        observed["dst"] = dst
+        observed["target_absent"] = not os.path.exists(target)
+        observed["tmp_bytes"] = open(src, "rb").read()
+        return real_link(src, dst, *a, **kw)
+
+    monkeypatch.setattr(os, "link", hook)
+    assert s.put(7, data) == d
+    assert observed["target_absent"] is True
+    assert observed["tmp_bytes"] == data
+    assert os.path.exists(target)
+    assert s.read(7, d, 1024) == data
+    assert hashlib.sha256(target.read_bytes()).hexdigest() == d
+    assert not [p for p in target.parent.iterdir() if p.name.startswith(".tmp-")]
+
+
+def test_rd_content_write_failure_no_publish_then_retry(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    data = b"write-failure-payload"
+    d = _digest(data)
+    target = _blob(tmp_path, 7, d)
+    real_write = os.write
+
+    def boom(fd, buf):
+        raise OSError(5, "injected write failure")
+
+    monkeypatch.setattr(os, "write", boom)
+    with pytest.raises(StorageUnavailable):
+        s.put(7, data)
+    monkeypatch.setattr(os, "write", real_write)
+    assert not target.exists()
+    assert not [p for p in target.parent.iterdir() if p.name.startswith(".tmp-")]
+    assert s.put(7, data) == d
+    assert s.read(7, d, 1024) == data
+
+
+def test_rd_content_fsync_failure_no_publish_then_retry(tmp_path, monkeypatch):
+    s = _store(tmp_path)
+    data = b"fsync-failure-payload"
+    d = _digest(data)
+    target = _blob(tmp_path, 7, d)
+    real_fsync = os.fsync
+
+    def boom(fd):
+        raise OSError(5, "injected fsync failure")
+
+    monkeypatch.setattr(os, "fsync", boom)
+    with pytest.raises(StorageUnavailable):
+        s.put(7, data)
+    monkeypatch.setattr(os, "fsync", real_fsync)
+    assert not target.exists()
+    assert not [p for p in target.parent.iterdir() if p.name.startswith(".tmp-")]
+    assert s.put(7, data) == d
+    assert s.read(7, d, 1024) == data
+
+
+def test_rd_content_read_max_bytes_rejects_oversized(tmp_path):
+    s = _store(tmp_path)
+    data = b"0123456789"
+    d = s.put(7, data)
+    with pytest.raises(StorageQuotaExceeded):
+        s.read(7, d, 5)
+    assert s.read(7, d, len(data)) == data
+    assert s.read(7, d, len(data) + 100) == data
