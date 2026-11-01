@@ -14,3 +14,82 @@ def test_google_and_yandex_implement_the_same_core_contract():
 def test_core_contract_has_no_provider_specific_method_names():
     names = set(dir(StorageAdapter))
     assert not any("google" in name or "yandex" in name for name in names)
+
+
+import pytest
+
+from app.integrations.contracts import StorageQuotaExceeded
+from app.integrations.pu_storage import PuStorageAdapter, RdVersionContentStore
+
+
+SIX = b"abcdef"
+TWO = b"ab"
+
+
+def _adapter(tmp_path, project_id=1, quota=10):
+    return PuStorageAdapter(project_id=project_id, root=tmp_path, quota_bytes=quota)
+
+
+def _store(tmp_path, quota=10):
+    return RdVersionContentStore(root=tmp_path, quota_bytes=quota)
+
+
+def _mutable_files(adapter):
+    root = adapter._ensure_project_root()
+    return sorted(p.name for p in root.iterdir() if p.is_file())
+
+
+def test_cas_then_mutable_write_rejects_and_preserves_cas(tmp_path):
+    adapter = _adapter(tmp_path)
+    store = _store(tmp_path)
+    digest = store.put(1, SIX)
+    before = store.read(1, digest, len(SIX))
+    with pytest.raises(StorageQuotaExceeded):
+        adapter.write_file(None, "mutable.bin", SIX)
+    assert store.read(1, digest, len(SIX)) == before
+    assert _mutable_files(adapter) == []
+
+
+def test_mutable_then_cas_rejects_and_preserves_mutable(tmp_path):
+    adapter = _adapter(tmp_path)
+    store = _store(tmp_path)
+    file_id = adapter.write_file(None, "mutable.bin", SIX)
+    before, _ = adapter.read_bytes(file_id, len(SIX))
+    with pytest.raises(StorageQuotaExceeded):
+        store.put(1, SIX)
+    after, _ = adapter.read_bytes(file_id, len(SIX))
+    assert after == before
+    project_dir = store._project_dir(1, create=False)
+    assert not any(p.name.startswith(".tmp-") for p in project_dir.iterdir())
+
+
+def test_copy_folder_tree_rejects_under_quota_and_leaves_source(tmp_path):
+    adapter = _adapter(tmp_path)
+    folder_id = adapter.create_folder("src")
+    adapter.write_file(folder_id, "a.bin", SIX)
+    before = adapter.walk_tree(folder_id)
+    with pytest.raises(StorageQuotaExceeded):
+        adapter.copy_folder_tree(folder_id, "pu:/", "src")
+    assert adapter.walk_tree(folder_id) == before
+    root = adapter._ensure_project_root()
+    assert sorted(p.name for p in root.iterdir()) == ["src"]
+
+
+def test_project_budgets_are_independent(tmp_path):
+    a1 = _adapter(tmp_path, project_id=1, quota=10)
+    a2 = _adapter(tmp_path, project_id=2, quota=10)
+    a1.write_file(None, "one.bin", TWO)
+    a2.write_file(None, "two.bin", TWO)
+    assert a1.usage() == (2, 10)
+    assert a2.usage() == (2, 10)
+
+
+def test_cas_dedup_does_not_double_usage_and_usage_includes_retained_cas(tmp_path):
+    adapter = _adapter(tmp_path)
+    store = _store(tmp_path)
+    store.put(1, SIX)
+    store.put(1, SIX)
+    assert store._used_bytes(1) == len(SIX)
+    used, quota = adapter.usage()
+    assert quota == 10
+    assert used == len(SIX)
