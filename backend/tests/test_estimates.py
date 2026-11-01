@@ -142,6 +142,68 @@ def test_line_edit_validation(world):
         svc.update_line(db, world["o"].id, lid, {"name": "x"})
 
 
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_service_nonfinite_edit_rejected(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, lid, {field: value})
+    db.rollback()
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value,expected", [("55,5", Decimal("55.5")), ("0", Decimal("0"))])
+def test_service_finite_edit_controls(world, field, value, expected):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert Decimal(line[field]) == expected
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", [None, ""])
+def test_service_blank_edit_clears_field(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert line[field] is None
+
+
+# --- finite values beyond declared Numeric(18,3)/(18,2) column bounds ---
+# DB declared precision is the sole bound; no new business max rules here.
+# 1e100 is finite but cannot fit Numeric(18,3)/(18,2): must be rejected as
+# ValueError by the service before flush, not surface as SQL/data error.
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+def test_service_oversized_finite_edit_rejected_and_snapshot_kept(world, field):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, lid, {field: "1e100"})
+    db.rollback()
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("field,value", [
+    ("qty", "123456.789"),
+    ("unit_price", "123456.78"),
+    ("total", "123456.78"),
+])
+def test_service_reasonable_large_finite_edit_accepted(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert Decimal(line[field]) == Decimal(value)
+
+
 def test_forms_render(world):
     from openpyxl import load_workbook
 
@@ -220,3 +282,42 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+def _api_client(db):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import estimates as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_api_nonfinite_patch_rejected_and_snapshot_kept(world, field, value):
+    db, pid = world["db"], world["p"].id
+    c = _api_client(db)
+    lid = world["lines"][0]["id"]
+    before = c.get(f"/projects/{pid}/estimates/{world['est']['id']}")
+    assert before.status_code == 200
+    r = c.patch(f"/projects/{pid}/estimate-lines/{lid}", json={field: value})
+    assert r.status_code == 422
+    after = c.get(f"/projects/{pid}/estimates/{world['est']['id']}")
+    assert after.status_code == 200 and after.json() == before.json()
+
+
+def test_api_mixed_patch_rolls_back_partial_write(world):
+    db, pid = world["db"], world["p"].id
+    c = _api_client(db)
+    lid = world["lines"][0]["id"]
+    before = c.get(f"/projects/{pid}/estimates/{world['est']['id']}").json()
+    r = c.patch(f"/projects/{pid}/estimate-lines/{lid}", json={"qty": "55,5", "unit_price": "NaN"})
+    assert r.status_code == 422
+    after = c.get(f"/projects/{pid}/estimates/{world['est']['id']}").json()
+    assert after == before
