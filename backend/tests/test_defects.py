@@ -2,15 +2,18 @@ from datetime import date, timedelta
 from io import BytesIO
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app import defects as svc
 from app.database import Base
+from app.models.defects import Defect
 from app.models.organization_contract import Organization
 from app.models.project import Project
+from app.models.rd import RdVolume, RdVolumeVersion
 
 JPEG = b"\xff\xd8\xff\xe0 fake jpeg"
 
@@ -30,6 +33,87 @@ def world():
         db.commit()
         yield {"db": db, "p": p, "o": o}
     engine.dispose()
+
+
+@pytest.fixture
+def fk_world():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def _fk_on(dbapi_conn, _rec):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        org = Organization(name="FK org")
+        db.add(org)
+        db.flush()
+        p = Project(name="P", organization_id=org.id)
+        db.add(p)
+        db.flush()
+        vol = RdVolume(project_id=p.id, title="V", file_name="v.pdf", provider="local")
+        db.add(vol)
+        db.flush()
+        ver = RdVolumeVersion(
+            volume_id=vol.id, content_sha256="a" * 64, size_bytes=10,
+            file_name="v.pdf", mime_type="application/pdf",
+        )
+        db.add(ver)
+        db.flush()
+        db.commit()
+        yield {"db": db, "p": p, "vol": vol, "ver": ver}
+    engine.dispose()
+
+
+def _defect(db, pid, **kw):
+    d = Defect(project_id=pid, number=kw.pop("number", 1), title=kw.pop("title", "T"), **kw)
+    db.add(d)
+    db.flush()
+    return d
+
+
+def test_unbound_defect_allowed(fk_world):
+    db, pid = fk_world["db"], fk_world["p"].id
+    d = _defect(db, pid)
+    db.commit()
+    assert d.rd_version_id is None
+
+
+def test_bind_persists_exact_id_across_new_version(fk_world):
+    db, pid, ver, vol = fk_world["db"], fk_world["p"].id, fk_world["ver"], fk_world["vol"]
+    d = _defect(db, pid, rd_version_id=ver.id)
+    db.commit()
+    bound_id = ver.id
+    new_ver = RdVolumeVersion(
+        volume_id=vol.id, content_sha256="b" * 64, size_bytes=20,
+        file_name="v2.pdf", mime_type="application/pdf",
+    )
+    db.add(new_ver)
+    db.commit()
+    assert new_ver.id != bound_id
+    db.expire_all()
+    assert db.get(Defect, d.id).rd_version_id == bound_id
+
+
+def test_referenced_version_deletion_rejected(fk_world):
+    db, pid, ver = fk_world["db"], fk_world["p"].id, fk_world["ver"]
+    _defect(db, pid, rd_version_id=ver.id)
+    db.commit()
+    with pytest.raises(IntegrityError):
+        db.delete(ver)
+        db.flush()
+    db.rollback()
+    assert db.get(RdVolumeVersion, ver.id) is not None
+
+
+def test_nonexistent_version_rejected(fk_world):
+    db, pid = fk_world["db"], fk_world["p"].id
+    with pytest.raises(IntegrityError):
+        _defect(db, pid, rd_version_id=999999)
+    db.rollback()
+    assert db.query(Defect).count() == 0
 
 
 def test_numbers_are_per_project_and_validation(world):
