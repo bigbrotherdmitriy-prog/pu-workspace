@@ -5,10 +5,11 @@ import re
 from datetime import date, datetime, timezone
 from io import BytesIO
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.defects import Defect, DefectComment, DefectPhoto
+from app.models.rd import RdVolume, RdVolumeVersion
 
 STATUSES = ("open", "in_progress", "fixed", "accepted")
 STATUS_LABEL = {"open": "Открыто", "in_progress": "В работе", "fixed": "Устранено", "accepted": "Принято"}
@@ -57,6 +58,7 @@ def _defect_dict(db: Session, d: Defect, full: bool = False) -> dict:
         "overdue": bool(d.due_date and d.status in ("open", "in_progress") and d.due_date < date.today()),
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "closed_at": d.closed_at.isoformat() if d.closed_at else None,
+        "rd_version_id": d.rd_version_id,
         "photos": [_photo_dict(p) for p in photos],
     }
     if full:
@@ -98,6 +100,50 @@ def _get(db: Session, project_id: int, defect_id: int) -> Defect:
 
 def get_defect(db: Session, project_id: int, defect_id: int) -> dict:
     return _defect_dict(db, _get(db, project_id, defect_id), full=True)
+
+
+def bind_rd_version(db: Session, project_id: int, defect_id: int, version_id: int) -> dict:
+    """Привязать замечание к конкретной версии РД (rd_version_id).
+
+    - version_id должен быть положительным int (bool отклоняется) -> ValueError.
+    - Замечание ищется в рамках проекта через _get -> LookupError.
+    - Версия должна существовать и принадлежать тому же проекту (через RdVolume);
+      отсутствующая и чужая версия неразличимы -> LookupError.
+    - Первичная привязка выполняется атомарным условным UPDATE
+      (WHERE id/project_id AND rd_version_id IS NULL), чтобы два параллельных
+      первичных связывателя не перезаписали друг друга.
+    - Если условный UPDATE не затронул строку, читается фактическая текущая
+      привязка: та же версия -> идемпотентный успех; другая версия -> ValueError.
+    - При ошибке состояние не меняется. Выполняется flush без commit.
+    """
+    if isinstance(version_id, bool) or not isinstance(version_id, int) or version_id <= 0:
+        raise ValueError("Некорректный идентификатор версии РД")
+    d = _get(db, project_id, defect_id)
+    row = db.execute(
+        select(RdVolumeVersion.id)
+        .join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id)
+        .where(RdVolumeVersion.id == version_id, RdVolume.project_id == project_id)
+    ).scalar_one_or_none()
+    if row is None:
+        raise LookupError("Версия РД не найдена")
+    result = db.execute(
+        update(Defect)
+        .where(Defect.id == defect_id, Defect.project_id == project_id, Defect.rd_version_id.is_(None))
+        .values(rd_version_id=version_id)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        current = db.execute(
+            select(Defect.rd_version_id).where(Defect.id == defect_id, Defect.project_id == project_id)
+        ).scalar_one_or_none()
+        if current != version_id:
+            raise ValueError("Замечание уже привязано к другой версии РД")
+    # Синхронизируем ORM-состояние с фактическим значением в БД, даже если
+    # identity map содержит устаревший объект. Обновляем только поле привязки,
+    # не трогая прочие (возможно изменённые) атрибуты.
+    db.refresh(d, attribute_names=["rd_version_id"])
+    db.flush()
+    return _defect_dict(db, d, full=True)
 
 
 def list_defects(db: Session, project_id: int, status: str | None = None, q: str | None = None) -> dict:
