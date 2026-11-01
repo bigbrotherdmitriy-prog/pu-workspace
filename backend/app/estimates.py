@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.estimates import Estimate, EstimateLine, KsAct
+from app.models.project import Project
 from app.models.work_log import WorkLogEntry
 
 TWO = Decimal("0.01")
@@ -289,8 +290,6 @@ def _preview(db: Session, project_id: int, estimate_id: int, period_from: date, 
         if lid not in line_by_id:
             continue
         if lid in legacy_lines:
-            if lid not in {w[0] for w in []}:
-                pass
             continue
         cap = remaining.get(lid)
         if cap is not None and cap <= 0:
@@ -304,6 +303,25 @@ def _preview(db: Session, project_id: int, estimate_id: int, period_from: date, 
         qty_by_line[lid] = qty_by_line.get(lid, ZERO) + take
         if cap is not None:
             remaining[lid] = cap - take
+    # Предупреждение о превышении остатка сметного объёма: сумма положительного свободного
+    # факта по строке больше оставшегося сметного объёма (включая cap == 0 при наличии факта).
+    # Сравниваем только свободный (не зарезервированный) факт, чтобы не давать ложных срабатываний.
+    free_by_line: dict[int, Decimal] = {}
+    for en in entries:
+        if en.id not in free:
+            continue
+        lid = en.estimate_line_id
+        if lid not in line_by_id or lid in legacy_lines:
+            continue
+        free_by_line[lid] = free_by_line.get(lid, ZERO) + free[en.id]
+    for lid, free_qty in free_by_line.items():
+        l = line_by_id.get(lid)
+        if l is None or l.qty is None:
+            continue
+        left = max(ZERO, l.qty - billed.get(lid, ZERO))
+        if free_qty > left:
+            warnings.append(f"Позиция {l.position or l.id} «{l.name[:60]}»: свободный факт превышает остаток сметного объёма "
+                            f"({_s(free_qty, THREE)} > {_s(left, THREE)}), в акт включён остаток сметного объёма.")
     for lid in legacy_lines:
         l = line_by_id.get(lid)
         if l is None:
@@ -338,9 +356,16 @@ def preview_act(db: Session, project_id: int, estimate_id: int, period_from: dat
 def create_act(db: Session, project_id: int, estimate_id: int, period_from: date, period_to: date,
                number: str | None = None, act_date: date | None = None) -> dict:
     # Сериализация конкурирующих созданий по проекту: блокировка строки проекта до commit вызывающего.
-    db.execute(select(Estimate.id).where(Estimate.project_id == project_id).with_for_update())
+    db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
     prev = _preview(db, project_id, estimate_id, period_from, period_to)
     if not prev["lines"]:
+        legacy_warnings = [w for w in prev["warnings"] if "legacy-акт" in w]
+        if legacy_warnings:
+            raise ValueError(
+                "За период нет новых выполненных работ по позициям сметы: строки исключены из сверки из-за legacy-акта "
+                "за пересекающийся период без распределения по записям журнала — источник факта не определён. "
+                + " ".join(legacy_warnings)
+            )
         raise ValueError("За период нет новых выполненных работ по позициям сметы: внесите факт в журнале работ и выберите позицию сметы.")
     existing = db.scalar(select(func.count()).select_from(KsAct).where(KsAct.project_id == project_id, KsAct.estimate_id == estimate_id)) or 0
     act = KsAct(
