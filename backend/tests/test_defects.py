@@ -18,6 +18,18 @@ from app.models.rd import RdVolume, RdVolumeVersion
 JPEG = b"\xff\xd8\xff\xe0 fake jpeg"
 
 
+def _fk_engine():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def _fk_on(dbapi_conn, _rec):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+    return engine
+
+
 @pytest.fixture
 def world():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -37,14 +49,7 @@ def world():
 
 @pytest.fixture
 def fk_world():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-
-    @event.listens_for(engine, "connect")
-    def _fk_on(dbapi_conn, _rec):
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA foreign_keys=ON")
-        cur.close()
-
+    engine = _fk_engine()
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         org = Organization(name="FK org")
@@ -67,11 +72,56 @@ def fk_world():
     engine.dispose()
 
 
+@pytest.fixture
+def bind_world():
+    """FK-enabled world with two projects, each owning a volume+version."""
+    engine = _fk_engine()
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        org = Organization(name="Bind org")
+        db.add(org)
+        db.flush()
+        p = Project(name="P", organization_id=org.id)
+        o = Project(name="O", organization_id=org.id)
+        db.add_all([p, o])
+        db.flush()
+        vol_p = RdVolume(project_id=p.id, title="VP", file_name="vp.pdf", provider="local")
+        vol_o = RdVolume(project_id=o.id, title="VO", file_name="vo.pdf", provider="local")
+        db.add_all([vol_p, vol_o])
+        db.flush()
+        ver_p = RdVolumeVersion(
+            volume_id=vol_p.id, content_sha256="c" * 64, size_bytes=11,
+            file_name="vp.pdf", mime_type="application/pdf",
+        )
+        ver_o = RdVolumeVersion(
+            volume_id=vol_o.id, content_sha256="d" * 64, size_bytes=12,
+            file_name="vo.pdf", mime_type="application/pdf",
+        )
+        db.add_all([ver_p, ver_o])
+        db.flush()
+        db.commit()
+        yield {"db": db, "p": p, "o": o, "vol_p": vol_p, "vol_o": vol_o, "ver_p": ver_p, "ver_o": ver_o}
+    engine.dispose()
+
+
 def _defect(db, pid, **kw):
     d = Defect(project_id=pid, number=kw.pop("number", 1), title=kw.pop("title", "T"), **kw)
     db.add(d)
     db.flush()
     return d
+
+
+def _snapshot(db, defect_id):
+    db.expire_all()
+    d = db.get(Defect, defect_id)
+    return {
+        "id": d.id,
+        "project_id": d.project_id,
+        "number": d.number,
+        "title": d.title,
+        "status": d.status,
+        "rd_version_id": d.rd_version_id,
+    }
 
 
 def test_unbound_defect_allowed(fk_world):
@@ -227,3 +277,133 @@ def test_api(world):
     assert c.get(f"/projects/{pid}/defects/export.xlsx").content[:2] == b"PK"
     assert c.get(f"/projects/{world['o'].id}/defects/{did}").status_code == 404
     assert c.delete(f"/projects/{pid}/defects/{did}").json() == {"deleted": did}
+
+
+# --- DS13C: direct service tests for bind_rd_version (implemented in DS13B) ---
+# These tests exercise the service function directly against a real FK-enabled
+# SQLite session. They do not use the API, network, providers or production data.
+# Thread concurrency is not claimed here; an atomic bind guard is a follow-up
+# requirement before full acceptance.
+
+
+def test_bind_initial_same_project_persists(bind_world):
+    db, pid, ver = bind_world["db"], bind_world["p"].id, bind_world["ver_p"]
+    d = _defect(db, pid)
+    db.commit()
+    before = _snapshot(db, d.id)
+    assert before["rd_version_id"] is None
+    out = svc.bind_rd_version(db, pid, d.id, ver.id)
+    assert out["id"] == d.id
+    assert out["rd_version_id"] == ver.id
+    db.commit()
+    after = _snapshot(db, d.id)
+    assert after["rd_version_id"] == ver.id
+    assert after["project_id"] == before["project_id"]
+    assert after["number"] == before["number"]
+    assert after["title"] == before["title"]
+    assert after["status"] == before["status"]
+
+
+def test_bind_same_version_repeat_no_change(bind_world):
+    db, pid, ver = bind_world["db"], bind_world["p"].id, bind_world["ver_p"]
+    d = _defect(db, pid)
+    db.commit()
+    first = svc.bind_rd_version(db, pid, d.id, ver.id)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    second = svc.bind_rd_version(db, pid, d.id, ver.id)
+    db.commit()
+    assert first["rd_version_id"] == ver.id
+    assert second["rd_version_id"] == ver.id
+    assert _snapshot(db, d.id) == snap
+
+
+def test_bind_different_existing_version_rejected(bind_world):
+    db, pid, vol_p, ver = bind_world["db"], bind_world["p"].id, bind_world["vol_p"], bind_world["ver_p"]
+    other = RdVolumeVersion(
+        volume_id=vol_p.id, content_sha256="e" * 64, size_bytes=13,
+        file_name="vp2.pdf", mime_type="application/pdf",
+    )
+    db.add(other)
+    db.flush()
+    d = _defect(db, pid, rd_version_id=ver.id)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    assert snap["rd_version_id"] == ver.id
+    with pytest.raises(ValueError):
+        svc.bind_rd_version(db, pid, d.id, other.id)
+    db.rollback()
+    assert _snapshot(db, d.id) == snap
+    assert _snapshot(db, d.id)["rd_version_id"] == ver.id
+
+
+def test_bind_foreign_project_version_rejected(bind_world):
+    db, pid, ver_o = bind_world["db"], bind_world["p"].id, bind_world["ver_o"]
+    d = _defect(db, pid)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    with pytest.raises(LookupError):
+        svc.bind_rd_version(db, pid, d.id, ver_o.id)
+    db.rollback()
+    assert _snapshot(db, d.id) == snap
+    assert _snapshot(db, d.id)["rd_version_id"] is None
+
+
+def test_bind_missing_version_same_lookup_error(bind_world):
+    db, pid = bind_world["db"], bind_world["p"].id
+    d = _defect(db, pid)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    with pytest.raises(LookupError):
+        svc.bind_rd_version(db, pid, d.id, 999999)
+    db.rollback()
+    assert _snapshot(db, d.id) == snap
+    assert _snapshot(db, d.id)["rd_version_id"] is None
+
+
+def test_bind_foreign_project_defect_denied(bind_world):
+    db, pid, oid, ver = bind_world["db"], bind_world["p"].id, bind_world["o"].id, bind_world["ver_p"]
+    d = _defect(db, pid)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    with pytest.raises(LookupError):
+        svc.bind_rd_version(db, oid, d.id, ver.id)
+    db.rollback()
+    assert _snapshot(db, d.id) == snap
+    assert _snapshot(db, d.id)["rd_version_id"] is None
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, -1, "1", "abc", ""])
+def test_bind_invalid_version_id_rejected(bind_world, bad):
+    db, pid = bind_world["db"], bind_world["p"].id
+    d = _defect(db, pid)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    with pytest.raises(ValueError):
+        svc.bind_rd_version(db, pid, d.id, bad)
+    db.rollback()
+    assert _snapshot(db, d.id) == snap
+    assert _snapshot(db, d.id)["rd_version_id"] is None
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, -1, "1", "abc", ""])
+def test_bind_invalid_defect_id_rejected(bind_world, bad):
+    db, pid, ver = bind_world["db"], bind_world["p"].id, bind_world["ver_p"]
+    with pytest.raises(ValueError):
+        svc.bind_rd_version(db, pid, bad, ver.id)
+    db.rollback()
+
+
+def test_bind_flush_not_commit_caller_rollback_removes_binding(bind_world):
+    db, pid, ver = bind_world["db"], bind_world["p"].id, bind_world["ver_p"]
+    d = _defect(db, pid)
+    db.commit()
+    snap = _snapshot(db, d.id)
+    out = svc.bind_rd_version(db, pid, d.id, ver.id)
+    assert out["rd_version_id"] == ver.id
+    # Service must flush, not commit: the binding is visible in-session but the
+    # caller still owns the transaction and can roll it back.
+    assert db.get(Defect, d.id).rd_version_id == ver.id
+    db.rollback()
+    assert _snapshot(db, d.id) == snap
+    assert _snapshot(db, d.id)["rd_version_id"] is None
