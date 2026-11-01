@@ -7,10 +7,13 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app import equipment as equipment_service
+from app import purchase as purchase_service
 from app.database import Base
 from app.models.equipment import EquipmentUnit
+from app.models.execution_finance import CashFlowEntry
 from app.models.organization_contract import Organization
 from app.models.project import Project
+from app.models.purchase import PurchaseItem
 from app.models.rd import RdSpecItem, RdVolume
 
 
@@ -376,3 +379,150 @@ def test_units_of_rejected_rd_items_are_hidden(world):
     names = [u["name"] for u in eq.list_units(db, project.id)]
     assert names == ["Насос"]
     assert eq.summary(db, project.id)["total"] == 1
+
+
+def test_generate_does_not_mark_physical_received_from_purchase(world):
+    """generate создаёт planned-юниты; paid/received purchase не делает их физически полученными.
+
+    Контракт: physical unit.status/received_date/installed_date меняются только
+    явным update_unit. generate не должен автоматически проставлять received.
+    """
+    db = world["db"]
+    project = world["project"]
+    vol = world["volume"]
+
+    spec = _make_spec(db, project.id, vol.id, "Щит", qty="2", unit="шт",
+                      type_mark="ЩР-1")
+    db.commit()
+
+    # purchase source для confirmed spec через rebuild (commit внутри)
+    purchase_service.rebuild(db, project.id)
+    db.commit()
+
+    items = db.query(PurchaseItem).filter(
+        PurchaseItem.project_id == project.id
+    ).all()
+    assert len(items) == 1
+    item = items[0]
+    item_id = item.id
+
+    # помечаем PurchaseItem paid
+    purchase_service.set_status(db, project.id, item_id, "paid")
+    db.commit()
+    db.refresh(item)
+    assert item.status == "paid"
+    purchase_status_before = item.status
+    purchase_qty_ordered_before = item.qty_ordered
+
+    cashflow_before = db.query(CashFlowEntry).count()
+
+    # generate создаёт planned units, несмотря на paid purchase
+    res = equipment_service.generate(db, project.id)
+    db.commit()
+    assert res["created"] == 2
+
+    units = db.query(EquipmentUnit).filter(
+        EquipmentUnit.project_id == project.id
+    ).order_by(EquipmentUnit.unit_no).all()
+    assert len(units) == 2
+    for u in units:
+        assert u.status == "planned"
+        assert u.received_date is None
+        assert u.installed_date is None
+        assert u.purchase_item_id == item_id
+
+    # purchase status/qty_ordered не меняются от generate
+    db.refresh(item)
+    assert item.status == purchase_status_before
+    assert item.qty_ordered == purchase_qty_ordered_before
+    assert db.query(CashFlowEntry).count() == cashflow_before
+
+    # повтор с purchase.status received также не ставит physical received/даты
+    purchase_service.set_status(db, project.id, item_id, "received")
+    db.commit()
+    res2 = equipment_service.generate(db, project.id)
+    db.commit()
+    assert res2["created"] == 0
+    assert res2["existing"] == 2
+
+    units = db.query(EquipmentUnit).filter(
+        EquipmentUnit.project_id == project.id
+    ).order_by(EquipmentUnit.unit_no).all()
+    assert len(units) == 2
+    for u in units:
+        assert u.status == "planned"
+        assert u.received_date is None
+        assert u.installed_date is None
+
+    # явный update_unit существующей единицы до received с датой/location/note/serial
+    first = units[0]
+    first_id = first.id
+    equipment_service.update_unit(db, project.id, first_id, {
+        "status": "received",
+        "received_date": "2025-02-10",
+        "location": "Склад А",
+        "note": "принято по акту",
+        "serial_number": "SN-PHYS-1",
+    })
+    db.commit()
+    db.refresh(first)
+    assert first.status == "received"
+    assert first.received_date == date(2025, 2, 10)
+    assert first.location == "Склад А"
+    assert first.note == "принято по акту"
+    assert first.serial_number == "SN-PHYS-1"
+
+    # повтор generate — старая unit сохраняет id/status/date/location/note/serial
+    res3 = equipment_service.generate(db, project.id)
+    db.commit()
+    assert res3["created"] == 0
+    assert res3["existing"] == 2
+    db.refresh(first)
+    assert first.id == first_id
+    assert first.status == "received"
+    assert first.received_date == date(2025, 2, 10)
+    assert first.location == "Склад А"
+    assert first.note == "принято по акту"
+    assert first.serial_number == "SN-PHYS-1"
+
+    # увеличение qty RD -> новые unit_no planned без physical dates
+    spec.qty = 4
+    db.commit()
+    res4 = equipment_service.generate(db, project.id)
+    db.commit()
+    assert res4["created"] == 2
+
+    units = db.query(EquipmentUnit).filter(
+        EquipmentUnit.project_id == project.id
+    ).order_by(EquipmentUnit.unit_no).all()
+    assert len(units) == 4
+
+    db.refresh(first)
+    assert first.id == first_id
+    assert first.status == "received"
+    assert first.received_date == date(2025, 2, 10)
+    assert first.location == "Склад А"
+    assert first.note == "принято по акту"
+    assert first.serial_number == "SN-PHYS-1"
+
+    new_units = [u for u in units if u.id != first_id]
+    assert len(new_units) == 3
+    for u in new_units:
+        assert u.status == "planned"
+        assert u.received_date is None
+        assert u.installed_date is None
+    assert sorted(u.unit_no for u in units) == [1, 2, 3, 4]
+
+    # повтор ещё раз не удваивает units
+    res5 = equipment_service.generate(db, project.id)
+    db.commit()
+    assert res5["created"] == 0
+    assert db.query(EquipmentUnit).filter(
+        EquipmentUnit.project_id == project.id
+    ).count() == 4
+
+    # purchase status/qty_ordered и journal entries не меняются от generate
+    db.refresh(item)
+    assert item.status == "received"
+    assert item.qty_ordered == purchase_qty_ordered_before
+    assert db.query(CashFlowEntry).count() == cashflow_before
