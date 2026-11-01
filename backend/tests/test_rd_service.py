@@ -10,7 +10,7 @@ from app import rd_service
 from app.database import Base
 from app.models.organization_contract import Organization
 from app.models.project import Project
-from app.models.rd import RdSpecItem, RdVolume
+from app.models.rd import RdSpecItem, RdVolume, RdVolumeVersion
 
 
 @pytest.fixture
@@ -298,3 +298,134 @@ def test_parse_volume_does_not_duplicate_confirmed_and_removes_exact_copies(worl
     db.expire_all()
     items = db.execute(select(RdSpecItem).where(RdSpecItem.volume_id == vol.id)).scalars().all()
     assert sorted((i.name, i.status) for i in items) == [("Кабель", "confirmed"), ("Щит", "proposed")]
+
+
+def _fail_if_called(*_args, **_kwargs):
+    raise AssertionError("provider/OCR path must not be called by record_volume_version")
+
+
+def _version_rows(db, volume_id):
+    return db.execute(
+        select(RdVolumeVersion).where(RdVolumeVersion.volume_id == volume_id)
+    ).scalars().all()
+
+
+def test_record_volume_version_metadata_and_dedup(world, monkeypatch):
+    import hashlib
+
+    db = world["db"]
+    project = world["project"]
+    vol = _make_volume(db, project.id, external_id="drive-version")
+
+    monkeypatch.setattr(rd_service, "_download", _fail_if_called)
+    monkeypatch.setattr(rd_service, "split_pages", _fail_if_called)
+    monkeypatch.setattr(rd_service, "find_spec_pages", _fail_if_called)
+    monkeypatch.setattr(rd_service, "spec_text", _fail_if_called)
+    monkeypatch.setattr(rd_service, "specification_from_text", _fail_if_called)
+
+    content = b"%PDF-1.4 synthetic volume bytes"
+    expected_digest = hashlib.sha256(content).hexdigest()
+
+    first = rd_service.record_volume_version(
+        db, project.id, vol.id, content, "  plan.pdf  ", "  application/pdf  ",
+    )
+    assert first.id is not None
+    assert first.volume_id == vol.id
+    assert first.content_sha256 == expected_digest
+    assert first.size_bytes == len(content)
+    assert first.file_name == "plan.pdf"
+    assert first.mime_type == "application/pdf"
+    first_id = first.id
+    first_created = first.created_at
+
+    # same bytes, different name/mime -> same row, original fields preserved
+    again = rd_service.record_volume_version(
+        db, project.id, vol.id, content, "other.pdf", "image/png",
+    )
+    assert again.id == first_id
+    assert again.file_name == "plan.pdf"
+    assert again.mime_type == "application/pdf"
+    assert again.created_at == first_created
+    assert len(_version_rows(db, vol.id)) == 1
+
+    # different bytes -> new row
+    other_content = b"%PDF-1.4 different synthetic bytes"
+    second = rd_service.record_volume_version(
+        db, project.id, vol.id, other_content, "plan2.pdf", "application/pdf",
+    )
+    assert second.id != first_id
+    assert second.content_sha256 == hashlib.sha256(other_content).hexdigest()
+    assert second.size_bytes == len(other_content)
+    assert len(_version_rows(db, vol.id)) == 2
+
+
+def test_record_volume_version_accepts_bytes_like(world):
+    import hashlib
+
+    db = world["db"]
+    project = world["project"]
+    vol = _make_volume(db, project.id, external_id="drive-bytes-like")
+
+    payload = b"bytes-like synthetic payload"
+    for variant in (bytearray(payload), memoryview(payload)):
+        version = rd_service.record_volume_version(
+            db, project.id, vol.id, variant, "v.pdf", "application/pdf",
+        )
+        assert version.content_sha256 == hashlib.sha256(payload).hexdigest()
+        assert version.size_bytes == len(payload)
+    assert len(_version_rows(db, vol.id)) == 1
+
+
+def test_record_volume_version_lookup_errors_are_identical(world):
+    db = world["db"]
+    project = world["project"]
+    other = world["other"]
+    vol = _make_volume(db, project.id, external_id="drive-lookup")
+
+    with pytest.raises(LookupError) as wrong_project:
+        rd_service.record_volume_version(
+            db, other.id, vol.id, b"synthetic", "a.pdf", "application/pdf",
+        )
+    with pytest.raises(LookupError) as missing_volume:
+        rd_service.record_volume_version(
+            db, project.id, 999999, b"synthetic", "a.pdf", "application/pdf",
+        )
+    assert str(wrong_project.value) == str(missing_volume.value)
+    assert _version_rows(db, vol.id) == []
+
+
+def test_record_volume_version_does_not_commit(world):
+    db = world["db"]
+    project = world["project"]
+    vol = _make_volume(db, project.id, external_id="drive-no-commit")
+
+    version = rd_service.record_volume_version(
+        db, project.id, vol.id, b"synthetic rollback bytes", "r.pdf", "application/pdf",
+    )
+    version_id = version.id
+    assert version_id is not None
+
+    db.rollback()
+
+    assert db.get(RdVolumeVersion, version_id) is None
+    assert _version_rows(db, vol.id) == []
+    assert db.get(RdVolume, vol.id) is not None
+
+
+def test_record_volume_version_validation_errors(world):
+    db = world["db"]
+    project = world["project"]
+    vol = _make_volume(db, project.id, external_id="drive-validation")
+
+    with pytest.raises(TypeError):
+        rd_service.record_volume_version(
+            db, project.id, vol.id, "not-bytes", "a.pdf", "application/pdf",
+        )
+
+    for bad_name, bad_mime in (("   ", "application/pdf"), ("a.pdf", "  ")):
+        with pytest.raises(ValueError):
+            rd_service.record_volume_version(
+                db, project.id, vol.id, b"synthetic", bad_name, bad_mime,
+            )
+
+    assert _version_rows(db, vol.id) == []
