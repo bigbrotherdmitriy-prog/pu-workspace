@@ -3,7 +3,7 @@ import zipfile
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -12,6 +12,8 @@ from app import equipment_test_act as eta
 from app import work_log as wl
 from app import work_log_form
 from app.database import Base
+from app.models.defects import Defect, DefectPhoto
+from app.models.estimates import Estimate, KsAct
 from app.models.organization_contract import Organization
 from app.models.project import Project
 
@@ -90,3 +92,368 @@ def test_api(world):
     assert c.post(f"/projects/{pid}/executive-docs/equipment-test-act.docx", json={"header": {}, "items": []}).status_code == 422
     r = c.post(f"/projects/{pid}/work-log/form.docx", json={"header": {"object_name": "О"}})
     assert r.status_code == 200 and r.content[:2] == b"PK"
+
+
+@pytest.fixture
+def weekly_world():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        org = Organization(name="Weekly org")
+        db.add(org)
+        db.flush()
+        p1 = Project(name="Проект А", organization_id=org.id)
+        p2 = Project(name="Проект Б", organization_id=org.id)
+        db.add_all([p1, p2])
+        db.flush()
+        db.commit()
+        yield {"db": db, "p1": p1, "p2": p2}
+    engine.dispose()
+
+
+def _snapshot(db: Session) -> dict:
+    return {
+        "work_log_entries": db.execute(select(wl.WorkLogEntry.id, wl.WorkLogEntry.work_name)).all(),
+        "defects": db.execute(select(Defect.id, Defect.status)).all(),
+        "defect_photos": db.execute(select(DefectPhoto.id, DefectPhoto.size_bytes)).all(),
+        "ks_acts": db.execute(select(KsAct.id, KsAct.status)).all(),
+    }
+
+
+def test_collect_weekly_report_scoping_and_readonly(weekly_world):
+    db = weekly_world["db"]
+    p1, p2 = weekly_world["p1"], weekly_world["p2"]
+
+    wl.add_entry(db, p1.id, 1, {"work_date": "2026-10-19", "work_name": "Работа до периода", "unit": "м", "qty": "1"})
+    wl.add_entry(db, p1.id, 1, {"work_date": "2026-10-20", "work_name": "Работа в начале", "unit": "м", "qty": "2"})
+    wl.add_entry(db, p1.id, 1, {"work_date": "2026-10-26", "work_name": "Работа в конце", "unit": "шт", "qty": "3"})
+    wl.add_entry(db, p1.id, 1, {"work_date": "2026-10-27", "work_name": "Работа после периода", "unit": "м", "qty": "4"})
+    wl.add_entry(db, p2.id, 1, {"work_date": "2026-10-22", "work_name": "Чужой проект", "unit": "м", "qty": "5"})
+
+    d1 = Defect(project_id=p1.id, number=1, title="Трещина", status="open", responsible="Иванов",
+                due_date=date(2026, 11, 1), location="Этаж 1")
+    d2 = Defect(project_id=p2.id, number=1, title="Чужой дефект", status="open")
+    db.add_all([d1, d2])
+    db.flush()
+    db.add(DefectPhoto(project_id=p1.id, defect_id=d1.id, filename="a.jpg", mime_type="image/jpeg",
+                       size_bytes=3, data=b"\x00\x01\x02"))
+    db.add(DefectPhoto(project_id=p2.id, defect_id=d2.id, filename="b.jpg", mime_type="image/jpeg",
+                       size_bytes=2, data=b"\xff\xfe"))
+
+    est = Estimate(project_id=p1.id, name="Смета")
+    db.add(est)
+    db.flush()
+    db.add(KsAct(project_id=p1.id, estimate_id=est.id, number="1", period_from=date(2026, 10, 1),
+                 period_to=date(2026, 10, 31), status="draft", customer_status="pending",
+                 lines_json="[]", header_json="{}"))
+    db.commit()
+
+    before = _snapshot(db)
+    result = work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+    after = _snapshot(db)
+
+    assert before == after
+    assert not db.new and not db.dirty and not db.deleted
+
+    assert result["project_id"] == p1.id
+    assert result["project_name"] == "Проект А"
+    assert result["period"] == {"date_from": "2026-10-20", "date_to": "2026-10-26"}
+
+    names = [w["work_name"] for w in result["work_facts"]]
+    assert "Работа в начале" in names and "Работа в конце" in names
+    assert "Работа до периода" not in names and "Работа после периода" not in names
+    assert "Чужой проект" not in names
+
+    assert [d["title"] for d in result["defects"]] == ["Трещина"]
+    assert result["defects"][0]["status"] == "open"
+    assert result["defects"][0]["responsible"] == "Иванов"
+    assert result["defects"][0]["due_date"] == "2026-11-01"
+    assert result["defects"][0]["location"] == "Этаж 1"
+
+    assert len(result["defect_photos"]) == 1
+    photo = result["defect_photos"][0]
+    assert photo["filename"] == "a.jpg" and photo["mime_type"] == "image/jpeg"
+    assert photo["size_bytes"] == 3 and photo["defect_id"] == d1.id
+    assert "data" not in photo
+    assert b"\x00\x01\x02" not in repr(result).encode("utf-8")
+
+    assert len(result["ks_acts"]) == 1
+    act = result["ks_acts"][0]
+    assert act["number"] == "1" and act["status"] == "draft" and act["customer_status"] == "pending"
+    assert act["period_from"] == "2026-10-01" and act["period_to"] == "2026-10-31"
+    assert "lines_json" not in act and "header_json" not in act and "total_ex_vat" not in act
+
+
+def test_collect_weekly_report_validation(weekly_world):
+    db = weekly_world["db"]
+    pid = weekly_world["p1"].id
+    with pytest.raises(ValueError):
+        work_log_form.collect_weekly_report(db, pid, "2026-10-26", "2026-10-20")
+    with pytest.raises(ValueError):
+        work_log_form.collect_weekly_report(db, pid, "not-a-date", "2026-10-20")
+    with pytest.raises(LookupError):
+        work_log_form.collect_weekly_report(db, 999999, "2026-10-20", "2026-10-26")
+
+
+# --- DS14C: регрессии на реальном SQLAlchemy/SQLite (без моков) ---
+
+
+def _capture_statements(db: Session):
+    """Подключить before_cursor_execute и вернуть (список SQL, detach-функцию)."""
+    statements: list[str] = []
+
+    def _before(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(db.get_bind(), "before_cursor_execute", _before)
+
+    def _detach():
+        event.remove(db.get_bind(), "before_cursor_execute", _before)
+
+    return statements, _detach
+
+
+def _seed_photo(db: Session, project_id: int, defect_id: int, filename: str, data: bytes) -> DefectPhoto:
+    photo = DefectPhoto(project_id=project_id, defect_id=defect_id, filename=filename,
+                        mime_type="image/jpeg", size_bytes=len(data), data=data)
+    db.add(photo)
+    db.flush()
+    return photo
+
+
+def test_collect_weekly_report_photo_select_omits_binary(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+
+    d1 = Defect(project_id=p1.id, number=1, title="Трещина", status="open")
+    db.add(d1)
+    db.flush()
+    _seed_photo(db, p1.id, d1.id, "a.jpg", b"\x00\x01\x02\x03")
+    db.commit()
+
+    statements, detach = _capture_statements(db)
+    try:
+        result = work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+    finally:
+        detach()
+
+    photo_selects = [s for s in statements if "defect_photos" in s.lower() and s.lstrip().lower().startswith("select")]
+    assert photo_selects, "ожидался SELECT по defect_photos"
+    for sql in photo_selects:
+        lowered = sql.lower()
+        assert "defect_photos.data" not in lowered, sql
+        assert "defect_photos.data as" not in lowered, sql
+
+    assert len(result["defect_photos"]) == 1
+    photo = result["defect_photos"][0]
+    assert photo["filename"] == "a.jpg"
+    assert "data" not in photo
+
+
+def test_collect_weekly_report_does_not_flush_pending(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+
+    pending = Project(name="Проект В", organization_id=p1.organization_id)
+    db.add(pending)
+    assert pending.id is None
+    assert pending in db.new
+
+    statements, detach = _capture_statements(db)
+    try:
+        work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+    finally:
+        detach()
+
+    assert pending.id is None
+    assert pending in db.new
+    for sql in statements:
+        head = sql.lstrip().lower()
+        assert not head.startswith("insert"), sql
+        assert not head.startswith("update"), sql
+
+    db.rollback()
+    assert pending not in db.new
+    assert db.get(Project, pending.id) is None if pending.id is not None else True
+
+    # после rollback обычный запрос вне захвата допустим
+    assert db.execute(select(Project.id).where(Project.id == p1.id)).scalar_one() == p1.id
+
+
+def test_collect_weekly_report_skips_cross_project_photo(weekly_world):
+    db = weekly_world["db"]
+    p1, p2 = weekly_world["p1"], weekly_world["p2"]
+
+    d1 = Defect(project_id=p1.id, number=1, title="Трещина", status="open")
+    d2 = Defect(project_id=p2.id, number=1, title="Чужой дефект", status="open")
+    db.add_all([d1, d2])
+    db.flush()
+
+    good = _seed_photo(db, p1.id, d1.id, "good.jpg", b"\x10\x11")
+    # project_id указывает на p1, но defect_id принадлежит дефекту p2 (FK валиден, но кросс-проект)
+    bad = _seed_photo(db, p1.id, d2.id, "bad.jpg", b"\x20\x21")
+    db.commit()
+
+    result = work_log_form.collect_weekly_report(db, p1.id, "2026-10-20", "2026-10-26")
+
+    filenames = [p["filename"] for p in result["defect_photos"]]
+    assert "good.jpg" in filenames
+    assert "bad.jpg" not in filenames
+    ids = [p["id"] for p in result["defect_photos"]]
+    assert good.id in ids and bad.id not in ids
+    for p in result["defect_photos"]:
+        assert p["defect_id"] == d1.id
+        assert "data" not in p
+
+
+# --- DS14D2: bounded weekly report (row_budget) — RED until DS14D1 lands ---
+# collect_weekly_report_bounded(db, pid, start, end, *, row_budget) is expected to
+# exist in app.work_log_form. These tests intentionally call it directly (no
+# getattr/hasattr guards, no xfail/skip) so a missing function fails loudly.
+
+
+def _bounded(db, pid, start, end, budget):
+    return work_log_form.collect_weekly_report_bounded(db, pid, start, end, row_budget=budget)
+
+
+def _seed_work(db, pid, day, name):
+    wl.add_entry(db, pid, 1, {"work_date": day, "work_name": name, "unit": "м", "qty": "1"})
+
+
+def _seed_defect(db, pid, number, title):
+    d = Defect(project_id=pid, number=number, title=title, status="open")
+    db.add(d)
+    db.flush()
+    return d
+
+
+def _seed_ks(db, pid, number):
+    est = Estimate(project_id=pid, name=f"Смета {number}")
+    db.add(est)
+    db.flush()
+    db.add(KsAct(project_id=pid, estimate_id=est.id, number=number,
+                 period_from=date(2026, 10, 1), period_to=date(2026, 10, 31),
+                 status="draft", customer_status="pending", lines_json="[]", header_json="{}"))
+    db.flush()
+
+
+def test_bounded_budget_two_exact_two_work_facts_success(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа первая")
+    _seed_work(db, p1.id, "2026-10-26", "Работа вторая")
+    db.commit()
+
+    result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 2)
+
+    assert result["project_id"] == p1.id
+    assert result["period"] == {"date_from": "2026-10-20", "date_to": "2026-10-26"}
+    names = [w["work_name"] for w in result["work_facts"]]
+    assert names == ["Работа первая", "Работа вторая"]
+    assert result["defects"] == []
+    assert result["defect_photos"] == []
+    assert result["ks_acts"] == []
+
+
+def test_bounded_third_own_row_raises_not_partial(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа первая")
+    _seed_work(db, p1.id, "2026-10-21", "Работа вторая")
+    _seed_work(db, p1.id, "2026-10-22", "Работа третья")
+    db.commit()
+
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", 2)
+
+
+def test_bounded_aggregate_budget_across_lists(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа")
+    d = _seed_defect(db, p1.id, 1, "Трещина")
+    _seed_photo(db, p1.id, d.id, "a.jpg", b"\x00\x01")
+    db.commit()
+
+    # 1 факт + 1 дефект + 1 фото = 3 строки при бюджете 2 -> отказ
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", 2)
+
+
+def test_bounded_aggregate_budget_includes_ks(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа")
+    _seed_ks(db, p1.id, "1")
+    db.commit()
+
+    # 1 факт + 1 акт КС = 2 строки при бюджете 1 -> отказ
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", 1)
+
+
+def test_bounded_foreign_rows_do_not_consume_budget(weekly_world):
+    db = weekly_world["db"]
+    p1, p2 = weekly_world["p1"], weekly_world["p2"]
+    _seed_work(db, p1.id, "2026-10-20", "Своя работа")
+    _seed_work(db, p2.id, "2026-10-20", "Чужая работа")
+    _seed_work(db, p2.id, "2026-10-21", "Чужая работа 2")
+    _seed_defect(db, p2.id, 1, "Чужой дефект")
+    _seed_ks(db, p2.id, "9")
+    db.commit()
+
+    result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 1)
+
+    assert [w["work_name"] for w in result["work_facts"]] == ["Своя работа"]
+    assert result["defects"] == []
+    assert result["ks_acts"] == []
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "2"])
+def test_bounded_invalid_budget_raises(weekly_world, bad):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", bad)
+
+
+def test_bounded_empty_report_valid_budget(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 1)
+    assert result["project_id"] == p1.id
+    assert result["work_facts"] == []
+    assert result["defects"] == []
+    assert result["defect_photos"] == []
+    assert result["ks_acts"] == []
+
+
+def test_bounded_fact_select_uses_sql_limit_and_omits_binary(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа")
+    d = _seed_defect(db, p1.id, 1, "Трещина")
+    _seed_photo(db, p1.id, d.id, "a.jpg", b"\x00\x01")
+    db.commit()
+
+    statements, detach = _capture_statements(db)
+    try:
+        result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 5)
+    finally:
+        detach()
+
+    assert len(result["work_facts"]) == 1
+
+    fact_selects = [s for s in statements
+                    if "work_log_entries" in s.lower() and s.lstrip().lower().startswith("select")]
+    assert fact_selects, "ожидался SELECT по work_log_entries"
+    for sql in fact_selects:
+        assert "limit" in sql.lower(), sql
+
+    for sql in statements:
+        lowered = sql.lower()
+        assert "defect_photos.data" not in lowered, sql
+        assert "lines_json" not in lowered, sql
+        assert "header_json" not in lowered, sql
+
+    assert "data" not in result["defect_photos"][0]
