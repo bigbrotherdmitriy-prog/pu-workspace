@@ -93,3 +93,66 @@ def test_cas_dedup_does_not_double_usage_and_usage_includes_retained_cas(tmp_pat
     used, quota = adapter.usage()
     assert quota == 10
     assert used == len(SIX)
+
+
+def test_copy_partial_tree_is_not_public_before_completion(tmp_path, monkeypatch):
+    """Visibility invariant: an in-progress copy must not be publicly listable.
+
+    Scope: this test only checks publication visibility of a partially written
+    copy tree. It does not assert fsync/crash durability, nor source-snapshot
+    semantics. A post-error cleanup assertion alone would not prove atomic
+    publication, so the visibility observation is made at the copy boundary.
+    """
+    import shutil
+
+    adapter = _adapter(tmp_path, project_id=1, quota=1000)
+    source_id = adapter.write_file(None, "own.bin", b"OWN")
+    destination_id = adapter.create_folder("dest")
+
+    observations = {"hook_called": False, "children": None, "partial_readable": None}
+    original_copytree = shutil.copytree
+
+    def _hooked_copytree(src, dst, *args, **kwargs):
+        observations["hook_called"] = True
+        # Perform real filesystem writes on tmp_path to simulate a partial copy.
+        import os
+
+        os.makedirs(dst, exist_ok=True)
+        partial_path = os.path.join(dst, "partial.bin")
+        with open(partial_path, "wb") as handle:
+            handle.write(b"PARTIAL")
+        # Observe what ordinary adapter listing exposes mid-copy.
+        observations["children"] = adapter.list_children(destination_id)
+        try:
+            with open(partial_path, "rb") as handle:
+                observations["partial_readable"] = handle.read()
+        except OSError:
+            observations["partial_readable"] = None
+        raise OSError("simulated copy interruption")
+
+    monkeypatch.setattr(shutil, "copytree", _hooked_copytree)
+    try:
+        with pytest.raises(OSError):
+            adapter.copy_folder_tree(source_id, "pu:/", "dest")
+    finally:
+        monkeypatch.setattr(shutil, "copytree", original_copytree)
+
+    # The hook must actually have been triggered at the real copy boundary.
+    assert observations["hook_called"] is True
+
+    # Desired invariant: no final copy entry and no readable partial payload
+    # is exposed through ordinary adapter listing before completion.
+    children = observations["children"]
+    assert children is not None
+    names = []
+    for child in children:
+        if isinstance(child, dict):
+            names.append(child.get("name"))
+        else:
+            names.append(getattr(child, "name", child))
+    assert "partial.bin" not in names
+    assert observations["partial_readable"] is None
+
+    # Source preservation is asserted separately from the visibility invariant.
+    source_bytes, _ = adapter.read_bytes(source_id, len(b"OWN"))
+    assert source_bytes == b"OWN"
