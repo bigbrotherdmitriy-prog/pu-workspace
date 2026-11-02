@@ -103,10 +103,14 @@ def test_copy_partial_tree_is_not_public_before_completion(tmp_path, monkeypatch
     semantics. A post-error cleanup assertion alone would not prove atomic
     publication, so the visibility observation is made at the copy boundary.
     """
+    import os
     import shutil
 
+    from app.integrations.contracts import StorageUnavailable
+
     adapter = _adapter(tmp_path, project_id=1, quota=1000)
-    source_id = adapter.write_file(None, "own.bin", b"OWN")
+    source_id = adapter.create_folder("src")
+    source_file = adapter.write_file(source_id, "own.bin", b"OWN")
     destination_id = adapter.create_folder("dest")
 
     observations = {"hook_called": False, "children": None, "partial_readable": None}
@@ -115,25 +119,30 @@ def test_copy_partial_tree_is_not_public_before_completion(tmp_path, monkeypatch
     def _hooked_copytree(src, dst, *args, **kwargs):
         observations["hook_called"] = True
         # Perform real filesystem writes on tmp_path to simulate a partial copy.
-        import os
-
         os.makedirs(dst, exist_ok=True)
         partial_path = os.path.join(dst, "partial.bin")
         with open(partial_path, "wb") as handle:
             handle.write(b"PARTIAL")
         # Observe what ordinary adapter listing exposes mid-copy.
         observations["children"] = adapter.list_children(destination_id)
-        try:
-            with open(partial_path, "rb") as handle:
-                observations["partial_readable"] = handle.read()
-        except OSError:
-            observations["partial_readable"] = None
+        # Probe public readability only through ordinary adapter listing roots.
+        listed = observations["children"] or []
+        for child in listed:
+            root_id = child.get("id") if isinstance(child, dict) else getattr(child, "id", None)
+            if root_id is None:
+                continue
+            try:
+                data, _ = adapter.read_bytes(root_id + "/partial.bin", len(b"PARTIAL"))
+            except OSError:
+                continue
+            observations["partial_readable"] = data
+            break
         raise OSError("simulated copy interruption")
 
     monkeypatch.setattr(shutil, "copytree", _hooked_copytree)
     try:
-        with pytest.raises(OSError):
-            adapter.copy_folder_tree(source_id, "pu:/", "dest")
+        with pytest.raises(StorageUnavailable):
+            adapter.copy_folder_tree(source_id, destination_id, "copy")
     finally:
         monkeypatch.setattr(shutil, "copytree", original_copytree)
 
@@ -144,15 +153,12 @@ def test_copy_partial_tree_is_not_public_before_completion(tmp_path, monkeypatch
     # is exposed through ordinary adapter listing before completion.
     children = observations["children"]
     assert children is not None
-    names = []
-    for child in children:
-        if isinstance(child, dict):
-            names.append(child.get("name"))
-        else:
-            names.append(getattr(child, "name", child))
-    assert "partial.bin" not in names
+    assert children == []
     assert observations["partial_readable"] is None
 
     # Source preservation is asserted separately from the visibility invariant.
-    source_bytes, _ = adapter.read_bytes(source_id, len(b"OWN"))
+    source_bytes, _ = adapter.read_bytes(source_file, len(b"OWN"))
     assert source_bytes == b"OWN"
+
+    # Post-error destination cleanup is asserted separately as well.
+    assert adapter.list_children(destination_id) == []
