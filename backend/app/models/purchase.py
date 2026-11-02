@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint, func,
+    CheckConstraint, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,3 +59,35 @@ class PurchaseItemSource(Base):
     qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
 
     item: Mapped["PurchaseItem"] = relationship(back_populates="sources")
+
+
+class MaterialReceipt(Base):
+    """Bounded draft persistence primitive for an independently recorded arrival.
+
+    Not a ready warehouse/API. DB-only FK does NOT enforce that the receipt and
+    the purchase item belong to the same project; a future service must
+    explicitly validate ownership. No immutability, Decimal finiteness or
+    concurrent idempotence guarantees are implied by this ORM model alone.
+    """
+
+    __tablename__ = "material_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "operation_key", name="uq_material_receipt_project_operation",
+        ),
+        CheckConstraint("qty > 0", name="ck_material_receipt_qty_positive"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True,
+    )
+    purchase_item_id: Mapped[int] = mapped_column(
+        ForeignKey("purchase_items.id", ondelete="RESTRICT"), index=True, nullable=False,
+    )
+    operation_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    qty: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_document_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
