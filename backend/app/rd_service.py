@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
@@ -10,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.rd import RdSheet, RdSpecItem, RdVolume
+from app.models.rd import RdSheet, RdSpecItem, RdVolume, RdVolumeVersion
 from app.rd_ingest import find_spec_pages, spec_pages_label, spec_text, split_pages
 from app.rd_sheets import build_register
 from app.specification import specification_from_text
@@ -341,6 +342,83 @@ def parse_volume(db: Session, volume_id: int) -> dict:
             vol.error_message = str(exc)[:500]
             db.commit()
         return {"items": 0, "spec_pages": vol.spec_pages if vol is not None and vol.spec_pages else ""}
+
+
+def record_volume_version(
+    db: Session,
+    project_id: int,
+    volume_id: int,
+    content: bytes,
+    file_name: str,
+    mime_type: str,
+) -> RdVolumeVersion:
+    """Register immutable metadata for a volume content version.
+
+    Metadata only: the raw ``content`` bytes are hashed and measured here but
+    are NOT retained, stored, or referenced anywhere. Only the SHA-256 digest,
+    byte length, file name and MIME type are persisted as an ``RdVolumeVersion``
+    row. This is not a viewer or a finished versioning feature.
+
+    The volume is resolved by ``id`` AND ``project_id``; a missing or foreign
+    volume raises ``LookupError`` with the same message. The volume row is
+    locked ``FOR UPDATE`` (single-volume) until the caller commits, so that
+    concurrent get-or-create callers serialize on the same volume.
+
+    The digest is computed from the actual ``content`` bytes and ``size_bytes``
+    is ``len(content)``; any caller-supplied hash is never trusted. If a row
+    with the same ``(volume_id, content_sha256)`` already exists it is returned
+    unchanged (its original file_name/mime_type/created_at are preserved).
+    Otherwise a new metadata row is inserted and flushed.
+
+    This function does NOT commit or roll back the caller's transaction; the
+    caller owns the transaction boundary. It also does not enforce append-only
+    update/delete outside this API, and it does not decide whether empty or
+    specific PDF/image content is acceptable — that is deferred to ingestion.
+    """
+    if not isinstance(content, (bytes, bytearray, memoryview)):
+        raise TypeError("content must be bytes")
+    content_bytes = bytes(content)
+
+    if not isinstance(file_name, str) or not file_name.strip():
+        raise ValueError("file_name must be a non-empty string")
+    if not isinstance(mime_type, str) or not mime_type.strip():
+        raise ValueError("mime_type must be a non-empty string")
+    clean_file_name = file_name.strip()
+    clean_mime_type = mime_type.strip()
+
+    vol = db.execute(
+        select(RdVolume)
+        .where(
+            RdVolume.id == volume_id,
+            RdVolume.project_id == project_id,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    if vol is None:
+        raise LookupError("volume not found")
+
+    digest = hashlib.sha256(content_bytes).hexdigest()
+    size_bytes = len(content_bytes)
+
+    existing = db.execute(
+        select(RdVolumeVersion).where(
+            RdVolumeVersion.volume_id == vol.id,
+            RdVolumeVersion.content_sha256 == digest,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    version = RdVolumeVersion(
+        volume_id=vol.id,
+        content_sha256=digest,
+        size_bytes=size_bytes,
+        file_name=clean_file_name,
+        mime_type=clean_mime_type,
+    )
+    db.add(version)
+    db.flush()
+    return version
 
 
 _ALLOWED_ITEM_STATUSES = {"proposed", "confirmed", "rejected"}
