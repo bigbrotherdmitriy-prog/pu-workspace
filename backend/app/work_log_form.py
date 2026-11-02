@@ -3,11 +3,15 @@ from __future__ import annotations
 
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import work_log as wl
 from app.acceptance_act_document import _para, _table
 from app.docx_kit import build_docx, page_break
+from app.models.defects import Defect, DefectPhoto
+from app.models.estimates import KsAct
+from app.models.project import Project
 
 BLANK = "________________"
 
@@ -21,6 +25,125 @@ def _d(value: str) -> str:
         return date.fromisoformat(value).strftime("%d.%m.%Y")
     except (TypeError, ValueError):
         return value or ""
+
+
+def _iso(value) -> str:
+    if isinstance(value, date):
+        return value.isoformat()
+    try:
+        return date.fromisoformat(str(value)).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Некорректная дата") from exc
+
+
+def collect_weekly_report(db: Session, project_id: int, date_from, date_to) -> dict:
+    """Собрать данные недельного отчёта (только чтение, без записи в БД).
+
+    Работы (work facts) фильтруются по периоду; дефекты, фото и акты КС —
+    текущее состояние проекта на момент сбора, без выдуманного фильтра по датам.
+
+    Все чтения выполняются в no_autoflush: отложенные изменения вызывающего
+    кода не сбрасываются в БД и не попадают в отчёт. Никаких flush/commit/rollback.
+    Фото дефектов читаются явной проекцией колонок (без бинарных данных).
+    """
+    start = _iso(date_from)
+    end = _iso(date_to)
+    if start > end:
+        raise ValueError("Начало периода позже окончания")
+
+    with db.no_autoflush:
+        project = db.get(Project, project_id)
+        if project is None:
+            raise LookupError("Проект не найден")
+
+        entries = wl.list_entries(db, project_id, start, end, limit=100000)
+        work_facts = [
+            {
+                "id": e["id"],
+                "work_date": e["work_date"],
+                "work_name": e["work_name"],
+                "unit": e["unit"],
+                "qty": e["qty"],
+                "location": e["location"],
+                "weather": e["weather"],
+                "workers": e["workers"],
+                "hours": e["hours"],
+                "crew_id": e["crew_id"],
+                "note": e["note"],
+            }
+            for e in entries
+        ]
+
+        defects = db.execute(
+            select(Defect).where(Defect.project_id == project_id).order_by(Defect.number, Defect.id)
+        ).scalars().all()
+        defect_rows = [
+            {
+                "id": d.id,
+                "number": d.number,
+                "title": d.title,
+                "status": d.status,
+                "responsible": d.responsible,
+                "due_date": d.due_date.isoformat() if d.due_date else None,
+                "location": d.location,
+            }
+            for d in defects
+        ]
+
+        # Явная проекция колонок: бинарные данные (data) не загружаются.
+        # Требуем совпадения project_id и у фото, и у владеющего дефекта,
+        # чтобы отсечь несогласованные строки внешних ключей.
+        photo_stmt = (
+            select(
+                DefectPhoto.id,
+                DefectPhoto.defect_id,
+                DefectPhoto.filename,
+                DefectPhoto.mime_type,
+                DefectPhoto.size_bytes,
+            )
+            .join(Defect, Defect.id == DefectPhoto.defect_id)
+            .where(
+                DefectPhoto.project_id == project_id,
+                Defect.project_id == project_id,
+            )
+            .order_by(DefectPhoto.id)
+        )
+        photo_rows = [
+            {
+                "id": row.id,
+                "defect_id": row.defect_id,
+                "filename": row.filename,
+                "mime_type": row.mime_type,
+                "size_bytes": row.size_bytes,
+            }
+            for row in db.execute(photo_stmt).all()
+        ]
+
+        acts = db.execute(
+            select(KsAct).where(KsAct.project_id == project_id).order_by(KsAct.id)
+        ).scalars().all()
+        act_rows = [
+            {
+                "id": a.id,
+                "number": a.number,
+                "status": a.status,
+                "customer_status": a.customer_status,
+                "period_from": a.period_from.isoformat() if a.period_from else None,
+                "period_to": a.period_to.isoformat() if a.period_to else None,
+                "act_date": a.act_date.isoformat() if a.act_date else None,
+            }
+            for a in acts
+        ]
+
+        return {
+            "project_id": project.id,
+            "project_name": project.name,
+            "period": {"date_from": start, "date_to": end},
+            "work_facts": work_facts,
+            "defects": defect_rows,
+            "defect_photos": photo_rows,
+            "ks_acts": act_rows,
+        }
 
 
 def render(db: Session, project_id: int, header: dict | None, date_from=None, date_to=None) -> bytes:
