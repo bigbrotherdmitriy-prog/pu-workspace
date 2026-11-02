@@ -227,7 +227,17 @@ def _get_unit(db: Session, project_id: int, unit_id: int) -> EquipmentUnit:
 
 
 def update_unit(db: Session, project_id: int, unit_id: int, data: dict) -> dict:
-    unit = _get_unit(db, project_id, unit_id)
+    # Initial lookup must not autoflush unrelated pending caller state before
+    # any validation has run. Use no_autoflush locally; autoflush is not
+    # globally disabled.
+    with db.no_autoflush:
+        unit = _get_unit(db, project_id, unit_id)
+
+    # Stage all supplied values first, validating everything before mutating
+    # any attribute on the target unit. This keeps rejected updates atomic:
+    # a ValueError raised below leaves the target fields unchanged and does
+    # not flush or discard unrelated caller state.
+    staged: dict[str, object] = {}
 
     if "serial_number" in data:
         raw = data["serial_number"]
@@ -235,42 +245,34 @@ def update_unit(db: Session, project_id: int, unit_id: int, data: dict) -> dict:
             value = raw.strip() or None
         else:
             value = raw
-        if value:
-            conflict = db.execute(
-                select(EquipmentUnit).where(
-                    EquipmentUnit.project_id == project_id,
-                    EquipmentUnit.id != unit.id,
-                    EquipmentUnit.serial_number == value,
-                    EquipmentUnit.type_mark == unit.type_mark,
-                )
-            ).scalar_one_or_none()
-            if conflict is not None:
-                raise ValueError("duplicate serial")
-        unit.serial_number = value
+        staged["serial_number"] = value
 
     if "location" in data:
         raw = data["location"]
-        unit.location = raw.strip() if isinstance(raw, str) and raw.strip() else (None if raw is None else raw)
+        staged["location"] = (
+            raw.strip() if isinstance(raw, str) and raw.strip()
+            else (None if raw is None else raw)
+        )
 
     if "status" in data:
         value = data["status"]
         if value not in _ALLOWED_STATUSES:
             raise ValueError("invalid status")
-        unit.status = value
+        staged["status"] = value
 
     if "received_date" in data:
-        unit.received_date = _parse_date(data["received_date"])
+        staged["received_date"] = _parse_date(data["received_date"])
     if "installed_date" in data:
-        unit.installed_date = _parse_date(data["installed_date"])
+        staged["installed_date"] = _parse_date(data["installed_date"])
     if "warranty_until" in data:
-        unit.warranty_until = _parse_date(data["warranty_until"])
+        staged["warranty_until"] = _parse_date(data["warranty_until"])
     if "last_service_date" in data:
-        unit.last_service_date = _parse_date(data["last_service_date"])
+        staged["last_service_date"] = _parse_date(data["last_service_date"])
 
     if "service_interval_months" in data:
         raw = data["service_interval_months"]
         if raw is None or raw == "":
-            unit.service_interval_months = None
+            staged["service_interval_months"] = None
         else:
             try:
                 months = int(raw)
@@ -278,14 +280,36 @@ def update_unit(db: Session, project_id: int, unit_id: int, data: dict) -> dict:
                 raise ValueError("invalid service interval") from None
             if months < 1 or months > 120:
                 raise ValueError("invalid service interval")
-            unit.service_interval_months = months
+            staged["service_interval_months"] = months
 
     if "note" in data:
         raw = data["note"]
         if isinstance(raw, str):
-            unit.note = raw.strip() or None
+            staged["note"] = raw.strip() or None
         else:
-            unit.note = raw
+            staged["note"] = raw
+
+    # Duplicate-serial lookup happens before any assignment. Use no_autoflush
+    # so a pending (possibly unrelated) caller state is not flushed while we
+    # validate; autoflush is not globally disabled.
+    if "serial_number" in staged:
+        value = staged["serial_number"]
+        if value:
+            with db.no_autoflush:
+                conflict = db.execute(
+                    select(EquipmentUnit).where(
+                        EquipmentUnit.project_id == project_id,
+                        EquipmentUnit.id != unit.id,
+                        EquipmentUnit.serial_number == value,
+                        EquipmentUnit.type_mark == unit.type_mark,
+                    )
+                ).scalar_one_or_none()
+            if conflict is not None:
+                raise ValueError("duplicate serial")
+
+    # All values validated; apply them to the target unit.
+    for attr, value in staged.items():
+        setattr(unit, attr, value)
 
     db.flush()
     return _unit_to_dict(unit)
