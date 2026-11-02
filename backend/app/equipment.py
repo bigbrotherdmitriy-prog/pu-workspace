@@ -227,7 +227,11 @@ def _get_unit(db: Session, project_id: int, unit_id: int) -> EquipmentUnit:
 
 
 def update_unit(db: Session, project_id: int, unit_id: int, data: dict) -> dict:
-    unit = _get_unit(db, project_id, unit_id)
+    # Initial lookup must not autoflush unrelated pending caller state before
+    # any validation has run. Use no_autoflush locally; autoflush is not
+    # globally disabled.
+    with db.no_autoflush:
+        unit = _get_unit(db, project_id, unit_id)
 
     # Stage all supplied values first, validating everything before mutating
     # any attribute on the target unit. This keeps rejected updates atomic:
