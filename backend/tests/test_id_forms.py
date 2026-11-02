@@ -304,3 +304,156 @@ def test_collect_weekly_report_skips_cross_project_photo(weekly_world):
     for p in result["defect_photos"]:
         assert p["defect_id"] == d1.id
         assert "data" not in p
+
+
+# --- DS14D2: bounded weekly report (row_budget) — RED until DS14D1 lands ---
+# collect_weekly_report_bounded(db, pid, start, end, *, row_budget) is expected to
+# exist in app.work_log_form. These tests intentionally call it directly (no
+# getattr/hasattr guards, no xfail/skip) so a missing function fails loudly.
+
+
+def _bounded(db, pid, start, end, budget):
+    return work_log_form.collect_weekly_report_bounded(db, pid, start, end, row_budget=budget)
+
+
+def _seed_work(db, pid, day, name):
+    wl.add_entry(db, pid, 1, {"work_date": day, "work_name": name, "unit": "м", "qty": "1"})
+
+
+def _seed_defect(db, pid, number, title):
+    d = Defect(project_id=pid, number=number, title=title, status="open")
+    db.add(d)
+    db.flush()
+    return d
+
+
+def _seed_ks(db, pid, number):
+    est = Estimate(project_id=pid, name=f"Смета {number}")
+    db.add(est)
+    db.flush()
+    db.add(KsAct(project_id=pid, estimate_id=est.id, number=number,
+                 period_from=date(2026, 10, 1), period_to=date(2026, 10, 31),
+                 status="draft", customer_status="pending", lines_json="[]", header_json="{}"))
+    db.flush()
+
+
+def test_bounded_budget_two_exact_two_work_facts_success(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа первая")
+    _seed_work(db, p1.id, "2026-10-26", "Работа вторая")
+    db.commit()
+
+    result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 2)
+
+    assert result["project_id"] == p1.id
+    assert result["period"] == {"date_from": "2026-10-20", "date_to": "2026-10-26"}
+    names = [w["work_name"] for w in result["work_facts"]]
+    assert names == ["Работа первая", "Работа вторая"]
+    assert result["defects"] == []
+    assert result["defect_photos"] == []
+    assert result["ks_acts"] == []
+
+
+def test_bounded_third_own_row_raises_not_partial(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа первая")
+    _seed_work(db, p1.id, "2026-10-21", "Работа вторая")
+    _seed_work(db, p1.id, "2026-10-22", "Работа третья")
+    db.commit()
+
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", 2)
+
+
+def test_bounded_aggregate_budget_across_lists(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа")
+    d = _seed_defect(db, p1.id, 1, "Трещина")
+    _seed_photo(db, p1.id, d.id, "a.jpg", b"\x00\x01")
+    db.commit()
+
+    # 1 факт + 1 дефект + 1 фото = 3 строки при бюджете 2 -> отказ
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", 2)
+
+
+def test_bounded_aggregate_budget_includes_ks(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа")
+    _seed_ks(db, p1.id, "1")
+    db.commit()
+
+    # 1 факт + 1 акт КС = 2 строки при бюджете 1 -> отказ
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", 1)
+
+
+def test_bounded_foreign_rows_do_not_consume_budget(weekly_world):
+    db = weekly_world["db"]
+    p1, p2 = weekly_world["p1"], weekly_world["p2"]
+    _seed_work(db, p1.id, "2026-10-20", "Своя работа")
+    _seed_work(db, p2.id, "2026-10-20", "Чужая работа")
+    _seed_work(db, p2.id, "2026-10-21", "Чужая работа 2")
+    _seed_defect(db, p2.id, 1, "Чужой дефект")
+    _seed_ks(db, p2.id, "9")
+    db.commit()
+
+    result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 1)
+
+    assert [w["work_name"] for w in result["work_facts"]] == ["Своя работа"]
+    assert result["defects"] == []
+    assert result["ks_acts"] == []
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "2"])
+def test_bounded_invalid_budget_raises(weekly_world, bad):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    with pytest.raises(ValueError):
+        _bounded(db, p1.id, "2026-10-20", "2026-10-26", bad)
+
+
+def test_bounded_empty_report_valid_budget(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 1)
+    assert result["project_id"] == p1.id
+    assert result["work_facts"] == []
+    assert result["defects"] == []
+    assert result["defect_photos"] == []
+    assert result["ks_acts"] == []
+
+
+def test_bounded_fact_select_uses_sql_limit_and_omits_binary(weekly_world):
+    db = weekly_world["db"]
+    p1 = weekly_world["p1"]
+    _seed_work(db, p1.id, "2026-10-20", "Работа")
+    d = _seed_defect(db, p1.id, 1, "Трещина")
+    _seed_photo(db, p1.id, d.id, "a.jpg", b"\x00\x01")
+    db.commit()
+
+    statements, detach = _capture_statements(db)
+    try:
+        result = _bounded(db, p1.id, "2026-10-20", "2026-10-26", 5)
+    finally:
+        detach()
+
+    assert len(result["work_facts"]) == 1
+
+    fact_selects = [s for s in statements
+                    if "work_log_entries" in s.lower() and s.lstrip().lower().startswith("select")]
+    assert fact_selects, "ожидался SELECT по work_log_entries"
+    for sql in fact_selects:
+        assert "limit" in sql.lower(), sql
+
+    for sql in statements:
+        lowered = sql.lower()
+        assert "defect_photos.data" not in lowered, sql
+        assert "lines_json" not in lowered, sql
+        assert "header_json" not in lowered, sql
+
+    assert "data" not in result["defect_photos"][0]
