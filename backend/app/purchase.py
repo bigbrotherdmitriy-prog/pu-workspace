@@ -4,12 +4,12 @@ import re
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.execution_finance import CashFlowEntry
 from app.models.invoice_line import InvoiceLine
-from app.models.purchase import PurchaseItem, PurchaseItemSource
+from app.models.purchase import MaterialReceipt, PurchaseItem, PurchaseItemSource
 from app.models.rd import RdSpecItem, RdVolume
 
 ALLOWED_STATUSES = {"need", "ordered", "paid", "received"}
@@ -391,3 +391,137 @@ def invoices_for_matching(db: Session, project_id: int) -> list[dict]:
             "suggested": suggested,
         })
     return result
+
+
+_RECEIPT_UNIT_MAX = 40
+_RECEIPT_QTY_SCALE = 3
+_RECEIPT_QTY_THOUSANDTHS = 1000
+
+
+def _validate_receipt_unit(unit) -> str:
+    if unit is None:
+        raise ValueError("receipt unit is null")
+    if not isinstance(unit, str):
+        raise ValueError("receipt unit is not a string")
+    if unit == "" or unit.strip() == "":
+        raise ValueError("receipt unit is blank")
+    if unit != unit.strip():
+        raise ValueError("receipt unit is not canonical")
+    if len(unit) > _RECEIPT_UNIT_MAX:
+        raise ValueError("receipt unit exceeds maximum length")
+    return unit
+
+
+def _receipt_qty_thousandths(value) -> int:
+    if value is None:
+        raise ValueError("receipt qty is null")
+    if isinstance(value, Decimal):
+        dec = value
+    elif isinstance(value, int) and not isinstance(value, bool):
+        dec = Decimal(value)
+    elif isinstance(value, str):
+        try:
+            dec = Decimal(value)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("receipt qty is not a decimal") from exc
+    else:
+        raise ValueError("receipt qty has unsupported type")
+    if not dec.is_finite():
+        raise ValueError("receipt qty is not finite")
+    if dec <= 0:
+        raise ValueError("receipt qty is not positive")
+    scaled = dec * _RECEIPT_QTY_THOUSANDTHS
+    if scaled != scaled.to_integral_value():
+        raise ValueError("receipt qty exceeds scale 3")
+    return int(scaled)
+
+
+def _format_thousandths(total: int) -> str:
+    sign = "-" if total < 0 else ""
+    magnitude = abs(total)
+    whole, frac = divmod(magnitude, _RECEIPT_QTY_THOUSANDTHS)
+    return f"{sign}{whole}.{frac:03d}"
+
+
+def received_totals(db: Session, project_id: int, *, row_budget: int) -> dict:
+    """Read-only explicit physical arrival totals for a project.
+
+    Counts only explicit MaterialReceipt rows. Does not read ordered/paid/
+    invoice sums, available stock or balances, and performs no writes.
+    """
+    if not isinstance(project_id, int) or isinstance(project_id, bool):
+        raise ValueError("project_id must be an int")
+    if project_id <= 0:
+        raise ValueError("project_id must be positive")
+    if not isinstance(row_budget, int) or isinstance(row_budget, bool):
+        raise ValueError("row_budget must be an int")
+    if row_budget < 1 or row_budget > 10000:
+        raise ValueError("row_budget out of range")
+
+    with db.no_autoflush:
+        project_exists = db.execute(
+            select(func.count()).select_from(PurchaseItem).where(
+                PurchaseItem.project_id == project_id
+            )
+        ).scalar_one()
+        if not project_exists:
+            raise LookupError("unknown project")
+
+        stmt = (
+            select(
+                MaterialReceipt.id,
+                MaterialReceipt.purchase_item_id,
+                MaterialReceipt.qty,
+                func.substr(MaterialReceipt.unit, 1, _RECEIPT_UNIT_MAX + 1),
+                PurchaseItem.project_id,
+            )
+            .select_from(MaterialReceipt)
+            .outerjoin(PurchaseItem, PurchaseItem.id == MaterialReceipt.purchase_item_id)
+            .where(MaterialReceipt.project_id == project_id)
+            .order_by(MaterialReceipt.id)
+            .limit(row_budget + 1)
+        )
+
+        result = db.execute(stmt)
+        try:
+            rows = result.all()
+        finally:
+            result.close()
+
+    if len(rows) > row_budget:
+        raise ValueError("receipt row budget exceeded")
+
+    groups: dict[tuple[int, str], dict] = {}
+    receipt_count = 0
+
+    for _rid, purchase_item_id, qty, unit, item_project_id in rows:
+        if purchase_item_id is None:
+            raise ValueError("receipt references missing purchase item")
+        if item_project_id is None or item_project_id != project_id:
+            raise ValueError("receipt references foreign purchase item")
+        unit_value = _validate_receipt_unit(unit)
+        thousandths = _receipt_qty_thousandths(qty)
+        key = (int(purchase_item_id), unit_value)
+        bucket = groups.get(key)
+        if bucket is None:
+            bucket = {"thousandths": 0, "receipt_count": 0}
+            groups[key] = bucket
+        bucket["thousandths"] += thousandths
+        bucket["receipt_count"] += 1
+        receipt_count += 1
+
+    materials = [
+        {
+            "purchase_item_id": item_id,
+            "unit": unit_value,
+            "qty_received": _format_thousandths(bucket["thousandths"]),
+            "receipt_count": bucket["receipt_count"],
+        }
+        for (item_id, unit_value), bucket in sorted(groups.items())
+    ]
+
+    return {
+        "project_id": project_id,
+        "receipt_count": receipt_count,
+        "materials": materials,
+    }
