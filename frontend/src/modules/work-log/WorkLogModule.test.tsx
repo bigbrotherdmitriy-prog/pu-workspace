@@ -15,11 +15,17 @@ const schedule = { baseline: { id: 1, name: "ГПР", version: 1, status: "appro
   { id: 9, title: "Монтаж кабельных лотков", is_group: false, is_milestone: false, planned_start: "2026-10-01", planned_finish: "2026-10-10", planned_progress: 100, actual_progress: 40, overdue: true, fact_entries: 0, fact_qty: null, fact_unit: null, fact_first: null, fact_last: null },
 ] };
 
+function receipt(init: unknown, id = 2) {
+  const body = JSON.parse(String((init as { body?: string } | undefined)?.body));
+  return { receipt_id: 5, client_mutation_id: body.client_mutation_id, operation: "work_log.create", status: "applied", entity_type: "work_log", entity_id: id, result: { id, project_id: body.project_id, author_user_id: 1 } };
+}
+
 function mockApiOk() {
   mockApi.mockImplementation(async (path: string, init?: { method?: string }) => {
     if (path.includes("/work-log/crews")) return { crews: [{ id: 4, name: "Бригада 1", foreman: "Иванов", members: "Петров\nСидоров", members_count: 3, note: null }] };
     if (path.includes("/work-log/schedule")) return schedule;
     if (path.includes("/suggestions")) return suggestions;
+    if (path === "/mobile-sync/work-log-create") return receipt(init);
     if (init?.method === "POST") return { id: 2 };
     if (init?.method === "DELETE") return { deleted: 1 };
     return listing;
@@ -28,14 +34,14 @@ function mockApiOk() {
 
 it("lists entries with summary", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   expect(await screen.findByText("Прокладка кабеля")).toBeTruthy();
   expect(screen.getByText(/Записей: 1/)).toBeTruthy();
 });
 
 it("shows works from the schedule and enters a fact for the chosen work", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   fireEvent.click(await screen.findByText("Подсказка из графика (ГПР)"));
   fireEvent.click(await screen.findByText("Монтаж кабельных лотков"));
   expect(screen.getByText(/Вносим факт по работе/)).toBeTruthy();
@@ -52,7 +58,7 @@ it("shows works from the schedule and enters a fact for the chosen work", async 
 
 it("adds an entry for a work outside the schedule", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   fireEvent.click(await screen.findByText("Подсказка из графика (ГПР)"));
   fireEvent.click(await screen.findByText("Монтаж кабельных лотков"));
   fireEvent.click(screen.getByText("Другая работа (вне графика)"));
@@ -69,7 +75,7 @@ it("adds an entry for a work outside the schedule", async () => {
 
 it("refuses an empty work name", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   await screen.findByText("Прокладка кабеля");
   fireEvent.click(screen.getByText("Добавить запись"));
   expect((await screen.findByRole("alert")).textContent).toContain("Укажите, какая работа");
@@ -77,7 +83,7 @@ it("refuses an empty work name", async () => {
 
 it("deletes an entry and shows the empty state", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   fireEvent.click(await screen.findByLabelText("Удалить запись Прокладка кабеля"));
   await waitFor(() => expect(mockApi.mock.calls.some((c) => (c[1] as { method?: string } | undefined)?.method === "DELETE")).toBe(true));
 });
@@ -88,21 +94,21 @@ it("shows the empty hint", async () => {
     if (path.includes("/work-log/schedule")) return { baseline: null, items: [] };
     return path.includes("/suggestions") ? suggestions : { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
   });
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   expect(await screen.findByText(/Записей пока нет/)).toBeTruthy();
 });
 
 
 it("sends hours and crew with the entry and manages crews on the crews tab", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   await screen.findByText("Прокладка кабеля");
   fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Монтаж щита" } });
   fireEvent.change(screen.getByLabelText("Часов работы"), { target: { value: "8" } });
   fireEvent.change(screen.getByLabelText("Бригада"), { target: { value: "4" } });
   fireEvent.click(screen.getByText("Добавить запись"));
   await waitFor(() => {
-    const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/work-log") && (c[1] as { method?: string } | undefined)?.method === "POST");
+    const call = mockApi.mock.calls.find((c) => String(c[0]) === "/mobile-sync/work-log-create" && (c[1] as { method?: string } | undefined)?.method === "POST");
     expect(call).toBeTruthy();
     const body = String((call![1] as { body: string }).body);
     expect(body).toContain("\"hours\":\"8\"");
@@ -118,7 +124,7 @@ it("sends hours and crew with the entry and manages crews on the crews tab", asy
 
 it("fills people from the crew and sends the timesheet with rates as data", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   await screen.findByText("Прокладка кабеля");
   fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Монтаж щита" } });
   fireEvent.change(screen.getByLabelText("Бригада"), { target: { value: "4" } });
@@ -127,7 +133,7 @@ it("fills people from the crew and sends the timesheet with rates as data", asyn
   fireEvent.change(screen.getByLabelText("Ставка работника 1"), { target: { value: "450" } });
   fireEvent.click(screen.getByText("Добавить запись"));
   await waitFor(() => {
-    const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/work-log") && (c[1] as { method?: string } | undefined)?.method === "POST");
+    const call = mockApi.mock.calls.find((c) => String(c[0]) === "/mobile-sync/work-log-create" && (c[1] as { method?: string } | undefined)?.method === "POST");
     expect(call).toBeTruthy();
     const body = String((call![1] as { body: string }).body);
     expect(body).toContain("\"labor\":[");
@@ -138,7 +144,7 @@ it("fills people from the crew and sends the timesheet with rates as data", asyn
 
 it("adds a worker by hand", async () => {
   mockApiOk();
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   await screen.findByText("Прокладка кабеля");
   fireEvent.click(screen.getByText("Добавить работника"));
   expect(screen.getByLabelText("Работник 1")).toBeTruthy();
@@ -152,16 +158,17 @@ it("links the entry to an estimate position and fills name and unit from it", as
     if (path.includes("/work-log/crews")) return { crews: [] };
     if (path.includes("/work-log/schedule")) return { baseline: null, items: [] };
     if (path.includes("/suggestions")) return { ...suggestions, estimate_lines: [{ id: 77, position: "3", code: null, name: "Прокладка кабеля ВВГ", unit: "м", qty: "100" }] };
+    if (path === "/mobile-sync/work-log-create") return receipt(init, 9);
     if (init?.method === "POST") return { id: 9 };
     return listing;
   });
-  render(<WorkLogModule projectId={5} />);
+  render(<WorkLogModule projectId={5} userId={1} />);
   await screen.findByText("Прокладка кабеля");
   fireEvent.change(await screen.findByLabelText(/Позиция сметы/), { target: { value: "77" } });
   fireEvent.change(screen.getByLabelText("Объём"), { target: { value: "25" } });
   fireEvent.click(screen.getByText("Добавить запись"));
   await waitFor(() => {
-    const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/work-log") && (c[1] as { method?: string } | undefined)?.method === "POST");
+    const call = mockApi.mock.calls.find((c) => String(c[0]) === "/mobile-sync/work-log-create" && (c[1] as { method?: string } | undefined)?.method === "POST");
     expect(call).toBeTruthy();
     const body = String((call![1] as { body: string }).body);
     expect(body).toContain("\"estimate_line_id\":77");

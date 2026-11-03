@@ -319,7 +319,7 @@ export async function synchronize(userId: number, projectId: number, manual = fa
           await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
           if (working.operation === "work_log.create" && positiveId(result.entityId)) {
             window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT, {
-              detail: { userId, projectId, entryId: result.entityId },
+              detail: { userId, projectId, entryId: result.entityId, clientMutationId: working.id },
             }));
           }
           changed();

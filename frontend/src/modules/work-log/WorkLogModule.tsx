@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { csrfHeaders } from "../../api/client";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
-import { enqueueWorkLogCreate, WORK_LOG_APPLIED_EVENT } from "../../offline/syncEngine";
+import { enqueueWorkLogCreate, enqueuePreparedWorkLogCreate, prepareWorkLogCreate, submitPreparedWorkLogCreate, WORK_LOG_APPLIED_EVENT, type PreparedWorkLogCreate } from "../../offline/syncEngine";
 import "./work-log.css";
 
 type Entry = {
@@ -64,11 +64,24 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
   const [estimateLineId, setEstimateLineId] = useState("");
   const [labor, setLabor] = useState<LaborRow[]>([]);
   const [crewForm, setCrewForm] = useState({ id: 0, name: "", foreman: "", members: "" });
+  const [pendingCommands, setPendingCommands] = useState<Record<string, PreparedWorkLogCreate>>({});
+  const scope = `${userId}:${projectId}`;
+  const liveScope = useRef(scope);
+  liveScope.current = scope;
+  const pending = pendingCommands[scope];
+  const latestBody = useRef<() => Record<string, unknown>>(() => ({}));
+  const lastQueued = useRef<{ scope: string; id: string } | null>(null);
 
   useEffect(() => {
     const applied = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId: number; projectId: number }>).detail;
-      if (detail?.userId === userId && detail.projectId === projectId) setTick((value) => value + 1);
+      const detail = (event as CustomEvent<{ userId: number; projectId: number; clientMutationId?: string }>).detail;
+      if (detail?.userId === userId && detail.projectId === projectId) {
+        setTick((value) => value + 1);
+        if (lastQueued.current?.scope === scope && lastQueued.current.id === detail.clientMutationId) {
+          setMessage("Запись добавлена");
+          lastQueued.current = null;
+        }
+      }
     };
     window.addEventListener(WORK_LOG_APPLIED_EVENT, applied);
     return () => window.removeEventListener(WORK_LOG_APPLIED_EVENT, applied);
@@ -114,12 +127,9 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
     setForm((f) => ({ ...f, work_name: name, unit: f.unit || (known?.unit ?? "") }));
   }
 
-  async function save() {
+  function workBody(): Record<string, unknown> {
     const workName = selected ? selected.title : form.work_name.trim();
-    if (!workName) { setError("Укажите, какая работа выполнена"); return; }
-    setSaving(true);
-    setError("");
-    setMessage("");
+    if (!workName) throw new Error("Укажите, какая работа выполнена");
     const body: Record<string, unknown> = { work_date: form.work_date, work_name: workName };
     if (selected) body.schedule_item_id = selected.id;
     if (estimateLineId) body.estimate_line_id = Number(estimateLineId);
@@ -131,25 +141,103 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
     if (form.crew_id) body.crew_id = Number(form.crew_id);
     const people = labor.filter((r) => r.person_name.trim() && r.hours.trim());
     if (people.length) body.labor = people.map((r) => ({ person_name: r.person_name.trim(), hours: r.hours.trim(), ...(r.hourly_rate ? { hourly_rate: r.hourly_rate } : {}) }));
+    return body;
+  }
+  latestBody.current = workBody;
+
+  function clearSubmitted(data: Record<string, unknown>, commandScope: string) {
+    if (liveScope.current !== commandScope) return;
+    try { if (JSON.stringify(latestBody.current()) !== JSON.stringify(data)) return; }
+    catch { return; }
+    setEstimateLineId("");
+    setLabor([]);
+    setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location, unit: selected ? f.unit : "" }));
+  }
+
+  function removePending(commandScope: string) {
+    setPendingCommands((current) => { const next = { ...current }; delete next[commandScope]; return next; });
+  }
+
+  function acceptedOnline(command: PreparedWorkLogCreate, commandScope: string, label: string) {
+    removePending(commandScope);
+    if (liveScope.current !== commandScope) return;
+    setError("");
+    setMessage(label);
+    clearSubmitted(command.patch, commandScope);
+    setTick((value) => value + 1);
+  }
+
+  async function preserveUncertain(command: PreparedWorkLogCreate, reason: unknown, commandScope: string) {
+    const attempts = command.attempts + 1;
+    const status = reason instanceof ApiError && [401, 403].includes(reason.status || 0)
+      ? "auth_required" : reason instanceof ApiError && [400, 404, 409, 422].includes(reason.status || 0)
+        ? "attention" : attempts >= 3 ? "attention" : "queued";
+    const retry: PreparedWorkLogCreate = { ...command, attempts, status, updatedAt: new Date().toISOString() };
     try {
-      const offline = !isOnline();
-      if (offline) {
-        if (!userId) throw new Error("Войдите заново, чтобы сохранить запись на устройстве.");
-        await enqueueWorkLogCreate({ userId, projectId, data: body });
-        setMessage("Запись сохранена на устройстве. Отправится при восстановлении связи.");
-      } else {
-        await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
-        setMessage("Запись добавлена");
+      await enqueuePreparedWorkLogCreate(retry);
+      removePending(commandScope);
+      if (liveScope.current === commandScope) {
+        lastQueued.current = { scope: commandScope, id: command.id };
+        setMessage("Запись сохранена на устройстве. Ожидает подтверждения сервера.");
+        clearSubmitted(command.patch, commandScope);
       }
-      setEstimateLineId("");
-      setLabor([]);
-      setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location, unit: selected ? f.unit : "" }));
-      if (!offline) setTick((v) => v + 1);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить запись");
-    } finally {
-      setSaving(false);
+    } catch {
+      setPendingCommands((current) => ({ ...current, [commandScope]: retry }));
+      if (liveScope.current === commandScope) setError("Ответ сервера не подтверждён, сохранить повтор на устройстве не удалось. Запись хранится только на этой странице. Повторите неподтверждённую запись.");
     }
+  }
+
+  async function save() {
+    if (pending || saving) return;
+    let body: Record<string, unknown>;
+    try { body = workBody(); } catch (reason) { setError((reason as Error).message); return; }
+    const commandScope = scope;
+    setSaving(true); setError(""); setMessage("");
+    try {
+      if (!userId) throw new Error(!isOnline() ? "Войдите заново, чтобы сохранить запись на устройстве." : "Войдите заново, чтобы отправить запись журнала.");
+      if (!isOnline()) {
+        const id = await enqueueWorkLogCreate({ userId, projectId, data: body });
+        if (liveScope.current === commandScope) {
+          lastQueued.current = { scope: commandScope, id };
+          setMessage("Запись сохранена на устройстве. Ожидает отправки.");
+          clearSubmitted(body, commandScope);
+        }
+        return;
+      }
+      const command = prepareWorkLogCreate({ userId, projectId, data: body });
+      try { await submitPreparedWorkLogCreate(command); }
+      catch (reason) {
+        if (reason instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(reason.status || 0)) throw reason;
+        await preserveUncertain(command, reason, commandScope);
+        return;
+      }
+      acceptedOnline(command, commandScope, "Запись добавлена");
+    } catch (err) {
+      if (liveScope.current === commandScope) setError(err instanceof Error ? err.message : "Не удалось сохранить запись");
+    } finally { setSaving(false); }
+  }
+
+  async function retryPending() {
+    if (!pending || saving) return;
+    const command = pending, commandScope = scope;
+    setSaving(true); setError("");
+    try {
+      if (!isOnline()) {
+        try {
+          await enqueuePreparedWorkLogCreate(command);
+          removePending(commandScope);
+          if (liveScope.current === commandScope) {
+            lastQueued.current = { scope: commandScope, id: command.id };
+            setMessage("Запись сохранена на устройстве. Ожидает отправки.");
+            clearSubmitted(command.patch, commandScope);
+          }
+        } catch { if (liveScope.current === commandScope) setError("Повтор пока не сохранён на устройстве. Не закрывайте страницу с неподтверждённой записью."); }
+        return;
+      }
+      try { await submitPreparedWorkLogCreate(command); }
+      catch (reason) { await preserveUncertain(command, reason, commandScope); return; }
+      acceptedOnline(command, commandScope, "Неподтверждённая запись добавлена");
+    } finally { setSaving(false); }
   }
 
   async function remove(id: number) {
@@ -369,8 +457,13 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
           ))}
           <button type="button" onClick={() => setLabor((rows) => [...rows, { person_name: "", hours: "8", hourly_rate: null }])}>Добавить работника</button>
         </fieldset>
-        <button type="submit" className="wl-save" disabled={saving}>{saving ? "Сохраняем…" : "Добавить запись"}</button>
+        <button type="submit" className="wl-save" disabled={saving || Boolean(pending)}>{saving ? "Сохраняем…" : "Добавить запись"}</button>
       </form>
+      {pending && <aside className="wl-note" aria-label="Неподтверждённая запись">
+        <p>Ожидает подтверждения: {String(pending.patch.work_name)} · {String(pending.patch.work_date)}.</p>
+        <p>Повтор не сохранён на устройстве: он доступен только на этой странице. Не закрывайте её до подтверждения или сохранения записи.</p>
+        <button type="button" disabled={saving} onClick={() => void retryPending()}>Повторить неподтверждённую запись</button>
+      </aside>}
       {message && <p className="wl-note" role="status">{message}</p>}
       {error && <p className="wl-error" role="alert">{error}</p>}
 
