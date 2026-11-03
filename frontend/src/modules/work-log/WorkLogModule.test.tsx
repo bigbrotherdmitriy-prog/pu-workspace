@@ -207,3 +207,26 @@ it.each(["crews", "schedule", "suggestions"])("ignores a late %s response from t
   expect(screen.queryAllByText(/Old synthetic project/)).toHaveLength(0);
   expect(container.querySelector('option[value="Old synthetic project"]')).toBeNull();
 });
+
+
+it("hides loaded project context while the next project is still loading without clearing the draft", async () => {
+  const never = new Promise<never>(() => undefined);
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.startsWith("/projects/6/")) return never;
+    if (path.endsWith("/crews")) return { crews: [{ id: 41, name: "Old synthetic crew", foreman: null, members: "", members_count: 0, note: null }] };
+    if (path.endsWith("/schedule")) return { baseline: { id: 1, name: "Old synthetic schedule", version: 1, status: "approved" }, items: [] };
+    if (path.endsWith("/suggestions")) return { works: [{ work_name: "Old synthetic suggestion", unit: "m" }], objects: [], rd_items: [] };
+    return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+  });
+  const { rerender, container } = render(<WorkLogModule projectId={5} userId={1} />);
+  await waitFor(() => expect(container.querySelector('option[value="Old synthetic suggestion"]')).not.toBeNull());
+  fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Unsaved synthetic draft" } });
+  rerender(<WorkLogModule projectId={6} userId={1} />);
+  expect(container.querySelector('option[value="Old synthetic suggestion"]')).toBeNull();
+  expect(container.querySelector('option[value="41"]')).toBeNull();
+  expect((screen.getByLabelText(/Какая работа выполнена/) as HTMLInputElement).value).toBe("Unsaved synthetic draft");
+  fireEvent.click(screen.getByText("Подсказка из графика (ГПР)"));
+  expect(screen.queryByText(/Old synthetic schedule/)).toBeNull();
+  fireEvent.click(screen.getByText("Бригады"));
+  expect(screen.queryByText(/Old synthetic crew/)).toBeNull();
+});

@@ -88,13 +88,19 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
   }, [userId, projectId]);
 
   useEffect(() => {
+    setCrews([]);
+    setPlan({ baseline: null, items: [] });
+    setSuggest({ works: [], objects: [], rd_items: [] });
+  }, [userId, projectId]);
+
+  useEffect(() => {
     if (projectId <= 0) return;
     let alive = true;
     api<{ crews: Crew[] }>(`/projects/${projectId}/work-log/crews`)
       .then((res) => { if (alive && res && Array.isArray(res.crews)) setCrews(res.crews); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [projectId, tick]);
+  }, [userId, projectId, tick]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -103,7 +109,7 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
       .then((res) => { if (alive && res && Array.isArray(res.items)) setPlan(res); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [projectId, tick]);
+  }, [userId, projectId, tick]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -115,7 +121,7 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
       .catch((err: unknown) => { if (alive) setError(err instanceof Error ? err.message : "Не удалось загрузить журнал"); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [projectId, query, tick]);
+  }, [userId, projectId, query, tick]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -124,7 +130,7 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
       .then((res) => { if (alive && res) setSuggest(res); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [projectId, tick]);
+  }, [userId, projectId, tick]);
 
   const set = (field: keyof ReturnType<typeof emptyForm>, value: string) => setForm((f) => ({ ...f, [field]: value }));
 
