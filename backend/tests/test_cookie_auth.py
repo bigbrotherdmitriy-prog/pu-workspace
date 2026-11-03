@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 import app.models  # noqa: F401 - register all mapped tables
-from app.api.auth import _set_session_cookies
+from app.api.auth import _set_session_cookies, logout
 from app.core.auth import require_user
 from app.database import Base
 from app.models.auth_session import AuthSession
@@ -150,3 +150,144 @@ def test_refresh_middleware_reissues_both_cookies():
     assert any(c.startswith("pu_csrf=csrf-value") for c in cookies)
     app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") != "/__test_slide"]
     assert dep is require_user
+
+
+def _seed_session(db, user, token):
+    import hashlib
+    db.add(AuthSession(
+        user_id=user.id,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    ))
+    db.commit()
+
+
+def _session_exists(db, token):
+    import hashlib
+    return db.query(AuthSession).filter(
+        AuthSession.token_hash == hashlib.sha256(token.encode()).hexdigest()
+    ).first() is not None
+
+
+@pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER", "bEaReR"])
+def test_logout_revokes_exact_bearer_session_case_insensitive(scheme):
+    engine = _database()
+    with Session(engine) as db:
+        user = User(name="Owner", email="owner@example.test", is_admin=True)
+        other = User(name="Other", email="other@example.test", is_admin=False)
+        db.add_all([user, other])
+        db.flush()
+        _seed_session(db, user, "bearer-token")
+        _seed_session(db, user, "same-user-other")
+        _seed_session(db, other, "other-user-token")
+
+        authenticated = require_user(
+            _request("GET"),
+            HTTPAuthorizationCredentials(scheme=scheme, credentials="bearer-token"),
+            db,
+        )
+        assert authenticated.id == user.id
+
+        response = Response()
+        result = logout(
+            _request("POST"),
+            response,
+            user=authenticated,
+            authorization=f"{scheme} bearer-token",
+            db=db,
+        )
+        assert result == {"status": "logged_out"}
+        assert not _session_exists(db, "bearer-token")
+        assert _session_exists(db, "same-user-other")
+        assert _session_exists(db, "other-user-token")
+
+        with pytest.raises(HTTPException) as failure:
+            require_user(
+                _request("GET"),
+                HTTPAuthorizationCredentials(scheme=scheme, credentials="bearer-token"),
+                db,
+            )
+        assert failure.value.status_code == 401
+
+
+def test_logout_cookie_only_revokes_cookie_session():
+    engine = _database()
+    with Session(engine) as db:
+        user = User(name="Owner", email="owner@example.test", is_admin=True)
+        db.add(user)
+        db.flush()
+        _seed_session(db, user, "cookie-token")
+        _seed_session(db, user, "other-token")
+
+        request = _request("POST", "pu_session=cookie-token; pu_csrf=csrf-token", "csrf-token")
+        authenticated = require_user(request, None, db)
+        assert authenticated.id == user.id
+
+        response = Response()
+        result = logout(request, response, user=authenticated, authorization="", db=db)
+        assert result == {"status": "logged_out"}
+        assert not _session_exists(db, "cookie-token")
+        assert _session_exists(db, "other-token")
+
+        with pytest.raises(HTTPException) as failure:
+            require_user(
+                _request("POST", "pu_session=cookie-token; pu_csrf=csrf-token", "csrf-token"),
+                None,
+                db,
+            )
+        assert failure.value.status_code == 401
+
+
+@pytest.mark.parametrize("bogus", ["undefined", "null"])
+def test_logout_bogus_bearer_does_not_shadow_valid_cookie(bogus):
+    engine = _database()
+    with Session(engine) as db:
+        user = User(name="Owner", email="owner@example.test", is_admin=True)
+        db.add(user)
+        db.flush()
+        _seed_session(db, user, "cookie-token")
+
+        request = _request("POST", "pu_session=cookie-token; pu_csrf=csrf-token", "csrf-token")
+        authenticated = require_user(
+            request,
+            HTTPAuthorizationCredentials(scheme="Bearer", credentials=bogus),
+            db,
+        )
+        assert authenticated.id == user.id
+
+        response = Response()
+        result = logout(request, response, user=authenticated, authorization=f"Bearer {bogus}", db=db)
+        assert result == {"status": "logged_out"}
+        assert not _session_exists(db, "cookie-token")
+
+        with pytest.raises(HTTPException) as failure:
+            require_user(
+                _request("POST", "pu_session=cookie-token; pu_csrf=csrf-token", "csrf-token"),
+                None,
+                db,
+            )
+        assert failure.value.status_code == 401
+
+
+def test_logout_valid_bearer_takes_priority_over_cookie():
+    engine = _database()
+    with Session(engine) as db:
+        user = User(name="Owner", email="owner@example.test", is_admin=True)
+        db.add(user)
+        db.flush()
+        _seed_session(db, user, "bearer-token")
+        _seed_session(db, user, "cookie-token")
+
+        request = _request("POST", "pu_session=cookie-token; pu_csrf=csrf-token", "csrf-token")
+        authenticated = require_user(
+            request,
+            HTTPAuthorizationCredentials(scheme="bearer", credentials="bearer-token"),
+            db,
+        )
+        assert authenticated.id == user.id
+
+        response = Response()
+        result = logout(request, response, user=authenticated, authorization="bearer bearer-token", db=db)
+        assert result == {"status": "logged_out"}
+        assert not _session_exists(db, "bearer-token")
+        assert _session_exists(db, "cookie-token")
