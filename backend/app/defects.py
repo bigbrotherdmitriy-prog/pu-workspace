@@ -205,8 +205,23 @@ def change_status(db: Session, project_id: int, user_id: int | None, defect_id: 
         has_after = db.scalar(select(func.count()).select_from(DefectPhoto).where(DefectPhoto.defect_id == d.id, DefectPhoto.project_id == d.project_id, DefectPhoto.kind == "after")) or 0
         if status == "fixed" and not has_after and not (comment or "").strip():
             raise ValueError("Чтобы отметить замечание устранённым, приложите фото результата или напишите комментарий")
-    d.status = status
-    d.closed_at = datetime.now(timezone.utc) if status == "accepted" else None
+        expected_status = d.status
+        changed = db.execute(update(Defect).where(
+            Defect.id == defect_id, Defect.project_id == project_id,
+            Defect.status == expected_status,
+        ).values(
+            status=status,
+            closed_at=datetime.now(timezone.utc) if status == "accepted" else None,
+        ).execution_options(synchronize_session=False))
+        if changed.rowcount != 1:
+            current = db.scalar(select(Defect.status).where(
+                Defect.id == defect_id, Defect.project_id == project_id,
+            ))
+            if current is None:
+                raise LookupError("Замечание не найдено")
+            raise ValueError("Статус замечания изменился: обновите данные перед переходом")
+        # Refresh only fields owned by this operation; preserve caller edits.
+        db.refresh(d, attribute_names=["status", "closed_at"])
     db.add(DefectComment(project_id=project_id, defect_id=d.id, author_user_id=user_id, text=(comment or "").strip(), status_change=status))
     db.flush()
     return _defect_dict(db, d, full=True)
