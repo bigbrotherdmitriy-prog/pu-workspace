@@ -1,0 +1,80 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import { api, ApiError } from "../api/client";
+import type { OfflineCommand } from "./types";
+const store = vi.hoisted(() => ({ rows: new Map<string, OfflineCommand>(), meta: new Map<string, unknown>() }));
+vi.mock("../api/client", () => ({ api: vi.fn(), ApiError: class ApiError extends Error { constructor(message: string, public status: number | null, public requestId: string) { super(message); } } }));
+vi.mock("./db", () => ({
+  putCommand: vi.fn(async (row: OfflineCommand) => { store.rows.set(row.id, structuredClone(row)); }),
+  deleteCommand: vi.fn(async (id: string) => { store.rows.delete(id); }),
+  listCommands: vi.fn(async (userId: number, projectId: number) => [...store.rows.values()].filter((row) => row.userId === userId && row.projectId === projectId)),
+  getMeta: vi.fn(async (key: string) => store.meta.get(key)),
+  setMeta: vi.fn(async (key: string, value: unknown) => { store.meta.set(key, value); }),
+}));
+import { enqueueWorkLogCreate, synchronize } from "./syncEngine";
+const args = () => ({ userId: 1, projectId: 17, data: { work_date: "2026-10-30", work_name: "Synthetic work", qty: "1.250", labor: [{ person_name: "Synthetic worker", hours: "2" }] } });
+const validReceipt = (body: Record<string, unknown>) => ({ receipt_id: 5, client_mutation_id: body.client_mutation_id, operation: "work_log.create", status: "applied", entity_type: "work_log", entity_id: 23, result: { id: 23, project_id: body.project_id, author_user_id: 1 } });
+beforeEach(() => { store.rows.clear(); store.meta.clear(); vi.mocked(api).mockReset(); Object.defineProperty(navigator,"onLine",{ configurable: true,value: true }); });
+it("snapshots explicit-date journal bodies without merging separate facts or inventing entity ids", async () => {
+  const data = args(); const id = await enqueueWorkLogCreate(data);
+  data.data.labor[0].hours = "9";
+  await enqueueWorkLogCreate(args());
+  expect(store.rows.size).toBe(2);
+  const saved = store.rows.get(id)!;
+  expect(saved.operation).toBe("work_log.create");
+  expect(saved).not.toHaveProperty("entityId");
+  expect(saved.patch.labor).toEqual([{person_name:"Synthetic worker",hours:"2"}]);
+  expect(saved.patch.work_date).toBe("2026-10-30");
+});
+it("sends the immutable create envelope and removes a fact only on a matching applied receipt", async () => {
+  await enqueueWorkLogCreate(args());
+  vi.mocked(api).mockImplementation(async (_path, init) => validReceipt(JSON.parse(String(init?.body))));
+  await synchronize(1,17);
+  expect(store.rows.size).toBe(0);
+  const [path, init] = vi.mocked(api).mock.calls[0];
+  const body = JSON.parse(String(init?.body));
+  expect(path).toBe("/mobile-sync/work-log-create");
+  expect(body).not.toHaveProperty("entity_id");
+  expect(body).not.toHaveProperty("user_id");
+  expect(body.data).toEqual(args().data);
+});
+it("retains the identical mutation/body/date after an ambiguous lost response", async () => {
+  const id = await enqueueWorkLogCreate(args());
+  let firstBody = "";
+  vi.mocked(api).mockImplementation(async (_path, init) => { firstBody = String(init?.body); throw new ApiError("Synthetic connection loss",null,"synthetic-request"); });
+  await synchronize(1,17);
+  expect(store.rows.get(id)?.status).toBe("queued");
+  vi.mocked(api).mockImplementation(async (_path, init) => { expect(String(init?.body)).toBe(firstBody); return validReceipt(JSON.parse(firstBody)); });
+  await synchronize(1,17);
+  expect(store.rows.size).toBe(0);
+});
+it.each([401,403])("keeps rejected authentication %s for explicit recovery without auto replay", async (status) => {
+  const id = await enqueueWorkLogCreate(args());
+  vi.mocked(api).mockRejectedValue(new ApiError("Synthetic auth failure",status,"synthetic-request"));
+  await synchronize(1,17);
+  expect(store.rows.get(id)?.status).toBe("auth_required");
+  await synchronize(1,17,true);
+  expect(api).toHaveBeenCalledTimes(1);
+});
+it.each(["wrong_mutation","wrong_entity","wrong_project","missing_receipt","wrong_author"])("retains a queued fact on a malformed receipt: %s", async (kind) => {
+  const id = await enqueueWorkLogCreate(args());
+  vi.mocked(api).mockImplementation(async (_path,init) => {
+    const r = validReceipt(JSON.parse(String(init?.body)));
+    if (kind==="wrong_mutation") r.client_mutation_id="different-synthetic-mutation";
+    if (kind==="wrong_entity") r.entity_id=0;
+    if (kind==="wrong_project") r.result.project_id=999;
+    if (kind==="missing_receipt") r.receipt_id=0;
+    if (kind==="wrong_author") r.result.author_user_id=999;
+    return r;
+  });
+  await synchronize(1,17);
+  expect(store.rows.has(id)).toBe(true);
+});
+it("never delivers another user's or project's queued facts", async () => {
+  await enqueueWorkLogCreate(args());
+  await synchronize(2,17); await synchronize(1,18);
+  expect(api).not.toHaveBeenCalled(); expect(store.rows.size).toBe(1);
+});
+it.each(["","2026-02-30","2026-1-03","0000-01-01"])("rejects a noncanonical explicit work date %s before persistence", async (work_date) => {
+  await expect(enqueueWorkLogCreate({...args(),data:{...args().data,work_date}})).rejects.toThrow();
+  expect(store.rows.size).toBe(0);
+});

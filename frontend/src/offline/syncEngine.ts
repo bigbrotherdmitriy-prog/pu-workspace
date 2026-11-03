@@ -50,6 +50,35 @@ function isSafeToCoalesce(command: OfflineCommand): boolean {
     && command.conflictId === undefined;
 }
 
+function positiveId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+export async function enqueueWorkLogCreate(args: {
+  userId: number; projectId: number; data: Record<string, unknown>;
+}): Promise<string> {
+  if (!positiveId(args.userId) || !positiveId(args.projectId)) throw new Error("Нужны пользователь и проект для локальной записи.");
+  const day = args.data.work_date;
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number(day.slice(0, 4)) < 1) {
+    throw new Error("Укажите дату выполненной работы в формате ГГГГ-ММ-ДД.");
+  }
+  const parsedDay = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsedDay.getTime()) || parsedDay.toISOString().slice(0, 10) !== day) throw new Error("Некорректная дата выполненной работы.");
+  if (typeof args.data.work_name !== "string" || !args.data.work_name.trim()) throw new Error("Укажите выполненную работу.");
+  const data = JSON.parse(JSON.stringify(args.data, (_key, value: unknown) => {
+    if (typeof value === "number" && !Number.isFinite(value)) throw new Error("Число должно быть конечным.");
+    return value;
+  })) as Record<string, unknown>;
+  const device = deviceId();
+  if (!/^[A-Za-z0-9_.:-]{8,100}$/.test(device)) throw new Error("Некорректный идентификатор устройства.");
+  const now = new Date().toISOString(), id = uuid();
+  // Every create is a distinct fact. Never coalesce or invent a server entity id.
+  await persist({ id, userId: args.userId, projectId: args.projectId, deviceId: device,
+    operation: "work_log.create", patch: data, clientCreatedAt: now,
+    status: "queued", attempts: 0, updatedAt: now });
+  return id;
+}
+
 export async function enqueueTaskUpdate(args: {
   userId: number;
   projectId: number;
@@ -150,6 +179,27 @@ function blobBase64(blob: Blob): Promise<string> {
 }
 
 async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
+  if (command.operation === "work_log.create") {
+    const response = await api<{
+      receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
+      status?: unknown; entity_type?: unknown; entity_id?: unknown;
+      result?: { id?: unknown; project_id?: unknown; author_user_id?: unknown };
+    }>("/mobile-sync/work-log-create", {
+      method: "POST", body: JSON.stringify({
+        client_mutation_id: command.id, device_id: command.deviceId,
+        project_id: command.projectId, operation: command.operation,
+        client_created_at: command.clientCreatedAt, data: command.patch,
+      }),
+    });
+    if (response?.status !== "applied" || response.operation !== "work_log.create"
+      || response.client_mutation_id !== command.id || response.entity_type !== "work_log"
+      || !positiveId(response.receipt_id) || !positiveId(response.entity_id)
+      || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
+      || response.result?.author_user_id !== command.userId) {
+      throw new Error("Не подтверждена доставка записи журнала. Локальная запись сохранена.");
+    }
+    return { applied: true, receiptId: response.receipt_id };
+  }
   if (command.operation === "document.upload") {
     const files = await Promise.all((command.uploads || []).map(async (file) => ({
       path: file.path,

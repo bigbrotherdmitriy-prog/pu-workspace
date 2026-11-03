@@ -12,13 +12,11 @@ export type StoredUploadFile = {
   blob: Blob;
 };
 
-export type OfflineCommand = {
+type OfflineCommandBase = {
   id: string;
   userId: number;
   projectId: number;
   deviceId: string;
-  operation: "task.update" | "notification.mark_read" | "document.upload";
-  entityId: number;
   baseToken?: string;
   patch: Record<string, unknown>;
   uploads?: StoredUploadFile[];
@@ -30,6 +28,11 @@ export type OfflineCommand = {
   conflictId?: number;
   updatedAt: string;
 };
+
+export type OfflineCommand = OfflineCommandBase & (
+  | { operation: "task.update" | "notification.mark_read" | "document.upload"; entityId: number }
+  | { operation: "work_log.create"; entityId?: never }
+);
 
 export type ServerConflict = {
   id: number;
