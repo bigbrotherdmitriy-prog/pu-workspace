@@ -26,6 +26,24 @@ def _dec(value) -> Decimal | None:
         return None
 
 
+def _validate_storable(value: Decimal | None, scale: int) -> None:
+    if value is None:
+        return
+    if not value.is_finite():
+        raise ValueError("Число должно быть конечным")
+    bound = Decimal(10) ** (18 - scale)
+    if value.copy_abs() >= bound:
+        raise ValueError("Число превышает допустимый диапазон поля")
+    # Match the existing service serialization policy before checking DB fit.
+    from decimal import localcontext
+    with localcontext() as context:
+        context.prec = 28
+        rounded = value.quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+    if abs(rounded) >= bound:
+        raise ValueError("Число превышает допустимый диапазон поля")
+
+
+
 def _money(value: Decimal) -> Decimal:
     return value.quantize(TWO, rounding=ROUND_HALF_UP)
 
@@ -50,11 +68,15 @@ def create_estimate(db: Session, project_id: int, name: str, parsed: dict, contr
     if not lines:
         raise ValueError("В файле не найдено ни одной позиции сметы")
     rate = _dec(vat_rate) if vat_rate not in (None, "") else Decimal("22")
-    if rate is None or not Decimal("0") <= rate <= Decimal("30"):
+    if rate is None or not rate.is_finite() or not Decimal("0") <= rate <= Decimal("30"):
         raise ValueError("Ставка НДС должна быть от 0 до 30")
+    for line in lines:
+        for field, scale in (("qty", 3), ("unit_price", 2), ("total", 2)):
+            _validate_storable(_dec(line.get(field)), scale)
     total = _dec(parsed.get("total"))
     if total is None:
         total = sum((_dec(l.get("total")) or ZERO for l in lines), ZERO)
+    _validate_storable(total, 2)
     est = Estimate(project_id=project_id, contract_id=contract_id, name=name[:500], source_name=(source_name or "")[:500] or None,
                    total=total, vat_rate=rate)
     db.add(est)
@@ -68,6 +90,7 @@ def create_estimate(db: Session, project_id: int, name: str, parsed: dict, contr
         ))
     db.flush()
     return _estimate_dict(est, len(lines))
+
 
 
 def list_estimates(db: Session, project_id: int) -> list[dict]:
@@ -151,22 +174,27 @@ def update_line(db: Session, project_id: int, line_id: int, data: dict) -> dict:
     l = db.get(EstimateLine, line_id)
     if l is None or l.project_id != project_id:
         raise LookupError("Позиция сметы не найдена")
+    changes = {}
     for field in ("name", "unit", "code", "position", "section", "note"):
         if field in data:
             value = (str(data[field]).strip() if data[field] is not None else "")
             if field == "name" and not value:
                 raise ValueError("Название позиции не может быть пустым")
-            setattr(l, field, value or None)
+            changes[field] = value or None
     for field in ("qty", "unit_price", "total"):
         if field in data:
             value = _dec(data[field])
             if data[field] not in (None, "") and value is None:
                 raise ValueError("Число указано неверно")
+            _validate_storable(value, 3 if field == "qty" else 2)
             if value is not None and value < 0:
                 raise ValueError("Значение не может быть отрицательным")
-            setattr(l, field, value)
+            changes[field] = value
+    for field, value in changes.items():
+        setattr(l, field, value)
     db.flush()
     return {"id": l.id}
+
 
 
 def _unit_price(l: EstimateLine) -> Decimal | None:

@@ -357,3 +357,142 @@ def test_service_ks_legacy_act_without_allocations_blocks_overlap(world):
     assert len(prev["lines"]) == 1 and _qty(prev["lines"][0]["qty"]) == Decimal("10.000")
     assert _money(prev["total_ex_vat"]) == Decimal("500.00")
 
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_service_nonfinite_edit_rejected(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, lid, {field: value})
+    db.rollback()
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value,expected", [("55,5", Decimal("55.5")), ("0", Decimal("0"))])
+def test_service_finite_edit_controls(world, field, value, expected):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert Decimal(line[field]) == expected
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", [None, ""])
+def test_service_blank_edit_clears_field(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert line[field] is None
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+def test_service_oversized_finite_edit_rejected_and_snapshot_kept(world, field):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    snapshot = svc.get_estimate(db, pid, world["est"]["id"])
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, lid, {field: "1e100"})
+    db.rollback()
+    assert svc.get_estimate(db, pid, world["est"]["id"]) == snapshot
+
+
+@pytest.mark.parametrize("field,value", [
+    ("qty", "123456.789"),
+    ("unit_price", "123456.78"),
+    ("total", "123456.78"),
+])
+def test_service_reasonable_large_finite_edit_accepted(world, field, value):
+    db, pid = world["db"], world["p"].id
+    lid = world["lines"][0]["id"]
+    svc.update_line(db, pid, lid, {field: value})
+    line = next(l for l in svc.get_estimate(db, pid, world["est"]["id"])["lines"] if l["id"] == lid)
+    assert Decimal(line[field]) == Decimal(value)
+
+
+def _api_client(db):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import estimates as api
+    from app.core.auth import require_user
+    from app.database import get_db
+
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_user] = lambda: type("U", (), {"id": 1, "is_active": True, "is_admin": True})()
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total"])
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_api_nonfinite_patch_rejected_and_snapshot_kept(world, field, value):
+    db, pid = world["db"], world["p"].id
+    c = _api_client(db)
+    lid = world["lines"][0]["id"]
+    before = c.get(f"/projects/{pid}/estimates/{world['est']['id']}")
+    assert before.status_code == 200
+    r = c.patch(f"/projects/{pid}/estimate-lines/{lid}", json={field: value})
+    assert r.status_code == 422
+    after = c.get(f"/projects/{pid}/estimates/{world['est']['id']}")
+    assert after.status_code == 200 and after.json() == before.json()
+
+
+def test_api_mixed_patch_rolls_back_partial_write(world):
+    db, pid = world["db"], world["p"].id
+    c = _api_client(db)
+    lid = world["lines"][0]["id"]
+    before = c.get(f"/projects/{pid}/estimates/{world['est']['id']}").json()
+    r = c.patch(f"/projects/{pid}/estimate-lines/{lid}", json={"qty": "55,5", "unit_price": "NaN"})
+    assert r.status_code == 422
+    after = c.get(f"/projects/{pid}/estimates/{world['est']['id']}").json()
+    assert after == before
+
+
+@pytest.mark.parametrize("rate", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_vat_nonfinite_rejected_before_write(world, rate):
+    db, pid = world["db"], world["p"].id
+    before = svc.list_estimates(db, pid)
+    with pytest.raises(ValueError):
+        svc.create_estimate(db, pid, "Synthetic VAT", PARSED, vat_rate=rate)
+    assert svc.list_estimates(db, pid) == before
+
+
+@pytest.mark.parametrize("field", ["qty", "unit_price", "total", "estimate_total"])
+@pytest.mark.parametrize("value", ["1e100", "NaN", "sNaN", "Infinity"])
+def test_import_invalid_numeric_rejected_before_write(world, field, value):
+    import copy
+    db, pid = world["db"], world["p"].id
+    before = svc.list_estimates(db, pid)
+    parsed = copy.deepcopy(PARSED)
+    if field == "estimate_total":
+        parsed["total"] = value
+    else:
+        parsed["lines"][0][field] = value
+    with pytest.raises(ValueError):
+        svc.create_estimate(db, pid, "Synthetic invalid import", parsed)
+    assert svc.list_estimates(db, pid) == before
+    assert not db.new
+
+
+@pytest.mark.parametrize("scale,value", [(2,"9999999999999999.995"), (2,"-9999999999999999.995"), (3,"999999999999999.9995"), (2,"1e1000000")])
+def test_rounded_database_overflow_rejected(scale, value):
+    with pytest.raises(ValueError):
+        svc._validate_storable(Decimal(value), scale)
+
+
+def test_invalid_mixed_edit_does_not_dirty_row(world):
+    from app.models.estimates import EstimateLine
+    db, pid = world["db"], world["p"].id
+    line = db.get(EstimateLine, world["lines"][0]["id"])
+    before = (line.name, line.qty)
+    with pytest.raises(ValueError):
+        svc.update_line(db, pid, line.id, {"name": "Changed", "qty": "1e100"})
+    assert (line.name, line.qty) == before
+    assert line not in db.dirty
+
