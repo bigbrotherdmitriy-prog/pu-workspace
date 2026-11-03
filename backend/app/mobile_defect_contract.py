@@ -6,7 +6,11 @@ from app.api.defects import DefectBody
 
 class OfflineDefectData(DefectBody):
     model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
+    object_name: str | None = Field(default=None, max_length=300)
+    location: str | None = Field(default=None, max_length=300)
+    responsible: str | None = Field(default=None, max_length=300)
 
     @field_validator("title")
     @classmethod

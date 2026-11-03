@@ -25,6 +25,7 @@ def _receipt(row: MobileSyncCommand, payload: dict) -> dict:
             or row.project_id != payload["project_id"]
             or type(row.entity_id) is not int or row.entity_id <= 0
             or type(result.get("id")) is not int or result["id"] != row.entity_id
+            or type(result.get("number")) is not int or result["number"] <= 0
             or type(result.get("project_id")) is not int or result["project_id"] != row.project_id
             or type(result.get("author_user_id")) is not int or result["author_user_id"] != row.user_id):
         raise ValueError("offline_receipt_not_applied")
@@ -70,7 +71,8 @@ def submit_defect_create(db: Session, actor: User, request: OfflineDefectCreateR
             )
             db.add(row)
             db.flush()
-        return _receipt(row, payload)
+            reply = _receipt(row, payload)
+        return reply
     except IntegrityError:
         with db.no_autoflush:
             existing = db.scalar(query)

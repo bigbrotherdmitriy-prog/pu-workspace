@@ -178,7 +178,7 @@ def test_forced_stale_initial_read_rolls_back_provisional_fact_on_real_unique_co
     assert missed and count(db, Defect) == count(db, MobileSyncCommand) == 1
 
 
-@pytest.mark.parametrize("damage", ["status", "type", "result_id", "result_project", "result_actor"])
+@pytest.mark.parametrize("damage", ["status", "type", "result_id", "result_project", "result_actor", "number"])
 def test_inconsistent_receipt_is_not_acknowledged(world, damage):
     db, actor, project, other = world
     request = command(project)
@@ -188,7 +188,7 @@ def test_inconsistent_receipt_is_not_acknowledged(world, damage):
     if damage == "status": row.status = "processing"
     elif damage == "type": row.entity_type = "work_log"
     else:
-        key, value = {"result_id": ("id", row.entity_id + 1000), "result_project": ("project_id", other.id), "result_actor": ("author_user_id", actor.id + 1000)}[damage]
+        key, value = {"result_id": ("id", row.entity_id + 1000), "result_project": ("project_id", other.id), "result_actor": ("author_user_id", actor.id + 1000), "number": ("number", 0)}[damage]
         row.result = {**row.result, key: value}
     db.commit()
     with pytest.raises(ValueError, match="offline_receipt_not_applied"):
@@ -230,3 +230,31 @@ def test_client_timestamp_cannot_invent_a_timezone():
     payload = envelope()
     payload["client_created_at"] = "2026-10-30T09:00:00"
     with pytest.raises(ValidationError): OfflineDefectCreateRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize("field,limit", [("title",500),("description",5000),("object_name",300),("location",300),("responsible",300)])
+def test_typed_text_caps_reject_loss_instead_of_silent_service_truncation(world, field, limit):
+    db, actor, project, _ = world
+    with pytest.raises(ValidationError):
+        submit_defect_create(db, actor, command(project, **{field: "x" * (limit + 1)}))
+    assert count(db, Defect) == count(db, MobileSyncCommand) == 0
+    result = submit_defect_create(db, actor, command(project, **{field: "x" * limit}))
+    assert result["result"][field] == "x" * limit
+
+
+def test_title_cap_counts_unicode_characters_not_utf8_bytes(world):
+    db, actor, project, _ = world
+    title = "😀" * 500
+    result = submit_defect_create(db, actor, command(project, title=title))
+    assert result["result"]["title"] == title
+
+
+def test_invalid_historical_numbering_does_not_leave_a_new_fact_or_receipt(world):
+    db, actor, project, _ = world
+    historical = Defect(project_id=project.id, number=-2, title="Synthetic invalid historical numbering")
+    db.add(historical)
+    db.commit()
+    with pytest.raises(ValueError, match="offline_receipt_not_applied"):
+        submit_defect_create(db, actor, command(project))
+    assert count(db, Defect) == 1 and count(db, MobileSyncCommand) == 0
+    assert db.get(Defect, historical.id).number == -2

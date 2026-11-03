@@ -32,6 +32,7 @@ type OfflineCommandBase = {
 export type OfflineCommand = OfflineCommandBase & (
   | { operation: "task.update" | "notification.mark_read" | "document.upload"; entityId: number }
   | { operation: "work_log.create"; entityId?: never }
+  | { operation: "defect.create"; entityId?: never; uploads?: never }
 );
 
 export type ServerConflict = {

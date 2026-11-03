@@ -6,6 +6,7 @@ import type { OfflineCommand, ServerConflict, StoredUploadFile, SyncSummary } fr
 const ATTENTION_AFTER_ATTEMPTS = 3;
 export const CHANGE_EVENT = "pu-mobile-sync-changed";
 export const WORK_LOG_APPLIED_EVENT = "pu-work-log-applied";
+export const DEFECT_APPLIED_EVENT = "pu-defect-applied";
 let running = false;
 
 function changed() {
@@ -71,6 +72,7 @@ export async function recoverAuthRequired(userId: number, projectId: number): Pr
 }
 
 export type PreparedWorkLogCreate = Readonly<Extract<OfflineCommand, { operation: "work_log.create" }>>;
+export type PreparedDefectCreate = Readonly<Extract<OfflineCommand, { operation: "defect.create" }>>;
 
 function freezeJson(value: unknown): void {
   if (value && typeof value === "object") {
@@ -135,6 +137,67 @@ export async function enqueueWorkLogCreate(args: {
   userId: number; projectId: number; data: Record<string, unknown>;
 }): Promise<string> {
   return enqueuePreparedWorkLogCreate(prepareWorkLogCreate(args));
+}
+
+const DEFECT_TEXT_LIMITS: Record<string, number> = { title: 500, description: 5000, object_name: 300, location: 300, responsible: 300 };
+const DEFECT_FIELD_LABELS: Record<string, string> = { title: "Название замечания", description: "Подробности", object_name: "Объект", location: "Место", responsible: "Ответственный" };
+const DEFECT_FIELDS = new Set([...Object.keys(DEFECT_TEXT_LIMITS), "priority", "due_date"]);
+
+function checkedDefectData(value: Record<string, unknown>): Record<string, unknown> {
+  if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Некорректные данные замечания.");
+  if (typeof value.title !== "string" || !value.title.trim()) throw new Error("Опишите замечание коротко: что не так.");
+  for (const [key, item] of Object.entries(value)) {
+    if (!DEFECT_FIELDS.has(key) || (item !== null && item !== undefined && typeof item !== "string")) {
+      throw new Error("Неподдерживаемые данные замечания. Фото добавляются отдельно.");
+    }
+    if (typeof item === "string" && DEFECT_TEXT_LIMITS[key] && Array.from(item).length > DEFECT_TEXT_LIMITS[key]) {
+      throw new Error(`${DEFECT_FIELD_LABELS[key]}: не более ${DEFECT_TEXT_LIMITS[key]} символов.`);
+    }
+  }
+  if (value.priority && !["low", "normal", "high"].includes(String(value.priority))) throw new Error("Выберите низкий, обычный или высокий приоритет.");
+  const day = value.due_date;
+  if (day !== undefined && day !== null && day !== "") {
+    if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number(day.slice(0, 4)) < 1) throw new Error("Укажите корректный срок устранения в формате ГГГГ-ММ-ДД.");
+    const parsed = new Date(`${day}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) throw new Error("Некорректный срок устранения.");
+  }
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function defectEnvelope(command: PreparedDefectCreate) {
+  return { client_mutation_id: command.id, device_id: command.deviceId,
+    project_id: command.projectId, operation: command.operation,
+    client_created_at: command.clientCreatedAt, data: command.patch };
+}
+
+export function prepareDefectCreate(args: { userId: number; projectId: number; data: Record<string, unknown> }): PreparedDefectCreate {
+  if (!positiveId(args.userId) || !positiveId(args.projectId)) throw new Error("Войдите в учётную запись и выберите проект.");
+  const data = checkedDefectData(args.data), device = deviceId();
+  if (!/^[A-Za-z0-9_.:-]{8,100}$/.test(device)) throw new Error("Некорректный идентификатор устройства.");
+  const now = new Date().toISOString();
+  freezeJson(data);
+  return Object.freeze({ id: uuid(), userId: args.userId, projectId: args.projectId,
+    deviceId: device, operation: "defect.create" as const, patch: data,
+    clientCreatedAt: now, status: "queued" as const, attempts: 0, updatedAt: now });
+}
+
+export async function enqueuePreparedDefectCreate(command: PreparedDefectCreate): Promise<string> {
+  if (command.operation !== "defect.create" || !positiveId(command.userId) || !positiveId(command.projectId)
+      || "entityId" in command || "uploads" in command) throw new Error("Некорректное подготовленное замечание.");
+  const snapshot = { ...command, patch: checkedDefectData(command.patch) };
+  const existing = (await listCommands(snapshot.userId, snapshot.projectId)).find((row) => row.id === snapshot.id);
+  if (existing) {
+    if (existing.operation !== "defect.create" || JSON.stringify(defectEnvelope(existing)) !== JSON.stringify(defectEnvelope(snapshot))) {
+      throw new Error("Идентификатор замечания уже использован с другими данными.");
+    }
+    return existing.id;
+  }
+  await persist(snapshot);
+  return snapshot.id;
+}
+
+export async function enqueueDefectCreate(args: { userId: number; projectId: number; data: Record<string, unknown> }): Promise<string> {
+  return enqueuePreparedDefectCreate(prepareDefectCreate(args));
 }
 
 export async function enqueueTaskUpdate(args: {
@@ -236,7 +299,7 @@ function blobBase64(blob: Blob): Promise<string> {
   });
 }
 
-async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number; entityId?: number }> {
+async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number; entityId?: number; entityNumber?: number }> {
   if (command.operation === "work_log.create") {
     const response = await api<{
       receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
@@ -254,6 +317,22 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       throw new Error("Не подтверждена доставка записи журнала.");
     }
     return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id };
+  }
+  if (command.operation === "defect.create") {
+    const response = await api<{
+      receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
+      status?: unknown; entity_type?: unknown; entity_id?: unknown;
+      result?: { id?: unknown; number?: unknown; project_id?: unknown; author_user_id?: unknown };
+    }>("/mobile-sync/defect-create", {
+      method: "POST", body: JSON.stringify(defectEnvelope(command)),
+      headers: { "X-PU-Expected-User": String(command.userId) },
+    });
+    if (response?.status !== "applied" || response.operation !== "defect.create"
+      || response.client_mutation_id !== command.id || response.entity_type !== "defect"
+      || !positiveId(response.receipt_id) || !positiveId(response.entity_id) || !positiveId(response.result?.number)
+      || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
+      || response.result?.author_user_id !== command.userId) throw new Error("Не подтверждено создание замечания.");
+    return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id, entityNumber: response.result.number };
   }
   if (command.operation === "document.upload") {
     const files = await Promise.all((command.uploads || []).map(async (file) => ({
@@ -303,6 +382,13 @@ export async function submitPreparedWorkLogCreate(command: PreparedWorkLogCreate
   return { receiptId: result.receiptId, entityId: result.entityId };
 }
 
+export async function submitPreparedDefectCreate(command: PreparedDefectCreate): Promise<{ receiptId: number; entityId: number; entityNumber: number }> {
+  if (command.operation !== "defect.create") throw new Error("Ожидалось подготовленное замечание.");
+  const result = await submit(command);
+  if (!result.applied || !positiveId(result.receiptId) || !positiveId(result.entityId) || !positiveId(result.entityNumber)) throw new Error("Не подтверждено создание замечания.");
+  return { receiptId: result.receiptId, entityId: result.entityId, entityNumber: result.entityNumber };
+}
+
 export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
   if (running || !isOnline() || !userId || !projectId) return;
   running = true;
@@ -321,6 +407,11 @@ export async function synchronize(userId: number, projectId: number, manual = fa
           if (working.operation === "work_log.create" && positiveId(result.entityId)) {
             window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT, {
               detail: { userId, projectId, entryId: result.entityId, clientMutationId: working.id },
+            }));
+          }
+          if (working.operation === "defect.create" && positiveId(result.entityId) && positiveId(result.entityNumber)) {
+            window.dispatchEvent(new CustomEvent(DEFECT_APPLIED_EVENT, {
+              detail: { userId, projectId, defectId: result.entityId, defectNumber: result.entityNumber, clientMutationId: working.id },
             }));
           }
           changed();
