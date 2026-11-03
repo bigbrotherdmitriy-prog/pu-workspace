@@ -380,3 +380,17 @@ def test_service_invite_literal_underscore_targets_exact_account(world):
     assert not cp.has_access(db, wrong.id, project)
     assert cp.has_access(db, intended.id, project)
     assert cp.invite(db, project, "ops_a@example.invalid", None)["id"] == result["id"]
+
+
+
+def test_service_invite_refuses_ambiguous_case_insensitive_account(world):
+    db, project = world["db"], world["p"].id
+    db.add_all([
+        User(email="duplicate@example.invalid", name="Synthetic first duplicate"),
+        User(email="DUPLICATE@example.invalid", name="Synthetic second duplicate"),
+    ])
+    db.flush()
+    before = cp.list_access(db, project)
+    with pytest.raises(ValueError, match="нескольким"):
+        cp.invite(db, project, "Duplicate@example.invalid", None)
+    assert cp.list_access(db, project) == before

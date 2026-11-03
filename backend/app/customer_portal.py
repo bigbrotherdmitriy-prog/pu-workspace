@@ -21,9 +21,12 @@ def invite(db: Session, project_id: int, email: str, invited_by: int | None) -> 
     mail = (email or "").strip().lower()
     if not mail:
         raise ValueError("Укажите электронную почту заказчика")
-    user = db.scalar(select(User).where(func.lower(User.email) == mail))
-    if user is None:
+    matches = db.scalars(select(User).where(func.lower(User.email) == mail).limit(2)).all()
+    if not matches:
         raise LookupError("Пользователь с такой почтой не найден: сначала создайте ему учётную запись")
+    if len(matches) != 1:
+        raise ValueError("Почта соответствует нескольким учётным записям: уточните получателя")
+    user = matches[0]
     row = db.scalar(select(CustomerAccess).where(CustomerAccess.project_id == project_id, CustomerAccess.user_id == user.id))
     if row is None:
         row = CustomerAccess(project_id=project_id, user_id=user.id, invited_by_user_id=invited_by)
