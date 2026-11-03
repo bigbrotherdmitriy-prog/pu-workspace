@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app import estimates as est
@@ -113,9 +113,27 @@ def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: st
     text = (comment or "").strip()
     if decision == "rejected" and not text:
         raise ValueError("Укажите причину отклонения")
-    a.customer_status = decision
-    a.customer_comment = text or None
-    a.customer_decided_at = datetime.now(timezone.utc)
-    a.customer_decided_by = user_id
+    result = db.execute(
+        update(KsAct).where(
+            KsAct.id == act_id, KsAct.project_id == project_id,
+            KsAct.status == "sent",
+            or_(KsAct.customer_status.is_(None),
+                KsAct.customer_status.not_in(("approved", "rejected"))),
+        ).values(
+            customer_status=decision, customer_comment=text or None,
+            customer_decided_at=datetime.now(timezone.utc),
+            customer_decided_by=user_id,
+        ).execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        current = db.execute(select(KsAct.status, KsAct.customer_status).where(
+            KsAct.id == act_id, KsAct.project_id == project_id,
+        )).first()
+        if current is None or current.status not in VISIBLE_STATUSES:
+            raise LookupError("Акт не найден")
+        if current.status == "signed":
+            raise ValueError("Акт уже подписан")
+        raise ValueError("Решение по акту уже принято")
+    db.refresh(a)
     db.flush()
     return est._act_dict(a)
