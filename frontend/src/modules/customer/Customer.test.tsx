@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "../../api/client";
 import { CustomerGate } from "./CustomerGate";
@@ -122,4 +122,44 @@ it("does not offer an unversioned decision from an older summary", async () => {
   expect((approve as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(approve);
   expect(mockApi.mock.calls.some(([path]) => String(path).endsWith("/decision"))).toBe(false);
+});
+
+
+it("sends only one decision while the first request is unresolved", async () => {
+  let resolveDecision!: (value: unknown) => void;
+  const pending = new Promise<unknown>((resolve) => { resolveDecision = resolve; });
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/summary")) return summary;
+    if (path.endsWith("/progress")) return { entries: [] };
+    if (path.endsWith("/decision")) return pending;
+    return {};
+  });
+  render(<CustomerPortal projects={[summary.project]} />);
+  const approve = await screen.findByRole("button", { name: "Согласовать" });
+  fireEvent.click(approve);
+  fireEvent.click(approve);
+  expect(mockApi.mock.calls.filter(([path]) => String(path).endsWith("/decision"))).toHaveLength(1);
+  expect((approve as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { resolveDecision({ id: 8 }); await pending; });
+});
+
+
+it("does not apply an old decision conflict to the newly selected project", async () => {
+  let rejectDecision!: (reason: unknown) => void;
+  const pending = new Promise<unknown>((_, reject) => { rejectDecision = reject; });
+  const nextProject = { id: 5, name: "Synthetic next project" };
+  mockApi.mockImplementation(async (path: string) => {
+    if (path === "/customer/projects/4/summary") return summary;
+    if (path === "/customer/projects/5/summary") return { project: nextProject, estimates: [], acts: [] };
+    if (path.endsWith("/progress")) return { entries: [] };
+    if (path.endsWith("/decision")) return pending;
+    return {};
+  });
+  render(<CustomerPortal projects={[summary.project, nextProject]} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Согласовать" }));
+  fireEvent.change(screen.getByLabelText("Проект"), { target: { value: "5" } });
+  await screen.findByRole("heading", { name: nextProject.name });
+  await act(async () => { rejectDecision(new ApiError("Synthetic old project conflict", 409, "synthetic")); await pending.catch(() => undefined); });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(mockApi.mock.calls.filter(([path]) => path === "/customer/projects/5/summary")).toHaveLength(1);
 });

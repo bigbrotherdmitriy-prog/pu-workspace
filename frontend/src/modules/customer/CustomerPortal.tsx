@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, csrfHeaders } from "../../api/client";
 import { CustomerDecisionHistory } from "./CustomerDecisionHistory";
 import "./customer.css";
@@ -21,6 +21,16 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
   const [comments, setComments] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
+  const pendingDecisions = useRef(new Set<string>());
+  const [pendingKeys, setPendingKeys] = useState(new Set<string>());
+  const liveProject = useRef(projectId);
+  liveProject.current = projectId;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
 
   const reload = useCallback(() => setTick((v) => v + 1), []);
 
@@ -34,23 +44,33 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
   }, [projectId, tick]);
 
   async function decide(act: Act, decision: "approved" | "rejected") {
+    const decisionProject = projectId;
+    const key = `${decisionProject}:${act.id}`;
+    if (pendingDecisions.current.has(key)) return;
     setError("");
     if (!validRevision(act.decision_revision)) {
       setError("Обновите акт: версия для принятия решения не получена.");
       return;
     }
+    pendingDecisions.current.add(key);
+    setPendingKeys(new Set(pendingDecisions.current));
     try {
-      await api(`/customer/projects/${projectId}/ks-acts/${act.id}/decision`, {
+      await api(`/customer/projects/${decisionProject}/ks-acts/${act.id}/decision`, {
         method: "POST", body: JSON.stringify({ decision, comment: comments[act.id] ?? "", expected_revision: act.decision_revision }),
       });
+      if (!mounted.current || liveProject.current !== decisionProject) return;
       reload();
     } catch (e) {
+      if (!mounted.current || liveProject.current !== decisionProject) return;
       if (e instanceof ApiError && e.status === 409) {
         setError("Акт изменился. Проверьте обновлённые данные и примите решение заново.");
         reload();
       } else {
         setError(e instanceof Error ? e.message : "Не удалось сохранить решение");
       }
+    } finally {
+      pendingDecisions.current.delete(key);
+      if (mounted.current) setPendingKeys(new Set(pendingDecisions.current));
     }
   }
 
@@ -120,8 +140,8 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
                   <div className="cust-decide">
                     {!validRevision(a.decision_revision) && <p className="cust-note">Версия акта не получена. <button type="button" onClick={reload}>Обновить акт</button></p>}
                     <input aria-label={`Комментарий к акту ${a.number}`} placeholder="Комментарий (обязателен при отклонении)" value={comments[a.id] ?? ""} onChange={(e) => setComments((c) => ({ ...c, [a.id]: e.target.value }))} />
-                    <button type="button" className="cust-main" disabled={!validRevision(a.decision_revision)} onClick={() => void decide(a, "approved")}>Согласовать</button>
-                    <button type="button" disabled={!validRevision(a.decision_revision)} onClick={() => void decide(a, "rejected")}>Отклонить</button>
+                    <button type="button" className="cust-main" disabled={!validRevision(a.decision_revision) || pendingKeys.has(`${projectId}:${a.id}`)} onClick={() => void decide(a, "approved")}>Согласовать</button>
+                    <button type="button" disabled={!validRevision(a.decision_revision) || pendingKeys.has(`${projectId}:${a.id}`)} onClick={() => void decide(a, "rejected")}>Отклонить</button>
                   </div>
                 )}
               </div>
