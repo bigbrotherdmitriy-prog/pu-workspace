@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app import estimates as est
@@ -21,7 +21,7 @@ def invite(db: Session, project_id: int, email: str, invited_by: int | None) -> 
     mail = (email or "").strip().lower()
     if not mail:
         raise ValueError("Укажите электронную почту заказчика")
-    user = db.scalar(select(User).where(User.email.ilike(mail)))
+    user = db.scalar(select(User).where(func.lower(User.email) == mail))
     if user is None:
         raise LookupError("Пользователь с такой почтой не найден: сначала создайте ему учётную запись")
     row = db.scalar(select(CustomerAccess).where(CustomerAccess.project_id == project_id, CustomerAccess.user_id == user.id))

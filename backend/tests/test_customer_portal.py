@@ -356,3 +356,27 @@ def test_api_stranger_forbidden_decision_on_allowed_project_no_mutation(world):
     assert r.status_code == 403
     db.rollback()
     assert _snapshot(db, pid, aid) == before
+
+
+@pytest.mark.parametrize("email", ["%@example.ru", "_@example.ru"])
+def test_service_invite_does_not_treat_email_as_sql_pattern(world, email):
+    db, project = world["db"], world["p"].id
+    before = cp.list_access(db, project)
+    with pytest.raises(LookupError):
+        cp.invite(db, project, email, None)
+    assert cp.list_access(db, project) == before
+
+
+def test_service_invite_literal_underscore_targets_exact_account(world):
+    db, project = world["db"], world["p"].id
+    wrong = User(email="opsxa@example.invalid", name="Synthetic wrong account")
+    intended = User(email="ops_a@example.invalid", name="Synthetic intended account")
+    db.add(wrong)
+    db.flush()
+    db.add(intended)
+    db.flush()
+    result = cp.invite(db, project, " OPS_A@example.invalid ", None)
+    assert result["user_id"] == intended.id
+    assert not cp.has_access(db, wrong.id, project)
+    assert cp.has_access(db, intended.id, project)
+    assert cp.invite(db, project, "ops_a@example.invalid", None)["id"] == result["id"]
