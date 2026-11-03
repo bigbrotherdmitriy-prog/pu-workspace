@@ -216,12 +216,14 @@ it("hides loaded project context while the next project is still loading without
     if (path.endsWith("/crews")) return { crews: [{ id: 41, name: "Old synthetic crew", foreman: null, members: "", members_count: 0, note: null }] };
     if (path.endsWith("/schedule")) return { baseline: { id: 1, name: "Old synthetic schedule", version: 1, status: "approved" }, items: [] };
     if (path.endsWith("/suggestions")) return { works: [{ work_name: "Old synthetic suggestion", unit: "m" }], objects: [], rd_items: [] };
-    return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+    return listing;
   });
   const { rerender, container } = render(<WorkLogModule projectId={5} userId={1} />);
   await waitFor(() => expect(container.querySelector('option[value="Old synthetic suggestion"]')).not.toBeNull());
   fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Unsaved synthetic draft" } });
+  await screen.findByText("Прокладка кабеля");
   rerender(<WorkLogModule projectId={6} userId={1} />);
+  expect(screen.queryByText("Прокладка кабеля")).toBeNull();
   expect(container.querySelector('option[value="Old synthetic suggestion"]')).toBeNull();
   expect(container.querySelector('option[value="41"]')).toBeNull();
   expect((screen.getByLabelText(/Какая работа выполнена/) as HTMLInputElement).value).toBe("Unsaved synthetic draft");

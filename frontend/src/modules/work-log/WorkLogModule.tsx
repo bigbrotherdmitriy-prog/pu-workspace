@@ -88,6 +88,8 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
   }, [userId, projectId]);
 
   useEffect(() => {
+    setEntries([]);
+    setSummary(null);
     setCrews([]);
     setPlan({ baseline: null, items: [] });
     setSuggest({ works: [], objects: [], rd_items: [] });
