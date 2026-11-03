@@ -5,7 +5,7 @@ import json
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.estimates import Estimate, EstimateLine, KsAct
@@ -422,12 +422,23 @@ def set_act_status(db: Session, project_id: int, act_id: int, status: str, heade
         raise ValueError("Статус акта: draft, sent или signed")
     if a.status == "signed" and status != "signed":
         raise ValueError("Подписанный акт изменить нельзя")
-    a.status = status
+    values = {"status": status}
     if header is not None:
-        a.header_json = json.dumps({k: v for k, v in header.items() if v}, ensure_ascii=False)
+        values["header_json"] = json.dumps({k: v for k, v in header.items() if v}, ensure_ascii=False)
     if status == "draft":
-        a.customer_status = "pending"
-        a.customer_comment = None
+        values.update(customer_status="pending", customer_comment=None)
+    stmt = update(KsAct).where(KsAct.id == act_id, KsAct.project_id == project_id)
+    if status != "signed":
+        stmt = stmt.where(KsAct.status != "signed")
+    result = db.execute(stmt.values(**values).execution_options(synchronize_session=False))
+    if result.rowcount != 1:
+        exists = db.scalar(select(KsAct.id).where(
+            KsAct.id == act_id, KsAct.project_id == project_id,
+        ))
+        if exists is None:
+            raise LookupError("Акт не найден")
+        raise ValueError("Подписанный акт изменить нельзя")
+    db.refresh(a)
     db.flush()
     return _act_dict(a)
 
