@@ -244,6 +244,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       result?: { id?: unknown; project_id?: unknown; author_user_id?: unknown };
     }>("/mobile-sync/work-log-create", {
       method: "POST", body: JSON.stringify(workLogEnvelope(command)),
+      headers: { "X-PU-Expected-User": String(command.userId) },
     });
     if (response?.status !== "applied" || response.operation !== "work_log.create"
       || response.client_mutation_id !== command.id || response.entity_type !== "work_log"

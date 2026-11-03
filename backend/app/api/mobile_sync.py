@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +15,9 @@ from app.api.management import append_management_history
 from app.api.tasks import TaskUpdate
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
+from app.mobile_create_owner import require_create_owner
+from app.mobile_defect import submit_defect_create as _submit_defect_create
+from app.mobile_defect_contract import OfflineDefectCreateRequest
 from app.mobile_work_log import submit_work_log_create as _submit_work_log_create
 from app.mobile_work_log_contract import OfflineWorkLogCreateRequest
 from app.mobile_sync_tokens import MobileSyncTokenError, verify_mobile_sync_token
@@ -31,10 +34,34 @@ router = APIRouter(prefix="/mobile-sync", tags=["mobile-sync"])
 
 @router.post("/work-log-create")
 def create_offline_work_log(request: OfflineWorkLogCreateRequest,
+                            expected_user_id: Annotated[int, Header(alias="X-PU-Expected-User", gt=0)],
                             db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Separate typed create envelope; never invent an entity_id for new facts."""
     try:
+        require_create_owner(user, expected_user_id)
         result = _submit_work_log_create(db, user, request)
+    except HTTPException:
+        db.rollback()
+        raise
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        status = 409 if str(exc) in {"client_mutation_id_reused", "offline_receipt_not_applied"} else 422
+        raise HTTPException(status, str(exc)) from exc
+    db.commit()
+    return result
+
+
+@router.post("/defect-create")
+def create_offline_defect(request: OfflineDefectCreateRequest,
+                          expected_user_id: Annotated[int, Header(alias="X-PU-Expected-User", gt=0)],
+                          db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Metadata only; author is authenticated user, expected owner is a precondition."""
+    try:
+        require_create_owner(user, expected_user_id)
+        result = _submit_defect_create(db, user, request)
     except HTTPException:
         db.rollback()
         raise

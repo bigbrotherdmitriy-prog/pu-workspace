@@ -115,3 +115,24 @@ it("keeps prepared nested data immutable after the first request is prepared", a
   await submitPreparedWorkLogCreate(command);
   const body=JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));expect(body.data.labor[0].hours).toBe("2");
 });
+
+
+it("does not deliver an old owner's queued create under another cookie session", async () => {
+  const id = await enqueueWorkLogCreate(args());
+  const actualSessionUser = 2;
+  let wrongOwnerFacts = 0;
+  vi.mocked(api).mockImplementation(async (_path, init) => {
+    const expectedOwner = new Headers(init?.headers).get("X-PU-Expected-User");
+    if (expectedOwner !== null && Number(expectedOwner) !== actualSessionUser) {
+      throw new ApiError("Synthetic session owner changed", 403, "synthetic");
+    }
+    wrongOwnerFacts += 1;
+    const receipt = validReceipt(JSON.parse(String(init?.body)));
+    receipt.result.author_user_id = actualSessionUser;
+    return receipt;
+  });
+  await synchronize(1, 17);
+  expect(wrongOwnerFacts).toBe(0);
+  expect(store.rows.get(id)?.status).toBe("auth_required");
+  expect(new Headers(vi.mocked(api).mock.calls[0][1]?.headers).get("X-PU-Expected-User")).toBe("1");
+});
