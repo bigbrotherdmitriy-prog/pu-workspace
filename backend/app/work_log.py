@@ -13,6 +13,9 @@ from app.models.work_log import WorkLogCrew, WorkLogEntry, WorkLogLabor
 
 _TEXT_FIELDS = ("object_name", "unit", "location", "weather", "note")
 _MAX_NAME = 1000
+# Existing database Numeric(18, 3) / Numeric(12, 2) storage limits.
+_MAX_QTY = Decimal("999999999999999.999")
+_MAX_HOURLY_RATE = Decimal("9999999999.99")
 
 
 def _parse_date(value) -> date:
@@ -35,6 +38,8 @@ def _parse_qty(value) -> Decimal | None:
         raise ValueError("Объём должен быть конечным числом")
     if qty < 0:
         raise ValueError("Объём не может быть отрицательным")
+    if qty > _MAX_QTY:
+        raise ValueError("Объём превышает размер поля хранения")
     return qty
 
 
@@ -150,6 +155,8 @@ def _parse_labor(raw) -> list[dict]:
                 raise ValueError("Ставка должна быть конечным числом")
             if rate < 0:
                 raise ValueError("Ставка не может быть отрицательной")
+            if rate > _MAX_HOURLY_RATE:
+                raise ValueError("Ставка превышает размер поля хранения")
         rows.append({"person_name": name[:300], "hours": hours, "hourly_rate": rate})
     return rows
 
