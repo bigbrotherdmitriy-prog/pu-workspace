@@ -122,3 +122,13 @@ def customer_decision(project_id: int, act_id: int, body: DecisionBody, db: Sess
         raise _fail(exc) from exc
     db.commit()
     return res
+
+
+@router.get("/customer/projects/{project_id}/ks-acts/{act_id}/decision-history")
+def customer_decision_history(project_id: int, act_id: int, limit: int = 100,
+                              db: Session = Depends(get_db), user=Depends(require_user)):
+    _customer_or_admin(db, user, project_id)
+    try:
+        return svc.decision_history(db, project_id, act_id, limit=limit)
+    except (ValueError, LookupError) as exc:
+        raise _fail(exc) from exc
