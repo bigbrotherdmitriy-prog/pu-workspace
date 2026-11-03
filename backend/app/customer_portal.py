@@ -8,6 +8,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app import estimates as est
+from app.models.audit_log import AuditLog
 from app.models.estimates import CustomerAccess, Estimate, KsAct
 from app.models.project import Project
 from app.models.user import User
@@ -135,5 +136,12 @@ def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: st
             raise ValueError("Акт уже подписан")
         raise ValueError("Решение по акту уже принято")
     db.refresh(a)
+    db.add(AuditLog(
+        action="customer_act_decision", entity_type="ks_act", entity_id=act_id,
+        details=json.dumps({
+            "project_id": project_id, "user_id": user_id,
+            "decision": decision, "comment": text or None,
+        }, ensure_ascii=False),
+    ))
     db.flush()
     return est._act_dict(a)
