@@ -10,7 +10,7 @@ vi.mock("./db", () => ({
   getMeta: vi.fn(async (key: string) => store.meta.get(key)),
   setMeta: vi.fn(async (key: string, value: unknown) => { store.meta.set(key, value); }),
 }));
-import { enqueueWorkLogCreate, synchronize } from "./syncEngine";
+import { enqueueWorkLogCreate, prepareWorkLogCreate, enqueuePreparedWorkLogCreate, submitPreparedWorkLogCreate, synchronize } from "./syncEngine";
 const args = () => ({ userId: 1, projectId: 17, data: { work_date: "2026-10-30", work_name: "Synthetic work", qty: "1.250", labor: [{ person_name: "Synthetic worker", hours: "2" }] } });
 const validReceipt = (body: Record<string, unknown>) => ({ receipt_id: 5, client_mutation_id: body.client_mutation_id, operation: "work_log.create", status: "applied", entity_type: "work_log", entity_id: 23, result: { id: 23, project_id: body.project_id, author_user_id: 1 } });
 beforeEach(() => { store.rows.clear(); store.meta.clear(); vi.mocked(api).mockReset(); Object.defineProperty(navigator,"onLine",{ configurable: true,value: true }); });
@@ -77,4 +77,41 @@ it("never delivers another user's or project's queued facts", async () => {
 it.each(["","2026-02-30","2026-1-03","0000-01-01"])("rejects a noncanonical explicit work date %s before persistence", async (work_date) => {
   await expect(enqueueWorkLogCreate({...args(),data:{...args().data,work_date}})).rejects.toThrow();
   expect(store.rows.size).toBe(0);
+});
+
+it("retries the same prepared online create after a lost response without regenerating identity", async () => {
+  const original = args(); const command = prepareWorkLogCreate(original);
+  original.data.labor[0].hours = "9";
+  expect(store.rows.size).toBe(0);
+  let firstBody = "";
+  vi.mocked(api).mockImplementationOnce(async (_path, init) => { firstBody=String(init?.body); throw new ApiError("Synthetic lost online response",null,"synthetic-request"); });
+  await expect(submitPreparedWorkLogCreate(command)).rejects.toThrow();
+  vi.mocked(api).mockImplementationOnce(async (_path, init) => { expect(String(init?.body)).toBe(firstBody); return validReceipt(JSON.parse(firstBody)); });
+  expect(await submitPreparedWorkLogCreate(command)).toEqual({receiptId:5,entityId:23});
+  expect(JSON.parse(firstBody).data.labor[0].hours).toBe("2");
+});
+it("moves an uncertain prepared online create into the durable queue with the same envelope", async () => {
+  const command=prepareWorkLogCreate(args()); let body="";
+  vi.mocked(api).mockImplementationOnce(async (_path,init)=>{body=String(init?.body);throw new ApiError("Synthetic lost response",null,"synthetic-request");});
+  await expect(submitPreparedWorkLogCreate(command)).rejects.toThrow();
+  expect(await enqueuePreparedWorkLogCreate(command)).toBe(command.id);
+  vi.mocked(api).mockImplementation(async(_path,init)=>{expect(String(init?.body)).toBe(body);return validReceipt(JSON.parse(body));});
+  await synchronize(1,17);expect(store.rows.size).toBe(0);
+});
+it("does not reset a suspended prepared command when it is queued again", async () => {
+  const command=prepareWorkLogCreate(args());await enqueuePreparedWorkLogCreate(command);
+  vi.mocked(api).mockRejectedValue(new ApiError("Synthetic denied",403,"synthetic-request"));await synchronize(1,17);
+  await enqueuePreparedWorkLogCreate(command);expect(store.rows.get(command.id)?.status).toBe("auth_required");
+});
+it("rejects changed data under an already queued prepared mutation identity", async () => {
+  const command=prepareWorkLogCreate(args());await enqueuePreparedWorkLogCreate(command);
+  await expect(enqueuePreparedWorkLogCreate({...command,patch:{...command.patch,qty:"9"}})).rejects.toThrow();
+  expect(store.rows.get(command.id)?.patch.qty).toBe("1.250");
+});
+it("keeps prepared nested data immutable after the first request is prepared", async () => {
+  const command=prepareWorkLogCreate(args());
+  try {(command.patch.labor as {hours:string}[])[0].hours="9";} catch { /* Immutable snapshots may reject writes. */ }
+  vi.mocked(api).mockImplementation(async(_path,init)=>validReceipt(JSON.parse(String(init?.body))));
+  await submitPreparedWorkLogCreate(command);
+  const body=JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));expect(body.data.labor[0].hours).toBe("2");
 });

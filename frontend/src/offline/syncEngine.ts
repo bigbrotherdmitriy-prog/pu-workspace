@@ -70,9 +70,26 @@ export async function recoverAuthRequired(userId: number, projectId: number): Pr
   return commands.length;
 }
 
-export async function enqueueWorkLogCreate(args: {
+export type PreparedWorkLogCreate = Readonly<Extract<OfflineCommand, { operation: "work_log.create" }>>;
+
+function freezeJson(value: unknown): void {
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) freezeJson(item);
+    Object.freeze(value);
+  }
+}
+
+function workLogEnvelope(command: PreparedWorkLogCreate) {
+  return {
+    client_mutation_id: command.id, device_id: command.deviceId,
+    project_id: command.projectId, operation: command.operation,
+    client_created_at: command.clientCreatedAt, data: command.patch,
+  };
+}
+
+export function prepareWorkLogCreate(args: {
   userId: number; projectId: number; data: Record<string, unknown>;
-}): Promise<string> {
+}): PreparedWorkLogCreate {
   if (!positiveId(args.userId) || !positiveId(args.projectId)) throw new Error("Нужны пользователь и проект для локальной записи.");
   const day = args.data.work_date;
   if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number(day.slice(0, 4)) < 1) {
@@ -89,10 +106,35 @@ export async function enqueueWorkLogCreate(args: {
   if (!/^[A-Za-z0-9_.:-]{8,100}$/.test(device)) throw new Error("Некорректный идентификатор устройства.");
   const now = new Date().toISOString(), id = uuid();
   // Every create is a distinct fact. Never coalesce or invent a server entity id.
-  await persist({ id, userId: args.userId, projectId: args.projectId, deviceId: device,
+  freezeJson(data);
+  const command: Extract<OfflineCommand, { operation: "work_log.create" }> = {
+    id, userId: args.userId, projectId: args.projectId, deviceId: device,
     operation: "work_log.create", patch: data, clientCreatedAt: now,
-    status: "queued", attempts: 0, updatedAt: now });
-  return id;
+    status: "queued", attempts: 0, updatedAt: now,
+  };
+  return Object.freeze(command);
+}
+
+export async function enqueuePreparedWorkLogCreate(command: PreparedWorkLogCreate): Promise<string> {
+  if (command.operation !== "work_log.create" || !positiveId(command.userId) || !positiveId(command.projectId) || "entityId" in command) {
+    throw new Error("Некорректная подготовленная запись журнала.");
+  }
+  const existing = (await listCommands(command.userId, command.projectId)).find((row) => row.id === command.id);
+  if (existing) {
+    if (existing.operation !== "work_log.create" || JSON.stringify(workLogEnvelope(existing)) !== JSON.stringify(workLogEnvelope(command))) {
+      throw new Error("Идентификатор записи уже использован с другими данными.");
+    }
+    // Preserve attempts, receipt and suspended status; this is not auth recovery.
+    return existing.id;
+  }
+  await persist({ ...command, patch: JSON.parse(JSON.stringify(command.patch)) as Record<string, unknown> });
+  return command.id;
+}
+
+export async function enqueueWorkLogCreate(args: {
+  userId: number; projectId: number; data: Record<string, unknown>;
+}): Promise<string> {
+  return enqueuePreparedWorkLogCreate(prepareWorkLogCreate(args));
 }
 
 export async function enqueueTaskUpdate(args: {
@@ -201,18 +243,14 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       status?: unknown; entity_type?: unknown; entity_id?: unknown;
       result?: { id?: unknown; project_id?: unknown; author_user_id?: unknown };
     }>("/mobile-sync/work-log-create", {
-      method: "POST", body: JSON.stringify({
-        client_mutation_id: command.id, device_id: command.deviceId,
-        project_id: command.projectId, operation: command.operation,
-        client_created_at: command.clientCreatedAt, data: command.patch,
-      }),
+      method: "POST", body: JSON.stringify(workLogEnvelope(command)),
     });
     if (response?.status !== "applied" || response.operation !== "work_log.create"
       || response.client_mutation_id !== command.id || response.entity_type !== "work_log"
       || !positiveId(response.receipt_id) || !positiveId(response.entity_id)
       || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
       || response.result?.author_user_id !== command.userId) {
-      throw new Error("Не подтверждена доставка записи журнала. Локальная запись сохранена.");
+      throw new Error("Не подтверждена доставка записи журнала.");
     }
     return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id };
   }
@@ -253,6 +291,15 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
     return { applied: false, conflictId: response.conflict?.id, receiptId: response.receipt_id };
   }
   throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+}
+
+export async function submitPreparedWorkLogCreate(command: PreparedWorkLogCreate): Promise<{ receiptId: number; entityId: number }> {
+  if (command.operation !== "work_log.create") throw new Error("Ожидалась подготовленная запись журнала.");
+  const result = await submit(command);
+  if (!result.applied || !positiveId(result.receiptId) || !positiveId(result.entityId)) {
+    throw new Error("Не подтверждена доставка записи журнала.");
+  }
+  return { receiptId: result.receiptId, entityId: result.entityId };
 }
 
 export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
