@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, csrfHeaders } from "../../api/client";
+import { api, ApiError, csrfHeaders } from "../../api/client";
 import { CustomerDecisionHistory } from "./CustomerDecisionHistory";
 import "./customer.css";
 
 type Project = { id: number; name: string };
-type Act = { id: number; number: string; period_from: string; period_to: string; status: string; total_ex_vat: string; customer_status: string; customer_comment: string | null };
+type Act = { id: number; number: string; period_from: string; period_to: string; status: string; total_ex_vat: string; customer_status: string; customer_comment: string | null; decision_revision: number };
 type EstimateRow = { id: number; name: string; total: string | null; done_amount: string; percent: number | null };
 type Summary = { project: Project; estimates: EstimateRow[]; acts: Act[] };
 type Entry = { work_date: string; work_name: string; unit: string | null; qty: string | null; location: string | null; object_name: string | null };
 
 const money = (v: string | null | undefined) => (v == null ? "—" : Number(v).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const dateRu = (v: string) => v.split("-").reverse().join(".");
+const validRevision = (value: number) => Number.isInteger(value) && value >= 0 && value <= 2147483647;
 const statusText: Record<string, string> = { pending: "Ждёт вашего решения", approved: "Согласован вами", rejected: "Отклонён вами" };
 
 export function CustomerPortal({ projects }: { projects: Project[] }) {
@@ -34,13 +35,22 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
 
   async function decide(act: Act, decision: "approved" | "rejected") {
     setError("");
+    if (!validRevision(act.decision_revision)) {
+      setError("Обновите акт: версия для принятия решения не получена.");
+      return;
+    }
     try {
       await api(`/customer/projects/${projectId}/ks-acts/${act.id}/decision`, {
-        method: "POST", body: JSON.stringify({ decision, comment: comments[act.id] ?? "" }),
+        method: "POST", body: JSON.stringify({ decision, comment: comments[act.id] ?? "", expected_revision: act.decision_revision }),
       });
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось сохранить решение");
+      if (e instanceof ApiError && e.status === 409) {
+        setError("Акт изменился. Проверьте обновлённые данные и примите решение заново.");
+        reload();
+      } else {
+        setError(e instanceof Error ? e.message : "Не удалось сохранить решение");
+      }
     }
   }
 
@@ -108,9 +118,10 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
                 <CustomerDecisionHistory key={`${projectId}:${a.id}:${tick}`} projectId={projectId} actId={a.id} />
                 {a.status === "sent" && !["approved", "rejected"].includes(a.customer_status) && (
                   <div className="cust-decide">
+                    {!validRevision(a.decision_revision) && <p className="cust-note">Версия акта не получена. <button type="button" onClick={reload}>Обновить акт</button></p>}
                     <input aria-label={`Комментарий к акту ${a.number}`} placeholder="Комментарий (обязателен при отклонении)" value={comments[a.id] ?? ""} onChange={(e) => setComments((c) => ({ ...c, [a.id]: e.target.value }))} />
-                    <button type="button" className="cust-main" onClick={() => void decide(a, "approved")}>Согласовать</button>
-                    <button type="button" onClick={() => void decide(a, "rejected")}>Отклонить</button>
+                    <button type="button" className="cust-main" disabled={!validRevision(a.decision_revision)} onClick={() => void decide(a, "approved")}>Согласовать</button>
+                    <button type="button" disabled={!validRevision(a.decision_revision)} onClick={() => void decide(a, "rejected")}>Отклонить</button>
                   </div>
                 )}
               </div>

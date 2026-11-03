@@ -63,3 +63,19 @@ def test_revision_is_a_strict_nonnegative_database_integer(world, bad):
     with pytest.raises(ValueError):
         cp.decide(db, pid, aid, uid, "approved", None, expected_revision=bad)
     assert db.get(KsAct, aid).customer_status == "pending"
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"expected_revision": True}, {"expected_revision": -1},
+    {"expected_revision": "1"}, {"expected_revision": 1.5}, {"expected_revision": 2147483648},
+])
+def test_decision_body_requires_strict_revision(payload):
+    from pydantic import ValidationError
+    from app.api.customer import DecisionBody
+    with pytest.raises(ValidationError):
+        DecisionBody.model_validate({"decision": "approved", **payload})
+
+
+def test_decision_body_preserves_legacy_zero_revision():
+    from app.api.customer import DecisionBody
+    assert DecisionBody.model_validate({"decision": "approved", "expected_revision": 0}).expected_revision == 0

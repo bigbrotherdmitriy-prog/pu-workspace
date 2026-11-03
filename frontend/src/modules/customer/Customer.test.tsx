@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 import { CustomerGate } from "./CustomerGate";
 import { CustomerPortal } from "./CustomerPortal";
 
@@ -12,8 +12,8 @@ const summary = {
   project: { id: 4, name: "ЦОД Дубна" },
   estimates: [{ id: 1, name: "Смета 1", total: "10000.00", done_amount: "4000.00", percent: 40 }],
   acts: [
-    { id: 8, number: "1", period_from: "2026-10-01", period_to: "2026-10-28", status: "sent", total_ex_vat: "4000.00", customer_status: "pending", customer_comment: null },
-    { id: 9, number: "2", period_from: "2026-09-01", period_to: "2026-09-30", status: "signed", total_ex_vat: "1000.00", customer_status: "approved", customer_comment: "ок" },
+    { id: 8, number: "1", period_from: "2026-10-01", period_to: "2026-10-28", status: "sent", total_ex_vat: "4000.00", customer_status: "pending", customer_comment: null, decision_revision: 1 },
+    { id: 9, number: "2", period_from: "2026-09-01", period_to: "2026-09-30", status: "signed", total_ex_vat: "1000.00", customer_status: "approved", customer_comment: "ок", decision_revision: 1 },
   ],
 };
 
@@ -45,6 +45,7 @@ it("approves an act and requires a comment to reject", async () => {
     const call = mockApi.mock.calls.find((c) => String(c[0]).endsWith("/decision"));
     expect(call).toBeTruthy();
     expect(String((call![1] as { body: string }).body)).toContain("approved");
+    expect(JSON.parse(String(call![1]?.body)).expected_revision).toBe(1);
   });
   fireEvent.change(screen.getByLabelText("Комментарий к акту 1"), { target: { value: "Объём завышен" } });
   fireEvent.click(screen.getByText("Отклонить"));
@@ -80,4 +81,45 @@ it("gate: a contractor with own projects, a plain user and a logged-out visitor 
   mockApi.mockRejectedValue(new Error("401"));
   render(<CustomerGate><div>обычное приложение</div></CustomerGate>);
   expect(await screen.findByText("обычное приложение")).toBeTruthy();
+});
+
+
+it("preserves the comment and refreshes a conflicting revision without automatically deciding again", async () => {
+  let summaries = 0;
+  let decisions = 0;
+  mockApi.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/summary")) {
+      summaries += 1;
+      return { ...summary, acts: summary.acts.map((a) => ({ ...a, decision_revision: summaries === 1 ? 1 : 3 })) };
+    }
+    if (path.endsWith("/progress")) return { entries: [] };
+    if (path.endsWith("/decision") && init?.method === "POST") {
+      decisions += 1;
+      if (decisions === 1) throw new ApiError("Synthetic stale act", 409, "synthetic");
+      return { id: 8 };
+    }
+    return {};
+  });
+  render(<CustomerPortal projects={[summary.project]} />);
+  fireEvent.change(await screen.findByLabelText("Комментарий к акту 1"), { target: { value: "Synthetic retained comment" } });
+  fireEvent.click(screen.getByText("Согласовать"));
+  await waitFor(() => expect(summaries).toBeGreaterThan(1));
+  expect(decisions).toBe(1);
+  expect((screen.getByLabelText("Комментарий к акту 1") as HTMLInputElement).value).toBe("Synthetic retained comment");
+  fireEvent.click(screen.getByText("Согласовать"));
+  await waitFor(() => expect(decisions).toBe(2));
+  const calls = mockApi.mock.calls.filter(([path]) => String(path).endsWith("/decision"));
+  expect(JSON.parse(String(calls[0][1]?.body)).expected_revision).toBe(1);
+  expect(JSON.parse(String(calls[1][1]?.body)).expected_revision).toBe(3);
+});
+
+it("does not offer an unversioned decision from an older summary", async () => {
+  mockApi.mockImplementation(async (path: string) => path.endsWith("/summary")
+    ? { ...summary, acts: summary.acts.map((a) => ({ ...a, decision_revision: undefined })) }
+    : { entries: [] });
+  render(<CustomerPortal projects={[summary.project]} />);
+  const approve = await screen.findByRole("button", { name: "Согласовать" });
+  expect((approve as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(approve);
+  expect(mockApi.mock.calls.some(([path]) => String(path).endsWith("/decision"))).toBe(false);
 });

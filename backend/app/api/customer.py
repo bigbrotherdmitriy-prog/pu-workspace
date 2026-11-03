@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import customer_portal as svc
@@ -20,6 +20,7 @@ class InviteBody(BaseModel):
 
 
 class DecisionBody(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0, le=2147483647)
     decision: str
     comment: str | None = None
 
@@ -32,6 +33,8 @@ def _customer_or_admin(db: Session, user, project_id: int) -> None:
 
 
 def _fail(exc: Exception) -> HTTPException:
+    if isinstance(exc, svc.StaleDecisionError):
+        return HTTPException(409, str(exc))
     return HTTPException(404 if isinstance(exc, LookupError) else 422, str(exc))
 
 
@@ -116,7 +119,7 @@ def customer_ks3(project_id: int, act_id: int, db: Session = Depends(get_db), us
 def customer_decision(project_id: int, act_id: int, body: DecisionBody, db: Session = Depends(get_db), user=Depends(require_user)):
     _customer_or_admin(db, user, project_id)
     try:
-        res = svc.decide(db, project_id, act_id, user.id, body.decision, body.comment)
+        res = svc.decide(db, project_id, act_id, user.id, body.decision, body.comment, expected_revision=body.expected_revision)
     except (ValueError, LookupError) as exc:
         db.rollback()
         raise _fail(exc) from exc

@@ -11,6 +11,7 @@ from app import estimates as est
 from app import work_log as wl
 from app.database import Base
 from app.models.organization_contract import Organization
+from app.models.estimates import KsAct
 from app.models.project import Project
 from app.models.user import User
 
@@ -122,7 +123,7 @@ def test_api_isolation_and_downloads(world):
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks2.docx").content[:2] == b"PK"
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks3.docx").content[:2] == b"PK"
     assert c.get(f"/customer/projects/{world['o'].id}/summary").status_code == 403
-    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"})
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision})
     assert r.status_code == 200 and r.json()["customer_status"] == "approved"
     # заказчик не управляет доступом и не видит внутренние маршруты
     assert c.post(f"/projects/{pid}/customer-access", json={"email": "zak@example.ru"}).status_code == 403
@@ -190,7 +191,7 @@ def test_api_matrix_both_users_allowed_and_foreign(world):
         assert c.get(f"/customer/projects/{oid}/progress").status_code == 403
         assert c.get(f"/customer/projects/{oid}/ks-acts/{aid}/ks2.docx").status_code == 403
         assert c.get(f"/customer/projects/{oid}/ks-acts/{aid}/ks3.docx").status_code == 403
-        assert c.post(f"/customer/projects/{oid}/ks-acts/{aid}/decision", json={"decision": "approved"}).status_code == 403
+        assert c.post(f"/customer/projects/{oid}/ks-acts/{aid}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision}).status_code == 403
 
     current["user"] = world["stranger"]
     assert c.get("/customer/projects").json()["projects"] == []
@@ -216,7 +217,7 @@ def test_api_revoke_blocks_all_customer_routes(world):
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks2.docx").status_code == 403
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks3.docx").status_code == 403
     before = _snapshot(db, pid, aid)
-    assert c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"}).status_code == 403
+    assert c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision}).status_code == 403
     db.rollback()
     assert _snapshot(db, pid, aid) == before
 
@@ -241,7 +242,7 @@ def test_api_foreign_act_id_with_allowed_project_is_404_and_no_mutation(world):
     # act_id принадлежит чужому проекту, но project_id доступен -> 404, без изменений
     assert c.get(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/ks2.docx").status_code == 404
     assert c.get(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/ks3.docx").status_code == 404
-    r = c.post(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/decision", json={"decision": "approved"})
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{foreign_aid}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision})
     assert r.status_code == 404
     db.rollback()
     assert _snapshot(db, pid, aid) == before
@@ -260,7 +261,7 @@ def test_api_missing_act_id_with_allowed_project_is_404_and_no_mutation(world):
     # несуществующий act_id при доступном проекте -> 404, без изменений
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/ks2.docx").status_code == 404
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/ks3.docx").status_code == 404
-    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/decision", json={"decision": "approved"})
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid + 1000}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision})
     assert r.status_code == 404
     db.rollback()
     assert _snapshot(db, pid, aid) == before
@@ -276,7 +277,7 @@ def test_api_draft_act_not_downloadable_nor_decidable(world):
     assert before[0] == "draft"
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks2.docx").status_code == 404
     assert c.get(f"/customer/projects/{pid}/ks-acts/{aid}/ks3.docx").status_code == 404
-    assert c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"}).status_code == 404
+    assert c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision}).status_code == 404
     db.rollback()
     assert _snapshot(db, pid, aid) == before
 
@@ -352,7 +353,7 @@ def test_api_stranger_forbidden_decision_on_allowed_project_no_mutation(world):
     before = _snapshot(db, pid, aid)
 
     # чужой пользователь не имеет доступа к проекту -> 403 на решение, акт не изменён
-    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved"})
+    r = c.post(f"/customer/projects/{pid}/ks-acts/{aid}/decision", json={"decision": "approved", "expected_revision": world["db"].get(KsAct, world["act"]["id"]).decision_revision})
     assert r.status_code == 403
     db.rollback()
     assert _snapshot(db, pid, aid) == before
