@@ -3293,6 +3293,8 @@ export function App() {
           summary={offlineSync.summary}
           conflicts={offlineSync.conflicts}
           onSync={() => { void offlineSync.syncNow(true); }}
+          recoveringAuth={offlineSync.recoveringAuth}
+          onRecoverAuth={() => { void offlineSync.recoverAuth().catch((reason) => setError((reason as Error).message)); }}
           onResolve={(id, resolution) => {
             void offlineSync.resolve(id, resolution).catch((reason) => setError((reason as Error).message));
           }}

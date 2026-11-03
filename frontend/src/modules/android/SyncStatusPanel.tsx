@@ -6,6 +6,8 @@ type Props = {
   summary: SyncSummary;
   conflicts: ServerConflict[];
   onSync: () => void;
+  onRecoverAuth?: () => void;
+  recoveringAuth?: boolean;
   onResolve: (id: number, resolution: "keep_server" | "apply_local" | "latest_write_wins") => void;
   /** Phone layout: nothing when all is synced, otherwise a one-row banner. */
   compact?: boolean;
@@ -22,7 +24,7 @@ export function syncIsSettled(online: boolean, summary: SyncSummary, conflicts: 
     && !(summary.attention + summary.authRequired + conflicts.length);
 }
 
-export function SyncStatusPanel({ online, summary, conflicts, onSync, onResolve, compact = false }: Props) {
+export function SyncStatusPanel({ online, summary, conflicts, onSync, onResolve, onRecoverAuth, recoveringAuth = false, compact = false }: Props) {
   if (compact && syncIsSettled(online, summary, conflicts)) return null;
   const needsAttention = summary.attention + summary.authRequired + conflicts.length;
   const label = !online
@@ -46,6 +48,12 @@ export function SyncStatusPanel({ online, summary, conflicts, onSync, onResolve,
       </button>
     </div>
     {summary.lastError && <small>{summary.lastError}</small>}
+    {summary.authRequired > 0 && onRecoverAuth && <div className="mobile-sync-actions">
+      <span>Для сохранённых изменений требуется проверка сеанса.</span>
+      <button type="button" onClick={onRecoverAuth} disabled={!online || Boolean(summary.syncing) || recoveringAuth}>
+        Проверить сеанс и повторить
+      </button>
+    </div>}
     {conflicts.map((conflict) => <article className="mobile-sync-conflict" key={conflict.id}>
       <strong>Конфликт задачи №{conflict.entity_id}</strong>
       <p>Ни одна версия не была затёрта. Выберите итог для полей: {conflict.conflicting_fields.join(", ")}.</p>

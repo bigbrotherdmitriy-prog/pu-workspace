@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CHANGE_EVENT, offlineSummary, resolveConflict, serverConflicts, synchronize,
+  CHANGE_EVENT, offlineSummary, recoverAuthRequired, resolveConflict, serverConflicts, synchronize,
 } from "./syncEngine";
 import { CONNECTIVITY_EVENT, isOnline } from "./connectivity";
 import type { ServerConflict, SyncSummary } from "./types";
@@ -13,6 +13,15 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   const storageAvailable = typeof indexedDB !== "undefined";
   const [summary, setSummary] = useState<SyncSummary>(EMPTY);
   const [conflicts, setConflicts] = useState<ServerConflict[]>([]);
+  const [recoveringAuth, setRecoveringAuth] = useState(false);
+  const recoveryRunning = useRef(false);
+  const currentScope = useRef(`${userId}:${projectId}`);
+  currentScope.current = `${userId}:${projectId}`;
+  useEffect(() => {
+    const scope = `${userId}:${projectId}`;
+    currentScope.current = scope;
+    return () => { if (currentScope.current === scope) currentScope.current = ""; };
+  }, [userId, projectId]);
   const onAppliedRef = useRef(onApplied);
   useEffect(() => { onAppliedRef.current = onApplied; }, [onApplied]);
 
@@ -66,5 +75,20 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
     onAppliedRef.current();
   }
 
-  return { summary, conflicts, syncNow, resolve };
+  async function recoverAuth() {
+    if (recoveryRunning.current) return;
+    if (!storageAvailable) throw new Error("Локальная очередь недоступна в этом браузере.");
+    const scope = `${userId}:${projectId}`;
+    recoveryRunning.current = true;
+    setRecoveringAuth(true);
+    try {
+      await recoverAuthRequired(userId, projectId);
+      if (currentScope.current === scope) await syncNow(true);
+    } finally {
+      recoveryRunning.current = false;
+      setRecoveringAuth(false);
+    }
+  }
+
+  return { summary, conflicts, syncNow, resolve, recoverAuth, recoveringAuth };
 }
