@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.estimates import Estimate, EstimateLine, KsAct
+from app.models.project import Project
 from app.models.work_log import WorkLogEntry
 
 TWO = Decimal("0.01")
@@ -198,49 +199,174 @@ def list_acts(db: Session, project_id: int, estimate_id: int) -> list[dict]:
     return [_act_dict(a) for a in rows]
 
 
-def preview_act(db: Session, project_id: int, estimate_id: int, period_from: date, period_to: date) -> dict:
-    """Что войдёт в КС-2 за период: факт из журнала, не больше остатка сметного объёма."""
+def _entry_reservations(db: Session, project_id: int) -> dict[int, Decimal]:
+    """Сколько qty каждой записи журнала уже зарезервировано актами проекта (по всем сметам)."""
+    out: dict[int, Decimal] = {}
+    acts = db.execute(select(KsAct).where(KsAct.project_id == project_id)).scalars().all()
+    for act in acts:
+        try:
+            lines = json.loads(act.lines_json)
+        except (ValueError, TypeError):
+            continue
+        for l in lines:
+            allocs = l.get("entry_allocations")
+            if not allocs:
+                continue
+            for a in allocs:
+                try:
+                    eid = int(a["entry_id"])
+                    q = Decimal(str(a["qty"]))
+                except (KeyError, TypeError, ValueError, InvalidOperation):
+                    continue
+                out[eid] = out.get(eid, ZERO) + q
+    return out
+
+
+def _legacy_lines_in_period(db: Session, project_id: int, estimate_id: int, period_from: date, period_to: date) -> set[int]:
+    """Строки legacy-актов (без entry_allocations), чей период пересекается с запрошенным."""
+    out: set[int] = set()
+    acts = db.execute(select(KsAct).where(KsAct.project_id == project_id, KsAct.estimate_id == estimate_id)).scalars().all()
+    for act in acts:
+        if act.period_to < period_from or act.period_from > period_to:
+            continue
+        try:
+            lines = json.loads(act.lines_json)
+        except (ValueError, TypeError):
+            continue
+        for l in lines:
+            if l.get("entry_allocations"):
+                continue
+            try:
+                out.add(int(l["line_id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    return out
+
+
+def _preview(db: Session, project_id: int, estimate_id: int, period_from: date, period_to: date) -> dict:
     if period_to < period_from:
         raise ValueError("Конец периода раньше начала")
     e = _get(db, project_id, estimate_id)
     lines = db.execute(select(EstimateLine).where(EstimateLine.estimate_id == e.id)
                        .order_by(EstimateLine.sort_order, EstimateLine.id)).scalars().all()
-    period_fact = _fact_by_line(db, project_id, e.id, period_from, period_to)
+    line_by_id = {l.id: l for l in lines}
     billed = _billed_by_line(db, project_id, e.id)
-    out: list[dict] = []
+    reserved = _entry_reservations(db, project_id)
+    legacy_lines = _legacy_lines_in_period(db, project_id, e.id, period_from, period_to)
+    entries = db.execute(
+        select(WorkLogEntry).where(
+            WorkLogEntry.project_id == project_id,
+            WorkLogEntry.estimate_line_id.in_(list(line_by_id.keys())) if line_by_id else False,
+            WorkLogEntry.work_date >= period_from,
+            WorkLogEntry.work_date <= period_to,
+        ).order_by(WorkLogEntry.work_date, WorkLogEntry.id)
+    ).scalars().all()
     warnings: list[str] = []
-    for l in lines:
-        fact = period_fact.get(l.id, ZERO)
-        if fact <= 0:
+    # Свободный остаток по каждой записи: qty минус уже зарезервированное актами.
+    free: dict[int, Decimal] = {}
+    for en in entries:
+        q = en.qty if en.qty is not None else ZERO
+        if q <= 0:
             continue
-        already = billed.get(l.id, ZERO)
-        qty = fact
-        if l.qty is not None:
-            remaining = max(ZERO, l.qty - already)
-            if fact > remaining:
-                warnings.append(f"Позиция {l.position or l.id} «{l.name[:60]}»: по журналу {fact:f} {l.unit or ''}, "
-                                f"в акт включено {remaining:f} (остаток сметного объёма).")
-                qty = remaining
+        left = q - reserved.get(en.id, ZERO)
+        if left > 0:
+            free[en.id] = left
+    # Остаток сметного объёма по каждой строке (existing billed cap).
+    remaining: dict[int, Decimal | None] = {}
+    for l in lines:
+        if l.qty is None:
+            remaining[l.id] = None
+        else:
+            remaining[l.id] = max(ZERO, l.qty - billed.get(l.id, ZERO))
+    # Deterministic allocation по work_date/id, ограниченный cap.
+    alloc_by_line: dict[int, list[dict]] = {}
+    qty_by_line: dict[int, Decimal] = {}
+    for en in entries:
+        if en.id not in free:
+            continue
+        lid = en.estimate_line_id
+        if lid not in line_by_id:
+            continue
+        if lid in legacy_lines:
+            continue
+        cap = remaining.get(lid)
+        if cap is not None and cap <= 0:
+            continue
+        take = free[en.id]
+        if cap is not None and take > cap:
+            take = cap
+        if take <= 0:
+            continue
+        alloc_by_line.setdefault(lid, []).append({"entry_id": en.id, "qty": f"{take.quantize(THREE):f}"})
+        qty_by_line[lid] = qty_by_line.get(lid, ZERO) + take
+        if cap is not None:
+            remaining[lid] = cap - take
+    # Предупреждение о превышении остатка сметного объёма: сумма положительного свободного
+    # факта по строке больше оставшегося сметного объёма (включая cap == 0 при наличии факта).
+    # Сравниваем только свободный (не зарезервированный) факт, чтобы не давать ложных срабатываний.
+    free_by_line: dict[int, Decimal] = {}
+    for en in entries:
+        if en.id not in free:
+            continue
+        lid = en.estimate_line_id
+        if lid not in line_by_id or lid in legacy_lines:
+            continue
+        free_by_line[lid] = free_by_line.get(lid, ZERO) + free[en.id]
+    for lid, free_qty in free_by_line.items():
+        l = line_by_id.get(lid)
+        if l is None or l.qty is None:
+            continue
+        left = max(ZERO, l.qty - billed.get(lid, ZERO))
+        if free_qty > left:
+            warnings.append(f"Позиция {l.position or l.id} «{l.name[:60]}»: свободный факт превышает остаток сметного объёма "
+                            f"({_s(free_qty, THREE)} > {_s(left, THREE)}), в акт включён остаток сметного объёма.")
+    for lid in legacy_lines:
+        l = line_by_id.get(lid)
+        if l is None:
+            continue
+        warnings.append(f"Позиция {l.position or l.id} «{l.name[:60]}»: есть legacy-акт за пересекающийся период без "
+                        f"распределения по записям журнала — источник факта не определён, строка исключена из сверки.")
+    out: list[dict] = []
+    for l in lines:
+        qty = qty_by_line.get(l.id, ZERO)
         if qty <= 0:
             continue
         price = _unit_price(l)
         if price is None:
             warnings.append(f"Позиция {l.position or l.id} «{l.name[:60]}»: в смете нет цены, в акт не включена.")
             continue
+        already = billed.get(l.id, ZERO)
         out.append({
             "line_id": l.id, "position": l.position or "", "code": l.code or "", "section": l.section or "", "name": l.name,
             "unit": l.unit or "", "qty": f"{qty.quantize(THREE):f}", "unit_price": f"{price:f}",
             "amount": f"{_money(qty * price):f}", "estimate_qty": _s(l.qty, THREE), "prev_qty": f"{already.quantize(THREE):f}",
+            "entry_allocations": alloc_by_line.get(l.id, []),
         })
     total = _money(sum((Decimal(l["amount"]) for l in out), ZERO))
     return {"lines": out, "total_ex_vat": f"{total:f}", "warnings": warnings}
 
 
+
+def preview_act(db: Session, project_id: int, estimate_id: int, period_from: date, period_to: date) -> dict:
+    """Что войдёт в КС-2 за период: небиллированный остаток каждой записи журнала, не больше остатка сметы."""
+    return _preview(db, project_id, estimate_id, period_from, period_to)
+
+
+
 def create_act(db: Session, project_id: int, estimate_id: int, period_from: date, period_to: date,
                number: str | None = None, act_date: date | None = None) -> dict:
-    prev = preview_act(db, project_id, estimate_id, period_from, period_to)
+    # Сериализация конкурирующих созданий по проекту: блокировка строки проекта до commit вызывающего.
+    db.execute(select(Project.id).where(Project.id == project_id).with_for_update())
+    prev = _preview(db, project_id, estimate_id, period_from, period_to)
     if not prev["lines"]:
-        raise ValueError("За период нет выполненных работ по позициям сметы: внесите факт в журнале работ и выберите позицию сметы.")
+        legacy_warnings = [w for w in prev["warnings"] if "legacy-акт" in w]
+        if legacy_warnings:
+            raise ValueError(
+                "За период нет новых выполненных работ по позициям сметы: строки исключены из сверки из-за legacy-акта "
+                "за пересекающийся период без распределения по записям журнала — источник факта не определён. "
+                + " ".join(legacy_warnings)
+            )
+        raise ValueError("За период нет новых выполненных работ по позициям сметы: внесите факт в журнале работ и выберите позицию сметы.")
     existing = db.scalar(select(func.count()).select_from(KsAct).where(KsAct.project_id == project_id, KsAct.estimate_id == estimate_id)) or 0
     act = KsAct(
         project_id=project_id, estimate_id=estimate_id, number=(number or str(existing + 1)).strip()[:40],
@@ -252,6 +378,7 @@ def create_act(db: Session, project_id: int, estimate_id: int, period_from: date
     d = _act_dict(act)
     d["warnings"] = prev["warnings"]
     return d
+
 
 
 def _get_act(db: Session, project_id: int, act_id: int) -> KsAct:
