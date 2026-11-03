@@ -98,9 +98,10 @@ def visible_act(db: Session, project_id: int, act_id: int) -> KsAct:
 
 def header_of(a: KsAct) -> dict:
     try:
-        return json.loads(a.header_json) if a.header_json else {}
-    except ValueError:
+        header = json.loads(a.header_json) if a.header_json else {}
+    except (ValueError, TypeError, RecursionError):
         return {}
+    return header if isinstance(header, dict) else {}
 
 
 def decision_history(db: Session, project_id: int, act_id: int, *, limit: int = 100) -> dict:
