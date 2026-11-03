@@ -108,6 +108,8 @@ def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: st
     a = visible_act(db, project_id, act_id)
     if a.status == "signed":
         raise ValueError("Акт уже подписан")
+    if a.customer_status in {"approved", "rejected"}:
+        raise ValueError("Решение по акту уже принято")
     text = (comment or "").strip()
     if decision == "rejected" and not text:
         raise ValueError("Укажите причину отклонения")
