@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app import defects as svc
-from app.models.defects import Defect, DefectComment
+from app.models.defects import Defect, DefectComment, DefectPhoto
 from app.models.project import Project
 from test_defects import world
 
@@ -65,3 +65,43 @@ def test_stale_rejection_does_not_flush_caller_changes(world):
     with db.no_autoflush:
         assert db.scalar(select(Defect.status).where(Defect.id == cached.id)) == "fixed"
     db.rollback()
+
+
+@pytest.mark.parametrize("comment", [None, " ", "Synthetic repair explanation"])
+def test_removed_after_photo_cannot_be_used_as_evidence_at_update(world, monkeypatch, comment):
+    from sqlalchemy.sql.dml import Update
+    db, project = world["db"], world["p"].id
+    made = svc.create_defect(db, project, None, {"title": "Synthetic disappearing evidence"})
+    photo = DefectPhoto(project_id=project, defect_id=made["id"], kind="after", filename="synthetic.jpg", mime_type="image/jpeg", size_bytes=3, data=b"abc")
+    db.add(photo)
+    db.flush()
+    photo_id = photo.id
+    db.commit()
+    original_execute = db.execute
+    interrupted = False
+
+    def remove_photo_before_update(statement, *args, **kwargs):
+        nonlocal interrupted
+        if not interrupted and isinstance(statement, Update) and statement.table.name == "defects":
+            interrupted = True
+            with Session(db.get_bind()) as other:
+                svc.delete_photo(other, project, made["id"], photo_id)
+                other.commit()
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", remove_photo_before_update)
+    try:
+        if not (comment or "").strip():
+            with pytest.raises(ValueError, match="фото.*комментарий"):
+                svc.change_status(db, project, None, made["id"], "fixed", comment)
+            db.rollback()
+        else:
+            assert svc.change_status(db, project, None, made["id"], "fixed", comment)["status"] == "fixed"
+            db.commit()
+    finally:
+        assert interrupted, "Synthetic interleaving did not run"
+    actual = db.get(Defect, made["id"])
+    assert actual.status == ("fixed" if (comment or "").strip() else "open")
+    assert db.scalar(select(func.count()).select_from(DefectPhoto)) == 0
+    comments = db.scalars(select(DefectComment).where(DefectComment.defect_id == actual.id)).all()
+    assert len(comments) == (1 if (comment or "").strip() else 0)

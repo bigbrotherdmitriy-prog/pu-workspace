@@ -206,19 +206,29 @@ def change_status(db: Session, project_id: int, user_id: int | None, defect_id: 
         if status == "fixed" and not has_after and not (comment or "").strip():
             raise ValueError("Чтобы отметить замечание устранённым, приложите фото результата или напишите комментарий")
         expected_status = d.status
-        changed = db.execute(update(Defect).where(
+        transition = update(Defect).where(
             Defect.id == defect_id, Defect.project_id == project_id,
             Defect.status == expected_status,
         ).values(
             status=status,
             closed_at=datetime.now(timezone.utc) if status == "accepted" else None,
-        ).execution_options(synchronize_session=False))
+        )
+        needs_photo = status == "fixed" and not (comment or "").strip()
+        if needs_photo:
+            transition = transition.where(select(DefectPhoto.id).where(
+                DefectPhoto.defect_id == defect_id,
+                DefectPhoto.project_id == project_id,
+                DefectPhoto.kind == "after",
+            ).exists())
+        changed = db.execute(transition.execution_options(synchronize_session=False))
         if changed.rowcount != 1:
             current = db.scalar(select(Defect.status).where(
                 Defect.id == defect_id, Defect.project_id == project_id,
             ))
             if current is None:
                 raise LookupError("Замечание не найдено")
+            if current == expected_status and needs_photo:
+                raise ValueError("Чтобы отметить замечание устранённым, приложите фото результата или напишите комментарий")
             raise ValueError("Статус замечания изменился: обновите данные перед переходом")
         # Refresh only fields owned by this operation; preserve caller edits.
         db.refresh(d, attribute_names=["status", "closed_at"])
