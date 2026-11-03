@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { WorkLogModule } from "./WorkLogModule";
@@ -174,4 +174,36 @@ it("links the entry to an estimate position and fills name and unit from it", as
     expect(body).toContain("\"estimate_line_id\":77");
     expect(body).toContain("Прокладка кабеля ВВГ");
   });
+});
+
+
+it.each(["crews", "schedule", "suggestions"])("ignores a late %s response from the previous project", async (kind) => {
+  let finishOld!: (value: unknown) => void;
+  const old = new Promise<unknown>((resolve) => { finishOld = resolve; });
+  const resource = `/work-log/${kind}`;
+  function payload(label: string) {
+    if (kind === "crews") return { crews: [{ id: 41, name: label, foreman: null, members: "", members_count: 0, note: null }] };
+    if (kind === "schedule") return { baseline: { id: 1, name: label, version: 1, status: "approved" }, items: [] };
+    return { works: [{ work_name: label, unit: "m" }], objects: [], rd_items: [] };
+  }
+  mockApi.mockImplementation(async (path: string) => {
+    if (path === `/projects/5${resource}`) return old;
+    if (path === `/projects/6${resource}`) return payload("Current synthetic project");
+    if (path.endsWith("/crews")) return { crews: [] };
+    if (path.endsWith("/schedule")) return { baseline: null, items: [] };
+    if (path.endsWith("/suggestions")) return { works: [], objects: [], rd_items: [] };
+    return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+  });
+  const { rerender, container } = render(<WorkLogModule projectId={5} userId={1} />);
+  rerender(<WorkLogModule projectId={6} userId={1} />);
+  if (kind === "crews") fireEvent.click(screen.getByText("Бригады"));
+  if (kind === "schedule") fireEvent.click(screen.getByText("Подсказка из графика (ГПР)"));
+  const currentVisible = () => kind === "suggestions"
+    ? container.querySelector('option[value="Current synthetic project"]') !== null
+    : screen.queryAllByText(/Current synthetic project/).length > 0;
+  await waitFor(() => expect(currentVisible()).toBe(true));
+  await act(async () => { finishOld(payload("Old synthetic project")); await old; });
+  expect(currentVisible()).toBe(true);
+  expect(screen.queryAllByText(/Old synthetic project/)).toHaveLength(0);
+  expect(container.querySelector('option[value="Old synthetic project"]')).toBeNull();
 });
