@@ -103,6 +103,50 @@ def header_of(a: KsAct) -> dict:
         return {}
 
 
+def decision_history(db: Session, project_id: int, act_id: int, *, limit: int = 100) -> dict:
+    """Internal accessor; the authenticated API must enforce customer access first.
+
+    Read at most limit+1 audit rows, newest first. Invalid legacy payloads are
+    omitted; has_more describes the raw bounded audit window, not valid events.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("Лимит истории должен быть от 1 до 100")
+    with db.no_autoflush:
+        visible = db.scalar(select(KsAct.id).where(
+            KsAct.id == act_id, KsAct.project_id == project_id,
+            KsAct.status.in_(VISIBLE_STATUSES),
+        ))
+        if visible is None:
+            raise LookupError("Акт не найден")
+        rows = db.execute(select(AuditLog.id, AuditLog.created_at, AuditLog.details).where(
+            AuditLog.action == "customer_act_decision", AuditLog.entity_type == "ks_act",
+            AuditLog.entity_id == act_id,
+        ).order_by(AuditLog.id.desc()).limit(limit + 1)).all()
+    events = []
+    for row in rows[:limit]:
+        try:
+            payload = json.loads(row.details or "null")
+        except (ValueError, TypeError, RecursionError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if type(payload.get("project_id")) is not int or payload["project_id"] != project_id:
+            continue
+        if type(payload.get("user_id")) is not int:
+            continue
+        if not isinstance(payload.get("decision"), str) or payload["decision"] not in {"approved", "rejected"}:
+            continue
+        comment = payload.get("comment")
+        if comment is not None and not isinstance(comment, str):
+            continue
+        events.append({
+            "id": row.id, "created_at": row.created_at.isoformat(),
+            "user_id": payload["user_id"], "decision": payload["decision"],
+            "comment": comment,
+        })
+    return {"events": events, "has_more": len(rows) > limit}
+
+
 def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: str, comment: str | None) -> dict:
     if decision not in {"approved", "rejected"}:
         raise ValueError("Решение: approved или rejected")
