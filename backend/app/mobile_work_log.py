@@ -1,4 +1,4 @@
-"""Atomic offline journal service; trusted authenticated actor, no HTTP wiring.
+"""Atomic offline journal service; trusted actor, HTTP adapter in api.mobile_sync.
 
 Codex fallback. Caller owns commit/rollback; dedicate a request unit of work.
 """

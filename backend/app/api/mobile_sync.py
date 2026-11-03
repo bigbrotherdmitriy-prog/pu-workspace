@@ -15,6 +15,8 @@ from app.api.management import append_management_history
 from app.api.tasks import TaskUpdate
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
+from app.mobile_work_log import submit_work_log_create as _submit_work_log_create
+from app.mobile_work_log_contract import OfflineWorkLogCreateRequest
 from app.mobile_sync_tokens import MobileSyncTokenError, verify_mobile_sync_token
 from app.models.management import Notification
 from app.models.mobile_sync import MobileSyncCommand, MobileSyncConflict
@@ -25,6 +27,26 @@ from app.task_mutations import TASK_TERMINAL_STATES, apply_task_patch, task_sync
 
 
 router = APIRouter(prefix="/mobile-sync", tags=["mobile-sync"])
+
+
+@router.post("/work-log-create")
+def create_offline_work_log(request: OfflineWorkLogCreateRequest,
+                            db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Separate typed create envelope; never invent an entity_id for new facts."""
+    try:
+        result = _submit_work_log_create(db, user, request)
+    except HTTPException:
+        db.rollback()
+        raise
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        status = 409 if str(exc) in {"client_mutation_id_reused", "offline_receipt_not_applied"} else 422
+        raise HTTPException(status, str(exc)) from exc
+    db.commit()
+    return result
 
 
 class MobileCommandRequest(BaseModel):

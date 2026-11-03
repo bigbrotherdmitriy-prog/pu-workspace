@@ -1,4 +1,4 @@
-"""Offline journal-create envelope only; no endpoint, receipt or permission grant.
+"""Offline journal-create envelope; HTTP adapter lives in api.mobile_sync.
 
 Codex fallback. Existing work_log service remains authoritative for business data.
 """
