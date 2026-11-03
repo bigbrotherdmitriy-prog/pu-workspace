@@ -230,3 +230,41 @@ it("hides loaded project context while the next project is still loading without
   fireEvent.click(screen.getByText("Бригады"));
   expect(screen.queryByText(/Old synthetic crew/)).toBeNull();
 });
+
+
+it.each(["schedule", "crew", "estimate"])("does not submit a stale %s reference after switching projects", async (kind) => {
+  mockApiOk();
+  const initial = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, init) => {
+    if (String(path).startsWith("/projects/6/")) {
+      if (String(path).endsWith("/crews")) return { crews: [] };
+      if (String(path).endsWith("/schedule")) return { baseline: null, items: [] };
+      if (String(path).endsWith("/suggestions")) return { works: [], objects: [], rd_items: [], estimate_lines: [] };
+      return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+    }
+    if (String(path).endsWith("/suggestions")) return { ...suggestions, estimate_lines: [{ id: 81, position: "1", code: null, name: "Synthetic estimate work", unit: "m", qty: "10" }] };
+    return initial(path, init);
+  });
+  const { rerender } = render(<WorkLogModule projectId={5} userId={1} />);
+  await screen.findByText("Прокладка кабеля");
+  fireEvent.change(screen.getByLabelText(/Какая работа выполнена/), { target: { value: "Unsaved synthetic work" } });
+  if (kind === "schedule") {
+    fireEvent.click(screen.getByText("Подсказка из графика (ГПР)"));
+    fireEvent.click(await screen.findByText("Монтаж кабельных лотков"));
+  }
+  if (kind === "crew") fireEvent.change(screen.getByLabelText("Бригада"), { target: { value: "4" } });
+  if (kind === "estimate") fireEvent.change(await screen.findByLabelText(/Позиция сметы/), { target: { value: "81" } });
+  rerender(<WorkLogModule projectId={6} userId={1} />);
+  await screen.findByText(/Записей пока нет/);
+  fireEvent.click(screen.getByText("Добавить запись"));
+  expect((await screen.findByRole("alert")).textContent).toMatch(/заново.*текущего проекта/);
+  expect(mockApi.mock.calls.filter(([path, init]) => path === "/mobile-sync/work-log-create" && init?.method === "POST")).toHaveLength(0);
+  fireEvent.click(screen.getByText("Снять неподтверждённые привязки"));
+  fireEvent.click(screen.getByText("Добавить запись"));
+  expect(await screen.findByText("Запись добавлена")).toBeTruthy();
+  const sent = mockApi.mock.calls.find(([path, init]) => path === "/mobile-sync/work-log-create" && init?.method === "POST")!;
+  const data = JSON.parse(String(sent[1]?.body)).data;
+  expect(data.schedule_item_id).toBeUndefined();
+  expect(data.crew_id).toBeUndefined();
+  expect(data.estimate_line_id).toBeUndefined();
+});

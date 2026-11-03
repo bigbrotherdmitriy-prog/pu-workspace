@@ -139,7 +139,20 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
     setForm((f) => ({ ...f, work_name: name, unit: f.unit || (known?.unit ?? "") }));
   }
 
+  const invalidReferences = Boolean(
+    (selected && !plan.items.some((item) => item.id === selected.id)) ||
+    (form.crew_id && !crews.some((crew) => String(crew.id) === form.crew_id)) ||
+    (estimateLineId && !suggest.estimate_lines?.some((line) => String(line.id) === estimateLineId))
+  );
+
+  function clearReferences() {
+    setSelected(null);
+    setEstimateLineId("");
+    setForm((current) => ({ ...current, crew_id: "" }));
+  }
+
   function workBody(): Record<string, unknown> {
+    if (invalidReferences) throw new Error("Выберите привязки заново для текущего проекта или снимите их.");
     const workName = selected ? selected.title : form.work_name.trim();
     if (!workName) throw new Error("Укажите, какая работа выполнена");
     const body: Record<string, unknown> = { work_date: form.work_date, work_name: workName };
@@ -417,6 +430,7 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
         </div>
       )}
       {view !== "crews" && <>
+      {invalidReferences && <button type="button" onClick={clearReferences}>Снять неподтверждённые привязки</button>}
       <form className="wl-form" onSubmit={(e) => { e.preventDefault(); void save(); }} aria-label="Новая запись журнала">
         <label>Дата<input type="date" value={form.work_date} onChange={(e) => set("work_date", e.target.value)} /></label>
         <label>Объект
