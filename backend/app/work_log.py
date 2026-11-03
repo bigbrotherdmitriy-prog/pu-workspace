@@ -31,6 +31,8 @@ def _parse_qty(value) -> Decimal | None:
         qty = Decimal(str(value).strip().replace(",", ".").replace(" ", ""))
     except InvalidOperation as exc:
         raise ValueError("Некорректный объём") from exc
+    if not qty.is_finite():
+        raise ValueError("Объём должен быть конечным числом")
     if qty < 0:
         raise ValueError("Объём не может быть отрицательным")
     return qty
@@ -73,6 +75,8 @@ def _clean(data: dict, *, partial: bool) -> dict:
                 hours = Decimal(str(raw).strip().replace(",", "."))
             except InvalidOperation as exc:
                 raise ValueError("Некорректное число часов") from exc
+            if not hours.is_finite():
+                raise ValueError("Часы должны быть конечным числом")
             if not Decimal("0") <= hours <= Decimal("24"):
                 raise ValueError("Часов за день может быть от 0 до 24")
             result["hours"] = hours
@@ -131,6 +135,8 @@ def _parse_labor(raw) -> list[dict]:
             hours = Decimal(str(item.get("hours")).strip().replace(",", "."))
         except (InvalidOperation, AttributeError) as exc:
             raise ValueError(f"Некорректные часы у {name}") from exc
+        if not hours.is_finite():
+            raise ValueError("Часы должны быть конечным числом")
         if not Decimal("0") <= hours <= Decimal("24"):
             raise ValueError(f"Часов у {name} может быть от 0 до 24")
         rate_raw = item.get("hourly_rate")
@@ -140,6 +146,8 @@ def _parse_labor(raw) -> list[dict]:
                 rate = Decimal(str(rate_raw).strip().replace(",", ".").replace(" ", ""))
             except InvalidOperation as exc:
                 raise ValueError(f"Некорректная ставка у {name}") from exc
+            if not rate.is_finite():
+                raise ValueError("Ставка должна быть конечным числом")
             if rate < 0:
                 raise ValueError("Ставка не может быть отрицательной")
         rows.append({"person_name": name[:300], "hours": hours, "hourly_rate": rate})
