@@ -36,13 +36,19 @@ export function DefectsModule({ projectId }: { projectId: number }) {
   const fail = (e: unknown, fallback: string) => setError(e instanceof Error ? e.message : fallback);
 
   useEffect(() => {
+    setData({ defects: [], counts: {}, overdue: 0 });
+  }, [projectId]);
+
+  useEffect(() => {
     if (projectId <= 0) return;
+    let active = true;
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (query.trim()) params.set("q", query.trim());
     api<Listing>(`/projects/${projectId}/defects${params.toString() ? `?${params.toString()}` : ""}`)
-      .then((res) => setData(res ?? { defects: [], counts: {}, overdue: 0 }))
-      .catch((e) => fail(e, "Не удалось загрузить замечания"));
+      .then((res) => { if (active) setData(res ?? { defects: [], counts: {}, overdue: 0 }); })
+      .catch((e) => { if (active) fail(e, "Не удалось загрузить замечания"); });
+    return () => { active = false; };
   }, [projectId, status, query, tick]);
 
   async function uploadPhotos(defectId: number, files: File[], kind: "before" | "after") {

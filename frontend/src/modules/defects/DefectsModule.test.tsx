@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { DefectsModule } from "./DefectsModule";
@@ -70,4 +70,29 @@ it("shows the empty hint", async () => {
   mockApi.mockResolvedValue({ defects: [], counts: {}, overdue: 0 });
   render(<DefectsModule projectId={4} />);
   expect(await screen.findByText(/Замечаний нет/)).toBeTruthy();
+});
+
+
+it("ignores a late defects list from the previous project", async () => {
+  let finishOld!: (value: unknown) => void;
+  const pending = new Promise<unknown>((resolve) => { finishOld = resolve; });
+  const current = { ...listing, defects: [{ ...defect, title: "Current synthetic defect", photos: [] }] };
+  mockApi.mockImplementation(async (path: string) => path.startsWith("/projects/4/") ? pending : current);
+  const { rerender } = render(<DefectsModule projectId={4} />);
+  rerender(<DefectsModule projectId={5} />);
+  await screen.findByText(/Current synthetic defect/);
+  await act(async () => { finishOld(listing); await pending; });
+  expect(screen.queryByText(/Current synthetic defect/)).not.toBeNull();
+  expect(screen.queryByText(/№ 7\. Не закреплён лоток/)).toBeNull();
+});
+
+it("hides already loaded defects while another project loads and preserves the draft", async () => {
+  const pending = new Promise<never>(() => undefined);
+  mockApi.mockImplementation(async (path: string) => path.startsWith("/projects/4/") ? listing : pending);
+  const { rerender } = render(<DefectsModule projectId={4} />);
+  await screen.findByText(/№ 7\. Не закреплён лоток/);
+  fireEvent.change(screen.getByPlaceholderText(/не закреплён кабельный лоток/), { target: { value: "Synthetic unsaved defect" } });
+  rerender(<DefectsModule projectId={5} />);
+  expect(screen.queryByText(/№ 7\. Не закреплён лоток/)).toBeNull();
+  expect((screen.getByPlaceholderText(/не закреплён кабельный лоток/) as HTMLInputElement).value).toBe("Synthetic unsaved defect");
 });
