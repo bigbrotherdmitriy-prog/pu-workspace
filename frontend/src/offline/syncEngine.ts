@@ -5,6 +5,7 @@ import type { OfflineCommand, ServerConflict, StoredUploadFile, SyncSummary } fr
 
 const ATTENTION_AFTER_ATTEMPTS = 3;
 export const CHANGE_EVENT = "pu-mobile-sync-changed";
+export const WORK_LOG_APPLIED_EVENT = "pu-work-log-applied";
 let running = false;
 
 function changed() {
@@ -178,7 +179,7 @@ function blobBase64(blob: Blob): Promise<string> {
   });
 }
 
-async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
+async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number; entityId?: number }> {
   if (command.operation === "work_log.create") {
     const response = await api<{
       receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
@@ -198,7 +199,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       || response.result?.author_user_id !== command.userId) {
       throw new Error("Не подтверждена доставка записи журнала. Локальная запись сохранена.");
     }
-    return { applied: true, receiptId: response.receipt_id };
+    return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id };
   }
   if (command.operation === "document.upload") {
     const files = await Promise.all((command.uploads || []).map(async (file) => ({
@@ -254,6 +255,11 @@ export async function synchronize(userId: number, projectId: number, manual = fa
         if (result.applied) {
           await deleteCommand(working.id);
           await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
+          if (working.operation === "work_log.create" && positiveId(result.entityId)) {
+            window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT, {
+              detail: { userId, projectId, entryId: result.entityId },
+            }));
+          }
           changed();
         } else {
           await persist({

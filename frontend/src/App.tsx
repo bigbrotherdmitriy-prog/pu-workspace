@@ -3812,7 +3812,7 @@ export function App() {
       {active === "Оборудование" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EquipmentModule projectId={projectId} /></section>}
       {active === "Сметы и КС" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EstimatesModule projectId={projectId} /></section>}
       {active === "Замечания" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><DefectsModule projectId={projectId} /></section>}
-      {active === "Журнал работ" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><WorkLogModule projectId={projectId} /></section>}
+      {active === "Журнал работ" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><WorkLogModule projectId={projectId} userId={currentUser?.id} /></section>}
       {active === "Файлы проекта" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PuStorageModule projectId={projectId} /></section>}
       {active === "Портфель" && <PortfolioModule onOpenProject={(id) => { void activateProject(id); setActive("ГПР и ДДС"); }} />}
       {active === "Аналитика" && <AnalyticsModule analytics={analytics} collapsed={collapsed} onReload={() => void load()} />}

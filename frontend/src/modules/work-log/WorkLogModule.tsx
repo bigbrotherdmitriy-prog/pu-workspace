@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { csrfHeaders } from "../../api/client";
 import { api } from "../../api/client";
+import { isOnline } from "../../offline/connectivity";
+import { enqueueWorkLogCreate, WORK_LOG_APPLIED_EVENT } from "../../offline/syncEngine";
 import "./work-log.css";
 
 type Entry = {
@@ -43,7 +45,7 @@ function formatDate(value: string): string {
 
 const emptyForm = () => ({ work_date: today(), object_name: "", work_name: "", unit: "", qty: "", location: "", weather: "", workers: "", hours: "", crew_id: "", note: "" });
 
-export function WorkLogModule({ projectId }: { projectId: number }) {
+export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; userId?: number }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [suggest, setSuggest] = useState<Suggestions>({ works: [], objects: [], rd_items: [] });
@@ -62,6 +64,15 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [estimateLineId, setEstimateLineId] = useState("");
   const [labor, setLabor] = useState<LaborRow[]>([]);
   const [crewForm, setCrewForm] = useState({ id: 0, name: "", foreman: "", members: "" });
+
+  useEffect(() => {
+    const applied = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId: number; projectId: number }>).detail;
+      if (detail?.userId === userId && detail.projectId === projectId) setTick((value) => value + 1);
+    };
+    window.addEventListener(WORK_LOG_APPLIED_EVENT, applied);
+    return () => window.removeEventListener(WORK_LOG_APPLIED_EVENT, applied);
+  }, [userId, projectId]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -121,12 +132,19 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
     const people = labor.filter((r) => r.person_name.trim() && r.hours.trim());
     if (people.length) body.labor = people.map((r) => ({ person_name: r.person_name.trim(), hours: r.hours.trim(), ...(r.hourly_rate ? { hourly_rate: r.hourly_rate } : {}) }));
     try {
-      await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
-      setMessage("Запись добавлена");
+      const offline = !isOnline();
+      if (offline) {
+        if (!userId) throw new Error("Войдите заново, чтобы сохранить запись на устройстве.");
+        await enqueueWorkLogCreate({ userId, projectId, data: body });
+        setMessage("Запись сохранена на устройстве. Отправится при восстановлении связи.");
+      } else {
+        await api(`/projects/${projectId}/work-log`, { method: "POST", body: JSON.stringify(body) });
+        setMessage("Запись добавлена");
+      }
       setEstimateLineId("");
       setLabor([]);
       setForm((f) => ({ ...emptyForm(), work_date: f.work_date, object_name: f.object_name, location: f.location, unit: selected ? f.unit : "" }));
-      setTick((v) => v + 1);
+      if (!offline) setTick((v) => v + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить запись");
     } finally {
