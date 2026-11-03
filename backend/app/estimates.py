@@ -5,7 +5,7 @@ import json
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.estimates import Estimate, EstimateLine, KsAct
@@ -436,7 +436,22 @@ def delete_act(db: Session, project_id: int, act_id: int) -> None:
     a = _get_act(db, project_id, act_id)
     if a.status == "signed":
         raise ValueError("Подписанный акт удалить нельзя")
-    db.delete(a)
+    # A cached draft may have been signed by another transaction.
+    # Check the invariant atomically in the DELETE predicate.
+    result = db.execute(
+        delete(KsAct).where(
+            KsAct.id == act_id, KsAct.project_id == project_id,
+            KsAct.status != "signed",
+        ).execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        status = db.scalar(select(KsAct.status).where(
+            KsAct.id == act_id, KsAct.project_id == project_id,
+        ))
+        if status is None:
+            raise LookupError("Акт не найден")
+        raise ValueError("Подписанный акт удалить нельзя")
+    db.expunge(a)
     db.flush()
 
 
