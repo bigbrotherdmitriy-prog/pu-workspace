@@ -223,3 +223,25 @@ it("does not acknowledge a create response without a valid persisted defect id",
   expect(screen.queryByText("Замечание № 8 добавлено")).toBeNull();
   expect(fetchMock).not.toHaveBeenCalled();
 });
+
+it.each(["status", "comment", "delete"])("ignores a late %s mutation after the selected project changes", async (kind) => {
+  let finish!: (value: unknown) => void;
+  const pending = new Promise<unknown>((resolve) => { finish = resolve; });
+  mockAll(); const original = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, init) => {
+    if ((kind === "status" && path.endsWith("/status")) || (kind === "comment" && path.endsWith("/comments")) || (kind === "delete" && init?.method === "DELETE")) return pending;
+    return original(path, init);
+  });
+  const { rerender } = render(<DefectsModule projectId={4} />);
+  fireEvent.click(await screen.findByText(/№ 7\. Не закреплён лоток/)); await screen.findByRole("dialog");
+  if (kind === "status") fireEvent.click(screen.getByText("Взять в работу"));
+  else if (kind === "comment") {
+    fireEvent.change(screen.getByPlaceholderText(/Комментарий/), { target: { value: "Synthetic old comment" } });
+    fireEvent.click(screen.getByText("Только комментарий"));
+  } else fireEvent.click(screen.getByText("Удалить замечание"));
+  rerender(<DefectsModule projectId={5} />);
+  fireEvent.click(await screen.findByText(/№ 7\. Не закреплён лоток/)); await screen.findByRole("dialog");
+  await act(async () => { finish({ ...defect, title: "Synthetic stale mutation result" }); await pending; });
+  expect(screen.queryByRole("dialog")).not.toBeNull();
+  expect(screen.queryByText(/Synthetic stale mutation result/)).toBeNull();
+});

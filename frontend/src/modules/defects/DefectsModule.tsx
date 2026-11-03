@@ -154,43 +154,70 @@ export function DefectsModule({ projectId }: { projectId: number }) {
     setOpen(null);
   }
 
+  // A reply belongs to the selected detail instance, not just its numeric id.
+  function mutationScope() {
+    const request = ++detailRequest.current;
+    const requestProject = projectId;
+    return () => request === detailRequest.current && liveProject.current === requestProject;
+  }
+
   async function addPhotos(kind: "before" | "after", files: File[]) {
     if (!open || !files.length) return;
+    const current = mutationScope();
+    const defectId = open.id;
     setError("");
     try {
-      await uploadPhotos(open.id, files, kind);
-      await openDefect(open.id);
-      reload();
-    } catch (e) { fail(e, "Не удалось загрузить фото"); }
+      await uploadPhotos(defectId, files, kind);
+      if (!current()) return;
+      await openDefect(defectId);
+      if (liveProject.current === projectId) reload();
+    } catch (e) { if (current()) fail(e, "Не удалось загрузить фото"); }
   }
 
   async function setDefectStatus(next: string) {
     if (!open) return;
+    const current = mutationScope();
+    const submittedComment = comment;
     setError("");
     try {
-      const res = await api<Defect>(`/projects/${projectId}/defects/${open.id}/status`, { method: "POST", body: JSON.stringify({ status: next, comment }) });
+      const res = await api<Defect>(`/projects/${projectId}/defects/${open.id}/status`, { method: "POST", body: JSON.stringify({ status: next, comment: submittedComment }) });
+      if (!current()) return;
       setOpen(res);
-      setComment("");
+      setComment((value) => value === submittedComment ? "" : value);
       reload();
-    } catch (e) { fail(e, "Не удалось изменить статус"); }
+    } catch (e) { if (current()) fail(e, "Не удалось изменить статус"); }
   }
 
   async function addComment() {
     if (!open || !comment.trim()) return;
+    const current = mutationScope();
+    const submittedComment = comment;
     try {
-      setOpen(await api<Defect>(`/projects/${projectId}/defects/${open.id}/comments`, { method: "POST", body: JSON.stringify({ text: comment }) }));
-      setComment("");
-    } catch (e) { fail(e, "Не удалось сохранить комментарий"); }
+      const result = await api<Defect>(`/projects/${projectId}/defects/${open.id}/comments`, { method: "POST", body: JSON.stringify({ text: submittedComment }) });
+      if (!current()) return;
+      setOpen(result);
+      setComment((value) => value === submittedComment ? "" : value);
+    } catch (e) { if (current()) fail(e, "Не удалось сохранить комментарий"); }
   }
 
   async function removePhoto(photo: Photo) {
     if (!open) return;
-    try { setOpen(await api<Defect>(`/projects/${projectId}/defects/${open.id}/photos/${photo.id}`, { method: "DELETE" })); reload(); } catch (e) { fail(e, "Не удалось удалить фото"); }
+    const current = mutationScope();
+    try {
+      const result = await api<Defect>(`/projects/${projectId}/defects/${open.id}/photos/${photo.id}`, { method: "DELETE" });
+      if (!current()) return;
+      setOpen(result); reload();
+    } catch (e) { if (current()) fail(e, "Не удалось удалить фото"); }
   }
 
   async function removeDefect() {
     if (!open) return;
-    try { await api(`/projects/${projectId}/defects/${open.id}`, { method: "DELETE" }); setOpen(null); reload(); } catch (e) { fail(e, "Не удалось удалить замечание"); }
+    const current = mutationScope();
+    try {
+      await api(`/projects/${projectId}/defects/${open.id}`, { method: "DELETE" });
+      if (!current()) return;
+      closeDefect(); reload();
+    } catch (e) { if (current()) fail(e, "Не удалось удалить замечание"); }
   }
 
   async function exportExcel() {
