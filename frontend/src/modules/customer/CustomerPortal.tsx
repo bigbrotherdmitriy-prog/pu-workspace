@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, csrfHeaders } from "../../api/client";
+import { CustomerDecisionHistory } from "./CustomerDecisionHistory";
 import "./customer.css";
 
 type Project = { id: number; name: string };
@@ -24,8 +25,11 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
 
   useEffect(() => {
     if (!projectId) return;
-    api<Summary>(`/customer/projects/${projectId}/summary`).then(setSummary).catch((e) => setError(e instanceof Error ? e.message : "Не удалось загрузить проект"));
-    api<{ entries: Entry[] }>(`/customer/projects/${projectId}/progress`).then((r) => setEntries(r?.entries ?? [])).catch(() => undefined);
+    let active = true;
+    setEntries([]);
+    api<Summary>(`/customer/projects/${projectId}/summary`).then((value) => { if (active) setSummary(value); }).catch((e) => { if (active) setError(e instanceof Error ? e.message : "Не удалось загрузить проект"); });
+    api<{ entries: Entry[] }>(`/customer/projects/${projectId}/progress`).then((r) => { if (active) setEntries(r?.entries ?? []); }).catch(() => undefined);
+    return () => { active = false; };
   }, [projectId, tick]);
 
   async function decide(act: Act, decision: "approved" | "rejected") {
@@ -74,7 +78,7 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
         <button type="button" onClick={() => void logout()}>Выйти</button>
       </header>
       {error && <p className="cust-error" role="alert">{error}</p>}
-      {summary && (
+      {summary && summary.project.id === projectId && (
         <>
           <h2 className="cust-sub">{summary.project.name}</h2>
           <section aria-label="Ход выполнения">
@@ -101,7 +105,8 @@ export function CustomerPortal({ projects }: { projects: Project[] }) {
                   <button type="button" onClick={() => void download(a, "ks2.docx", `КС-2 № ${a.number}.docx`)}>КС-2 (Word)</button>
                   <button type="button" onClick={() => void download(a, "ks3.docx", `КС-3 № ${a.number}.docx`)}>КС-3 (Word)</button>
                 </div>
-                {a.status === "sent" && (
+                <CustomerDecisionHistory key={`${projectId}:${a.id}:${tick}`} projectId={projectId} actId={a.id} />
+                {a.status === "sent" && !["approved", "rejected"].includes(a.customer_status) && (
                   <div className="cust-decide">
                     <input aria-label={`Комментарий к акту ${a.number}`} placeholder="Комментарий (обязателен при отклонении)" value={comments[a.id] ?? ""} onChange={(e) => setComments((c) => ({ ...c, [a.id]: e.target.value }))} />
                     <button type="button" className="cust-main" onClick={() => void decide(a, "approved")}>Согласовать</button>
