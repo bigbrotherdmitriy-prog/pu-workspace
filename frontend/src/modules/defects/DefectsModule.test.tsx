@@ -138,3 +138,88 @@ it("keeps the newest chosen defect when earlier detail resolves later", async ()
   expect(screen.queryByRole("dialog", { name: "Замечание 8" })).not.toBeNull();
   expect(screen.queryByRole("dialog", { name: "Замечание 7" })).toBeNull();
 });
+
+
+it("does not create the same defect again after a known create succeeds but photo upload fails", async () => {
+  mockAll();
+  const original = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, init) => path === "/projects/4/defects/9" ? { ...defect, id: 9, number: 8, photos: [] } : original(path, init));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: "Synthetic photo failure" }) }));
+  render(<DefectsModule projectId={4} />);
+  await screen.findByText(/№ 7\. Не закреплён лоток/);
+  fireEvent.change(screen.getByPlaceholderText(/не закреплён кабельный лоток/), { target: { value: "Synthetic created defect" } });
+  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["x"], "synthetic.jpg", { type: "image/jpeg" })] } });
+  fireEvent.click(screen.getByText("Добавить замечание"));
+  await screen.findByRole("alert");
+  fireEvent.click(await screen.findByText("Добавить замечание"));
+  const creates = () => mockApi.mock.calls.filter(([path, init]) => path === "/projects/4/defects" && init?.method === "POST");
+  expect(creates()).toHaveLength(1);
+  expect(screen.getByText(/Не все фото удалось загрузить/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Открыть созданное замечание" }));
+  expect(await screen.findByRole("dialog", { name: "Замечание 8" })).toBeTruthy();
+  expect(creates()).toHaveLength(1);
+});
+
+it("keeps a new draft and newly chosen photo when an earlier created defect's upload fails", async () => {
+  mockAll();
+  let rejectUpload!: (reason: unknown) => void;
+  const pending = new Promise<unknown>((_, reject) => { rejectUpload = reject; });
+  const fetchMock = vi.fn().mockImplementationOnce(() => pending).mockResolvedValue({ ok: true, status: 200 });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<DefectsModule projectId={4} />);
+  await screen.findByText(/№ 7\. Не закреплён лоток/);
+  const title = screen.getByPlaceholderText(/не закреплён кабельный лоток/);
+  fireEvent.change(title, { target: { value: "Synthetic first defect" } });
+  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["old"], "old.jpg", { type: "image/jpeg" })] } });
+  fireEvent.click(screen.getByText("Добавить замечание"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  fireEvent.change(title, { target: { value: "Synthetic next draft" } });
+  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["new"], "new.jpg", { type: "image/jpeg" })] } });
+  await act(async () => { rejectUpload(new Error("Synthetic old upload failure")); await pending.catch(() => undefined); });
+  expect((title as HTMLInputElement).value).toBe("Synthetic next draft");
+  fireEvent.click(await screen.findByText("Добавить замечание"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(String(fetchMock.mock.calls[1][0])).toContain("name=new.jpg");
+});
+
+
+it("keeps another project's draft intact when an old photo upload fails", async () => {
+  mockAll();
+  let rejectUpload!: (reason: unknown) => void;
+  const pending = new Promise<unknown>((_, reject) => { rejectUpload = reject; });
+  const fetchMock = vi.fn().mockImplementation(() => pending);
+  vi.stubGlobal("fetch", fetchMock);
+  const { rerender } = render(<DefectsModule projectId={4} />);
+  await screen.findByText(/№ 7\. Не закреплён лоток/);
+  const title = screen.getByPlaceholderText(/не закреплён кабельный лоток/);
+  fireEvent.change(title, { target: { value: "Synthetic original project defect" } });
+  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["x"], "old-project.jpg", { type: "image/jpeg" })] } });
+  fireEvent.click(screen.getByText("Добавить замечание"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  rerender(<DefectsModule projectId={5} />);
+  fireEvent.change(title, { target: { value: "Synthetic other project draft" } });
+  await act(async () => { rejectUpload(new Error("Synthetic old scope upload failure")); await pending.catch(() => undefined); });
+  expect((title as HTMLInputElement).value).toBe("Synthetic other project draft");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Открыть созданное замечание" })).toBeNull();
+  expect(String(fetchMock.mock.calls[0][0])).toContain("/projects/4/defects/9/photos");
+  rerender(<DefectsModule projectId={4} />);
+  expect(screen.getByRole("button", { name: "Открыть созданное замечание" })).toBeTruthy();
+});
+
+it("does not acknowledge a create response without a valid persisted defect id", async () => {
+  mockAll();
+  const original = mockApi.getMockImplementation()!;
+  mockApi.mockImplementation(async (path, init) => path === "/projects/4/defects" && init?.method === "POST"
+    ? { id: 0, number: 8 } : original(path, init));
+  const fetchMock = vi.fn();vi.stubGlobal("fetch", fetchMock);
+  render(<DefectsModule projectId={4} />);
+  await screen.findByText(/№ 7\. Не закреплён лоток/);
+  const title = screen.getByPlaceholderText(/не закреплён кабельный лоток/);
+  fireEvent.change(title, { target: { value: "Synthetic unconfirmed response" } });
+  fireEvent.click(screen.getByText("Добавить замечание"));
+  expect((await screen.findByRole("alert")).textContent).toContain("подтвердить создание");
+  expect((title as HTMLInputElement).value).toBe("Synthetic unconfirmed response");
+  expect(screen.queryByText("Замечание № 8 добавлено")).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+});

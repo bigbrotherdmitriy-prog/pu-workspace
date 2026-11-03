@@ -31,6 +31,12 @@ export function DefectsModule({ projectId }: { projectId: number }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const createBusy = useRef(false);
+  const latestDraft = useRef({ form, newPhotos });
+  latestDraft.current = { form, newPhotos };
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [photoRecovery, setPhotoRecovery] = useState<Record<number, { id: number; number: number }>>({});
+
   const detailRequest = useRef(0);
   const liveProject = useRef(projectId);
   liveProject.current = projectId;
@@ -71,24 +77,54 @@ export function DefectsModule({ projectId }: { projectId: number }) {
     }
   }
 
+  function acknowledgeCreated(created: Defect, submitted: ReturnType<typeof emptyForm>, files: File[], requestProject: number) {
+    if (liveProject.current !== requestProject) return;
+    if (JSON.stringify(latestDraft.current.form) === JSON.stringify(submitted)) {
+      setForm((current) => JSON.stringify(current) === JSON.stringify(submitted)
+        ? { ...emptyForm(), object_name: current.object_name, responsible: current.responsible } : current);
+      const currentFiles = latestDraft.current.newPhotos;
+      if (currentFiles.length === files.length && currentFiles.every((file, index) => file === files[index])) {
+        setNewPhotos([]);
+        if (photoInput.current) photoInput.current.value = "";
+      }
+    }
+    setMessage(`Замечание № ${created.number} добавлено`);
+    reload();
+  }
+
   async function create() {
+    if (createBusy.current) return;
     if (!form.title.trim()) { setError("Опишите замечание коротко: что не так"); return; }
+    const requestProject = projectId;
+    const submitted = { ...form };
+    const files = [...newPhotos];
+    createBusy.current = true;
     setBusy(true);
     setError("");
     setMessage("");
     try {
       const body: Record<string, string> = {};
-      for (const [k, v] of Object.entries(form)) if (v.trim()) body[k] = v.trim();
-      const created = await api<Defect>(`/projects/${projectId}/defects`, { method: "POST", body: JSON.stringify(body) });
-      if (newPhotos.length) await uploadPhotos(created.id, newPhotos, "before");
-      setForm((f) => ({ ...emptyForm(), object_name: f.object_name, responsible: f.responsible }));
-      setNewPhotos([]);
-      setMessage(`Замечание № ${created.number} добавлено`);
-      reload();
+      for (const [k, v] of Object.entries(submitted)) if (v.trim()) body[k] = v.trim();
+      const created = await api<Defect>(`/projects/${requestProject}/defects`, { method: "POST", body: JSON.stringify(body) });
+      if (!created || !Number.isSafeInteger(created.id) || created.id <= 0 || !Number.isSafeInteger(created.number) || created.number <= 0) {
+        throw new Error("Не удалось подтвердить создание замечания. Проверьте список перед повторной отправкой.");
+      }
+      try {
+        if (files.length) await uploadPhotos(created.id, files, "before");
+      } catch (e) {
+        setPhotoRecovery((current) => ({ ...current, [requestProject]: { id: created.id, number: created.number } }));
+        acknowledgeCreated(created, submitted, files, requestProject);
+        if (liveProject.current === requestProject) fail(e, "Не удалось загрузить все фото");
+        return;
+      }
+      acknowledgeCreated(created, submitted, files, requestProject);
     } catch (e) {
-      fail(e, "Не удалось сохранить замечание");
-      reload();
+      if (liveProject.current === requestProject) {
+        fail(e, "Не удалось сохранить замечание");
+        reload();
+      }
     } finally {
+      createBusy.current = false;
       setBusy(false);
     }
   }
@@ -99,7 +135,15 @@ export function DefectsModule({ projectId }: { projectId: number }) {
     setError("");
     try {
       const result = await api<Defect>(`/projects/${lookupProject}/defects/${id}`);
-      if (request === detailRequest.current && liveProject.current === lookupProject) setOpen(result);
+      if (request === detailRequest.current && liveProject.current === lookupProject) {
+        setOpen(result);
+        setPhotoRecovery((current) => {
+          if (current[lookupProject]?.id !== result.id) return current;
+          const next = { ...current };
+          delete next[lookupProject];
+          return next;
+        });
+      }
     } catch (e) {
       if (request === detailRequest.current && liveProject.current === lookupProject) fail(e, "Не удалось открыть замечание");
     }
@@ -188,13 +232,18 @@ export function DefectsModule({ projectId }: { projectId: number }) {
         <label>Срок устранения<input type="date" value={form.due_date} onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))} /></label>
         <label className="df-wide">Подробности<input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
         <label className="df-wide">Фото с телефона или из файлов
-          <input type="file" accept="image/*" capture="environment" multiple aria-label="Фото замечания" onChange={(e) => setNewPhotos(Array.from(e.target.files ?? []))} />
+          <input ref={photoInput} type="file" accept="image/*" capture="environment" multiple aria-label="Фото замечания" onChange={(e) => setNewPhotos(Array.from(e.target.files ?? []))} />
         </label>
         {newPhotos.length > 0 && <span className="df-note df-wide">Выбрано фото: {newPhotos.length}</span>}
         <button type="submit" className="df-save" disabled={busy}>{busy ? "Сохраняем…" : "Добавить замечание"}</button>
       </form>
       {message && <p className="df-note" role="status">{message}</p>}
       {error && <p className="df-error" role="alert">{error}</p>}
+      {photoRecovery[projectId] && <p className="df-note" role="status">
+        Не все фото удалось загрузить в замечание № {photoRecovery[projectId].number}. Проверьте вложения перед повторной загрузкой.
+        <button type="button" onClick={() => void openDefect(photoRecovery[projectId].id)}>Открыть созданное замечание</button>
+      </p>}
+
 
       <div className="df-chips" role="group" aria-label="Фильтр по статусу">
         <button type="button" className={!status ? "df-chip df-chip-on" : "df-chip"} onClick={() => setStatus("")}>Все</button>
