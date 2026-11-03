@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -122,3 +124,39 @@ def trial_act(project_id: int, body: HandoverBody, db: Session = Depends(get_db)
 def commissioning_act(project_id: int, body: HandoverBody, db: Session = Depends(get_db), user=Depends(require_user)):
     require_project_role(db, user, project_id, "viewer")
     return _file(id_handover.render_commissioning_act(body.header), DOCX, "commissioning-act.docx")
+
+
+# Technical limits for this endpoint, not business limits on stored projects.
+WEEKLY_REPORT_ROW_BUDGET = 1000
+WEEKLY_REPORT_TEXT_BYTE_BUDGET = 1024 * 1024
+WEEKLY_REPORT_PHOTO_BYTE_BUDGET = 10 * 1024 * 1024
+WEEKLY_REPORT_PHOTO_PIXEL_BUDGET = 20_000_000
+
+
+@router.get("/{project_id}/reports/weekly.pdf", response_class=Response,
+            responses={200: {"content": {"application/pdf": {}}}})
+def weekly_report_pdf(project_id: int, date_from: date = Query(...), date_to: date = Query(...), include_photos: bool = Query(False),
+                      db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "viewer")
+    try:
+        report = work_log_form.collect_weekly_report_bounded(
+            db, project_id, date_from, date_to, row_budget=WEEKLY_REPORT_ROW_BUDGET,
+            text_byte_budget=WEEKLY_REPORT_TEXT_BYTE_BUDGET,
+        )
+        photos = work_log_form.load_weekly_report_photos(
+            db, project_id, report['defect_photos'], byte_budget=WEEKLY_REPORT_PHOTO_BYTE_BUDGET,
+        ) if include_photos else ()
+        content = work_log_form.render_weekly_pdf(
+            report, photo_attachments=photos, photo_byte_budget=WEEKLY_REPORT_PHOTO_BYTE_BUDGET,
+            photo_pixel_budget=WEEKLY_REPORT_PHOTO_PIXEL_BUDGET,
+        )
+    except (work_log_form.ReportRendererUnavailable, ImportError) as exc:
+        raise HTTPException(503, "Генератор PDF временно недоступен") from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return Response(content=content, media_type="application/pdf", headers={
+        "Content-Disposition": 'attachment; filename="weekly-report.pdf"',
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    })

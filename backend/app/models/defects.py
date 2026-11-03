@@ -20,6 +20,9 @@ class Defect(Base):
     status: Mapped[str] = mapped_column(String(20), default="open", server_default="open")
     responsible: Mapped[str | None] = mapped_column(String(300), nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rd_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("rd_volume_versions.id", ondelete="RESTRICT"), nullable=True, index=True,
+    )
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

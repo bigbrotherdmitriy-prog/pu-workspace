@@ -86,4 +86,72 @@ describe("offline synchronization queue", () => {
     expect(row.conflictId).toBe(71);
     expect((await offlineSummary(1, 17)).conflicts).toBe(1);
   });
+
+  it("does not coalesce into an attempted command after a network failure", async () => {
+    const firstId = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+    const before = structuredClone(store.rows.get(firstId)!);
+    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null, "offline-test"));
+    await synchronize(1, 17, true);
+
+    const attempted = structuredClone(store.rows.get(firstId)!);
+    expect(attempted.attempts).toBe(1);
+    expect(attempted.status).toBe("queued");
+
+    const secondId = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { assignee_user_id: 3 },
+    });
+
+    expect(secondId).not.toBe(firstId);
+    expect(store.rows.size).toBe(2);
+    const untouched = store.rows.get(firstId)!;
+    expect(untouched.id).toBe(before.id);
+    expect(untouched.patch).toEqual(before.patch);
+    expect(untouched.baseToken).toBe(before.baseToken);
+    expect(untouched.clientCreatedAt).toBe(before.clientCreatedAt);
+    expect(untouched.attempts).toBe(1);
+    expect(untouched.status).toBe("queued");
+    expect(store.rows.get(secondId)!.patch).toEqual({ assignee_user_id: 3 });
+  });
+
+  it("retries the original id with a byte-identical JSON payload", async () => {
+    const id = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+    vi.mocked(api).mockRejectedValueOnce(new ApiError("network unavailable", null, "offline-test"));
+    await synchronize(1, 17, true);
+    const firstBody = vi.mocked(api).mock.calls[0][1]?.body as string;
+
+    vi.mocked(api).mockResolvedValueOnce({ receipt_id: 5, status: "applied" });
+    await synchronize(1, 17, true);
+    const secondBody = vi.mocked(api).mock.calls[1][1]?.body as string;
+
+    expect(JSON.parse(firstBody).client_mutation_id).toBe(id);
+    expect(secondBody).toBe(firstBody);
+    expect(store.rows.size).toBe(0);
+  });
+
+  it("does not coalesce edits across users or projects", async () => {
+    await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+    await enqueueTaskUpdate({
+      userId: 2, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+    await enqueueTaskUpdate({
+      userId: 1, projectId: 18, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+
+    expect(store.rows.size).toBe(3);
+    expect((await offlineSummary(1, 17)).total).toBe(1);
+    expect((await offlineSummary(2, 17)).total).toBe(1);
+    expect((await offlineSummary(1, 18)).total).toBe(1);
+  });
 });

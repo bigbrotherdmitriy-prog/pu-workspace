@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.execution_finance import CashFlowEntry
 from app.models.invoice_line import InvoiceLine
-from app.models.purchase import PurchaseItem, PurchaseItemSource
+from app.models.purchase import MaterialReceipt, PurchaseItem, PurchaseItemSource
 from app.models.rd import RdSpecItem, RdVolume
 
 ALLOWED_STATUSES = {"need", "ordered", "paid", "received"}
@@ -111,12 +111,16 @@ def rebuild(db: Session, project_id: int) -> dict:
             ))
         db.flush()
 
-    # Удаляем "need" строки, у которых больше нет подтверждённых позиций
+    # Preserve historical material identity even if its RD source is later rejected.
+    receipted_ids = set(db.scalars(select(MaterialReceipt.purchase_item_id).where(
+        MaterialReceipt.purchase_item_id.in_([item.id for item in existing]),
+    )))
+    # Удаляем "need" строки без подтверждённых позиций и физического прихода.
     removed = 0
     for item in existing:
         if item.id in kept_ids:
             continue
-        if item.status == "need":
+        if item.status == "need" and item.id not in receipted_ids:
             db.delete(item)
             removed += 1
     db.flush()
@@ -391,3 +395,55 @@ def invoices_for_matching(db: Session, project_id: int) -> list[dict]:
             "suggested": suggested,
         })
     return result
+
+
+def received_totals(db: Session, project_id: int, *, row_budget: int) -> dict:
+    """Bounded physical arrival totals only; not available stock or writeoff."""
+    from sqlalchemy import func as sqlfunc
+    from app.models.project import Project
+    from app.models.purchase import MaterialReceipt
+    if type(project_id) is not int or project_id <= 0:
+        raise ValueError("Invalid receipt project")
+    if type(row_budget) is not int or not 1 <= row_budget <= 10_000:
+        raise ValueError("Receipt report row budget must be between 1 and 10000")
+    groups = {}
+    count = 0
+    with db.no_autoflush:
+        if db.scalar(select(Project.id).where(Project.id == project_id)) is None:
+            raise LookupError("Project not found")
+        statement = select(
+            MaterialReceipt.purchase_item_id, MaterialReceipt.qty,
+            sqlfunc.substr(MaterialReceipt.unit, 1, 41).label('unit'),
+            PurchaseItem.project_id.label('material_project'),
+        ).outerjoin(PurchaseItem, PurchaseItem.id == MaterialReceipt.purchase_item_id).where(
+            MaterialReceipt.project_id == project_id,
+        ).order_by(MaterialReceipt.id).limit(row_budget + 1)
+        rows = db.execute(statement.execution_options(yield_per=100)).mappings()
+        try:
+            for row in rows:
+                if count == row_budget:
+                    raise ValueError("Receipt report exceeds row budget")
+                if row['material_project'] != project_id:
+                    raise ValueError("Receipt material ownership is invalid")
+                unit = row['unit']
+                if not isinstance(unit, str) or not unit or len(unit) > 40 or unit.strip() != unit:
+                    raise ValueError("Stored receipt unit is invalid")
+                quantity = row['qty']
+                if quantity is None or not quantity.is_finite() or quantity <= 0 or quantity > Decimal('999999999999999.999'):
+                    raise ValueError("Stored receipt quantity is invalid")
+                numerator, denominator = quantity.as_integer_ratio()
+                thousandths, remainder = divmod(numerator * 1000, denominator)
+                if remainder:
+                    raise ValueError("Stored receipt precision is invalid")
+                key = (row['purchase_item_id'], unit)
+                total, operations = groups.get(key, (0, 0))
+                groups[key] = (total + thousandths, operations + 1)
+                count += 1
+        finally:
+            rows.close()
+    materials = []
+    for (item_id, unit), (total, operations) in sorted(groups.items()):
+        materials.append({'purchase_item_id': item_id, 'unit': unit,
+                          'qty_received': f'{total // 1000}.{total % 1000:03d}',
+                          'receipt_count': operations})
+    return {'project_id': project_id, 'receipt_count': count, 'materials': materials}

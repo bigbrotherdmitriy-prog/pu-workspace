@@ -16,3 +16,4 @@ mpxj==16.5.0
 JPype1==1.6.0
 Pillow==13.0.0
 openpyxl==3.1.5
+reportlab==4.4.3

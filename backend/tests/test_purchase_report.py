@@ -270,3 +270,134 @@ def test_api_report_and_invoices(world, monkeypatch):
     assert r.status_code == 200
     r = client.get(f"/projects/{project.id}/purchase")
     assert r.status_code == 200
+
+
+def _physical_receipt(db, item, key, quantity, *, unit=None, project_id=None):
+    from app.models.purchase import MaterialReceipt
+    row = MaterialReceipt(project_id=project_id if project_id is not None else item.project_id,
+                          purchase_item_id=item.id, operation_key=key,
+                          qty=Decimal(quantity), unit=unit if unit is not None else item.unit)
+    db.add(row)
+    db.flush()
+    return row
+
+
+def test_received_totals_exact_groups_and_project_isolation(world):
+    db, pid, other = world['db'], world['project'].id, world['other'].id
+    item = _make_item(db, pid, 'Material', unit='м')
+    second = _make_item(db, pid, 'Second', unit='шт')
+    foreign = _make_item(db, other, 'Foreign', unit='м')
+    _physical_receipt(db, item, 'one', '0.001')
+    _physical_receipt(db, item, 'two', '0.002')
+    _physical_receipt(db, item, 'historical-unit', '5', unit='кг')
+    _physical_receipt(db, second, 'second', '2')
+    _physical_receipt(db, foreign, 'foreign', '100')
+    db.commit()
+    result = purchase_service.received_totals(db, pid, row_budget=4)
+    assert result['receipt_count'] == 4
+    by_key = {(r['purchase_item_id'], r['unit']): r for r in result['materials']}
+    assert by_key[(item.id, 'м')]['qty_received'] == '0.003'
+    assert by_key[(item.id, 'м')]['receipt_count'] == 2
+    assert by_key[(item.id, 'кг')]['qty_received'] == '5.000'
+    assert by_key[(second.id, 'шт')]['qty_received'] == '2.000'
+    assert len(by_key) == 3 and all(key[0] != foreign.id for key in by_key)
+    keys = [(r['purchase_item_id'], r['unit']) for r in result['materials']]
+    assert keys == sorted(keys)
+
+
+def test_received_totals_does_not_infer_physical_arrival_from_finance(world):
+    db, pid = world['db'], world['project'].id
+    item = _make_item(db, pid, 'Paid material', status='paid')
+    item.qty_ordered = Decimal('10')
+    invoice = _make_entry(db, pid, actual=Decimal('100'), status='paid')
+    _make_line(db, pid, invoice, item, '10')
+    db.commit()
+    assert purchase_service.received_totals(db, pid, row_budget=1) == {
+        'project_id': pid, 'receipt_count': 0, 'materials': [],
+    }
+
+
+def test_received_totals_budget_boundary_and_readonly_sql(world):
+    db, pid = world['db'], world['project'].id
+    item = _make_item(db, pid, 'Material', unit='м')
+    _physical_receipt(db, item, 'one', '1')
+    _physical_receipt(db, item, 'two', '2')
+    db.commit()
+    statements = []
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+    engine = db.get_bind()
+    event.listen(engine, 'before_cursor_execute', capture)
+    try:
+        assert purchase_service.received_totals(db, pid, row_budget=2)['materials'][0]['qty_received'] == '3.000'
+        with pytest.raises(ValueError, match='exceeds row budget'):
+            purchase_service.received_totals(db, pid, row_budget=1)
+    finally:
+        event.remove(engine, 'before_cursor_execute', capture)
+    assert statements and all(not sql.lstrip().lower().startswith(('insert', 'update', 'delete')) for sql in statements)
+    receipt_queries = [sql.lower() for sql in statements if 'from material_receipts' in sql.lower()]
+    assert len(receipt_queries) == 2
+    assert all('limit' in sql and 'substr(' in sql and 'purchase_items.name' not in sql for sql in receipt_queries)
+
+
+@pytest.mark.parametrize('budget', [0, -1, True, 1.5, '1', 10001])
+def test_received_totals_invalid_budget(world, budget):
+    with pytest.raises(ValueError):
+        purchase_service.received_totals(world['db'], world['project'].id, row_budget=budget)
+
+
+def test_received_totals_foreign_material_corruption_is_rejected(world):
+    db, pid = world['db'], world['project'].id
+    foreign = _make_item(db, world['other'].id, 'Foreign', unit='м')
+    _physical_receipt(db, foreign, 'corrupt-link', '1', project_id=pid)
+    db.commit()
+    with pytest.raises(ValueError, match='ownership'):
+        purchase_service.received_totals(db, pid, row_budget=1)
+
+
+def test_received_totals_pending_caller_state_not_flushed_or_counted(world):
+    from sqlalchemy import select
+    from app.models.purchase import MaterialReceipt
+    db, pid = world['db'], world['project'].id
+    item = _make_item(db, pid, 'Material', unit='м')
+    _physical_receipt(db, item, 'stored', '1')
+    db.commit()
+    item_id = item.id
+    item.note = 'Pending caller change'
+    pending = PurchaseItem(project_id=pid, group_key='pending', name='Pending', unit='м')
+    pending_receipt = MaterialReceipt(project_id=pid, purchase_item_id=item_id, operation_key='pending', qty=Decimal('9'), unit='м')
+    db.add_all([pending, pending_receipt])
+    result = purchase_service.received_totals(db, pid, row_budget=1)
+    assert result['receipt_count'] == 1 and result['materials'][0]['qty_received'] == '1.000'
+    assert item in db.dirty and pending in db.new and pending_receipt in db.new
+    assert pending.id is None and pending_receipt.id is None
+    with db.no_autoflush:
+        assert db.scalar(select(PurchaseItem.note).where(PurchaseItem.id == item_id)) is None
+
+
+def test_received_totals_large_stored_unit_rejected(world):
+    db, pid = world['db'], world['project'].id
+    item = _make_item(db, pid, 'Material', unit='м')
+    _physical_receipt(db, item, 'bad-unit', '1', unit='X' * 100000)
+    db.commit()
+    with pytest.raises(ValueError, match='unit'):
+        purchase_service.received_totals(db, pid, row_budget=1)
+
+
+def test_received_totals_unknown_project(world):
+    with pytest.raises(LookupError):
+        purchase_service.received_totals(world['db'], 999999, row_budget=1)
+
+
+def test_received_totals_ignores_caller_decimal_precision(world):
+    from decimal import localcontext
+    db, pid = world['db'], world['project'].id
+    item = _make_item(db, pid, 'Material', unit='м')
+    _physical_receipt(db, item, 'one', '1.250')
+    _physical_receipt(db, item, 'two', '2.005')
+    db.commit()
+    with localcontext() as context:
+        context.prec = 2
+        result = purchase_service.received_totals(db, pid, row_budget=2)
+        assert result['materials'][0]['qty_received'] == '3.255'
+        assert context.prec == 2

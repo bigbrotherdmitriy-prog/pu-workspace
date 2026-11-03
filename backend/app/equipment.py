@@ -227,66 +227,70 @@ def _get_unit(db: Session, project_id: int, unit_id: int) -> EquipmentUnit:
 
 
 def update_unit(db: Session, project_id: int, unit_id: int, data: dict) -> dict:
-    unit = _get_unit(db, project_id, unit_id)
+    updates = {}
+    with db.no_autoflush:
+        unit = _get_unit(db, project_id, unit_id)
 
-    if "serial_number" in data:
-        raw = data["serial_number"]
-        if isinstance(raw, str):
-            value = raw.strip() or None
-        else:
-            value = raw
-        if value:
-            conflict = db.execute(
-                select(EquipmentUnit).where(
-                    EquipmentUnit.project_id == project_id,
-                    EquipmentUnit.id != unit.id,
-                    EquipmentUnit.serial_number == value,
-                    EquipmentUnit.type_mark == unit.type_mark,
-                )
-            ).scalar_one_or_none()
-            if conflict is not None:
-                raise ValueError("duplicate serial")
-        unit.serial_number = value
+        if "serial_number" in data:
+            raw = data["serial_number"]
+            if isinstance(raw, str):
+                value = raw.strip() or None
+            else:
+                value = raw
+            if value:
+                conflict = db.execute(
+                    select(EquipmentUnit).where(
+                        EquipmentUnit.project_id == project_id,
+                        EquipmentUnit.id != unit.id,
+                        EquipmentUnit.serial_number == value,
+                        EquipmentUnit.type_mark == unit.type_mark,
+                    )
+                ).scalar_one_or_none()
+                if conflict is not None:
+                    raise ValueError("duplicate serial")
+            updates['serial_number'] = value
 
-    if "location" in data:
-        raw = data["location"]
-        unit.location = raw.strip() if isinstance(raw, str) and raw.strip() else (None if raw is None else raw)
+        if "location" in data:
+            raw = data["location"]
+            updates['location'] = raw.strip() if isinstance(raw, str) and raw.strip() else (None if raw is None else raw)
 
-    if "status" in data:
-        value = data["status"]
-        if value not in _ALLOWED_STATUSES:
-            raise ValueError("invalid status")
-        unit.status = value
+        if "status" in data:
+            value = data["status"]
+            if value not in _ALLOWED_STATUSES:
+                raise ValueError("invalid status")
+            updates['status'] = value
 
-    if "received_date" in data:
-        unit.received_date = _parse_date(data["received_date"])
-    if "installed_date" in data:
-        unit.installed_date = _parse_date(data["installed_date"])
-    if "warranty_until" in data:
-        unit.warranty_until = _parse_date(data["warranty_until"])
-    if "last_service_date" in data:
-        unit.last_service_date = _parse_date(data["last_service_date"])
+        if "received_date" in data:
+            updates['received_date'] = _parse_date(data["received_date"])
+        if "installed_date" in data:
+            updates['installed_date'] = _parse_date(data["installed_date"])
+        if "warranty_until" in data:
+            updates['warranty_until'] = _parse_date(data["warranty_until"])
+        if "last_service_date" in data:
+            updates['last_service_date'] = _parse_date(data["last_service_date"])
 
-    if "service_interval_months" in data:
-        raw = data["service_interval_months"]
-        if raw is None or raw == "":
-            unit.service_interval_months = None
-        else:
-            try:
-                months = int(raw)
-            except Exception:  # noqa: BLE001
-                raise ValueError("invalid service interval") from None
-            if months < 1 or months > 120:
-                raise ValueError("invalid service interval")
-            unit.service_interval_months = months
+        if "service_interval_months" in data:
+            raw = data["service_interval_months"]
+            if raw is None or raw == "":
+                updates['service_interval_months'] = None
+            else:
+                try:
+                    months = int(raw)
+                except Exception:  # noqa: BLE001
+                    raise ValueError("invalid service interval") from None
+                if months < 1 or months > 120:
+                    raise ValueError("invalid service interval")
+                updates['service_interval_months'] = months
 
-    if "note" in data:
-        raw = data["note"]
-        if isinstance(raw, str):
-            unit.note = raw.strip() or None
-        else:
-            unit.note = raw
+        if "note" in data:
+            raw = data["note"]
+            if isinstance(raw, str):
+                updates['note'] = raw.strip() or None
+            else:
+                updates['note'] = raw
 
+    for field, value in updates.items():
+        setattr(unit, field, value)
     db.flush()
     return _unit_to_dict(unit)
 

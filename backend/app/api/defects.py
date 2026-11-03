@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy.orm import Session
 
 from app import defects as svc
@@ -28,6 +30,10 @@ class StatusBody(BaseModel):
 
 class CommentBody(BaseModel):
     text: str
+
+
+class RdVersionBody(BaseModel):
+    rd_version_id: Annotated[StrictInt, Field(gt=0)]
 
 
 def _fail(exc: Exception) -> HTTPException:
@@ -99,6 +105,18 @@ def add_comment(project_id: int, defect_id: int, body: CommentBody, db: Session 
     require_project_role(db, user, project_id, "editor")
     try:
         res = svc.add_comment(db, project_id, getattr(user, "id", None), defect_id, body.text)
+    except (ValueError, LookupError) as exc:
+        db.rollback()
+        raise _fail(exc) from exc
+    db.commit()
+    return res
+
+
+@router.post("/{project_id}/defects/{defect_id}/rd-version")
+def bind_rd_version(project_id: int, defect_id: int, body: RdVersionBody, db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, "editor")
+    try:
+        res = svc.bind_rd_version(db, project_id, defect_id, body.rd_version_id)
     except (ValueError, LookupError) as exc:
         db.rollback()
         raise _fail(exc) from exc

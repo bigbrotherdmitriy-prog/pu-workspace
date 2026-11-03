@@ -224,3 +224,27 @@ def test_api_endpoints(world, monkeypatch):
     assert client.get(f"/projects/{project.id}/purchase").status_code == 200
     assert client.post(f"/projects/{project.id}/purchase/rebuild").status_code == 403
     assert client.patch(f"/projects/{project.id}/purchase/{item_id}", json={"status": "paid"}).status_code == 403
+
+
+def test_rebuild_preserves_need_item_with_physical_material_receipt(world):
+    from sqlalchemy import select, func
+    from app.material_receipts import record_receipt
+    from app.models.purchase import MaterialReceipt, PurchaseItem
+    db = world['db']
+    project = world['project']
+    volume = _volume(db, project.id, 'Synthetic volume', 'receipt-rebuild')
+    spec = _spec(db, project.id, volume.id, name='Synthetic cable', unit='м', qty=Decimal('3'))
+    db.commit()
+    purchase_service.rebuild(db, project.id)
+    item = db.scalar(select(PurchaseItem).where(PurchaseItem.project_id == project.id))
+    assert item.status == 'need'
+    receipt = record_receipt(db, project.id, item.id, operation_key='delivery-before-rejection', qty='1', unit='м')
+    item_id = item.id
+    spec.status = 'rejected'
+    db.commit()
+    result = purchase_service.rebuild(db, project.id)
+    assert result['removed'] == 0
+    remaining = db.get(PurchaseItem, item_id)
+    assert remaining is not None and remaining.status == 'need'
+    assert db.scalar(select(func.count()).select_from(MaterialReceipt)) == 1
+    assert db.scalar(select(MaterialReceipt.qty).where(MaterialReceipt.id == receipt['id'])) == Decimal('1.000')

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index,
+    Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer,
     JSON, String, UniqueConstraint, Uuid, event, inspect,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -80,7 +80,7 @@ class Materialization(Base):
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=new_id)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"))
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     source_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
     source_version_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))

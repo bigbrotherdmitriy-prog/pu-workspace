@@ -1,12 +1,16 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
 class ResponseDraft(Base):
     __tablename__ = "response_drafts"
-    __table_args__ = (UniqueConstraint("project_id", "source_file_id", "source_excerpt_hash", name="uq_response_source_excerpt"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "source_file_id", "source_excerpt_hash", name="uq_response_source_excerpt"),
+        Index("ix_response_drafts_sent_external_id", "sent_external_id", unique=True),
+        Index("uq_response_drafts_send_idempotency_key", "send_idempotency_key", unique=True),
+    )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     reviewer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
@@ -31,9 +35,9 @@ class ResponseDraft(Base):
     source_excerpt: Mapped[str] = mapped_column(Text)
     source_excerpt_hash: Mapped[str] = mapped_column(String(64))
     confidence: Mapped[float] = mapped_column(Float)
-    sent_external_id: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True)
+    sent_external_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    send_idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    send_idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     send_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     last_send_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

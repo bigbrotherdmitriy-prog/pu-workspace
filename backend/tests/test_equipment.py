@@ -376,3 +376,153 @@ def test_units_of_rejected_rd_items_are_hidden(world):
     names = [u["name"] for u in eq.list_units(db, project.id)]
     assert names == ["Насос"]
     assert eq.summary(db, project.id)["total"] == 1
+
+
+@pytest.mark.parametrize('changes', [
+    {'status': 'received', 'service_interval_months': 0},
+    {'serial_number': 'NEW', 'status': 'not-a-status'},
+    {'location': 'CHANGED', 'service_interval_months': 'invalid'},
+])
+def test_rejected_update_has_no_partial_fields_or_later_persistence(world, changes):
+    from sqlalchemy import select
+    db = world['db']
+    first = EquipmentUnit(project_id=world['project'].id, name='First', status='planned', serial_number='OLD', location='Original')
+    second = EquipmentUnit(project_id=world['project'].id, name='Second', status='planned')
+    db.add_all([first, second])
+    db.commit()
+    pid, first_id, second_id = first.project_id, first.id, second.id
+    original = (first.status, first.serial_number, first.location)
+    with pytest.raises(ValueError):
+        equipment_service.update_unit(db, pid, first_id, changes)
+    assert (first.status, first.serial_number, first.location) == original
+    equipment_service.update_unit(db, pid, second_id, {'note': 'Independent successful edit'})
+    actual = db.execute(select(EquipmentUnit.status, EquipmentUnit.serial_number, EquipmentUnit.location).where(EquipmentUnit.id == first_id)).one()
+    assert tuple(actual) == original
+
+
+def test_rejected_update_preserves_unflushed_caller_state(world):
+    from sqlalchemy import select
+    db = world['db']
+    first = EquipmentUnit(project_id=world['project'].id, name='First', status='planned')
+    second = EquipmentUnit(project_id=world['project'].id, name='Second', status='planned', note='Stored')
+    db.add_all([first, second])
+    db.commit()
+    pid, first_id, second_id = first.project_id, first.id, second.id
+    second.note = 'Pending caller edit'
+    pending = EquipmentUnit(project_id=pid, name='Unflushed caller object', status='planned')
+    db.add(pending)
+    with pytest.raises(ValueError):
+        equipment_service.update_unit(db, pid, first_id, {'status': 'received', 'service_interval_months': 0})
+    assert second in db.dirty and second.note == 'Pending caller edit'
+    assert pending.id is None and pending in db.new
+    with db.no_autoflush:
+        assert db.execute(select(EquipmentUnit.note).where(EquipmentUnit.id == second_id)).scalar_one() == 'Stored'
+        assert db.execute(select(EquipmentUnit.status).where(EquipmentUnit.id == first_id)).scalar_one() == 'planned'
+
+
+def _material_receipt_purchase(world, project_id=None):
+    from decimal import Decimal
+    from app.models.purchase import PurchaseItem
+    db = world['db']
+    item = PurchaseItem(project_id=project_id or world['project'].id, group_key='receipt-fixture',
+                        name='Synthetic material', unit='м', qty_needed=Decimal('10'),
+                        qty_ordered=Decimal('10'), status='paid')
+    db.add(item)
+    db.flush()
+    return item
+
+
+def test_material_receipt_model_stores_explicit_arrival_without_finance_change(world):
+    from decimal import Decimal
+    from app.models.purchase import MaterialReceipt
+    db = world['db']
+    item = _material_receipt_purchase(world)
+    before = (item.status, item.qty_needed, item.qty_ordered)
+    row = MaterialReceipt(project_id=item.project_id, purchase_item_id=item.id,
+                          operation_key='delivery-1-line-1', qty=Decimal('1.250'), unit='м',
+                          source_document_ref='Synthetic delivery note 1')
+    db.add(row)
+    db.flush()
+    db.refresh(row)
+    assert row.qty == Decimal('1.250') and row.unit == 'м'
+    assert row.created_at is not None and row.source_document_ref == 'Synthetic delivery note 1'
+    db.refresh(item)
+    assert (item.status, item.qty_needed, item.qty_ordered) == before
+
+
+def test_material_receipt_model_duplicate_key_preserves_original(world):
+    from decimal import Decimal
+    from sqlalchemy import select, func
+    from sqlalchemy.exc import IntegrityError
+    from app.models.purchase import MaterialReceipt
+    db = world['db']
+    item = _material_receipt_purchase(world)
+    row = MaterialReceipt(project_id=item.project_id, purchase_item_id=item.id,
+                          operation_key='same-delivery', qty=Decimal('1.250'), unit='м')
+    db.add(row)
+    db.flush()
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            db.add(MaterialReceipt(project_id=item.project_id, purchase_item_id=item.id,
+                                   operation_key='same-delivery', qty=Decimal('9'), unit='м'))
+            db.flush()
+    assert db.scalar(select(func.count()).select_from(MaterialReceipt)) == 1
+    db.refresh(row)
+    assert row.qty == Decimal('1.250')
+
+
+def test_material_receipt_model_key_scope_is_project(world):
+    from decimal import Decimal
+    from sqlalchemy import select, func
+    from app.models.purchase import MaterialReceipt
+    db = world['db']
+    first = _material_receipt_purchase(world)
+    second = _material_receipt_purchase(world, world['other'].id)
+    for item in (first, second):
+        db.add(MaterialReceipt(project_id=item.project_id, purchase_item_id=item.id,
+                               operation_key='same-key', qty=Decimal('1'), unit='м'))
+    db.flush()
+    assert db.scalar(select(func.count()).select_from(MaterialReceipt)) == 2
+
+
+@pytest.mark.parametrize('quantity', ['0', '-1'])
+def test_material_receipt_model_rejects_nonpositive_quantity(world, quantity):
+    from decimal import Decimal
+    from sqlalchemy.exc import IntegrityError
+    from app.models.purchase import MaterialReceipt
+    db = world['db']
+    item = _material_receipt_purchase(world)
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            db.add(MaterialReceipt(project_id=item.project_id, purchase_item_id=item.id,
+                                   operation_key='bad-quantity', qty=Decimal(quantity), unit='м'))
+            db.flush()
+
+
+def test_material_receipt_model_unknown_purchase_rejected(world):
+    from decimal import Decimal
+    from sqlalchemy.exc import IntegrityError
+    from app.models.purchase import MaterialReceipt
+    db = world['db']
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            db.add(MaterialReceipt(project_id=world['project'].id, purchase_item_id=999999,
+                                   operation_key='unknown', qty=Decimal('1'), unit='м'))
+            db.flush()
+
+
+def test_material_receipt_model_purchase_delete_restricted(world):
+    from decimal import Decimal
+    from sqlalchemy import delete, select
+    from sqlalchemy.exc import IntegrityError
+    from app.models.purchase import MaterialReceipt, PurchaseItem
+    db = world['db']
+    item = _material_receipt_purchase(world)
+    row = MaterialReceipt(project_id=item.project_id, purchase_item_id=item.id,
+                          operation_key='delivery', qty=Decimal('1'), unit='м')
+    db.add(row)
+    db.flush()
+    with pytest.raises(IntegrityError):
+        with db.begin_nested():
+            db.execute(delete(PurchaseItem).where(PurchaseItem.id == item.id))
+    assert db.scalar(select(MaterialReceipt.qty).where(MaterialReceipt.id == row.id)) == Decimal('1')

@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.project_creation import resolve_creation_organization
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_service_settings import ProjectServiceSettings
@@ -124,10 +125,14 @@ def create_project(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    organization_id = project.organization_id or db.scalar(select(Organization.id).order_by(Organization.id).limit(1))
-    if organization_id is None or db.get(Organization, organization_id) is None:
-        raise HTTPException(422, "Organization is required")
-    item = Project(name=project.name, organization_id=organization_id, currency=project.currency)
+    try:
+        organization = resolve_creation_organization(db, user.id, user.is_admin, project.organization_id)
+    except LookupError as error:
+        raise HTTPException(422, "Organization is required") from error
+    except PermissionError as error:
+        raise HTTPException(403, "Organization access denied") from error
+    item = Project(name=project.name, organization_id=organization.id,
+                   tenant_workspace_id=organization.tenant_workspace_id, currency=project.currency)
 
     db.add(item)
     db.flush()

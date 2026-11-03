@@ -5,10 +5,11 @@ import re
 from datetime import date, datetime, timezone
 from io import BytesIO
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.defects import Defect, DefectComment, DefectPhoto
+from app.models.rd import RdVolume, RdVolumeVersion
 
 STATUSES = ("open", "in_progress", "fixed", "accepted")
 STATUS_LABEL = {"open": "Открыто", "in_progress": "В работе", "fixed": "Устранено", "accepted": "Принято"}
@@ -49,7 +50,11 @@ def _photo_dict(p: DefectPhoto) -> dict:
 
 
 def _defect_dict(db: Session, d: Defect, full: bool = False) -> dict:
-    photos = db.execute(select(DefectPhoto).where(DefectPhoto.defect_id == d.id).order_by(DefectPhoto.id)).scalars().all()
+    photos = db.execute(select(
+        DefectPhoto.id, DefectPhoto.kind, DefectPhoto.filename,
+        DefectPhoto.mime_type, DefectPhoto.size_bytes,
+    ).where(DefectPhoto.defect_id == d.id, DefectPhoto.project_id == d.project_id)
+      .order_by(DefectPhoto.id)).all()
     out = {
         "id": d.id, "number": d.number, "title": d.title, "description": d.description, "object_name": d.object_name,
         "location": d.location, "priority": d.priority, "status": d.status, "status_label": STATUS_LABEL.get(d.status, d.status),
@@ -57,10 +62,11 @@ def _defect_dict(db: Session, d: Defect, full: bool = False) -> dict:
         "overdue": bool(d.due_date and d.status in ("open", "in_progress") and d.due_date < date.today()),
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "closed_at": d.closed_at.isoformat() if d.closed_at else None,
+        "rd_version_id": d.rd_version_id,
         "photos": [_photo_dict(p) for p in photos],
     }
     if full:
-        comments = db.execute(select(DefectComment).where(DefectComment.defect_id == d.id).order_by(DefectComment.id)).scalars().all()
+        comments = db.execute(select(DefectComment).where(DefectComment.defect_id == d.id, DefectComment.project_id == d.project_id).order_by(DefectComment.id)).scalars().all()
         out["comments"] = [
             {"id": c.id, "text": c.text, "status_change": c.status_change, "created_at": c.created_at.isoformat() if c.created_at else None}
             for c in comments
@@ -100,6 +106,50 @@ def get_defect(db: Session, project_id: int, defect_id: int) -> dict:
     return _defect_dict(db, _get(db, project_id, defect_id), full=True)
 
 
+def bind_rd_version(db: Session, project_id: int, defect_id: int, version_id: int) -> dict:
+    """Привязать замечание к конкретной версии РД (rd_version_id).
+
+    - version_id должен быть положительным int (bool отклоняется) -> ValueError.
+    - Замечание ищется в рамках проекта через _get -> LookupError.
+    - Версия должна существовать и принадлежать тому же проекту (через RdVolume);
+      отсутствующая и чужая версия неразличимы -> LookupError.
+    - Первичная привязка выполняется атомарным условным UPDATE
+      (WHERE id/project_id AND rd_version_id IS NULL), чтобы два параллельных
+      первичных связывателя не перезаписали друг друга.
+    - Если условный UPDATE не затронул строку, читается фактическая текущая
+      привязка: та же версия -> идемпотентный успех; другая версия -> ValueError.
+    - При ошибке состояние не меняется. Выполняется flush без commit.
+    """
+    if isinstance(version_id, bool) or not isinstance(version_id, int) or version_id <= 0:
+        raise ValueError("Некорректный идентификатор версии РД")
+    d = _get(db, project_id, defect_id)
+    row = db.execute(
+        select(RdVolumeVersion.id)
+        .join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id)
+        .where(RdVolumeVersion.id == version_id, RdVolume.project_id == project_id)
+    ).scalar_one_or_none()
+    if row is None:
+        raise LookupError("Версия РД не найдена")
+    result = db.execute(
+        update(Defect)
+        .where(Defect.id == defect_id, Defect.project_id == project_id, Defect.rd_version_id.is_(None))
+        .values(rd_version_id=version_id)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        current = db.execute(
+            select(Defect.rd_version_id).where(Defect.id == defect_id, Defect.project_id == project_id)
+        ).scalar_one_or_none()
+        if current != version_id:
+            raise ValueError("Замечание уже привязано к другой версии РД")
+    # Синхронизируем ORM-состояние с фактическим значением в БД, даже если
+    # identity map содержит устаревший объект. Обновляем только поле привязки,
+    # не трогая прочие (возможно изменённые) атрибуты.
+    db.refresh(d, attribute_names=["rd_version_id"])
+    db.flush()
+    return _defect_dict(db, d, full=True)
+
+
 def list_defects(db: Session, project_id: int, status: str | None = None, q: str | None = None) -> dict:
     stmt = select(Defect).where(Defect.project_id == project_id)
     if status:
@@ -119,36 +169,42 @@ def list_defects(db: Session, project_id: int, status: str | None = None, q: str
 
 
 def update_defect(db: Session, project_id: int, defect_id: int, data: dict) -> dict:
-    d = _get(db, project_id, defect_id)
-    if "title" in data:
-        title = _txt(data["title"], 500)
-        if not title:
-            raise ValueError("Название замечания не может быть пустым")
-        d.title = title
-    for field, limit in (("description", 5000), ("object_name", 300), ("location", 300), ("responsible", 300)):
-        if field in data:
-            setattr(d, field, _txt(data[field], limit))
-    if "priority" in data:
-        if data["priority"] not in PRIORITIES:
-            raise ValueError("Приоритет: low, normal или high")
-        d.priority = data["priority"]
-    if "due_date" in data:
-        d.due_date = _date(data["due_date"])
+    # Rejected edits must not alter target fields or flush caller-owned state.
+    with db.no_autoflush:
+        d = _get(db, project_id, defect_id)
+        changes = {}
+        if "title" in data:
+            title = _txt(data["title"], 500)
+            if not title:
+                raise ValueError("Название замечания не может быть пустым")
+            changes["title"] = title
+        for field, limit in (("description", 5000), ("object_name", 300), ("location", 300), ("responsible", 300)):
+            if field in data:
+                changes[field] = _txt(data[field], limit)
+        if "priority" in data:
+            if data["priority"] not in PRIORITIES:
+                raise ValueError("Приоритет: low, normal или high")
+            changes["priority"] = data["priority"]
+        if "due_date" in data:
+            changes["due_date"] = _date(data["due_date"])
+    for field, value in changes.items():
+        setattr(d, field, value)
     db.flush()
     return _defect_dict(db, d, full=True)
 
 
 def change_status(db: Session, project_id: int, user_id: int | None, defect_id: int, status: str, comment: str | None) -> dict:
-    d = _get(db, project_id, defect_id)
-    if status not in STATUSES:
-        raise ValueError("Неизвестный статус")
-    if status == d.status:
-        raise ValueError("Замечание уже в этом статусе")
-    if status not in TRANSITIONS.get(d.status, set()):
-        raise ValueError(f"Из статуса «{STATUS_LABEL[d.status]}» нельзя перейти в «{STATUS_LABEL[status]}»")
-    has_after = db.scalar(select(func.count()).select_from(DefectPhoto).where(DefectPhoto.defect_id == d.id, DefectPhoto.kind == "after")) or 0
-    if status == "fixed" and not has_after and not (comment or "").strip():
-        raise ValueError("Чтобы отметить замечание устранённым, приложите фото результата или напишите комментарий")
+    with db.no_autoflush:
+        d = _get(db, project_id, defect_id)
+        if status not in STATUSES:
+            raise ValueError("Неизвестный статус")
+        if status == d.status:
+            raise ValueError("Замечание уже в этом статусе")
+        if status not in TRANSITIONS.get(d.status, set()):
+            raise ValueError(f"Из статуса «{STATUS_LABEL[d.status]}» нельзя перейти в «{STATUS_LABEL[status]}»")
+        has_after = db.scalar(select(func.count()).select_from(DefectPhoto).where(DefectPhoto.defect_id == d.id, DefectPhoto.project_id == d.project_id, DefectPhoto.kind == "after")) or 0
+        if status == "fixed" and not has_after and not (comment or "").strip():
+            raise ValueError("Чтобы отметить замечание устранённым, приложите фото результата или напишите комментарий")
     d.status = status
     d.closed_at = datetime.now(timezone.utc) if status == "accepted" else None
     db.add(DefectComment(project_id=project_id, defect_id=d.id, author_user_id=user_id, text=(comment or "").strip(), status_change=status))
@@ -167,31 +223,36 @@ def add_comment(db: Session, project_id: int, user_id: int | None, defect_id: in
 
 
 def add_photo(db: Session, project_id: int, defect_id: int, kind: str, filename: str, mime: str | None, data: bytes) -> dict:
-    d = _get(db, project_id, defect_id)
-    if kind not in ("before", "after"):
-        raise ValueError("Вид фото: before или after")
-    if not data:
-        raise ValueError("Пустой файл")
-    if len(data) > MAX_PHOTO_BYTES:
-        raise ValueError("Фото больше 10 МБ")
-    mime = (mime or "").split(";")[0].strip().lower()
-    if mime not in ALLOWED_MIME:
-        raise ValueError("Допустимы фото JPG, PNG или WEBP")
-    count = db.scalar(select(func.count()).select_from(DefectPhoto).where(DefectPhoto.defect_id == d.id)) or 0
-    if count >= MAX_PHOTOS:
-        raise ValueError(f"К замечанию можно приложить до {MAX_PHOTOS} фото")
-    name = re.sub(r"[\\/\x00-\x1f]", "_", (filename or "photo").strip())[:300] or "photo"
+    with db.no_autoflush:
+        d = _get(db, project_id, defect_id)
+        if kind not in ("before", "after"):
+            raise ValueError("Вид фото: before или after")
+        if not data:
+            raise ValueError("Пустой файл")
+        if len(data) > MAX_PHOTO_BYTES:
+            raise ValueError("Фото больше 10 МБ")
+        mime = (mime or "").split(";")[0].strip().lower()
+        if mime not in ALLOWED_MIME:
+            raise ValueError("Допустимы фото JPG, PNG или WEBP")
+        count = db.scalar(select(func.count()).select_from(DefectPhoto).where(DefectPhoto.defect_id == d.id, DefectPhoto.project_id == d.project_id)) or 0
+        if count >= MAX_PHOTOS:
+            raise ValueError(f"К замечанию можно приложить до {MAX_PHOTOS} фото")
+        name = re.sub(r"[\\/\x00-\x1f]", "_", (filename or "photo").strip())[:300] or "photo"
     db.add(DefectPhoto(project_id=project_id, defect_id=d.id, kind=kind, filename=name, mime_type=mime, size_bytes=len(data), data=data))
     db.flush()
     return _defect_dict(db, d, full=True)
 
 
 def get_photo(db: Session, project_id: int, defect_id: int, photo_id: int) -> DefectPhoto:
-    _get(db, project_id, defect_id)
-    p = db.get(DefectPhoto, photo_id)
-    if p is None or p.defect_id != defect_id:
-        raise LookupError("Фото не найдено")
-    return p
+    with db.no_autoflush:
+        _get(db, project_id, defect_id)
+        p = db.scalar(select(DefectPhoto).where(
+            DefectPhoto.id == photo_id, DefectPhoto.defect_id == defect_id,
+            DefectPhoto.project_id == project_id,
+        ))
+        if p is None:
+            raise LookupError("Фото не найдено")
+        return p
 
 
 def delete_photo(db: Session, project_id: int, defect_id: int, photo_id: int) -> dict:
@@ -202,10 +263,23 @@ def delete_photo(db: Session, project_id: int, defect_id: int, photo_id: int) ->
 
 
 def delete_defect(db: Session, project_id: int, defect_id: int) -> None:
-    d = _get(db, project_id, defect_id)
+    with db.no_autoflush:
+        d = db.scalar(select(Defect).where(
+            Defect.id == defect_id, Defect.project_id == project_id,
+        ).with_for_update())
+        if d is None:
+            raise LookupError("Замечание не найдено")
+        # Fail closed instead of cascading across inconsistent project labels.
+        for model in (DefectPhoto, DefectComment):
+            foreign = db.scalar(select(model.id).where(
+                model.defect_id == d.id, model.project_id != project_id,
+            ).limit(1))
+            if foreign is not None:
+                raise LookupError("Замечание не найдено")
     for model in (DefectPhoto, DefectComment):
-        for row in db.execute(select(model).where(model.defect_id == d.id)).scalars().all():
-            db.delete(row)
+        db.execute(delete(model).where(
+            model.defect_id == d.id, model.project_id == project_id,
+        ).execution_options(synchronize_session="fetch"))
     db.delete(d)
     db.flush()
 

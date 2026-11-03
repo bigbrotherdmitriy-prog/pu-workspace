@@ -190,7 +190,7 @@ class MailboxProjectCohort(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="RESTRICT"))
+    organization_id: Mapped[int] = mapped_column(Integer, nullable=False)
     project_id: Mapped[int] = mapped_column(Integer, nullable=False)
     mail_connection_id: Mapped[str] = mapped_column(Uuid(as_uuid=False))
     credential_generation: Mapped[int] = mapped_column(Integer, nullable=False)

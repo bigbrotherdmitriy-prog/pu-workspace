@@ -36,6 +36,20 @@ async function persist(command: OfflineCommand) {
   changed();
 }
 
+/**
+ * A queued command may be safely coalesced only when it has never been sent:
+ * no attempts, no receipt, no conflict. Once a command has been attempted (or
+ * is syncing/attention/auth_required/conflict) its payload is immutable, because
+ * the server may already have applied it and compares the stored payload on
+ * retry (client_mutation_id_reused on mismatch).
+ */
+function isSafeToCoalesce(command: OfflineCommand): boolean {
+  return command.status === "queued"
+    && command.attempts === 0
+    && command.receiptId === undefined
+    && command.conflictId === undefined;
+}
+
 export async function enqueueTaskUpdate(args: {
   userId: number;
   projectId: number;
@@ -46,18 +60,15 @@ export async function enqueueTaskUpdate(args: {
   if (!args.baseToken) throw new Error("Задача загружена без защищённой базовой версии. Обновите данные онлайн.");
   const now = new Date().toISOString();
   const existing = (await listCommands(args.userId, args.projectId)).find((item) =>
-    item.operation === "task.update" && item.entityId === args.taskId
-      && ["queued", "attention", "auth_required"].includes(item.status),
+    item.operation === "task.update" && item.entityId === args.taskId && isSafeToCoalesce(item),
   );
   if (existing) {
+    // Keep the original baseToken, clientCreatedAt and attempts: the merged
+    // payload is still the first (never-sent) attempt for this id.
     await persist({
       ...existing,
       patch: { ...existing.patch, ...args.patch },
-      clientCreatedAt: now,
-      status: "queued",
-      attempts: 0,
       updatedAt: now,
-      lastError: undefined,
     });
     return existing.id;
   }
