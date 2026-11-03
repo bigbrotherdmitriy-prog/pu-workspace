@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, csrfHeaders } from "../../api/client";
 import "./defects.css";
 
@@ -31,12 +31,19 @@ export function DefectsModule({ projectId }: { projectId: number }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const detailRequest = useRef(0);
+  const liveProject = useRef(projectId);
+  liveProject.current = projectId;
+
 
   const reload = useCallback(() => setTick((v) => v + 1), []);
   const fail = (e: unknown, fallback: string) => setError(e instanceof Error ? e.message : fallback);
 
   useEffect(() => {
     setData({ defects: [], counts: {}, overdue: 0 });
+    setOpen(null);
+    detailRequest.current += 1;
+    return () => { detailRequest.current += 1; };
   }, [projectId]);
 
   useEffect(() => {
@@ -87,8 +94,20 @@ export function DefectsModule({ projectId }: { projectId: number }) {
   }
 
   async function openDefect(id: number) {
+    const request = ++detailRequest.current;
+    const lookupProject = projectId;
     setError("");
-    try { setOpen(await api<Defect>(`/projects/${projectId}/defects/${id}`)); } catch (e) { fail(e, "Не удалось открыть замечание"); }
+    try {
+      const result = await api<Defect>(`/projects/${lookupProject}/defects/${id}`);
+      if (request === detailRequest.current && liveProject.current === lookupProject) setOpen(result);
+    } catch (e) {
+      if (request === detailRequest.current && liveProject.current === lookupProject) fail(e, "Не удалось открыть замечание");
+    }
+  }
+
+  function closeDefect() {
+    detailRequest.current += 1;
+    setOpen(null);
   }
 
   async function addPhotos(kind: "before" | "after", files: File[]) {
@@ -212,7 +231,7 @@ export function DefectsModule({ projectId }: { projectId: number }) {
         <div className="df-detail" role="dialog" aria-label={`Замечание ${open.number}`}>
           <div className="df-detail-head">
             <h4>№ {open.number}. {open.title}</h4>
-            <button type="button" aria-label="Закрыть замечание" onClick={() => setOpen(null)}>×</button>
+            <button type="button" aria-label="Закрыть замечание" onClick={closeDefect}>×</button>
           </div>
           <p className="df-note">{[open.object_name, open.location].filter(Boolean).join(", ")} · {STATUS_LABEL[open.status]}{open.responsible ? ` · ${open.responsible}` : ""}{open.due_date ? ` · срок ${dateRu(open.due_date)}` : ""}</p>
           {open.description && <p>{open.description}</p>}

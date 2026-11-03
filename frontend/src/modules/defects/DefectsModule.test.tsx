@@ -96,3 +96,45 @@ it("hides already loaded defects while another project loads and preserves the d
   expect(screen.queryByText(/№ 7\. Не закреплён лоток/)).toBeNull();
   expect((screen.getByPlaceholderText(/не закреплён кабельный лоток/) as HTMLInputElement).value).toBe("Synthetic unsaved defect");
 });
+
+
+it("does not open an old project's late defect detail", async () => {
+  let finish!: (value: unknown) => void;
+  const pending = new Promise<unknown>((resolve) => { finish = resolve; });
+  mockApi.mockImplementation(async (path: string) => {
+    if (path === "/projects/4/defects/3") return pending;
+    return path.startsWith("/projects/4/") ? listing : { defects: [], counts: {}, overdue: 0 };
+  });
+  const { rerender } = render(<DefectsModule projectId={4} />);
+  fireEvent.click(await screen.findByText(/№ 7\. Не закреплён лоток/));
+  rerender(<DefectsModule projectId={5} />);
+  await act(async () => { finish(defect); await pending; });
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("hides a loaded defect detail after switching project", async () => {
+  mockAll();
+  const { rerender } = render(<DefectsModule projectId={4} />);
+  fireEvent.click(await screen.findByText(/№ 7\. Не закреплён лоток/));
+  await screen.findByRole("dialog");
+  rerender(<DefectsModule projectId={5} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("keeps the newest chosen defect when earlier detail resolves later", async () => {
+  let finishOld!: (value: unknown) => void;
+  const pending = new Promise<unknown>((resolve) => { finishOld = resolve; });
+  const next = { ...defect, id: 4, number: 8, title: "Synthetic newer detail", photos: [] };
+  mockApi.mockImplementation(async (path: string) => {
+    if (path.endsWith("/defects/3")) return pending;
+    if (path.endsWith("/defects/4")) return next;
+    return { ...listing, defects: [defect, next] };
+  });
+  render(<DefectsModule projectId={4} />);
+  fireEvent.click(await screen.findByText(/№ 7\. Не закреплён лоток/));
+  fireEvent.click(screen.getByText(/№ 8\. Synthetic newer detail/));
+  await screen.findByRole("dialog", { name: "Замечание 8" });
+  await act(async () => { finishOld(defect); await pending; });
+  expect(screen.queryByRole("dialog", { name: "Замечание 8" })).not.toBeNull();
+  expect(screen.queryByRole("dialog", { name: "Замечание 7" })).toBeNull();
+});
