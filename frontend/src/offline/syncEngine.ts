@@ -55,6 +55,21 @@ function positiveId(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+/** Explicit recovery only; ordinary/manual synchronize still skips auth_required. */
+export async function recoverAuthRequired(userId: number, projectId: number): Promise<number> {
+  if (!positiveId(userId) || !positiveId(projectId)) throw new Error("Нужны пользователь и проект для восстановления очереди.");
+  if (!isOnline()) throw new Error("Для проверки входа требуется связь с сервером.");
+  if (!(await listCommands(userId, projectId)).some((row) => row.status === "auth_required")) return 0;
+  const actor = await api<{ id?: unknown }>("/auth/me");
+  if (actor?.id !== userId) throw new Error("Войдите в ту же учётную запись, в которой сохранены изменения.");
+  // Reload after the identity check rather than resurrecting an already removed row.
+  const commands = (await listCommands(userId, projectId)).filter((row) => row.status === "auth_required");
+  for (const command of commands) {
+    await persist({ ...command, status: "queued", lastError: undefined, updatedAt: new Date().toISOString() });
+  }
+  return commands.length;
+}
+
 export async function enqueueWorkLogCreate(args: {
   userId: number; projectId: number; data: Record<string, unknown>;
 }): Promise<string> {
