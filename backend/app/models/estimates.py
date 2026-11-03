@@ -50,6 +50,7 @@ class KsAct(Base):
     lines_json: Mapped[str] = mapped_column(Text)
     total_ex_vat: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"), server_default="0")
     header_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     customer_status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending")
     customer_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -17,6 +17,12 @@ from app.models.work_log import WorkLogEntry
 VISIBLE_STATUSES = ("sent", "signed")
 
 
+class StaleDecisionError(ValueError):
+    """The displayed act version is no longer current."""
+
+
+
+
 def invite(db: Session, project_id: int, email: str, invited_by: int | None) -> dict:
     mail = (email or "").strip().lower()
     if not mail:
@@ -151,7 +157,9 @@ def decision_history(db: Session, project_id: int, act_id: int, *, limit: int = 
     return {"events": events, "has_more": len(rows) > limit}
 
 
-def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: str, comment: str | None) -> dict:
+def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: str, comment: str | None, *, expected_revision: int | None = None) -> dict:
+    if expected_revision is not None and (type(expected_revision) is not int or not 0 <= expected_revision <= 2147483647):
+        raise ValueError("Версия акта должна быть неотрицательным целым числом базы данных")
     if decision not in {"approved", "rejected"}:
         raise ValueError("Решение: approved или rejected")
     a = visible_act(db, project_id, act_id)
@@ -166,6 +174,7 @@ def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: st
         update(KsAct).where(
             KsAct.id == act_id, KsAct.project_id == project_id,
             KsAct.status == "sent",
+            True if expected_revision is None else KsAct.decision_revision == expected_revision,
             or_(KsAct.customer_status.is_(None),
                 KsAct.customer_status.not_in(("approved", "rejected"))),
         ).values(
@@ -175,13 +184,15 @@ def decide(db: Session, project_id: int, act_id: int, user_id: int, decision: st
         ).execution_options(synchronize_session=False)
     )
     if result.rowcount != 1:
-        current = db.execute(select(KsAct.status, KsAct.customer_status).where(
+        current = db.execute(select(KsAct.status, KsAct.customer_status, KsAct.decision_revision).where(
             KsAct.id == act_id, KsAct.project_id == project_id,
         )).first()
         if current is None or current.status not in VISIBLE_STATUSES:
             raise LookupError("Акт не найден")
         if current.status == "signed":
             raise ValueError("Акт уже подписан")
+        if expected_revision is not None and current.decision_revision != expected_revision:
+            raise StaleDecisionError("Акт изменился: обновите его перед принятием решения")
         raise ValueError("Решение по акту уже принято")
     db.refresh(a)
     db.add(AuditLog(
