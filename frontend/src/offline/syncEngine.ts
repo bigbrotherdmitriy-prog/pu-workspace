@@ -341,11 +341,18 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       mime_type: file.mimeType,
       content_base64: await blobBase64(file.blob),
     })));
-    await api("/local-upload/analyze", {
+    const response = await api<{ status?: unknown; jobs?: { job_id?: unknown; status?: unknown }[] }>("/local-upload/analyze", {
       method: "POST",
       headers: { "Idempotency-Key": command.id, "X-PU-Expected-User": String(command.userId) },
       body: JSON.stringify({ project_id: command.projectId, files }),
     });
+    const acceptedStates = new Set(["queued", "retrying", "running", "already_queued"]);
+    if (response?.status !== "queued" || !Array.isArray(response.jobs) || !files.length
+      || response.jobs.length !== files.length
+      || response.jobs.some(job => !job || !positiveId(job.job_id) || !acceptedStates.has(String(job.status)))
+      || new Set(response.jobs.map(job => job.job_id)).size !== files.length) {
+      throw new Error("Сервер не подтвердил сохранение всех файлов в защищённой очереди.");
+    }
     return { applied: true };
   }
   const response = await api<{

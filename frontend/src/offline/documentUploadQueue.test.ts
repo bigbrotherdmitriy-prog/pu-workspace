@@ -39,3 +39,24 @@ it("does not send a corrupted queue identity", async () => {
   await synchronize(-1, 17);
   expect(api).not.toHaveBeenCalled(); expect(store.rows.has(id)).toBe(true);
 });
+
+it.each([
+  {}, { status: "queued", jobs: [] }, { status: "ok", jobs: [{ job_id: 91, status: "queued" }] },
+  { status: "queued", jobs: [{ job_id: 0, status: "queued" }] },
+  { status: "queued", jobs: [{ job_id: true, status: "queued" }] },
+  { status: "queued", jobs: [{ job_id: 91, status: "failed" }] },
+  { status: "queued", jobs: [{ job_id: 91, status: "queued" }, { job_id: 91, status: "queued" }] },
+])("retains uploads after a malformed durable handoff: %j", async response => {
+  const id = await enqueueDocumentUpload(args());
+  vi.mocked(api).mockResolvedValue(response);
+  await synchronize(1, 17);
+  expect(store.rows.has(id)).toBe(true);
+  expect(store.rows.get(id)?.lastError).toBeTruthy();
+});
+
+it("accepts the real server already-queued replay without claiming OCR completion", async () => {
+  await enqueueDocumentUpload(args());
+  vi.mocked(api).mockResolvedValue({ status: "queued", jobs: [{ job_id: 91, status: "already_queued" }] });
+  await synchronize(1, 17);
+  expect(store.rows.size).toBe(0);
+});
