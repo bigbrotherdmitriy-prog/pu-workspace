@@ -73,6 +73,11 @@ def create_estimate(db: Session, project_id: int, name: str, parsed: dict, contr
     for line in lines:
         for field, scale in (("qty", 3), ("unit_price", 2), ("total", 2)):
             _validate_storable(_dec(line.get(field)), scale)
+    from app.provisional_policy import derive_unit_price
+    for line in lines:
+        q, price, amount = _dec(line.get("qty")), _dec(line.get("unit_price")), _dec(line.get("total"))
+        if price is None and q is not None and q > 0 and amount is not None:
+            derive_unit_price(q, amount)
     total = _dec(parsed.get("total"))
     if total is None:
         total = sum((_dec(l.get("total")) or ZERO for l in lines), ZERO)
@@ -190,6 +195,12 @@ def update_line(db: Session, project_id: int, line_id: int, data: dict) -> dict:
             if value is not None and value < 0:
                 raise ValueError("Значение не может быть отрицательным")
             changes[field] = value
+    q = changes.get("qty", l.qty)
+    price = changes.get("unit_price", l.unit_price)
+    amount = changes.get("total", l.total)
+    if price is None and q is not None and q > 0 and amount is not None:
+        from app.provisional_policy import derive_unit_price
+        derive_unit_price(q, amount)
     for field, value in changes.items():
         setattr(l, field, value)
     db.flush()
@@ -201,7 +212,8 @@ def _unit_price(l: EstimateLine) -> Decimal | None:
     if l.unit_price is not None:
         return l.unit_price
     if l.total is not None and l.qty:
-        return (l.total / l.qty).quantize(TWO, rounding=ROUND_HALF_UP)
+        from app.provisional_policy import derive_unit_price
+        return derive_unit_price(l.qty, l.total)
     return None
 
 

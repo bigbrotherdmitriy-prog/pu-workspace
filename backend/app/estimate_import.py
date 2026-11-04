@@ -345,7 +345,8 @@ def _apply_math(
     total = _parse_decimal(line.get("total")) if line.get("total") is not None else None
 
     if price is None and total is not None and qty is not None and qty > 0:
-        price = (total / qty).quantize(Decimal("0.01"))
+        from app.provisional_policy import derive_unit_price
+        price = derive_unit_price(qty, total)
         line["unit_price"] = _to_str(price)
 
     if total is None and price is not None and qty is not None:
