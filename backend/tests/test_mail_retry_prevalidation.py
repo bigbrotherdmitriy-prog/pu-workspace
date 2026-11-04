@@ -38,4 +38,6 @@ def test_retry_route_checks_preconditions_before_any_assignment_or_commit():
     assert [ast.unparse(arg) for arg in guard.args] == ['draft', 'payload.revision']
     mutations = [node.lineno for node in ast.walk(route) if isinstance(node, ast.Assign) and any(isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == 'draft' for target in node.targets)]
     commits = [node.lineno for node in ast.walk(route) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'commit']
-    assert mutations and commits and guard.lineno < min(mutations + commits)
+    assert mutations and guard.lineno < min(mutations)
+    # The delegated send path owns the transaction commit after all admission checks.
+    assert not commits

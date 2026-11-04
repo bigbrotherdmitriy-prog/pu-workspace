@@ -830,5 +830,4 @@ def retry_mail_draft(draft_id: int, payload: MailDraftSend, db: Session = Depend
     require_mail_retry(draft, payload.revision)
     draft.status = "approved"
     draft.send_idempotency_key = None
-    db.commit()
     return send_mail_draft(draft_id, payload, db, user)
