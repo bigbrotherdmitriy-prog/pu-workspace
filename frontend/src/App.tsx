@@ -3134,8 +3134,8 @@ export function App() {
     try {
       await revokePushDevice();
       await api("/auth/logout", { method: "POST" });
-      if (typeof indexedDB !== "undefined") await clearOfflineData();
       setReady(false);
+      if (typeof indexedDB !== "undefined") await clearOfflineData();
     } catch (reason) {
       setError((reason as Error).message);
     }

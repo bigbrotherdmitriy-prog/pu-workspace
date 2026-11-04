@@ -96,10 +96,17 @@ export function listCommands(userId: number, projectId: number): Promise<Offline
 export function clearOfflineData(): Promise<void> {
   return openDatabase().then((db) => new Promise((resolve, reject) => {
     const transaction = db.transaction([COMMANDS, META], "readwrite");
-    transaction.objectStore(COMMANDS).clear();
-    transaction.objectStore(META).clear();
+    let failure: unknown;
     transaction.oncomplete = () => { db.close(); resolve(); };
-    transaction.onerror = () => { db.close(); reject(transaction.error); };
+    transaction.onabort = () => { db.close(); reject(failure || transaction.error || new Error("Очистка локальной очереди прервана")); };
+    transaction.onerror = () => { failure ||= transaction.error; };
+    try {
+      transaction.objectStore(COMMANDS).clear();
+      transaction.objectStore(META).clear();
+    } catch (reason) {
+      failure = reason;
+      try { transaction.abort(); } catch { db.close(); reject(reason); }
+    }
   }));
 }
 
