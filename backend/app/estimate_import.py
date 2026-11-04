@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 from io import BytesIO
 from typing import Any
 
@@ -369,7 +369,12 @@ def _apply_math(
         line["unit_price"] = _to_str(price)
 
     if total is None and price is not None and qty is not None:
-        total = (price * qty).quantize(Decimal("0.01"))
+        # Денежное округление до копеек — явно ROUND_HALF_UP, независимо
+        # от текущего контекста Decimal вызывающего кода.
+        with localcontext() as ctx:
+            ctx.prec = 28
+            ctx.rounding = ROUND_HALF_UP
+            total = (price * qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         line["total"] = _to_str(total)
 
     if qty is not None and price is not None and total is not None and total != 0:
