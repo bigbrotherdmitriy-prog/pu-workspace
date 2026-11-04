@@ -68,3 +68,10 @@ it("aborts both logout stores and closes the connection on synchronous clear fai
   await expect(operation).rejects.toMatchObject({ name: "QuotaExceededError" });
   expect(s.transaction.abort).toHaveBeenCalledOnce(); expect(s.db.close).toHaveBeenCalledOnce();
 });
+
+it("does not erase a newer session after delayed logout DB open", async () => {
+  const s=syntheticDatabase(); const operation=clearOfflineData();
+  resumeOfflineSession(482);
+  await expect(operation).rejects.toThrow("Сеанс изменился");
+  expect(s.db.transaction).not.toHaveBeenCalled(); expect(s.db.close).toHaveBeenCalledOnce();
+});

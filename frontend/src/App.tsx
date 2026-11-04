@@ -1,3 +1,4 @@
+import { logoutPurgePolicy, logoutPurgeWarning } from "./offline/logoutPolicy";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
@@ -3129,9 +3130,10 @@ export function App() {
     } else setActive(section);
   }
   async function logout() {
-    if (offlineSync.summary.total > 0 && !window.confirm(
-      `На устройстве осталось несинхронизированных изменений: ${offlineSync.summary.total}. При выходе локальная очередь будет удалена. Выйти?`,
-    )) return;
+    let purgeScope: ReturnType<typeof logoutPurgePolicy>;
+    try { purgeScope = logoutPurgePolicy(); }
+    catch (reason) { setError((reason as Error).message); return; }
+    if (!window.confirm(logoutPurgeWarning(purgeScope))) return;
     try {
       await revokePushDevice();
       await api("/auth/logout", { method: "POST" });
@@ -3139,7 +3141,7 @@ export function App() {
       loadSequenceRef.current += 1;
       setCurrentUser(null);
       setReady(false);
-      if (typeof indexedDB !== "undefined") await clearOfflineData();
+      if (typeof indexedDB !== "undefined") await clearOfflineData({ scope: purgeScope, userId: currentUser?.id });
     } catch (reason) {
       setError((reason as Error).message);
     }

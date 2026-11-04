@@ -1,5 +1,5 @@
 import type { OfflineCommand } from "./types";
-import { offlineSessionEpoch, requireOfflineSession } from "./lifecycle";
+import { OfflineSessionChanged, offlineSessionEpoch, requireOfflineSession } from "./lifecycle";
 
 const DB_NAME = "pu-mobile-sync-v1";
 const DB_VERSION = 1;
@@ -100,16 +100,37 @@ export function listCommands(userId: number, projectId: number): Promise<Offline
   });
 }
 
-export function clearOfflineData(): Promise<void> {
+export function clearOfflineData(options: { scope?: "all_local_data" | "current_actor"; userId?: number } = {}): Promise<void> {
+  const scope = options.scope ?? "all_local_data";
+  if (scope !== "all_local_data" && scope !== "current_actor") return Promise.reject(new Error("Invalid logout purge scope"));
+  if (scope === "current_actor" && (!Number.isSafeInteger(options.userId) || options.userId! <= 0)) return Promise.reject(new Error("Invalid logout purge actor"));
+  const epoch = offlineSessionEpoch();
   return openDatabase().then((db) => new Promise((resolve, reject) => {
+    if (offlineSessionEpoch() !== epoch) { db.close(); reject(new OfflineSessionChanged()); return; }
     const transaction = db.transaction([COMMANDS, META], "readwrite");
     let failure: unknown;
     transaction.oncomplete = () => { db.close(); resolve(); };
     transaction.onabort = () => { db.close(); reject(failure || transaction.error || new Error("Очистка локальной очереди прервана")); };
     transaction.onerror = () => { failure ||= transaction.error; };
     try {
-      transaction.objectStore(COMMANDS).clear();
-      transaction.objectStore(META).clear();
+      if (scope === "all_local_data") {
+        transaction.objectStore(COMMANDS).clear(); transaction.objectStore(META).clear();
+      } else {
+        const commands = transaction.objectStore(COMMANDS).openCursor();
+        commands.onerror = () => { failure ||= commands.error; transaction.abort(); };
+        commands.onsuccess = () => {
+          const cursor = commands.result; if (!cursor) return;
+          if ((cursor.value as OfflineCommand).userId === options.userId) cursor.delete();
+          cursor.continue();
+        };
+        const metadata = transaction.objectStore(META).openCursor();
+        metadata.onerror = () => { failure ||= metadata.error; transaction.abort(); };
+        metadata.onsuccess = () => {
+          const cursor = metadata.result; if (!cursor) return;
+          if (String(cursor.key).startsWith(`last-synced:${options.userId}:`)) cursor.delete();
+          cursor.continue();
+        };
+      }
     } catch (reason) {
       failure = reason;
       try { transaction.abort(); } catch { db.close(); reject(reason); }
