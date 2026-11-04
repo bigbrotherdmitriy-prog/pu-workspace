@@ -13,6 +13,20 @@ def test_disabled_policy_fails_closed():
     with pytest.raises(ValueError,match='disabled'):validate_point(1,1,0,0,policy=ProvisionalPolicy(drawing_point='disabled'))
 
 
+# Codex fallback: published DeepSeek context lacks these local files.
+@pytest.mark.parametrize('value', ['0e-10000', '-0e-10000', '0e+10000', '-0', '0.0000'])
+def test_zero_coordinates_have_bounded_canonical_form(value):
+    result = validate_point(1, 1, value, value)
+    assert len(result['x']) == len(result['y']) == 1
+    assert result['x'] == result['y'] == '0'
+
+
+@pytest.mark.parametrize('value', ['0e-1000000000', '-0e-1000000000', '0e+1000000000'])
+def test_compact_extreme_zero_never_requires_fixed_point_expansion(value):
+    result = validate_point(1, 1, value, value)
+    assert result['x'] == result['y'] == '0'
+
+
 def test_version_bound_point_idempotence_and_foreign_scope(db_session):
     from app.models.organization_contract import Organization
     from app.models.project import Project
@@ -28,3 +42,10 @@ def test_version_bound_point_idempotence_and_foreign_scope(db_session):
     assert get_defect(db,p.id,defect['id'])['drawing_point']==first
     with pytest.raises(ValueError,match='immutable'):bind_point(db,p.id,defect['id'],version_id=version.id,page=2,x=0.25,y=0.5)
     with pytest.raises(LookupError):bind_point(db,other.id,defect['id'],version_id=version.id,page=1,x=0,y=0)
+    zero_defect = create_defect(db, p.id, None, {'title': 'SYNTHETIC zero point'})
+    zero = bind_point(db, p.id, zero_defect['id'], version_id=version.id,
+                      page=1, x='-0e-1000000000', y='0.0000')
+    assert zero['x'] == zero['y'] == '0'
+    assert bind_point(db, p.id, zero_defect['id'], version_id=version.id,
+                      page=1, x='0e+1000000000', y='-0') == zero
+    assert get_defect(db, p.id, zero_defect['id'])['drawing_point'] == zero

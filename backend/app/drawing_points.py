@@ -18,7 +18,9 @@ def validate_point(version_id, page, x, y, *, policy=None):
             number=Decimal(str(value))
             if not number.is_finite() or not 0 <= number <= 1:raise ValueError('Coordinate outside page')
             if number and number.adjusted() < -24:raise ValueError('Coordinate precision budget exceeded')
-            coordinates.append(format(number,'f'))
+            # Zero's exponent carries no position information. Canonicalize it
+            # before fixed-point formatting, which can otherwise allocate huge strings.
+            coordinates.append('0' if number.is_zero() else format(number,'f'))
         except InvalidOperation as exc:raise ValueError('Invalid normalized coordinate') from exc
     return {'rd_version_id':version_id,'page':page,'x':coordinates[0],'y':coordinates[1],'coordinate_system':'normalized_page_v1'}
 
