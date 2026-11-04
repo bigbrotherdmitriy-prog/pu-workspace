@@ -284,3 +284,36 @@ def test_attempts_below_one_raises_without_calling_client_or_sleep(attempts):
 
     assert client.calls == 0
     assert delays == []
+
+
+# Codex fallback: DS25 was rejected; no real provider or sleeps in these regressions.
+@pytest.mark.parametrize("changes", [
+    {"attempts": True}, {"attempts": 1.5}, {"attempts": "3"},
+    {"base_delay": -1}, {"base_delay": float("nan")}, {"base_delay": float("inf")},
+    {"max_delay": -1}, {"max_delay": float("nan")}, {"max_delay": float("inf")},
+    {"jitter": -1}, {"jitter": float("nan")}, {"jitter": float("inf")},
+    {"base_delay": True}, {"max_delay": "8"},
+])
+def test_invalid_policy_never_calls_provider(changes):
+    client = FakeClient([response(200)])
+    delays = []
+    with pytest.raises(ValueError):
+        request_with_retry(client, "GET", "https://provider.test", policy=RetryPolicy(**changes), sleep=delays.append)
+    assert client.calls == 0 and delays == []
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "-2"])
+def test_nonfinite_or_negative_retry_after_uses_safe_fallback(value):
+    client = FakeClient([response(429, retry_after=value), response(200)])
+    delays = []
+    request_with_retry(client, "GET", "https://provider.test", policy=RetryPolicy(base_delay=1, jitter=0), sleep=delays.append)
+    assert delays == [1]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -0.1, 1.1, True, "0.5"])
+def test_invalid_random_source_never_reaches_sleep(value):
+    client = FakeClient([response(429), response(200)])
+    delays = []
+    with pytest.raises(ValueError):
+        request_with_retry(client, "GET", "https://provider.test", sleep=delays.append, random_value=lambda: value)
+    assert client.calls == 1 and delays == []

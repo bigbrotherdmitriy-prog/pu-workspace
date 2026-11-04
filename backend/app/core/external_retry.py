@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import random
 import time
 from typing import Any, Callable
@@ -38,7 +39,8 @@ def _retry_after_seconds(response: httpx.Response | None) -> float | None:
         return None
     value = response.headers.get("Retry-After", "").strip()
     try:
-        return max(0.0, float(value)) if value else None
+        seconds = float(value) if value else None
+        return seconds if seconds is not None and math.isfinite(seconds) and seconds >= 0 else None
     except ValueError:
         return None
 
@@ -62,8 +64,12 @@ def request_with_retry(
     **kwargs: Any,
 ) -> httpx.Response:
     """Execute one retry-safe HTTP request without logging URL, headers or body."""
-    if policy.attempts < 1:
-        raise ValueError("retry attempts must be positive")
+    if type(policy.attempts) is not int or policy.attempts < 1:
+        raise ValueError("retry attempts must be a positive integer")
+    for name in ("base_delay", "max_delay", "jitter"):
+        value = getattr(policy, name)
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"retry {name} must be finite and nonnegative")
     last_error: httpx.HTTPError | None = None
     for attempt in range(policy.attempts):
         try:
@@ -78,7 +84,10 @@ def request_with_retry(
             retry_after = _retry_after_seconds(response)
             exponential = min(policy.max_delay, policy.base_delay * (2**attempt))
             delay = retry_after if retry_after is not None else exponential
-            delay = min(policy.max_delay, delay + policy.jitter * random_value())
+            sample = random_value()
+            if type(sample) not in (int, float) or not math.isfinite(sample) or not 0 <= sample <= 1:
+                raise ValueError("retry random sample must be finite and between zero and one")
+            delay = min(policy.max_delay, delay + policy.jitter * sample)
             sleep(delay)
     assert last_error is not None
     raise last_error
