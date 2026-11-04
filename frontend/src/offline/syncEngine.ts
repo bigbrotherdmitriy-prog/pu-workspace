@@ -1,6 +1,6 @@
 import { api, ApiError } from "../api/client";
 import { isOnline } from "./connectivity";
-import { deleteCommand, getMeta, listCommands, putCommand, setMeta } from "./db";
+import { deleteCommand, getMeta, listCommands, putCommand, putCommands, setMeta } from "./db";
 import type { OfflineCommand, ServerConflict, StoredUploadFile, SyncSummary } from "./types";
 
 const ATTENTION_AFTER_ATTEMPTS = 3;
@@ -271,23 +271,35 @@ export async function enqueueDocumentUpload(args: {
   projectId: number;
   files: StoredUploadFile[];
 }): Promise<string> {
-  const now = new Date().toISOString(), id = uuid();
+  if (!positiveId(args.userId) || !positiveId(args.projectId)) throw new Error("Нужны пользователь и проект для загрузки.");
+  if (!args.files.length || args.files.length > 50) throw new Error("Выберите от 1 до 50 файлов.");
+  const batches: StoredUploadFile[][] = [];
+  let batch: StoredUploadFile[] = [], bytes = 0, selectionBytes = 0;
+  for (const file of args.files) {
+    const size = file.blob?.size;
+    if (!Number.isSafeInteger(size) || size < 0 || size > 4 * 1024 * 1024) throw new Error("Файл больше 4 МБ или повреждён.");
+    selectionBytes += size;
+    if (selectionBytes > 60 * 1024 * 1024) throw new Error("Общий размер выбранных файлов больше 60 МБ.");
+    if (batch.length && (batch.length === 5 || bytes + size > 12 * 1024 * 1024)) {
+      batches.push(batch); batch = []; bytes = 0;
+    }
+    batch.push({ ...file }); bytes += size;
+  }
+  if (batch.length) batches.push(batch);
+  const now = new Date().toISOString();
+  const commands: OfflineCommand[] = batches.map(uploads => ({
+    id: uuid(), userId: args.userId, projectId: args.projectId, deviceId: deviceId(),
+    operation: "document.upload", entityId: 0, patch: {}, uploads,
+    clientCreatedAt: now, status: "queued", attempts: 0, updatedAt: now,
+  }));
   if (navigator.storage?.persist) await navigator.storage.persist().catch(() => false);
-  await persist({
-    id,
-    userId: args.userId,
-    projectId: args.projectId,
-    deviceId: deviceId(),
-    operation: "document.upload",
-    entityId: 0,
-    patch: {},
-    uploads: args.files,
-    clientCreatedAt: now,
-    status: "queued",
-    attempts: 0,
-    updatedAt: now,
-  });
-  return id;
+  try { await putCommands(commands); }
+  catch (reason) {
+    if (reason instanceof DOMException && reason.name === "QuotaExceededError") throw new Error("На устройстве закончилось место. Файлы не сохранены; освободите память и повторите.");
+    throw reason;
+  }
+  changed();
+  return commands[0].id;
 }
 
 function blobBase64(blob: Blob): Promise<string> {

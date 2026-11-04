@@ -61,6 +61,19 @@ export function putCommand(command: OfflineCommand): Promise<OfflineCommand> {
   });
 }
 
+/** Selection admission is atomic: a quota/clone error must not save half a batch. */
+export function putCommands(commands: OfflineCommand[]): Promise<void> {
+  return transact(COMMANDS, "readwrite", (store, resolve, reject) => {
+    try {
+      for (const command of commands) {
+        const request = store.put(command);
+        request.onerror = () => reject(request.error);
+      }
+      resolve(); // transact resolves externally only after transaction.oncomplete.
+    } catch (reason) { reject(reason); }
+  });
+}
+
 export function deleteCommand(id: string): Promise<void> {
   return transact(COMMANDS, "readwrite", (store, resolve, reject) => {
     const request = store.delete(id);

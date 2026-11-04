@@ -6,6 +6,7 @@ const store = vi.hoisted(() => ({ rows: new Map<string, OfflineCommand>(), meta:
 vi.mock("../api/client", () => ({ api: vi.fn(), ApiError: class extends Error { constructor(message: string, public status: number | null) { super(message); } } }));
 vi.mock("./db", () => ({
   putCommand: vi.fn(async (row: OfflineCommand) => { store.rows.set(row.id, { ...row }); }),
+  putCommands: vi.fn(async (rows: OfflineCommand[]) => { for (const row of rows) store.rows.set(row.id, { ...row }); }),
   deleteCommand: vi.fn(async (id: string) => { store.rows.delete(id); }),
   listCommands: vi.fn(async (user: number, project: number) => [...store.rows.values()].filter(row => row.userId === user && row.projectId === project)),
   getMeta: vi.fn(async (key: string) => store.meta.get(key)),
@@ -59,4 +60,24 @@ it("accepts the real server already-queued replay without claiming OCR completio
   vi.mocked(api).mockResolvedValue({ status: "queued", jobs: [{ job_id: 91, status: "already_queued" }] });
   await synchronize(1, 17);
   expect(store.rows.size).toBe(0);
+});
+
+it("partitions eight maximum-size files before persisting, without allocating their payload", async () => {
+  const files = Array.from({ length: 8 }, (_, i) => {
+    const blob = new Blob(["synthetic"]);
+    Object.defineProperty(blob, "size", { value: 4 * 1024 * 1024 }); // Size-only boundary probe, not payload/HTTP proof.
+    return { name: `${i}.txt`, path: `${i}.txt`, mimeType: "text/plain", blob };
+  });
+  await enqueueDocumentUpload({ userId: 1, projectId: 17, files });
+  const commands = [...store.rows.values()];
+  expect(commands.map(row => row.uploads?.length)).toEqual([3, 3, 2]);
+  expect(commands.flatMap(row => row.uploads!.map(file => file.path))).toEqual(files.map(file => file.path));
+  expect(new Set(commands.map(row => row.id)).size).toBe(3);
+  expect(commands.every(row => row.uploads!.reduce((size, file) => size + file.blob.size, 0) <= 12 * 1024 * 1024)).toBe(true);
+});
+
+it("limits small files to five per saved request", async () => {
+  const files = Array.from({ length: 6 }, (_, i) => ({ ...args().files[0], name: `${i}.txt`, path: `${i}.txt` }));
+  await enqueueDocumentUpload({ userId: 1, projectId: 17, files });
+  expect([...store.rows.values()].map(row => row.uploads?.length)).toEqual([5, 1]);
 });
