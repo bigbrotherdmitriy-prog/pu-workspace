@@ -110,6 +110,12 @@ def require_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
 ) -> User:
+    # A durable, non-secret browser signout marker also fences cached/legacy
+    # clients that still carry an HttpOnly cookie or a previously stored bearer.
+    if request.cookies.get('pu_local_signed_out') == '1' and request.url.path not in {
+        '/auth/logout-intent', '/auth/logout',
+    }:
+        raise HTTPException(401, 'Local signout pending; explicit login required')
     bearer_token = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else ""
     if bearer_token in ("undefined", "null"):
         # Some browser extensions / injected scripts add a stray

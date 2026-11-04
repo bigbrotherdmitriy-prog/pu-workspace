@@ -113,3 +113,19 @@ def test_http_login_supplies_revoke_only_ticket_and_forgery_is_rejected(api_stoc
     client.cookies.clear()
     assert client.post('/auth/logout/revoke', json={'ticket':ticket}).json() == {'status':'revoked'}
     assert db.query(AuthSession).count() == 0
+
+
+def test_http_local_signout_marker_blocks_old_cookie_and_saved_bearer(api_stock):
+    from app.api.auth import router
+    from app.core.auth import require_user, issue_session
+    client, actor, _, _, _, _, db = api_stock
+    client.app.include_router(router); client.app.dependency_overrides.pop(require_user)
+    raw, _ = issue_session(db, actor['id'])
+    client.cookies.set('pu_session', raw)
+    ticket = client.get('/auth/logout-intent').json()['logout_ticket']
+    client.cookies.set('pu_local_signed_out', '1')
+    assert client.get('/auth/me').status_code == 401
+    assert client.get('/auth/me', headers={'Authorization':'Bearer '+raw}).status_code == 401
+    assert db.query(AuthSession).count() == 1  # Fenced before deferred revocation.
+    assert client.post('/auth/logout/revoke', json={'ticket':ticket}).status_code == 200
+    assert db.query(AuthSession).count() == 0

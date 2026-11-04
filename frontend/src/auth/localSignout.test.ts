@@ -69,3 +69,18 @@ it('failed or malformed revoke ACK never drops queued capability', async () => {
   await prepared();auth.beginLocalSignout();network.mockResolvedValue(reply({status:'wrong'}));
   await expect(auth.flushPendingRevocations()).rejects.toThrow();expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBe(ticket);
 });
+it('BFCache page checks durable fence on pageshow even without a storage event',async()=>{
+  await prepared();network.mockRejectedValue(new Error('SYNTHETIC offline'));
+  const notice=vi.fn(),close=vi.fn(),stop=auth.startLogoutRecovery(notice,close);
+  try {localStorage.setItem('pu.local-signout.v1','1');window.dispatchEvent(new Event('pageshow'));
+    expect(close).toHaveBeenCalledOnce();expect(auth.isLocallySignedOut()).toBe(true);
+    expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBe(ticket);
+  } finally {stop();}
+});
+it('an in-flight old API response cannot publish data after local logout',async()=>{
+  await prepared();let release!:(response:Response)=>void;
+  network.mockImplementation(()=>new Promise<Response>(resolve=>{release=resolve;}));
+  const {api}=await import('../api/client');const pending=api('/SYNTHETIC-private-data');
+  auth.beginLocalSignout();release(reply({private:'SYNTHETIC old session'}));
+  await expect(pending).rejects.toMatchObject({status:401});
+});

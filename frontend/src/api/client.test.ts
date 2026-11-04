@@ -5,6 +5,10 @@ import { api } from "./client";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("API structured errors", () => {
+  it('always bypasses browser HTTP cache for authenticated API data',async()=>{
+    const request=vi.fn(async()=>new Response('{}',{status:200}));vi.stubGlobal('fetch',request);
+    await api('/SYNTHETIC-private');expect(request).toHaveBeenCalledWith('/SYNTHETIC-private',expect.objectContaining({cache:'no-store',credentials:'same-origin'}));
+  });
   it("preserves every rejected DDS row for the atomic confirmation report", async () => {
     const detail = { code: "CASH_FLOW_BATCH_REJECTED", confirmed_count: 0,
       rows: [{ id: 1, code: "NOT_APPLIED" }, { id: 2, code: "CASH_FLOW_VERSION_MISMATCH" }] };

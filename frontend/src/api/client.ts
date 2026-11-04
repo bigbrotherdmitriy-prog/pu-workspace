@@ -43,6 +43,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   try {
     response = await fetch(path, {
       ...options,
+      cache: 'no-store',
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",

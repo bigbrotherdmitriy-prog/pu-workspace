@@ -61,6 +61,7 @@ def _secure_cookie(request: Request) -> bool:
 
 
 def _set_session_cookies(response: Response, request: Request, token: str, expires) -> None:
+    response.headers['Cache-Control'] = 'no-store'
     secure = _secure_cookie(request)
     response.set_cookie("pu_session", token, expires=expires, httponly=True, secure=secure, samesite="strict", path="/")
     response.set_cookie("pu_csrf", secrets.token_urlsafe(24), expires=expires, httponly=False, secure=secure, samesite="strict", path="/")

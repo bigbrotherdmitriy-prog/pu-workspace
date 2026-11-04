@@ -49,6 +49,7 @@ export async function prepareAuthenticatedSession(request?: () => Promise<{ logo
   if (!validTicket(body.logout_ticket) || !Number.isSafeInteger(body.user_id) || body.user_id <= 0) throw new Error('Не подтверждена сессия');
   if (started !== generation || isLocallySignedOut()) throw new Error('Сеанс изменился');
   activeTicket = body.logout_ticket;
+  resumeOfflineSession(Number(body.user_id));
 }
 export function completeExplicitLogin(body: { logout_ticket?: unknown; user?: { id?: unknown } }, started: number) {
   if (!validTicket(body.logout_ticket) || !Number.isSafeInteger(body.user?.id) || Number(body.user?.id) <= 0) throw new Error('Вход не подтверждён сервером');
@@ -109,8 +110,18 @@ export function startLogoutRecovery(notify: (message: string) => void, signout: 
       closed = true; generation++; activeTicket = null; closeOfflineSession(); signout(); retry();
     }
   };
+  const restored = () => {
+    // BFCache/frozen pages may miss a storage event while suspended.
+    if (isLocallySignedOut() && !closed) storage(new StorageEvent('storage', { key: FENCE, newValue: '1' }));
+  };
   window.addEventListener('online', retry); window.addEventListener('storage', storage);
+  window.addEventListener('pageshow', restored); window.addEventListener('focus', restored);
+  document.addEventListener('visibilitychange', restored);
   const timer = setInterval(retry, 30000);
+  restored();
   retry();
-  return () => { alive = false; clearInterval(timer); window.removeEventListener('online', retry); window.removeEventListener('storage', storage); };
+  return () => {
+    alive = false; clearInterval(timer); window.removeEventListener('online', retry); window.removeEventListener('storage', storage);
+    window.removeEventListener('pageshow', restored); window.removeEventListener('focus', restored); document.removeEventListener('visibilitychange', restored);
+  };
 }
