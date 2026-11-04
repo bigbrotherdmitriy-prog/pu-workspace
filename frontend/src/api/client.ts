@@ -1,5 +1,7 @@
 import { humanizeErrorText } from "../i18n/humanize";
 import { reportServerReachable } from "../offline/connectivity";
+import { isLocallySignedOut } from '../auth/localSignout';
+import { offlineSessionEpoch } from '../offline/lifecycle';
 
 export class ApiError extends Error {
   constructor(
@@ -32,6 +34,8 @@ export function csrfHeaders(): Record<string, string> {
 }
 
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  const sessionEpoch = offlineSessionEpoch();
+  if (path !== '/auth/login' && isLocallySignedOut()) throw new ApiError('Локальный сеанс закрыт. Войдите явно.', 401, 'local-signout');
   const requestId = newRequestId();
   const method = (options.method || "GET").toUpperCase();
   const csrfToken = cookie("pu_csrf");
@@ -58,6 +62,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     );
   }
   reportServerReachable();
+  if (path !== '/auth/login' && (sessionEpoch !== offlineSessionEpoch() || isLocallySignedOut())) throw new ApiError('Сеанс изменился', 401, requestId);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const responseRequestId = response.headers.get("X-Request-ID") || requestId;

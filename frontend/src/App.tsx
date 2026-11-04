@@ -1,4 +1,4 @@
-import { logoutPurgePolicy, logoutPurgeWarning } from "./offline/logoutPolicy";
+import { beginLocalSignout, clearOwnedBrowserCaches, flushPendingRevocations, isLocallySignedOut, prepareAuthenticatedSession, signoutGeneration, startLogoutRecovery } from './auth/localSignout';
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
@@ -45,8 +45,6 @@ import { AndroidBottomNav } from "./modules/android/AndroidBottomNav";
 import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { SyncStatusPanel, syncIsSettled } from "./modules/android/SyncStatusPanel";
 import { usePhoneLayout } from "./modules/android/usePhoneLayout";
-import { clearOfflineData } from "./offline/db";
-import { closeOfflineSession } from "./offline/lifecycle";
 import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine";
 import { useOfflineSync } from "./offline/useOfflineSync";
 import { isOnline } from "./offline/connectivity";
@@ -404,6 +402,7 @@ export function App() {
     const id = Number(params.get("invoice")), project = Number(params.get("project_id"));
     return Number.isSafeInteger(id) && id > 0 && Number.isSafeInteger(project) && project > 0 ? { id, projectId: project } : null;
   });
+  const [signoutNotice, setSignoutNotice] = useState('');
   const [ready, setReady] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [mobile, setMobile] = useState(false),
@@ -2365,10 +2364,18 @@ export function App() {
     }
   }
   useEffect(() => {
+    let alive = true;
+    const started = signoutGeneration();
+    if (isLocallySignedOut()) { setReady(false); return; }
     api("/auth/me")
-      .then(() => setReady(true))
-      .catch(() => setReady(false));
+      .then(() => prepareAuthenticatedSession())
+      .then(() => { if (alive && started === signoutGeneration() && !isLocallySignedOut()) setReady(true); })
+      .catch(() => { if (alive && started === signoutGeneration()) setReady(false); });
+    return () => { alive = false; };
   }, []);
+  useEffect(() => startLogoutRecovery(setSignoutNotice, () => {
+    loadSequenceRef.current += 1; setCurrentUser(null); setReady(false);
+  }), []);
   useEffect(() => {
     if (ready) void registerPushDevice();
   }, [ready]);
@@ -2869,7 +2876,7 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  if (!ready) return <Login onDone={() => setReady(true)} />;
+  if (!ready) return <Login notice={signoutNotice} onDone={() => { setSignoutNotice(''); setReady(true); }} />;
   function openContextualAssistant(prompt: string) {
     setIncomingName(`Контекстная помощь · ${active}`);
     setIncomingText(prompt);
@@ -3130,21 +3137,20 @@ export function App() {
     } else setActive(section);
   }
   async function logout() {
-    let purgeScope: ReturnType<typeof logoutPurgePolicy>;
-    try { purgeScope = logoutPurgePolicy(); }
-    catch (reason) { setError((reason as Error).message); return; }
-    if (!window.confirm(logoutPurgeWarning(purgeScope))) return;
+    if (!window.confirm('Выйти на этом устройстве? Неотправленные фото и правки будут сохранены для вашей учётной записи. До явного входа они не отправляются. Серверная сессия будет отозвана после появления сети.')) return;
+    void revokePushDevice(); // Start before the API fence; never await networking.
+    const warnings = beginLocalSignout();
+    loadSequenceRef.current += 1; setCurrentUser(null); setReady(false);
+    setSignoutNotice(['Локальный выход выполнен. Неотправленные данные сохранены. Отзыв сессии ожидает сети.', ...warnings].join(' '));
+    // Local fencing is synchronous and never waits for push or network.
     try {
-      await revokePushDevice();
-      await api("/auth/logout", { method: "POST" });
-      closeOfflineSession();
-      loadSequenceRef.current += 1;
-      setCurrentUser(null);
-      setReady(false);
-      if (typeof indexedDB !== "undefined") await clearOfflineData({ scope: purgeScope, userId: currentUser?.id });
+      await clearOwnedBrowserCaches();
     } catch (reason) {
-      setError((reason as Error).message);
+      setSignoutNotice('Сеанс закрыт; очистка кэша не завершена. Неотправленные данные сохранены.');
     }
+    void flushPendingRevocations().then(() => {
+      if (isLocallySignedOut()) setSignoutNotice('Локальный выход выполнен. Серверная сессия отозвана. Неотправленные данные сохранены до явного входа.');
+    }).catch(() => undefined);
   }
   return (
     <div className={`shell ${active === "Рабочий центр" ? "future-light-dashboard future-preview-shell" : ""}`}>
