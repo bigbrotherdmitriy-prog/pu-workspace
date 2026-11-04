@@ -50,3 +50,17 @@ class DefectComment(Base):
     text: Mapped[str] = mapped_column(Text)
     status_change: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DefectDrawingPoint(Base):
+    """Immutable normalized reference; no automatic rebinding to later versions."""
+    __tablename__ = "defect_drawing_points"
+    __table_args__ = (UniqueConstraint("defect_id", name="uq_defect_drawing_point"),)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    defect_id: Mapped[int] = mapped_column(ForeignKey("defects.id", ondelete="CASCADE"))
+    rd_version_id: Mapped[int] = mapped_column(ForeignKey("rd_volume_versions.id", ondelete="RESTRICT"))
+    page: Mapped[int] = mapped_column(Integer)
+    x: Mapped[str] = mapped_column(String(32))
+    y: Mapped[str] = mapped_column(String(32))
+    coordinate_system: Mapped[str] = mapped_column(String(40), default="normalized_page_v1", server_default="normalized_page_v1")

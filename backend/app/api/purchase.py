@@ -3,7 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
@@ -150,3 +150,67 @@ def export_purchase_xlsx(
         ),
         headers={"Content-Disposition": 'attachment; filename="Zakupka.xlsx"'},
     )
+
+
+class PhysicalReceiptBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_key: str = Field(min_length=1,max_length=160)
+    qty: str = Field(min_length=1,max_length=64)
+    unit: str = Field(min_length=1,max_length=40)
+    source_document_ref: str | None = Field(default=None,max_length=500)
+
+
+class PhysicalWriteoffBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_key: str = Field(min_length=1,max_length=160)
+    qty: str = Field(min_length=1,max_length=64)
+    unit: str = Field(min_length=1,max_length=40)
+    work_log_entry_id: StrictInt = Field(gt=0,le=2147483647)
+
+
+class StornoBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_key: str = Field(min_length=1,max_length=160)
+
+
+def _stock_failure(db, exc):
+    db.rollback()
+    return HTTPException(404 if isinstance(exc, LookupError) else 422,str(exc))
+
+
+@router.get('/{project_id}/purchase/{item_id}/physical-balance')
+def get_physical_balance(project_id: int,item_id: int,db: Session=Depends(get_db),user=Depends(require_user)):
+    require_project_role(db,user,project_id,'viewer')
+    from sqlalchemy import select
+    from app.models.purchase import PurchaseItem
+    from app.material_writeoffs import physical_balance
+    if db.scalar(select(PurchaseItem.id).where(PurchaseItem.id==item_id,PurchaseItem.project_id==project_id)) is None:
+        raise HTTPException(404,'Material not found in project')
+    return {'qty':format(physical_balance(db,project_id,item_id),'.3f')}
+
+
+@router.post('/{project_id}/purchase/{item_id}/physical-receipts')
+def create_physical_receipt(project_id: int,item_id: int,body: PhysicalReceiptBody,db: Session=Depends(get_db),user=Depends(require_user)):
+    require_project_role(db,user,project_id,'manager')
+    from app.material_receipts import record_receipt
+    try:result=record_receipt(db,project_id,item_id,**body.model_dump())
+    except (ValueError,LookupError) as exc:raise _stock_failure(db,exc) from exc
+    db.commit();return result
+
+
+@router.post('/{project_id}/purchase/{item_id}/writeoffs')
+def create_physical_writeoff(project_id: int,item_id: int,body: PhysicalWriteoffBody,db: Session=Depends(get_db),user=Depends(require_user)):
+    require_project_role(db,user,project_id,'manager')
+    from app.material_writeoffs import record_writeoff
+    try:result=record_writeoff(db,project_id,item_id,body.work_log_entry_id,operation_key=body.operation_key,qty=body.qty,unit=body.unit)
+    except (ValueError,LookupError) as exc:raise _stock_failure(db,exc) from exc
+    db.commit();return result
+
+
+@router.post('/{project_id}/purchase/writeoffs/{writeoff_id}/storno')
+def create_physical_storno(project_id: int,writeoff_id: int,body: StornoBody,db: Session=Depends(get_db),user=Depends(require_user)):
+    require_project_role(db,user,project_id,'manager')
+    from app.material_writeoffs import reverse_writeoff
+    try:result=reverse_writeoff(db,project_id,writeoff_id,operation_key=body.operation_key)
+    except (ValueError,LookupError) as exc:raise _stock_failure(db,exc) from exc
+    db.commit();return result

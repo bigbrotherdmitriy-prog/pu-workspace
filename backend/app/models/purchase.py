@@ -91,3 +91,23 @@ class MaterialReceipt(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),
     )
+
+
+class MaterialWriteoff(Base):
+    """Explicit append-only consumption/storno. Not derived from payments."""
+    __tablename__ = "material_writeoffs"
+    __table_args__ = (
+        UniqueConstraint("project_id", "operation_key", name="uq_material_writeoff_operation"),
+        UniqueConstraint("reverses_id", name="uq_material_writeoff_reversal"),
+        CheckConstraint("qty > 0", name="ck_material_writeoff_qty_positive"),
+        CheckConstraint("reverses_id IS NULL OR reverses_id <> id", name="ck_material_writeoff_not_self"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    purchase_item_id: Mapped[int] = mapped_column(ForeignKey("purchase_items.id", ondelete="RESTRICT"), index=True)
+    work_log_entry_id: Mapped[int] = mapped_column(ForeignKey("work_log_entries.id", ondelete="RESTRICT"), index=True)
+    operation_key: Mapped[str] = mapped_column(String(160))
+    qty: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit: Mapped[str] = mapped_column(String(40))
+    reverses_id: Mapped[int | None] = mapped_column(ForeignKey("material_writeoffs.id", ondelete="RESTRICT"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

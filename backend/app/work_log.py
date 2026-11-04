@@ -242,6 +242,10 @@ def update_entry(db: Session, project_id: int, entry_id: int, data: dict) -> dic
 
 def delete_entry(db: Session, project_id: int, entry_id: int) -> None:
     entry = _get(db, project_id, entry_id)
+    if db.scalar(select(WorkLogEntry.id).where(WorkLogEntry.id == entry_id, WorkLogEntry.project_id == project_id).with_for_update()) is None:
+        raise LookupError("Запись не найдена")
+    from app.material_writeoffs import require_deletable_fact
+    require_deletable_fact(db, project_id, entry_id)
     for lab in db.execute(select(WorkLogLabor).where(WorkLogLabor.entry_id == entry.id)).scalars().all():
         db.delete(lab)
     db.delete(entry)

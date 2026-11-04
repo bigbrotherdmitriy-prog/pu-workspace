@@ -71,6 +71,9 @@ def _defect_dict(db: Session, d: Defect, full: bool = False) -> dict:
             {"id": c.id, "text": c.text, "status_change": c.status_change, "created_at": c.created_at.isoformat() if c.created_at else None}
             for c in comments
         ]
+    from app.models.defects import DefectDrawingPoint
+    point = db.scalar(select(DefectDrawingPoint).where(DefectDrawingPoint.defect_id == d.id, DefectDrawingPoint.project_id == d.project_id))
+    out["drawing_point"] = None if point is None else {key: getattr(point, key) for key in ("rd_version_id", "page", "x", "y", "coordinate_system")}
     return out
 
 
