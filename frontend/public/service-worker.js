@@ -1,8 +1,10 @@
 const CACHE_PREFIX = "pu-workspace-shell-";
-const CACHE = `${CACHE_PREFIX}v2`;
+const CACHE = CACHE_PREFIX + /* PU_BUILD_REVISION */ "v2";
+const BUILD_ASSETS = /* PU_BUILD_ASSETS */ [];
 const APP_SHELL = [
   "/new/", "/new/manifest.webmanifest", "/new/pu-icon.svg",
   "/new/pu-icon-192.png", "/new/pu-icon-512.png", "/new/pu-icon-maskable-512.png",
+  ...BUILD_ASSETS,
 ];
 
 self.addEventListener("install", event => {
