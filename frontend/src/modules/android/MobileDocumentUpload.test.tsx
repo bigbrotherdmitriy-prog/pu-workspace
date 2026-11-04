@@ -24,6 +24,27 @@ function setup(projectId = 7) {
 }
 
 describe("local document upload", () => {
+  it.each(["project", "user", "reopen", "unmount"])("ignores late upload completion after %s", async (change) => {
+    let finish!: (value: unknown) => void;
+    vi.mocked(api).mockResolvedValue({ job_id: 91, status: "completed", progress: 100,
+      result: { processed: 1, skipped: 0, tasks: 0, risks: 0, decisions: 0, drafts: 0, documents: [19] },
+    }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const onComplete = vi.fn(), onClose = vi.fn();
+    const props = { open: true, projectId: 7, userId: 1, onComplete, onClose };
+    const view = render(<MobileDocumentUpload {...props} />);
+    fireEvent.change(view.container.querySelector('input[webkitdirectory]')!, { target: { files: [new File(["old"], "old.txt")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+    await waitFor(() => expect(api).toHaveBeenCalledOnce());
+    if (change === "unmount") view.unmount();
+    else if (change === "reopen") {
+      view.rerender(<MobileDocumentUpload {...props} open={false} />);
+      view.rerender(<MobileDocumentUpload {...props} />);
+    } else view.rerender(<MobileDocumentUpload {...props} projectId={change === "project" ? 8 : 7} userId={change === "user" ? 2 : 1} />);
+    await act(async () => { finish({ jobs: [{ job_id: 91, status: "queued" }] }); });
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("shows one unambiguous folder action for the project-folder flow", () => {
     render(<MobileDocumentUpload open projectId={7} userId={1} folderOnly title="Разобрать папку проекта" onClose={vi.fn()} onComplete={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Выбрать папку проекта/ })).toBeEnabled();

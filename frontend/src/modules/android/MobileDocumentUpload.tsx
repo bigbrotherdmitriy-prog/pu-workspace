@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, FileUp, FolderOpen, Upload, X } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
@@ -64,9 +64,20 @@ export function MobileDocumentUpload({
   const [warning, setWarning] = useState("");
   const [progress, setProgress] = useState("");
   const [dragging, setDragging] = useState(false);
+  const scopeKey = `${userId}:${projectId}:${open}`;
+  const currentScope = useRef({ key: scopeKey, active: false, generation: 0 });
+  if (currentScope.current.key !== scopeKey) currentScope.current = { key: scopeKey, active: false, generation: 0 };
+  const scope = currentScope.current;
+  useEffect(() => {
+    scope.active = open;
+    scope.generation += 1;
+    setFiles([]); setBusy(false); setError(""); setWarning(""); setProgress(""); setDragging(false);
+    return () => { scope.active = false; scope.generation += 1; };
+  }, [scope, open]);
   if (!open) return null;
 
   function select(incoming: FileList | null) {
+    if (busy) return;
     const selected = Array.from(incoming || []);
     const next = selected.filter(isSupportedLocalUploadFile);
     const unsupported = selected.filter((file) => !isSupportedLocalUploadFile(file));
@@ -101,6 +112,9 @@ export function MobileDocumentUpload({
 
   async function upload() {
     if (!files.length || !projectId || !userId || busy) return;
+    const generation = scope.generation;
+    const alive = () => currentScope.current === scope && scope.active && scope.generation === generation;
+    if (!alive()) return;
     let uploadedCount = 0;
     try {
       setBusy(true);
@@ -116,6 +130,7 @@ export function MobileDocumentUpload({
             blob: file,
           })),
         });
+        if (!alive()) return;
         setFiles([]);
         onComplete(`Сохранено на устройстве: ${files.length}. Файлы отправятся после восстановления связи.`, []);
         onClose();
@@ -125,22 +140,26 @@ export function MobileDocumentUpload({
       const total = { processed: 0, tasks: 0, risks: 0, skipped: 0, jobs: 0 };
       const jobs: QueuedLocalUploadJob[] = [];
       for (let index = 0; index < batches.length; index += 1) {
+        if (!alive()) return;
         setProgress(`Пачка ${index + 1} из ${batches.length}`);
         const payload = await Promise.all(batches[index].map(async (file) => ({
           path: file.webkitRelativePath || file.name,
           mime_type: localUploadMimeType(file),
           content_base64: await readBase64(file),
         })));
+        if (!alive()) return;
         const result = await api("/local-upload/analyze", {
           method: "POST",
           body: JSON.stringify({ project_id: projectId, files: payload }),
         });
+        if (!alive()) return;
         const queuedJobs = Array.isArray(result.jobs) ? result.jobs : [];
         total.jobs += queuedJobs.length;
         jobs.push(...queuedJobs);
         uploadedCount += batches[index].length;
       }
-      const completed = await awaitLocalUploadJobs(projectId, jobs, setProgress);
+      const completed = await awaitLocalUploadJobs(projectId, jobs, message => { if (alive()) setProgress(message); });
+      if (!alive()) return;
       total.processed = completed.processed;
       total.tasks = completed.tasks;
       total.risks = completed.risks;
@@ -152,6 +171,7 @@ export function MobileDocumentUpload({
       );
       onClose();
     } catch (reason) {
+      if (!alive()) return;
       const remaining = files.slice(uploadedCount);
       if (remaining.length && ((reason instanceof ApiError && reason.status === null) || !isOnline())) {
         try {
@@ -165,6 +185,7 @@ export function MobileDocumentUpload({
               blob: file,
             })),
           });
+          if (!alive()) return;
           setFiles([]);
           onComplete(
             `Загружено: ${uploadedCount}. Сохранено на устройстве: ${remaining.length}; отправятся после восстановления связи.`,
@@ -173,7 +194,7 @@ export function MobileDocumentUpload({
           onClose();
           return;
         } catch (queueError) {
-          setError((queueError as Error).message);
+          if (alive()) setError((queueError as Error).message);
           return;
         }
       }
@@ -183,8 +204,10 @@ export function MobileDocumentUpload({
       const prefix = uploadedCount ? `Уже загружено файлов: ${uploadedCount}. ` : "";
       setError(`${prefix}${(reason as Error).message}`);
     } finally {
-      setBusy(false);
-      setProgress("");
+      if (alive()) {
+        setBusy(false);
+        setProgress("");
+      }
     }
   }
 
