@@ -56,6 +56,12 @@ _GRAND_TOTAL_PREFIXES = ("всего по смете", "итого по смет
 _MAX_LINES = 5000
 _HEADER_SCAN_LIMIT = 40
 
+# Технический бюджет на длину текстового представления числа.
+# Защищает от раздувания памяти при форматировании Decimal с экстремальной
+# экспонентой (например, 1e10000 -> 10001 символ). Это ресурсный лимит,
+# а не финансовое/бизнес-ограничение на значения.
+MAX_NUMERIC_TEXT_CHARS = 1024
+
 
 def _norm(value: Any) -> str:
     return str(value or "").lower().replace("ё", "е")
@@ -132,9 +138,51 @@ def _parse_finite_decimal(value: Any, field: str) -> Decimal | None:
     return d
 
 
+def _numeric_text_size(d: Decimal) -> int:
+    """Оценить длину текстового представления Decimal без его форматирования.
+
+    Использует только метаданные Decimal (tuple/exponent), не создавая
+    строку и не выполняя exponent-expanding арифметику. Возвращает
+    верхнюю оценку количества символов в формате без экспоненты.
+    """
+    sign, digits, exponent = d.as_tuple()
+    # digits — кортеж цифр; exponent — int (для конечных Decimal).
+    n_digits = len(digits)
+    exp = int(exponent)
+    if exp >= 0:
+        # Целое число: n_digits + exp значащих позиций.
+        int_len = n_digits + exp
+        frac_len = 0
+    else:
+        # exp < 0: дробная часть.
+        if n_digits + exp > 0:
+            int_len = n_digits + exp
+            frac_len = -exp
+        else:
+            # Ведущие нули после запятой: 0.000...digits
+            int_len = 1  # "0"
+            frac_len = -exp
+    size = int_len + frac_len
+    if frac_len > 0:
+        size += 1  # десятичная точка
+    if sign:
+        size += 1  # знак минус
+    return size
+
+
 def _to_str(d: Decimal | None) -> str | None:
     if d is None:
         return None
+    # Дешёвый канонический ноль для экстремальных экспонент.
+    if d.is_zero():
+        return "0"
+    # Ресурсный бюджет: отвергаем слишком длинное представление ДО
+    # выделения памяти под format(d, "f").
+    if _numeric_text_size(d) > MAX_NUMERIC_TEXT_CHARS:
+        raise ValueError(
+            "Числовое значение превышает допустимый размер текстового "
+            f"представления ({MAX_NUMERIC_TEXT_CHARS} символов)"
+        )
     # Decimal без экспоненты, нормализованный.
     s = format(d, "f")
     if "." in s:
