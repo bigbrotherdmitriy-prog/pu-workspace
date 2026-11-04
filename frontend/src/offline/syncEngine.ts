@@ -369,10 +369,16 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
   }
   const response = await api<{
     receipt_id: number;
+    client_mutation_id?: unknown;
+    user_id?: unknown;
+    project_id?: unknown;
+    operation?: unknown;
+    entity_type?: unknown;
+    entity_id?: unknown;
     status: string;
     error_code?: string;
     error_message?: string;
-    conflict?: { id: number };
+    conflict?: { id: number; command_id?: unknown; entity_type?: unknown; entity_id?: unknown };
   }>("/mobile-sync/commands", {
     method: "POST",
     body: JSON.stringify({
@@ -386,8 +392,19 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       client_created_at: command.clientCreatedAt,
     }),
   });
-  if (response.status === "applied") return { applied: true, receiptId: response.receipt_id };
+  const entityType = command.operation === "task.update" ? "task" : "notification";
+  if (response?.status === "applied" || response?.status === "conflict") {
+    if (!positiveId(response.receipt_id) || response.client_mutation_id !== command.id
+      || response.user_id !== command.userId || response.project_id !== command.projectId
+      || response.operation !== command.operation || response.entity_type !== entityType
+      || response.entity_id !== command.entityId) throw new Error("Не подтверждена доставка сохранённого изменения.");
+  }
+  if (response?.status === "applied") return { applied: true, receiptId: response.receipt_id };
   if (response.status === "conflict") {
+    if (!positiveId(response.conflict?.id) || response.conflict?.command_id !== response.receipt_id
+      || response.conflict.entity_type !== entityType || response.conflict.entity_id !== command.entityId) {
+      throw new Error("Не подтверждена принадлежность конфликта сохранённому изменению.");
+    }
     return { applied: false, conflictId: response.conflict?.id, receiptId: response.receipt_id };
   }
   throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");

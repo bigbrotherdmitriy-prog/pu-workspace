@@ -30,6 +30,16 @@ beforeEach(() => {
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
 });
 
+function matchingReceipt(receiptId: number, status = "applied") {
+  return async (_path: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    const entityType = body.operation === "task.update" ? "task" : "notification";
+    return { receipt_id: receiptId, client_mutation_id: body.client_mutation_id, user_id: 1, project_id: 17,
+      operation: body.operation, entity_type: entityType, entity_id: body.entity_id, status,
+      conflict: status === "conflict" ? { id: 71, command_id: receiptId, entity_type: entityType, entity_id: body.entity_id } : null };
+  };
+}
+
 describe("offline synchronization queue", () => {
   it("coalesces safe edits of one task without discarding either field", async () => {
     await enqueueTaskUpdate({
@@ -62,7 +72,7 @@ describe("offline synchronization queue", () => {
     await synchronize(1, 17, false);
     expect(api).not.toHaveBeenCalled();
 
-    vi.mocked(api).mockResolvedValue({ receipt_id: 9, status: "applied" });
+    vi.mocked(api).mockImplementation(matchingReceipt(9));
     await synchronize(1, 17, true);
     expect(store.rows.size).toBe(0);
   });
@@ -72,11 +82,7 @@ describe("offline synchronization queue", () => {
       userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
       patch: { status: "cancelled" },
     });
-    vi.mocked(api).mockResolvedValue({
-      receipt_id: 22,
-      status: "conflict",
-      conflict: { id: 71 },
-    });
+    vi.mocked(api).mockImplementation(matchingReceipt(22, "conflict"));
 
     await synchronize(1, 17, true);
 
@@ -126,7 +132,7 @@ describe("offline synchronization queue", () => {
     await synchronize(1, 17, true);
     const firstBody = vi.mocked(api).mock.calls[0][1]?.body as string;
 
-    vi.mocked(api).mockResolvedValueOnce({ receipt_id: 5, status: "applied" });
+    vi.mocked(api).mockImplementationOnce(matchingReceipt(5));
     await synchronize(1, 17, true);
     const secondBody = vi.mocked(api).mock.calls[1][1]?.body as string;
 
@@ -153,5 +159,19 @@ describe("offline synchronization queue", () => {
     expect((await offlineSummary(1, 17)).total).toBe(1);
     expect((await offlineSummary(2, 17)).total).toBe(1);
     expect((await offlineSummary(1, 18)).total).toBe(1);
+  });
+
+  it.each(["client_mutation_id", "operation", "entity_id", "entity_type", "user_id", "project_id", "receipt_id"])("retains commands on mismatched %s", async field => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    vi.mocked(api).mockImplementation(async (path, init) => ({ ...await matchingReceipt(9)(path, init), [field]: "wrong-synthetic-value" }));
+    await synchronize(1, 17);
+    expect(store.rows.has(id)).toBe(true); expect(store.rows.get(id)?.status).toBe("queued");
+  });
+
+  it("retains a conflict command if the conflict points to another receipt", async () => {
+    const id = await enqueueTaskUpdate({ userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base", patch: { status: "cancelled" } });
+    vi.mocked(api).mockImplementation(async (path, init) => ({ ...await matchingReceipt(22, "conflict")(path, init), conflict: { id: 71, command_id: 999, entity_type: "task", entity_id: 9 } }));
+    await synchronize(1, 17);
+    expect(store.rows.get(id)?.status).toBe("queued");
   });
 });

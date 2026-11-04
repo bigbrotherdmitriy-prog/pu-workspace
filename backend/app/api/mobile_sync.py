@@ -129,6 +129,8 @@ def _command_payload(row: MobileSyncCommand, db: Session) -> dict:
     return {
         "receipt_id": row.id,
         "client_mutation_id": row.client_mutation_id,
+        "user_id": row.user_id,
+        "project_id": row.project_id,
         "operation": row.operation,
         "entity_type": row.entity_type,
         "entity_id": row.entity_id,
