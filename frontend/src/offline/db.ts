@@ -1,4 +1,5 @@
 import type { OfflineCommand } from "./types";
+import { offlineSessionEpoch, requireOfflineSession } from "./lifecycle";
 
 const DB_NAME = "pu-mobile-sync-v1";
 const DB_VERSION = 1;
@@ -29,7 +30,12 @@ function transact<T>(
   mode: IDBTransactionMode,
   action: (store: IDBObjectStore, resolve: (value: T) => void, reject: (reason?: unknown) => void) => void,
 ): Promise<T> {
-  return openDatabase().then((db) => new Promise<T>((resolve, reject) => {
+  const session = offlineSessionEpoch();
+  return openDatabase().then((db) => {
+    if (mode === "readwrite") {
+      try { requireOfflineSession(session); } catch (reason) { db.close(); throw reason; }
+    }
+    return new Promise<T>((resolve, reject) => {
     const transaction = db.transaction(storeName, mode);
     const store = transaction.objectStore(storeName);
     let result: T;
@@ -50,7 +56,8 @@ function transact<T>(
         try { transaction.abort(); } catch { reject(reason); }
       },
     );
-  }));
+    });
+  });
 }
 
 export function putCommand(command: OfflineCommand): Promise<OfflineCommand> {

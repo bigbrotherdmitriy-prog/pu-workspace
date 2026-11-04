@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, csrfHeaders } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
+import { OfflineSessionChanged } from "../../offline/lifecycle";
 import { prepareDefectCreate, enqueuePreparedDefectCreate, submitPreparedDefectCreate, DEFECT_APPLIED_EVENT, type PreparedDefectCreate } from "../../offline/syncEngine";
 import "./defects.css";
 
@@ -131,6 +132,7 @@ export function DefectsModule({ projectId, userId = 0 }: { projectId: number; us
   }
 
   async function preserveUncertain(intent: DefectIntent, reason: unknown, alive: () => boolean) {
+    if (reason instanceof OfflineSessionChanged) return;
     const attempts = intent.command.attempts + 1;
     const status = reason instanceof ApiError && [401, 403].includes(reason.status || 0) ? "auth_required" : attempts >= 3 ? "attention" : "queued";
     const retry: DefectIntent = { ...intent, command: { ...intent.command, attempts, status, updatedAt: new Date().toISOString() } };

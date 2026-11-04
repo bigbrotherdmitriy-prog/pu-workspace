@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, FileUp, FolderOpen, Upload, X } from "lucide-react";
 import { ApiError } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
+import { OfflineSessionChanged } from "../../offline/lifecycle";
 import { prepareDocumentUploads, enqueuePreparedDocumentUploads, submitPreparedDocumentUpload, type PreparedDocumentUpload } from "../../offline/syncEngine";
 import {
   awaitLocalUploadJobs, isSupportedLocalUploadFile, localUploadMimeType, type QueuedLocalUploadJob,
@@ -134,7 +135,7 @@ export function MobileDocumentUpload({
       );
       onClose();
     } catch (reason) {
-      if (!alive()) return;
+      if (reason instanceof OfflineSessionChanged || !alive()) return;
       const remaining = files.slice(uploadedCount);
       if (!savingOffline && remaining.length && ((reason instanceof ApiError && reason.status === null) || !isOnline())) {
         try {

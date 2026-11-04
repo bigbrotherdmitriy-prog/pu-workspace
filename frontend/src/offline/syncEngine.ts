@@ -1,5 +1,6 @@
 import { api, ApiError } from "../api/client";
 import { isOnline } from "./connectivity";
+import { captureOfflineSession, offlineSessionEpoch, offlineSessionIsCurrent, offlineActorIsCurrent, requireOfflineSession, OfflineSessionChanged } from "./lifecycle";
 import { deleteCommand, getMeta, listCommands, putCommand, putCommands, setMeta } from "./db";
 import type { OfflineCommand, ServerConflict, StoredUploadFile, SyncSummary } from "./types";
 
@@ -7,7 +8,7 @@ const ATTENTION_AFTER_ATTEMPTS = 3;
 export const CHANGE_EVENT = "pu-mobile-sync-changed";
 export const WORK_LOG_APPLIED_EVENT = "pu-work-log-applied";
 export const DEFECT_APPLIED_EVENT = "pu-defect-applied";
-let running = false;
+let running: { session: number } | null = null;
 
 function changed() {
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
@@ -26,9 +27,11 @@ export function deviceId(): string {
   return value;
 }
 
-async function persist(command: OfflineCommand) {
+async function persist(command: OfflineCommand, session = captureOfflineSession(command.userId)) {
+  requireOfflineSession(session);
   try {
     await putCommand(command);
+    requireOfflineSession(session);
   } catch (reason) {
     if (reason instanceof DOMException && reason.name === "QuotaExceededError") {
       throw new Error("На устройстве закончилось место. Изменение не сохранено; освободите память и повторите.");
@@ -58,15 +61,19 @@ function positiveId(value: unknown): value is number {
 
 /** Explicit recovery only; ordinary/manual synchronize still skips auth_required. */
 export async function recoverAuthRequired(userId: number, projectId: number): Promise<number> {
+  const session = captureOfflineSession(userId);
   if (!positiveId(userId) || !positiveId(projectId)) throw new Error("Нужны пользователь и проект для восстановления очереди.");
   if (!isOnline()) throw new Error("Для проверки входа требуется связь с сервером.");
   if (!(await listCommands(userId, projectId)).some((row) => row.status === "auth_required")) return 0;
+  requireOfflineSession(session);
   const actor = await api<{ id?: unknown }>("/auth/me");
+  requireOfflineSession(session);
   if (actor?.id !== userId) throw new Error("Войдите в ту же учётную запись, в которой сохранены изменения.");
   // Reload after the identity check rather than resurrecting an already removed row.
   const commands = (await listCommands(userId, projectId)).filter((row) => row.status === "auth_required");
+  requireOfflineSession(session);
   for (const command of commands) {
-    await persist({ ...command, status: "queued", lastError: undefined, updatedAt: new Date().toISOString() });
+    await persist({ ...command, status: "queued", lastError: undefined, updatedAt: new Date().toISOString() }, session);
   }
   return commands.length;
 }
@@ -118,10 +125,12 @@ export function prepareWorkLogCreate(args: {
 }
 
 export async function enqueuePreparedWorkLogCreate(command: PreparedWorkLogCreate): Promise<string> {
+  const session = captureOfflineSession(command.userId);
   if (command.operation !== "work_log.create" || !positiveId(command.userId) || !positiveId(command.projectId) || "entityId" in command) {
     throw new Error("Некорректная подготовленная запись журнала.");
   }
   const existing = (await listCommands(command.userId, command.projectId)).find((row) => row.id === command.id);
+  requireOfflineSession(session);
   if (existing) {
     if (existing.operation !== "work_log.create" || JSON.stringify(workLogEnvelope(existing)) !== JSON.stringify(workLogEnvelope(command))) {
       throw new Error("Идентификатор записи уже использован с другими данными.");
@@ -129,7 +138,7 @@ export async function enqueuePreparedWorkLogCreate(command: PreparedWorkLogCreat
     // Preserve attempts, receipt and suspended status; this is not auth recovery.
     return existing.id;
   }
-  await persist({ ...command, patch: JSON.parse(JSON.stringify(command.patch)) as Record<string, unknown> });
+  await persist({ ...command, patch: JSON.parse(JSON.stringify(command.patch)) as Record<string, unknown> }, session);
   return command.id;
 }
 
@@ -182,17 +191,19 @@ export function prepareDefectCreate(args: { userId: number; projectId: number; d
 }
 
 export async function enqueuePreparedDefectCreate(command: PreparedDefectCreate): Promise<string> {
+  const session = captureOfflineSession(command.userId);
   if (command.operation !== "defect.create" || !positiveId(command.userId) || !positiveId(command.projectId)
       || "entityId" in command || "uploads" in command) throw new Error("Некорректное подготовленное замечание.");
   const snapshot = { ...command, patch: checkedDefectData(command.patch) };
   const existing = (await listCommands(snapshot.userId, snapshot.projectId)).find((row) => row.id === snapshot.id);
+  requireOfflineSession(session);
   if (existing) {
     if (existing.operation !== "defect.create" || JSON.stringify(defectEnvelope(existing)) !== JSON.stringify(defectEnvelope(snapshot))) {
       throw new Error("Идентификатор замечания уже использован с другими данными.");
     }
     return existing.id;
   }
-  await persist(snapshot);
+  await persist(snapshot, session);
   return snapshot.id;
 }
 
@@ -207,11 +218,13 @@ export async function enqueueTaskUpdate(args: {
   baseToken?: string;
   patch: Record<string, unknown>;
 }): Promise<string> {
+  const session = captureOfflineSession(args.userId);
   if (!args.baseToken) throw new Error("Задача загружена без защищённой базовой версии. Обновите данные онлайн.");
   const now = new Date().toISOString();
   const existing = (await listCommands(args.userId, args.projectId)).find((item) =>
     item.operation === "task.update" && item.entityId === args.taskId && isSafeToCoalesce(item),
   );
+  requireOfflineSession(session);
   if (existing) {
     // Keep the original baseToken, clientCreatedAt and attempts: the merged
     // payload is still the first (never-sent) attempt for this id.
@@ -219,7 +232,7 @@ export async function enqueueTaskUpdate(args: {
       ...existing,
       patch: { ...existing.patch, ...args.patch },
       updatedAt: now,
-    });
+    }, session);
     return existing.id;
   }
   const id = uuid();
@@ -236,7 +249,7 @@ export async function enqueueTaskUpdate(args: {
     status: "queued",
     attempts: 0,
     updatedAt: now,
-  });
+  }, session);
   return id;
 }
 
@@ -245,9 +258,11 @@ export async function enqueueNotificationRead(args: {
   projectId: number;
   notificationId: number;
 }): Promise<string> {
+  const session = captureOfflineSession(args.userId);
   const duplicate = (await listCommands(args.userId, args.projectId)).find((item) =>
     item.operation === "notification.mark_read" && item.entityId === args.notificationId,
   );
+  requireOfflineSession(session);
   if (duplicate) return duplicate.id;
   const now = new Date().toISOString(), id = uuid();
   await persist({
@@ -262,7 +277,7 @@ export async function enqueueNotificationRead(args: {
     status: "queued",
     attempts: 0,
     updatedAt: now,
-  });
+  }, session);
   return id;
 }
 
@@ -302,6 +317,7 @@ export function prepareDocumentUploads(args: {
 }
 
 export async function enqueuePreparedDocumentUploads(commands: PreparedDocumentUpload[]): Promise<string> {
+  const session = captureOfflineSession(commands[0]?.userId);
   if (!commands.length || commands.some(command => command.operation !== "document.upload"
     || !positiveId(command.userId) || !positiveId(command.projectId)
     || command.userId !== commands[0].userId || command.projectId !== commands[0].projectId)) {
@@ -317,12 +333,15 @@ export async function enqueuePreparedDocumentUploads(commands: PreparedDocumentU
       }
     } else pending.push({ ...command, uploads: command.uploads.map(file => ({ ...file })) });
   }
+  requireOfflineSession(session);
   if (navigator.storage?.persist) await navigator.storage.persist().catch(() => false);
+  requireOfflineSession(session);
   try { if (pending.length) await putCommands(pending); }
   catch (reason) {
     if (reason instanceof DOMException && reason.name === "QuotaExceededError") throw new Error("На устройстве закончилось место. Файлы не сохранены; освободите память и повторите.");
     throw reason;
   }
+  requireOfflineSession(session);
   changed();
   return commands[0].id;
 }
@@ -347,101 +366,112 @@ async function documentUploadBody(command: OfflineCommand) {
 }
 
 export async function submitPreparedDocumentUpload(command: PreparedDocumentUpload): Promise<{ job_id: number; status: string }[]> {
-  if (!positiveId(command.userId) || !positiveId(command.projectId) || command.operation !== "document.upload") throw new Error("Неверный владелец или проект сохранённой загрузки.");
-  const body = await documentUploadBody(command);
-  const response = await api<{ status?: unknown; jobs?: { job_id?: unknown; status?: unknown }[] }>("/local-upload/analyze", {
-    method: "POST", headers: { "Idempotency-Key": command.id, "X-PU-Expected-User": String(command.userId) }, body: JSON.stringify(body),
-  });
-  const acceptedStates = new Set(["queued", "retrying", "running", "already_queued"]);
-  if (response?.status !== "queued" || !Array.isArray(response.jobs) || !body.files.length
-    || response.jobs.length !== body.files.length
-    || response.jobs.some(job => !job || !positiveId(job.job_id) || !acceptedStates.has(String(job.status)))
-    || new Set(response.jobs.map(job => job.job_id)).size !== body.files.length) {
-    throw new Error("Сервер не подтвердил сохранение всех файлов в защищённой очереди.");
-  }
-  return response.jobs.map(job => ({ job_id: job.job_id as number, status: String(job.status) }));
+  const session = captureOfflineSession(command.userId);
+  try {
+    if (!positiveId(command.userId) || !positiveId(command.projectId) || command.operation !== "document.upload") throw new Error("Неверный владелец или проект сохранённой загрузки.");
+    const body = await documentUploadBody(command);
+    requireOfflineSession(session);
+    const response = await api<{ status?: unknown; jobs?: { job_id?: unknown; status?: unknown }[] }>("/local-upload/analyze", {
+      method: "POST", headers: { "Idempotency-Key": command.id, "X-PU-Expected-User": String(command.userId) }, body: JSON.stringify(body),
+    });
+    requireOfflineSession(session);
+    const acceptedStates = new Set(["queued", "retrying", "running", "already_queued"]);
+    if (response?.status !== "queued" || !Array.isArray(response.jobs) || !body.files.length
+      || response.jobs.length !== body.files.length
+      || response.jobs.some(job => !job || !positiveId(job.job_id) || !acceptedStates.has(String(job.status)))
+      || new Set(response.jobs.map(job => job.job_id)).size !== body.files.length) {
+      throw new Error("Сервер не подтвердил сохранение всех файлов в защищённой очереди.");
+    }
+    return response.jobs.map(job => ({ job_id: job.job_id as number, status: String(job.status) }));
+  } finally { requireOfflineSession(session); }
 }
 
 async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number; entityId?: number; entityNumber?: number }> {
-  if (command.operation === "work_log.create") {
-    const response = await api<{
-      receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
-      status?: unknown; entity_type?: unknown; entity_id?: unknown;
-      result?: { id?: unknown; project_id?: unknown; author_user_id?: unknown };
-    }>("/mobile-sync/work-log-create", {
-      method: "POST", body: JSON.stringify(workLogEnvelope(command)),
-      headers: { "X-PU-Expected-User": String(command.userId) },
-    });
-    if (response?.status !== "applied" || response.operation !== "work_log.create"
-      || response.client_mutation_id !== command.id || response.entity_type !== "work_log"
-      || !positiveId(response.receipt_id) || !positiveId(response.entity_id)
-      || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
-      || response.result?.author_user_id !== command.userId) {
-      throw new Error("Не подтверждена доставка записи журнала.");
+  const session = captureOfflineSession(command.userId);
+  try {
+    if (command.operation === "work_log.create") {
+      const response = await api<{
+        receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
+        status?: unknown; entity_type?: unknown; entity_id?: unknown;
+        result?: { id?: unknown; project_id?: unknown; author_user_id?: unknown };
+      }>("/mobile-sync/work-log-create", {
+        method: "POST", body: JSON.stringify(workLogEnvelope(command)),
+        headers: { "X-PU-Expected-User": String(command.userId) },
+      });
+      requireOfflineSession(session);
+      if (response?.status !== "applied" || response.operation !== "work_log.create"
+        || response.client_mutation_id !== command.id || response.entity_type !== "work_log"
+        || !positiveId(response.receipt_id) || !positiveId(response.entity_id)
+        || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
+        || response.result?.author_user_id !== command.userId) {
+        throw new Error("Не подтверждена доставка записи журнала.");
+      }
+      return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id };
     }
-    return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id };
-  }
-  if (command.operation === "defect.create") {
-    const response = await api<{
-      receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
-      status?: unknown; entity_type?: unknown; entity_id?: unknown;
-      result?: { id?: unknown; number?: unknown; project_id?: unknown; author_user_id?: unknown };
-    }>("/mobile-sync/defect-create", {
-      method: "POST", body: JSON.stringify(defectEnvelope(command)),
-      headers: { "X-PU-Expected-User": String(command.userId) },
-    });
-    if (response?.status !== "applied" || response.operation !== "defect.create"
-      || response.client_mutation_id !== command.id || response.entity_type !== "defect"
-      || !positiveId(response.receipt_id) || !positiveId(response.entity_id) || !positiveId(response.result?.number)
-      || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
-      || response.result?.author_user_id !== command.userId) throw new Error("Не подтверждено создание замечания.");
-    return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id, entityNumber: response.result.number };
-  }
-  if (command.operation === "document.upload") {
-    await submitPreparedDocumentUpload(command as PreparedDocumentUpload);
-    return { applied: true };
-  }
-  const response = await api<{
-    receipt_id: number;
-    client_mutation_id?: unknown;
-    user_id?: unknown;
-    project_id?: unknown;
-    operation?: unknown;
-    entity_type?: unknown;
-    entity_id?: unknown;
-    status: string;
-    error_code?: string;
-    error_message?: string;
-    conflict?: { id: number; command_id?: unknown; entity_type?: unknown; entity_id?: unknown };
-  }>("/mobile-sync/commands", {
-    method: "POST",
-    body: JSON.stringify({
-      client_mutation_id: command.id,
-      device_id: command.deviceId,
-      project_id: command.projectId,
-      operation: command.operation,
-      entity_id: command.entityId,
-      base_token: command.baseToken,
-      patch: command.patch,
-      client_created_at: command.clientCreatedAt,
-    }),
-  });
-  const entityType = command.operation === "task.update" ? "task" : "notification";
-  if (response?.status === "applied" || response?.status === "conflict") {
-    if (!positiveId(response.receipt_id) || response.client_mutation_id !== command.id
-      || response.user_id !== command.userId || response.project_id !== command.projectId
-      || response.operation !== command.operation || response.entity_type !== entityType
-      || response.entity_id !== command.entityId) throw new Error("Не подтверждена доставка сохранённого изменения.");
-  }
-  if (response?.status === "applied") return { applied: true, receiptId: response.receipt_id };
-  if (response.status === "conflict") {
-    if (!positiveId(response.conflict?.id) || response.conflict?.command_id !== response.receipt_id
-      || response.conflict.entity_type !== entityType || response.conflict.entity_id !== command.entityId) {
-      throw new Error("Не подтверждена принадлежность конфликта сохранённому изменению.");
+    if (command.operation === "defect.create") {
+      const response = await api<{
+        receipt_id?: unknown; client_mutation_id?: unknown; operation?: unknown;
+        status?: unknown; entity_type?: unknown; entity_id?: unknown;
+        result?: { id?: unknown; number?: unknown; project_id?: unknown; author_user_id?: unknown };
+      }>("/mobile-sync/defect-create", {
+        method: "POST", body: JSON.stringify(defectEnvelope(command)),
+        headers: { "X-PU-Expected-User": String(command.userId) },
+      });
+      requireOfflineSession(session);
+      if (response?.status !== "applied" || response.operation !== "defect.create"
+        || response.client_mutation_id !== command.id || response.entity_type !== "defect"
+        || !positiveId(response.receipt_id) || !positiveId(response.entity_id) || !positiveId(response.result?.number)
+        || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
+        || response.result?.author_user_id !== command.userId) throw new Error("Не подтверждено создание замечания.");
+      return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id, entityNumber: response.result.number };
     }
-    return { applied: false, conflictId: response.conflict?.id, receiptId: response.receipt_id };
-  }
-  throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+    if (command.operation === "document.upload") {
+      await submitPreparedDocumentUpload(command as PreparedDocumentUpload);
+      return { applied: true };
+    }
+    const response = await api<{
+      receipt_id: number;
+      client_mutation_id?: unknown;
+      user_id?: unknown;
+      project_id?: unknown;
+      operation?: unknown;
+      entity_type?: unknown;
+      entity_id?: unknown;
+      status: string;
+      error_code?: string;
+      error_message?: string;
+      conflict?: { id: number; command_id?: unknown; entity_type?: unknown; entity_id?: unknown };
+    }>("/mobile-sync/commands", {
+      method: "POST",
+      body: JSON.stringify({
+        client_mutation_id: command.id,
+        device_id: command.deviceId,
+        project_id: command.projectId,
+        operation: command.operation,
+        entity_id: command.entityId,
+        base_token: command.baseToken,
+        patch: command.patch,
+        client_created_at: command.clientCreatedAt,
+      }),
+    });
+    requireOfflineSession(session);
+    const entityType = command.operation === "task.update" ? "task" : "notification";
+    if (response?.status === "applied" || response?.status === "conflict") {
+      if (!positiveId(response.receipt_id) || response.client_mutation_id !== command.id
+        || response.user_id !== command.userId || response.project_id !== command.projectId
+        || response.operation !== command.operation || response.entity_type !== entityType
+        || response.entity_id !== command.entityId) throw new Error("Не подтверждена доставка сохранённого изменения.");
+    }
+    if (response?.status === "applied") return { applied: true, receiptId: response.receipt_id };
+    if (response.status === "conflict") {
+      if (!positiveId(response.conflict?.id) || response.conflict?.command_id !== response.receipt_id
+        || response.conflict.entity_type !== entityType || response.conflict.entity_id !== command.entityId) {
+        throw new Error("Не подтверждена принадлежность конфликта сохранённому изменению.");
+      }
+      return { applied: false, conflictId: response.conflict?.id, receiptId: response.receipt_id };
+    }
+    throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+  } finally { requireOfflineSession(session); }
 }
 
 export async function submitPreparedWorkLogCreate(command: PreparedWorkLogCreate): Promise<{ receiptId: number; entityId: number }> {
@@ -461,25 +491,32 @@ export async function submitPreparedDefectCreate(command: PreparedDefectCreate):
 }
 
 export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
-  if (running || !isOnline() || !userId || !projectId) return;
-  running = true;
+  const session = offlineSessionEpoch();
+  if (!offlineActorIsCurrent(userId) || !offlineSessionIsCurrent(session) || (running && offlineSessionIsCurrent(running.session)) || !isOnline() || !userId || !projectId) return;
+  const run = { session };
+  running = run;
   try {
     const commands = await listCommands(userId, projectId);
     for (const command of commands) {
+      if (!offlineSessionIsCurrent(session)) return;
       if (["conflict", "auth_required"].includes(command.status)) continue;
       if (command.status === "attention" && !manual) continue;
       const working = { ...command, status: "syncing" as const, updatedAt: new Date().toISOString() };
-      await persist(working);
+      await persist(working, session);
       try {
         const result = await submit(working);
+        if (!offlineSessionIsCurrent(session)) return;
         if (result.applied) {
           await deleteCommand(working.id);
+          if (!offlineSessionIsCurrent(session)) return;
           await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
+          if (!offlineSessionIsCurrent(session)) return;
           if (working.operation === "work_log.create" && positiveId(result.entityId)) {
             window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT, {
               detail: { userId, projectId, entryId: result.entityId, clientMutationId: working.id },
             }));
           }
+          if (!offlineSessionIsCurrent(session)) return;
           if (working.operation === "defect.create" && positiveId(result.entityId) && positiveId(result.entityNumber)) {
             window.dispatchEvent(new CustomEvent(DEFECT_APPLIED_EVENT, {
               detail: { userId, projectId, defectId: result.entityId, defectNumber: result.entityNumber, clientMutationId: working.id },
@@ -493,9 +530,10 @@ export async function synchronize(userId: number, projectId: number, manual = fa
             receiptId: result.receiptId,
             conflictId: result.conflictId,
             updatedAt: new Date().toISOString(),
-          });
+          }, session);
         }
       } catch (reason) {
+        if (!offlineSessionIsCurrent(session)) return;
         const attempts = working.attempts + 1;
         const authRequired = reason instanceof ApiError && [401, 403].includes(reason.status || 0);
         await persist({
@@ -504,12 +542,14 @@ export async function synchronize(userId: number, projectId: number, manual = fa
           status: authRequired ? "auth_required" : attempts >= ATTENTION_AFTER_ATTEMPTS ? "attention" : "queued",
           lastError: (reason as Error).message,
           updatedAt: new Date().toISOString(),
-        });
+        }, session);
       }
     }
+  } catch (reason) {
+    if (!(reason instanceof OfflineSessionChanged)) throw reason;
   } finally {
-    running = false;
-    changed();
+    if (running === run) running = null;
+    if (offlineSessionIsCurrent(session)) changed();
   }
 }
 
@@ -543,13 +583,18 @@ export async function resolveConflict(
   conflictId: number,
   resolution: "keep_server" | "apply_local" | "latest_write_wins",
 ): Promise<void> {
+  const session = captureOfflineSession(userId);
   await api(`/mobile-sync/conflicts/${conflictId}/resolve`, {
     method: "POST",
     body: JSON.stringify({ resolution }),
   });
+  requireOfflineSession(session);
   const commands = await listCommands(userId, projectId);
+  requireOfflineSession(session);
   const local = commands.find((item) => item.conflictId === conflictId);
   if (local) await deleteCommand(local.id);
+  requireOfflineSession(session);
   await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
+  requireOfflineSession(session);
   changed();
 }

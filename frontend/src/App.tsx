@@ -45,6 +45,7 @@ import { MobileDocumentUpload } from "./modules/android/MobileDocumentUpload";
 import { SyncStatusPanel, syncIsSettled } from "./modules/android/SyncStatusPanel";
 import { usePhoneLayout } from "./modules/android/usePhoneLayout";
 import { clearOfflineData } from "./offline/db";
+import { closeOfflineSession } from "./offline/lifecycle";
 import { enqueueNotificationRead, enqueueTaskUpdate } from "./offline/syncEngine";
 import { useOfflineSync } from "./offline/useOfflineSync";
 import { isOnline } from "./offline/connectivity";
@@ -543,7 +544,7 @@ export function App() {
   const documentRequestRef = useRef(0);
   const mailSyncAbortRef = useRef<AbortController | null>(null);
   const meetingAuthorityCommands = useRef(new Map<string, string>());
-  const offlineSync = useOfflineSync(currentUser?.id || 0, projectId, () => { void load(); });
+  const offlineSync = useOfflineSync(ready ? currentUser?.id || 0 : 0, ready ? projectId : 0, () => { void load(); });
   // Phones keep the top of every screen for content (owner review 13.10.2026):
   // theme controls live in the "Ещё" drawer, sync shows as a header dot unless it needs attention.
   const phoneLayout = usePhoneLayout();
@@ -3134,6 +3135,9 @@ export function App() {
     try {
       await revokePushDevice();
       await api("/auth/logout", { method: "POST" });
+      closeOfflineSession();
+      loadSequenceRef.current += 1;
+      setCurrentUser(null);
       setReady(false);
       if (typeof indexedDB !== "undefined") await clearOfflineData();
     } catch (reason) {

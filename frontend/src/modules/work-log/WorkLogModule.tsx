@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { csrfHeaders } from "../../api/client";
 import { api, ApiError } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
+import { OfflineSessionChanged } from "../../offline/lifecycle";
 import { enqueueWorkLogCreate, enqueuePreparedWorkLogCreate, prepareWorkLogCreate, submitPreparedWorkLogCreate, WORK_LOG_APPLIED_EVENT, type PreparedWorkLogCreate } from "../../offline/syncEngine";
 import "./work-log.css";
 
@@ -195,6 +196,7 @@ export function WorkLogModule({ projectId, userId = 0 }: { projectId: number; us
   }
 
   async function preserveUncertain(command: PreparedWorkLogCreate, reason: unknown, commandScope: string) {
+    if (reason instanceof OfflineSessionChanged) return;
     const attempts = command.attempts + 1;
     const status = reason instanceof ApiError && [401, 403].includes(reason.status || 0)
       ? "auth_required" : reason instanceof ApiError && [400, 404, 409, 422].includes(reason.status || 0)

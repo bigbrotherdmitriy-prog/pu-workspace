@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "../api/client";
 import type { OfflineCommand } from "./types";
+import { closeOfflineSession, resumeOfflineSession } from "./lifecycle";
 
 const store = vi.hoisted(() => ({ rows: new Map<string, OfflineCommand>(), meta: new Map<string, unknown>() }));
 
@@ -24,6 +25,7 @@ vi.mock("./db", () => ({
 import { enqueueNotificationRead, enqueueTaskUpdate, offlineSummary, synchronize } from "./syncEngine";
 
 beforeEach(() => {
+  resumeOfflineSession();
   store.rows.clear();
   store.meta.clear();
   vi.mocked(api).mockReset();
@@ -41,6 +43,38 @@ function matchingReceipt(receiptId: number, status = "applied") {
 }
 
 describe("offline synchronization queue", () => {
+  it("cannot resurrect a cleared row when an old request fails after logout", async () => {
+    await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    let reject!: (reason: Error) => void;
+    vi.mocked(api).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    const operation = synchronize(1, 17);
+    await vi.waitFor(() => expect(api).toHaveBeenCalledOnce());
+    closeOfflineSession(); store.rows.clear(); store.meta.clear();
+    reject(new ApiError("Synthetic late failure", null, "synthetic-request")); await operation;
+    expect(store.rows.size).toBe(0); expect(store.meta.size).toBe(0);
+  });
+
+  it("allows a new authenticated session while ignoring the old in-flight result", async () => {
+    await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    let reject!: (reason: Error) => void;
+    vi.mocked(api).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    const old = synchronize(1, 17); await vi.waitFor(() => expect(api).toHaveBeenCalledOnce());
+    closeOfflineSession(); store.rows.clear(); resumeOfflineSession();
+    await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 45 });
+    vi.mocked(api).mockImplementation(matchingReceipt(10));
+    try {
+      await synchronize(1, 17);
+      expect(api).toHaveBeenCalledTimes(2); expect(store.rows.size).toBe(0);
+    } finally { reject(new ApiError("Synthetic old response lost", null, "synthetic-request")); await old; }
+    expect(store.rows.size).toBe(0);
+  });
+
+  it("refuses an old account's delayed enqueue after another account signs in", async () => {
+    resumeOfflineSession(1); closeOfflineSession(); resumeOfflineSession(2);
+    await expect(enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 })).rejects.toThrow("Сеанс изменился");
+    expect(store.rows.size).toBe(0); expect(api).not.toHaveBeenCalled();
+  });
+
   it("coalesces safe edits of one task without discarding either field", async () => {
     await enqueueTaskUpdate({
       userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",

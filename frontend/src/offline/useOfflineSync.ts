@@ -4,6 +4,7 @@ import {
 } from "./syncEngine";
 import { CONNECTIVITY_EVENT, isOnline } from "./connectivity";
 import type { ServerConflict, SyncSummary } from "./types";
+import { resumeOfflineSession } from "./lifecycle";
 
 const EMPTY: SyncSummary = {
   queued: 0, syncing: 0, attention: 0, authRequired: 0, conflicts: 0, total: 0,
@@ -22,6 +23,7 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   const scope = currentScope.current;
   const isCurrent = (generation: number) => currentScope.current === scope && scope.active && scope.generation === generation;
   useEffect(() => {
+    if (userId > 0 && projectId > 0) resumeOfflineSession(userId);
     scope.active = true;
     scope.generation += 1;
     recoveryRunning.current = false;

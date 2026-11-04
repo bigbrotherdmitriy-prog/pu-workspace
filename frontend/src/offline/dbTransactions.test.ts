@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { OfflineCommand } from "./types";
 import { putCommands, clearOfflineData } from "./db";
-afterEach(() => vi.unstubAllGlobals());
+import { closeOfflineSession, resumeOfflineSession } from "./lifecycle";
+afterEach(() => { vi.unstubAllGlobals(); resumeOfflineSession(); });
 
 function syntheticDatabase(failAt = 0) {
   const requests: any[] = [];
@@ -20,6 +21,15 @@ function syntheticDatabase(failAt = 0) {
   return { requests, transaction, db };
 }
 const commands = [{ id: "synthetic-one" }, { id: "synthetic-two" }] as OfflineCommand[];
+
+it("does not start a stale write transaction when database open resolves after logout", async () => {
+  const s = syntheticDatabase();
+  const observed = putCommands(commands).then(() => "resolved", () => "rejected");
+  closeOfflineSession(); await Promise.resolve(); await Promise.resolve();
+  s.transaction.oncomplete?.();
+  expect(await observed).toBe("rejected");
+  expect(s.db.transaction).not.toHaveBeenCalled(); expect(s.db.close).toHaveBeenCalledOnce();
+});
 
 it("acknowledges selection persistence only after the entire transaction commits", async () => {
   const s = syntheticDatabase(); const completed = vi.fn();

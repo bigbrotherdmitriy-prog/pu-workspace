@@ -3,12 +3,27 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "../../api/client";
 import { DefectsModule } from "./DefectsModule";
 import { enqueuePreparedDefectCreate } from "../../offline/syncEngine";
+import { closeOfflineSession, resumeOfflineSession } from "../../offline/lifecycle";
 
 vi.mock("../../api/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../api/client")>()), api: vi.fn() }));
 vi.mock("../../offline/syncEngine", async importOriginal => ({ ...(await importOriginal<typeof import("../../offline/syncEngine")>()), enqueuePreparedDefectCreate: vi.fn() }));
 const mockApi = vi.mocked(api);
 beforeEach(() => vi.mocked(enqueuePreparedDefectCreate).mockRejectedValue(new Error("Synthetic local storage unavailable")));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); mockApi.mockReset(); vi.mocked(enqueuePreparedDefectCreate).mockReset(); Object.defineProperty(navigator, "onLine", { configurable: true, value: true }); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); mockApi.mockReset(); vi.mocked(enqueuePreparedDefectCreate).mockReset(); resumeOfflineSession(); Object.defineProperty(navigator, "onLine", { configurable: true, value: true }); });
+
+it("never saves an old uncertain create after logout and another account signs in", async () => {
+  mockAll(); const original = mockApi.getMockImplementation()!; let reject!: (reason: Error) => void;
+  mockApi.mockImplementation(async (path, init) => path === "/mobile-sync/defect-create"
+    ? new Promise((_, fail) => { reject = fail; }) : original(path, init));
+  const view = render(<DefectsModule projectId={4} userId={1} />); await screen.findByText(/№ 7/);
+  fireEvent.change(screen.getByPlaceholderText(/не закреплён кабельный лоток/), { target: { value: "Synthetic old actor" } });
+  fireEvent.click(screen.getByText("Добавить замечание"));
+  await waitFor(() => expect(mockApi.mock.calls.some(([path]) => path === "/mobile-sync/defect-create")).toBe(true));
+  closeOfflineSession(); resumeOfflineSession(2); view.rerender(<DefectsModule projectId={4} userId={2} />);
+  await act(async () => { reject(new ApiError("Synthetic old lost response", null, "synthetic-request")); });
+  expect(enqueuePreparedDefectCreate).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Повторить неподтверждённое замечание" })).toBeNull();
+});
 
 it("binds metadata creation to the actual actor through the typed endpoint", async () => {
   mockAll();
