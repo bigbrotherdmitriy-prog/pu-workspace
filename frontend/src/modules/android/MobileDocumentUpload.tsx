@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, FileUp, FolderOpen, Upload, X } from "lucide-react";
-import { api, ApiError } from "../../api/client";
+import { ApiError } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
-import { enqueueDocumentUpload } from "../../offline/syncEngine";
+import { prepareDocumentUploads, enqueuePreparedDocumentUploads, submitPreparedDocumentUpload, type PreparedDocumentUpload } from "../../offline/syncEngine";
 import {
   awaitLocalUploadJobs, isSupportedLocalUploadFile, localUploadMimeType, type QueuedLocalUploadJob,
 } from "../documents/localUploadJobs";
@@ -20,35 +20,6 @@ type Props = {
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_SELECTION_BYTES = 60 * 1024 * 1024;
-const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
-const MAX_FILES_PER_REQUEST = 5;
-
-function partitionFiles(files: File[]): File[][] {
-  const batches: File[][] = [];
-  let current: File[] = [];
-  let currentBytes = 0;
-  for (const file of files) {
-    if (current.length && (current.length >= MAX_FILES_PER_REQUEST || currentBytes + file.size > MAX_REQUEST_BYTES)) {
-      batches.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(file);
-    currentBytes += file.size;
-  }
-  if (current.length) batches.push(current);
-  return batches;
-}
-
-function readBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Не удалось прочитать ${file.name}`));
-    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
-    reader.readAsDataURL(file);
-  });
-}
-
 export function MobileDocumentUpload({
   open, projectId, userId, onClose, onComplete,
   title = "Добавить документы",
@@ -64,11 +35,13 @@ export function MobileDocumentUpload({
   const [warning, setWarning] = useState("");
   const [progress, setProgress] = useState("");
   const [dragging, setDragging] = useState(false);
+  const prepared = useRef<PreparedDocumentUpload[] | null>(null);
   const scopeKey = `${userId}:${projectId}:${open}`;
   const currentScope = useRef({ key: scopeKey, active: false, generation: 0 });
   if (currentScope.current.key !== scopeKey) currentScope.current = { key: scopeKey, active: false, generation: 0 };
   const scope = currentScope.current;
   useEffect(() => {
+    prepared.current = null;
     scope.active = open;
     scope.generation += 1;
     setFiles([]); setBusy(false); setError(""); setWarning(""); setProgress(""); setDragging(false);
@@ -77,7 +50,7 @@ export function MobileDocumentUpload({
   if (!open) return null;
 
   function select(incoming: FileList | null) {
-    if (busy) return;
+    if (busy || prepared.current?.length) return;
     const selected = Array.from(incoming || []);
     const next = selected.filter(isSupportedLocalUploadFile);
     const unsupported = selected.filter((file) => !isSupportedLocalUploadFile(file));
@@ -116,47 +89,36 @@ export function MobileDocumentUpload({
     const alive = () => currentScope.current === scope && scope.active && scope.generation === generation;
     if (!alive()) return;
     let uploadedCount = 0;
+    let savingOffline = false;
     try {
       setBusy(true);
       setError("");
+      const batches = prepared.current?.length ? prepared.current : prepareDocumentUploads({
+        userId, projectId, files: files.map(file => ({ name: file.name, path: file.webkitRelativePath || file.name, mimeType: localUploadMimeType(file), blob: file })),
+      });
+      prepared.current = batches;
       if (!isOnline()) {
-        await enqueueDocumentUpload({
-          userId,
-          projectId,
-          files: files.map((file) => ({
-            name: file.name,
-            path: file.webkitRelativePath || file.name,
-            mimeType: localUploadMimeType(file),
-            blob: file,
-          })),
-        });
+        savingOffline = true;
+        await enqueuePreparedDocumentUploads(batches);
         if (!alive()) return;
+        prepared.current = null;
         setFiles([]);
         onComplete(`Сохранено на устройстве: ${files.length}. Файлы отправятся после восстановления связи.`, []);
         onClose();
         return;
       }
-      const batches = partitionFiles(files);
       const total = { processed: 0, tasks: 0, risks: 0, skipped: 0, jobs: 0 };
       const jobs: QueuedLocalUploadJob[] = [];
+      // Work on a snapshot: acknowledged batches leave the pending intent, never get new IDs.
       for (let index = 0; index < batches.length; index += 1) {
         if (!alive()) return;
         setProgress(`Пачка ${index + 1} из ${batches.length}`);
-        const payload = await Promise.all(batches[index].map(async (file) => ({
-          path: file.webkitRelativePath || file.name,
-          mime_type: localUploadMimeType(file),
-          content_base64: await readBase64(file),
-        })));
+        const queuedJobs = await submitPreparedDocumentUpload(batches[index]);
         if (!alive()) return;
-        const result = await api("/local-upload/analyze", {
-          method: "POST",
-          body: JSON.stringify({ project_id: projectId, files: payload }),
-        });
-        if (!alive()) return;
-        const queuedJobs = Array.isArray(result.jobs) ? result.jobs : [];
         total.jobs += queuedJobs.length;
         jobs.push(...queuedJobs);
-        uploadedCount += batches[index].length;
+        uploadedCount += batches[index].uploads.length;
+        prepared.current = batches.slice(index + 1);
       }
       const completed = await awaitLocalUploadJobs(projectId, jobs, message => { if (alive()) setProgress(message); });
       if (!alive()) return;
@@ -164,6 +126,7 @@ export function MobileDocumentUpload({
       total.tasks = completed.tasks;
       total.risks = completed.risks;
       total.skipped = completed.skipped;
+      prepared.current = null;
       setFiles([]);
       onComplete(
         `Обработано: ${total.processed}. Задач: ${total.tasks}. Рисков: ${total.risks}. Пропущено: ${total.skipped}.`,
@@ -173,19 +136,11 @@ export function MobileDocumentUpload({
     } catch (reason) {
       if (!alive()) return;
       const remaining = files.slice(uploadedCount);
-      if (remaining.length && ((reason instanceof ApiError && reason.status === null) || !isOnline())) {
+      if (!savingOffline && remaining.length && ((reason instanceof ApiError && reason.status === null) || !isOnline())) {
         try {
-          await enqueueDocumentUpload({
-            userId,
-            projectId,
-            files: remaining.map((file) => ({
-              name: file.name,
-              path: file.webkitRelativePath || file.name,
-              mimeType: localUploadMimeType(file),
-              blob: file,
-            })),
-          });
+          await enqueuePreparedDocumentUploads(prepared.current || []);
           if (!alive()) return;
+          prepared.current = null;
           setFiles([]);
           onComplete(
             `Загружено: ${uploadedCount}. Сохранено на устройстве: ${remaining.length}; отправятся после восстановления связи.`,
@@ -194,12 +149,18 @@ export function MobileDocumentUpload({
           onClose();
           return;
         } catch (queueError) {
-          if (alive()) setError((queueError as Error).message);
+          if (alive()) {
+            if (uploadedCount) setFiles(items => items.slice(uploadedCount));
+            setError(`${(queueError as Error).message}. Повтор отправит ту же пачку.`);
+          }
           return;
         }
       }
       if (uploadedCount) {
         setFiles((items) => items.slice(uploadedCount));
+      }
+      if (reason instanceof ApiError && [400, 401, 403, 404, 413, 422].includes(reason.status || 0)) {
+        prepared.current = null; // Definite admission denial: allow correcting the selection.
       }
       const prefix = uploadedCount ? `Уже загружено файлов: ${uploadedCount}. ` : "";
       setError(`${prefix}${(reason as Error).message}`);
@@ -218,9 +179,9 @@ export function MobileDocumentUpload({
         <button type="button" aria-label="Закрыть" disabled={busy} onClick={onClose}><X /></button>
       </div>
       <div className={`mobile-upload-actions${folderOnly ? " folder-only" : ""}`}>
-        {!folderOnly && <button type="button" disabled={busy} onClick={() => filesInput.current?.click()}><FileUp /><span><strong>Выбрать файлы</strong><small>PDF, DOCX, XLSX, TXT, CSV, фото</small></span></button>}
-        <button type="button" disabled={busy} onClick={() => folderInput.current?.click()}><FolderOpen /><span><strong>{folderOnly ? "Выбрать папку проекта" : "Выбрать папку"}</strong><small>С вложенными файлами, до 50 файлов</small></span></button>
-        {!folderOnly && <button type="button" disabled={busy} onClick={() => cameraInput.current?.click()}><Camera /><span><strong>Сфотографировать</strong><small>Счёт, акт или документ</small></span></button>}
+        {!folderOnly && <button type="button" disabled={busy || !!prepared.current?.length} onClick={() => filesInput.current?.click()}><FileUp /><span><strong>Выбрать файлы</strong><small>PDF, DOCX, XLSX, TXT, CSV, фото</small></span></button>}
+        <button type="button" disabled={busy || !!prepared.current?.length} onClick={() => folderInput.current?.click()}><FolderOpen /><span><strong>{folderOnly ? "Выбрать папку проекта" : "Выбрать папку"}</strong><small>С вложенными файлами, до 50 файлов</small></span></button>
+        {!folderOnly && <button type="button" disabled={busy || !!prepared.current?.length} onClick={() => cameraInput.current?.click()}><Camera /><span><strong>Сфотографировать</strong><small>Счёт, акт или документ</small></span></button>}
       </div>
       <input ref={filesInput} hidden type="file" multiple accept=".pdf,.docx,.xlsx,.txt,.md,.csv,.bmp,.jpg,.jpeg,.png,.tif,.tiff,.webp" onChange={(event) => select(event.target.files)} />
       <input ref={folderInput} aria-label="Файлы из папки" hidden type="file" multiple {...{ webkitdirectory: "" }} onChange={(event) => select(event.target.files)} />
@@ -228,12 +189,12 @@ export function MobileDocumentUpload({
       <div
         className={`mobile-upload-files${dragging ? " dragging" : ""}`}
         aria-label="Перетащите файлы сюда"
-        onDragEnter={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
+        onDragEnter={(event) => { event.preventDefault(); if (!busy && !prepared.current?.length) setDragging(true); }}
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={() => setDragging(false)}
-        onDrop={(event) => { event.preventDefault(); setDragging(false); if (!busy) select(event.dataTransfer.files); }}
+        onDrop={(event) => { event.preventDefault(); setDragging(false); if (!busy && !prepared.current?.length) select(event.dataTransfer.files); }}
       >
-        {files.map((file, index) => <article key={`${file.name}-${index}`}><span><strong title={file.webkitRelativePath || file.name}>{file.webkitRelativePath || file.name}</strong><small>{Math.max(1, Math.round(file.size / 1024))} КБ</small></span><button type="button" disabled={busy} aria-label={`Удалить ${file.name}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X /></button></article>)}
+        {files.map((file, index) => <article key={`${file.name}-${index}`}><span><strong title={file.webkitRelativePath || file.name}>{file.webkitRelativePath || file.name}</strong><small>{Math.max(1, Math.round(file.size / 1024))} КБ</small></span><button type="button" disabled={busy || !!prepared.current?.length} aria-label={`Удалить ${file.name}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X /></button></article>)}
         {!files.length && <p>{folderOnly ? "Выберите папку целиком. До подтверждения ничего не будет загружено или изменено." : "Перетащите файлы сюда или выберите выше."} Максимум 4 МБ на файл и 60 МБ за один выбор.</p>}
       </div>
       {warning && <p className="mobile-upload-warning" role="status">{warning}</p>}

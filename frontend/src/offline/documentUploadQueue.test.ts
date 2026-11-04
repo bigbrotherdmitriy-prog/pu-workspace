@@ -12,7 +12,7 @@ vi.mock("./db", () => ({
   getMeta: vi.fn(async (key: string) => store.meta.get(key)),
   setMeta: vi.fn(async (key: string, value: unknown) => { store.meta.set(key, value); }),
 }));
-import { enqueueDocumentUpload, recoverAuthRequired, synchronize } from "./syncEngine";
+import { enqueueDocumentUpload, enqueuePreparedDocumentUploads, prepareDocumentUploads, submitPreparedDocumentUpload, recoverAuthRequired, synchronize } from "./syncEngine";
 const args = () => ({ userId: 1, projectId: 17, files: [{ name: "synthetic.txt", path: "synthetic.txt", mimeType: "text/plain", blob: new Blob(["synthetic"], { type: "text/plain" }) }] });
 beforeEach(() => { store.rows.clear(); store.meta.clear(); vi.mocked(api).mockReset(); Object.defineProperty(navigator, "onLine", { configurable: true, value: true }); });
 
@@ -80,4 +80,28 @@ it("limits small files to five per saved request", async () => {
   const files = Array.from({ length: 6 }, (_, i) => ({ ...args().files[0], name: `${i}.txt`, path: `${i}.txt` }));
   await enqueueDocumentUpload({ userId: 1, projectId: 17, files });
   expect([...store.rows.values()].map(row => row.uploads?.length)).toEqual([5, 1]);
+});
+
+it("preserves batch key and ordered bytes from lost online reply into queued retry", async () => {
+  const input = args(); const batches = prepareDocumentUploads(input);
+  input.files[0].path = "edited-after-snapshot.txt";
+  vi.mocked(api).mockRejectedValueOnce(new ApiError("Synthetic response lost after admission", null, "synthetic-request"));
+  await expect(submitPreparedDocumentUpload(batches[0])).rejects.toThrow();
+  const original = vi.mocked(api).mock.calls[0][1];
+  await enqueuePreparedDocumentUploads(batches);
+  vi.mocked(api).mockResolvedValue({ status: "queued", jobs: [{ job_id: 91, status: "already_queued" }] });
+  await synchronize(1, 17);
+  expect(vi.mocked(api).mock.calls[1][1]?.headers).toEqual(original?.headers);
+  expect(vi.mocked(api).mock.calls[1][1]?.body).toBe(original?.body);
+  expect(JSON.parse(String(original?.body)).files[0].path).toBe("synthetic.txt");
+  expect(store.rows.size).toBe(0);
+});
+
+it("does not reset attempts or suspended authentication when re-saving a prepared batch", async () => {
+  const batches = prepareDocumentUploads(args());
+  await enqueuePreparedDocumentUploads(batches);
+  const prior = store.rows.get(batches[0].id)!; prior.status = "auth_required"; prior.attempts = 2;
+  await enqueuePreparedDocumentUploads(batches);
+  expect(store.rows.get(batches[0].id)?.status).toBe("auth_required");
+  expect(store.rows.get(batches[0].id)?.attempts).toBe(2);
 });

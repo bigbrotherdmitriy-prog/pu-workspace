@@ -266,11 +266,13 @@ export async function enqueueNotificationRead(args: {
   return id;
 }
 
-export async function enqueueDocumentUpload(args: {
+export type PreparedDocumentUpload = Readonly<OfflineCommand & { operation: "document.upload"; uploads: StoredUploadFile[] }>;
+
+export function prepareDocumentUploads(args: {
   userId: number;
   projectId: number;
   files: StoredUploadFile[];
-}): Promise<string> {
+}): PreparedDocumentUpload[] {
   if (!positiveId(args.userId) || !positiveId(args.projectId)) throw new Error("Нужны пользователь и проект для загрузки.");
   if (!args.files.length || args.files.length > 50) throw new Error("Выберите от 1 до 50 файлов.");
   const batches: StoredUploadFile[][] = [];
@@ -287,19 +289,46 @@ export async function enqueueDocumentUpload(args: {
   }
   if (batch.length) batches.push(batch);
   const now = new Date().toISOString();
-  const commands: OfflineCommand[] = batches.map(uploads => ({
+  const commands: PreparedDocumentUpload[] = batches.map(uploads => ({
     id: uuid(), userId: args.userId, projectId: args.projectId, deviceId: deviceId(),
     operation: "document.upload", entityId: 0, patch: {}, uploads,
     clientCreatedAt: now, status: "queued", attempts: 0, updatedAt: now,
   }));
+  for (const command of commands) {
+    for (const file of command.uploads) Object.freeze(file);
+    Object.freeze(command.uploads); Object.freeze(command);
+  }
+  return commands;
+}
+
+export async function enqueuePreparedDocumentUploads(commands: PreparedDocumentUpload[]): Promise<string> {
+  if (!commands.length || commands.some(command => command.operation !== "document.upload"
+    || !positiveId(command.userId) || !positiveId(command.projectId)
+    || command.userId !== commands[0].userId || command.projectId !== commands[0].projectId)) {
+    throw new Error("Некорректная подготовленная загрузка.");
+  }
+  const existing = await listCommands(commands[0].userId, commands[0].projectId);
+  const pending: OfflineCommand[] = [];
+  for (const command of commands) {
+    const prior = existing.find(row => row.id === command.id);
+    if (prior) {
+      if (prior.operation !== "document.upload" || JSON.stringify(await documentUploadBody(prior)) !== JSON.stringify(await documentUploadBody(command))) {
+        throw new Error("Идентификатор загрузки уже использован с другими файлами.");
+      }
+    } else pending.push({ ...command, uploads: command.uploads.map(file => ({ ...file })) });
+  }
   if (navigator.storage?.persist) await navigator.storage.persist().catch(() => false);
-  try { await putCommands(commands); }
+  try { if (pending.length) await putCommands(pending); }
   catch (reason) {
     if (reason instanceof DOMException && reason.name === "QuotaExceededError") throw new Error("На устройстве закончилось место. Файлы не сохранены; освободите память и повторите.");
     throw reason;
   }
   changed();
   return commands[0].id;
+}
+
+export async function enqueueDocumentUpload(args: { userId: number; projectId: number; files: StoredUploadFile[] }): Promise<string> {
+  return enqueuePreparedDocumentUploads(prepareDocumentUploads(args));
 }
 
 function blobBase64(blob: Blob): Promise<string> {
@@ -309,6 +338,28 @@ function blobBase64(blob: Blob): Promise<string> {
     reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
     reader.readAsDataURL(blob);
   });
+}
+
+async function documentUploadBody(command: OfflineCommand) {
+  return { project_id: command.projectId, files: await Promise.all((command.uploads || []).map(async file => ({
+    path: file.path, mime_type: file.mimeType, content_base64: await blobBase64(file.blob),
+  }))) };
+}
+
+export async function submitPreparedDocumentUpload(command: PreparedDocumentUpload): Promise<{ job_id: number; status: string }[]> {
+  if (!positiveId(command.userId) || !positiveId(command.projectId) || command.operation !== "document.upload") throw new Error("Неверный владелец или проект сохранённой загрузки.");
+  const body = await documentUploadBody(command);
+  const response = await api<{ status?: unknown; jobs?: { job_id?: unknown; status?: unknown }[] }>("/local-upload/analyze", {
+    method: "POST", headers: { "Idempotency-Key": command.id, "X-PU-Expected-User": String(command.userId) }, body: JSON.stringify(body),
+  });
+  const acceptedStates = new Set(["queued", "retrying", "running", "already_queued"]);
+  if (response?.status !== "queued" || !Array.isArray(response.jobs) || !body.files.length
+    || response.jobs.length !== body.files.length
+    || response.jobs.some(job => !job || !positiveId(job.job_id) || !acceptedStates.has(String(job.status)))
+    || new Set(response.jobs.map(job => job.job_id)).size !== body.files.length) {
+    throw new Error("Сервер не подтвердил сохранение всех файлов в защищённой очереди.");
+  }
+  return response.jobs.map(job => ({ job_id: job.job_id as number, status: String(job.status) }));
 }
 
 async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number; entityId?: number; entityNumber?: number }> {
@@ -347,24 +398,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
     return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id, entityNumber: response.result.number };
   }
   if (command.operation === "document.upload") {
-    if (!positiveId(command.userId) || !positiveId(command.projectId)) throw new Error("Неверный владелец или проект сохранённой загрузки.");
-    const files = await Promise.all((command.uploads || []).map(async (file) => ({
-      path: file.path,
-      mime_type: file.mimeType,
-      content_base64: await blobBase64(file.blob),
-    })));
-    const response = await api<{ status?: unknown; jobs?: { job_id?: unknown; status?: unknown }[] }>("/local-upload/analyze", {
-      method: "POST",
-      headers: { "Idempotency-Key": command.id, "X-PU-Expected-User": String(command.userId) },
-      body: JSON.stringify({ project_id: command.projectId, files }),
-    });
-    const acceptedStates = new Set(["queued", "retrying", "running", "already_queued"]);
-    if (response?.status !== "queued" || !Array.isArray(response.jobs) || !files.length
-      || response.jobs.length !== files.length
-      || response.jobs.some(job => !job || !positiveId(job.job_id) || !acceptedStates.has(String(job.status)))
-      || new Set(response.jobs.map(job => job.job_id)).size !== files.length) {
-      throw new Error("Сервер не подтвердил сохранение всех файлов в защищённой очереди.");
-    }
+    await submitPreparedDocumentUpload(command as PreparedDocumentUpload);
     return { applied: true };
   }
   const response = await api<{

@@ -1,18 +1,20 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../../api/client";
-import { enqueueDocumentUpload } from "../../offline/syncEngine";
+import { api, ApiError } from "../../api/client";
+import { enqueuePreparedDocumentUploads } from "../../offline/syncEngine";
 import { MobileDocumentUpload } from "./MobileDocumentUpload";
 
 vi.mock("../../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/client")>()),
   api: vi.fn(),
 }));
-vi.mock("../../offline/syncEngine", () => ({ enqueueDocumentUpload: vi.fn() }));
+vi.mock("../../offline/syncEngine", async importOriginal => ({
+  ...(await importOriginal<typeof import("../../offline/syncEngine")>()), enqueuePreparedDocumentUploads: vi.fn(),
+}));
 afterEach(cleanup);
 beforeEach(() => {
   vi.mocked(api).mockReset();
-  vi.mocked(enqueueDocumentUpload).mockReset();
+  vi.mocked(enqueuePreparedDocumentUploads).mockReset();
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
 });
 
@@ -24,6 +26,49 @@ function setup(projectId = 7) {
 }
 
 describe("local document upload", () => {
+  it("assigns a stable explicit batch key before an ambiguous network reply", async () => {
+    vi.mocked(api).mockRejectedValueOnce(new ApiError("Synthetic lost reply", null, "synthetic-request"));
+    vi.mocked(enqueuePreparedDocumentUploads).mockResolvedValue("saved-synthetic");
+    const { input, onComplete } = setup();
+    fireEvent.change(input, { target: { files: [new File(["same bytes"], "same.txt")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(vi.mocked(api).mock.calls[0][1]?.headers).toHaveProperty("Idempotency-Key");
+    const saved = vi.mocked(enqueuePreparedDocumentUploads).mock.calls[0][0];
+    expect(saved).toHaveLength(1);
+    expect(saved[0].id).toBe((vi.mocked(api).mock.calls[0][1]?.headers as Record<string, string>)["Idempotency-Key"]);
+    expect(saved[0].uploads[0].path).toBe("same.txt");
+  });
+
+  it("retains the same request after local quota failure and a manual retry", async () => {
+    vi.mocked(api).mockRejectedValue(new ApiError("Synthetic lost reply", null, "synthetic-request"));
+    vi.mocked(enqueuePreparedDocumentUploads).mockRejectedValueOnce(new Error("Synthetic quota")) .mockResolvedValueOnce("saved");
+    const { input, onComplete } = setup();
+    fireEvent.change(input, { target: { files: [new File(["same bytes"], "same.txt")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+    await screen.findByText(/Synthetic quota/);
+    expect(screen.getByRole("button", { name: "Удалить same.txt" })).toBeDisabled();
+    expect(onComplete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    expect(vi.mocked(api).mock.calls[1][1]).toEqual(vi.mocked(api).mock.calls[0][1]);
+    expect(vi.mocked(enqueuePreparedDocumentUploads).mock.calls[1][0][0].id).toBe(vi.mocked(enqueuePreparedDocumentUploads).mock.calls[0][0][0].id);
+  });
+
+  it("queues only the unchanged failed later batch after earlier files were admitted", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ status: "queued", jobs: Array.from({ length: 5 }, (_, i) => ({ job_id: 80 + i, status: "queued" })) })
+      .mockRejectedValueOnce(new ApiError("Synthetic second batch lost reply", null, "synthetic-request"));
+    vi.mocked(enqueuePreparedDocumentUploads).mockResolvedValue("saved-later");
+    const { input, onComplete } = setup();
+    fireEvent.change(input, { target: { files: Array.from({ length: 6 }, (_, i) => new File([String(i)], `${i}.txt`)) } });
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (6)" }));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    const pending = vi.mocked(enqueuePreparedDocumentUploads).mock.calls[0][0];
+    expect(pending).toHaveLength(1); expect(pending[0].uploads.map(file => file.path)).toEqual(["5.txt"]);
+    expect(pending[0].id).toBe((vi.mocked(api).mock.calls[1][1]?.headers as Record<string, string>)["Idempotency-Key"]);
+    expect(onComplete).toHaveBeenCalledWith(expect.stringContaining("Загружено: 5. Сохранено на устройстве: 1"), []);
+  });
+
   it.each(["project", "user", "reopen", "unmount"])("ignores late upload completion after %s", async (change) => {
     let finish!: (value: unknown) => void;
     vi.mocked(api).mockResolvedValue({ job_id: 91, status: "completed", progress: 100,
@@ -127,18 +172,18 @@ describe("local document upload", () => {
 
   it("keeps selected files durably on the device while offline", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
-    vi.mocked(enqueueDocumentUpload).mockResolvedValue("queued-upload-1");
+    vi.mocked(enqueuePreparedDocumentUploads).mockResolvedValue("queued-upload-1");
     const { input, onComplete, onClose } = setup();
     const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
     fireEvent.change(input, { target: { files: [file] } });
 
     fireEvent.click(screen.getByRole("button", { name: "Загрузить и проанализировать (1)" }));
 
-    await waitFor(() => expect(enqueueDocumentUpload).toHaveBeenCalledOnce());
-    expect(enqueueDocumentUpload).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(enqueuePreparedDocumentUploads).toHaveBeenCalledOnce());
+    expect(enqueuePreparedDocumentUploads).toHaveBeenCalledWith([expect.objectContaining({
       userId: 1, projectId: 7,
-      files: [expect.objectContaining({ name: "invoice.pdf", path: "invoice.pdf" })],
-    }));
+      uploads: [expect.objectContaining({ name: "invoice.pdf", path: "invoice.pdf" })],
+    })]);
     expect(api).not.toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledWith(expect.stringContaining("Сохранено на устройстве: 1"), []);
     expect(onClose).toHaveBeenCalledOnce();
