@@ -170,3 +170,115 @@ def test_move_to_trash_uses_recoverable_provider_operation(scope):
     receipt = GmailMailboxAdapter(workspace).move_message("gm-1", "trash")
     assert receipt.destination == "trash"
     assert workspace.gmail.users_api.messages_api.move == ("trash", {"userId": "me", "id": "gm-1"})
+
+
+@pytest.mark.parametrize("failure", [TimeoutError, RuntimeError])
+def test_send_execute_failure_is_unknown_and_never_retried(failure):
+    workspace = Workspace()
+    calls = []
+    marker = failure("synthetic uncertain outcome")
+
+    class Request:
+        def execute(self):
+            calls.append("execute")
+            raise marker
+
+    def send(**kwargs):
+        calls.append("send")
+        return Request()
+
+    workspace.gmail.users_api.messages_api.send = send
+    with pytest.raises(failure) as caught:
+        GmailMailboxAdapter(workspace).send_message(MailSendCommand(
+            to=("synthetic@example.test",), cc=(), bcc=(), subject="Synthetic", body="Body",
+        ))
+    assert caught.value is marker
+    assert not isinstance(caught.value, MailNotAppliedError)
+    assert calls == ["send", "execute"]
+
+
+@pytest.mark.parametrize("response", [{}, {"id": " "}, {"id": None}])
+def test_missing_send_receipt_is_unknown_and_never_retried(response):
+    workspace = Workspace()
+    calls = []
+
+    class Request:
+        def execute(self):
+            calls.append("execute")
+            return response
+
+    def send(**kwargs):
+        calls.append("send")
+        return Request()
+
+    workspace.gmail.users_api.messages_api.send = send
+    with pytest.raises(RuntimeError, match="^provider_receipt_missing$") as caught:
+        GmailMailboxAdapter(workspace).send_message(MailSendCommand(
+            to=("synthetic@example.test",), cc=(), bcc=(), subject="Synthetic", body="Body",
+        ))
+    assert not isinstance(caught.value, MailNotAppliedError)
+    assert calls == ["send", "execute"]
+
+
+@pytest.mark.parametrize("destination,operation", [("trash", "trash"), ("archive", "modify")])
+def test_move_execute_failure_is_unknown_and_never_retried(destination, operation):
+    workspace = Workspace()
+    calls = []
+    marker = TimeoutError("synthetic uncertain move")
+
+    class Request:
+        def execute(self):
+            calls.append("execute")
+            raise marker
+
+    def move(**kwargs):
+        calls.append(operation)
+        return Request()
+
+    setattr(workspace.gmail.users_api.messages_api, operation, move)
+    with pytest.raises(TimeoutError) as caught:
+        GmailMailboxAdapter(workspace).move_message("gm-synthetic", destination)
+    assert caught.value is marker
+    assert not isinstance(caught.value, MailNotAppliedError)
+    assert calls == [operation, "execute"]
+
+
+def test_send_request_setup_failure_never_executes_and_is_sanitized():
+    workspace = Workspace()
+    calls = []
+
+    def send(**kwargs):
+        calls.append("send")
+        raise RuntimeError("synthetic private marker")
+
+    workspace.gmail.users_api.messages_api.send = send
+    with pytest.raises(MailNotAppliedError, match="^provider_unavailable_before_send$") as caught:
+        GmailMailboxAdapter(workspace).send_message(MailSendCommand(
+            to=("synthetic@example.test",), cc=(), bcc=(), subject="Synthetic", body="Body",
+        ))
+    assert "private" not in str(caught.value)
+    assert calls == ["send"]
+
+
+def test_send_missing_optional_thread_preserves_command_fallback():
+    workspace = Workspace()
+    calls = []
+
+    class Request:
+        def execute(self):
+            calls.append("execute")
+            return {"id": "gm-synthetic"}
+
+    def send(**kwargs):
+        calls.append("send")
+        assert kwargs["body"]["threadId"] == "thread-synthetic"
+        return Request()
+
+    workspace.gmail.users_api.messages_api.send = send
+    receipt = GmailMailboxAdapter(workspace).send_message(MailSendCommand(
+        to=("synthetic@example.test",), cc=(), bcc=(), subject="Synthetic", body="Body",
+        thread_id="thread-synthetic",
+    ))
+    assert receipt.external_message_id == "gm-synthetic"
+    assert receipt.external_thread_id == "thread-synthetic"
+    assert calls == ["send", "execute"]
