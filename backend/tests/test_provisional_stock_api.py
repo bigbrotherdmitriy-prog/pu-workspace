@@ -94,3 +94,31 @@ def test_stock_scope_with_actual_bearer_auth_and_revoked_session(api_stock):
     assert c.get(path,headers={'Authorization':'Bearer '+foreign_token}).status_code==403
     db.query(AuthSession).filter(AuthSession.user_id==own_id).delete(synchronize_session=False);db.commit()
     assert c.get(path,headers={'Authorization':'Bearer '+own_token}).status_code==401
+
+
+@pytest.mark.parametrize('kind',['work-log','defect'])
+def test_typed_offline_create_real_http_replay_actor_and_revoke(api_stock,kind):
+    c,user,p,item,entry,foreign,db=api_stock
+    from app.api.mobile_sync import router as mobile_router
+    from app.core.auth import issue_session
+    from app.models.mobile_sync import MobileSyncCommand
+    from app.models.defects import Defect
+    own=user['id'];own_token,_=issue_session(db,own);foreign_token,_=issue_session(db,foreign)
+    c.app.include_router(mobile_router);c.app.dependency_overrides.pop(require_user)
+    model=WorkLogEntry if kind=='work-log' else Defect
+    before=db.query(model).count()
+    data={'work_date':'2026-10-05','work_name':'SYNTHETIC offline HTTP','qty':'1.250'} if kind=='work-log' else {'title':'SYNTHETIC offline HTTP'}
+    operation='work_log.create' if kind=='work-log' else 'defect.create'
+    body={'project_id':p,'client_mutation_id':'synthetic-http-create','device_id':'synthetic-browser','operation':operation,'client_created_at':'2026-10-05T00:00:00Z','data':data}
+    path=f'/mobile-sync/{kind}-create';headers={'Authorization':'Bearer '+own_token,'X-PU-Expected-User':str(own)}
+    assert c.post(path,json=body).status_code==401
+    first=c.post(path,json=body,headers=headers);assert first.status_code==200
+    assert c.post(path,json=body,headers=headers).json()==first.json()
+    assert db.query(model).count()==before+1 and db.query(MobileSyncCommand).count()==1
+    assert first.json()['result']['author_user_id']==own and first.json()['result']['project_id']==p
+    assert c.post(path,json=body,headers={**headers,'Authorization':'Bearer '+foreign_token}).status_code==403
+    changed={**body,'data':{**data,('work_name' if kind=='work-log' else 'title'):'SYNTHETIC changed'}}
+    assert c.post(path,json=changed,headers=headers).status_code==409
+    db.query(ProjectMember).filter_by(project_id=p,user_id=own).delete(synchronize_session=False);db.commit()
+    assert c.post(path,json=body,headers=headers).status_code==403
+    assert db.query(model).count()==before+1 and db.query(MobileSyncCommand).count()==1
