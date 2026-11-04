@@ -136,3 +136,18 @@ def test_legacy_estimate_read_over_http_stays_correctable_under_strict_policy(ap
     assert response.status_code==200
     assert response.json()['lines'][0]['unit_price'] is None
     assert response.json()['lines'][0]['total']=='2.01'
+
+
+def test_history_and_expected_actor_precondition_for_stock_api(api_stock):
+    from app.models.purchase import MaterialReceipt
+    c,user,p,item,entry,foreign,db=api_stock
+    base=f'/projects/{p}/purchase/{item}'
+    assert c.post(base+'/physical-receipts',json={'operation_key':'wrong-actor','qty':'3','unit':'m'},headers={'X-PU-Expected-User':str(foreign)}).status_code==403
+    assert db.query(MaterialReceipt).count()==0
+    assert c.post(base+'/physical-receipts',json={'operation_key':'history-arrival','qty':'3','unit':'m'},headers={'X-PU-Expected-User':str(user['id'])}).status_code==200
+    response=c.get(base+'/stock-history?limit=1')
+    assert response.status_code==200 and response.json()['balance']=='3.000'
+    assert response.json()['unit']=='m' and response.json()['movements'][0]['kind']=='receipt'
+    assert c.get(base+'/stock-history?limit=101').status_code==422
+    user['id']=foreign
+    assert c.get(base+'/stock-history').status_code==403

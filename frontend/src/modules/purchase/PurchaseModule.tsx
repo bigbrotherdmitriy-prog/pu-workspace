@@ -1,3 +1,4 @@
+import { PhysicalStockPanel } from "./PhysicalStockPanel";
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { PurchaseInvoices } from "./PurchaseInvoices";
@@ -30,7 +31,7 @@ type PurchaseSummary = {
 
 type PurchaseResponse = { items: PurchaseItem[]; summary: PurchaseSummary };
 
-type Props = { projectId: number };
+type Props = { projectId: number; userId?: number; canManageStock?: boolean };
 
 const statusOrder: PurchaseStatus[] = ["need", "ordered", "paid", "received"];
 
@@ -57,7 +58,7 @@ const statusClass: Record<PurchaseStatus, string> = {
 
 const emptySummary: PurchaseSummary = { total: 0, need: 0, ordered: 0, paid: 0, received: 0 };
 
-export function PurchaseModule({ projectId }: Props) {
+export function PurchaseModule({ projectId, userId = 0, canManageStock = false }: Props) {
   const [items, setItems] = useState<PurchaseItem[]>([]);
   const [summary, setSummary] = useState<PurchaseSummary>(emptySummary);
   const [loading, setLoading] = useState(false);
@@ -71,7 +72,7 @@ export function PurchaseModule({ projectId }: Props) {
   const [exportBusy, setExportBusy] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [draftQty, setDraftQty] = useState<Record<number, string>>({});
-  const [tab, setTab] = useState<"spec" | "invoices" | "report">("spec");
+  const [tab, setTab] = useState<"spec" | "invoices" | "report" | "stock">("spec");
 
   useEffect(() => {
     if (projectId <= 0) { setItems([]); setSummary(emptySummary); return; }
@@ -217,11 +218,12 @@ export function PurchaseModule({ projectId }: Props) {
         >
           Отчёт
         </button>
+        <button type="button" role="tab" aria-selected={tab === "stock"} className={`pr-tab${tab === "stock" ? " pr-tab-active" : ""}`} onClick={() => setTab("stock")}>Склад</button>
       </div>
 
       {tab !== "spec" && (
         <div className="pr-tab-panel">
-          {tab === "invoices" ? (
+          {tab === "stock" ? (<PhysicalStockPanel projectId={projectId} userId={userId} canManage={canManageStock} items={items} />) : tab === "invoices" ? (
             <PurchaseInvoices projectId={projectId} onChanged={() => setReloadTick((value) => value + 1)} />
           ) : (
             <PurchaseReport projectId={projectId} reloadKey={reloadTick} />

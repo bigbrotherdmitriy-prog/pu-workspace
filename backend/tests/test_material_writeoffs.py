@@ -93,3 +93,45 @@ def test_replay_preserves_historical_unit_after_material_unit_changes(stock):
         consume(stock,key='new-consumption')
     reverse_writeoff(db,p,first['id'],operation_key='historical-unit-storno')
     assert physical_balance(db,p,item)==Decimal('3')
+
+
+def test_recent_history_binds_scope_reversals_and_physical_balance(stock):
+    from app.material_writeoffs import stock_history
+    arrive(stock);first=consume(stock);db,p,item,entry,_=stock
+    reverse_writeoff(db,p,first['id'],operation_key='history-storno')
+    history=stock_history(db,p,item,limit=25)
+    assert history['balance']=='3.000' and history['unit']=='m'
+    assert len(history['movements'])==3
+    original=next(row for row in history['movements'] if row['kind']=='writeoff')
+    assert original['reversed'] is True
+    assert next(row for row in history['movements'] if row['kind']=='storno')['reverses_id']==first['id']
+    page=stock_history(db,p,item,limit=1)
+    assert len(page['movements'])==1 and page['has_more'] is True
+    with pytest.raises(LookupError):stock_history(db,p+999,item,limit=25)
+    for limit in [0,101,True]:
+        with pytest.raises(ValueError):stock_history(db,p,item,limit=limit)
+
+
+def test_new_arrivals_cannot_mix_historical_units_after_material_unit_change(stock):
+    from app.material_writeoffs import stock_history
+    arrive(stock);first=consume(stock);db,p,item,entry,_=stock
+    db.get(PurchaseItem,item).unit='kg';db.flush()
+    with pytest.raises(ValueError,match='истории материала'):
+        record_receipt(db,p,item,operation_key='new-different-unit',qty='1',unit='kg')
+    assert record_receipt(db,p,item,operation_key='synthetic-arrive',qty='3',unit='m')['qty']=='3.000'
+    assert consume(stock)==first
+    reverse_writeoff(db,p,first['id'],operation_key='unit-storno')
+    assert stock_history(db,p,item,limit=25)['unit']=='m'
+
+
+def test_legacy_mixed_units_remain_auditable_without_a_fake_sum(stock):
+    from app.models.purchase import MaterialReceipt
+    from app.material_writeoffs import stock_history
+    from app.material_receipts import MixedPhysicalUnitsError
+    arrive(stock);db,p,item,entry,_=stock
+    # Historical fixture bypasses new safe admission to exercise legacy recovery.
+    db.add(MaterialReceipt(project_id=p,purchase_item_id=item,operation_key='SYNTHETIC-legacy-mixed',qty=2,unit='kg'));db.flush()
+    history=stock_history(db,p,item,limit=25)
+    assert len(history['movements'])==2 and history['balance'] is None and history['unit'] is None
+    assert history['warning'] and {row['unit'] for row in history['movements']}=={'m','kg'}
+    with pytest.raises(MixedPhysicalUnitsError):physical_balance(db,p,item)

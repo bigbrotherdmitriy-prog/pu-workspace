@@ -2,7 +2,7 @@
 from decimal import Decimal, localcontext
 from sqlalchemy import select, func, text
 from app.models.purchase import MaterialReceipt, MaterialWriteoff, PurchaseItem
-from app.material_receipts import prepare_writeoff, _quantity, _text
+from app.material_receipts import prepare_writeoff, _quantity, _text, existing_physical_unit, MixedPhysicalUnitsError
 from app.provisional_policy import get_policy
 
 
@@ -21,6 +21,7 @@ def _locked_item(db, project_id, item_id):
 def physical_balance(db, project_id, item_id):
     with db.no_autoflush, localcontext() as context:
         context.prec = 50
+        existing_physical_unit(db, project_id, item_id)
         receipts = db.scalar(select(func.coalesce(func.sum(MaterialReceipt.qty), 0)).where(MaterialReceipt.project_id == project_id, MaterialReceipt.purchase_item_id == item_id))
         rows = db.execute(select(MaterialWriteoff.qty, MaterialWriteoff.reverses_id).where(MaterialWriteoff.project_id == project_id, MaterialWriteoff.purchase_item_id == item_id)).all()
         return Decimal(receipts) + sum((qty if reverse is not None else -qty for qty, reverse in rows), Decimal(0))
@@ -52,6 +53,9 @@ def record_writeoff(db, project_id, item_id, entry_id, *, operation_key, qty, un
         # A genuine replay is bound to its persisted unit; only NEW consumption
         # is checked against the current material definition (no conversion).
         intent = prepare_writeoff(db, project_id, item_id, entry_id, operation_key=key, qty=quantity, unit=normalized_unit)
+        historical_unit = existing_physical_unit(db,project_id,item_id)
+        if historical_unit is not None and historical_unit != normalized_unit:
+            raise ValueError("Единица движения отличается от истории материала; автоматического пересчёта нет")
         if policy.negative_stock == 'forbid' and physical_balance(db, project_id, item_id) < quantity:
             raise ValueError('Insufficient physical stock')
         # Core INSERT does not flush unrelated pending caller objects.
@@ -87,3 +91,41 @@ def require_deletable_fact(db, project_id, entry_id, *, policy=None):
     with db.no_autoflush:
         if db.scalar(select(MaterialWriteoff.id).where(MaterialWriteoff.project_id == project_id, MaterialWriteoff.work_log_entry_id == entry_id).limit(1)) is not None:
             raise ValueError('Запись связана со складской историей: удаление запрещено')
+
+
+
+def stock_history(db,project_id,item_id,*,limit=25):
+    """Bounded recent physical movements; does not infer stock from finance."""
+    from sqlalchemy.orm import aliased
+    if any(type(v) is not int or v<=0 for v in [project_id,item_id,limit]) or limit>100:
+        raise ValueError('Invalid stock history scope/budget')
+    with db.no_autoflush:
+        item=db.scalar(select(PurchaseItem.id).where(PurchaseItem.id==item_id,PurchaseItem.project_id==project_id))
+        if item is None:raise LookupError('Material not found in project')
+        arrivals=db.execute(select(MaterialReceipt.id,MaterialReceipt.qty,MaterialReceipt.unit,
+            MaterialReceipt.operation_key,MaterialReceipt.source_document_ref,MaterialReceipt.created_at).where(
+            MaterialReceipt.project_id==project_id,MaterialReceipt.purchase_item_id==item_id).order_by(MaterialReceipt.created_at.desc(),MaterialReceipt.id.desc()).limit(limit+1)).all()
+        other=aliased(MaterialWriteoff)
+        reversed_query=select(other.id).where(other.reverses_id==MaterialWriteoff.id,other.project_id==project_id).exists().correlate(MaterialWriteoff)
+        consumption=db.execute(select(MaterialWriteoff.id,MaterialWriteoff.qty,MaterialWriteoff.unit,
+            MaterialWriteoff.operation_key,MaterialWriteoff.work_log_entry_id,MaterialWriteoff.reverses_id,
+            MaterialWriteoff.created_at,reversed_query.label('reversed')).where(
+            MaterialWriteoff.project_id==project_id,MaterialWriteoff.purchase_item_id==item_id).order_by(MaterialWriteoff.created_at.desc(),MaterialWriteoff.id.desc()).limit(limit+1)).all()
+        rows=[{'id':a.id,'kind':'receipt','qty':format(_quantity(a.qty),'.3f'),'unit':a.unit,
+               'operation_key':a.operation_key,'source_document_ref':a.source_document_ref,
+               'created_at':a.created_at.isoformat(),'work_log_entry_id':None,'reverses_id':None,'reversed':False} for a in arrivals]
+        rows += [{'id':a.id,'kind':'storno' if a.reverses_id is not None else 'writeoff','qty':format(_quantity(a.qty),'.3f'),
+                 'unit':a.unit,'operation_key':a.operation_key,'source_document_ref':None,
+                 'created_at':a.created_at.isoformat(),'work_log_entry_id':a.work_log_entry_id,
+                 'reverses_id':a.reverses_id,'reversed':bool(a.reversed)} for a in consumption]
+        rows.sort(key=lambda row:(row['created_at'],row['kind'],row['id']),reverse=True)
+        warning=None
+        try:
+            historical_unit=existing_physical_unit(db,project_id,item_id)
+            balance=format(physical_balance(db,project_id,item_id),'.3f')
+        except MixedPhysicalUnitsError as exc:
+            historical_unit=None;balance=None;warning=str(exc)
+        current_unit=db.scalar(select(PurchaseItem.unit).where(PurchaseItem.id==item_id,PurchaseItem.project_id==project_id))
+        return {'movements':rows[:limit],'limit':limit,'has_more':len(rows)>limit,
+                'unit':historical_unit or current_unit if warning is None else None,
+                'balance':balance,'warning':warning}

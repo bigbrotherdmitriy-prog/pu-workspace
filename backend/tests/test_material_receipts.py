@@ -348,8 +348,10 @@ def test_historical_replay_survives_current_unit_change(world):
         _record(world, unit='шт')
     with pytest.raises(ValueError, match='unit must match'):
         _record(world, operation_key='new-arrival-old-unit')
-    new = _record(world, operation_key='new-arrival-current-unit', unit='шт')
-    assert new['id'] != original['id']
-    assert db.scalar(select(func.count()).select_from(MaterialReceipt)) == 2
+    # Provisional full stock ledger rejects adding incomparable units. A genuine
+    # historical replay still returns the exact original receipt above.
+    with pytest.raises(ValueError, match='истории материала'):
+        _record(world, operation_key='new-arrival-current-unit', unit='шт')
+    assert db.scalar(select(func.count()).select_from(MaterialReceipt)) == 1
     with pytest.raises(LookupError):
         record_receipt(db, other, item_id, operation_key='delivery-1-line-1', qty='1.250', unit='м')

@@ -1,10 +1,10 @@
 """Explicit physical arrivals; no payment inference, writeoff or API wiring."""
 from decimal import Decimal, InvalidOperation, localcontext
 
-from sqlalchemy import Numeric, cast, literal, select
+from sqlalchemy import Numeric, cast, literal, select, text
 from sqlalchemy.orm import Session
 
-from app.models.purchase import MaterialReceipt, PurchaseItem
+from app.models.purchase import MaterialReceipt, MaterialWriteoff, PurchaseItem
 
 
 _QUANTUM = Decimal("0.001")
@@ -41,6 +41,20 @@ def _quantity(value):
         raise ValueError("Invalid physical receipt quantity") from exc
 
 
+class MixedPhysicalUnitsError(ValueError):
+    pass
+
+
+def existing_physical_unit(db, project_id, item_id):
+    """Never add incomparable unit histories or invent a conversion."""
+    with db.no_autoflush:
+        units = db.execute(select(MaterialReceipt.unit).where(MaterialReceipt.project_id == project_id, MaterialReceipt.purchase_item_id == item_id).union(
+            select(MaterialWriteoff.unit).where(MaterialWriteoff.project_id == project_id, MaterialWriteoff.purchase_item_id == item_id)).limit(2)).scalars().all()
+        if len(units) > 1:
+            raise MixedPhysicalUnitsError("В истории материала разные единицы: требуется сверка без автоматического пересчёта")
+        return units[0] if units else None
+
+
 def record_receipt(db: Session, project_id: int, purchase_item_id: int, *,
                    operation_key: str, qty, unit: str, source_document_ref: str | None = None) -> dict:
     """Record/replay one arrival in the caller transaction without flushing caller state."""
@@ -58,9 +72,11 @@ def record_receipt(db: Session, project_id: int, purchase_item_id: int, *,
     else:
         raise RuntimeError("Physical receipt insertion requires SQLite or PostgreSQL")
     with db.no_autoflush:
+        if dialect == "sqlite":
+            db.execute(text("UPDATE purchase_items SET id=id WHERE id=:id AND project_id=:p"), {"id": purchase_item_id, "p": project_id})
         item = db.execute(select(PurchaseItem.id, PurchaseItem.unit).where(
             PurchaseItem.id == purchase_item_id, PurchaseItem.project_id == project_id,
-        )).first()
+        ).with_for_update()).first()
         if item is None:
             raise LookupError("Material not found in project")
         receipt_query = select(MaterialReceipt.__table__).where(
@@ -68,6 +84,9 @@ def record_receipt(db: Session, project_id: int, purchase_item_id: int, *,
         )
         row = db.execute(receipt_query).mappings().one_or_none()
         if row is None:
+            historical_unit = existing_physical_unit(db, project_id, purchase_item_id)
+            if historical_unit is not None and historical_unit != unit:
+                raise ValueError("Единица движения отличается от истории материала; автоматического пересчёта нет")
             if not isinstance(item.unit, str) or item.unit.strip() != unit:
                 raise ValueError("Receipt unit must match the material unit; conversion is not supported")
             # SQLite Numeric uses floating-point storage. Reject lossy values before writing.

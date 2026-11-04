@@ -1,0 +1,4 @@
+import {expect,it} from "vitest";
+import {checkedStockIntent,requireStockAcknowledgement,stockQuantity,stockRequest} from "./stockIntents";
+it("rejects lossy nonfinite and nonpositive quantity instead of rounding",()=>{expect(stockQuantity("1,25")).toBe("1.250");for(const v of["NaN","Infinity","0","-1","1.0001","1e3"])expect(()=>stockQuantity(v)).toThrow();});
+it("binds saved intents to actor/project and derives fixed paths",()=>{const raw={version:1,userId:1,projectId:7,itemId:4,kind:"receipt",operationKey:"synthetic-operation",qty:"1.000",unit:"m"};const intent=checkedStockIntent(raw,1,7);expect(stockRequest(intent).path).toBe("/projects/7/purchase/4/physical-receipts");expect(()=>checkedStockIntent(raw,2,7)).toThrow();expect(()=>checkedStockIntent(raw,1,8)).toThrow();expect(()=>requireStockAcknowledgement(intent,{id:5,project_id:7,purchase_item_id:4,operation_key:"other",qty:"1.000",unit:"m"})).toThrow();});

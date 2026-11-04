@@ -127,7 +127,7 @@ export function clearOfflineData(options: { scope?: "all_local_data" | "current_
         metadata.onerror = () => { failure ||= metadata.error; transaction.abort(); };
         metadata.onsuccess = () => {
           const cursor = metadata.result; if (!cursor) return;
-          if (String(cursor.key).startsWith(`last-synced:${options.userId}:`)) cursor.delete();
+          if ([`last-synced:${options.userId}:`, `stock-intent:${options.userId}:`].some(prefix => String(cursor.key).startsWith(prefix))) cursor.delete();
           cursor.continue();
         };
       }

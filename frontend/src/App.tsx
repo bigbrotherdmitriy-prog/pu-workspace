@@ -3816,7 +3816,7 @@ export function App() {
       {quickInvoice && <InvoiceQuickConfirm projectId={quickInvoice.projectId} proposalId={quickInvoice.id} onClose={() => { setQuickInvoice(null); window.history.replaceState({}, "", window.location.pathname); }} onConfirmed={() => void load()} />}
       {active === "Исполнительная документация" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><ExecutiveDocsModule projectId={projectId} /></section>}
       {active === "Рабочая документация" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><RdModule projectId={projectId} /></section>}
-      {active === "Закупка" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PurchaseModule projectId={projectId} /></section>}
+      {active === "Закупка" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><PurchaseModule projectId={projectId} userId={currentUser?.id || 0} canManageStock={!!currentUser?.is_admin || members.some(member => member.user_id === currentUser?.id && ["manager", "owner"].includes(member.role))} /></section>}
       {active === "Оборудование" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EquipmentModule projectId={projectId} /></section>}
       {active === "Сметы и КС" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><EstimatesModule projectId={projectId} /></section>}
       {active === "Замечания" && <section className={`module-overlay ${collapsed ? "collapsed" : ""}`}><DefectsModule projectId={projectId} userId={currentUser?.id} /></section>}
