@@ -335,6 +335,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
     return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id, entityNumber: response.result.number };
   }
   if (command.operation === "document.upload") {
+    if (!positiveId(command.userId) || !positiveId(command.projectId)) throw new Error("Неверный владелец или проект сохранённой загрузки.");
     const files = await Promise.all((command.uploads || []).map(async (file) => ({
       path: file.path,
       mime_type: file.mimeType,
@@ -342,7 +343,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
     })));
     await api("/local-upload/analyze", {
       method: "POST",
-      headers: { "Idempotency-Key": command.id },
+      headers: { "Idempotency-Key": command.id, "X-PU-Expected-User": String(command.userId) },
       body: JSON.stringify({ project_id: command.projectId, files }),
     });
     return { applied: true };

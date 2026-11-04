@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_project_role, require_user
+from app.mobile_create_owner import require_create_owner
 from app.database import get_db
 from app.local_upload_staging import (
     LocalUploadAdmissionDenied,
@@ -104,10 +105,13 @@ def analyze_local_folder(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    expected_user_id: int | None = Header(default=None, alias="X-PU-Expected-User"),
 ):
     # Authorization and whole-batch admission happen before base64 decode or
     # any staging read/write.
     require_project_role(db, user, payload.project_id, "manager")
+    if expected_user_id is not None:
+        require_create_owner(user, expected_user_id)
     try:
         runtime = get_local_upload_runtime()
         estimated = [_decoded_size(item.content_base64) for item in payload.files]

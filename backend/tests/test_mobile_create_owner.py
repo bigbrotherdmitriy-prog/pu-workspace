@@ -47,3 +47,21 @@ def test_absent_authenticated_actor_cannot_be_supplied_by_the_precondition():
     with pytest.raises(HTTPException) as exc:
         require_create_owner(None, 1)
     assert exc.value.status_code == 401
+
+
+def test_queued_upload_declares_owner_precondition_before_decode_or_staging():
+    """Static binding proof only; HTTP parsing/authorization remains UNRUN."""
+    import ast
+    from pathlib import Path
+    tree = ast.parse((Path(__file__).parents[1] / 'app/api/local_upload.py').read_text())
+    route = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'analyze_local_folder')
+    defaults = dict(zip([arg.arg for arg in route.args.args][-len(route.args.defaults):], route.args.defaults))
+    header = defaults['expected_user_id']
+    assert isinstance(header, ast.Call) and isinstance(header.func, ast.Name) and header.func.id == 'Header'
+    keywords = {kw.arg: kw.value for kw in header.keywords}
+    assert isinstance(keywords['default'], ast.Constant) and keywords['default'].value is None
+    assert isinstance(keywords['alias'], ast.Constant) and keywords['alias'].value == 'X-PU-Expected-User'
+    calls = [node for node in ast.walk(route) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+    precondition = next(node for node in calls if node.func.id == 'require_create_owner')
+    assert [arg.id for arg in precondition.args] == ['user', 'expected_user_id']
+    assert precondition.lineno < min(node.lineno for node in calls if node.func.id in {'get_local_upload_runtime', 'decode_local_file', 'stage_and_enqueue'})
