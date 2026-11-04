@@ -34,19 +34,24 @@ def _result(row):
 
 def record_writeoff(db, project_id, item_id, entry_id, *, operation_key, qty, unit, policy=None):
     policy = policy or get_policy()
+    if any(type(value) is not int or value <= 0 for value in [project_id,item_id,entry_id]):
+        raise ValueError('Invalid writeoff identity')
+    quantity = _quantity(qty)
+    key = _text(operation_key,160,'writeoff operation key')
+    normalized_unit = _text(unit,40,'writeoff unit')
     with db.no_autoflush:
-        intent = prepare_writeoff(db, project_id, item_id, entry_id, operation_key=operation_key, qty=qty, unit=unit)
-        quantity = _quantity(qty)
         _locked_item(db, project_id, item_id)
-        # Lock the fact as well: deletion must never race an admitted movement.
         from app.models.work_log import WorkLogEntry
         entry = db.scalar(select(WorkLogEntry.id).where(WorkLogEntry.id == entry_id, WorkLogEntry.project_id == project_id).with_for_update())
         if entry is None: raise LookupError('Work log entry not found in project')
-        old = db.scalar(select(MaterialWriteoff).where(MaterialWriteoff.project_id == project_id, MaterialWriteoff.operation_key == intent['operation_key']))
+        old = db.scalar(select(MaterialWriteoff).where(MaterialWriteoff.project_id == project_id, MaterialWriteoff.operation_key == key))
         if old:
-            if (old.purchase_item_id, old.work_log_entry_id, old.qty, old.unit, old.reverses_id) != (item_id, entry_id, quantity, intent['unit'], None):
+            if (old.purchase_item_id, old.work_log_entry_id, old.qty, old.unit, old.reverses_id) != (item_id, entry_id, quantity, normalized_unit, None):
                 raise ValueError('Writeoff operation key conflict')
             return _result(old)
+        # A genuine replay is bound to its persisted unit; only NEW consumption
+        # is checked against the current material definition (no conversion).
+        intent = prepare_writeoff(db, project_id, item_id, entry_id, operation_key=key, qty=quantity, unit=normalized_unit)
         if policy.negative_stock == 'forbid' and physical_balance(db, project_id, item_id) < quantity:
             raise ValueError('Insufficient physical stock')
         # Core INSERT does not flush unrelated pending caller objects.
@@ -63,6 +68,8 @@ def reverse_writeoff(db, project_id, writeoff_id, *, operation_key):
         original = db.scalar(select(MaterialWriteoff).where(MaterialWriteoff.id == writeoff_id, MaterialWriteoff.project_id == project_id))
         if original is None: raise LookupError('Writeoff not found in project')
         if original.reverses_id is not None: raise ValueError('Cannot reverse a reversal')
+        _quantity(original.qty)
+        _text(original.unit,40,'stored writeoff unit')
         _locked_item(db, project_id, original.purchase_item_id)
         old = db.scalar(select(MaterialWriteoff).where(MaterialWriteoff.project_id == project_id, MaterialWriteoff.operation_key == key))
         if old:

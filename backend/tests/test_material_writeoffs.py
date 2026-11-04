@@ -83,3 +83,13 @@ def test_fact_with_historical_consumption_cannot_be_deleted_even_after_storno(st
 def test_caller_rollback_removes_admitted_movement(stock):
     arrive(stock);stock[0].commit();consume(stock);stock[0].rollback()
     assert stock[0].scalar(select(func.count()).select_from(MaterialWriteoff))==0
+
+
+def test_replay_preserves_historical_unit_after_material_unit_changes(stock):
+    arrive(stock);first=consume(stock);db,p,item,entry,_=stock
+    db.get(PurchaseItem,item).unit='kg';db.flush()
+    assert consume(stock)==first
+    with pytest.raises(ValueError,match='unit must match'):
+        consume(stock,key='new-consumption')
+    reverse_writeoff(db,p,first['id'],operation_key='historical-unit-storno')
+    assert physical_balance(db,p,item)==Decimal('3')

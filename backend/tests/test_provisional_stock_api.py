@@ -78,3 +78,19 @@ def test_drawing_point_api_scope_repeat_and_bounds(api_stock):
     assert c.get(f'/projects/{p}/defects/{defect["id"]}').json()['drawing_point']==first.json()
     user['id']=foreign
     assert c.post(path,json=body).status_code==403
+
+
+def test_stock_scope_with_actual_bearer_auth_and_revoked_session(api_stock):
+    c,user,p,item,entry,foreign,db=api_stock
+    from app.core.auth import issue_session
+    from app.models.auth_session import AuthSession
+    own_id=user['id']
+    own_token,_=issue_session(db,own_id)
+    foreign_token,_=issue_session(db,foreign)
+    c.app.dependency_overrides.pop(require_user)
+    path=f'/projects/{p}/purchase/{item}/physical-balance'
+    assert c.get(path).status_code==401
+    assert c.get(path,headers={'Authorization':'Bearer '+own_token}).status_code==200
+    assert c.get(path,headers={'Authorization':'Bearer '+foreign_token}).status_code==403
+    db.query(AuthSession).filter(AuthSession.user_id==own_id).delete(synchronize_session=False);db.commit()
+    assert c.get(path,headers={'Authorization':'Bearer '+own_token}).status_code==401
