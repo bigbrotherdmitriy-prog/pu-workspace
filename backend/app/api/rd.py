@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.jobs.queue import enqueue
-from app.models.rd import RdSheet, RdSpecItem, RdVolume
+from app.models.rd import RdSheet, RdSpecItem, RdVolume, RdVolumeVersion
 from app.rd_service import (
     import_folder,
     item_counts,
@@ -188,3 +188,24 @@ def confirm_all(
         item.status = "confirmed"
     db.commit()
     return {"confirmed": len(items)}
+
+
+@router.get("/{project_id}/rd/drawing-versions")
+def list_drawing_versions(project_id: int, limit: int = Query(25, ge=1, le=100),
+                          before_id: int | None = Query(None, gt=0),
+                          db: Session = Depends(get_db), user=Depends(require_user)):
+    """Bounded immutable metadata only; never resolves provider URLs or reads blobs."""
+    require_project_role(db, user, project_id, "viewer")
+    query = select(RdVolumeVersion, RdVolume.title).join(
+        RdVolume, RdVolume.id == RdVolumeVersion.volume_id
+    ).where(RdVolume.project_id == project_id)
+    if before_id is not None:
+        query = query.where(RdVolumeVersion.id < before_id)
+    rows = db.execute(query.order_by(RdVolumeVersion.id.desc()).limit(limit + 1)).all()
+    return {"versions": [{"id": v.id, "volume_id": v.volume_id, "title": title,
+            "file_name": v.file_name, "mime_type": v.mime_type,
+            "content_sha256": v.content_sha256, "size_bytes": v.size_bytes,
+            "created_at": v.created_at.isoformat() if v.created_at else None}
+            for v, title in rows[:limit]],
+            "next_before_id": rows[limit-1][0].id if len(rows) > limit else None,
+            "metadata_only": True}

@@ -4,13 +4,14 @@ import { isOnline } from "../../offline/connectivity";
 import { OfflineSessionChanged } from "../../offline/lifecycle";
 import { prepareDefectCreate, enqueuePreparedDefectCreate, submitPreparedDefectCreate, DEFECT_APPLIED_EVENT, type PreparedDefectCreate } from "../../offline/syncEngine";
 import "./defects.css";
+import { DrawingPointPanel, type DrawingPoint } from "./DrawingPointPanel";
 
 type Photo = { id: number; kind: "before" | "after"; filename: string };
 type Comment = { id: number; text: string; status_change: string | null; created_at: string | null };
 type Defect = {
   id: number; number: number; title: string; description: string | null; object_name: string | null; location: string | null;
   priority: string; status: string; status_label: string; responsible: string | null; due_date: string | null; overdue: boolean;
-  photos: Photo[]; comments?: Comment[];
+  rd_version_id?: number | null; drawing_point?: DrawingPoint | null; photos: Photo[]; comments?: Comment[];
 };
 type Listing = { defects: Defect[]; counts: Record<string, number>; overdue: number };
 
@@ -24,7 +25,7 @@ const emptyForm = () => ({ title: "", description: "", object_name: "", location
 
 type DefectIntent = { command: PreparedDefectCreate; submitted: ReturnType<typeof emptyForm>; files: File[]; key: string };
 
-export function DefectsModule({ projectId, userId = 0 }: { projectId: number; userId?: number }) {
+export function DefectsModule({ projectId, userId = 0, canEditDrawing = false }: { projectId: number; userId?: number; canEditDrawing?: boolean }) {
   const [data, setData] = useState<Listing>({ defects: [], counts: {}, overdue: 0 });
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
@@ -391,6 +392,7 @@ export function DefectsModule({ projectId, userId = 0 }: { projectId: number; us
           </div>
           <p className="df-note">{[open.object_name, open.location].filter(Boolean).join(", ")} · {STATUS_LABEL[open.status]}{open.responsible ? ` · ${open.responsible}` : ""}{open.due_date ? ` · срок ${dateRu(open.due_date)}` : ""}</p>
           {open.description && <p>{open.description}</p>}
+          <DrawingPointPanel key={`${scopeKey}:${open.id}`} projectId={projectId} userId={userId} defectId={open.id} boundVersionId={open.rd_version_id ?? null} point={open.drawing_point ?? null} canEdit={canEditDrawing} onBound={() => { void openDefect(open.id); reload(); }} />
           {(["before", "after"] as const).map((kind) => (
             <div key={kind}>
               <h5>{kind === "before" ? "Фото замечания" : "Фото после устранения"}</h5>

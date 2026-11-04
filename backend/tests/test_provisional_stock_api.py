@@ -151,3 +151,29 @@ def test_history_and_expected_actor_precondition_for_stock_api(api_stock):
     assert c.get(base+'/stock-history?limit=101').status_code==422
     user['id']=foreign
     assert c.get(base+'/stock-history').status_code==403
+
+
+def test_drawing_versions_scoped_paging_and_expected_actor(api_stock):
+    c,user,p,item,entry,foreign,db=api_stock
+    from app.api.rd import router as rd_router
+    from app.models.rd import RdVolume,RdVolumeVersion
+    from app.defects import create_defect
+    c.app.include_router(rd_router)
+    own=RdVolume(project_id=p,title='SYNTHETIC own',file_name='SYNTHETIC.pdf',provider='local')
+    other_project=db.query(Project).filter(Project.id!=p).one()
+    other=RdVolume(project_id=other_project.id,title='SYNTHETIC foreign',file_name='foreign.pdf',provider='local')
+    db.add_all([own,other]);db.flush()
+    versions=[RdVolumeVersion(volume_id=own.id,content_sha256=ch*64,size_bytes=0,file_name='SYNTHETIC.pdf',mime_type='application/pdf') for ch in ['a','b','c']]
+    alien=RdVolumeVersion(volume_id=other.id,content_sha256='d'*64,size_bytes=0,file_name='foreign.pdf',mime_type='application/pdf')
+    db.add_all([*versions,alien]);db.flush();defect=create_defect(db,p,None,{'title':'SYNTHETIC'});db.commit()
+    path=f'/projects/{p}/rd/drawing-versions'
+    first=c.get(path+'?limit=2').json();assert [v['id'] for v in first['versions']]==[versions[2].id,versions[1].id]
+    assert first['metadata_only'] is True
+    second=c.get(path+f'?limit=2&before_id={first["next_before_id"]}').json()
+    assert [v['id'] for v in second['versions']]==[versions[0].id];assert second['next_before_id'] is None
+    assert c.get(path+'?limit=101').status_code==422
+    point=f'/projects/{p}/defects/{defect["id"]}/drawing-point';body={'rd_version_id':versions[0].id,'page':1,'x':0.0,'y':1.0}
+    assert c.post(point,json=body,headers={'X-PU-Expected-User':str(foreign)}).status_code==403
+    assert c.get(f'/projects/{p}/defects/{defect["id"]}').json()['drawing_point'] is None
+    assert c.post(point,json=body,headers={'X-PU-Expected-User':str(user['id'])}).status_code==200
+    user['id']=foreign;assert c.get(path).status_code==403

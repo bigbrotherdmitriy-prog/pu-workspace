@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, Header
 from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy.orm import Session
 
@@ -184,8 +184,11 @@ class DrawingPointBody(BaseModel):
 
 
 @router.post('/{project_id}/defects/{defect_id}/drawing-point')
-def attach_drawing_point(project_id: int, defect_id: int, body: DrawingPointBody, db: Session = Depends(get_db), user=Depends(require_user)):
+def attach_drawing_point(project_id: int, defect_id: int, body: DrawingPointBody, expected_user_id: int | None = Header(None, alias='X-PU-Expected-User', gt=0), db: Session = Depends(get_db), user=Depends(require_user)):
     require_project_role(db,user,project_id,'editor')
+    if expected_user_id is not None:
+        from app.mobile_create_owner import require_create_owner
+        require_create_owner(user, expected_user_id)
     from app.drawing_points import bind_point
     try:
         result=bind_point(db,project_id,defect_id,version_id=body.rd_version_id,page=body.page,x=body.x,y=body.y)
