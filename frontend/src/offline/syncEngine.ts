@@ -1,3 +1,4 @@
+import { prepareDefectPhotos, checkDefectPhotos, photoIdentity, sendDefectPhotos } from "./defectPhotos";
 import { api, ApiError } from "../api/client";
 import { isOnline } from "./connectivity";
 import { captureOfflineSession, offlineSessionEpoch, offlineSessionIsCurrent, offlineActorIsCurrent, requireOfflineSession, OfflineSessionChanged } from "./lifecycle";
@@ -190,15 +191,25 @@ export function prepareDefectCreate(args: { userId: number; projectId: number; d
     clientCreatedAt: now, status: "queued" as const, attempts: 0, updatedAt: now });
 }
 
+export async function prepareDefectCreateWithPhotos(args: { userId: number; projectId: number; data: Record<string, unknown>; files: File[] }): Promise<PreparedDefectCreate> {
+  const session = captureOfflineSession(args.userId);
+  const command = prepareDefectCreate(args);
+  const photos = await prepareDefectPhotos(args.files);
+  requireOfflineSession(session);
+  return Object.freeze({ ...command, photos });
+}
+
 export async function enqueuePreparedDefectCreate(command: PreparedDefectCreate): Promise<string> {
   const session = captureOfflineSession(command.userId);
   if (command.operation !== "defect.create" || !positiveId(command.userId) || !positiveId(command.projectId)
       || "entityId" in command || "uploads" in command) throw new Error("Некорректное подготовленное замечание.");
-  const snapshot = { ...command, patch: checkedDefectData(command.patch) };
+  const photos = await checkDefectPhotos(command.photos);
+  requireOfflineSession(session);
+  const snapshot = { ...command, patch: checkedDefectData(command.patch), ...(photos.length ? { photos } : {}) };
   const existing = (await listCommands(snapshot.userId, snapshot.projectId)).find((row) => row.id === snapshot.id);
   requireOfflineSession(session);
   if (existing) {
-    if (existing.operation !== "defect.create" || JSON.stringify(defectEnvelope(existing)) !== JSON.stringify(defectEnvelope(snapshot))) {
+    if (existing.operation !== "defect.create" || JSON.stringify(defectEnvelope(existing)) !== JSON.stringify(defectEnvelope(snapshot)) || JSON.stringify(photoIdentity(await checkDefectPhotos(existing.photos))) !== JSON.stringify(photoIdentity(photos))) {
       throw new Error("Идентификатор замечания уже использован с другими данными.");
     }
     return existing.id;
@@ -423,6 +434,8 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
         || !positiveId(response.receipt_id) || !positiveId(response.entity_id) || !positiveId(response.result?.number)
         || response.result?.id !== response.entity_id || response.result?.project_id !== command.projectId
         || response.result?.author_user_id !== command.userId) throw new Error("Не подтверждено создание замечания.");
+      if (command.photos?.length) await sendDefectPhotos(command.userId, command.projectId, response.entity_id, command.photos);
+      requireOfflineSession(session);
       return { applied: true, receiptId: response.receipt_id, entityId: response.entity_id, entityNumber: response.result.number };
     }
     if (command.operation === "document.upload") {

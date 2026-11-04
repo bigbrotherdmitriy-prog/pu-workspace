@@ -1,3 +1,4 @@
+import type { DefectPhotoIntent } from "./defectPhotos";
 export type OfflineCommandStatus =
   | "queued"
   | "syncing"
@@ -32,7 +33,7 @@ type OfflineCommandBase = {
 export type OfflineCommand = OfflineCommandBase & (
   | { operation: "task.update" | "notification.mark_read" | "document.upload"; entityId: number }
   | { operation: "work_log.create"; entityId?: never }
-  | { operation: "defect.create"; entityId?: never; uploads?: never }
+  | { operation: "defect.create"; entityId?: never; uploads?: never; photos?: readonly DefectPhotoIntent[] }
 );
 
 export type ServerConflict = {

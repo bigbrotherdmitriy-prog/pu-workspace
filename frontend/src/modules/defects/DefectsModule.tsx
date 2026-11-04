@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, csrfHeaders } from "../../api/client";
 import { isOnline } from "../../offline/connectivity";
 import { OfflineSessionChanged } from "../../offline/lifecycle";
-import { prepareDefectCreate, enqueuePreparedDefectCreate, submitPreparedDefectCreate, DEFECT_APPLIED_EVENT, type PreparedDefectCreate } from "../../offline/syncEngine";
+import { prepareDefectCreate, prepareDefectCreateWithPhotos, synchronize, enqueuePreparedDefectCreate, submitPreparedDefectCreate, DEFECT_APPLIED_EVENT, type PreparedDefectCreate } from "../../offline/syncEngine";
 import "./defects.css";
 import { DrawingPointPanel, type DrawingPoint } from "./DrawingPointPanel";
 
@@ -161,6 +161,13 @@ export function DefectsModule({ projectId, userId = 0, canEditDrawing = false }:
     if (!alive() || intent.key !== scopeKey) return;
     createBusy.current = true; setBusy(true); setError(""); setMessage("");
     try {
+      if (intent.command.photos?.length) {
+        await enqueuePreparedDefectCreate(intent.command);
+        removePending(intent.key); queued.current.add(`${intent.key}:${intent.command.id}`);
+        if (alive()) { clearSubmitted(intent.submitted, intent.files, alive); setMessage("Замечание и исходные фото сохранены на устройстве. Ожидают подтверждения сервера."); }
+        if (alive() && isOnline()) await synchronize(userId, projectId, true);
+        return;
+      }
       if (!isOnline()) {
         if (intent.files.length) throw new Error("Фото без связи пока не сохраняются. Оставьте форму открытой и повторите после восстановления связи.");
         await enqueuePreparedDefectCreate(intent.command);
@@ -199,12 +206,18 @@ export function DefectsModule({ projectId, userId = 0, canEditDrawing = false }:
       setError("Войдите заново и выберите проект для создания замечания."); return;
     }
     const submitted = { ...form }, files = [...newPhotos];
+    const generation = scope.generation;
+    const alive = () => currentScope.current === scope && scope.active && scope.generation === generation;
+    createBusy.current = true; setBusy(true);
     try {
       const body: Record<string, string> = {};
       for (const [key, value] of Object.entries(submitted)) if (value.trim()) body[key] = value.trim();
-      const command = prepareDefectCreate({ userId, projectId, data: body });
+      const command = files.length ? await prepareDefectCreateWithPhotos({ userId, projectId, data: body, files }) : prepareDefectCreate({ userId, projectId, data: body });
+      if (!alive()) return;
+      createBusy.current = false;
       await runIntent({ command, submitted, files, key: scopeKey });
-    } catch (reason) { fail(reason, "Не удалось подготовить замечание"); }
+    } catch (reason) { if (alive()) fail(reason, "Не удалось подготовить замечание"); }
+    finally { if (alive()) { createBusy.current = false; setBusy(false); } }
   }
 
   async function openDefect(id: number) {
@@ -339,6 +352,7 @@ export function DefectsModule({ projectId, userId = 0, canEditDrawing = false }:
         <label className="df-wide">Фото с телефона или из файлов
           <input ref={photoInput} type="file" accept="image/*" capture="environment" multiple aria-label="Фото замечания" onChange={(e) => setNewPhotos(Array.from(e.target.files ?? []))} />
         </label>
+        <p className="df-note df-wide">Фото: JPG/PNG/WEBP, до 12 файлов, 10 МБ каждый и 20 МБ всего. Локальное сохранение требует свободного места и защищённого браузера.</p>
         {newPhotos.length > 0 && <span className="df-note df-wide">Выбрано фото: {newPhotos.length}</span>}
         <button type="submit" className="df-save" disabled={busy || !!pending}>{busy ? "Сохраняем…" : "Добавить замечание"}</button>
       </form>

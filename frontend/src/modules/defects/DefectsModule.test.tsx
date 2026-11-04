@@ -1,14 +1,18 @@
+// @ts-expect-error Vitest Node runtime supplies this builtin; browser TS config excludes Node types.
+import { webcrypto } from "node:crypto";
+// @ts-expect-error Vitest Node runtime supplies real structured-cloneable Blob/File, not browser production dependencies.
+import { Blob as NativeBlob, File as NativeFile } from "node:buffer";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "../../api/client";
 import { DefectsModule } from "./DefectsModule";
-import { enqueuePreparedDefectCreate } from "../../offline/syncEngine";
+import { enqueuePreparedDefectCreate, synchronize } from "../../offline/syncEngine";
 import { closeOfflineSession, resumeOfflineSession } from "../../offline/lifecycle";
 
 vi.mock("../../api/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../api/client")>()), api: vi.fn() }));
-vi.mock("../../offline/syncEngine", async importOriginal => ({ ...(await importOriginal<typeof import("../../offline/syncEngine")>()), enqueuePreparedDefectCreate: vi.fn() }));
+vi.mock("../../offline/syncEngine", async importOriginal => ({ ...(await importOriginal<typeof import("../../offline/syncEngine")>()), enqueuePreparedDefectCreate: vi.fn(), synchronize: vi.fn() }));
 const mockApi = vi.mocked(api);
-beforeEach(() => vi.mocked(enqueuePreparedDefectCreate).mockRejectedValue(new Error("Synthetic local storage unavailable")));
+beforeEach(() => { vi.stubGlobal("crypto", webcrypto); vi.stubGlobal("Blob", NativeBlob); vi.stubGlobal("File", NativeFile); vi.mocked(synchronize).mockReset(); vi.mocked(synchronize).mockResolvedValue(); vi.mocked(enqueuePreparedDefectCreate).mockRejectedValue(new Error("Synthetic local storage unavailable")); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); mockApi.mockReset(); vi.mocked(enqueuePreparedDefectCreate).mockReset(); resumeOfflineSession(); Object.defineProperty(navigator, "onLine", { configurable: true, value: true }); });
 
 it("never saves an old uncertain create after logout and another account signs in", async () => {
@@ -53,16 +57,14 @@ it("refuses create without an authenticated actor instead of inventing one", asy
   expect(mockApi.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 });
 
-it("honestly refuses offline photos and keeps the original draft and selection", async () => {
-  mockAll(); Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
-  render(<DefectsModule projectId={4} userId={1} />); await screen.findByText(/№ 7/);
-  const title = screen.getByPlaceholderText(/не закреплён кабельный лоток/);
-  fireEvent.change(title, { target: { value: "Synthetic offline photo" } });
-  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["synthetic"], "photo.jpg", { type: "image/jpeg" })] } });
-  fireEvent.click(screen.getByText("Добавить замечание"));
-  expect((await screen.findByRole("alert")).textContent).toContain("Фото без связи пока не сохраняются");
-  expect(enqueuePreparedDefectCreate).not.toHaveBeenCalled(); expect((title as HTMLInputElement).value).toBe("Synthetic offline photo");
-  expect(screen.getByText("Выбрано фото: 1")).toBeTruthy();
+it("persists offline metadata and exact photo bytes together before clearing the draft", async () => {
+ mockAll(); Object.defineProperty(navigator,"onLine",{configurable:true,value:false});vi.mocked(enqueuePreparedDefectCreate).mockResolvedValue("synthetic-local");
+ render(<DefectsModule projectId={4} userId={1} />);await screen.findByText(/№ 7/);
+ const title=screen.getByPlaceholderText(/не закреплён кабельный лоток/);fireEvent.change(title,{target:{value:"Synthetic offline photo"}});
+ fireEvent.change(screen.getByLabelText("Фото замечания"),{target:{files:[new File(["synthetic"],"photo.jpg",{type:"image/jpeg"})]}});fireEvent.click(screen.getByText("Добавить замечание"));
+ await waitFor(()=>expect(enqueuePreparedDefectCreate).toHaveBeenCalledOnce());await screen.findByText(/Замечание и исходные фото сохранены/);
+ const command=vi.mocked(enqueuePreparedDefectCreate).mock.calls[0][0];expect(command.photos).toHaveLength(1);expect(await command.photos![0].blob.text()).toBe("synthetic");expect(command.photos![0].sha256).toMatch(/^[a-f0-9]{64}$/);
+ expect(synchronize).not.toHaveBeenCalled();expect(mockApi.mock.calls.filter(([,init])=>init?.method==="POST")).toHaveLength(0);expect((title as HTMLInputElement).value).toBe("");
 });
 
 it("keeps metadata on local quota refusal without acknowledging persistence", async () => {
@@ -142,21 +144,12 @@ it("lists defects with status counters, thumbnails and overdue mark", async () =
   expect(document.querySelector("img.df-thumb")?.getAttribute("src")).toBe("/projects/4/defects/3/photos/5");
 });
 
-it("creates a defect and uploads the photo with the CSRF token", async () => {
-  document.cookie = "pu_csrf=tok-d";
-  mockAll();
-  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-  vi.stubGlobal("fetch", fetchMock);
-  render(<DefectsModule projectId={4} userId={1} />);
-  await screen.findByText(/№ 7/);
-  fireEvent.change(screen.getByPlaceholderText(/не закреплён кабельный лоток/), { target: { value: "Трещина" } });
-  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["x"], "p.jpg", { type: "image/jpeg" })] } });
-  fireEvent.click(screen.getByText("Добавить замечание"));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  expect(String(fetchMock.mock.calls[0][0])).toContain("/projects/4/defects/9/photos?name=p.jpg&kind=before");
-  expect((fetchMock.mock.calls[0][1] as { headers: Record<string, string> }).headers["X-CSRF-Token"]).toBe("tok-d");
-  expect(await screen.findByText("Замечание № 8 добавлено")).toBeTruthy();
-  document.cookie = "pu_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+it("queues photos before online synchronization and never falls back to legacy raw upload",async()=>{
+ mockAll();vi.mocked(enqueuePreparedDefectCreate).mockResolvedValue("synthetic-queued");const fetchMock=vi.fn();vi.stubGlobal("fetch",fetchMock);
+ render(<DefectsModule projectId={4} userId={1} />);await screen.findByText(/№ 7/);
+ fireEvent.change(screen.getByPlaceholderText(/не закреплён кабельный лоток/),{target:{value:"Synthetic queued online photo"}});
+ fireEvent.change(screen.getByLabelText("Фото замечания"),{target:{files:[new File(["x"],"p.jpg",{type:"image/jpeg"})]}});fireEvent.click(screen.getByText("Добавить замечание"));
+ await waitFor(()=>expect(synchronize).toHaveBeenCalledWith(1,4,true));expect(enqueuePreparedDefectCreate).toHaveBeenCalledOnce();expect(fetchMock).not.toHaveBeenCalled();expect(vi.mocked(enqueuePreparedDefectCreate).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(synchronize).mock.invocationCallOrder[0]);
 });
 
 it("opens a defect and moves it to in progress", async () => {
@@ -254,71 +247,27 @@ it("keeps the newest chosen defect when earlier detail resolves later", async ()
 });
 
 
-it("does not create the same defect again after a known create succeeds but photo upload fails", async () => {
-  mockAll();
-  const original = mockApi.getMockImplementation()!;
-  mockApi.mockImplementation(async (path, init) => path === "/projects/4/defects/9" ? { ...defect, id: 9, number: 8, photos: [] } : original(path, init));
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ detail: "Synthetic photo failure" }) }));
-  render(<DefectsModule projectId={4} userId={1} />);
-  await screen.findByText(/№ 7\. Не закреплён лоток/);
-  fireEvent.change(screen.getByPlaceholderText(/не закреплён кабельный лоток/), { target: { value: "Synthetic created defect" } });
-  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["x"], "synthetic.jpg", { type: "image/jpeg" })] } });
-  fireEvent.click(screen.getByText("Добавить замечание"));
-  await screen.findByRole("alert");
-  fireEvent.click(await screen.findByText("Добавить замечание"));
-  const creates = () => mockApi.mock.calls.filter(([path, init]) => path === "/mobile-sync/defect-create" && init?.method === "POST");
-  expect(creates()).toHaveLength(1);
-  expect(screen.getByText(/Не все фото удалось загрузить/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Открыть созданное замечание" }));
-  expect(await screen.findByRole("dialog", { name: "Замечание 8" })).toBeTruthy();
-  expect(creates()).toHaveLength(1);
+it("does not create server metadata when photo persistence fails",async()=>{
+ mockAll();render(<DefectsModule projectId={4} userId={1} />);await screen.findByText(/№ 7/);
+ const title=screen.getByPlaceholderText(/не закреплён кабельный лоток/);fireEvent.change(title,{target:{value:"Synthetic quota photo"}});
+ fireEvent.change(screen.getByLabelText("Фото замечания"),{target:{files:[new File(["x"],"p.jpg",{type:"image/jpeg"})]}});fireEvent.click(screen.getByText("Добавить замечание"));await screen.findByRole("alert");
+ expect(mockApi.mock.calls.filter(([,init])=>init?.method==="POST")).toHaveLength(0);expect(synchronize).not.toHaveBeenCalled();expect((title as HTMLInputElement).value).toBe("Synthetic quota photo");expect(screen.getByText("Выбрано фото: 1")).toBeTruthy();
 });
 
-it("keeps a new draft and newly chosen photo when an earlier created defect's upload fails", async () => {
-  mockAll();
-  let rejectUpload!: (reason: unknown) => void;
-  const pending = new Promise<unknown>((_, reject) => { rejectUpload = reject; });
-  const fetchMock = vi.fn().mockImplementationOnce(() => pending).mockResolvedValue({ ok: true, status: 200 });
-  vi.stubGlobal("fetch", fetchMock);
-  render(<DefectsModule projectId={4} userId={1} />);
-  await screen.findByText(/№ 7\. Не закреплён лоток/);
-  const title = screen.getByPlaceholderText(/не закреплён кабельный лоток/);
-  fireEvent.change(title, { target: { value: "Synthetic first defect" } });
-  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["old"], "old.jpg", { type: "image/jpeg" })] } });
-  fireEvent.click(screen.getByText("Добавить замечание"));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  fireEvent.change(title, { target: { value: "Synthetic next draft" } });
-  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["new"], "new.jpg", { type: "image/jpeg" })] } });
-  await act(async () => { rejectUpload(new Error("Synthetic old upload failure")); await pending.catch(() => undefined); });
-  expect((title as HTMLInputElement).value).toBe("Synthetic next draft");
-  fireEvent.click(await screen.findByText("Добавить замечание"));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-  expect(String(fetchMock.mock.calls[1][0])).toContain("name=new.jpg");
+it("keeps an edited draft and new selection while the earlier photo command persists",async()=>{
+ mockAll();let finish!:(value:string)=>void;vi.mocked(enqueuePreparedDefectCreate).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;})).mockResolvedValue("synthetic-second");
+ render(<DefectsModule projectId={4} userId={1} />);await screen.findByText(/№ 7/);const title=screen.getByPlaceholderText(/не закреплён кабельный лоток/);
+ fireEvent.change(title,{target:{value:"Synthetic first"}});fireEvent.change(screen.getByLabelText("Фото замечания"),{target:{files:[new File(["old"],"old.jpg",{type:"image/jpeg"})]}});fireEvent.click(screen.getByText("Добавить замечание"));await waitFor(()=>expect(finish).toBeTypeOf("function"));
+ fireEvent.change(title,{target:{value:"Synthetic next draft"}});fireEvent.change(screen.getByLabelText("Фото замечания"),{target:{files:[new File(["new"],"new.jpg",{type:"image/jpeg"})]}});await act(async()=>finish("synthetic-first"));
+ expect((title as HTMLInputElement).value).toBe("Synthetic next draft");fireEvent.click(screen.getByText("Добавить замечание"));await waitFor(()=>expect(enqueuePreparedDefectCreate).toHaveBeenCalledTimes(2));expect(vi.mocked(enqueuePreparedDefectCreate).mock.calls[1][0].photos![0].name).toBe("new.jpg");
 });
 
-
-it("keeps another project's draft intact when an old photo upload fails", async () => {
-  mockAll();
-  let rejectUpload!: (reason: unknown) => void;
-  const pending = new Promise<unknown>((_, reject) => { rejectUpload = reject; });
-  const fetchMock = vi.fn().mockImplementation(() => pending);
-  vi.stubGlobal("fetch", fetchMock);
-  const { rerender } = render(<DefectsModule projectId={4} userId={1} />);
-  await screen.findByText(/№ 7\. Не закреплён лоток/);
-  const title = screen.getByPlaceholderText(/не закреплён кабельный лоток/);
-  fireEvent.change(title, { target: { value: "Synthetic original project defect" } });
-  fireEvent.change(screen.getByLabelText("Фото замечания"), { target: { files: [new File(["x"], "old-project.jpg", { type: "image/jpeg" })] } });
-  fireEvent.click(screen.getByText("Добавить замечание"));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  rerender(<DefectsModule projectId={5} userId={1} />);
-  fireEvent.change(title, { target: { value: "Synthetic other project draft" } });
-  await act(async () => { rejectUpload(new Error("Synthetic old scope upload failure")); await pending.catch(() => undefined); });
-  expect((title as HTMLInputElement).value).toBe("Synthetic other project draft");
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Открыть созданное замечание" })).toBeNull();
-  expect(String(fetchMock.mock.calls[0][0])).toContain("/projects/4/defects/9/photos");
-  rerender(<DefectsModule projectId={4} userId={1} />);
-  expect(screen.getByRole("button", { name: "Открыть созданное замечание" })).toBeTruthy();
+it("does not update another project after the old photo command finishes persisting",async()=>{
+ mockAll();let finish!:(value:string)=>void;vi.mocked(enqueuePreparedDefectCreate).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const view=render(<DefectsModule projectId={4} userId={1} />);await screen.findByText(/№ 7/);const title=screen.getByPlaceholderText(/не закреплён кабельный лоток/);
+ fireEvent.change(title,{target:{value:"Synthetic old project"}});fireEvent.change(screen.getByLabelText("Фото замечания"),{target:{files:[new File(["old"],"old.jpg",{type:"image/jpeg"})]}});fireEvent.click(screen.getByText("Добавить замечание"));await waitFor(()=>expect(finish).toBeTypeOf("function"));
+ view.rerender(<DefectsModule projectId={5} userId={1} />);fireEvent.change(title,{target:{value:"Synthetic other project draft"}});await act(async()=>finish("synthetic-old"));
+ expect((title as HTMLInputElement).value).toBe("Synthetic other project draft");expect(screen.queryByText(/Замечание и исходные фото сохранены/)).toBeNull();expect(synchronize).not.toHaveBeenCalled();expect(vi.mocked(enqueuePreparedDefectCreate).mock.calls[0][0].projectId).toBe(4);
 });
 
 it("does not acknowledge a create response without a valid persisted defect id", async () => {
