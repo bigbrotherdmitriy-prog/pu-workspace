@@ -18,7 +18,7 @@ it('confirmed offline logout immediately closes UI, warns about preserving pendi
  const dependencies={window:{confirm},revokePushDevice:()=>new Promise(()=>{}),beginLocalSignout:()=>{calls.push('fence');return[];},loadSequenceRef:seq,setCurrentUser:()=>calls.push('user-null'),setReady:(v:boolean)=>calls.push('ready:'+v),setSignoutNotice:vi.fn(),clearOwnedBrowserCaches:()=>cache,flushPendingRevocations:async()=>{throw Error('SYNTHETIC offline');},isLocallySignedOut:()=>true};
  const fn=new Function(...Object.keys(dependencies),compiled(logout)+';return logout;')(...Object.values(dependencies));
  const pending=fn();expect(calls).toEqual(['fence','user-null','ready:false']);expect(seq.current).toBe(1);
- expect(confirm.mock.calls[0][0]).toContain('Неотправленные фото и правки будут сохранены');release();await pending;
+ expect(confirm.mock.calls[0][0]).toContain('Неотправленные фото и правки');expect(confirm.mock.calls[0][0]).toContain('Несохранённые поля форм');release();await pending;
 });
 it('cancel warning leaves session and all local data unchanged',async()=>{
  const fence=vi.fn();const fn=new Function('window','beginLocalSignout',compiled(logout)+';return logout;')({confirm:()=>false},fence);

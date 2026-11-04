@@ -1,4 +1,4 @@
-import { beginLocalSignout, clearOwnedBrowserCaches, flushPendingRevocations, isLocallySignedOut, prepareAuthenticatedSession, signoutGeneration, startLogoutRecovery } from './auth/localSignout';
+import { beginLocalSignout, clearOwnedBrowserCaches, flushPendingRevocations, isLocallySignedOut, LOCAL_SIGNOUT_STORAGE_KEY, prepareAuthenticatedSession, SESSION_TRANSITION_EVENT, signoutGeneration, startLogoutRecovery } from './auth/localSignout';
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
@@ -395,6 +395,23 @@ function snapshotActionError(error: unknown) {
 }
 
 export function App() {
+  const [sessionRevision, setSessionRevision] = useState(0);
+  useEffect(() => {
+    const reset = () => setSessionRevision(value => value + 1);
+    const storage = (event: StorageEvent) => { if (event.key === LOCAL_SIGNOUT_STORAGE_KEY) reset(); };
+    const restored = (event: PageTransitionEvent) => { if (event.persisted) reset(); };
+    window.addEventListener(SESSION_TRANSITION_EVENT, reset);
+    window.addEventListener('storage', storage); window.addEventListener('pageshow', restored);
+    return () => {
+      window.removeEventListener(SESSION_TRANSITION_EVENT, reset);
+      window.removeEventListener('storage', storage); window.removeEventListener('pageshow', restored);
+    };
+  }, []);
+  // Drop every cached private field, not only currentUser, across authentication.
+  return <WorkspaceSession key={sessionRevision} />;
+}
+
+function WorkspaceSession() {
   const { projectId, projectIdRef, rememberProject: persistProjectSelection, initialProjectId } = useProjectSelection();
   // A push «Счёт из почты» opens ?project_id=…&invoice=… straight into the one-tap confirmation card.
   const [quickInvoice, setQuickInvoice] = useState(() => {
@@ -2876,7 +2893,7 @@ export function App() {
       setError((e as Error).message);
     }
   }
-  if (!ready) return <Login notice={signoutNotice} onDone={() => { setSignoutNotice(''); setReady(true); }} />;
+  if (!ready) return <Login notice={signoutNotice || (isLocallySignedOut() ? 'Локальный выход выполнен. Сохранённые неотправленные данные остаются на устройстве. Для работы войдите явно.' : '')} onDone={() => { setSignoutNotice(''); }} />;
   function openContextualAssistant(prompt: string) {
     setIncomingName(`Контекстная помощь · ${active}`);
     setIncomingText(prompt);
@@ -3137,7 +3154,7 @@ export function App() {
     } else setActive(section);
   }
   async function logout() {
-    if (!window.confirm('Выйти на этом устройстве? Неотправленные фото и правки будут сохранены для вашей учётной записи. До явного входа они не отправляются. Серверная сессия будет отозвана после появления сети.')) return;
+    if (!window.confirm('Выйти на этом устройстве? Неотправленные фото и правки, уже сохранённые на устройстве, останутся для вашей учётной записи. Несохранённые поля форм могут быть потеряны: сохраните их перед выходом. До явного входа очередь не отправляется. Серверная сессия будет отозвана после появления сети.')) return;
     void revokePushDevice(); // Start before the API fence; never await networking.
     const warnings = beginLocalSignout();
     loadSequenceRef.current += 1; setCurrentUser(null); setReady(false);
@@ -3201,6 +3218,7 @@ export function App() {
           )}
           <button
             className="icon"
+            aria-label="Выйти из аккаунта"
             onClick={() => { void logout(); }}
           >
             <LogOut />

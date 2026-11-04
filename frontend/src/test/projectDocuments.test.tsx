@@ -89,4 +89,15 @@ describe("project document isolation", () => {
     expect(screen.queryByText(documentA.summary)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: documentA.name })).not.toBeInTheDocument();
   });
+  it('unmounts all private workspace state immediately on confirmed local logout',async()=>{
+    const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
+    try {
+      await openDocuments();await screen.findByText(documentA.summary);
+      fireEvent.click(screen.getByRole('button',{name:'Выйти из аккаунта'}));
+      await screen.findByRole('heading',{name:'Вход в PU Workspace'});
+      expect(screen.queryByText(documentA.summary)).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading',{name:documentA.name})).not.toBeInTheDocument();
+      expect(confirm).toHaveBeenCalledOnce();
+    } finally {confirm.mockRestore();}
+  });
 });

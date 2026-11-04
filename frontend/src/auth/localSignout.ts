@@ -1,6 +1,8 @@
 /** Durable local fence and revocation-only queue. Never stores login tokens/passwords. */
 import { closeOfflineSession, resumeOfflineSession } from '../offline/lifecycle';
-const FENCE = 'pu.local-signout.v1';
+export const LOCAL_SIGNOUT_STORAGE_KEY = 'pu.local-signout.v1';
+export const SESSION_TRANSITION_EVENT = 'pu-auth-session-transition';
+const FENCE = LOCAL_SIGNOUT_STORAGE_KEY;
 const PREFIX = 'pu.logout-revoke.v1.';
 const COOKIE = 'pu_local_signed_out';
 let closed = false;
@@ -62,6 +64,7 @@ export function completeExplicitLogin(body: { logout_ticket?: unknown; user?: { 
   document.cookie = `${COOKIE}=; Max-Age=0; Path=/; SameSite=Strict`;
   generation++; closed = false; activeTicket = body.logout_ticket;
   resumeOfflineSession(Number(body.user!.id));
+  window.dispatchEvent(new Event(SESSION_TRANSITION_EVENT));
 }
 export function beginLocalSignout(): string[] {
   closed = true; generation++; closeOfflineSession();
@@ -73,6 +76,7 @@ export function beginLocalSignout(): string[] {
   try { if (!activeTicket) throw new Error(); queue(activeTicket); }
   catch { warnings.push('Отзыв сессии не сохранён на диске; не закрывайте вкладку до появления сети'); }
   activeTicket = null;
+  window.dispatchEvent(new Event(SESSION_TRANSITION_EVENT));
   return warnings;
 }
 export function flushPendingRevocations(): Promise<void> {
