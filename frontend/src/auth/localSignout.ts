@@ -38,12 +38,14 @@ async function boundedFetch(path: string, options: RequestInit = {}) {
   try { return await fetch(path, { ...options, cache: 'no-store', signal: controller.signal }); }
   finally { clearTimeout(timer); }
 }
-export async function prepareAuthenticatedSession() {
+export async function prepareAuthenticatedSession(request?: () => Promise<{ logout_ticket?: unknown; user_id?: unknown }>) {
   const started = generation;
   if (isLocallySignedOut()) throw new Error('Требуется явный вход');
-  const response = await boundedFetch('/auth/logout-intent', { credentials: 'same-origin' });
-  if (!response.ok) throw new Error('Не удалось подготовить безопасный выход');
-  const body = await response.json();
+  const body = request ? await request() : await (async () => {
+    const response = await boundedFetch('/auth/logout-intent', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Не удалось подготовить безопасный выход');
+    return response.json();
+  })();
   if (!validTicket(body.logout_ticket) || !Number.isSafeInteger(body.user_id) || body.user_id <= 0) throw new Error('Не подтверждена сессия');
   if (started !== generation || isLocallySignedOut()) throw new Error('Сеанс изменился');
   activeTicket = body.logout_ticket;

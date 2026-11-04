@@ -21,6 +21,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   mockApi.mockReset();
   mockApi.mockImplementation(async path => {
+    if (path === '/auth/logout-intent') return { logout_ticket: '1.'+'a'.repeat(64), user_id: 1 };
     if (path === "/projects/") return { projects: projectRows };
     if (path.endsWith("/google/status")) return { authorized: true };
     return empty;

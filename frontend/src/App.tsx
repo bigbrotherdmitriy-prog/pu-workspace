@@ -2368,7 +2368,7 @@ export function App() {
     const started = signoutGeneration();
     if (isLocallySignedOut()) { setReady(false); return; }
     api("/auth/me")
-      .then(() => prepareAuthenticatedSession())
+      .then(() => prepareAuthenticatedSession(() => api('/auth/logout-intent')))
       .then(() => { if (alive && started === signoutGeneration() && !isLocallySignedOut()) setReady(true); })
       .catch(() => { if (alive && started === signoutGeneration()) setReady(false); });
     return () => { alive = false; };

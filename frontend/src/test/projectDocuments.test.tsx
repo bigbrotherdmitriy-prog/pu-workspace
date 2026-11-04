@@ -19,6 +19,7 @@ beforeEach(() => {
   detailResponse = async () => documentA;
   vi.mocked(api).mockReset();
   vi.mocked(api).mockImplementation(async (path: string) => {
+    if (path === '/auth/logout-intent') return { logout_ticket: '1.'+'a'.repeat(64), user_id: 1 };
     if (path === "/auth/me") return { id: 1, role: "owner", full_name: "QA" };
     if (path === "/projects/") return { projects: [{ id: 1, name: "QA A" }, { id: 2, name: "QA B" }] };
     if (path === "/projects/1/documents/101") return detailResponse();

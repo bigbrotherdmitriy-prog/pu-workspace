@@ -64,6 +64,7 @@ beforeEach(() => {
   projectCurrency = "RUB";
   vi.mocked(api).mockReset();
   vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path === '/auth/logout-intent') return { logout_ticket: '1.'+'a'.repeat(64), user_id: 1 };
     if (path === "/auth/me") return { id: 1, role: "owner", full_name: "QA", is_admin: true };
     if (path === "/projects/") return { projects: [{ id: 7, name: "Synthetic project", currency: projectCurrency }, { id: 8, name: "Other synthetic project" }] };
     if (path === "/projects/7/contracts/31/documents" && init?.method === "POST") return attach();
