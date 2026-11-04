@@ -2445,6 +2445,8 @@ def update_invoice_extraction(proposal_id: int, payload: InvoiceExtractionUpdate
     require_project_role(db, user, item.project_id, "manager")
     if item.status != "proposed":
         raise HTTPException(409, "Подтверждённое или отклонённое предложение неизменяемо")
+    # A detected repeat is read-only on the server, not only in the review UI.
+    _refuse_repeated_invoice(db, item)
     data = payload.model_dump(exclude_unset=True)
     if "selected_cost_category_id" in data:
         if data["selected_cost_category_id"] is None:
