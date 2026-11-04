@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import defects as svc
 from app.core.auth import require_project_role, require_user
+from app.bounded_body import read_body_limited
 from app.database import get_db
 
 router = APIRouter(prefix="/projects", tags=["defects"])
@@ -131,10 +132,7 @@ async def upload_photo(
     db: Session = Depends(get_db), user=Depends(require_user),
 ):
     require_project_role(db, user, project_id, "editor")
-    declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > svc.MAX_PHOTO_BYTES + 1024:
-        raise HTTPException(413, "Фото больше 10 МБ")
-    data = await request.body()
+    data = await read_body_limited(request, svc.MAX_PHOTO_BYTES, "Фото больше 10 МБ")
     try:
         res = svc.add_photo(db, project_id, defect_id, kind, name, request.headers.get("content-type"), data)
     except (ValueError, LookupError) as exc:
