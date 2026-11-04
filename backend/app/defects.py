@@ -262,6 +262,16 @@ def add_photo(db: Session, project_id: int, defect_id: int, kind: str, filename:
         mime = (mime or "").split(";")[0].strip().lower()
         if mime not in ALLOWED_MIME:
             raise ValueError("Допустимы фото JPG, PNG или WEBP")
+        # Serialize admission per defect. Count-then-insert without this lock
+        # allows two concurrent uploads to exceed MAX_PHOTOS.
+        if db.get_bind().dialect.name == "sqlite":
+            from sqlalchemy import text
+            db.execute(text("UPDATE defects SET id=id WHERE id=:id AND project_id=:p"), {"id": defect_id, "p": project_id})
+        elif db.get_bind().dialect.name != "postgresql":
+            raise RuntimeError("Photo admission requires SQLite or PostgreSQL")
+        locked = db.scalar(select(Defect.id).where(Defect.id == defect_id, Defect.project_id == project_id).with_for_update())
+        if locked is None:
+            raise LookupError("Замечание не найдено")
         count = db.scalar(select(func.count()).select_from(DefectPhoto).where(DefectPhoto.defect_id == d.id, DefectPhoto.project_id == d.project_id)) or 0
         if count >= MAX_PHOTOS:
             raise ValueError(f"К замечанию можно приложить до {MAX_PHOTOS} фото")
