@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, csrfHeaders } from "../../api/client";
+import { api, ApiError, csrfHeaders } from "../../api/client";
+import { isOnline } from "../../offline/connectivity";
+import { prepareDefectCreate, enqueuePreparedDefectCreate, submitPreparedDefectCreate, DEFECT_APPLIED_EVENT, type PreparedDefectCreate } from "../../offline/syncEngine";
 import "./defects.css";
 
 type Photo = { id: number; kind: "before" | "after"; filename: string };
@@ -19,7 +21,9 @@ const NEXT_BUTTON: Record<string, string> = { in_progress: "Взять в раб
 const dateRu = (v: string | null) => (v ? v.slice(0, 10).split("-").reverse().join(".") : "");
 const emptyForm = () => ({ title: "", description: "", object_name: "", location: "", priority: "normal", responsible: "", due_date: "" });
 
-export function DefectsModule({ projectId }: { projectId: number }) {
+type DefectIntent = { command: PreparedDefectCreate; submitted: ReturnType<typeof emptyForm>; files: File[]; key: string };
+
+export function DefectsModule({ projectId, userId = 0 }: { projectId: number; userId?: number }) {
   const [data, setData] = useState<Listing>({ defects: [], counts: {}, overdue: 0 });
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
@@ -35,9 +39,20 @@ export function DefectsModule({ projectId }: { projectId: number }) {
   const latestDraft = useRef({ form, newPhotos });
   latestDraft.current = { form, newPhotos };
   const photoInput = useRef<HTMLInputElement>(null);
-  const [photoRecovery, setPhotoRecovery] = useState<Record<number, { id: number; number: number }>>({});
+  const [photoRecovery, setPhotoRecovery] = useState<Record<string, { id: number; number: number }>>({});
 
+  const scopeKey = `${userId}:${projectId}`;
+  const [pendingCommands, setPendingCommands] = useState<Record<string, DefectIntent>>({});
+  const pending = pendingCommands[scopeKey];
+  const queued = useRef(new Set<string>());
   const detailRequest = useRef(0);
+  const currentScope = useRef({ key: scopeKey, active: false, generation: 0 });
+  if (currentScope.current.key !== scopeKey) {
+    currentScope.current = { key: scopeKey, active: false, generation: 0 };
+    detailRequest.current += 1;
+  }
+  const scope = currentScope.current;
+  const priorActor = useRef(userId);
   const liveProject = useRef(projectId);
   liveProject.current = projectId;
 
@@ -46,11 +61,26 @@ export function DefectsModule({ projectId }: { projectId: number }) {
   const fail = (e: unknown, fallback: string) => setError(e instanceof Error ? e.message : fallback);
 
   useEffect(() => {
+    scope.active = true; scope.generation += 1;
+    createBusy.current = false; setBusy(false); setError(""); setMessage("");
+    if (priorActor.current !== userId) { setForm(emptyForm()); setNewPhotos([]); priorActor.current = userId; }
     setData({ defects: [], counts: {}, overdue: 0 });
     setOpen(null);
     detailRequest.current += 1;
-    return () => { detailRequest.current += 1; };
-  }, [projectId]);
+    return () => { detailRequest.current += 1; scope.active = false; scope.generation += 1; };
+  }, [projectId, userId, scope]);
+
+  useEffect(() => {
+    const applied = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId: number; projectId: number; clientMutationId: string; defectNumber: number }>).detail;
+      if (!detail || detail.userId !== userId || detail.projectId !== projectId || !Number.isSafeInteger(detail.defectNumber) || detail.defectNumber <= 0) return;
+      const key = `${scopeKey}:${detail.clientMutationId}`;
+      if (!queued.current.delete(key)) return;
+      setMessage(`Замечание № ${detail.defectNumber} синхронизировано`); reload();
+    };
+    window.addEventListener(DEFECT_APPLIED_EVENT, applied);
+    return () => window.removeEventListener(DEFECT_APPLIED_EVENT, applied);
+  }, [userId, projectId, scopeKey, reload]);
 
   useEffect(() => {
     if (projectId <= 0) return;
@@ -62,7 +92,7 @@ export function DefectsModule({ projectId }: { projectId: number }) {
       .then((res) => { if (active) setData(res ?? { defects: [], counts: {}, overdue: 0 }); })
       .catch((e) => { if (active) fail(e, "Не удалось загрузить замечания"); });
     return () => { active = false; };
-  }, [projectId, status, query, tick]);
+  }, [projectId, userId, status, query, tick]);
 
   async function uploadPhotos(defectId: number, files: File[], kind: "before" | "after") {
     for (const file of files) {
@@ -77,8 +107,8 @@ export function DefectsModule({ projectId }: { projectId: number }) {
     }
   }
 
-  function acknowledgeCreated(created: Defect, submitted: ReturnType<typeof emptyForm>, files: File[], requestProject: number) {
-    if (liveProject.current !== requestProject) return;
+  function clearSubmitted(submitted: ReturnType<typeof emptyForm>, files: File[], alive: () => boolean) {
+    if (!alive()) return;
     if (JSON.stringify(latestDraft.current.form) === JSON.stringify(submitted)) {
       setForm((current) => JSON.stringify(current) === JSON.stringify(submitted)
         ? { ...emptyForm(), object_name: current.object_name, responsible: current.responsible } : current);
@@ -88,45 +118,90 @@ export function DefectsModule({ projectId }: { projectId: number }) {
         if (photoInput.current) photoInput.current.value = "";
       }
     }
-    setMessage(`Замечание № ${created.number} добавлено`);
-    reload();
+  }
+
+  function acknowledgeCreated(created: { id: number; number: number }, intent: DefectIntent, alive: () => boolean) {
+    if (!alive()) return;
+    clearSubmitted(intent.submitted, intent.files, alive);
+    setMessage(`Замечание № ${created.number} добавлено`); reload();
+  }
+
+  function removePending(key: string) {
+    setPendingCommands(current => { const next = { ...current }; delete next[key]; return next; });
+  }
+
+  async function preserveUncertain(intent: DefectIntent, reason: unknown, alive: () => boolean) {
+    const attempts = intent.command.attempts + 1;
+    const status = reason instanceof ApiError && [401, 403].includes(reason.status || 0) ? "auth_required" : attempts >= 3 ? "attention" : "queued";
+    const retry: DefectIntent = { ...intent, command: { ...intent.command, attempts, status, updatedAt: new Date().toISOString() } };
+    if (!intent.files.length) {
+      try {
+        await enqueuePreparedDefectCreate(retry.command);
+        removePending(intent.key); queued.current.add(`${intent.key}:${intent.command.id}`);
+        if (alive()) {
+          clearSubmitted(intent.submitted, intent.files, alive);
+          setMessage(status === "auth_required" ? "Замечание сохранено на устройстве. Войдите исходной учётной записью для отправки." : "Замечание сохранено на устройстве. Ожидает подтверждения сервера.");
+        }
+        return;
+      } catch { /* Keep exact intent in memory rather than inventing a second create. */ }
+    }
+    setPendingCommands(current => ({ ...current, [intent.key]: retry }));
+    if (alive()) setError(intent.files.length
+      ? "Создание замечания не подтверждено. Фото не сохранены в offline-очереди; не закрывайте страницу. Повторите неподтверждённое замечание."
+      : "Не удалось подтвердить создание и сохранить повтор на устройстве. Не закрывайте страницу; повторите неподтверждённое замечание.");
+  }
+
+  async function runIntent(intent: DefectIntent) {
+    if (createBusy.current) return;
+    const generation = scope.generation;
+    const alive = () => currentScope.current === scope && scope.active && scope.generation === generation;
+    if (!alive() || intent.key !== scopeKey) return;
+    createBusy.current = true; setBusy(true); setError(""); setMessage("");
+    try {
+      if (!isOnline()) {
+        if (intent.files.length) throw new Error("Фото без связи пока не сохраняются. Оставьте форму открытой и повторите после восстановления связи.");
+        await enqueuePreparedDefectCreate(intent.command);
+        removePending(intent.key); queued.current.add(`${intent.key}:${intent.command.id}`);
+        if (alive()) { clearSubmitted(intent.submitted, intent.files, alive); setMessage("Замечание сохранено на устройстве. Ожидает отправки."); }
+        return;
+      }
+      let result: Awaited<ReturnType<typeof submitPreparedDefectCreate>>;
+      try { result = await submitPreparedDefectCreate(intent.command); }
+      catch (reason) {
+        if (reason instanceof ApiError && [400, 404, 409, 422].includes(reason.status || 0)) throw reason;
+        await preserveUncertain(intent, reason, alive); return;
+      }
+      removePending(intent.key);
+      const created = { id: result.entityId, number: result.entityNumber };
+      if (!alive()) {
+        if (intent.files.length) setPhotoRecovery(current => ({ ...current, [intent.key]: created }));
+        return;
+      }
+      try { if (intent.files.length) await uploadPhotos(created.id, intent.files, "before"); }
+      catch (reason) {
+        setPhotoRecovery(current => ({ ...current, [intent.key]: created }));
+        acknowledgeCreated(created, intent, alive);
+        if (alive()) fail(reason, "Не удалось загрузить все фото");
+        return;
+      }
+      acknowledgeCreated(created, intent, alive);
+    } catch (reason) { if (alive()) { fail(reason, "Не удалось сохранить замечание"); reload(); } }
+    finally { if (alive()) { createBusy.current = false; setBusy(false); } }
   }
 
   async function create() {
-    if (createBusy.current) return;
+    if (createBusy.current || pending) return;
     if (!form.title.trim()) { setError("Опишите замечание коротко: что не так"); return; }
-    const requestProject = projectId;
-    const submitted = { ...form };
-    const files = [...newPhotos];
-    createBusy.current = true;
-    setBusy(true);
-    setError("");
-    setMessage("");
+    if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(projectId) || projectId <= 0) {
+      setError("Войдите заново и выберите проект для создания замечания."); return;
+    }
+    const submitted = { ...form }, files = [...newPhotos];
     try {
       const body: Record<string, string> = {};
-      for (const [k, v] of Object.entries(submitted)) if (v.trim()) body[k] = v.trim();
-      const created = await api<Defect>(`/projects/${requestProject}/defects`, { method: "POST", body: JSON.stringify(body) });
-      if (!created || !Number.isSafeInteger(created.id) || created.id <= 0 || !Number.isSafeInteger(created.number) || created.number <= 0) {
-        throw new Error("Не удалось подтвердить создание замечания. Проверьте список перед повторной отправкой.");
-      }
-      try {
-        if (files.length) await uploadPhotos(created.id, files, "before");
-      } catch (e) {
-        setPhotoRecovery((current) => ({ ...current, [requestProject]: { id: created.id, number: created.number } }));
-        acknowledgeCreated(created, submitted, files, requestProject);
-        if (liveProject.current === requestProject) fail(e, "Не удалось загрузить все фото");
-        return;
-      }
-      acknowledgeCreated(created, submitted, files, requestProject);
-    } catch (e) {
-      if (liveProject.current === requestProject) {
-        fail(e, "Не удалось сохранить замечание");
-        reload();
-      }
-    } finally {
-      createBusy.current = false;
-      setBusy(false);
-    }
+      for (const [key, value] of Object.entries(submitted)) if (value.trim()) body[key] = value.trim();
+      const command = prepareDefectCreate({ userId, projectId, data: body });
+      await runIntent({ command, submitted, files, key: scopeKey });
+    } catch (reason) { fail(reason, "Не удалось подготовить замечание"); }
   }
 
   async function openDefect(id: number) {
@@ -138,9 +213,9 @@ export function DefectsModule({ projectId }: { projectId: number }) {
       if (request === detailRequest.current && liveProject.current === lookupProject) {
         setOpen(result);
         setPhotoRecovery((current) => {
-          if (current[lookupProject]?.id !== result.id) return current;
+          if (current[`${userId}:${lookupProject}`]?.id !== result.id) return current;
           const next = { ...current };
-          delete next[lookupProject];
+          delete next[`${userId}:${lookupProject}`];
           return next;
         });
       }
@@ -262,13 +337,16 @@ export function DefectsModule({ projectId }: { projectId: number }) {
           <input ref={photoInput} type="file" accept="image/*" capture="environment" multiple aria-label="Фото замечания" onChange={(e) => setNewPhotos(Array.from(e.target.files ?? []))} />
         </label>
         {newPhotos.length > 0 && <span className="df-note df-wide">Выбрано фото: {newPhotos.length}</span>}
-        <button type="submit" className="df-save" disabled={busy}>{busy ? "Сохраняем…" : "Добавить замечание"}</button>
+        <button type="submit" className="df-save" disabled={busy || !!pending}>{busy ? "Сохраняем…" : "Добавить замечание"}</button>
       </form>
       {message && <p className="df-note" role="status">{message}</p>}
       {error && <p className="df-error" role="alert">{error}</p>}
-      {photoRecovery[projectId] && <p className="df-note" role="status">
-        Не все фото удалось загрузить в замечание № {photoRecovery[projectId].number}. Проверьте вложения перед повторной загрузкой.
-        <button type="button" onClick={() => void openDefect(photoRecovery[projectId].id)}>Открыть созданное замечание</button>
+      {pending && <p className="df-note">Есть неподтверждённое замечание. Повтор использует исходные данные, новый черновик сохранится.
+        <button type="button" disabled={busy} onClick={() => void runIntent(pending)}>Повторить неподтверждённое замечание</button>
+      </p>}
+      {photoRecovery[scopeKey] && <p className="df-note" role="status">
+        Не все фото удалось загрузить в замечание № {photoRecovery[scopeKey].number}. Проверьте вложения перед повторной загрузкой.
+        <button type="button" onClick={() => void openDefect(photoRecovery[scopeKey].id)}>Открыть созданное замечание</button>
       </p>}
 
 
