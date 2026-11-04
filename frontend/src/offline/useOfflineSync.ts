@@ -15,36 +15,55 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   const [conflicts, setConflicts] = useState<ServerConflict[]>([]);
   const [recoveringAuth, setRecoveringAuth] = useState(false);
   const recoveryRunning = useRef(false);
-  const currentScope = useRef(`${userId}:${projectId}`);
-  currentScope.current = `${userId}:${projectId}`;
+  // Identity changes even for A -> B -> A; string equality cannot fence late work.
+  const key = `${userId}:${projectId}`;
+  const currentScope = useRef({ key, active: false, generation: 0 });
+  if (currentScope.current.key !== key) currentScope.current = { key, active: false, generation: 0 };
+  const scope = currentScope.current;
+  const isCurrent = (generation: number) => currentScope.current === scope && scope.active && scope.generation === generation;
   useEffect(() => {
-    const scope = `${userId}:${projectId}`;
-    currentScope.current = scope;
-    return () => { if (currentScope.current === scope) currentScope.current = ""; };
-  }, [userId, projectId]);
+    scope.active = true;
+    scope.generation += 1;
+    recoveryRunning.current = false;
+    setRecoveringAuth(false);
+    setSummary(EMPTY);
+    setConflicts([]);
+    return () => { scope.active = false; scope.generation += 1; };
+  }, [scope]);
   const onAppliedRef = useRef(onApplied);
   useEffect(() => { onAppliedRef.current = onApplied; }, [onApplied]);
 
   const refresh = useCallback(async () => {
+    const generation = scope.generation;
+    if (!isCurrent(generation)) return;
     if (!storageAvailable) {
       setSummary(EMPTY);
       setConflicts([]);
       return;
     }
-    setSummary(await offlineSummary(userId, projectId));
+    const nextSummary = await offlineSummary(userId, projectId);
+    if (!isCurrent(generation)) return;
+    setSummary(nextSummary);
     if (isOnline() && userId && projectId) {
-      try { setConflicts(await serverConflicts(projectId)); } catch { /* Preserve local state. */ }
+      try {
+        const nextConflicts = await serverConflicts(projectId);
+        if (isCurrent(generation)) setConflicts(nextConflicts);
+      } catch { /* Preserve local state. */ }
     }
-  }, [userId, projectId, storageAvailable]);
+  }, [userId, projectId, storageAvailable, scope]);
 
   const syncNow = useCallback(async (manual = false) => {
-    if (!storageAvailable) return;
+    const generation = scope.generation;
+    if (!storageAvailable || !isCurrent(generation)) return;
     const before = (await offlineSummary(userId, projectId)).total;
+    if (!isCurrent(generation)) return;
     await synchronize(userId, projectId, manual);
+    if (!isCurrent(generation)) return;
     const after = (await offlineSummary(userId, projectId)).total;
+    if (!isCurrent(generation)) return;
     await refresh();
-    if (after < before) onAppliedRef.current();
-  }, [userId, projectId, refresh, storageAvailable]);
+    if (isCurrent(generation) && after < before) onAppliedRef.current();
+  }, [userId, projectId, refresh, storageAvailable, scope]);
 
   useEffect(() => {
     if (!storageAvailable || !userId || !projectId) return;
@@ -69,24 +88,29 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   }, [userId, projectId, refresh, syncNow, storageAvailable]);
 
   async function resolve(id: number, resolution: "keep_server" | "apply_local" | "latest_write_wins") {
-    if (!storageAvailable) return;
+    const generation = scope.generation;
+    if (!storageAvailable || !isCurrent(generation)) return;
     await resolveConflict(userId, projectId, id, resolution);
+    if (!isCurrent(generation)) return;
     await refresh();
-    onAppliedRef.current();
+    if (isCurrent(generation)) onAppliedRef.current();
   }
 
   async function recoverAuth() {
+    const generation = scope.generation;
+    if (!isCurrent(generation)) return;
     if (recoveryRunning.current) return;
     if (!storageAvailable) throw new Error("Локальная очередь недоступна в этом браузере.");
-    const scope = `${userId}:${projectId}`;
     recoveryRunning.current = true;
     setRecoveringAuth(true);
     try {
       await recoverAuthRequired(userId, projectId);
-      if (currentScope.current === scope) await syncNow(true);
+      if (isCurrent(generation)) await syncNow(true);
     } finally {
-      recoveryRunning.current = false;
-      setRecoveringAuth(false);
+      if (isCurrent(generation)) {
+        recoveryRunning.current = false;
+        setRecoveringAuth(false);
+      }
     }
   }
 
