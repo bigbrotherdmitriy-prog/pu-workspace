@@ -196,3 +196,25 @@ def attach_drawing_point(project_id: int, defect_id: int, body: DrawingPointBody
         db.rollback();raise _fail(exc) from exc
     db.commit()
     return result
+
+
+@router.post('/{project_id}/defects/{defect_id}/photos/idempotent')
+async def upload_photo_idempotent(project_id: int, defect_id: int, request: Request,
+        expected_user_id: int = Header(..., alias='X-PU-Expected-User', gt=0),
+        operation_key: str = Header(..., alias='X-PU-Photo-Operation', min_length=8, max_length=160),
+        name: str = Query(..., min_length=1, max_length=300), kind: str = Query('before'),
+        db: Session = Depends(get_db), user=Depends(require_user)):
+    require_project_role(db, user, project_id, 'editor')
+    from app.mobile_create_owner import require_create_owner
+    from app.defect_photo_receipts import save_photo, PhotoReceiptConflict
+    require_create_owner(user, expected_user_id)
+    data = await read_body_limited(request, svc.MAX_PHOTO_BYTES, 'Фото больше 10 МБ')
+    try:
+        result = save_photo(db, project_id, defect_id, user.id, operation_key=operation_key,
+            kind=kind, filename=name, mime=request.headers.get('content-type'), data=data)
+    except PhotoReceiptConflict as exc:
+        db.rollback(); raise HTTPException(409, str(exc)) from exc
+    except (ValueError, LookupError) as exc:
+        db.rollback(); raise _fail(exc) from exc
+    db.commit()
+    return result

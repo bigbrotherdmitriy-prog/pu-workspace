@@ -177,3 +177,35 @@ def test_drawing_versions_scoped_paging_and_expected_actor(api_stock):
     assert c.get(f'/projects/{p}/defects/{defect["id"]}').json()['drawing_point'] is None
     assert c.post(point,json=body,headers={'X-PU-Expected-User':str(user['id'])}).status_code==200
     user['id']=foreign;assert c.get(path).status_code==403
+
+
+def test_idempotent_photo_http_actor_replay_conflict_deleted(api_stock):
+    c,user,p,item,entry,foreign,db=api_stock
+    from app.defects import create_defect
+    from app.models.defects import DefectPhoto,DefectPhotoReceipt
+    defect=create_defect(db,p,user['id'],{'title':'SYNTHETIC photo'});db.commit()
+    path=f'/projects/{p}/defects/{defect["id"]}/photos/idempotent?name=SYNTHETIC.png&kind=before'
+    headers={'Content-Type':'image/png','X-PU-Expected-User':str(user['id']),'X-PU-Photo-Operation':'synthetic-photo-http'}
+    wrong={**headers,'X-PU-Expected-User':str(foreign)}
+    assert c.post(path,headers=wrong,content=b'SYNTHETIC').status_code==403
+    assert db.query(DefectPhoto).count()==0
+    first=c.post(path,headers=headers,content=b'SYNTHETIC');assert first.status_code==200
+    ack=first.json();assert ack['user_id']==user['id'];assert ack['status']=='applied'
+    assert c.post(path,headers=headers,content=b'SYNTHETIC').json()==ack
+    assert c.post(path,headers=headers,content=b'CHANGED').status_code==409
+    assert db.query(DefectPhoto).count()==1
+    assert c.delete(f'/projects/{p}/defects/{defect["id"]}/photos/{ack["photo_id"]}').status_code==200
+    assert c.post(path,headers=headers,content=b'SYNTHETIC').status_code==409
+    assert db.query(DefectPhoto).count()==0;assert db.query(DefectPhotoReceipt).count()==1
+    user['id']=foreign;assert c.post(path,headers=headers,content=b'SYNTHETIC').status_code==403
+
+
+def test_idempotent_photo_http_strict_required_headers_and_body_budget(api_stock):
+    c,user,p,item,entry,foreign,db=api_stock
+    from app.defects import create_defect
+    defect=create_defect(db,p,user['id'],{'title':'SYNTHETIC bounded photo'});db.commit()
+    path=f'/projects/{p}/defects/{defect["id"]}/photos/idempotent?name=SYNTHETIC.png'
+    assert c.post(path,content=b'x').status_code==422
+    headers={'Content-Type':'image/png','X-PU-Expected-User':str(user['id']),'X-PU-Photo-Operation':'synthetic-photo-budget'}
+    assert c.post(path,headers=headers,content=b'x'*(10*1024*1024+1)).status_code==413
+    assert c.post(path,headers=headers,content=b'').status_code==422

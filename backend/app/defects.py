@@ -294,13 +294,21 @@ def get_photo(db: Session, project_id: int, defect_id: int, photo_id: int) -> De
 
 
 def delete_photo(db: Session, project_id: int, defect_id: int, photo_id: int) -> dict:
-    p = get_photo(db, project_id, defect_id, photo_id)
+    from app.models.defects import DefectPhotoReceipt
+    with db.no_autoflush:
+        if db.get_bind().dialect.name == "sqlite":
+            from sqlalchemy import text
+            db.execute(text("UPDATE defects SET id=id WHERE id=:d AND project_id=:p"), {"d": defect_id, "p": project_id})
+        db.scalar(select(Defect.id).where(Defect.id == defect_id, Defect.project_id == project_id).with_for_update())
+        p = get_photo(db, project_id, defect_id, photo_id)
+        db.execute(update(DefectPhotoReceipt).where(DefectPhotoReceipt.photo_id == photo_id, DefectPhotoReceipt.project_id == project_id, DefectPhotoReceipt.defect_id == defect_id).values(photo_id=None))
     db.delete(p)
     db.flush()
     return get_defect(db, project_id, defect_id)
 
 
 def delete_defect(db: Session, project_id: int, defect_id: int) -> None:
+    from app.models.defects import DefectPhotoReceipt
     with db.no_autoflush:
         d = db.scalar(select(Defect).where(
             Defect.id == defect_id, Defect.project_id == project_id,
@@ -308,13 +316,13 @@ def delete_defect(db: Session, project_id: int, defect_id: int) -> None:
         if d is None:
             raise LookupError("Замечание не найдено")
         # Fail closed instead of cascading across inconsistent project labels.
-        for model in (DefectPhoto, DefectComment):
+        for model in (DefectPhotoReceipt, DefectPhoto, DefectComment):
             foreign = db.scalar(select(model.id).where(
                 model.defect_id == d.id, model.project_id != project_id,
             ).limit(1))
             if foreign is not None:
                 raise LookupError("Замечание не найдено")
-    for model in (DefectPhoto, DefectComment):
+    for model in (DefectPhotoReceipt, DefectPhoto, DefectComment):
         db.execute(delete(model).where(
             model.defect_id == d.id, model.project_id == project_id,
         ).execution_options(synchronize_session="fetch"))

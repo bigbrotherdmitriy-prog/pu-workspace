@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -64,3 +64,20 @@ class DefectDrawingPoint(Base):
     x: Mapped[str] = mapped_column(String(32))
     y: Mapped[str] = mapped_column(String(32))
     coordinate_system: Mapped[str] = mapped_column(String(40), default="normalized_page_v1", server_default="normalized_page_v1")
+
+
+class DefectPhotoReceipt(Base):
+    """Durable per-actor upload identity; deleted photos leave a tombstone."""
+    __tablename__ = 'defect_photo_receipts'
+    __table_args__ = (
+        UniqueConstraint('project_id', 'user_id', 'operation_key', name='uq_defect_photo_receipt_operation'),
+        CheckConstraint('length(request_sha256) = 64', name='ck_defect_photo_receipt_digest'),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id', ondelete='CASCADE'), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    defect_id: Mapped[int] = mapped_column(ForeignKey('defects.id', ondelete='CASCADE'), index=True)
+    operation_key: Mapped[str] = mapped_column(String(160))
+    request_sha256: Mapped[str] = mapped_column(String(64))
+    photo_id: Mapped[int | None] = mapped_column(ForeignKey('defect_photos.id', ondelete='SET NULL'), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
