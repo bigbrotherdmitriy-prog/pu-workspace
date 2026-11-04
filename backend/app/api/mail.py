@@ -19,6 +19,7 @@ from app.integrations.ai import configured_ai_provider
 from app.integrations.contracts import MailNotAppliedError, MailSendCommand
 from app.integrations.mail import mailbox_adapter_for_project
 from app.mail_content import is_rich_mail_body, mail_html_to_text, sanitize_mail_html
+from app.mail_retry import require_mail_retry
 from app.models.ai_secretary import Message
 from app.models.audit_log import AuditLog
 from app.models.integration_credential import IntegrationCredential
@@ -826,10 +827,7 @@ def retry_mail_draft(draft_id: int, payload: MailDraftSend, db: Session = Depend
     if draft is None:
         raise HTTPException(404, "Mail draft not found")
     require_project_role(db, user, draft.project_id, "manager")
-    if draft.status == "unknown":
-        raise HTTPException(409, "mail_send_outcome_unknown_reconciliation_required")
-    if draft.status != "failed":
-        raise HTTPException(409, "mail_retry_not_available")
+    require_mail_retry(draft, payload.revision)
     draft.status = "approved"
     draft.send_idempotency_key = None
     db.commit()
