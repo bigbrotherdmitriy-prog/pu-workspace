@@ -212,8 +212,13 @@ def _unit_price(l: EstimateLine) -> Decimal | None:
     if l.unit_price is not None:
         return l.unit_price
     if l.total is not None and l.qty:
-        from app.provisional_policy import derive_unit_price
-        return derive_unit_price(l.qty, l.total)
+        from app.provisional_policy import AmbiguousPriceError, derive_unit_price
+        try:
+            return derive_unit_price(l.qty, l.total)
+        except AmbiguousPriceError:
+            # Historical lines remain readable/correctable. A new KS must not
+            # invent a price; the existing preview warning excludes this line.
+            return None
     return None
 
 

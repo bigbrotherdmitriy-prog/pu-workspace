@@ -2,6 +2,10 @@
 from dataclasses import dataclass
 import os
 
+class AmbiguousPriceError(ValueError):
+    """Needs an explicit price, not a guessed historical replacement."""
+
+
 @dataclass(frozen=True)
 class ProvisionalPolicy:
     estimate_rounding: str = "reject_ambiguous"
@@ -38,5 +42,5 @@ def derive_unit_price(qty, total, *, policy=None):
         price = (total / qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         represented = (price * qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         if represented != total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) and policy.estimate_rounding == "reject_ambiguous":
-            raise ValueError("Неоднозначная цена: укажите цену явно; исходная сумма не изменена")
+            raise AmbiguousPriceError("Неоднозначная цена: укажите цену явно; исходная сумма не изменена")
         return price

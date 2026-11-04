@@ -54,3 +54,22 @@ def test_manual_patch_rejects_ambiguous_price_without_partial_change(db_session)
     with pytest.raises(ValueError, match="Неоднозначная цена"):
         estimates.update_line(db, project.id, row.id, {"qty": "2", "name": "must not change"})
     assert row.qty == Decimal("1") and row.name == "SYNTHETIC"
+
+
+def test_legacy_ambiguous_total_remains_readable_but_is_not_silently_billed(db_session):
+    from datetime import date
+    from app.models.organization_contract import Organization
+    from app.models.project import Project
+    from app.models.estimates import Estimate,EstimateLine
+    from app.models.work_log import WorkLogEntry
+    from app import estimates
+    db=db_session;org=Organization(name='SYNTHETIC legacy');db.add(org);db.flush()
+    project=Project(name='SYNTHETIC legacy',organization_id=org.id);db.add(project);db.flush()
+    estimate=Estimate(project_id=project.id,name='SYNTHETIC legacy',total=Decimal('2.01'));db.add(estimate);db.flush()
+    line=EstimateLine(project_id=project.id,estimate_id=estimate.id,name='SYNTHETIC ambiguous',qty=Decimal('2'),total=Decimal('2.01'),unit_price=None)
+    db.add(line);db.flush();db.add(WorkLogEntry(project_id=project.id,estimate_line_id=line.id,work_date=date(2026,10,5),work_name='SYNTHETIC',qty=1));db.commit()
+    shown=estimates.get_estimate(db,project.id,estimate.id)
+    assert shown['lines'][0]['unit_price'] is None
+    preview=estimates.preview_act(db,project.id,estimate.id,date(2026,10,1),date(2026,10,28))
+    assert preview['lines']==[] and preview['warnings']
+    db.refresh(line);assert line.total==Decimal('2.01') and line.unit_price is None

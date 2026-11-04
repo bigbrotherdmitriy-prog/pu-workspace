@@ -122,3 +122,17 @@ def test_typed_offline_create_real_http_replay_actor_and_revoke(api_stock,kind):
     db.query(ProjectMember).filter_by(project_id=p,user_id=own).delete(synchronize_session=False);db.commit()
     assert c.post(path,json=body,headers=headers).status_code==403
     assert db.query(model).count()==before+1 and db.query(MobileSyncCommand).count()==1
+
+
+def test_legacy_estimate_read_over_http_stays_correctable_under_strict_policy(api_stock):
+    from decimal import Decimal
+    from app.models.estimates import Estimate,EstimateLine
+    from app.api.estimates import router as estimates_router
+    c,user,p,item,entry,foreign,db=api_stock
+    estimate=Estimate(project_id=p,name='SYNTHETIC legacy',total=Decimal('2.01'));db.add(estimate);db.flush()
+    line=EstimateLine(project_id=p,estimate_id=estimate.id,name='SYNTHETIC legacy',qty=2,total=Decimal('2.01'),unit_price=None)
+    db.add(line);db.commit();c.app.include_router(estimates_router)
+    response=c.get(f'/projects/{p}/estimates/{estimate.id}')
+    assert response.status_code==200
+    assert response.json()['lines'][0]['unit_price'] is None
+    assert response.json()['lines'][0]['total']=='2.01'
