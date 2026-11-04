@@ -21,6 +21,7 @@ from app.database import get_db
 from app.models.auth_session import AuthSession
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from app.logout_revocation import ticket_for_session, revoke_ticket
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -89,7 +90,8 @@ def bootstrap(payload: BootstrapRequest, request: Request, response: Response, x
     db.commit(); db.refresh(user)
     token, expires = issue_session(db, user.id)
     _set_session_cookies(response, request, token, expires)
-    return {"token_type": "cookie", "expires_at": expires, "user": _user(user)}
+    return {"token_type": "cookie", "expires_at": expires, "user": _user(user),
+            "logout_ticket": ticket_for_session(db, token)}
 
 
 @router.post("/login")
@@ -106,12 +108,35 @@ def login(payload: Credentials, request: Request, response: Response, db: Sessio
     clear_login_failures(throttle_key)
     token, expires = issue_session(db, user.id)
     _set_session_cookies(response, request, token, expires)
-    return {"token_type": "cookie", "expires_at": expires, "user": _user(user)}
+    return {"token_type": "cookie", "expires_at": expires, "user": _user(user),
+            "logout_ticket": ticket_for_session(db, token)}
 
 
 @router.get("/me")
 def me(user: User = Depends(require_user)):
     return _user(user)
+
+
+@router.get('/logout-intent')
+def logout_intent(request: Request, response: Response,
+                  user: User = Depends(require_user), authorization: str = Header(default=''),
+                  db: Session = Depends(get_db)):
+    raw = _bearer_token(authorization) or request.cookies.get('pu_session', '')
+    response.headers['Cache-Control'] = 'no-store'
+    return {'logout_ticket': ticket_for_session(db, raw), 'user_id': user.id}
+
+
+class PendingLogout(BaseModel):
+    ticket: str = Field(min_length=66, max_length=84, pattern=r'^[1-9][0-9]{0,18}\.[a-f0-9]{64}$')
+
+
+@router.post('/logout/revoke')
+def revoke_pending_logout(body: PendingLogout, request: Request, response: Response,
+                          db: Session = Depends(get_db)):
+    # Deliberately ignores ambient authentication: a scoped capability can ONLY
+    # revoke its original session and must not revoke a new user's cookie.
+    response.headers['Cache-Control'] = 'no-store'
+    return revoke_ticket(db, body.ticket, request, response)
 
 
 @router.post("/logout")
