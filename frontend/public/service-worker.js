@@ -4,6 +4,7 @@ const BUILD_ASSETS = /* PU_BUILD_ASSETS */ [];
 const APP_SHELL = [
   "/new/", "/new/manifest.webmanifest", "/new/pu-icon.svg",
   "/new/pu-icon-192.png", "/new/pu-icon-512.png", "/new/pu-icon-maskable-512.png",
+  "/new/assets/control-room/dusk-lines.webp", "/new/assets/future-light/holographic-grid-background.png",
   ...BUILD_ASSETS,
 ];
 

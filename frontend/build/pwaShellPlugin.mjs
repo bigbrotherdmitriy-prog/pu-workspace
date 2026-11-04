@@ -31,7 +31,7 @@ export function pwaShellPlugin() {
         digest.update(name).update(item.type === "chunk" ? item.code : item.source);
         if (/\.(js|css)$/.test(name)) assets.push(config.base + name);
       }
-      for (const name of ["manifest.webmanifest", "pu-icon.svg", "pu-icon-192.png", "pu-icon-512.png", "pu-icon-maskable-512.png"]) {
+      for (const name of ["manifest.webmanifest", "pu-icon.svg", "pu-icon-192.png", "pu-icon-512.png", "pu-icon-maskable-512.png", "assets/control-room/dusk-lines.webp", "assets/future-light/holographic-grid-background.png"]) {
         digest.update(name).update(readFileSync(join(config.publicDir, name)));
       }
       writeFileSync(join(output.dir, "service-worker.js"), buildShellWorker(source, assets, digest.digest("hex")));

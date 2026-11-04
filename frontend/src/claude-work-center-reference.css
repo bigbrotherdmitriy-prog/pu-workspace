@@ -3,7 +3,7 @@
  * Runtime data and actions remain in React; no mock metrics are imported. */
 :root[data-display-theme] .future-light-dashboard.future-light-dashboard { position: relative; isolation: isolate; min-height: 100vh; color: rgb(232, 250, 255); background: rgb(7, 24, 39); }
 
-:root[data-display-theme] .future-light-dashboard.future-light-dashboard::before, :root[data-display-theme] .future-light-dashboard.future-light-dashboard::after { content: ""; position: fixed; z-index: -2; inset: -18px; pointer-events: none; background: url("/new/assets/future-light/holographic-grid-background.png") center center / cover no-repeat; }
+:root[data-display-theme] .future-light-dashboard.future-light-dashboard::before, :root[data-display-theme] .future-light-dashboard.future-light-dashboard::after { content: ""; position: fixed; z-index: -2; inset: -18px; pointer-events: none; background: url("/assets/future-light/holographic-grid-background.png") center center / cover no-repeat; }
 
 :root[data-display-theme] .future-light-dashboard.future-light-dashboard::before { transform: scale(1.025); animation: 18s ease-in-out 0s infinite alternate none running future-background-depth; }
 

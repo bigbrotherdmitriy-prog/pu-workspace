@@ -16,7 +16,9 @@ it("precaches entry and lazy JS/CSS in a build-specific owned shell cache", asyn
   let completed: Promise<unknown> | undefined;
   listeners.get("install")!({ waitUntil: (value: Promise<unknown>) => { completed = value; } }); await completed;
   expect(open).toHaveBeenCalledWith("pu-workspace-shell-build-" + "a".repeat(64));
-  expect(addAll.mock.calls[0][0]).toEqual(expect.arrayContaining(["/new/", ...paths]));
+  expect(addAll.mock.calls[0][0]).toEqual(expect.arrayContaining(["/new/", ...paths,
+    "/new/assets/control-room/dusk-lines.webp", "/new/assets/future-light/holographic-grid-background.png",
+  ]));
   expect(built).not.toContain("PU_BUILD_ASSETS");
 });
 
