@@ -72,3 +72,44 @@ def test_invalid_capability_is_bounded(world, value):
     with pytest.raises(HTTPException):
         revoke_ticket(world, value, request(), Response())
     assert world.query(AuthSession).count() == 2
+
+
+from test_provisional_stock_api import api_stock  # Existing synthetic HTTP fixture.
+
+
+def test_http_ticket_cannot_authenticate_and_old_revoke_preserves_new_session(api_stock):
+    from app.api.auth import router
+    from app.core.auth import require_user, issue_session
+    client, actor, _, _, _, _, db = api_stock
+    client.app.include_router(router); client.app.dependency_overrides.pop(require_user)
+    old, _ = issue_session(db, actor['id'])
+    client.cookies.set('pu_session', old)
+    response = client.get('/auth/logout-intent')
+    assert response.status_code == 200 and response.headers['cache-control'] == 'no-store'
+    ticket = response.json()['logout_ticket']
+    new, _ = issue_session(db, actor['id'])
+    client.cookies.set('pu_session', new)
+    revoked = client.post('/auth/logout/revoke', json={'ticket': ticket})
+    assert revoked.status_code == 200 and 'set-cookie' not in revoked.headers
+    assert client.get('/auth/me').status_code == 200
+    assert client.post('/auth/logout/revoke', json={'ticket': ticket}).status_code == 200
+    assert db.query(AuthSession).count() == 1
+    client.cookies.clear()
+    assert client.get('/auth/me', headers={'Authorization':'Bearer '+ticket}).status_code == 401
+
+
+def test_http_login_supplies_revoke_only_ticket_and_forgery_is_rejected(api_stock):
+    from app.api.auth import router
+    from app.core.auth import require_user, hash_password
+    client, actor, _, _, _, _, db = api_stock
+    user = db.get(User, actor['id']); user.password_hash = hash_password('SYNTHETIC-long-password')
+    db.commit(); client.app.include_router(router); client.app.dependency_overrides.pop(require_user)
+    login = client.post('/auth/login', json={'email':user.email, 'password':'SYNTHETIC-long-password'})
+    assert login.status_code == 200
+    ticket = login.json()['logout_ticket']
+    forged = ticket.split('.')[0]+'.'+'0'*64
+    assert client.post('/auth/logout/revoke', json={'ticket':forged}).status_code == 403
+    assert db.query(AuthSession).count() == 1
+    client.cookies.clear()
+    assert client.post('/auth/logout/revoke', json={'ticket':ticket}).json() == {'status':'revoked'}
+    assert db.query(AuthSession).count() == 0
