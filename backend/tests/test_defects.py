@@ -143,3 +143,72 @@ def test_api(world):
     assert c.get(f"/projects/{pid}/defects/export.xlsx").content[:2] == b"PK"
     assert c.get(f"/projects/{world['o'].id}/defects/{did}").status_code == 404
     assert c.delete(f"/projects/{pid}/defects/{did}").json() == {"deleted": did}
+
+
+def test_download_photo_headers_and_no_store(monkeypatch):
+    from app.api import defects as api
+
+    class _Photo:
+        data = JPEG
+        mime_type = "image/jpeg"
+
+    calls = {"role": 0, "photo": 0}
+
+    def fake_role(db, user, project_id, role):
+        calls["role"] += 1
+        assert role == "viewer"
+
+    def fake_get_photo(db, project_id, defect_id, photo_id):
+        calls["photo"] += 1
+        return _Photo()
+
+    monkeypatch.setattr(api, "require_project_role", fake_role)
+    monkeypatch.setattr(api.svc, "get_photo", fake_get_photo)
+
+    resp = api.download_photo(1, 2, 3, db=None, user=object())
+    assert resp.body == JPEG
+    assert resp.media_type == "image/jpeg"
+    assert resp.headers["cache-control"] == "private, no-store"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert calls == {"role": 1, "photo": 1}
+
+
+def test_download_photo_denied_role_skips_lookup(monkeypatch):
+    from fastapi import HTTPException
+    from app.api import defects as api
+
+    calls = {"photo": 0}
+
+    def deny_role(db, user, project_id, role):
+        raise HTTPException(403, "forbidden")
+
+    def fake_get_photo(db, project_id, defect_id, photo_id):
+        calls["photo"] += 1
+        raise AssertionError("get_photo must not be called")
+
+    monkeypatch.setattr(api, "require_project_role", deny_role)
+    monkeypatch.setattr(api.svc, "get_photo", fake_get_photo)
+
+    with pytest.raises(HTTPException) as exc:
+        api.download_photo(1, 2, 3, db=None, user=object())
+    assert exc.value.status_code == 403
+    assert calls["photo"] == 0
+
+
+def test_download_photo_lookup_error_is_404(monkeypatch):
+    from fastapi import HTTPException
+    from app.api import defects as api
+
+    def allow_role(db, user, project_id, role):
+        return None
+
+    def missing_photo(db, project_id, defect_id, photo_id):
+        raise LookupError("Фото не найдено")
+
+    monkeypatch.setattr(api, "require_project_role", allow_role)
+    monkeypatch.setattr(api.svc, "get_photo", missing_photo)
+
+    with pytest.raises(HTTPException) as exc:
+        api.download_photo(1, 2, 3, db=None, user=object())
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Фото не найдено"
