@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
@@ -465,7 +466,12 @@ def test_dead_letter_summary_hostile_kinds_sanitized():
     ]
     message = _dead_letter_summary(rows)
     assert message.startswith("dead-letter jobs: 4 (kinds: ")
-    assert " " not in message.split("kinds: ", 1)[1].split(";", 1)[0]
+    kinds_segment = message.split("kinds: ", 1)[1].split(";", 1)[0]
+    for entry in kinds_segment.split(", "):
+        kind_name = entry.split("=", 1)[0]
+        assert re.fullmatch(r"[A-Za-z0-9_.\-]+", kind_name), kind_name
+        assert len(kind_name) <= 60, kind_name
+    assert not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in message)
     assert "\n" not in message
     assert "x" * 60 in message
     assert "x" * 61 not in message
