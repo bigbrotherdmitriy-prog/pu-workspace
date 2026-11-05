@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +14,32 @@ from app.automations.ai_secretary import status as ai_secretary_automation_statu
 from app.integrations.push import fcm_health, fcm_service_account_path
 from app.database import SessionLocal
 from app.models.job import BackgroundJob, ServiceHeartbeat
+
+
+_KIND_SAFE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def _dead_letter_summary(rows) -> str:
+    """Summarize dead-letter rows as (kind, updated_at) tuples without exposing payloads."""
+    kinds: dict[str, int] = {}
+    oldest = None
+    count = 0
+    for kind, updated_at in rows:
+        count += 1
+        safe = _KIND_SAFE.sub("", kind if isinstance(kind, str) else "")[:60] or "other"
+        kinds[safe] = kinds.get(safe, 0) + 1
+        if updated_at is not None:
+            day = updated_at.date()
+            if oldest is None or day < oldest:
+                oldest = day
+    message = f"dead-letter jobs: {count}"
+    if count:
+        parts = ", ".join(f"{name}={kinds[name]}" for name in sorted(kinds))
+        detail = f"kinds: {parts}"
+        if oldest is not None:
+            detail += f"; oldest {oldest.isoformat()}"
+        message += f" ({detail})"
+    return message
 
 
 def readiness_report(*, include_live_services: bool = True) -> dict:
@@ -105,12 +132,15 @@ def readiness_report(*, include_live_services: bool = True) -> dict:
                 scheduler_count = len(list(db.scalars(select(ServiceHeartbeat.service_id).where(
                     ServiceHeartbeat.service_kind == "scheduler", ServiceHeartbeat.last_seen >= cutoff,
                 ))))
-                dead_letters = len(list(db.scalars(select(BackgroundJob.id).where(
+                dead_letter_rows = list(db.execute(select(
+                    BackgroundJob.kind, BackgroundJob.updated_at,
+                ).where(
                     BackgroundJob.status == "dead_letter",
-                ))))
+                )).all())
+            dead_letters = len(dead_letter_rows)
             checks["durable_workers"] = _check(worker_count >= 2, f"active workers: {worker_count}; required: 2")
             checks["durable_scheduler"] = _check(scheduler_count >= 1, f"active schedulers: {scheduler_count}; required: 1")
-            checks["dead_letter_queue"] = _check(dead_letters == 0, f"dead-letter jobs: {dead_letters}", required=False)
+            checks["dead_letter_queue"] = _check(dead_letters == 0, _dead_letter_summary(dead_letter_rows), required=False)
     except SQLAlchemyError as exc:
         checks["database"] = _check(False, exc.__class__.__name__)
         checks["schema"] = _check(False, "database unavailable")
