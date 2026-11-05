@@ -13,12 +13,28 @@ _CUSTOM_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relati
 _CUSTOM_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
 
 
+def _is_xml1_forbidden_char(ch: str) -> bool:
+    code = ord(ch)
+    if code in (0x9, 0xA, 0xD):
+        return False
+    if code < 0x20:
+        return True
+    if 0xD800 <= code <= 0xDFFF:
+        return True
+    if code in (0xFFFE, 0xFFFF):
+        return True
+    return False
+
+
 def _normalize_template_value(name: str, value: object) -> str:
     if not isinstance(value, str) or isinstance(value, bool):
         raise ValueError(f"{name} must be a non-empty string")
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{name} must be a non-empty string")
+    for ch in normalized:
+        if _is_xml1_forbidden_char(ch):
+            raise ValueError(f"{name} contains characters not allowed in XML 1.0")
     return normalized
 
 
