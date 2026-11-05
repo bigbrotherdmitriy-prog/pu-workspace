@@ -38,7 +38,7 @@ def _custom_properties_xml(template_id: str, template_version: str) -> str:
     )
 
 
-def _with_custom_properties(content_types: str, doc_rels: str) -> tuple[str, str]:
+def _with_custom_properties(content_types: str, package_rels: str) -> tuple[str, str]:
     override = (
         f'<Override PartName="/docProps/custom.xml" ContentType="{_CUSTOM_CONTENT_TYPE}"/>'
     )
@@ -47,11 +47,11 @@ def _with_custom_properties(content_types: str, doc_rels: str) -> tuple[str, str
     else:
         content_types = content_types + override
     rel = f'<Relationship Id="rIdCustomProps" Type="{_CUSTOM_REL_TYPE}" Target="docProps/custom.xml"/>'
-    if "</Relationships>" in doc_rels:
-        doc_rels = doc_rels.replace("</Relationships>", rel + "</Relationships>", 1)
+    if "</Relationships>" in package_rels:
+        package_rels = package_rels.replace("</Relationships>", rel + "</Relationships>", 1)
     else:
-        doc_rels = doc_rels + rel
-    return content_types, doc_rels
+        package_rels = package_rels + rel
+    return content_types, package_rels
 
 
 def build_docx(
@@ -86,15 +86,15 @@ def build_docx(
         f'<w:document xmlns:w="{_W_NS}"><w:body>' + "".join(parts) + sect + "</w:body></w:document>"
     )
     content_types = _CONTENT_TYPES
-    doc_rels = _DOC_RELS
+    package_rels = _RELS
     if custom_xml is not None:
-        content_types, doc_rels = _with_custom_properties(content_types, doc_rels)
+        content_types, package_rels = _with_custom_properties(content_types, package_rels)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types)
-        zf.writestr("_rels/.rels", _RELS)
+        zf.writestr("_rels/.rels", package_rels)
         zf.writestr("word/document.xml", document_xml)
-        zf.writestr("word/_rels/document.xml.rels", doc_rels)
+        zf.writestr("word/_rels/document.xml.rels", _DOC_RELS)
         if custom_xml is not None:
             zf.writestr("docProps/custom.xml", custom_xml)
     return buf.getvalue()
