@@ -9,8 +9,10 @@ from app.database import Base
 from app.models.organization_contract import Organization
 from app.models.project import Project
 from app.models.rd import RdVolume, RdVolumeVersion
+from app.models.defects import Defect, DefectDrawingPoint
 from app.integrations.pu_storage import RdVersionContentStore
 from app.drawing_compare import compare_stored_raster_versions
+from app.drawing_points import bind_point
 from test_drawing_compare import image_bytes
 
 @pytest.fixture
@@ -80,3 +82,65 @@ def test_declared_size_and_mime_mismatch_rejected(world):
     with pytest.raises(ValueError,match='mismatch'):compare(world,byte_budget=len(a)+len(b)+1)
     versions[0].size_bytes=len(a);versions[0].mime_type='image/jpeg';db.commit()
     with pytest.raises(ValueError,match='MIME'):compare(world)
+
+
+def _single_frame_png_fixture(world):
+    """Return the stored PNG bytes for the own-project version and assert exactly one frame."""
+    from io import BytesIO
+    from PIL import Image
+    db,store,own,volumes,versions,a,b=world
+    version=versions[0]
+    content=store.read(own.id,version.content_sha256)
+    assert sha256(content).hexdigest()==version.content_sha256
+    with Image.open(BytesIO(content)) as image:
+        assert image.format=='PNG'
+        assert getattr(image,'n_frames',1)==1
+        image.load()
+    return content
+
+
+def _fresh_defect(db,project_id,name):
+    defect=Defect(project_id=project_id,name=name)
+    db.add(defect);db.flush();db.commit()
+    return defect
+
+
+def _snapshot(db,defect_id,project_id):
+    point=db.scalar(select(DefectDrawingPoint).where(DefectDrawingPoint.defect_id==defect_id,DefectDrawingPoint.project_id==project_id))
+    links=db.execute(select(DefectDrawingPoint.__table__).where(DefectDrawingPoint.defect_id==defect_id)).all()
+    return point,links
+
+
+def test_service_single_frame_annotation_positive_control(world):
+    db,store,own,volumes,versions,a,b=world
+    _single_frame_png_fixture(world)
+    defect=_fresh_defect(db,own.id,'positive')
+    version=versions[0]
+    first=bind_point(db,own.id,defect.id,version_id=version.id,page=1,x='0.25',y='0.50')
+    db.commit()
+    assert first['rd_version_id']==version.id and first['page']==1
+    assert Decimal(first['x'])==Decimal('0.25') and Decimal(first['y'])==Decimal('0.50')
+    point,links=_snapshot(db,defect.id,own.id)
+    assert point is not None and point.rd_version_id==version.id and point.page==1
+    assert len(links)==1
+    replay=bind_point(db,own.id,defect.id,version_id=version.id,page=1,x='0.250',y='0.5')
+    db.commit()
+    assert Decimal(replay['x'])==Decimal('0.25') and Decimal(replay['y'])==Decimal('0.5')
+    point2,links2=_snapshot(db,defect.id,own.id)
+    assert len(links2)==1 and point2.id==point.id
+
+
+def test_service_single_frame_annotation_page2_rejected(world):
+    db,store,own,volumes,versions,a,b=world
+    _single_frame_png_fixture(world)
+    defect=_fresh_defect(db,own.id,'negative')
+    version=versions[0]
+    before_point,before_links=_snapshot(db,defect.id,own.id)
+    assert before_point is None and before_links==[]
+    with pytest.raises(ValueError,match='page'):
+        bind_point(db,own.id,defect.id,version_id=version.id,page=2,x='0.25',y='0.50')
+    db.rollback()
+    after_point,after_links=_snapshot(db,defect.id,own.id)
+    assert after_point is None
+    assert after_links==before_links
+    assert db.scalar(select(Defect).where(Defect.id==defect.id,Defect.project_id==own.id)) is not None
