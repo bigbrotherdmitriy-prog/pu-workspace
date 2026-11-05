@@ -588,7 +588,7 @@ def test_api_authorizes_before_decode_or_staging(monkeypatch):
         lambda: (_ for _ in ()).throw(AssertionError("staging touched before authorization")),
     )
     with pytest.raises(RuntimeError, match="denied"):
-        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11))
+        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="synthetic-direct-batch")
 
 
 def test_api_admits_whole_batch_and_returns_only_opaque_job_references(tmp_path, monkeypatch):
@@ -615,7 +615,7 @@ def test_api_admits_whole_batch_and_returns_only_opaque_job_references(tmp_path,
         ),
     ])
     response = local_api.analyze_local_folder(
-        batch, db=object(), user=SimpleNamespace(id=11), idempotency_key="client-request",
+        batch, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="client-request",
     )
     assert [item.display_name for item in admitted] == ["first.txt", "second.pdf"]
     assert staged == [
@@ -641,7 +641,7 @@ def test_api_rejects_invalid_base64_size_and_mime_with_stable_errors(tmp_path, m
         project_id=23, files=[local_api.LocalFile(path="secret.txt", content_base64="%%%")],
     )
     with pytest.raises(HTTPException) as error:
-        local_api.analyze_local_folder(invalid, db=object(), user=SimpleNamespace(id=11))
+        local_api.analyze_local_folder(invalid, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="synthetic-direct-batch")
     assert (error.value.status_code, error.value.detail) == (422, "invalid_file_content")
 
     unsupported = local_api.LocalBatch(project_id=23, files=[local_api.LocalFile(
@@ -649,7 +649,7 @@ def test_api_rejects_invalid_base64_size_and_mime_with_stable_errors(tmp_path, m
         content_base64=base64.b64encode(b"binary").decode("ascii"),
     )])
     with pytest.raises(HTTPException) as error:
-        local_api.analyze_local_folder(unsupported, db=object(), user=SimpleNamespace(id=11))
+        local_api.analyze_local_folder(unsupported, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="synthetic-direct-batch")
     assert (error.value.status_code, error.value.detail) == (422, "unsupported_mime_type")
 
 
@@ -667,7 +667,7 @@ def test_api_rejects_whole_batch_before_decode_or_staging(tmp_path, monkeypatch)
         local_api.LocalFile(path="two.txt", content_base64=base64.b64encode(b"def").decode()),
     ])
     with pytest.raises(HTTPException) as error:
-        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11))
+        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="synthetic-direct-batch")
     assert (error.value.status_code, error.value.detail) == (422, "batch_too_large")
 
 
@@ -695,7 +695,7 @@ def test_api_maps_infrastructure_failures_to_content_free_503(
         content_base64=base64.b64encode(b"secret body").decode(),
     )])
     with pytest.raises(HTTPException) as error:
-        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11))
+        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="synthetic-direct-batch")
     assert (error.value.status_code, error.value.detail) == (503, expected_detail)
     assert "private" not in error.value.detail
     assert "key=raw" not in error.value.detail
@@ -716,7 +716,7 @@ def test_api_does_not_echo_unexpected_value_error_text(tmp_path, monkeypatch):
         content_base64=base64.b64encode(b"secret body").decode(),
     )])
     with pytest.raises(HTTPException) as error:
-        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11))
+        local_api.analyze_local_folder(batch, db=object(), user=SimpleNamespace(id=11), expected_user_id=11, idempotency_key="synthetic-direct-batch")
     assert (error.value.status_code, error.value.detail) == (422, "invalid_file_content")
 
 

@@ -437,13 +437,19 @@ def test_single_head_and_postgresql_offline_migration(monkeypatch):
     # Explicit synthetic URL, offline only: never inherit DATABASE_URL.
     monkeypatch.setenv("DATABASE_URL","postgresql+psycopg://synthetic:synthetic@127.0.0.1/puw_v54_test_offline")
     buf = StringIO()
-    command.upgrade(migration_config(buf),"f360a1b2c3d4:head",sql=True)
+    command.upgrade(migration_config(buf),"f360a1b2c3d4:c1d2e3f4a5b6",sql=True)
     sql = buf.getvalue()
     assert "CREATE TABLE v54_sources" in sql and "fk_v54_evidence_observation" in sql
     assert "UPDATE alembic_version" in sql
     assert "DROP TABLE" not in sql
     assert sql.count("INSERT INTO v54") == 1
     assert "INSERT INTO v54_mailbox_project_cohorts" in sql
+    # Later safety guards need a real, explicitly isolated catalog; do not
+    # pretend that an offline mock proved their data preconditions.
+    refused = StringIO()
+    with pytest.raises(RuntimeError, match="requires live catalog preflight"):
+        command.upgrade(migration_config(refused), "f360a1b2c3d4:head", sql=True)
+    assert refused.getvalue() == ""
 
 
 def test_postgresql_upgrade_downgrade_only_on_explicit_empty_test_db(monkeypatch):
