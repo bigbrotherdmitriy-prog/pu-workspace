@@ -285,7 +285,7 @@ def _apply_task_command(
         actor=user,
         changes=python_patch,
         fields_set=fields_set,
-        history_idempotency_key=f"mobile:{command.client_mutation_id}",
+        history_idempotency_key=f"mobile:{user.id}:{command.client_mutation_id}",
     )
     db.flush()
     command.status = "applied"
@@ -324,7 +324,7 @@ def _apply_notification_command(
             new_values={"is_read": True},
             evidence={"kind": item.kind, "entity_type": item.entity_type, "entity_id": item.entity_id},
             reason="Офлайн-отметка синхронизирована",
-            idempotency_key=f"mobile:{command.client_mutation_id}",
+            idempotency_key=f"mobile:{user.id}:{command.client_mutation_id}",
         )
     command.status = "applied"
     command.result = {
