@@ -29,3 +29,7 @@ NOTES.md: HttpOnly и общий HTTP disk cache физически недост
 ## Владение и запреты
 
 Перед мутациями git status/control/user pause и единственный work-owner lock/lease. Не обходить чужой lock; PID namespace не kill. Control обновлять атомарно под supervisor.lock, сохранять другие tasks и pause. Не clean/reset/untrackeddelete. No production/liveDB/deploy/approval/.env/secrets/sudo/services/bots/proxy/denied обход. DeepSeek основной; Codex fallback по исключению при недоступном исполнении с честным provenance. Новые обращения только .pu-autonomy, не старый alias. Общий MASTER-PLAN не завершён.
+
+## Последний review этапа3 — 2026-11-05T06:26:57.605988+00:00
+
+На source00306095 подтверждён OPEN P1 HTTP cache фото:private,max-age3600/no nosniff.6existing scope checks PASS и3actualdirect-handler controls; privacy критерии не выполнены. DS53 terminal rejected/Invalid bounded request, повтор не отправлен; уточнённый контракт в docs/STAGE3-PHOTO-CACHE-REVIEW-2026-11-05.md. Review docs/NEXT сохранены отдельно в refs/heads/review/stage3-photo-cache-20261105; проектная реализация/тесты и candidate00306095 не менялись. Следующий глобальный P0 по-прежнему stage1-finite.
