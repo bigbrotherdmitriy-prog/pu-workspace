@@ -386,6 +386,7 @@ export class StorageApi {
     if (method === "POST" && /^\/projects\/\d+\/snapshots\/31\/standardize$/.test(path)) return this.fulfill(route, this.standardizeReply);
     if (method !== "GET") return this.block(route, `Unexpected write ${method} ${path}`);
     const single: Record<string, unknown> = {
+      "/auth/logout-intent": { user_id: 900, logout_ticket: "900." + "a".repeat(64) },
       "/auth/me": { id: 900, name: "Synthetic Operator", email: "operator@example.invalid", is_admin: true },
       "/mobile-sync/status": { conflicts: [], count: 0 },
       "/organizations/current/requisites": { id: 901, name: "Synthetic Organization", requisites_status: "draft" },
