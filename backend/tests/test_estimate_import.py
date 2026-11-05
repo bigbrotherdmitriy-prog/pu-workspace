@@ -1,11 +1,12 @@
 """Тесты разбора сметы из Excel (.xlsx)."""
 
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_EVEN, localcontext
 from io import BytesIO
 
 import pytest
 from openpyxl import Workbook
 
-from app.estimate_import import parse_estimate_xlsx
+from app.estimate_import import _apply_math, parse_estimate_xlsx
 
 
 def _wb_bytes(wb: Workbook) -> bytes:
@@ -155,3 +156,68 @@ def test_too_many_lines_raises():
 
     with pytest.raises(ValueError):
         parse_estimate_xlsx(_wb_bytes(wb))
+
+
+# --- Регрессии для _apply_math: производная сумма (total) ---
+
+
+def _fresh_line(qty, price, total=None):
+    """Свежий словарь строки для каждого вызова _apply_math."""
+    return {
+        "sort_order": 1,
+        "section": "",
+        "position": "1",
+        "code": "",
+        "name": "Позиция",
+        "unit": "шт",
+        "qty": qty,
+        "unit_price": price,
+        "total": total,
+        "note": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "qty, price, expected",
+    [
+        ("0.5", "2.01", "1.01"),
+        ("0.5", "2.05", "1.03"),
+        ("1.25", "0.10", "0.13"),
+    ],
+)
+def test_apply_math_derived_total_exact(qty, price, expected):
+    line = _fresh_line(qty, price, total=None)
+    warnings: list[str] = []
+    _apply_math(line, 1, warnings)
+    assert line["total"] is not None
+    assert Decimal(str(line["total"])) == Decimal(expected)
+
+
+@pytest.mark.parametrize("rounding", [ROUND_DOWN, ROUND_HALF_EVEN])
+@pytest.mark.parametrize(
+    "qty, price, expected",
+    [
+        ("0.5", "2.01", "1.01"),
+        ("0.5", "2.05", "1.03"),
+        ("1.25", "0.10", "0.13"),
+    ],
+)
+def test_apply_math_derived_total_independent_of_caller_rounding(
+    rounding, qty, price, expected
+):
+    line = _fresh_line(qty, price, total=None)
+    warnings: list[str] = []
+    with localcontext() as ctx:
+        ctx.rounding = rounding
+        ctx.prec = 2
+        _apply_math(line, 1, warnings)
+    assert line["total"] is not None
+    assert Decimal(str(line["total"])) == Decimal(expected)
+
+
+def test_apply_math_preserves_explicit_total():
+    # Явно заданная сумма не должна пересчитываться.
+    line = _fresh_line("0.5", "2.01", total="7.77")
+    warnings: list[str] = []
+    _apply_math(line, 1, warnings)
+    assert Decimal(str(line["total"])) == Decimal("7.77")
