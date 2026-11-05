@@ -1,34 +1,31 @@
-# NEXT — продолжение MASTER-PLAN
+# NEXT — PU Workspace
 
 ## Сделано
 
-- P0 snapshot:437исходныхuntracked+2modified+SOURCE-MANIFEST,440files;allSHA/readbackverified. Manifest `docs/operations/P0-WORKTREE-SNAPSHOT-MANIFEST-2026-11-03.json`. RootHEAD/modifiedbytesunchanged.
+P0 «выход без сети и отсутствие автоматического восстановления» завершён в изолированном проверенном объёме. Последний code commit **b894d194826a2bf25655b8e3d4b7067bc3413560**, `/tmp/pu-integration-git-20261103`, branch `work/post-handoff-safe-20261104`; после него — отдельный docs commit. Точный полный source HEAD и SHA256 брать из `docs/operations/OFFLINE-LOGOUT-CURRENT-TRANSFER-INPUTS-2026-11-05.json`, restore receipt рядом. При отсутствии этих файлов завершить упаковку текущего checkout, не использовать старый2f/ee83 пакет как актуальный.
 
-- Предыдущие проверки и последний1291filecandidate описаны в HANDOFF.md.
-- Состояние Git и control прочитано; mode running, пользовательская пауза не переопределялась.
-- Единственный доступный агент: /root. Захвачен живой кооперативный kernel-lock `.pu-autonomy/work-owner.lock`; владелец `.pu-autonomy/work-owner.json`, control.work_owner. PID в record локален namespace, не использовать его для kill.
+- Local/server fence, session epochs, delayed-body guard, BFCache/multitab и пересоздание всего приватного React-состояния.
+- Durable scoped revoke-only queue, повторы при сети/startup/online; ответ отзыва не стирает новую login-cookie.
+- Предупреждение и отмена до выхода; сохранение actor-scoped unsent photo Blobs/правок/stock intents. Несохранённые поля формы сохранить заранее.
+- 12code/verification commits до b894d194, явно Codex fallback; не результат DeepSeek. Прибавлен завершающий коммит HANDOFF/NEXT/NOTES/DECISIONS. Никаких push/merge/deploy.
+- Проверки после исправлений: **877 frontend unit**, **100E2E**, **4227Python**, **132conditionalSKIP**,5subchecks. Матрицы учитывают целевые повторы; исходные failed full отчёты сохранены. 7testfiles sales-bot/dispatcher исключены по прямому запрету. Main/E2E TypeScript и builds0. Actual Chromium→HTTP→FastAPI/memorySQLite logout4PASS, свои процессы остановлены.
+- Исходные root estimates diff и untracked сохранены, migration revision bytes не изменены. Production/liveDB/.env/секреты/службы/боты не трогали.
 
 ## В работе
 
-P0 из раздела6 HANDOFF: исходное дерево сохранено; собрать отдельную review Git-ветку из полного immutable upstream дерева и проверенного source capsule. Root checkout не сбрасывать/не чистить. Секреты/.env не читать.
+Активной реализации следующего P0 в этом bounded задании нет. Источник истины: HANDOFF§6, матрицы в docs/operations, WORK-STATUS и .pu-autonomy/evidence. Stage3 целиком не объявлен done: реальный телефон и другие программные пункты остаются.
 
-## Следующий шаг
+## Следующий шаг — P0 stage1-finite
 
-1. Snapshot и evidence завершены; не перезаписывать архив.
-2. Создать отдельный writable Git checkout в /tmp на базе86a4, сохранить происхождение и hashes1291files. Никаких push/merge/deploy.
-3. Проверить интегрированную ветку; затем P0 migration/recovery/CI gates, не переписывая историю.
+1. Прочитать `docs/STAGE1-NUMERIC-REVIEW-GATES-2026-11-04.md` и два RED report: `STAGE1-ROUNDING-TIE-RED-2026-11-04.json`, `STAGE1-MANUAL-ROUNDTRIP-RED-2026-11-04.json`.
+2. Закрыть tie-rounding и ручной round-trip без молчаливой перезаписи исторического total: `backend/app/estimates.py`, `backend/app/estimate_import.py`, соответствующие `backend/tests/test_estimates.py` / `test_estimate_import.py`. Сначала проверить актуальный diff/source head и результаты DS39–44; queued не равно модельному результату. При подтверждённо недоступном исполнении — явный Codex fallback.
+3. Изолированные synthetic regressions и подходящие HTTP проверки; никаких production DB/реальных смет. Не применять автоматически два прежних root estimates diff.
+4. Следующие независимые P1: no-store для authenticated defect photos; RD PDF/изображения viewer/сравнение. Не объявлять всё оставшееся внешними блокерами.
 
-## Владение очередью и восстановление
+## Допущения и границы
 
-- Перед изменениями читать control.mode и owner record, проверить live lock. Если он удерживается другим исполнителем, не выполнять параллельную работу.
-- Временный keeper только держит lock, не запускает проектные задачи и не является системой/runner/service. Lease30минут; renew/release через `.pu-autonomy/work-owner-command.json` с точным token текущего owner. Не подменять user pause и не красть живой lease.
-- При обрыве проверять record+lock, не доверять одному stale PID. После освобождения lease новый исполнитель может захватить его; snapshot/manifest/evidence — источник восстановления.
-- Запрещены production/живаяDB/deploy/approval/секреты/.env/службы/боты/обход отказанных действий.
+NOTES.md: HttpOnly и общий HTTP disk cache физически недоступны JS офлайн; local fence/no-store/owned cache cleanup и server revoke предотвращают восстановление. Старый destructive logout default заменён прямым требованием сохранять unsent. Предварительные остальные решения — DECISIONS.md. Default PostgreSQL/opt-in skips не являются runtime приёмкой; realphone/camera/OS PWA/печать, реальные формы/смета/1С/Диадок отдельно.
 
-## Вопросы владельцу продукта — не блокируют независимые задачи
+## Владение и запреты
 
-- Нужны реальная смета и принимаемые заказчиком КС/формыИД.
-- Правило округления qty2/total2.01 без цены: сохранять исходный total или округлять unit price и пересчитывать?
-- Отрицательный физический остаток допускается? Что делать с расходом при удалении связанного журнала?
-- Какая конфигурация/формат1С, тестовый обмен Диадока и три приоритетные формыИД?
-- Как доступна проверка реального телефона/камеры/PWA? Секреты в чат не нужны.
+Перед мутациями git status/control/user pause и единственный work-owner lock/lease. Не обходить чужой lock; PID namespace не kill. Control обновлять атомарно под supervisor.lock, сохранять другие tasks и pause. Не clean/reset/untrackeddelete. No production/liveDB/deploy/approval/.env/secrets/sudo/services/bots/proxy/denied обход. DeepSeek основной; Codex fallback по исключению при недоступном исполнении с честным provenance. Новые обращения только .pu-autonomy, не старый alias. Общий MASTER-PLAN не завершён.
