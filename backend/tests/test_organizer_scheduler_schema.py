@@ -44,9 +44,16 @@ def test_startup_preflight_waits_for_schema_but_not_unstarted_services(monkeypat
         )
     monkeypatch.setattr(readiness_module, "engine", database)
 
+    class _EmptyResult:
+        def all(self):
+            return []
+
     class EmptySession:
         def scalars(self, _query):
             return []
+
+        def execute(self, _query):
+            return _EmptyResult()
 
     @contextmanager
     def empty_session():

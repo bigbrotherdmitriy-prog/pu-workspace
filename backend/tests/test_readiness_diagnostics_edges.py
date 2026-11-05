@@ -6,6 +6,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -23,6 +25,14 @@ REVISION = "a" * 40
 IMAGE = "sha256:" + "b" * 64
 ORIGIN = "https://example.test"
 SECRET_SENTINEL = "TEST_SECRET_MUST_NOT_APPEAR_IN_DIAGNOSTICS"
+
+READINESS_SPEC = importlib.util.spec_from_file_location(
+    "readiness_module", ROOT / "backend/app/core/readiness.py"
+)
+readiness_module = importlib.util.module_from_spec(READINESS_SPEC)
+assert READINESS_SPEC and READINESS_SPEC.loader
+READINESS_SPEC.loader.exec_module(readiness_module)
+_dead_letter_summary = readiness_module._dead_letter_summary
 
 
 class FakeClock:
@@ -410,3 +420,60 @@ def test_success_receipt_and_stdout_filter_extra_api_secrets(
     assert SECRET_SENTINEL not in receipt.read_text()
     output = capsys.readouterr()
     assert SECRET_SENTINEL not in output.out + output.err
+
+
+def test_dead_letter_summary_zero_rows():
+    assert _dead_letter_summary([]) == "dead-letter jobs: 0"
+
+
+def test_dead_letter_summary_one_row():
+    stamp = datetime(2024, 5, 1, 12, 0, tzinfo=timezone.utc)
+    assert _dead_letter_summary([("email_sync", stamp)]) == (
+        "dead-letter jobs: 1 (kinds: email_sync=1; oldest 2024-05-01)"
+    )
+
+
+def test_dead_letter_summary_mixed_kinds_sorted():
+    stamp = datetime(2024, 5, 1, tzinfo=timezone.utc)
+    rows = [("zeta", stamp), ("alpha", stamp), ("zeta", stamp), ("beta", stamp)]
+    assert _dead_letter_summary(rows) == (
+        "dead-letter jobs: 4 (kinds: alpha=1, beta=1, zeta=2; oldest 2024-05-01)"
+    )
+
+
+def test_dead_letter_summary_naive_and_aware_datetimes():
+    aware = datetime(2024, 3, 10, 8, 0, tzinfo=timezone.utc)
+    naive = datetime(2024, 3, 5, 8, 0)
+    rows = [("a", aware), ("b", naive)]
+    assert _dead_letter_summary(rows) == (
+        "dead-letter jobs: 2 (kinds: a=1, b=1; oldest 2024-03-05)"
+    )
+
+
+def test_dead_letter_summary_none_datetimes():
+    rows = [("a", None), ("b", None)]
+    assert _dead_letter_summary(rows) == "dead-letter jobs: 2 (kinds: a=1, b=1)"
+
+
+def test_dead_letter_summary_hostile_kinds_sanitized():
+    stamp = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    long_kind = "x" * 200
+    rows = [
+        ("has space", stamp),
+        ("line\nbreak", stamp),
+        (long_kind, stamp),
+        ("", stamp),
+    ]
+    message = _dead_letter_summary(rows)
+    assert message.startswith("dead-letter jobs: 4 (kinds: ")
+    kinds_segment = message.split("kinds: ", 1)[1].split(";", 1)[0]
+    for entry in kinds_segment.split(", "):
+        kind_name = entry.split("=", 1)[0]
+        assert re.fullmatch(r"[A-Za-z0-9_.\-]+", kind_name), kind_name
+        assert len(kind_name) <= 60, kind_name
+    assert not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in message)
+    assert "\n" not in message
+    assert "x" * 60 in message
+    assert "x" * 61 not in message
+    assert "other=1" in message
+    assert message.endswith("; oldest 2024-01-02)")
