@@ -8,6 +8,8 @@ from hashlib import sha256
 from sqlalchemy import literal, select
 from app.models.rd import RdVolume, RdVolumeVersion
 
+_ALLOWED_MIME = ('image/png', 'image/jpeg', 'application/pdf')
+
 
 def retain_version_content(db, store, project_id: int, volume_id: int, content: bytes,
                            file_name: str, mime_type: str, *, byte_budget: int) -> dict:
@@ -52,3 +54,55 @@ def retain_version_content(db, store, project_id: int, volume_id: int, content: 
                 'content_sha256': row['content_sha256'], 'size_bytes': row['size_bytes'],
                 'file_name': row['file_name'], 'mime_type': row['mime_type'],
                 'created_at': row['created_at'].isoformat()}
+
+
+def read_retained_version_content(db, store, project_id: int, version_id: int, *,
+                                  byte_budget: int) -> dict:
+    """Read retained version bytes for a future authenticated download.
+
+    Read-only: performs no commit, flush, rollback or write. The caller MUST
+    authorize the requesting user as a project viewer before invocation; this
+    helper grants no user access itself. The later API layer MUST also enforce
+    no-store, nosniff and safe attachment response headers.
+
+    MIME type is retained metadata only; bytes integrity is verified, but safe
+    inline rendering is NOT established and no codec/render/page validation is
+    claimed. Missing or foreign-scoped versions are indistinguishable and raise
+    LookupError before any store access. Corrupt, truncated or oversized stored
+    data raises ValueError; specific store errors propagate unchanged.
+    """
+    if any(type(value) is not int or value <= 0
+           for value in (project_id, version_id, byte_budget)):
+        raise ValueError('Invalid project, version or content budget')
+    with db.no_autoflush:
+        row = db.execute(select(
+            RdVolumeVersion.id,
+            RdVolumeVersion.volume_id,
+            RdVolumeVersion.size_bytes,
+            RdVolumeVersion.content_sha256.substring(1, 65),
+            RdVolumeVersion.mime_type.substring(1, 101),
+        ).join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id).where(
+            RdVolumeVersion.id == version_id,
+            RdVolume.project_id == project_id,
+        )).one_or_none()
+    if row is None:
+        raise LookupError('Drawing version not found in project')
+    volume_id, declared_size, digest, mime_type = row[1], row[2], row[3], row[4]
+    if type(declared_size) is not int or declared_size <= 0 or declared_size > byte_budget:
+        raise ValueError('Invalid retained version size')
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(ch not in '0123456789abcdef' for ch in digest)):
+        raise ValueError('Invalid retained version digest')
+    if mime_type not in _ALLOWED_MIME:
+        raise ValueError('Invalid retained version MIME type')
+    content = store.read(project_id, digest, declared_size)
+    if type(content) is not bytes:
+        raise ValueError('Retained version content is not bytes')
+    if len(content) != declared_size:
+        raise ValueError('Retained version content size mismatch')
+    if sha256(content).hexdigest() != digest:
+        raise ValueError('Retained version content digest mismatch')
+    return {'project_id': project_id, 'version_id': version_id,
+            'volume_id': volume_id, 'content_sha256': digest,
+            'size_bytes': declared_size, 'mime_type': mime_type,
+            'content': content}
