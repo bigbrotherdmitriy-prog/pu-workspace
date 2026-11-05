@@ -1,4 +1,5 @@
 import io
+import posixpath
 import zipfile
 from datetime import date
 from xml.etree import ElementTree as ET
@@ -201,6 +202,8 @@ _CUSTOM_NS = "http://schemas.openxmlformats.org/officeDocument/2006/custom-prope
 _VT_NS = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
 _CUSTOM_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties"
 _CUSTOM_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
+_PKG_RELS = "_rels/.rels"
+_DOC_RELS = "word/_rels/document.xml.rels"
 
 
 def _read(data: bytes, name: str) -> str:
@@ -212,6 +215,14 @@ def _read(data: bytes, name: str) -> str:
 def _names(data: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         return zf.namelist()
+
+
+def _resolve_target(source_part: str, target: str) -> str:
+    """Resolve an OPC relationship Target relative to its source part."""
+    if target.startswith("/"):
+        return target.lstrip("/")
+    base = posixpath.dirname(source_part)
+    return posixpath.normpath(posixpath.join(base, target))
 
 
 def test_build_docx_old_call_and_positional_landscape_preserved():
@@ -262,13 +273,36 @@ def test_build_docx_template_metadata_parses_and_escapes():
     assert len(overrides) == 1
     assert overrides[0].get("ContentType") == _CUSTOM_CONTENT_TYPE
 
-    rels = _read(data, "word/_rels/document.xml.rels")
-    rel_root = ET.fromstring(rels)
-    custom_rels = [r for r in rel_root if r.get("Type") == _CUSTOM_REL_TYPE]
+    # custom-properties relationship lives in the package rels, not document rels
+    pkg_rels = _read(data, _PKG_RELS)
+    pkg_root = ET.fromstring(pkg_rels)
+    custom_rels = [r for r in pkg_root if r.get("Type") == _CUSTOM_REL_TYPE]
     assert len(custom_rels) == 1
     assert custom_rels[0].get("Target") == "docProps/custom.xml"
-    ids = [r.get("Id") for r in rel_root]
-    assert len(set(ids)) == len(ids)
+    pkg_ids = [r.get("Id") for r in pkg_root]
+    assert len(set(pkg_ids)) == len(pkg_ids)
+
+    doc_rels = _read(data, _DOC_RELS)
+    doc_root = ET.fromstring(doc_rels)
+    assert [r for r in doc_root if r.get("Type") == _CUSTOM_REL_TYPE] == []
+    doc_ids = [r.get("Id") for r in doc_root]
+    assert len(set(doc_ids)) == len(doc_ids)
+
+
+def test_build_docx_custom_relationship_target_resolves_in_package():
+    parts = ["<w:p><w:r><w:t>Текст</w:t></w:r></w:p>"]
+    data = build_docx(parts, template_id="T", template_version="1")
+    names = _names(data)
+
+    pkg_root = ET.fromstring(_read(data, _PKG_RELS))
+    custom_rels = [r for r in pkg_root if r.get("Type") == _CUSTOM_REL_TYPE]
+    assert len(custom_rels) == 1
+    target = custom_rels[0].get("Target")
+    assert target
+
+    resolved = _resolve_target(_PKG_RELS, target)
+    assert resolved == "docProps/custom.xml"
+    assert resolved in names
 
 
 def test_build_docx_document_xml_unchanged_between_versions():
