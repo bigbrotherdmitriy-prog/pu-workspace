@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -150,20 +150,40 @@ def update_line(db: Session, project_id: int, line_id: int, data: dict) -> dict:
     l = db.get(EstimateLine, line_id)
     if l is None or l.project_id != project_id:
         raise LookupError("Позиция сметы не найдена")
+    # Сначала валидируем и нормализуем все поля, ничего не мутируя в ORM.
+    text_updates: dict[str, str | None] = {}
     for field in ("name", "unit", "code", "position", "section", "note"):
         if field in data:
             value = (str(data[field]).strip() if data[field] is not None else "")
             if field == "name" and not value:
                 raise ValueError("Название позиции не может быть пустым")
-            setattr(l, field, value or None)
+            text_updates[field] = value or None
+    numeric_updates: dict[str, Decimal | None] = {}
     for field in ("qty", "unit_price", "total"):
         if field in data:
             value = _dec(data[field])
             if data[field] not in (None, "") and value is None:
                 raise ValueError("Число указано неверно")
+            if value is not None and not value.is_finite():
+                raise ValueError("Число указано неверно")
             if value is not None and value < 0:
                 raise ValueError("Значение не может быть отрицательным")
-            setattr(l, field, value)
+            if value is not None:
+                # Явная политика сериализации ROUND_HALF_UP до присвоения в ORM.
+                # Достаточная точность контекста не зависит от настроек вызывающего кода.
+                with localcontext() as ctx:
+                    ctx.prec = max(28, len(value.as_tuple().digits) + 10)
+                    ctx.rounding = ROUND_HALF_UP
+                    try:
+                        value = value.quantize(THREE if field == "qty" else TWO, rounding=ROUND_HALF_UP)
+                    except InvalidOperation:
+                        raise ValueError("Число указано неверно")
+            numeric_updates[field] = value
+    # Все проверки пройдены — только теперь применяем изменения.
+    for field, value in text_updates.items():
+        setattr(l, field, value)
+    for field, value in numeric_updates.items():
+        setattr(l, field, value)
     db.flush()
     return {"id": l.id}
 
