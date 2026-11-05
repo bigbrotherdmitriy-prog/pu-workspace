@@ -220,3 +220,99 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+# ---------------------------------------------------------------------------
+# DS62: синтетические регрессии ручного Decimal round-trip (HALF_UP).
+# Проверяют, что update_line сохраняет Decimal без потери точности и что
+# get_estimate отдаёт значения, округлённые HALF_UP, до и после expire_all.
+# ---------------------------------------------------------------------------
+
+
+def _manual_estimate(db, pid, name="Ручная смета"):
+    parsed = {
+        "lines": [
+            {"sort_order": 1, "section": "Раздел 1", "position": "1", "code": "", "name": "Позиция ручная", "unit": "шт",
+             "qty": "1", "unit_price": "1.00", "total": "1.00", "note": ""},
+        ],
+        "total": "1.00",
+    }
+    return svc.create_estimate(db, pid, name, parsed)
+
+
+def _reload_line(db, pid, eid, lid):
+    est = svc.get_estimate(db, pid, eid)
+    return next(l for l in est["lines"] if l["id"] == lid)
+
+
+def test_update_line_decimal_round_trip_half_up(world):
+    db, pid = world["db"], world["p"].id
+    est = _manual_estimate(db, pid)
+    eid = est["id"]
+    lid = svc.get_estimate(db, pid, eid)["lines"][0]["id"]
+
+    # Явный unit_price в исходной строке, чтобы не мешала логика цены из total/qty.
+    svc.update_line(db, pid, lid, {"unit_price": "1.00", "qty": "1", "total": "1.00"})
+    db.commit()
+
+    # price 1.005 -> 1.01 (HALF_UP), total 1.005 -> 1.01, qty 1.2345 -> 1.235
+    svc.update_line(db, pid, lid, {"unit_price": "1.005", "total": "1.005", "qty": "1.2345"})
+    db.commit()
+
+    before = _reload_line(db, pid, eid, lid)
+    assert before["unit_price"] == "1.01", before
+    assert before["total"] == "1.01", before
+    assert before["qty"] == "1.235", before
+
+    db.expire_all()
+    after = _reload_line(db, pid, eid, lid)
+    assert after["unit_price"] == "1.01", after
+    assert after["total"] == "1.01", after
+    assert after["qty"] == "1.235", after
+
+    # Явные HALF_UP-ожидания через Decimal, чтобы не зависеть от строкового формата.
+    assert Decimal(after["unit_price"]) == Decimal("1.005").quantize(Decimal("0.01"), rounding="ROUND_HALF_UP")
+    assert Decimal(after["total"]) == Decimal("1.005").quantize(Decimal("0.01"), rounding="ROUND_HALF_UP")
+    assert Decimal(after["qty"]) == Decimal("1.2345").quantize(Decimal("0.001"), rounding="ROUND_HALF_UP")
+
+
+def test_update_line_exact_amounts_positive_control(world):
+    db, pid = world["db"], world["p"].id
+    est = _manual_estimate(db, pid, name="Точная смета")
+    eid = est["id"]
+    lid = svc.get_estimate(db, pid, eid)["lines"][0]["id"]
+
+    svc.update_line(db, pid, lid, {"unit_price": "2.50", "total": "5.00", "qty": "2.000"})
+    db.commit()
+
+    before = _reload_line(db, pid, eid, lid)
+    assert before["unit_price"] == "2.50", before
+    assert before["total"] == "5.00", before
+    assert before["qty"] == "2.000", before
+
+    db.expire_all()
+    after = _reload_line(db, pid, eid, lid)
+    assert after["unit_price"] == "2.50", after
+    assert after["total"] == "5.00", after
+    assert after["qty"] == "2.000", after
+
+
+def test_update_line_none_and_empty_preserved(world):
+    db, pid = world["db"], world["p"].id
+    est = _manual_estimate(db, pid, name="Пустая смета")
+    eid = est["id"]
+    lid = svc.get_estimate(db, pid, eid)["lines"][0]["id"]
+
+    svc.update_line(db, pid, lid, {"unit_price": None, "total": "", "qty": None})
+    db.commit()
+
+    before = _reload_line(db, pid, eid, lid)
+    assert before["unit_price"] is None, before
+    assert before["total"] is None, before
+    assert before["qty"] is None, before
+
+    db.expire_all()
+    after = _reload_line(db, pid, eid, lid)
+    assert after["unit_price"] is None, after
+    assert after["total"] is None, after
+    assert after["qty"] is None, after
