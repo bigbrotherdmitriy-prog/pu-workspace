@@ -133,7 +133,7 @@ def download_photo(project_id: int, defect_id: int, photo_id: int, db: Session =
         p = svc.get_photo(db, project_id, defect_id, photo_id)
     except LookupError as exc:
         raise _fail(exc) from exc
-    return Response(content=p.data, media_type=p.mime_type, headers={"Content-Disposition": "inline; filename=\"photo\"", "Cache-Control": "private, max-age=3600"})
+    return Response(content=p.data, media_type=p.mime_type, headers={"Content-Disposition": "inline; filename=\"photo\"", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.delete("/{project_id}/defects/{defect_id}/photos/{photo_id}")
