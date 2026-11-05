@@ -69,8 +69,9 @@
   :root .shell > main > .mobile-sync-panel.compact,
   :root[data-display-theme] .shell.future-preview-shell.future-light-dashboard > main > .mobile-sync-panel.compact {
     gap: 6px !important; margin: 6px 12px 0 !important; padding: 4px 6px 4px 10px !important;
+    min-width: 0; grid-template-columns: minmax(0, 1fr);
   }
-  :root .shell > main > .mobile-sync-panel.compact .mobile-sync-summary { flex-wrap: nowrap !important; align-items: center !important; gap: 8px; }
+  :root .shell > main > .mobile-sync-panel.compact .mobile-sync-summary { min-width: 0; flex-wrap: nowrap !important; align-items: center !important; gap: 8px; }
   :root .shell > main > .mobile-sync-panel.compact .mobile-sync-summary > span {
     min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     font-size: 13px; line-height: 1.25;

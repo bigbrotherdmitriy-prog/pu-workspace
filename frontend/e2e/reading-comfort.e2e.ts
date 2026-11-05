@@ -1,6 +1,8 @@
 import { expect, test } from "./storage-fixtures";
 
 test("reading themes retain contrast, legible copy and responsive layout", async ({ page, mock }, info) => {
+  // Two full-page theme captures, reload and responsive transition on the 2GB stand.
+  test.setTimeout(90_000);
   mock.projectRows[1].name = "Реконструкция инженерного корпуса";
   await page.route("**/projects/2/site-location", route => route.fulfill({ json: {
     configured: false, latitude: null, longitude: null, label: null, radius_m: null, accuracy_m: null,
