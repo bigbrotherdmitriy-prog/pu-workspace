@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 from dataclasses import dataclass
 import importlib.util
@@ -10,6 +11,9 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CURRENT_HEAD = next(node.value.value for node in ast.parse((ROOT / "backend/app/schema.py").read_text()).body
+    if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+    and any(isinstance(target, ast.Name) and target.id == "CURRENT_SCHEMA_REVISION" for target in node.targets))
 
 
 def valid_runtime_records():
@@ -107,7 +111,7 @@ def test_runtime_orchestrator_never_publishes_captured_output_or_secrets():
     assert "capture_output=True" in source
     assert "print(result.stdout" not in source and "print(result.stderr" not in source
     assert "DROP DATABASE {}" in source and "pg_terminate_backend" in source
-    assert 'HEAD = "b9c0d1e2f3a4"' in source
+    assert f'HEAD = "{CURRENT_HEAD}"' in source
     assert '"PUW_V54_PROVIDER_MIGRATION_DATABASE_URL": base_url("puw_v54_test_migrations")' in source
     assert '"backend/tests/test_v54_provider_action_migration.py"' in source
     assert '"backend/tests/test_v54_product_acceptance.py"' in source

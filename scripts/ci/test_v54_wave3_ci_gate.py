@@ -1,10 +1,14 @@
+import ast
 from pathlib import Path
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_HEAD = "b9c0d1e2f3a4"
+CURRENT_HEAD = next(node.value.value for node in ast.parse((ROOT / "backend/app/schema.py").read_text()).body
+    if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+    and any(isinstance(target, ast.Name) and target.id == "CURRENT_SCHEMA_REVISION" for target in node.targets))
+EXPECTED_HEAD = CURRENT_HEAD
 WAVE3_BRANCH = "codex/v54-wave3-integration"
 
 
@@ -26,7 +30,7 @@ def test_wave3_runs_postgres_runtime_and_durable_fault_gate():
     assert durable["permissions"] == {"contents": "read"}
 
 
-def test_every_wave3_runtime_pin_matches_a09():
+def test_every_runtime_pin_matches_current_schema():
     sources = {
         "orchestrator": ROOT / "scripts/ci/v54_pilot_workflow.py",
         "durable": ROOT / "scripts/ci/durable_queue/run.py",
