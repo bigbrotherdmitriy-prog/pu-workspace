@@ -280,3 +280,123 @@ def test_tampered_base_token_fails_closed_without_mutating_task(mobile_sync_worl
     db.refresh(task)
     assert task.status == "assigned"
     assert db.query(MobileSyncConflict).count() == 0
+
+
+def test_same_mutation_id_scopes_receipts_per_user_for_own_notifications(mobile_sync_world):
+    db, _, project, owner, colleague, _, owner_notice = mobile_sync_world
+    colleague_notice = Notification(
+        project_id=project.id,
+        user_id=colleague.id,
+        kind="deadline",
+        title="Deadline",
+        body="Soon",
+        entity_type="task",
+        entity_id=1,
+        dedupe_key="offline-notice-colleague",
+    )
+    db.add(colleague_notice)
+    db.commit()
+    db.refresh(colleague_notice)
+
+    shared_mutation_id = "notification-read-shared-0001"
+    owner_payload = _command(
+        project_id=project.id,
+        operation="notification.mark_read",
+        entity_id=owner_notice.id,
+        mutation_id=shared_mutation_id,
+    )
+    colleague_payload = _command(
+        project_id=project.id,
+        operation="notification.mark_read",
+        entity_id=colleague_notice.id,
+        mutation_id=shared_mutation_id,
+    )
+
+    owner_first = submit_mobile_command(owner_payload, db, owner)
+    colleague_first = submit_mobile_command(colleague_payload, db, colleague)
+
+    assert owner_first["status"] == "applied"
+    assert colleague_first["status"] == "applied"
+    assert owner_first["receipt_id"] != colleague_first["receipt_id"]
+
+    owner_receipt = db.scalar(select(MobileSyncCommand).where(
+        MobileSyncCommand.id == owner_first["receipt_id"],
+    ))
+    colleague_receipt = db.scalar(select(MobileSyncCommand).where(
+        MobileSyncCommand.id == colleague_first["receipt_id"],
+    ))
+    assert owner_receipt is not None
+    assert colleague_receipt is not None
+    assert owner_receipt.user_id == owner.id
+    assert colleague_receipt.user_id == colleague.id
+    assert owner_receipt.client_mutation_id == shared_mutation_id
+    assert colleague_receipt.client_mutation_id == shared_mutation_id
+
+    db.refresh(owner_notice)
+    db.refresh(colleague_notice)
+    assert owner_notice.is_read is True
+    assert colleague_notice.is_read is True
+
+    command_count_before_replay = db.query(MobileSyncCommand).count()
+    owner_replay = submit_mobile_command(owner_payload, db, owner)
+
+    assert owner_replay["receipt_id"] == owner_first["receipt_id"]
+    assert owner_replay["receipt_id"] != colleague_first["receipt_id"]
+    assert db.query(MobileSyncCommand).count() == command_count_before_replay
+    db.refresh(owner_notice)
+    db.refresh(colleague_notice)
+    assert owner_notice.is_read is True
+    assert colleague_notice.is_read is True
+
+
+def test_colleague_cannot_replay_owner_notification_command(mobile_sync_world):
+    db, _, project, owner, colleague, _, owner_notice = mobile_sync_world
+    shared_mutation_id = "notification-read-owner-only-0001"
+    owner_payload = _command(
+        project_id=project.id,
+        operation="notification.mark_read",
+        entity_id=owner_notice.id,
+        mutation_id=shared_mutation_id,
+    )
+
+    owner_first = submit_mobile_command(owner_payload, db, owner)
+    assert owner_first["status"] == "applied"
+    db.refresh(owner_notice)
+    assert owner_notice.is_read is True
+    owner_version_after_success = owner_notice.record_version
+
+    colleague_payload = _command(
+        project_id=project.id,
+        operation="notification.mark_read",
+        entity_id=owner_notice.id,
+        mutation_id=shared_mutation_id,
+    )
+
+    try:
+        colleague_response = submit_mobile_command(colleague_payload, db, colleague)
+    except Exception as exc:  # authorization exception is an acceptable contract outcome
+        assert not isinstance(exc, AssertionError)
+        colleague_response = None
+
+    if colleague_response is not None:
+        assert colleague_response["status"] == "rejected"
+        assert colleague_response.get("receipt_id") != owner_first["receipt_id"]
+        assert colleague_response.get("result") != owner_first.get("result")
+
+    db.refresh(owner_notice)
+    assert owner_notice.is_read is True
+    assert owner_notice.record_version == owner_version_after_success
+
+    owner_receipt = db.scalar(select(MobileSyncCommand).where(
+        MobileSyncCommand.id == owner_first["receipt_id"],
+    ))
+    assert owner_receipt is not None
+    assert owner_receipt.user_id == owner.id
+    assert owner_receipt.client_mutation_id == shared_mutation_id
+
+    colleague_receipts = db.scalars(select(MobileSyncCommand).where(
+        MobileSyncCommand.user_id == colleague.id,
+    )).all()
+    for receipt in colleague_receipts:
+        assert receipt.id != owner_first["receipt_id"]
+        assert receipt.status != "applied"
