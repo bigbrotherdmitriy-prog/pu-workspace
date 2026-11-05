@@ -220,3 +220,51 @@ def test_api_import_ks_flow(world):
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
+
+
+def test_ks3_cumulative_totals_across_calendar_years(world):
+    """KS-3 accumulates from project start, but restarts year-to-date on Jan 1."""
+    from openpyxl import load_workbook
+
+    db, pid = world["db"], world["p"].id
+    estimate_id = world["est"]["id"]
+    cable = world["lines"][0]["id"]
+    periods = [
+        ("2025-12-15", "10", date(2025, 12, 1), date(2025, 12, 31)),
+        ("2026-01-15", "20", date(2026, 1, 1), date(2026, 1, 31)),
+        ("2026-02-15", "30", date(2026, 2, 1), date(2026, 2, 28)),
+    ]
+    acts = []
+    for day, qty, start, end in periods:
+        _log(db, pid, cable, day, qty)
+        db.commit()
+        act = svc.create_act(db, pid, estimate_id, start, end)
+        svc.set_act_status(db, pid, act["id"], "signed")
+        db.commit()
+        acts.append(act)
+
+    expected = [
+        ("500.00", "500.00", "500.00"),
+        ("1500.00", "1000.00", "1000.00"),
+        ("3000.00", "2500.00", "1500.00"),
+    ]
+    for act, (from_start, from_year, period_total) in zip(acts, expected):
+        data = svc.act_with_totals(db, pid, act["id"])
+        assert (data["from_start"], data["from_year_start"], data["period_total"]) == (
+            from_start, from_year, period_total
+        )
+
+        expected_print = [ks_forms._fmt(v) for v in (from_start, from_year, period_total)]
+        total_row = next(row for row in ks_forms.ks3_rows(data) if row[1].startswith("Всего работ"))
+        assert total_row[3:6] == expected_print
+
+        wb = load_workbook(io.BytesIO(ks_forms.render_xlsx({}, data)), read_only=True)
+        try:
+            ks3 = wb["КС-3"]
+            printed = next(
+                row[3:6] for row in ks3.iter_rows(values_only=True)
+                if len(row) > 1 and isinstance(row[1], str) and row[1].startswith("Всего работ")
+            )
+            assert list(printed) == expected_print
+        finally:
+            wb.close()
