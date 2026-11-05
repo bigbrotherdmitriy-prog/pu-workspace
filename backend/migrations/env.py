@@ -29,9 +29,14 @@ def run_migrations_offline():
     from alembic.script import ScriptDirectory
     script = ScriptDirectory.from_config(config)
     guarded = {"c2d3e4f5a6b7", "c3d4e5f6a7b8"}
-    revisions = script.iterate_revisions(
-        context.get_revision_argument(), context.get_starting_revision_argument()
-    )
+    from alembic.script.revision import RangeNotAncestorError
+    target, starting = context.get_revision_argument(), context.get_starting_revision_argument()
+    try:
+        revisions = list(script.iterate_revisions(target, starting))
+    except RangeNotAncestorError:
+        # An explicit downgrade traverses the same chain in reverse. Preserve
+        # revision-specific loss-prevention checks rather than failing its range.
+        revisions = list(script.iterate_revisions(starting, target))
     if any(revision.revision in guarded for revision in revisions):
         raise RuntimeError("Offline SQL export requires live catalog preflight for guarded revisions")
     context.configure(
