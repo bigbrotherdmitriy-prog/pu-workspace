@@ -65,6 +65,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   reportServerReachable();
   if (path !== '/auth/login' && (sessionEpoch !== offlineSessionEpoch() || isLocallySignedOut())) throw new ApiError('Сеанс изменился', 401, requestId);
   const body = await response.json().catch(() => ({}));
+  if (path !== '/auth/login' && (sessionEpoch !== offlineSessionEpoch() || isLocallySignedOut())) throw new ApiError('Сеанс изменился', 401, requestId);
   if (!response.ok) {
     const responseRequestId = response.headers.get("X-Request-ID") || requestId;
     const code = typeof body.detail === "object" && body.detail !== null

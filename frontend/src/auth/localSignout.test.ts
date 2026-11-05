@@ -84,3 +84,13 @@ it('an in-flight old API response cannot publish data after local logout',async(
   auth.beginLocalSignout();release(reply({private:'SYNTHETIC old session'}));
   await expect(pending).rejects.toMatchObject({status:401});
 });
+
+it('an API body completing after logout cannot publish private data',async()=>{
+  await prepared();let release!:(value:unknown)=>void,reading!:()=>void;
+  const entered=new Promise<void>(resolve=>{reading=resolve;});
+  const body=new Promise<unknown>(resolve=>{release=resolve;});
+  network.mockResolvedValue({ok:true,status:200,headers:new Headers(),json:()=>{reading();return body;}});
+  const {api}=await import('../api/client');const pending=api('/SYNTHETIC-private-body');
+  await entered;auth.beginLocalSignout();release({private:'SYNTHETIC old body'});
+  await expect(pending).rejects.toMatchObject({status:401});
+});
