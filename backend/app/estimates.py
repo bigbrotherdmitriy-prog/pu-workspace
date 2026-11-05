@@ -265,11 +265,15 @@ def set_act_status(db: Session, project_id: int, act_id: int, status: str, heade
     a = _get_act(db, project_id, act_id)
     if status not in {"draft", "sent", "signed"}:
         raise ValueError("Статус акта: draft, sent или signed")
-    if a.status == "signed" and status != "signed":
-        raise ValueError("Подписанный акт изменить нельзя")
+    normalized_header = {k: v for k, v in header.items() if v} if header is not None else None
+    if a.status == "signed":
+        if status != "signed":
+            raise ValueError("Подписанный акт изменить нельзя")
+        if normalized_header is not None and normalized_header != json.loads(a.header_json or "{}"):
+            raise ValueError("Реквизиты подписанного акта изменить нельзя")
     a.status = status
-    if header is not None:
-        a.header_json = json.dumps({k: v for k, v in header.items() if v}, ensure_ascii=False)
+    if normalized_header is not None:
+        a.header_json = json.dumps(normalized_header, ensure_ascii=False)
     if status == "draft":
         a.customer_status = "pending"
         a.customer_comment = None

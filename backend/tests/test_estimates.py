@@ -121,7 +121,12 @@ def test_empty_period_and_status_rules(world):
     _log(db, pid, world["lines"][0]["id"], "2026-10-05", "10")
     db.commit()
     act = svc.create_act(db, pid, world["est"]["id"], date(2026, 10, 1), date(2026, 10, 31))
-    assert svc.set_act_status(db, pid, act["id"], "signed")["status"] == "signed"
+    assert svc.set_act_status(db, pid, act["id"], "signed", {"customer": "Original"})["status"] == "signed"
+    frozen_header = svc._get_act(db, pid, act["id"]).header_json
+    with pytest.raises(ValueError, match="Реквизиты подписанного акта"):
+        svc.set_act_status(db, pid, act["id"], "signed", {"customer": "Tampered"})
+    assert svc._get_act(db, pid, act["id"]).header_json == frozen_header
+    assert svc.set_act_status(db, pid, act["id"], "signed", {"customer": "Original"})["status"] == "signed"
     with pytest.raises(ValueError):
         svc.delete_act(db, pid, act["id"])
     with pytest.raises(ValueError):
@@ -217,6 +222,7 @@ def test_api_import_ks_flow(world):
         rr = c.post(f"/projects/{pid}/ks-acts/{aid}/{path}", json={"header": {"object_name": "О"}})
         assert rr.status_code == 200 and rr.content[:2] == magic, path
     assert c.patch(f"/projects/{pid}/ks-acts/{aid}", json={"status": "signed"}).json()["status"] == "signed"
+    assert c.patch(f"/projects/{pid}/ks-acts/{aid}", json={"status": "signed", "header": {"customer": "Tampered"}}).status_code == 422
     assert c.delete(f"/projects/{pid}/ks-acts/{aid}").status_code == 422
     assert c.get(f"/projects/{world['o'].id}/estimates/{eid}").status_code == 404
     assert c.delete(f"/projects/{pid}/estimates/{eid}").json() == {"deleted": eid}
