@@ -6,6 +6,7 @@ RGBA compares all channels, including RGB values hidden by transparent alpha.
 from hashlib import sha256
 from io import BytesIO
 from PIL import Image, UnidentifiedImageError
+import warnings
 
 
 def compare_raster_versions(previous: bytes, current: bytes, *, byte_budget: int, pixel_budget: int) -> dict:
@@ -107,3 +108,69 @@ def compare_stored_raster_versions(db, store, project_id: int, volume_id: int,
             raise ValueError('Drawing version MIME mismatch')
     return dict(result, project_id=project_id, volume_id=volume_id,
                 previous_version_id=previous_id, current_version_id=current_id)
+
+
+def validate_stored_raster_page(db, store, project_id: int, version_id: int, page: int, *,
+                                byte_budget: int, pixel_budget: int) -> dict:
+    """Validate a single stored PNG/JPEG page-1 raster version.
+
+    Read-only: performs no flush/commit/rollback and no API/schema/provider/env
+    access. This helper does NOT grant authorization; the caller must authorize
+    viewer access to the project before invoking it. PDF is explicitly
+    unsupported and mutable volume.page_count is never trusted.
+    """
+    import re
+    from sqlalchemy import select, func
+    from app.models.rd import RdVolume, RdVolumeVersion
+    if any(type(value) is not int or value <= 0 for value in
+           (project_id, version_id, page, byte_budget, pixel_budget)):
+        raise ValueError('Invalid identifiers, page or budgets')
+    if page != 1:
+        raise ValueError('Only single-frame PNG/JPEG page 1 is supported')
+    with db.no_autoflush:
+        row = db.execute(select(
+            RdVolumeVersion.id, RdVolumeVersion.size_bytes,
+            func.substr(RdVolumeVersion.content_sha256, 1, 65).label('digest'),
+            func.substr(RdVolumeVersion.mime_type, 1, 101).label('mime'),
+        ).join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id).where(
+            RdVolume.project_id == project_id, RdVolume.id == version_id,
+            RdVolumeVersion.id == version_id).limit(1)).mappings().first()
+    if row is None:
+        raise LookupError('Drawing version not found in project')
+    if (type(row['size_bytes']) is not int or row['size_bytes'] <= 0
+            or row['size_bytes'] > byte_budget
+            or row['mime'] not in ('image/png', 'image/jpeg')
+            or not isinstance(row['digest'], str)
+            or re.fullmatch('[0-9a-f]{64}', row['digest']) is None):
+        raise ValueError('Invalid raster version metadata')
+    content = store.read(project_id, row['digest'], row['size_bytes'])
+    if not isinstance(content, bytes) or len(content) != row['size_bytes']:
+        raise ValueError('Drawing version content mismatch')
+    if sha256(content).hexdigest() != row['digest']:
+        raise ValueError('Drawing version content mismatch')
+    image = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            image = Image.open(BytesIO(content), formats=('PNG', 'JPEG'))
+            if getattr(image, 'n_frames', 1) != 1:
+                raise ValueError('Animated/multiframe images are not supported')
+            width, height = image.width, image.height
+            if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
+                raise ValueError('Invalid raster dimensions')
+            if width * height > pixel_budget:
+                raise ValueError('Raster pixel budget exceeded')
+            image.load()
+        actual_mime = {'PNG': 'image/png', 'JPEG': 'image/jpeg'}.get(image.format)
+        if actual_mime is None:
+            raise ValueError('Invalid or unsupported raster image')
+        if actual_mime != row['mime']:
+            raise ValueError('Drawing version MIME mismatch')
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning) as error:
+        raise ValueError('Invalid or unsupported raster image') from error
+    finally:
+        if image is not None:
+            image.close()
+    return {'version_id': version_id, 'content_sha256': row['digest'],
+            'page': page, 'page_count': 1}
