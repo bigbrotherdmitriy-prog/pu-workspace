@@ -3,7 +3,7 @@ from pathlib import Path
 from hashlib import sha256
 from decimal import Decimal
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session
 import app.models
 from app.database import Base
@@ -14,6 +14,7 @@ from app.models.defects import Defect, DefectDrawingPoint
 from app.integrations.pu_storage import RdVersionContentStore
 from app.drawing_compare import compare_stored_raster_versions
 from app.drawing_points import bind_point
+from app.defects import create_defect
 from test_drawing_compare import image_bytes
 
 @pytest.fixture
@@ -108,11 +109,25 @@ def _fresh_defect(db,project_id,name):
 
 
 def _snapshot(db,defect_id,project_id):
-    defect=db.get(Defect,defect_id)
-    rd_version_id=defect.rd_version_id if defect is not None else None
-    points=db.scalars(select(DefectDrawingPoint).where(DefectDrawingPoint.defect_id==defect_id,DefectDrawingPoint.project_id==project_id)).all()
-    columns=sorted(DefectDrawingPoint.__table__.columns.keys())
-    return rd_version_id,len(points),columns
+    """Read actual stored values via SQL, bypassing ORM identity-map/cached state.
+
+    Returns (rd_version_id, ordered point column VALUES). The point rows are
+    ordered deterministically by id so the tuple is stable across calls.
+    """
+    with db.no_autoflush:
+        rd_version_id=db.execute(
+            text('SELECT rd_version_id FROM defects WHERE id=:id AND project_id=:pid'),
+            {'id':defect_id,'pid':project_id},
+        ).scalar()
+        rows=db.execute(
+            text(
+                'SELECT id, defect_id, project_id, rd_version_id, page, x, y '
+                'FROM defect_drawing_points '
+                'WHERE defect_id=:id AND project_id=:pid ORDER BY id'
+            ),
+            {'id':defect_id,'pid':project_id},
+        ).all()
+    return rd_version_id,tuple(tuple(row) for row in rows)
 
 
 def test_service_single_frame_annotation_positive_control(world):
@@ -124,13 +139,15 @@ def test_service_single_frame_annotation_positive_control(world):
     db.commit()
     assert first['rd_version_id']==version.id and first['page']==1
     assert Decimal(first['x'])==Decimal('0.25') and Decimal(first['y'])==Decimal('0.50')
-    rd_version_id,count,columns=_snapshot(db,defect.id,own.id)
-    assert rd_version_id==version.id and count==1
+    rd_version_id,points=_snapshot(db,defect.id,own.id)
+    assert rd_version_id==version.id and len(points)==1
+    assert Decimal(str(points[0][5]))==Decimal('0.25') and Decimal(str(points[0][6]))==Decimal('0.50')
+    assert points[0][4]==1 and points[0][3]==version.id
     replay=bind_point(db,own.id,defect.id,version_id=version.id,page=1,x='0.250',y='0.5')
     db.commit()
     assert Decimal(replay['x'])==Decimal('0.25') and Decimal(replay['y'])==Decimal('0.5')
-    rd_version_id2,count2,columns2=_snapshot(db,defect.id,own.id)
-    assert count2==1 and rd_version_id2==version.id and columns2==columns
+    rd_version_id2,points2=_snapshot(db,defect.id,own.id)
+    assert len(points2)==1 and rd_version_id2==version.id and points2==points
 
 
 def test_service_single_frame_annotation_page2_rejected(world):
@@ -138,13 +155,17 @@ def test_service_single_frame_annotation_page2_rejected(world):
     _single_frame_png_fixture(world)
     defect=_fresh_defect(db,own.id,'negative')
     version=versions[0]
-    before_rd_version_id,before_count,before_columns=_snapshot(db,defect.id,own.id)
-    assert before_rd_version_id is None and before_count==0
+    before_rd_version_id,before_points=_snapshot(db,defect.id,own.id)
+    assert before_rd_version_id is None and before_points==()
     with pytest.raises(ValueError,match='page'):
         bind_point(db,own.id,defect.id,version_id=version.id,page=2,x='0.25',y='0.50')
+        # Assert stored state BEFORE any caller rollback so a partial mutation
+        # cannot be hidden by the rollback below.
+        mid_rd_version_id,mid_points=_snapshot(db,defect.id,own.id)
+        assert mid_rd_version_id==before_rd_version_id
+        assert mid_points==before_points
     db.rollback()
-    after_rd_version_id,after_count,after_columns=_snapshot(db,defect.id,own.id)
+    after_rd_version_id,after_points=_snapshot(db,defect.id,own.id)
     assert after_rd_version_id==before_rd_version_id
-    assert after_count==before_count
-    assert after_columns==before_columns
+    assert after_points==before_points
     assert db.scalar(select(Defect).where(Defect.id==defect.id,Defect.project_id==own.id)) is not None
