@@ -421,3 +421,128 @@ def test_equipment_template_invalid_pairs_rejected(template_id, template_version
             template_id=template_id,
             template_version=template_version,
         )
+
+
+# --- Work log form template metadata (renderer) tests ---
+
+_WORKLOG_SYNTHETIC_OBJECT = "СИНТЕТИЧЕСКИЙ ОБЪЕКТ — НЕ ДЛЯ ПОДПИСАНИЯ"
+
+
+def _worklog_template_header(**extra) -> dict:
+    header = {"object_name": _WORKLOG_SYNTHETIC_OBJECT, "journal_no": "1"}
+    header.update(extra)
+    return header
+
+
+def _worklog_template_custom_props(data: bytes) -> dict:
+    custom = _read(data, "docProps/custom.xml")
+    root = ET.fromstring(custom)
+    assert root.tag == f"{{{_CUSTOM_NS}}}Properties"
+    props = {}
+    for prop in root.findall(f"{{{_CUSTOM_NS}}}property"):
+        value_el = prop.find(f"{{{_VT_NS}}}lpwstr")
+        assert value_el is not None
+        props[prop.get("name")] = value_el.text
+    return props
+
+
+def _worklog_template_assert_package_consistent(data: bytes) -> None:
+    names = _names(data)
+    assert "word/document.xml" in names
+    assert "docProps/custom.xml" in names
+    ET.fromstring(_read(data, "word/document.xml"))
+    ET.fromstring(_read(data, "[Content_Types].xml"))
+    ET.fromstring(_read(data, _PKG_RELS))
+    ET.fromstring(_read(data, _DOC_RELS))
+    ct_root = ET.fromstring(_read(data, "[Content_Types].xml"))
+    overrides = [o for o in ct_root if o.get("PartName") == "/docProps/custom.xml"]
+    assert len(overrides) == 1
+    assert overrides[0].get("ContentType") == _CUSTOM_CONTENT_TYPE
+    # relationship lookup must use the package rels, not document rels
+    pkg_root = ET.fromstring(_read(data, _PKG_RELS))
+    custom_rels = [r for r in pkg_root if r.get("Type") == _CUSTOM_REL_TYPE]
+    assert len(custom_rels) == 1
+    target = custom_rels[0].get("Target")
+    assert target
+    resolved = _resolve_target(_PKG_RELS, target)
+    assert resolved == "docProps/custom.xml"
+    assert resolved in names
+    ids = [r.get("Id") for r in pkg_root]
+    assert len(set(ids)) == len(ids)
+    doc_root = ET.fromstring(_read(data, _DOC_RELS))
+    assert [r for r in doc_root if r.get("Type") == _CUSTOM_REL_TYPE] == []
+
+
+def test_worklog_template_legacy_positional_dates_use_legacy_builder(world):
+    db, pid = world["db"], world["p"].id
+    header = _worklog_template_header()
+    legacy = work_log_form.render(db, pid, header, date(2026, 10, 1), date(2026, 10, 31))
+    assert "docProps/custom.xml" not in _names(legacy)
+    assert "word/document.xml" in _names(legacy)
+    assert 'w:orient="landscape"' in _read(legacy, "word/document.xml")
+
+
+def test_worklog_template_explicit_both_none_uses_legacy_builder(world):
+    db, pid = world["db"], world["p"].id
+    header = _worklog_template_header()
+    omitted = work_log_form.render(db, pid, header)
+    both_none = work_log_form.render(db, pid, header, template_id=None, template_version=None)
+    assert "docProps/custom.xml" not in _names(omitted)
+    assert "docProps/custom.xml" not in _names(both_none)
+    assert _read(omitted, "word/document.xml") == _read(both_none, "word/document.xml")
+
+
+def test_worklog_template_explicit_metadata_parsed_and_package_consistent(world):
+    db, pid = world["db"], world["p"].id
+    header = _worklog_template_header()
+    data = work_log_form.render(
+        db, pid, header, template_id="  PU-WL-01  ", template_version="  v1 & <x>  "
+    )
+    _worklog_template_assert_package_consistent(data)
+    props = _worklog_template_custom_props(data)
+    assert props["PU.TemplateId"] == "PU-WL-01"
+    assert props["PU.TemplateVersion"] == "v1 & <x>"
+    custom = _read(data, "docProps/custom.xml")
+    assert "&amp;" in custom and "&lt;x&gt;" in custom
+    assert 'w:orient="landscape"' in _read(data, "word/document.xml")
+
+
+def test_worklog_template_document_xml_unchanged_with_metadata(world):
+    db, pid = world["db"], world["p"].id
+    header = _worklog_template_header()
+    plain = work_log_form.render(db, pid, header)
+    with_meta = work_log_form.render(db, pid, header, template_id="PU-WL-01", template_version="1")
+    assert "docProps/custom.xml" not in _names(plain)
+    assert "docProps/custom.xml" in _names(with_meta)
+    assert _read(plain, "word/document.xml") == _read(with_meta, "word/document.xml")
+    assert 'w:orient="landscape"' in _read(with_meta, "word/document.xml")
+
+
+def test_worklog_template_document_xml_unchanged_between_versions(world):
+    db, pid = world["db"], world["p"].id
+    header = _worklog_template_header()
+    a = work_log_form.render(db, pid, header, template_id="PU-WL-01", template_version="1")
+    b = work_log_form.render(db, pid, header, template_id="PU-WL-01", template_version="2")
+    assert _read(a, "word/document.xml") == _read(b, "word/document.xml")
+    assert _read(a, "docProps/custom.xml") != _read(b, "docProps/custom.xml")
+
+
+@pytest.mark.parametrize(
+    "template_id,template_version",
+    [
+        ("PU-WL-01", None),
+        (None, "1"),
+        ("", "1"),
+        ("PU-WL-01", ""),
+        ("   ", "1"),
+        ("PU-WL-01", "   "),
+        ("PU-WL-01\x00", "1"),
+        ("PU-WL-01", "1\x1f"),
+    ],
+)
+def test_worklog_template_invalid_pairs_rejected(world, template_id, template_version):
+    db, pid = world["db"], world["p"].id
+    with pytest.raises(ValueError):
+        work_log_form.render(
+            db, pid, _worklog_template_header(), template_id=template_id, template_version=template_version
+        )
