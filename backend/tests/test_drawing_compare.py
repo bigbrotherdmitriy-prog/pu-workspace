@@ -79,3 +79,23 @@ def test_animated_png_rejected():
     try:a.save(out,format='PNG',save_all=True,append_images=[b],duration=20,loop=0)
     finally:a.close();b.close()
     with pytest.raises(ValueError,match='multiframe'):compare(out.getvalue(),image_bytes())
+
+
+def test_hidden_rgb_change_at_transparent_pixel_detected():
+    a=image_bytes(color=(0,0,0,0))
+    b=image_bytes(color=(0,0,0,0),changes=[((1,1),(255,0,0,0))])
+    result=compare(a,b)
+    assert not result['same_pixels']
+    assert result['changed_pixels']==1
+    assert result['changed_bbox']==[1,1,2,2]
+
+
+def test_distinct_jpeg_colors_detected():
+    a=image_bytes(color=(0,0,0),mode='RGB',fmt='JPEG')
+    b=image_bytes(color=(255,255,255),mode='RGB',fmt='JPEG')
+    assert a[:2]==b'\xff\xd8' and b[:2]==b'\xff\xd8'
+    result=compare(a,b)
+    assert result['previous']['format']=='JPEG' and result['current']['format']=='JPEG'
+    assert result['changed_pixels']==3*2
+    assert result['changed_bbox']==[0,0,3,2]
+    assert not result['dimensions_changed']
