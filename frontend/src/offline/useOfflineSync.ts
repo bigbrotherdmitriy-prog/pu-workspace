@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CHANGE_EVENT, offlineSummary, resolveConflict, serverConflicts, synchronize,
 } from "./syncEngine";
@@ -15,12 +15,16 @@ function sameScope(a: Scope, b: Scope): boolean {
   return a.userId === b.userId && a.projectId === b.projectId;
 }
 
-// A lifetime token identifies one mounted scope instance. It is created fresh
+// A lifetime token identifies one rendered scope instance. It is created fresh
 // for every (userId, projectId) activation and invalidated on unmount or scope
 // change. Handlers capture the token of the lifetime they were created in, so a
 // retained handler from an earlier lifetime (even for the same user/project,
 // e.g. A -> B -> A) can never become valid again.
 type Lifetime = { scope: Scope; active: boolean };
+
+// Per-effect setup epoch. Each effect setup bumps the epoch; cleanup invalidates
+// it. Operations capture the epoch at START and re-check it after every await.
+type Epoch = { value: number };
 
 export function useOfflineSync(userId: number, projectId: number, onApplied: () => void) {
   const storageAvailable = typeof indexedDB !== "undefined";
@@ -29,19 +33,29 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   const onAppliedRef = useRef(onApplied);
   useEffect(() => { onAppliedRef.current = onApplied; }, [onApplied]);
 
+  // Memoized per-scope lifetime identity. A new lifetime object is created only
+  // when the scope (userId/projectId) actually changes, not on ordinary
+  // same-scope re-renders. No shared history cache is kept across scopes.
+  const lifetime = useMemo<Lifetime>(
+    () => ({ scope: { userId, projectId }, active: true }),
+    [userId, projectId],
+  );
+
   // The currently active lifetime. Replaced on scope change and invalidated on
   // unmount. Handlers compare against this by identity, not by scope values.
-  const lifetimeRef = useRef<Lifetime>({ scope: { userId, projectId }, active: true });
+  const lifetimeRef = useRef<Lifetime>(lifetime);
   // Latest refresh generation per scope; a newer refresh supersedes older ones.
   const refreshGenRef = useRef(0);
+  // Current setup epoch; bumped on every effect setup, invalidated on cleanup.
+  const epochRef = useRef<Epoch>({ value: 0 });
 
-  const isLive = useCallback((lifetime: Lifetime): boolean => {
-    return lifetime.active && lifetimeRef.current === lifetime;
+  const isLive = useCallback((token: Lifetime): boolean => {
+    return token.active && lifetimeRef.current === token;
   }, []);
 
   // Invalidate outstanding async work and reset visible state on scope change.
   useEffect(() => {
-    const lifetime: Lifetime = { scope: { userId, projectId }, active: true };
+    lifetime.active = true;
     lifetimeRef.current = lifetime;
     refreshGenRef.current += 1;
     setSummary(EMPTY);
@@ -53,19 +67,21 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
       }
       refreshGenRef.current += 1;
     };
-  }, [userId, projectId]);
+  }, [lifetime]);
 
   const refresh = useCallback(async () => {
-    const lifetime = lifetimeRef.current;
+    const token = lifetime;
     const scope: Scope = { userId, projectId };
+    const epoch = epochRef.current;
     const refreshGen = ++refreshGenRef.current;
     const stillCurrent = () =>
-      isLive(lifetime) && sameScope(lifetime.scope, scope) &&
+      isLive(token) && sameScope(token.scope, scope) &&
+      epochRef.current === epoch &&
       refreshGenRef.current === refreshGen;
 
-    if (!isLive(lifetime)) return;
+    if (!stillCurrent()) return;
     if (!storageAvailable || !userId || !projectId) {
-      if (isLive(lifetime)) {
+      if (stillCurrent()) {
         setSummary(EMPTY);
         setConflicts([]);
       }
@@ -86,12 +102,14 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
         setConflicts(nextConflicts);
       } catch { /* Preserve local state. */ }
     }
-  }, [userId, projectId, storageAvailable, isLive]);
+  }, [userId, projectId, storageAvailable, isLive, lifetime]);
 
   const syncNow = useCallback(async (manual = false) => {
-    const lifetime = lifetimeRef.current;
+    const token = lifetime;
     const scope: Scope = { userId, projectId };
-    const stillCurrent = () => isLive(lifetime) && sameScope(lifetime.scope, scope);
+    const epoch = epochRef.current;
+    const stillCurrent = () =>
+      isLive(token) && sameScope(token.scope, scope) && epochRef.current === epoch;
 
     if (!stillCurrent()) return;
     if (!storageAvailable || !userId || !projectId) return;
@@ -114,10 +132,12 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
     await refresh();
     if (!stillCurrent()) return;
     if (after < before) onAppliedRef.current();
-  }, [userId, projectId, refresh, storageAvailable, isLive]);
+  }, [userId, projectId, refresh, storageAvailable, isLive, lifetime]);
 
   useEffect(() => {
     if (!storageAvailable || !userId || !projectId) return;
+    const epoch: Epoch = { value: epochRef.current.value + 1 };
+    epochRef.current = epoch;
     const changed = () => { void refresh(); };
     const online = () => { void syncNow(false); };
     const connectivity = () => { if (isOnline()) void syncNow(false); };
@@ -135,13 +155,18 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
       window.removeEventListener(CONNECTIVITY_EVENT, connectivity);
       document.removeEventListener("visibilitychange", visible);
       window.clearInterval(timer);
+      if (epochRef.current === epoch) {
+        epochRef.current = { value: epoch.value + 1 };
+      }
     };
   }, [userId, projectId, refresh, syncNow, storageAvailable]);
 
   async function resolve(id: number, resolution: "keep_server" | "apply_local" | "latest_write_wins") {
-    const lifetime = lifetimeRef.current;
+    const token = lifetime;
     const scope: Scope = { userId, projectId };
-    const stillCurrent = () => isLive(lifetime) && sameScope(lifetime.scope, scope);
+    const epoch = epochRef.current;
+    const stillCurrent = () =>
+      isLive(token) && sameScope(token.scope, scope) && epochRef.current === epoch;
 
     if (!stillCurrent()) return;
     if (!storageAvailable || !userId || !projectId) return;
