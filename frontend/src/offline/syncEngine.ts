@@ -150,17 +150,92 @@ function receiptError(message: string): Error {
   return new Error(`Некорректная квитанция сервера: ${message}`);
 }
 
+const UPLOAD_JOB_STATUSES = ["queued", "retrying", "running", "already_queued"] as const;
+type UploadJobStatus = (typeof UPLOAD_JOB_STATUSES)[number];
+const STAGING_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+type UploadStagingRef = { job_id: number; staging_id: string; status: UploadJobStatus };
+type UploadStagingAck = { status: string; jobs: UploadStagingRef[] };
+
+function uploadAckError(message: string): Error {
+  return new Error(`Некорректное подтверждение загрузки документа: ${message}`);
+}
+
+function isUploadJobStatus(value: unknown): value is UploadJobStatus {
+  return typeof value === "string" && (UPLOAD_JOB_STATUSES as readonly string[]).includes(value);
+}
+
+function isStagingId(value: unknown): value is string {
+  return typeof value === "string" && STAGING_ID_PATTERN.test(value);
+}
+
+function validateUploadAck(response: unknown, expectedCount: number): UploadStagingAck {
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    throw uploadAckError("ответ не является объектом");
+  }
+  const ack = response as Record<string, unknown>;
+  if (typeof ack.status !== "string" || ack.status !== "queued") {
+    throw uploadAckError("некорректный статус анализа");
+  }
+  if (!Array.isArray(ack.jobs)) {
+    throw uploadAckError("отсутствует список заданий");
+  }
+  if (ack.jobs.length !== expectedCount) {
+    throw uploadAckError("количество заданий не совпадает с числом файлов");
+  }
+  const jobIds = new Set<number>();
+  const stagingIds = new Set<string>();
+  const jobs: UploadStagingRef[] = [];
+  for (const entry of ack.jobs) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw uploadAckError("задание не является объектом");
+    }
+    const job = entry as Record<string, unknown>;
+    if (!isPositiveSafeInteger(job.job_id)) {
+      throw uploadAckError("некорректный job_id");
+    }
+    if (!isStagingId(job.staging_id)) {
+      throw uploadAckError("некорректный staging_id");
+    }
+    if (!isUploadJobStatus(job.status)) {
+      throw uploadAckError("некорректный статус задания");
+    }
+    if (jobIds.has(job.job_id)) {
+      throw uploadAckError("повторяющийся job_id");
+    }
+    if (stagingIds.has(job.staging_id)) {
+      throw uploadAckError("повторяющийся staging_id");
+    }
+    jobIds.add(job.job_id);
+    stagingIds.add(job.staging_id);
+    jobs.push({ job_id: job.job_id, staging_id: job.staging_id, status: job.status });
+  }
+  return { status: ack.status, jobs };
+}
+
 async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
   if (command.operation === "document.upload") {
-    const files = await Promise.all((command.uploads || []).map(async (file) => ({
+    const uploads = command.uploads || [];
+    if (uploads.length === 0) {
+      throw uploadAckError("нет файлов для загрузки");
+    }
+    const files = await Promise.all(uploads.map(async (file) => ({
       path: file.path,
       mime_type: file.mimeType,
       content_base64: await blobBase64(file.blob),
     })));
-    await api("/local-upload/analyze", {
+    const response = await api<unknown>("/local-upload/analyze", {
       method: "POST",
-      headers: { "Idempotency-Key": command.id },
+      headers: {
+        "Idempotency-Key": command.id,
+        "X-PU-Expected-User": String(command.userId),
+      },
       body: JSON.stringify({ project_id: command.projectId, files }),
+    });
+    const ack = validateUploadAck(response, uploads.length);
+    await setMeta(`upload-staging-ack:${command.userId}:${command.projectId}:${command.id}`, {
+      status: ack.status,
+      jobs: ack.jobs.map((job) => ({ job_id: job.job_id, staging_id: job.staging_id, status: job.status })),
     });
     return { applied: true };
   }
