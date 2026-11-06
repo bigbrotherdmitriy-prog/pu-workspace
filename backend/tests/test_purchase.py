@@ -470,12 +470,23 @@ def test_writeoff_self_reversal_check(world):
     )
     db.add(w)
     db.flush()
-    w.reverses_id = w.id
+    db.commit()
+    original_id = w.id
 
     def build():
+        # Assign self-reversal inside the savepoint established by the helper,
+        # so the CHECK violation is raised by the helper's flush, not by an
+        # autoflush during the helper's baseline count query.
+        w.reverses_id = original_id
         db.flush()
 
     _expect_integrity(db, build)
+
+    # The savepoint rollback must restore the original row's reverses_id to None.
+    db.expire_all()
+    restored = db.get(MaterialWriteoff, original_id)
+    assert restored is not None
+    assert restored.reverses_id is None
 
 
 def test_ledger_column_metadata(world):
