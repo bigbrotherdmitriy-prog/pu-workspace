@@ -23,7 +23,16 @@ def _d(value: str) -> str:
         return value or ""
 
 
-def render(db: Session, project_id: int, header: dict | None, date_from=None, date_to=None) -> bytes:
+def render(
+    db: Session,
+    project_id: int,
+    header: dict | None,
+    date_from=None,
+    date_to=None,
+    *,
+    template_id: str | None = None,
+    template_version: str | None = None,
+) -> bytes:
     h = header or {}
     entries = list(reversed(wl.list_entries(db, project_id, date_from, date_to, limit=100000)))
     crews = wl.list_crews(db, project_id)
@@ -94,4 +103,6 @@ def render(db: Session, project_id: int, header: dict | None, date_from=None, da
     p.append(_para(""))
     p.append(_para("Раздел 5. Сведения о строительном контроле лица, осуществляющего строительство", bold=True))
     p.append(_table([["Дата", "Результаты контроля, замечания", "Срок устранения", "Подпись"], ["", "", "", ""]]))
-    return build_docx(p, landscape=True)
+    if template_id is None and template_version is None:
+        return build_docx(p, landscape=True)
+    return build_docx(p, landscape=True, template_id=template_id, template_version=template_version)
