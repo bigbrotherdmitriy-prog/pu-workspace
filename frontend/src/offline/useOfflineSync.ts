@@ -9,6 +9,12 @@ const EMPTY: SyncSummary = {
   queued: 0, syncing: 0, attention: 0, authRequired: 0, conflicts: 0, total: 0,
 };
 
+type Scope = { userId: number; projectId: number };
+
+function sameScope(a: Scope, b: Scope): boolean {
+  return a.userId === b.userId && a.projectId === b.projectId;
+}
+
 export function useOfflineSync(userId: number, projectId: number, onApplied: () => void) {
   const storageAvailable = typeof indexedDB !== "undefined";
   const [summary, setSummary] = useState<SyncSummary>(EMPTY);
@@ -16,26 +22,86 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   const onAppliedRef = useRef(onApplied);
   useEffect(() => { onAppliedRef.current = onApplied; }, [onApplied]);
 
+  // Lifetime generation: bumped on unmount and whenever the active scope changes.
+  const generationRef = useRef(0);
+  // Latest refresh generation per scope; a newer refresh supersedes older ones.
+  const refreshGenRef = useRef(0);
+  const scopeRef = useRef<Scope>({ userId, projectId });
+
+  const isCurrent = useCallback((gen: number, scope: Scope): boolean => {
+    return generationRef.current === gen && sameScope(scopeRef.current, scope);
+  }, []);
+
+  // Invalidate outstanding async work and reset visible state on scope change.
+  useEffect(() => {
+    generationRef.current += 1;
+    refreshGenRef.current += 1;
+    scopeRef.current = { userId, projectId };
+    setSummary(EMPTY);
+    setConflicts([]);
+    return () => {
+      generationRef.current += 1;
+      refreshGenRef.current += 1;
+    };
+  }, [userId, projectId]);
+
   const refresh = useCallback(async () => {
-    if (!storageAvailable) {
-      setSummary(EMPTY);
-      setConflicts([]);
+    const gen = generationRef.current;
+    const scope: Scope = { userId, projectId };
+    const refreshGen = ++refreshGenRef.current;
+    const stillCurrent = () =>
+      isCurrent(gen, scope) && refreshGenRef.current === refreshGen;
+
+    if (!storageAvailable || !userId || !projectId) {
+      if (isCurrent(gen, scope)) {
+        setSummary(EMPTY);
+        setConflicts([]);
+      }
       return;
     }
-    setSummary(await offlineSummary(userId, projectId));
-    if (isOnline() && userId && projectId) {
-      try { setConflicts(await serverConflicts(projectId)); } catch { /* Preserve local state. */ }
+    let nextSummary: SyncSummary;
+    try {
+      nextSummary = await offlineSummary(userId, projectId);
+    } catch {
+      return;
     }
-  }, [userId, projectId, storageAvailable]);
+    if (!stillCurrent()) return;
+    setSummary(nextSummary);
+    if (isOnline()) {
+      try {
+        const nextConflicts = await serverConflicts(projectId);
+        if (!stillCurrent()) return;
+        setConflicts(nextConflicts);
+      } catch { /* Preserve local state. */ }
+    }
+  }, [userId, projectId, storageAvailable, isCurrent]);
 
   const syncNow = useCallback(async (manual = false) => {
-    if (!storageAvailable) return;
-    const before = (await offlineSummary(userId, projectId)).total;
+    const gen = generationRef.current;
+    const scope: Scope = { userId, projectId };
+    const stillCurrent = () => isCurrent(gen, scope);
+
+    if (!storageAvailable || !userId || !projectId) return;
+    let before: number;
+    try {
+      before = (await offlineSummary(userId, projectId)).total;
+    } catch {
+      return;
+    }
+    if (!stillCurrent()) return;
     await synchronize(userId, projectId, manual);
-    const after = (await offlineSummary(userId, projectId)).total;
+    if (!stillCurrent()) return;
+    let after: number;
+    try {
+      after = (await offlineSummary(userId, projectId)).total;
+    } catch {
+      return;
+    }
+    if (!stillCurrent()) return;
     await refresh();
+    if (!stillCurrent()) return;
     if (after < before) onAppliedRef.current();
-  }, [userId, projectId, refresh, storageAvailable]);
+  }, [userId, projectId, refresh, storageAvailable, isCurrent]);
 
   useEffect(() => {
     if (!storageAvailable || !userId || !projectId) return;
@@ -60,9 +126,15 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   }, [userId, projectId, refresh, syncNow, storageAvailable]);
 
   async function resolve(id: number, resolution: "keep_server" | "apply_local" | "latest_write_wins") {
-    if (!storageAvailable) return;
+    const gen = generationRef.current;
+    const scope: Scope = { userId, projectId };
+    const stillCurrent = () => isCurrent(gen, scope);
+
+    if (!storageAvailable || !userId || !projectId) return;
     await resolveConflict(userId, projectId, id, resolution);
+    if (!stillCurrent()) return;
     await refresh();
+    if (!stillCurrent()) return;
     onAppliedRef.current();
   }
 
