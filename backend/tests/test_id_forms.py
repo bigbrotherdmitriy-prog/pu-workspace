@@ -356,7 +356,7 @@ def _equipment_template_assert_package_consistent(data: bytes) -> None:
     overrides = [o for o in ct_root if o.get("PartName") == "/docProps/custom.xml"]
     assert len(overrides) == 1
     assert overrides[0].get("ContentType") == _CUSTOM_CONTENT_TYPE
-    rel_root = ET.fromstring(_equipment_template_read(data, "word/_rels/document.xml.rels"))
+    rel_root = ET.fromstring(_equipment_template_read(data, "_rels/.rels"))
     custom_rels = [r for r in rel_root if r.get("Type") == _CUSTOM_REL_TYPE]
     assert len(custom_rels) == 1
     assert custom_rels[0].get("Target") == "docProps/custom.xml"
