@@ -88,3 +88,67 @@ def test_trial_and_commissioning_acts(world):
     assert c.post(f"/projects/{pid}/executive-docs/trial-act.docx", json={"items": []}).status_code == 422
     r = c.post(f"/projects/{pid}/executive-docs/commissioning-act.docx", json={"header": {"scope": "ЭМ"}})
     assert r.status_code == 200 and "ввода в эксплуатацию" in _text(r.content)
+
+
+def _add_scope_data(db, p):
+    v2 = RdVolume(project_id=p.id, object_name="ВТОРОЙ", section="ЭМ", title="ЭМ-2", file_name="em2.pdf", provider="pu_storage", external_id="2")
+    db.add(v2)
+    db.flush()
+    db.add(RdSpecItem(volume_id=v2.id, project_id=p.id, name="Кабель КВ-2", type_mark="ВВГ", unit="м", status="confirmed"))
+    db.add(RdSpecItem(volume_id=v2.id, project_id=p.id, name="Отклонено-2", status="rejected"))
+    org2 = Organization(name="ООО Чужой")
+    db.add(org2)
+    db.flush()
+    p2 = Project(name="P2", organization_id=org2.id)
+    db.add(p2)
+    db.flush()
+    v3 = RdVolume(project_id=p2.id, object_name="ДУБНА", section="ЭМ", title="ЭМ-3", file_name="em3.pdf", provider="pu_storage", external_id="3")
+    db.add(v3)
+    db.flush()
+    db.add(RdSpecItem(volume_id=v3.id, project_id=p2.id, name="Чужой Щит", type_mark="ЧУЖ", unit="шт", status="confirmed"))
+    db.commit()
+    return p2
+
+
+def test_service_object_scope_known_and_second_isolated(world):
+    from app.id_handover import equipment_rows
+
+    db, p = world["db"], world["p"]
+    _add_scope_data(db, p)
+    first = equipment_rows(db, p.id, "ДУБНА")
+    second = equipment_rows(db, p.id, "ВТОРОЙ")
+    assert [r["name"] for r in first] == ["Щит ЩР-1"]
+    assert [r["name"] for r in second] == ["Кабель КВ-2"]
+
+
+def test_service_object_scope_unknown_returns_empty(world):
+    from app.id_handover import equipment_rows
+
+    db, p = world["db"], world["p"]
+    _add_scope_data(db, p)
+    assert equipment_rows(db, p.id, "SYNTHETIC-NO-SUCH-OBJECT") == []
+
+
+def test_service_object_scope_projectwide_for_none_and_empty(world):
+    from app.id_handover import equipment_rows
+
+    db, p = world["db"], world["p"]
+    _add_scope_data(db, p)
+    for scope in (None, ""):
+        names = [r["name"] for r in equipment_rows(db, p.id, scope)]
+        assert names == ["Щит ЩР-1", "Кабель КВ-2"]
+        assert "Лишнее" not in names and "Отклонено-2" not in names and "Чужой Щит" not in names
+
+
+def test_service_object_scope_reads_do_not_mutate(world):
+    from app.id_handover import equipment_rows
+
+    db, p = world["db"], world["p"]
+    _add_scope_data(db, p)
+    before = (db.query(RdVolume).count(), db.query(RdSpecItem).count())
+    equipment_rows(db, p.id, "ДУБНА")
+    equipment_rows(db, p.id, "SYNTHETIC-NO-SUCH-OBJECT")
+    equipment_rows(db, p.id, None)
+    equipment_rows(db, p.id, "")
+    after = (db.query(RdVolume).count(), db.query(RdSpecItem).count())
+    assert before == after
