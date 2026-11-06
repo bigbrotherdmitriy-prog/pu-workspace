@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
-from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
 from app.api import mobile_sync
@@ -295,41 +294,42 @@ def test_direct_handler_preserves_request_and_actor_inputs(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Pure FastAPI route/OpenAPI metadata checks. Constructs FastAPI and
-# include_router ONLY (no client/server). This does NOT claim actual HTTP
-# request validation; it only inspects declared route metadata.
+# Pure FastAPI OpenAPI metadata checks. Constructs FastAPI and include_router
+# ONLY (no client/server/HTTP). Inspects the public app.openapi() schema; this
+# does NOT claim actual HTTP request validation.
 # ---------------------------------------------------------------------------
 
 
-def _work_log_create_route():
+def _work_log_create_openapi():
     app = FastAPI()
     app.include_router(mobile_sync.router)
-    path = mobile_sync.router.prefix + '/work-log-create'
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path == path and 'POST' in route.methods:
-            return route
-    raise AssertionError('work-log-create route not found')
+    schema = app.openapi()
+    path = schema['paths']['/mobile-sync/work-log-create']
+    return path['post']
 
 
 def test_route_metadata_post_path_and_header_contract():
-    route = _work_log_create_route()
-    assert route.path == '/mobile-sync/work-log-create'
-    assert 'POST' in route.methods
+    operation = _work_log_create_openapi()
 
-    header_params = [p for p in route.dependant.header_params
-                     if p.alias == 'X-PU-Expected-User']
+    header_params = [p for p in operation.get('parameters', [])
+                     if p.get('in') == 'header'
+                     and p.get('name') == 'X-PU-Expected-User']
     assert len(header_params) == 1
     header = header_params[0]
-    assert header.required is True
+    assert header['required'] is True
 
-    schema = header.field_info
-    assert schema.gt == 0
-    assert schema.le == 9007199254740991
+    header_schema = header['schema']
+    assert header_schema['type'] == 'integer'
+    assert header_schema['exclusiveMinimum'] == 0
+    assert header_schema['maximum'] == 9007199254740991
 
 
 def test_route_metadata_request_body_references_dto():
-    route = _work_log_create_route()
-    body_params = [p for p in route.dependant.body_params
-                   if p.name == 'request']
-    assert len(body_params) == 1
-    assert body_params[0].field_info.annotation is OfflineWorkLogCreateRequest
+    operation = _work_log_create_openapi()
+
+    request_body = operation['requestBody']
+    assert request_body['required'] is True
+    content = request_body['content']
+    assert 'application/json' in content
+    ref = content['application/json']['schema']['$ref']
+    assert ref.endswith('/OfflineWorkLogCreateRequest')
