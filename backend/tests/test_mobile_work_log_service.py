@@ -194,7 +194,9 @@ def test_corrupt_result_receipt_rejected(world,mutate):
 
 def _baseline_receipt_stub(db,receipt_id):
     row=db.get(MobileSyncCommand,receipt_id)
-    return SimpleNamespace(entity_type=row.entity_type,entity_id=row.entity_id,
+    return SimpleNamespace(id=row.id,client_mutation_id=row.client_mutation_id,
+        payload=deepcopy(row.payload),operation=row.operation,status=row.status,
+        entity_type=row.entity_type,entity_id=row.entity_id,
         project_id=row.project_id,user_id=row.user_id,result=deepcopy(row.result))
 
 
@@ -214,9 +216,10 @@ def test_corrupt_bool_receipt_rejected_by_pure_guard(world,mutate):
     from app import mobile_work_log
     db,actor,project,_=world;request=command(project)
     first=submit_work_log_create(db,actor,request);db.commit()
+    payload=request.model_dump(mode='json')
     stub=_baseline_receipt_stub(db,first['receipt_id'])
-    mobile_work_log._receipt(stub,request,actor)
+    assert mobile_work_log._receipt(stub,payload)==first
     mutate(stub)
     with pytest.raises(ValueError,match='offline_receipt_not_applied'):
-        mobile_work_log._receipt(stub,request,actor)
+        mobile_work_log._receipt(stub,payload)
     assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
