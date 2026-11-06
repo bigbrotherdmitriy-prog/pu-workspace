@@ -29,12 +29,12 @@ def _is_xml1_forbidden_char(ch: str) -> bool:
 def _normalize_template_value(name: str, value: object) -> str:
     if not isinstance(value, str) or isinstance(value, bool):
         raise ValueError(f"{name} must be a non-empty string")
+    for ch in value:
+        if _is_xml1_forbidden_char(ch):
+            raise ValueError(f"{name} contains characters not allowed in XML 1.0")
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{name} must be a non-empty string")
-    for ch in normalized:
-        if _is_xml1_forbidden_char(ch):
-            raise ValueError(f"{name} contains characters not allowed in XML 1.0")
     return normalized
 
 
