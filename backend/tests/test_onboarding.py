@@ -34,7 +34,7 @@ def world():
         db.add_all([p, o])
         db.flush()
         db.commit()
-        yield {"db": db, "p": p, "o": o, "engine": engine}
+        yield {"db": db, "p": p, "o": o}
     engine.dispose()
 
 
@@ -46,6 +46,8 @@ def test_empty_project_starts_with_the_contract(world):
 
 
 def test_progress_follows_real_data_and_ignores_other_projects(world):
+    from datetime import date
+
     db, pid = world["db"], world["p"].id
     vol = RdVolume(project_id=pid, title="V", file_name="v.pdf", provider="google_drive")
     other_vol = RdVolume(project_id=world["o"].id, title="V2", file_name="v2.pdf", provider="google_drive")
@@ -84,6 +86,21 @@ ALL_KEYS = [
     "contract", "documents", "schedule", "dds", "rd",
     "rd_confirm", "purchase", "equipment", "id", "work_log",
 ]
+
+# Explicit key -> screen contract. Ten steps intentionally share eight screens:
+# schedule+dds both live on "ГПР и ДДС"; rd+rd_confirm both on "Рабочая документация".
+EXPECTED_SCREENS = {
+    "contract": "Договоры",
+    "documents": "Документы",
+    "schedule": "ГПР и ДДС",
+    "dds": "ГПР и ДДС",
+    "rd": "Рабочая документация",
+    "rd_confirm": "Рабочая документация",
+    "purchase": "Закупка",
+    "equipment": "Оборудование",
+    "id": "Исполнительная документация",
+    "work_log": "Журнал работ",
+}
 
 
 def _seed_step(db, pid, key, user_id, tag):
@@ -142,12 +159,12 @@ def test_service_full_onboarding_all_ten_steps(world):
     assert len(res["items"]) == 10
     assert [i["key"] for i in res["items"]] == ALL_KEYS
     assert len({i["key"] for i in res["items"]}) == 10
-    assert len({i["screen"] for i in res["items"]}) == 10
+    assert {i["key"]: i["screen"] for i in res["items"]} == EXPECTED_SCREENS
     assert _done_keys(res) == set(ALL_KEYS)
     assert res["done"] == 10 and res["total"] == 10 and res["percent"] == 100
     assert res["next"] is None
 
-    with Session(world["engine"]) as fresh:
+    with Session(db.get_bind()) as fresh:
         again = onboarding.steps(fresh, pid)
     assert again["done"] == 10 and again["percent"] == 100 and again["next"] is None
     assert _done_keys(again) == set(ALL_KEYS)
@@ -170,13 +187,13 @@ def test_service_full_onboarding_worklog_removal_and_foreign_isolation(world):
     db.query(WorkLogEntry).filter(WorkLogEntry.project_id == pid).delete()
     db.commit()
 
-    with Session(world["engine"]) as fresh:
+    with Session(db.get_bind()) as fresh:
         res = onboarding.steps(fresh, pid)
     assert res["done"] == 9 and res["total"] == 10 and res["percent"] == 90
     assert res["next"] == "work_log"
     assert _done_keys(res) == set(ALL_KEYS) - {"work_log"}
 
-    with Session(world["engine"]) as fresh:
+    with Session(db.get_bind()) as fresh:
         foreign = onboarding.steps(fresh, oid)
     assert foreign["done"] == 10 and foreign["percent"] == 100 and foreign["next"] is None
 
