@@ -8,11 +8,17 @@ import {
 
 type Cmd = ReturnType<typeof prepareWorkLogCreate>;
 
-const identity = { mutationId: "m-1", deviceId: "d-1", createdAt: "2024-05-01T10:00:00.000Z" };
+const identity = {
+  mutationId: "synthetic-mutation-1",
+  deviceId: "synthetic-device-1",
+  createdAt: "2024-05-01T10:00:00.000Z",
+};
+
+const baselineData = { work_date: "2026-11-06", work_name: "SYNTHETIC", note: "hi" };
 
 function makeCmd(over: Record<string, unknown> = {}, idOver: Partial<typeof identity> = {}): Cmd {
   return prepareWorkLogCreate(
-    { userId: 7, projectId: 3, data: { note: "hi", ...over } },
+    { userId: 7, projectId: 3, data: { ...baselineData, ...over } },
     { ...identity, ...idOver },
   );
 }
@@ -30,6 +36,16 @@ function validAck(cmd: Cmd) {
 }
 
 describe("prepareWorkLogCreate", () => {
+  it("accepts a valid baseline command", () => {
+    const cmd = makeCmd();
+    expect(cmd.data).toMatchObject(baselineData);
+    expect(cmd.id).toBe("synthetic-mutation-1");
+    expect(cmd.deviceId).toBe("synthetic-device-1");
+    expect(cmd.operation).toBe("work_log.create");
+    expect(cmd.userId).toBe(7);
+    expect(cmd.projectId).toBe(3);
+  });
+
   it("deep-copies nested objects and arrays", () => {
     const nested = { a: { b: [1, 2, { c: 3 }] } };
     const cmd = makeCmd({ nested });
@@ -41,23 +57,34 @@ describe("prepareWorkLogCreate", () => {
   it("is frozen and identity is stable", () => {
     const cmd = makeCmd();
     expect(Object.isFrozen(cmd)).toBe(true);
-    expect(cmd.id).toBe("m-1");
-    expect(cmd.deviceId).toBe("d-1");
+    expect(cmd.id).toBe("synthetic-mutation-1");
+    expect(cmd.deviceId).toBe("synthetic-device-1");
     expect(cmd.operation).toBe("work_log.create");
     expect(cmd.clientCreatedAt).toBe(identity.createdAt);
     expect(cmd.userId).toBe(7);
     expect(cmd.projectId).toBe(3);
   });
 
-  it("rejects invalid calendar dates", () => {
+  it("rejects invalid calendar dates in createdAt", () => {
     for (const d of ["0000-01-01T00:00:00.000Z", "2024-02-30T00:00:00.000Z", "1900-02-29T00:00:00.000Z"]) {
       expect(() => makeCmd({}, { createdAt: d })).toThrow();
     }
   });
 
-  it("accepts leap-year edge dates", () => {
+  it("accepts leap-year edge dates in createdAt", () => {
     expect(() => makeCmd({}, { createdAt: "0004-02-29T00:00:00.000Z" })).not.toThrow();
     expect(() => makeCmd({}, { createdAt: "2000-02-29T00:00:00.000Z" })).not.toThrow();
+  });
+
+  it("rejects invalid work_date calendar dates", () => {
+    for (const d of ["0000-01-01", "2026-02-30", "1900-02-29"]) {
+      expect(() => makeCmd({ work_date: d })).toThrow();
+    }
+  });
+
+  it("accepts leap-year edge work_date dates", () => {
+    expect(() => makeCmd({ work_date: "0004-02-29" })).not.toThrow();
+    expect(() => makeCmd({ work_date: "2000-02-29" })).not.toThrow();
   });
 
   it("rejects invalid createdAt date/time/offset", () => {
@@ -83,6 +110,7 @@ describe("prepareWorkLogCreate", () => {
     expect(Object.keys(out).sort()).toEqual(["__proto__", "constructor", "prototype"]);
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     expect(({} as any).p).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(out))).toEqual({ __proto__: { p: 1 }, constructor: { c: 2 }, prototype: { t: 3 } });
   });
 });
 
