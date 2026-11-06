@@ -117,6 +117,44 @@ def test_two_actors_have_separate_receipt_namespaces(world):
     assert count(db, Defect) == count(db, MobileSyncCommand) == 2
 
 
+def test_two_editors_same_identity_isolated_replay_and_revocation(world):
+    db, actor, project, _ = world
+    second_actor = User(name="Synthetic second editor", email="second-defect@example.invalid", is_admin=False)
+    db.add(second_actor)
+    db.flush()
+    db.add(ProjectMember(project_id=project.id, user_id=second_actor.id, role="editor"))
+    db.commit()
+    request = command(project)
+    first = submit_defect_create(db, actor, request)
+    second = submit_defect_create(db, second_actor, request)
+    db.commit()
+    assert first["entity_id"] != second["entity_id"]
+    assert first["entity_id"] > 0 and second["entity_id"] > 0
+    assert first["receipt_id"] != second["receipt_id"]
+    assert first["receipt_id"] > 0 and second["receipt_id"] > 0
+    first_stored = db.get(Defect, first["entity_id"])
+    second_stored = db.get(Defect, second["entity_id"])
+    assert first_stored.created_by == actor.id
+    assert second_stored.created_by == second_actor.id
+    first_receipt = db.get(MobileSyncCommand, first["receipt_id"])
+    second_receipt = db.get(MobileSyncCommand, second["receipt_id"])
+    assert first_receipt.user_id == actor.id
+    assert second_receipt.user_id == second_actor.id
+    assert count(db, Defect) == count(db, MobileSyncCommand) == 2
+    assert submit_defect_create(db, actor, request) == first
+    assert submit_defect_create(db, second_actor, request) == second
+    assert count(db, Defect) == count(db, MobileSyncCommand) == 2
+    second_member = db.scalar(select(ProjectMember).where(
+        ProjectMember.project_id == project.id, ProjectMember.user_id == second_actor.id))
+    db.delete(second_member)
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        submit_defect_create(db, second_actor, request)
+    assert exc.value.status_code == 403
+    assert submit_defect_create(db, actor, request) == first
+    assert count(db, Defect) == count(db, MobileSyncCommand) == 2
+
+
 def test_same_body_with_new_mutation_identity_is_a_distinct_defect(world):
     db, actor, project, _ = world
     request = command(project)
