@@ -60,23 +60,23 @@ async function settleLoads() {
   await act(async()=>{ await Promise.resolve(); await Promise.resolve(); });
 }
 it.each([
-  {label:"user switch", fromUser:7, toUser:8, project:5},
-  {label:"project switch", fromUser:7, toUser:7, project:6},
-])("does not leak a deferred save into a re-rendered $label scope", async({fromUser,toUser,project})=>{
+  {label:"user switch", fromUser:7, toUser:8, fromProject:5, toProject:5},
+  {label:"project switch", fromUser:7, toUser:7, fromProject:5, toProject:6},
+])("does not leak a deferred save into a re-rendered $label scope", async({fromUser,toUser,fromProject,toProject})=>{
   let resolveSave!: (id:string)=>void;
   vi.mocked(enqueueWorkLogCreate).mockImplementation(()=>new Promise(resolve=>{resolveSave=resolve;}));
-  const {rerender} = render(<WorkLogModule projectId={project} userId={fromUser}/>);
+  const {rerender} = render(<WorkLogModule projectId={fromProject} userId={fromUser}/>);
   await fill();
   fireEvent.click(screen.getByText("Добавить запись"));
-  await waitFor(()=>expect(enqueueWorkLogCreate).toHaveBeenCalledWith({userId:fromUser,projectId:project,data:expect.objectContaining({work_name:"Synthetic offline work",qty:"1,250"})}));
-  rerender(<WorkLogModule projectId={project} userId={toUser}/>);
+  await waitFor(()=>expect(enqueueWorkLogCreate).toHaveBeenCalledWith({userId:fromUser,projectId:fromProject,data:expect.objectContaining({work_name:"Synthetic offline work",qty:"1,250"})}));
+  rerender(<WorkLogModule projectId={toProject} userId={toUser}/>);
   await settleLoads();
   fireEvent.change(screen.getByLabelText(/Какая работа выполнена/),{target:{value:"Synthetic new scope work"}});
   fireEvent.change(screen.getByLabelText("Объём"),{target:{value:"9,500"}});
   await act(async()=>resolveSave("synthetic-mutation"));
   await act(async()=>{ await Promise.resolve(); await Promise.resolve(); });
   expect(enqueueWorkLogCreate).toHaveBeenCalledTimes(1);
-  expect(enqueueWorkLogCreate).toHaveBeenCalledWith({userId:fromUser,projectId:project,data:expect.objectContaining({work_name:"Synthetic offline work",qty:"1,250"})});
+  expect(enqueueWorkLogCreate).toHaveBeenCalledWith({userId:fromUser,projectId:fromProject,data:expect.objectContaining({work_name:"Synthetic offline work",qty:"1,250"})});
   expect(screen.getByLabelText(/Какая работа выполнена/)).toHaveProperty("value","Synthetic new scope work");
   expect(screen.getByLabelText("Объём")).toHaveProperty("value","9,500");
   expect(screen.queryByText(/Запись сохранена на устройстве/)).toBeNull();
