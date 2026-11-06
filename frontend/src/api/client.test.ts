@@ -169,7 +169,7 @@ describe("document upload staging ACK", () => {
     },
   );
 
-  const malformed: Array<[string, unknown]> = [
+  const malformed: Array<[string, unknown, number?]> = [
     ["null body", null],
     ["empty object", {}],
     ["wrong job count", ackBody([{ job_id: 1, staging_id: STAGING_A, status: "queued" }, { job_id: 2, staging_id: STAGING_B, status: "queued" }])],
@@ -179,16 +179,18 @@ describe("document upload staging ACK", () => {
     ["staging_id wrong length", ackBody([{ job_id: 1, staging_id: "abc", status: "queued" }])],
     ["staging_id uppercase", ackBody([{ job_id: 1, staging_id: STAGING_A.toUpperCase(), status: "queued" }])],
     ["unknown job status", ackBody([{ job_id: 1, staging_id: STAGING_A, status: "done" }])],
-    ["duplicate job_id", ackBody([{ job_id: 1, staging_id: STAGING_A, status: "queued" }, { job_id: 1, staging_id: STAGING_B, status: "queued" }])],
-    ["duplicate staging_id", ackBody([{ job_id: 1, staging_id: STAGING_A, status: "queued" }, { job_id: 2, staging_id: STAGING_A, status: "queued" }])],
+    ["duplicate job_id", ackBody([{ job_id: 1, staging_id: STAGING_A, status: "queued" }, { job_id: 1, staging_id: STAGING_B, status: "queued" }]), 2],
+    ["duplicate staging_id", ackBody([{ job_id: 1, staging_id: STAGING_A, status: "queued" }, { job_id: 2, staging_id: STAGING_A, status: "queued" }]), 2],
   ];
 
-  it.each(malformed)("rejects malformed ACK: %s", async (_label, body) => {
-    const file = makeFile("synthetic.pdf", "SYNTHETIC-CONTENT");
-    const commandId = await enqueueDocumentUpload({ userId: USER_ID, projectId: PROJECT_ID, files: [
-      { name: file.name, path: "docs/synthetic.pdf", mimeType: file.type, blob: file },
-    ] });
-    const originalBlob = (dbState.commands.get(commandId)?.uploads as Array<{ blob: Blob }>)[0].blob;
+  it.each(malformed)("rejects malformed ACK: %s", async (_label, body, fileCount = 1) => {
+    const files = Array.from({ length: fileCount }, (_, index) =>
+      makeFile(`synthetic-${index}.pdf`, `SYNTHETIC-CONTENT-${index}`),
+    );
+    const commandId = await enqueueDocumentUpload({ userId: USER_ID, projectId: PROJECT_ID, files:
+      files.map((file) => ({ name: file.name, path: `docs/${file.name}`, mimeType: file.type, blob: file })),
+    });
+    const originalBlobs = (dbState.commands.get(commandId)?.uploads as Array<{ blob: Blob }>).map((item) => item.blob);
     const previousMarker = "2020-01-01T00:00:00.000Z";
     dbState.meta.set(`last-synced:${USER_ID}:${PROJECT_ID}`, previousMarker);
     clearTrace();
@@ -200,11 +202,62 @@ describe("document upload staging ACK", () => {
     const remaining = dbState.commands.get(commandId);
     expect(remaining).toBeTruthy();
     const remainingUploads = remaining?.uploads as Array<{ blob: Blob }>;
-    expect(remainingUploads[0].blob).toBe(originalBlob);
+    expect(remainingUploads).toHaveLength(originalBlobs.length);
+    remainingUploads.forEach((upload, index) => {
+      expect(upload.blob).toBe(originalBlobs[index]);
+    });
     expect(remaining?.status).not.toBe("conflict");
     expect(dbState.meta.get(`last-synced:${USER_ID}:${PROJECT_ID}`)).toBe(previousMarker);
     expect(dbState.trace.some((entry) => entry.startsWith("delete:"))).toBe(false);
     expect(dbState.meta.has(`upload-staging-ack:${USER_ID}:${PROJECT_ID}:${commandId}`)).toBe(false);
+  });
+
+  it("accepts a valid two-file ACK with distinct jobs and writes in order", async () => {
+    const fileA = makeFile("synthetic-a.pdf", "SYNTHETIC-CONTENT-A");
+    const fileB = makeFile("synthetic-b.pdf", "SYNTHETIC-CONTENT-B");
+    const commandId = await enqueueDocumentUpload({ userId: USER_ID, projectId: PROJECT_ID, files: [
+      { name: fileA.name, path: "docs/synthetic-a.pdf", mimeType: fileA.type, blob: fileA },
+      { name: fileB.name, path: "docs/synthetic-b.pdf", mimeType: fileB.type, blob: fileB },
+    ] });
+    clearTrace();
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = normalizeHeaders(init);
+      expect(headers["idempotency-key"]).toBe(commandId);
+      expect(headers["x-pu-expected-user"]).toBe(String(USER_ID));
+      const body = JSON.parse(String(init?.body));
+      expect(body.project_id).toBe(PROJECT_ID);
+      expect(Array.isArray(body.files)).toBe(true);
+      expect(body.files).toHaveLength(2);
+      expect(body.files[0].path).toBe("docs/synthetic-a.pdf");
+      expect(body.files[1].path).toBe("docs/synthetic-b.pdf");
+      return responseJSON(ackBody([
+        { job_id: 201, staging_id: STAGING_A, status: "queued" },
+        { job_id: 202, staging_id: STAGING_B, status: "queued" },
+      ]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await synchronize(USER_ID, PROJECT_ID, true);
+
+    const ackKey = `upload-staging-ack:${USER_ID}:${PROJECT_ID}:${commandId}`;
+    const stored = dbState.meta.get(ackKey) as { status: string; jobs: Array<Record<string, unknown>> };
+    expect(stored).toEqual({
+      status: "queued",
+      jobs: [
+        { job_id: 201, staging_id: STAGING_A, status: "queued" },
+        { job_id: 202, staging_id: STAGING_B, status: "queued" },
+      ],
+    });
+    expect(JSON.stringify(stored)).not.toMatch(/base64|blob|path/i);
+
+    const ackIndex = dbState.trace.indexOf(`meta:${ackKey}`);
+    const deleteIndex = dbState.trace.indexOf(`delete:${commandId}`);
+    const lastSyncedIndex = dbState.trace.indexOf(`meta:last-synced:${USER_ID}:${PROJECT_ID}`);
+    expect(ackIndex).toBeGreaterThanOrEqual(0);
+    expect(deleteIndex).toBeGreaterThan(ackIndex);
+    expect(lastSyncedIndex).toBeGreaterThan(deleteIndex);
+    expect(dbState.commands.has(commandId)).toBe(false);
   });
 
   it("keeps blob and marks auth_required on 403 offline_actor_mismatch", async () => {
