@@ -8,7 +8,8 @@ vi.mock("../api/client", () => ({
   api: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number | null;
-    constructor(message: string, status: number | null) { super(message); this.status = status; }
+    requestId?: string;
+    constructor(message: string, status: number | null, requestId?: string) { super(message); this.status = status; this.requestId = requestId; }
   },
 }));
 vi.mock("./db", () => ({
@@ -134,7 +135,7 @@ describe("offline synchronization auth suspension", () => {
   it.each([401, 403])("suspends a pending notification command on ApiError %i", async (status) => {
     const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
     const before = structuredClone(store.rows.get(id)!);
-    vi.mocked(api).mockRejectedValue(new ApiError("unauthorized", status));
+    vi.mocked(api).mockRejectedValue(new ApiError("unauthorized", status, "offline-test"));
 
     await synchronize(1, 17, true);
 
@@ -284,7 +285,7 @@ describe("historical PR379 immutable coalescing", () => {
       userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
       patch: { status: "in_progress" },
     });
-    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null));
+    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null, "offline-test"));
     await synchronize(1, 17, true);
     const attempted = structuredClone(store.rows.get(first)!);
 
@@ -300,7 +301,7 @@ describe("historical PR379 immutable coalescing", () => {
 
   it("retries the original lost reply with a byte-identical body", async () => {
     await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
-    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null));
+    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null, "offline-test"));
     await synchronize(1, 17, true);
     const firstBody = String((vi.mocked(api).mock.calls[0][1] as { body: string }).body);
 
