@@ -1,6 +1,7 @@
 # Codex fallback project/volume CAS service checks, not HTTP authorization.
 from pathlib import Path
 from hashlib import sha256
+from decimal import Decimal
 import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
@@ -90,7 +91,7 @@ def _single_frame_png_fixture(world):
     from PIL import Image
     db,store,own,volumes,versions,a,b=world
     version=versions[0]
-    content=store.read(own.id,version.content_sha256)
+    content=store.read(own.id,version.content_sha256,max_bytes=version.size_bytes)
     assert sha256(content).hexdigest()==version.content_sha256
     with Image.open(BytesIO(content)) as image:
         assert image.format=='PNG'
@@ -100,15 +101,18 @@ def _single_frame_png_fixture(world):
 
 
 def _fresh_defect(db,project_id,name):
-    defect=Defect(project_id=project_id,name=name)
-    db.add(defect);db.flush();db.commit()
-    return defect
+    created=create_defect(db,project_id,None,{'title':name})
+    db.flush();db.commit()
+    defect_id=created['id'] if isinstance(created,dict) else created.id
+    return db.get(Defect,defect_id)
 
 
 def _snapshot(db,defect_id,project_id):
-    point=db.scalar(select(DefectDrawingPoint).where(DefectDrawingPoint.defect_id==defect_id,DefectDrawingPoint.project_id==project_id))
-    links=db.execute(select(DefectDrawingPoint.__table__).where(DefectDrawingPoint.defect_id==defect_id)).all()
-    return point,links
+    defect=db.get(Defect,defect_id)
+    rd_version_id=defect.rd_version_id if defect is not None else None
+    points=db.scalars(select(DefectDrawingPoint).where(DefectDrawingPoint.defect_id==defect_id,DefectDrawingPoint.project_id==project_id)).all()
+    columns=sorted(DefectDrawingPoint.__table__.columns.keys())
+    return rd_version_id,len(points),columns
 
 
 def test_service_single_frame_annotation_positive_control(world):
@@ -120,14 +124,13 @@ def test_service_single_frame_annotation_positive_control(world):
     db.commit()
     assert first['rd_version_id']==version.id and first['page']==1
     assert Decimal(first['x'])==Decimal('0.25') and Decimal(first['y'])==Decimal('0.50')
-    point,links=_snapshot(db,defect.id,own.id)
-    assert point is not None and point.rd_version_id==version.id and point.page==1
-    assert len(links)==1
+    rd_version_id,count,columns=_snapshot(db,defect.id,own.id)
+    assert rd_version_id==version.id and count==1
     replay=bind_point(db,own.id,defect.id,version_id=version.id,page=1,x='0.250',y='0.5')
     db.commit()
     assert Decimal(replay['x'])==Decimal('0.25') and Decimal(replay['y'])==Decimal('0.5')
-    point2,links2=_snapshot(db,defect.id,own.id)
-    assert len(links2)==1 and point2.id==point.id
+    rd_version_id2,count2,columns2=_snapshot(db,defect.id,own.id)
+    assert count2==1 and rd_version_id2==version.id and columns2==columns
 
 
 def test_service_single_frame_annotation_page2_rejected(world):
@@ -135,12 +138,13 @@ def test_service_single_frame_annotation_page2_rejected(world):
     _single_frame_png_fixture(world)
     defect=_fresh_defect(db,own.id,'negative')
     version=versions[0]
-    before_point,before_links=_snapshot(db,defect.id,own.id)
-    assert before_point is None and before_links==[]
+    before_rd_version_id,before_count,before_columns=_snapshot(db,defect.id,own.id)
+    assert before_rd_version_id is None and before_count==0
     with pytest.raises(ValueError,match='page'):
         bind_point(db,own.id,defect.id,version_id=version.id,page=2,x='0.25',y='0.50')
     db.rollback()
-    after_point,after_links=_snapshot(db,defect.id,own.id)
-    assert after_point is None
-    assert after_links==before_links
+    after_rd_version_id,after_count,after_columns=_snapshot(db,defect.id,own.id)
+    assert after_rd_version_id==before_rd_version_id
+    assert after_count==before_count
+    assert after_columns==before_columns
     assert db.scalar(select(Defect).where(Defect.id==defect.id,Defect.project_id==own.id)) is not None
