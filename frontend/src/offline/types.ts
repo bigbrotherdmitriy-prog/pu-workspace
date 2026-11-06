@@ -56,3 +56,43 @@ export type SyncSummary = {
   lastSyncedAt?: string;
   lastError?: string;
 };
+
+/**
+ * Immutable prepared input for a future workLogQueue module.
+ *
+ * This is intentionally NOT part of the OfflineCommand union and carries no
+ * entityId, baseToken, or uploads. It represents a work_log.create payload that
+ * has been prepared for delivery but not yet queued. Static typing here does not
+ * replace runtime validation of the server contract.
+ */
+export type PreparedWorkLogCreate = {
+  readonly id: string;
+  readonly userId: number;
+  readonly projectId: number;
+  readonly deviceId: string;
+  readonly operation: "work_log.create";
+  readonly patch: Readonly<Record<string, unknown>>;
+  readonly clientCreatedAt: string;
+  readonly status: "queued";
+  readonly attempts: 0;
+  readonly updatedAt: string;
+};
+
+/**
+ * Optional acknowledgement shape for a work_log.create delivery.
+ * Static typing here does not replace runtime validation of the server response.
+ */
+export type WorkLogCreateAck = {
+  readonly receipt_id: number;
+  readonly client_mutation_id: string;
+  readonly operation: "work_log.create";
+  readonly entity_type: "work_log";
+  readonly entity_id: number;
+  readonly status: "applied";
+  readonly result: {
+    readonly id: number;
+    readonly project_id: number;
+    readonly author_user_id: number;
+    readonly [key: string]: unknown;
+  };
+};
