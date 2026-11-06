@@ -99,3 +99,67 @@ def test_distinct_jpeg_colors_detected():
     assert result['changed_pixels']==3*2
     assert result['changed_bbox']==[0,0,3,2]
     assert not result['dimensions_changed']
+
+
+def _install_open_spy(monkeypatch):
+    """Wrap module Image.open, retaining every returned object for identity checks."""
+    opened=[]
+    original_open=Image.open
+    def spy_open(*args,**kwargs):
+        image=original_open(*args,**kwargs)
+        opened.append(image)
+        return image
+    monkeypatch.setattr(Image,'open',spy_open)
+    return opened
+
+
+def _install_close_spy(monkeypatch):
+    """Wrap Image.Image.close, calling the original and recording closed objects."""
+    closed=[]
+    original_close=Image.Image.close
+    def spy_close(self,*args,**kwargs):
+        closed.append(self)
+        return original_close(self,*args,**kwargs)
+    monkeypatch.setattr(Image.Image,'close',spy_close)
+    return closed
+
+
+def _assert_all_closed(opened,closed):
+    assert opened, 'comparator opened no images'
+    for image in opened:
+        assert any(image is done for done in closed), 'comparator-owned image was not closed'
+
+
+def test_first_image_closed_when_second_invalid(monkeypatch):
+    good=image_bytes()
+    bad=b'not an image'
+    opened=_install_open_spy(monkeypatch)
+    closed=_install_close_spy(monkeypatch)
+    with pytest.raises(ValueError):
+        compare(good,bad)
+    assert len(opened)==1
+    _assert_all_closed(opened,closed)
+
+
+def test_both_images_closed_on_pixel_budget_rejection(monkeypatch):
+    a=image_bytes()
+    opened=_install_open_spy(monkeypatch)
+    closed=_install_close_spy(monkeypatch)
+    with pytest.raises(ValueError,match='pixel budget'):
+        compare(a,a,pixel_budget=11)
+    assert len(opened)==2
+    _assert_all_closed(opened,closed)
+
+
+def test_originals_and_converted_closed_on_dimension_mismatch(monkeypatch):
+    a=image_bytes()
+    b=image_bytes(size=(2,2))
+    opened=_install_open_spy(monkeypatch)
+    closed=_install_close_spy(monkeypatch)
+    result=compare(a,b,pixel_budget=10)
+    assert result['dimensions_changed']
+    assert len(opened)==2
+    _assert_all_closed(opened,closed)
+    # Converted RGBA images are distinct objects from the opened originals.
+    converted=[image for image in closed if all(image is not original for original in opened)]
+    assert len(converted)>=2
