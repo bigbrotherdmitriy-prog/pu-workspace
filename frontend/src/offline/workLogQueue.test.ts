@@ -147,6 +147,7 @@ it.each([
   "fractional_entity_id",
   "unsafe_entity_id",
 ])("retains the queued journal fact on a malformed create receipt: %s", async (kind) => {
+  const db = await import("./db");
   const id = await enqueueWorkLogCreate(args());
   const before = store.rows.get(id)!;
   const snapshot = {
@@ -170,6 +171,7 @@ it.each([
     if (kind === "unsafe_entity_id") { r.entity_id = Number.MAX_SAFE_INTEGER + 1; r.result.id = Number.MAX_SAFE_INTEGER + 1; }
     return r;
   });
+  vi.mocked(db.deleteCommand).mockClear();
   await synchronize(1, 17);
   const after = store.rows.get(id);
   expect(after).toBeDefined();
@@ -180,6 +182,6 @@ it.each([
   expect(after!.userId).toBe(snapshot.userId);
   expect(after!.projectId).toBe(snapshot.projectId);
   expect(after).not.toHaveProperty("entityId");
-  expect(after).not.toHaveProperty("deleteCommand");
+  expect(db.deleteCommand).not.toHaveBeenCalled();
   expect(store.meta.get("last-synced:1:17")).toBe("old-marker");
 });
