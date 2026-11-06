@@ -138,6 +138,18 @@ function blobBase64(blob: Blob): Promise<string> {
   });
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function expectedEntityType(command: OfflineCommand): string {
+  return command.operation === "task.update" ? "task" : "notification";
+}
+
+function receiptError(message: string): Error {
+  return new Error(`Некорректная квитанция сервера: ${message}`);
+}
+
 async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
   if (command.operation === "document.upload") {
     const files = await Promise.all((command.uploads || []).map(async (file) => ({
@@ -154,10 +166,22 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
   }
   const response = await api<{
     receipt_id: number;
+    client_mutation_id: string;
+    operation: string;
+    entity_id: number;
+    entity_type: string;
     status: string;
+    result?: unknown;
     error_code?: string;
     error_message?: string;
-    conflict?: { id: number };
+    conflict?: {
+      id: number;
+      command_id: number;
+      entity_type: string;
+      entity_id: number;
+    };
+    created_at?: string;
+    updated_at?: string;
   }>("/mobile-sync/commands", {
     method: "POST",
     body: JSON.stringify({
@@ -171,11 +195,45 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       client_created_at: command.clientCreatedAt,
     }),
   });
-  if (response.status === "applied") return { applied: true, receiptId: response.receipt_id };
-  if (response.status === "conflict") {
-    return { applied: false, conflictId: response.conflict?.id, receiptId: response.receipt_id };
+  if (!response || typeof response !== "object") {
+    throw receiptError("ответ не является объектом");
   }
-  throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+  if (response.status !== "applied" && response.status !== "conflict") {
+    throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+  }
+  if (!isPositiveSafeInteger(response.receipt_id)) {
+    throw receiptError("отсутствует корректный receipt_id");
+  }
+  if (response.client_mutation_id !== command.id) {
+    throw receiptError("client_mutation_id не совпадает с командой");
+  }
+  if (response.operation !== command.operation) {
+    throw receiptError("operation не совпадает с командой");
+  }
+  if (response.entity_id !== command.entityId) {
+    throw receiptError("entity_id не совпадает с командой");
+  }
+  if (response.entity_type !== expectedEntityType(command)) {
+    throw receiptError("entity_type не совпадает с командой");
+  }
+  if (response.status === "applied") return { applied: true, receiptId: response.receipt_id };
+  const conflict = response.conflict;
+  if (!conflict || typeof conflict !== "object") {
+    throw receiptError("отсутствует описание конфликта");
+  }
+  if (!isPositiveSafeInteger(conflict.id)) {
+    throw receiptError("отсутствует корректный conflict.id");
+  }
+  if (conflict.command_id !== response.receipt_id) {
+    throw receiptError("conflict.command_id не совпадает с receipt_id");
+  }
+  if (conflict.entity_type !== response.entity_type) {
+    throw receiptError("conflict.entity_type не совпадает с квитанцией");
+  }
+  if (conflict.entity_id !== response.entity_id) {
+    throw receiptError("conflict.entity_id не совпадает с квитанцией");
+  }
+  return { applied: false, conflictId: conflict.id, receiptId: response.receipt_id };
 }
 
 export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
