@@ -108,3 +108,24 @@ def test_failure_after_business_flush_rolls_back_labor_and_entry(world,monkeypat
     with pytest.raises(RuntimeError,match='Synthetic failure'):
         submit_work_log_create(db,actor,command(project))
     assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==0
+
+
+def test_two_editors_same_mutation_id_isolated(world):
+    db,actor,project,_=world
+    second=User(name='Second editor',email='second@example.test',is_admin=False)
+    db.add(second);db.flush()
+    db.add(ProjectMember(project_id=project.id,user_id=second.id,role='editor'));db.commit()
+    request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    other=submit_work_log_create(db,second,request);db.commit()
+    assert first['entity_id']>0 and other['entity_id']>0 and first['entity_id']!=other['entity_id']
+    assert first['receipt_id']>0 and other['receipt_id']>0 and first['receipt_id']!=other['receipt_id']
+    assert first['result']['author_user_id']==actor.id and other['result']['author_user_id']==second.id
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==2
+    assert db.get(WorkLogEntry,first['entity_id']).author_user_id==actor.id
+    assert db.get(WorkLogEntry,other['entity_id']).author_user_id==second.id
+    assert db.get(MobileSyncCommand,first['receipt_id']).user_id==actor.id
+    assert db.get(MobileSyncCommand,other['receipt_id']).user_id==second.id
+    assert submit_work_log_create(db,actor,request)==first
+    assert submit_work_log_create(db,second,request)==other
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==2
