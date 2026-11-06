@@ -169,3 +169,84 @@ def test_service_single_frame_annotation_page2_rejected(world):
     assert after_rd_version_id==before_rd_version_id
     assert after_points==before_points
     assert db.scalar(select(Defect).where(Defect.id==defect.id,Defect.project_id==own.id)) is not None
+
+
+def _synthetic_jpeg_version(world):
+    """SYNTHETIC single-frame RGB JPEG stored in the own-project CAS.
+
+    Builds a small in-memory JPEG with Pillow, stores it via the fixture CAS,
+    and adds an RdVolumeVersion with correct image/jpeg/digest/size. Verifies
+    the stored bytes are actually a one-frame JPEG (not PNG relabelled).
+    """
+    from io import BytesIO
+    from PIL import Image
+    db,store,own,volumes,versions,a,b=world
+    buffer=BytesIO()
+    Image.new('RGB',(4,4),(10,20,30)).save(buffer,format='JPEG',quality=80)
+    content=buffer.getvalue()
+    with Image.open(BytesIO(content)) as image:
+        assert image.format=='JPEG'
+        assert getattr(image,'n_frames',1)==1
+        image.load()
+    digest=store.put(own.id,content)
+    version=RdVolumeVersion(volume_id=volumes[0].id,content_sha256=digest,size_bytes=len(content),file_name='synthetic.jpg',mime_type='image/jpeg')
+    db.add(version);db.flush();db.commit()
+    stored=store.read(own.id,version.content_sha256,max_bytes=version.size_bytes)
+    assert sha256(stored).hexdigest()==version.content_sha256
+    with Image.open(BytesIO(stored)) as image:
+        assert image.format=='JPEG'
+        assert getattr(image,'n_frames',1)==1
+        image.load()
+    return version
+
+
+def test_service_synthetic_jpeg_page1_positive(world):
+    db,store,own,volumes,versions,a,b=world
+    version=_synthetic_jpeg_version(world)
+    defect=_fresh_defect(db,own.id,'jpeg-positive')
+    first=bind_point(db,own.id,defect.id,version_id=version.id,page=1,x='0.25',y='0.50')
+    db.commit()
+    assert first['rd_version_id']==version.id and first['page']==1
+    assert Decimal(first['x'])==Decimal('0.25') and Decimal(first['y'])==Decimal('0.50')
+    rd_version_id,points=_snapshot(db,defect.id,own.id)
+    assert rd_version_id==version.id and len(points)==1
+    assert points[0][3]==version.id and points[0][4]==1
+    assert Decimal(str(points[0][5]))==Decimal('0.25') and Decimal(str(points[0][6]))==Decimal('0.50')
+    replay=bind_point(db,own.id,defect.id,version_id=version.id,page=1,x='0.250',y='0.5')
+    db.commit()
+    assert Decimal(replay['x'])==Decimal('0.25') and Decimal(replay['y'])==Decimal('0.5')
+    rd_version_id2,points2=_snapshot(db,defect.id,own.id)
+    assert len(points2)==1 and rd_version_id2==version.id and points2==points
+
+
+def test_service_synthetic_jpeg_page2_rejected(world):
+    db,store,own,volumes,versions,a,b=world
+    version=_synthetic_jpeg_version(world)
+    defect=_fresh_defect(db,own.id,'jpeg-negative')
+    # Cache primitive IDs before adding pending state.
+    project_id=own.id;defect_id=defect.id;version_id=version.id;org_id=own.organization_id
+    before_rd_version_id,before_points=_snapshot(db,defect_id,project_id)
+    assert before_rd_version_id is None and before_points==()
+    own.name='Pending rename'
+    pending=Project(name='Pending',organization_id=org_id);db.add(pending)
+    statements=[]
+    def capture(conn,cursor,sql,parameters,context,executemany):statements.append(sql)
+    event.listen(db.get_bind(),'before_cursor_execute',capture)
+    try:
+        with pytest.raises(ValueError,match='page'):
+            bind_point(db,project_id,defect_id,version_id=version_id,page=2,x='0.25',y='0.50')
+    finally:
+        event.remove(db.get_bind(),'before_cursor_execute',capture)
+    # Stored state unchanged BEFORE any caller rollback.
+    mid_rd_version_id,mid_points=_snapshot(db,defect_id,project_id)
+    assert mid_rd_version_id==before_rd_version_id
+    assert mid_points==before_points
+    # No INSERT/UPDATE/DELETE issued around bind_point.
+    assert not any(s.lstrip().lower().startswith(('insert','update','delete')) for s in statements)
+    # Pending object not flushed and dirty rename preserved.
+    assert pending.id is None and pending in db.new and own in db.dirty
+    db.rollback()
+    after_rd_version_id,after_points=_snapshot(db,defect_id,project_id)
+    assert after_rd_version_id==before_rd_version_id
+    assert after_points==before_points
+    assert db.scalar(select(Defect).where(Defect.id==defect_id,Defect.project_id==project_id)) is not None
