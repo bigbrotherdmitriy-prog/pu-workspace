@@ -61,19 +61,69 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(year: number, month: number): number {
+  switch (month) {
+    case 1:
+    case 3:
+    case 5:
+    case 7:
+    case 8:
+    case 10:
+    case 12:
+      return 31;
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30;
+    case 2:
+      return isLeapYear(year) ? 29 : 28;
+    default:
+      return 0;
+  }
+}
+
 function isRealCalendarDate(value: string): boolean {
   if (!DATE_PATTERN.test(value)) return false;
   const year = Number(value.slice(0, 4));
   const month = Number(value.slice(5, 7));
   const day = Number(value.slice(8, 10));
-  if (month < 1 || month > 12 || day < 1) return false;
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return day <= daysInMonth;
+  if (year < 1 || year > 9999) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1) return false;
+  return day <= daysInMonth(year, month);
 }
 
 function isIsoWithOffset(value: string): boolean {
   if (!ISO_PATTERN.test(value)) return false;
+  const datePart = value.slice(0, 10);
+  if (!isRealCalendarDate(datePart)) return false;
+  const hour = Number(value.slice(11, 13));
+  const minute = Number(value.slice(14, 16));
+  const second = Number(value.slice(17, 19));
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  const zone = value.slice(19).replace(/^\.[0-9]+/, "");
+  if (zone !== "Z") {
+    const sign = zone.charAt(0);
+    if (sign !== "+" && sign !== "-") return false;
+    const offHour = Number(zone.slice(1, 3));
+    const offMinute = Number(zone.slice(4, 6));
+    if (offHour > 23 || offMinute > 59) return false;
+  }
   return !Number.isNaN(Date.parse(value));
+}
+
+function defineOwn(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 function deepCopyJson(value: unknown, seen: Set<object>): unknown {
@@ -94,7 +144,7 @@ function deepCopyJson(value: unknown, seen: Set<object>): unknown {
   } else if (isPlainObject(obj)) {
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
-      out[key] = deepCopyJson(obj[key], seen);
+      defineOwn(out, key, deepCopyJson((obj as Record<string, unknown>)[key], seen));
     }
     copy = out;
   } else {
