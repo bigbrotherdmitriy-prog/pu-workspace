@@ -218,10 +218,25 @@ def _names(data: bytes) -> list[str]:
 
 
 def _resolve_target(source_part: str, target: str) -> str:
-    """Resolve an OPC relationship Target relative to its source part."""
+    """Resolve an OPC relationship Target relative to its source part.
+
+    The base directory is the directory of the *source part* itself. For the
+    package-level relationships part ``_rels/.rels`` the source part is the
+    package root, so relative targets resolve against the package root (not
+    against the ``_rels`` directory). For a part such as
+    ``word/_rels/document.xml.rels`` the source part is ``word/document.xml``
+    and relative targets resolve against ``word``.
+    """
     if target.startswith("/"):
         return target.lstrip("/")
-    base = posixpath.dirname(source_part)
+    if source_part == "_rels/.rels":
+        base = ""
+    else:
+        # strip the trailing ".rels" and the "_rels/" segment to get the
+        # source part, then take its directory
+        rels_dir = posixpath.dirname(source_part)
+        source_dir = posixpath.dirname(rels_dir)
+        base = source_dir
     return posixpath.normpath(posixpath.join(base, target))
 
 
