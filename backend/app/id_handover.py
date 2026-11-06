@@ -66,7 +66,7 @@ def equipment_rows(db: Session, project_id: int, object_name: str | None) -> lis
     from app.models.rd import RdSpecItem, RdVolume
 
     vols = db.query(RdVolume).filter(RdVolume.project_id == project_id).all()
-    if object_name and any(v.object_name == object_name for v in vols):
+    if object_name:
         vols = [v for v in vols if v.object_name == object_name]
     by_id = {v.id: v for v in vols}
     if not by_id:
