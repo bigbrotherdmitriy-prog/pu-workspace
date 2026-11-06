@@ -136,3 +136,50 @@ it("does not deliver an old owner's queued create under another cookie session",
   expect(store.rows.get(id)?.status).toBe("auth_required");
   expect(new Headers(vi.mocked(api).mock.calls[0][1]?.headers).get("X-PU-Expected-User")).toBe("1");
 });
+
+it.each([
+  "wrong_operation",
+  "status_queued",
+  "entity_type_task",
+  "result_id_mismatch",
+  "fractional_receipt_id",
+  "unsafe_receipt_id",
+  "fractional_entity_id",
+  "unsafe_entity_id",
+])("retains the queued journal fact on a malformed create receipt: %s", async (kind) => {
+  const id = await enqueueWorkLogCreate(args());
+  const before = store.rows.get(id)!;
+  const snapshot = {
+    id: before.id,
+    clientCreatedAt: before.clientCreatedAt,
+    patch: structuredClone(before.patch),
+    userId: before.userId,
+    projectId: before.projectId,
+  };
+  store.meta.set("last-synced:1:17", "old-marker");
+  vi.mocked(api).mockImplementation(async (_path, init) => {
+    const body = JSON.parse(String(init?.body));
+    const r = validReceipt(body);
+    if (kind === "wrong_operation") r.operation = "task.update";
+    if (kind === "status_queued") r.status = "queued";
+    if (kind === "entity_type_task") r.entity_type = "task";
+    if (kind === "result_id_mismatch") r.result.id = 24;
+    if (kind === "fractional_receipt_id") r.receipt_id = 1.5;
+    if (kind === "unsafe_receipt_id") r.receipt_id = Number.MAX_SAFE_INTEGER + 1;
+    if (kind === "fractional_entity_id") { r.entity_id = 1.5; r.result.id = 1.5; }
+    if (kind === "unsafe_entity_id") { r.entity_id = Number.MAX_SAFE_INTEGER + 1; r.result.id = Number.MAX_SAFE_INTEGER + 1; }
+    return r;
+  });
+  await synchronize(1, 17);
+  const after = store.rows.get(id);
+  expect(after).toBeDefined();
+  expect(after!.id).toBe(snapshot.id);
+  expect(after!.clientCreatedAt).toBe(snapshot.clientCreatedAt);
+  expect(after!.patch).toEqual(snapshot.patch);
+  expect(after!.patch.work_date).toBe("2026-10-30");
+  expect(after!.userId).toBe(snapshot.userId);
+  expect(after!.projectId).toBe(snapshot.projectId);
+  expect(after).not.toHaveProperty("entityId");
+  expect(after).not.toHaveProperty("deleteCommand");
+  expect(store.meta.get("last-synced:1:17")).toBe("old-marker");
+});
