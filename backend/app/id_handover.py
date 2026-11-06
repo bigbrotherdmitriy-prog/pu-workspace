@@ -110,6 +110,21 @@ def render_equipment_register(header: dict, rows: list[dict]) -> bytes:
     return build_docx(p, landscape=True)
 
 
+def _append_xlsx_row(ws, values: list) -> None:
+    """Добавить строку, сохраняя текстовые значения как строки (data_type 's').
+
+    openpyxl при присвоении строки, начинающейся с '=', создаёт формулу.
+    Для табличных экспортов формулы не нужны: внешний текст должен остаться
+    точной строкой без изменения значения. Числа/None/булевы сохраняются как есть.
+    """
+    ws.append(values)
+    row_idx = ws.max_row
+    for col_idx, value in enumerate(values, start=1):
+        if isinstance(value, str):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.data_type = "s"
+
+
 def render_equipment_register_xlsx(header: dict, rows: list[dict]) -> bytes:
     if not rows:
         raise ValueError("В РД нет позиций спецификации — сначала разберите РД")
@@ -118,10 +133,10 @@ def render_equipment_register_xlsx(header: dict, rows: list[dict]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Ведомость оборудования"
-    ws.append([f"Ведомость смонтированного оборудования. Объект: {(header or {}).get('object_name') or ''}"])
-    ws.append(["№", "Наименование", "Тип, марка", "Код", "Изготовитель", "Ед.", "Кол-во", "Раздел", "Том РД"])
+    _append_xlsx_row(ws, [f"Ведомость смонтированного оборудования. Объект: {(header or {}).get('object_name') or ''}"])
+    _append_xlsx_row(ws, ["№", "Наименование", "Тип, марка", "Код", "Изготовитель", "Ед.", "Кол-во", "Раздел", "Том РД"])
     for i, r in enumerate(rows, start=1):
-        ws.append([i, r["name"], r["type_mark"], r["code"], r["manufacturer"], r["unit"], r["qty"], r["section"], r["volume"]])
+        _append_xlsx_row(ws, [i, r["name"], r["type_mark"], r["code"], r["manufacturer"], r["unit"], r["qty"], r["section"], r["volume"]])
     for col, width in zip("ABCDEFGHI", (5, 50, 28, 18, 24, 7, 10, 10, 24)):
         ws.column_dimensions[col].width = width
     buf = io.BytesIO()
@@ -177,10 +192,10 @@ def render_register_xlsx(header: dict, rows: list[dict]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Реестр ИД"
-    ws.append([f"Реестр исполнительной документации. Объект: {(header or {}).get('object_name') or ''}"])
-    ws.append(["№", "Документ", "Вид", "Раздел", "Наличие", "Обязательный", "Файл"])
+    _append_xlsx_row(ws, [f"Реестр исполнительной документации. Объект: {(header or {}).get('object_name') or ''}"])
+    _append_xlsx_row(ws, ["№", "Документ", "Вид", "Раздел", "Наличие", "Обязательный", "Файл"])
     for i, r in enumerate(rows, start=1):
-        ws.append([i, r["title"], r["kind"], r["section"], r["status"], "да" if r["required"] else "нет", r["files"]])
+        _append_xlsx_row(ws, [i, r["title"], r["kind"], r["section"], r["status"], "да" if r["required"] else "нет", r["files"]])
     for col, width in zip("ABCDEFG", (5, 60, 18, 14, 12, 14, 40)):
         ws.column_dimensions[col].width = width
     buf = io.BytesIO()

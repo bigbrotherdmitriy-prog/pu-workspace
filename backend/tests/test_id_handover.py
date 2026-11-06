@@ -152,3 +152,226 @@ def test_service_object_scope_reads_do_not_mutate(world):
     equipment_rows(db, p.id, "")
     after = (db.query(RdVolume).count(), db.query(RdSpecItem).count())
     assert before == after
+
+
+# ---------- XLSX literal text regression (no DB, no HTTP) ----------
+
+_HARMFUL_STRINGS = ["=1+1", "+text", "-text", "@text", "Unicode & <tag> \"quotes\" 'apos'", "line1\nline2", "#REF!"]
+
+
+def _load_xlsx(data: bytes):
+    from openpyxl import load_workbook
+
+    return load_workbook(io.BytesIO(data), data_only=False)
+
+
+def _equipment_row(**overrides) -> dict:
+    row = {
+        "name": "Щит ЩР-1", "type_mark": "ЩРн-24", "code": "C-1", "manufacturer": "Завод",
+        "unit": "шт", "qty": "2", "section": "ЭМ", "volume": "ЭМ-1",
+    }
+    row.update(overrides)
+    return row
+
+
+def _register_row(**overrides) -> dict:
+    row = {
+        "title": "Журнал прокладки кабелей", "kind": "Журнал", "section": "ЭМ",
+        "status": "есть", "required": True, "files": "journal.pdf",
+    }
+    row.update(overrides)
+    return row
+
+
+def _render(kind: str, header: dict, rows: list[dict]) -> bytes:
+    from app.id_handover import render_equipment_register_xlsx, render_register_xlsx
+
+    if kind == "equipment":
+        return render_equipment_register_xlsx(header, rows)
+    return render_register_xlsx(header, rows)
+
+
+def _make_row(export_kind: str, **overrides) -> dict:
+    return _equipment_row(**overrides) if export_kind == "equipment" else _register_row(**overrides)
+
+
+def _text_columns(kind: str) -> list[str]:
+    if kind == "equipment":
+        return ["name", "type_mark", "code", "manufacturer", "unit", "qty", "section", "volume"]
+    return ["title", "kind", "section", "status", "files"]
+
+
+def _column_index(kind: str, key: str) -> int:
+    if kind == "equipment":
+        order = ["name", "type_mark", "code", "manufacturer", "unit", "qty", "section", "volume"]
+        return 2 + order.index(key)
+    order = ["title", "kind", "section", "status", "required", "files"]
+    return 2 + order.index(key)
+
+
+def _assert_no_formula_cells(data: bytes) -> None:
+    wb = _load_xlsx(data)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                assert cell.data_type != "f", f"formula cell at {cell.coordinate}: {cell.value!r}"
+    xml = zipfile.ZipFile(io.BytesIO(data)).read("xl/worksheets/sheet1.xml").decode()
+    assert "<f" not in xml
+
+
+def _assert_zip_crc(data: bytes) -> None:
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert zf.testzip() is None
+
+
+@pytest.mark.parametrize("kind,column", [
+    ("equipment", "name"),
+    ("equipment", "type_mark"),
+    ("equipment", "code"),
+    ("equipment", "manufacturer"),
+    ("equipment", "unit"),
+    ("equipment", "qty"),
+    ("equipment", "section"),
+    ("equipment", "volume"),
+    ("register", "title"),
+    ("register", "kind"),
+    ("register", "section"),
+    ("register", "status"),
+    ("register", "files"),
+])
+@pytest.mark.parametrize("harmful", _HARMFUL_STRINGS)
+def test_xlsx_literal_text_equipment_columns(kind, column, harmful):
+    header = {"object_name": "ДУБНА"}
+    row = _make_row(kind, **{column: harmful})
+    data = _render(kind, header, [row])
+    _assert_zip_crc(data)
+    _assert_no_formula_cells(data)
+    ws = _load_xlsx(data).worksheets[0]
+    cell = ws.cell(row=3, column=_column_index(kind, column))
+    assert cell.value == harmful
+    assert cell.data_type == "s"
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+@pytest.mark.parametrize("harmful", _HARMFUL_STRINGS)
+def test_xlsx_literal_text_all_columns_filled(kind, harmful):
+    header = {"object_name": harmful}
+    row = _make_row(kind, **{key: harmful for key in _text_columns(kind)})
+    data = _render(kind, header, [row])
+    _assert_zip_crc(data)
+    _assert_no_formula_cells(data)
+    ws = _load_xlsx(data).worksheets[0]
+    for key in _text_columns(kind):
+        cell = ws.cell(row=3, column=_column_index(kind, key))
+        assert cell.value == harmful, key
+        assert cell.data_type == "s", key
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+def test_xlsx_literal_text_no_apostrophe_or_strip(kind):
+    header = {"object_name": "ДУБНА"}
+    row = _make_row(kind, **{key: "  =1+1  " for key in _text_columns(kind)})
+    data = _render(kind, header, [row])
+    ws = _load_xlsx(data).worksheets[0]
+    for key in _text_columns(kind):
+        cell = ws.cell(row=3, column=_column_index(kind, key))
+        assert cell.value == "  =1+1  ", key
+        assert cell.data_type == "s", key
+        assert not str(cell.value).startswith("'")
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+def test_xlsx_numeric_and_optional_control(kind):
+    header = {"object_name": "ДУБНА"}
+    if kind == "equipment":
+        row = _equipment_row(qty=2)
+        data = _render(kind, header, [row])
+        ws = _load_xlsx(data).worksheets[0]
+        assert ws.cell(row=3, column=1).value == 1
+        assert ws.cell(row=3, column=1).data_type == "n"
+        qty_cell = ws.cell(row=3, column=_column_index(kind, "qty"))
+        assert qty_cell.value == 2
+        assert qty_cell.data_type == "n"
+    else:
+        row = _register_row(required=True)
+        data = _render(kind, header, [row])
+        ws = _load_xlsx(data).worksheets[0]
+        assert ws.cell(row=3, column=1).value == 1
+        assert ws.cell(row=3, column=1).data_type == "n"
+        assert ws.cell(row=3, column=_column_index(kind, "required")).value == "да"
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+def test_xlsx_text_quantity_string_control(kind):
+    header = {"object_name": "ДУБНА"}
+    if kind == "equipment":
+        row = _equipment_row(qty="2")
+        data = _render(kind, header, [row])
+        ws = _load_xlsx(data).worksheets[0]
+        qty_cell = ws.cell(row=3, column=_column_index(kind, "qty"))
+        assert qty_cell.value == "2"
+        assert qty_cell.data_type == "s"
+    else:
+        row = _register_row(required=False)
+        data = _render(kind, header, [row])
+        ws = _load_xlsx(data).worksheets[0]
+        assert ws.cell(row=3, column=_column_index(kind, "required")).value == "нет"
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+@pytest.mark.parametrize("blank", [None, ""])
+def test_xlsx_none_and_blank_legacy_semantics(kind, blank):
+    header = {"object_name": "ДУБНА"}
+    row = _make_row(kind, **{key: blank for key in _text_columns(kind)})
+    data = _render(kind, header, [row])
+    ws = _load_xlsx(data).worksheets[0]
+    for key in _text_columns(kind):
+        cell = ws.cell(row=3, column=_column_index(kind, key))
+        assert cell.value is None, key
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+def test_xlsx_title_sheetnames_widths_unchanged(kind):
+    header = {"object_name": "ДУБНА"}
+    row = _make_row(kind)
+    data = _render(kind, header, [row])
+    wb = _load_xlsx(data)
+    ws = wb.worksheets[0]
+    if kind == "equipment":
+        assert ws.title == "Ведомость оборудования"
+        expected = {"A": 5, "B": 50, "C": 28, "D": 18, "E": 24, "F": 7, "G": 10, "H": 10, "I": 24}
+    else:
+        assert ws.title == "Реестр ИД"
+        expected = {"A": 5, "B": 60, "C": 18, "D": 14, "E": 12, "F": 14, "G": 40}
+    for col, width in expected.items():
+        assert ws.column_dimensions[col].width == width, col
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+def test_xlsx_input_header_and_rows_deepcopies_unchanged(kind):
+    import copy
+
+    header = {"object_name": "=1+1", "customer": "@text"}
+    row = _make_row(kind, **{key: "=1+1" for key in _text_columns(kind)})
+    header_before = copy.deepcopy(header)
+    rows_before = copy.deepcopy([row])
+    _render(kind, header, [row])
+    assert header == header_before
+    assert [row] == rows_before
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+def test_xlsx_empty_rows_raises(kind):
+    with pytest.raises(ValueError):
+        _render(kind, {"object_name": "ДУБНА"}, [])
+
+
+def test_docx_compat_qty_string_literal_names():
+    from app.id_handover import render_equipment_register
+
+    sample = "=1+1"
+    rows = [_equipment_row(name=sample, qty="2")]
+    data = render_equipment_register({"object_name": "ДУБНА"}, rows)
+    xml = _text(data)
+    assert sample in xml
+    assert "2" in xml
