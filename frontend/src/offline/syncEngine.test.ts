@@ -87,3 +87,59 @@ describe("offline synchronization queue", () => {
     expect((await offlineSummary(1, 17)).conflicts).toBe(1);
   });
 });
+
+describe("offline synchronization auth suspension", () => {
+  it.each([401, 403])("suspends a pending notification command on ApiError %i", async (status) => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    const before = structuredClone(store.rows.get(id)!);
+    vi.mocked(api).mockRejectedValue(new ApiError("unauthorized", status));
+
+    await synchronize(1, 17, true);
+
+    const row = store.rows.get(id)!;
+    expect(row).toBeDefined();
+    expect(row.status).toBe("auth_required");
+    expect(row.id).toBe(before.id);
+    expect(row.patch).toEqual(before.patch);
+    expect(row.clientCreatedAt).toBe(before.clientCreatedAt);
+    expect(row.userId).toBe(before.userId);
+    expect(row.projectId).toBe(before.projectId);
+    expect(store.meta.has("last-synced:1:17")).toBe(false);
+
+    const summary = await offlineSummary(1, 17);
+    expect(summary.authRequired).toBe(1);
+    expect(summary.total).toBe(1);
+
+    vi.mocked(api).mockClear();
+    await synchronize(1, 17, false);
+    await synchronize(1, 17, true);
+    expect(api).not.toHaveBeenCalled();
+    expect(store.rows.get(id)!.status).toBe("auth_required");
+    expect(store.rows.size).toBe(1);
+  });
+
+  it("delivers a fresh pending notification on a matching applied receipt", async () => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    vi.mocked(api).mockResolvedValue({ receipt_id: 9, status: "applied" });
+
+    await synchronize(1, 17, true);
+
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(store.rows.has(id)).toBe(false);
+    expect(store.rows.size).toBe(0);
+    expect(store.meta.has("last-synced:1:17")).toBe(true);
+  });
+
+  it("does not deliver a queued command outside the requested scope", async () => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    const before = structuredClone(store.rows.get(id)!);
+    vi.mocked(api).mockResolvedValue({ receipt_id: 9, status: "applied" });
+
+    await synchronize(2, 17, true);
+    await synchronize(1, 18, true);
+
+    expect(api).not.toHaveBeenCalled();
+    expect(store.rows.get(id)).toEqual(before);
+    expect(store.rows.size).toBe(1);
+  });
+});
