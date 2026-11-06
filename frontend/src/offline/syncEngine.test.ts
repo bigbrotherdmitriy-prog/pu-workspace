@@ -30,6 +30,52 @@ beforeEach(() => {
   Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
 });
 
+type Sent = {
+  client_mutation_id: string;
+  operation: string;
+  entity_id: number;
+  project_id: number;
+};
+
+function sentBody(): Sent {
+  const call = vi.mocked(api).mock.calls[0];
+  return JSON.parse(String((call[1] as { body: string }).body));
+}
+
+function entityTypeFor(operation: string): string {
+  return operation === "notification.mark_read" ? "notification" : "task";
+}
+
+function appliedReceipt(receiptId: number) {
+  const sent = sentBody();
+  return {
+    receipt_id: receiptId,
+    client_mutation_id: sent.client_mutation_id,
+    operation: sent.operation,
+    entity_id: sent.entity_id,
+    entity_type: entityTypeFor(sent.operation),
+    status: "applied",
+  };
+}
+
+function conflictReceipt(receiptId: number, conflictId: number) {
+  const sent = sentBody();
+  return {
+    receipt_id: receiptId,
+    client_mutation_id: sent.client_mutation_id,
+    operation: sent.operation,
+    entity_id: sent.entity_id,
+    entity_type: entityTypeFor(sent.operation),
+    status: "conflict",
+    conflict: {
+      id: conflictId,
+      command_id: receiptId,
+      entity_type: entityTypeFor(sent.operation),
+      entity_id: sent.entity_id,
+    },
+  };
+}
+
 describe("offline synchronization queue", () => {
   it("coalesces safe edits of one task without discarding either field", async () => {
     await enqueueTaskUpdate({
@@ -62,7 +108,7 @@ describe("offline synchronization queue", () => {
     await synchronize(1, 17, false);
     expect(api).not.toHaveBeenCalled();
 
-    vi.mocked(api).mockResolvedValue({ receipt_id: 9, status: "applied" });
+    vi.mocked(api).mockImplementation(async () => appliedReceipt(9));
     await synchronize(1, 17, true);
     expect(store.rows.size).toBe(0);
   });
@@ -72,11 +118,7 @@ describe("offline synchronization queue", () => {
       userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
       patch: { status: "cancelled" },
     });
-    vi.mocked(api).mockResolvedValue({
-      receipt_id: 22,
-      status: "conflict",
-      conflict: { id: 71 },
-    });
+    vi.mocked(api).mockImplementation(async () => conflictReceipt(22, 71));
 
     await synchronize(1, 17, true);
 
@@ -120,7 +162,7 @@ describe("offline synchronization auth suspension", () => {
 
   it("delivers a fresh pending notification on a matching applied receipt", async () => {
     const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
-    vi.mocked(api).mockResolvedValue({ receipt_id: 9, status: "applied" });
+    vi.mocked(api).mockImplementation(async () => appliedReceipt(9));
 
     await synchronize(1, 17, true);
 
@@ -133,7 +175,7 @@ describe("offline synchronization auth suspension", () => {
   it("does not deliver a queued command outside the requested scope", async () => {
     const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
     const before = structuredClone(store.rows.get(id)!);
-    vi.mocked(api).mockResolvedValue({ receipt_id: 9, status: "applied" });
+    vi.mocked(api).mockImplementation(async () => appliedReceipt(9));
 
     await synchronize(2, 17, true);
     await synchronize(1, 18, true);
@@ -141,5 +183,139 @@ describe("offline synchronization auth suspension", () => {
     expect(api).not.toHaveBeenCalled();
     expect(store.rows.get(id)).toEqual(before);
     expect(store.rows.size).toBe(1);
+  });
+});
+
+describe("strict receipt guard", () => {
+  type Case = { name: string; mutate: (r: Record<string, unknown>) => unknown };
+  const cases: Case[] = [
+    { name: "missing receipt_id", mutate: (r) => { delete r.receipt_id; return r; } },
+    { name: "zero receipt_id", mutate: (r) => ({ ...r, receipt_id: 0 }) },
+    { name: "negative receipt_id", mutate: (r) => ({ ...r, receipt_id: -5 }) },
+    { name: "noninteger receipt_id", mutate: (r) => ({ ...r, receipt_id: 1.5 }) },
+    { name: "unsafe receipt_id", mutate: (r) => ({ ...r, receipt_id: Number.MAX_SAFE_INTEGER + 2 }) },
+    { name: "wrong client_mutation_id", mutate: (r) => ({ ...r, client_mutation_id: "other-id" }) },
+    { name: "wrong operation", mutate: (r) => ({ ...r, operation: "task.update" }) },
+    { name: "wrong entity_id", mutate: (r) => ({ ...r, entity_id: 999 }) },
+    { name: "wrong entity_type", mutate: (r) => ({ ...r, entity_type: "task" }) },
+    { name: "null response", mutate: () => null },
+  ];
+
+  it.each(cases)("rejects malformed applied receipt: $name", async ({ mutate }) => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    const before = structuredClone(store.rows.get(id)!);
+    vi.mocked(api).mockImplementation(async () => mutate(appliedReceipt(9)) as never);
+
+    await synchronize(1, 17, true);
+
+    const row = store.rows.get(id)!;
+    expect(row).toBeDefined();
+    expect(row.id).toBe(before.id);
+    expect(row.patch).toEqual(before.patch);
+    expect(row.clientCreatedAt).toBe(before.clientCreatedAt);
+    expect(store.meta.has("last-synced:1:17")).toBe(false);
+  });
+
+  type CCase = { name: string; mutate: (r: Record<string, unknown>) => unknown };
+  const conflictCases: CCase[] = [
+    { name: "missing conflict id", mutate: (r) => { delete (r.conflict as Record<string, unknown>).id; return r; } },
+    { name: "bad conflict id", mutate: (r) => ({ ...r, conflict: { ...(r.conflict as object), id: 0 } }) },
+    { name: "wrong command_id", mutate: (r) => ({ ...r, conflict: { ...(r.conflict as object), command_id: 999 } }) },
+    { name: "wrong conflict entity", mutate: (r) => ({ ...r, conflict: { ...(r.conflict as object), entity_id: 999 } }) },
+  ];
+
+  it.each(conflictCases)("rejects malformed conflict receipt: $name", async ({ mutate }) => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    const before = structuredClone(store.rows.get(id)!);
+    vi.mocked(api).mockImplementation(async () => mutate(conflictReceipt(22, 71)) as never);
+
+    await synchronize(1, 17, true);
+
+    const row = store.rows.get(id)!;
+    expect(row).toBeDefined();
+    expect(row.id).toBe(before.id);
+    expect(row.patch).toEqual(before.patch);
+    expect(row.clientCreatedAt).toBe(before.clientCreatedAt);
+    expect(store.meta.has("last-synced:1:17")).toBe(false);
+  });
+
+  it("applies a valid task.update receipt", async () => {
+    const id = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+    vi.mocked(api).mockImplementation(async () => appliedReceipt(31));
+
+    await synchronize(1, 17, true);
+
+    expect(store.rows.has(id)).toBe(false);
+    expect(store.meta.has("last-synced:1:17")).toBe(true);
+  });
+
+  it("applies a valid notification.mark_read receipt", async () => {
+    const id = await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    vi.mocked(api).mockImplementation(async () => appliedReceipt(32));
+
+    await synchronize(1, 17, true);
+
+    expect(store.rows.has(id)).toBe(false);
+    expect(store.meta.has("last-synced:1:17")).toBe(true);
+  });
+
+  it("records a valid task.update conflict", async () => {
+    const id = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "cancelled" },
+    });
+    vi.mocked(api).mockImplementation(async () => conflictReceipt(33, 81));
+
+    await synchronize(1, 17, true);
+
+    const row = store.rows.get(id)!;
+    expect(row.status).toBe("conflict");
+    expect(row.receiptId).toBe(33);
+    expect(row.conflictId).toBe(81);
+  });
+});
+
+describe("historical PR379 immutable coalescing", () => {
+  it("creates a distinct id after a failed attempt while the attempted row stays unchanged", async () => {
+    const first = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { status: "in_progress" },
+    });
+    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null));
+    await synchronize(1, 17, true);
+    const attempted = structuredClone(store.rows.get(first)!);
+
+    const second = await enqueueTaskUpdate({
+      userId: 1, projectId: 17, taskId: 9, baseToken: "signed-base",
+      patch: { assignee_user_id: 3 },
+    });
+
+    expect(second).not.toBe(first);
+    expect(store.rows.get(first)).toEqual(attempted);
+    expect(store.rows.get(second)!.patch).toEqual({ assignee_user_id: 3 });
+  });
+
+  it("retries the original lost reply with a byte-identical body", async () => {
+    await enqueueNotificationRead({ userId: 1, projectId: 17, notificationId: 44 });
+    vi.mocked(api).mockRejectedValue(new ApiError("network unavailable", null));
+    await synchronize(1, 17, true);
+    const firstBody = String((vi.mocked(api).mock.calls[0][1] as { body: string }).body);
+
+    vi.mocked(api).mockImplementation(async () => appliedReceipt(9));
+    await synchronize(1, 17, true);
+    const retryBody = String((vi.mocked(api).mock.calls[1][1] as { body: string }).body);
+
+    expect(retryBody).toBe(firstBody);
+  });
+
+  it("never coalesces edits from separate users or projects", async () => {
+    await enqueueTaskUpdate({ userId: 1, projectId: 17, taskId: 9, baseToken: "b", patch: { status: "in_progress" } });
+    await enqueueTaskUpdate({ userId: 2, projectId: 17, taskId: 9, baseToken: "b", patch: { status: "done" } });
+    await enqueueTaskUpdate({ userId: 1, projectId: 18, taskId: 9, baseToken: "b", patch: { status: "done" } });
+
+    expect(store.rows.size).toBe(3);
   });
 });
