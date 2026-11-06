@@ -1,5 +1,6 @@
 """Real synthetic SQLite service transactions; no HTTP/auth-session acceptance."""
 from copy import deepcopy
+from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine,event,select,func
@@ -129,3 +130,96 @@ def test_two_editors_same_mutation_id_isolated(world):
     assert submit_work_log_create(db,actor,request)==first
     assert submit_work_log_create(db,second,request)==other
     assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==2
+
+
+def _corrupt_result(db,receipt_id,mutate):
+    row=db.get(MobileSyncCommand,receipt_id)
+    result=deepcopy(row.result)
+    mutate(result)
+    row.result=result
+    db.commit()
+
+
+def _corrupt_row(db,receipt_id,mutate):
+    row=db.get(MobileSyncCommand,receipt_id)
+    mutate(row)
+    db.commit()
+
+
+def _set_entity_type(row):row.entity_type='task'
+def _set_entity_id_zero(row):row.entity_id=0
+def _set_entity_id_negative(row):row.entity_id=-1
+
+def _set_result_id_99999(result):result['id']=99999
+def _set_result_project_id_99999(result):result['project_id']=99999
+def _set_result_author_99999(result):result['author_user_id']=99999
+
+
+@pytest.mark.parametrize('mutate',[
+    _set_entity_type,
+    _set_entity_id_zero,
+    _set_entity_id_negative,
+],ids=['entity_type','entity_id_zero','entity_id_negative'])
+def test_corrupt_row_receipt_rejected(world,mutate):
+    db,actor,project,_=world;request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    _corrupt_row(db,first['receipt_id'],mutate)
+    with pytest.raises(ValueError,match='offline_receipt_not_applied'):
+        submit_work_log_create(db,actor,request)
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
+
+
+def test_corrupt_row_project_id_rejected(world):
+    db,actor,project,other=world;request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    _corrupt_row(db,first['receipt_id'],lambda row:setattr(row,'project_id',other.id))
+    with pytest.raises(ValueError,match='offline_receipt_not_applied'):
+        submit_work_log_create(db,actor,request)
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
+
+
+@pytest.mark.parametrize('mutate',[
+    _set_result_id_99999,
+    _set_result_project_id_99999,
+    _set_result_author_99999,
+],ids=['result_id_99999','result_project_id_99999','result_author_99999'])
+def test_corrupt_result_receipt_rejected(world,mutate):
+    db,actor,project,_=world;request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    _corrupt_result(db,first['receipt_id'],mutate)
+    with pytest.raises(ValueError,match='offline_receipt_not_applied'):
+        submit_work_log_create(db,actor,request)
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
+
+
+def _baseline_receipt_stub(db,receipt_id):
+    row=db.get(MobileSyncCommand,receipt_id)
+    return SimpleNamespace(id=row.id,client_mutation_id=row.client_mutation_id,
+        payload=deepcopy(row.payload),operation=row.operation,status=row.status,
+        entity_type=row.entity_type,entity_id=row.entity_id,
+        project_id=row.project_id,user_id=row.user_id,result=deepcopy(row.result))
+
+
+def _set_stub_entity_id_bool(stub):stub.entity_id=True
+def _set_stub_result_id_bool(stub):stub.result['id']=True
+def _set_stub_result_project_id_bool(stub):stub.result['project_id']=True
+def _set_stub_result_author_bool(stub):stub.result['author_user_id']=True
+
+
+@pytest.mark.parametrize('mutate',[
+    _set_stub_entity_id_bool,
+    _set_stub_result_id_bool,
+    _set_stub_result_project_id_bool,
+    _set_stub_result_author_bool,
+],ids=['entity_id_bool','result_id_bool','result_project_id_bool','result_author_bool'])
+def test_corrupt_bool_receipt_rejected_by_pure_guard(world,mutate):
+    from app import mobile_work_log
+    db,actor,project,_=world;request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    payload=request.model_dump(mode='json')
+    stub=_baseline_receipt_stub(db,first['receipt_id'])
+    assert mobile_work_log._receipt(stub,payload)==first
+    mutate(stub)
+    with pytest.raises(ValueError,match='offline_receipt_not_applied'):
+        mobile_work_log._receipt(stub,payload)
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
