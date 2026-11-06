@@ -15,10 +15,32 @@ from app.models.project import Project
 from app.models.user import User
 
 
+def _strict_positive_int(value) -> bool:
+    # bool is a subclass of int; reject it explicitly.
+    return type(value) is int and value > 0
+
+
 def _receipt(row: MobileSyncCommand, payload: dict) -> dict:
     if row.payload != payload:
         raise ValueError('client_mutation_id_reused')
     if row.operation != 'work_log.create' or row.status != 'applied' or not isinstance(row.result, dict):
+        raise ValueError('offline_receipt_not_applied')
+    # Persisted receipt integrity: the cached applied result must be internally
+    # consistent with the journal row and the replayed payload. Historical
+    # receipt replay after fact deletion must retain existing semantics, so no
+    # referenced fact existence lookup is performed here.
+    if row.entity_type != 'work_log':
+        raise ValueError('offline_receipt_not_applied')
+    if not _strict_positive_int(row.entity_id):
+        raise ValueError('offline_receipt_not_applied')
+    result = row.result
+    if not _strict_positive_int(result.get('id')) or result.get('id') != row.entity_id:
+        raise ValueError('offline_receipt_not_applied')
+    if row.project_id != payload.get('project_id'):
+        raise ValueError('offline_receipt_not_applied')
+    if not _strict_positive_int(result.get('project_id')) or result.get('project_id') != row.project_id:
+        raise ValueError('offline_receipt_not_applied')
+    if not _strict_positive_int(result.get('author_user_id')) or result.get('author_user_id') != row.user_id:
         raise ValueError('offline_receipt_not_applied')
     return {'receipt_id':row.id,'client_mutation_id':row.client_mutation_id,
             'operation':row.operation,'entity_type':row.entity_type,

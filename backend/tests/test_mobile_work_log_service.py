@@ -129,3 +129,64 @@ def test_two_editors_same_mutation_id_isolated(world):
     assert submit_work_log_create(db,actor,request)==first
     assert submit_work_log_create(db,second,request)==other
     assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==2
+
+
+def _corrupt_result(db,receipt_id,mutate):
+    row=db.get(MobileSyncCommand,receipt_id)
+    result=deepcopy(row.result)
+    mutate(result)
+    row.result=result
+    db.commit()
+
+
+def _corrupt_row(db,receipt_id,mutate):
+    row=db.get(MobileSyncCommand,receipt_id)
+    mutate(row)
+    db.commit()
+
+
+def _set_entity_type(row):row.entity_type='task'
+def _set_entity_id_zero(row):row.entity_id=0
+def _set_entity_id_bool(row):row.entity_id=True
+def _set_entity_id_negative(row):row.entity_id=-1
+def _set_row_project_id(row):row.project_id=99999
+
+def _set_result_id_99999(result):result['id']=99999
+def _set_result_id_bool(result):result['id']=True
+def _set_result_project_id_99999(result):result['project_id']=99999
+def _set_result_project_id_bool(result):result['project_id']=True
+def _set_result_author_99999(result):result['author_user_id']=99999
+def _set_result_author_bool(result):result['author_user_id']=True
+
+
+@pytest.mark.parametrize('mutate',[
+    _set_entity_type,
+    _set_entity_id_zero,
+    _set_entity_id_bool,
+    _set_entity_id_negative,
+    _set_row_project_id,
+],ids=['entity_type','entity_id_zero','entity_id_bool','entity_id_negative','row_project_id'])
+def test_corrupt_row_receipt_rejected(world,mutate):
+    db,actor,project,_=world;request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    _corrupt_row(db,first['receipt_id'],mutate)
+    with pytest.raises(ValueError,match='offline_receipt_not_applied'):
+        submit_work_log_create(db,actor,request)
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
+
+
+@pytest.mark.parametrize('mutate',[
+    _set_result_id_99999,
+    _set_result_id_bool,
+    _set_result_project_id_99999,
+    _set_result_project_id_bool,
+    _set_result_author_99999,
+    _set_result_author_bool,
+],ids=['result_id_99999','result_id_bool','result_project_id_99999','result_project_id_bool','result_author_99999','result_author_bool'])
+def test_corrupt_result_receipt_rejected(world,mutate):
+    db,actor,project,_=world;request=command(project)
+    first=submit_work_log_create(db,actor,request);db.commit()
+    _corrupt_result(db,first['receipt_id'],mutate)
+    with pytest.raises(ValueError,match='offline_receipt_not_applied'):
+        submit_work_log_create(db,actor,request)
+    assert count(db,WorkLogEntry)==count(db,WorkLogLabor)==count(db,MobileSyncCommand)==1
