@@ -55,3 +55,44 @@ it("refreshes only for an applied fact of the same user and project",async()=>{
   await act(async()=>window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT,{detail:{userId:7,projectId:5,entryId:23}})));
   await waitFor(()=>expect(vi.mocked(api).mock.calls.length).toBeGreaterThan(before));
 });
+async function settleLoads() {
+  await screen.findByRole("form", {name:"Новая запись журнала"});
+  await act(async()=>{ await Promise.resolve(); await Promise.resolve(); });
+}
+it.each([
+  {label:"user switch", fromUser:7, toUser:8, project:5},
+  {label:"project switch", fromUser:7, toUser:7, project:6},
+])("does not leak a deferred save into a re-rendered $label scope", async({fromUser,toUser,project})=>{
+  let resolveSave!: (id:string)=>void;
+  vi.mocked(enqueueWorkLogCreate).mockImplementation(()=>new Promise(resolve=>{resolveSave=resolve;}));
+  const {rerender} = render(<WorkLogModule projectId={project} userId={fromUser}/>);
+  await fill();
+  fireEvent.click(screen.getByText("Добавить запись"));
+  await waitFor(()=>expect(enqueueWorkLogCreate).toHaveBeenCalledWith({userId:fromUser,projectId:project,data:expect.objectContaining({work_name:"Synthetic offline work",qty:"1,250"})}));
+  rerender(<WorkLogModule projectId={project} userId={toUser}/>);
+  await settleLoads();
+  fireEvent.change(screen.getByLabelText(/Какая работа выполнена/),{target:{value:"Synthetic new scope work"}});
+  fireEvent.change(screen.getByLabelText("Объём"),{target:{value:"9,500"}});
+  await act(async()=>resolveSave("synthetic-mutation"));
+  await act(async()=>{ await Promise.resolve(); await Promise.resolve(); });
+  expect(enqueueWorkLogCreate).toHaveBeenCalledTimes(1);
+  expect(enqueueWorkLogCreate).toHaveBeenCalledWith({userId:fromUser,projectId:project,data:expect.objectContaining({work_name:"Synthetic offline work",qty:"1,250"})});
+  expect(screen.getByLabelText(/Какая работа выполнена/)).toHaveProperty("value","Synthetic new scope work");
+  expect(screen.getByLabelText("Объём")).toHaveProperty("value","9,500");
+  expect(screen.queryByText(/Запись сохранена на устройстве/)).toBeNull();
+  expect(screen.queryByText("Запись добавлена")).toBeNull();
+  expect(vi.mocked(api).mock.calls.some(([,init])=>init?.method==="POST")).toBe(false);
+});
+it("refreshes only for an applied fact of the current re-rendered scope",async()=>{
+  const {rerender} = render(<WorkLogModule projectId={5} userId={7}/>);
+  await settleLoads();
+  rerender(<WorkLogModule projectId={5} userId={8}/>);
+  await settleLoads();
+  await act(async()=>{ await Promise.resolve(); await Promise.resolve(); });
+  const before=vi.mocked(api).mock.calls.length;
+  await act(async()=>window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT,{detail:{userId:7,projectId:5,entryId:31}})));
+  await act(async()=>{ await Promise.resolve(); await Promise.resolve(); });
+  expect(vi.mocked(api).mock.calls.length).toBe(before);
+  await act(async()=>window.dispatchEvent(new CustomEvent(WORK_LOG_APPLIED_EVENT,{detail:{userId:8,projectId:5,entryId:31}})));
+  await waitFor(()=>expect(vi.mocked(api).mock.calls.length).toBeGreaterThan(before));
+});
