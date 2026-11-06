@@ -5,7 +5,7 @@ Rollback may leave a quota-counted immutable blob; no automatic destructive clea
 This primitive does not validate a file codec or authorize a user.
 """
 from hashlib import sha256
-from sqlalchemy import literal, select
+from sqlalchemy import func, literal, select
 from app.models.rd import RdVolume, RdVolumeVersion
 
 _ALLOWED_MIME = ('image/png', 'image/jpeg', 'application/pdf')
@@ -79,8 +79,8 @@ def read_retained_version_content(db, store, project_id: int, version_id: int, *
             RdVolumeVersion.id,
             RdVolumeVersion.volume_id,
             RdVolumeVersion.size_bytes,
-            RdVolumeVersion.content_sha256.substring(1, 65),
-            RdVolumeVersion.mime_type.substring(1, 101),
+            func.substr(RdVolumeVersion.content_sha256, 1, 65),
+            func.substr(RdVolumeVersion.mime_type, 1, 101),
         ).join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id).where(
             RdVolumeVersion.id == version_id,
             RdVolume.project_id == project_id,
