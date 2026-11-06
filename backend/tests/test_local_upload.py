@@ -132,7 +132,6 @@ def _expected_user_adapter():
 
 @pytest.mark.parametrize("raw", ["0", "-1", "-42"])
 @pytest.mark.parametrize("as_string", [False, True])
-@pytest.mark.parametrize("as_string", [False, True])
 def test_expected_user_annotation_rejects_non_positive(raw, as_string):
     adapter = _expected_user_adapter()
     value = raw if as_string else int(raw)
