@@ -3,6 +3,7 @@ import binascii
 import hashlib
 import os
 import re
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -104,7 +105,16 @@ def analyze_local_folder(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    expected_user_id: Annotated[
+        int | None,
+        Header(alias="X-PU-Expected-User", gt=0),
+    ] = None,
 ):
+    # Optional expected-actor contract: when the client supplies an expected
+    # user id, it must match the authenticated session user. This is a staged
+    # contract only and never replaces session-based authentication.
+    if expected_user_id is not None and expected_user_id != int(user.id):
+        raise HTTPException(403, "offline_actor_mismatch")
     # Authorization and whole-batch admission happen before base64 decode or
     # any staging read/write.
     require_project_role(db, user, payload.project_id, "manager")
