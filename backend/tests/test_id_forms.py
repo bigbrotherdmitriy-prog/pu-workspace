@@ -303,3 +303,176 @@ def test_build_docx_does_not_mutate_parts():
     original = list(parts)
     build_docx(parts, template_id="T", template_version="1")
     assert parts == original
+
+
+# --- Equipment act template metadata (renderer) tests ---
+
+_EQUIPMENT_SYNTHETIC_OBJECT = "СИНТЕТИЧЕСКИЙ ОБРАЗЕЦ — НЕ ДЛЯ ПОДПИСАНИЯ"
+
+
+def _equipment_template_header(**extra) -> dict:
+    header = {"object_name": _EQUIPMENT_SYNTHETIC_OBJECT}
+    header.update(extra)
+    return header
+
+
+def _equipment_template_items() -> list[dict]:
+    return [{"name": "SYNTHETIC", "result": "pass"}]
+
+
+def _equipment_template_names(data: bytes) -> list[str]:
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert zf.testzip() is None
+        return zf.namelist()
+
+
+def _equipment_template_read(data: bytes, name: str) -> str:
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert zf.testzip() is None
+        return zf.read(name).decode("utf-8")
+
+
+def _equipment_template_custom_props(data: bytes) -> dict:
+    custom = _equipment_template_read(data, "docProps/custom.xml")
+    root = ET.fromstring(custom)
+    assert root.tag == f"{{{_CUSTOM_NS}}}Properties"
+    props = {}
+    for prop in root.findall(f"{{{_CUSTOM_NS}}}property"):
+        value_el = prop.find(f"{{{_VT_NS}}}lpwstr")
+        assert value_el is not None
+        props[prop.get("name")] = value_el.text
+    return props
+
+
+def _equipment_template_assert_package_consistent(data: bytes) -> None:
+    names = _equipment_template_names(data)
+    assert "word/document.xml" in names
+    assert "docProps/custom.xml" in names
+    ET.fromstring(_equipment_template_read(data, "word/document.xml"))
+    ET.fromstring(_equipment_template_read(data, "[Content_Types].xml"))
+    ET.fromstring(_equipment_template_read(data, "_rels/.rels"))
+    ET.fromstring(_equipment_template_read(data, "word/_rels/document.xml.rels"))
+    ct_root = ET.fromstring(_equipment_template_read(data, "[Content_Types].xml"))
+    overrides = [o for o in ct_root if o.get("PartName") == "/docProps/custom.xml"]
+    assert len(overrides) == 1
+    assert overrides[0].get("ContentType") == _CUSTOM_CONTENT_TYPE
+    rel_root = ET.fromstring(_equipment_template_read(data, "word/_rels/document.xml.rels"))
+    custom_rels = [r for r in rel_root if r.get("Type") == _CUSTOM_REL_TYPE]
+    assert len(custom_rels) == 1
+    assert custom_rels[0].get("Target") == "docProps/custom.xml"
+    ids = [r.get("Id") for r in rel_root]
+    assert len(set(ids)) == len(ids)
+
+
+def test_equipment_template_omitted_and_none_use_legacy_builder(monkeypatch):
+    calls = []
+
+    def spy(parts, *args, **kwargs):
+        calls.append((list(parts), args, dict(kwargs)))
+        return build_docx(parts, *args, **kwargs)
+
+    monkeypatch.setattr(eta, "build_docx", spy)
+    header = _equipment_template_header()
+    items = _equipment_template_items()
+
+    omitted = eta.render(header, items)
+    assert len(calls) == 1
+    parts, args, kwargs = calls[0]
+    assert args == () and kwargs == {}
+    assert isinstance(parts, list) and parts
+    assert "docProps/custom.xml" not in _equipment_template_names(omitted)
+
+    calls.clear()
+    both_none = eta.render(header, items, template_id=None, template_version=None)
+    assert len(calls) == 1
+    parts, args, kwargs = calls[0]
+    assert args == () and kwargs == {}
+    assert "docProps/custom.xml" not in _equipment_template_names(both_none)
+
+    assert _equipment_template_read(omitted, "word/document.xml") == _equipment_template_read(
+        both_none, "word/document.xml"
+    )
+
+
+def test_equipment_template_explicit_metadata_forwarded_and_parsed(monkeypatch):
+    calls = []
+
+    def spy(parts, *args, **kwargs):
+        calls.append((list(parts), args, dict(kwargs)))
+        return build_docx(parts, *args, **kwargs)
+
+    monkeypatch.setattr(eta, "build_docx", spy)
+    header = _equipment_template_header()
+    items = _equipment_template_items()
+
+    data = eta.render(header, items, template_id="  PU-EQ-01  ", template_version="  v1 & <x>  ")
+    assert len(calls) == 1
+    _, args, kwargs = calls[0]
+    assert args == ()
+    assert kwargs == {"template_id": "  PU-EQ-01  ", "template_version": "  v1 & <x>  "}
+
+    _equipment_template_assert_package_consistent(data)
+    props = _equipment_template_custom_props(data)
+    assert props["PU.TemplateId"] == "PU-EQ-01"
+    assert props["PU.TemplateVersion"] == "v1 & <x>"
+    custom = _equipment_template_read(data, "docProps/custom.xml")
+    assert "&amp;" in custom and "&lt;x&gt;" in custom
+
+
+def test_equipment_template_document_xml_unchanged_with_metadata():
+    header = _equipment_template_header()
+    items = _equipment_template_items()
+    plain = eta.render(header, items)
+    with_meta = eta.render(header, items, template_id="PU-EQ-01", template_version="1")
+    assert "docProps/custom.xml" not in _equipment_template_names(plain)
+    assert "docProps/custom.xml" in _equipment_template_names(with_meta)
+    assert _equipment_template_read(plain, "word/document.xml") == _equipment_template_read(
+        with_meta, "word/document.xml"
+    )
+
+
+def test_equipment_template_header_keys_alone_do_not_enable_metadata():
+    header = _equipment_template_header(template_id="PU-EQ-01", template_version="1")
+    data = eta.render(header, _equipment_template_items())
+    assert "docProps/custom.xml" not in _equipment_template_names(data)
+
+
+def test_equipment_template_does_not_mutate_inputs():
+    import copy
+
+    header = _equipment_template_header(act_no="1")
+    items = _equipment_template_items()
+    header_before = copy.deepcopy(header)
+    items_before = copy.deepcopy(items)
+
+    eta.render(header, items, template_id="PU-EQ-01", template_version="1")
+    assert header == header_before and items == items_before
+
+    with pytest.raises(ValueError):
+        eta.render(header, items, template_id="PU-EQ-01")
+    assert header == header_before and items == items_before
+
+
+@pytest.mark.parametrize(
+    "template_id,template_version",
+    [
+        ("PU-EQ-01", None),
+        (None, "1"),
+        ("", "1"),
+        ("PU-EQ-01", ""),
+        ("   ", "1"),
+        ("PU-EQ-01", "   "),
+        (True, "1"),
+        ("PU-EQ-01", 1),
+        ("PU-EQ-01\x00", "1"),
+        ("PU-EQ-01", "1\x1f"),
+    ],
+)
+def test_equipment_template_invalid_pairs_rejected(template_id, template_version):
+    with pytest.raises(ValueError):
+        eta.render(
+            _equipment_template_header(),
+            _equipment_template_items(),
+            template_id=template_id,
+            template_version=template_version,
+        )
