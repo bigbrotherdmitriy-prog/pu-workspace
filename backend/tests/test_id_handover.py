@@ -224,12 +224,23 @@ def _assert_zip_crc(data: bytes) -> None:
         assert zf.testzip() is None
 
 
-@pytest.mark.parametrize("kind", ["equipment", "register"])
+@pytest.mark.parametrize("kind,column", [
+    ("equipment", "name"),
+    ("equipment", "type_mark"),
+    ("equipment", "code"),
+    ("equipment", "manufacturer"),
+    ("equipment", "unit"),
+    ("equipment", "qty"),
+    ("equipment", "section"),
+    ("equipment", "volume"),
+    ("register", "title"),
+    ("register", "kind"),
+    ("register", "section"),
+    ("register", "status"),
+    ("register", "files"),
+])
 @pytest.mark.parametrize("harmful", _HARMFUL_STRINGS)
-@pytest.mark.parametrize("column", ["name", "type_mark", "code", "manufacturer", "unit", "qty", "section", "volume"])
-def test_xlsx_literal_text_equipment_columns(kind, harmful, column):
-    if kind == "register" and column not in _text_columns("register"):
-        pytest.skip("column not present in register")
+def test_xlsx_literal_text_equipment_columns(kind, column, harmful):
     header = {"object_name": "ДУБНА"}
     row = _make_row(kind, **{column: harmful})
     data = _render(kind, header, [row])
