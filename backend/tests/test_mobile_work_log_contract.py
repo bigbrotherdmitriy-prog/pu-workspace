@@ -1,7 +1,12 @@
 """Pure synthetic envelope tests; no DB, auth override, HTTP or provider."""
 from copy import deepcopy
+from types import SimpleNamespace
+
 import pytest
+from fastapi import FastAPI, HTTPException
 from pydantic import ValidationError
+
+from app.api import mobile_sync
 from app.api.work_log import WorkLogBody
 from app.mobile_work_log_contract import OfflineWorkLogCreateRequest
 
@@ -69,3 +74,262 @@ def test_identity_and_server_id_not_accepted(field,location):
 def test_invalid_command_metadata_rejected(field,value):
     body=payload();body[field]=value
     with pytest.raises(ValidationError):OfflineWorkLogCreateRequest.model_validate(body)
+
+
+# ---------------------------------------------------------------------------
+# Synthetic direct-handler unit tests for submit_offline_work_log_create.
+# No TestClient/HTTP/browser/network/DB. The service is intentionally mocked
+# ONLY to verify the adapter wrapper / unit-of-work behavior; actual service
+# integration is covered separately.
+# ---------------------------------------------------------------------------
+
+
+class _FakeDb:
+    """Bounded fake recording commit/rollback; never touches a real DB."""
+
+    def __init__(self, commit_error=None):
+        self.commit_calls = 0
+        self.rollback_calls = 0
+        self.commit_error = commit_error
+
+    def commit(self):
+        self.commit_calls += 1
+        if self.commit_error is not None:
+            raise self.commit_error
+
+    def rollback(self):
+        self.rollback_calls += 1
+
+
+def _actor():
+    return SimpleNamespace(id=42)
+
+
+def _request():
+    return OfflineWorkLogCreateRequest.model_validate(payload())
+
+
+def _install_service(monkeypatch, behavior):
+    calls = []
+
+    def fake_service(db, user, request):
+        calls.append((db, user, request))
+        return behavior(db, user, request)
+
+    monkeypatch.setattr(mobile_sync, 'submit_work_log_create', fake_service)
+    return calls
+
+
+def test_direct_handler_success_returns_same_ack_and_commits_once(monkeypatch):
+    ack = object()
+    calls = _install_service(monkeypatch, lambda db, user, request: ack)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    result = mobile_sync.submit_offline_work_log_create(
+        request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert result is ack
+    assert len(calls) == 1
+    assert calls[0][0] is db
+    assert calls[0][1] is actor
+    assert calls[0][2] is request
+    assert db.commit_calls == 1
+    assert db.rollback_calls == 0
+
+
+def test_direct_handler_header_mismatch_403_before_service(monkeypatch):
+    calls = _install_service(monkeypatch, lambda db, user, request: object())
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(HTTPException) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id + 1, db=db, user=actor)
+
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.detail == {'code': 'expected_user_mismatch'}
+    assert calls == []
+    assert db.commit_calls == 0
+    assert db.rollback_calls == 0
+
+
+@pytest.mark.parametrize('status', [401, 403])
+def test_direct_handler_service_http_exception_unchanged(monkeypatch, status):
+    original = HTTPException(status, {'code': 'synthetic_service_error'})
+
+    def behavior(db, user, request):
+        raise original
+
+    _install_service(monkeypatch, behavior)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(HTTPException) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert excinfo.value is original
+    assert excinfo.value.status_code == status
+    assert excinfo.value.detail == {'code': 'synthetic_service_error'}
+    assert db.rollback_calls == 1
+    assert db.commit_calls == 0
+
+
+def test_direct_handler_lookup_error_maps_to_404(monkeypatch):
+    def behavior(db, user, request):
+        raise LookupError('synthetic missing project')
+
+    _install_service(monkeypatch, behavior)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(HTTPException) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert excinfo.value.status_code == 404
+    assert excinfo.value.detail == {
+        'code': 'project_not_found', 'message': 'synthetic missing project'}
+    assert db.rollback_calls == 1
+    assert db.commit_calls == 0
+
+
+@pytest.mark.parametrize('code', ['client_mutation_id_reused', 'offline_receipt_not_applied'])
+def test_direct_handler_value_error_conflict_maps_to_409(monkeypatch, code):
+    def behavior(db, user, request):
+        raise ValueError(code)
+
+    _install_service(monkeypatch, behavior)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(HTTPException) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail == {'code': code}
+    assert db.rollback_calls == 1
+    assert db.commit_calls == 0
+
+
+def test_direct_handler_other_value_error_maps_to_422(monkeypatch):
+    def behavior(db, user, request):
+        raise ValueError('synthetic invalid value')
+
+    _install_service(monkeypatch, behavior)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(HTTPException) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail == {
+        'code': 'invalid_work_log_create', 'message': 'synthetic invalid value'}
+    assert db.rollback_calls == 1
+    assert db.commit_calls == 0
+
+
+def test_direct_handler_unexpected_error_rethrown_same_object(monkeypatch):
+    original = RuntimeError('synthetic unexpected')
+
+    def behavior(db, user, request):
+        raise original
+
+    _install_service(monkeypatch, behavior)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert excinfo.value is original
+    assert db.rollback_calls == 1
+    assert db.commit_calls == 0
+
+
+def test_direct_handler_commit_failure_rethrown_same_object(monkeypatch):
+    ack = object()
+    commit_error = RuntimeError('synthetic commit failure')
+    _install_service(monkeypatch, lambda db, user, request: ack)
+    db = _FakeDb(commit_error=commit_error)
+    actor = _actor()
+    request = _request()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        mobile_sync.submit_offline_work_log_create(
+            request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert excinfo.value is commit_error
+    assert db.commit_calls == 1
+    assert db.rollback_calls == 1
+
+
+def test_direct_handler_preserves_request_and_actor_inputs(monkeypatch):
+    ack = object()
+    calls = _install_service(monkeypatch, lambda db, user, request: ack)
+    db = _FakeDb()
+    actor = _actor()
+    request = _request()
+    before = request.model_dump_json()
+
+    mobile_sync.submit_offline_work_log_create(
+        request, x_pu_expected_user=actor.id, db=db, user=actor)
+
+    assert calls[0][2] is request
+    assert calls[0][1] is actor
+    assert request.model_dump_json() == before
+    assert actor.id == 42
+
+
+# ---------------------------------------------------------------------------
+# Pure FastAPI OpenAPI metadata checks. Constructs FastAPI and include_router
+# ONLY (no client/server/HTTP). Inspects the public app.openapi() schema; this
+# does NOT claim actual HTTP request validation.
+# ---------------------------------------------------------------------------
+
+
+def _work_log_create_openapi():
+    app = FastAPI()
+    app.include_router(mobile_sync.router)
+    schema = app.openapi()
+    path = schema['paths']['/mobile-sync/work-log-create']
+    return path['post']
+
+
+def test_route_metadata_post_path_and_header_contract():
+    operation = _work_log_create_openapi()
+
+    header_params = [p for p in operation.get('parameters', [])
+                     if p.get('in') == 'header'
+                     and p.get('name') == 'X-PU-Expected-User']
+    assert len(header_params) == 1
+    header = header_params[0]
+    assert header['required'] is True
+
+    header_schema = header['schema']
+    assert header_schema['type'] == 'integer'
+    assert header_schema['exclusiveMinimum'] == 0
+    assert header_schema['maximum'] == 9007199254740991
+
+
+def test_route_metadata_request_body_references_dto():
+    operation = _work_log_create_openapi()
+
+    request_body = operation['requestBody']
+    assert request_body['required'] is True
+    content = request_body['content']
+    assert 'application/json' in content
+    ref = content['application/json']['schema']['$ref']
+    assert ref.endswith('/OfflineWorkLogCreateRequest')

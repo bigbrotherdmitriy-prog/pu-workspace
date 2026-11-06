@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +16,8 @@ from app.api.tasks import TaskUpdate
 from app.core.auth import require_project_role, require_user
 from app.database import get_db
 from app.mobile_sync_tokens import MobileSyncTokenError, verify_mobile_sync_token
+from app.mobile_work_log import submit_work_log_create
+from app.mobile_work_log_contract import OfflineWorkLogCreateRequest
 from app.models.management import Notification
 from app.models.mobile_sync import MobileSyncCommand, MobileSyncConflict
 from app.models.project import Project
@@ -368,6 +370,36 @@ def submit_mobile_command(
     db.commit()
     db.refresh(command)
     return _command_payload(command, db)
+
+
+@router.post("/work-log-create")
+def submit_offline_work_log_create(
+    request: OfflineWorkLogCreateRequest,
+    x_pu_expected_user: int = Header(alias="X-PU-Expected-User", gt=0, le=9007199254740991),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    if x_pu_expected_user != user.id:
+        raise HTTPException(403, {"code": "expected_user_mismatch"})
+    try:
+        receipt = submit_work_log_create(db, user, request)
+        db.commit()
+        return receipt
+    except HTTPException:
+        db.rollback()
+        raise
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, {"code": "project_not_found", "message": str(exc)}) from exc
+    except ValueError as exc:
+        db.rollback()
+        code = str(exc)
+        if code in {"client_mutation_id_reused", "offline_receipt_not_applied"}:
+            raise HTTPException(409, {"code": code}) from exc
+        raise HTTPException(422, {"code": "invalid_work_log_create", "message": code}) from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/status")
