@@ -164,13 +164,27 @@ def test_declared_byte_budget_rejects_before_read(page_world,monkeypatch):
 
 def test_readonly_preserves_pending_state(page_world):
     db,store,own,foreign,vol1,vol2,volf,v1,v2,vj,vf,png,jpeg=page_world
-    org=own.organization_id;own.name='Pending rename';pending=Project(name='Pending',organization_id=org);db.add(pending)
+    # Capture plain scalar IDs BEFORE creating pending/dirty state so that no
+    # expired-attribute lazy load or autoflush can be attributed to the helper.
+    project_id=own.id
+    version_id=v1.id
+    byte_budget=len(png)+len(jpeg)
+    pixel_budget=12
+    org=own.organization_id
+    own.name='Pending rename'
+    pending=Project(name='Pending',organization_id=org);db.add(pending)
     statements=[]
     def capture(conn,cursor,sql,parameters,context,executemany):statements.append(sql)
     event.listen(db.get_bind(),'before_cursor_execute',capture)
-    try:result=validate(page_world,v1)
-    finally:event.remove(db.get_bind(),'before_cursor_execute',capture)
-    assert result['version_id']==v1.id
+    try:
+        # Invoke the helper directly with cached scalar IDs/budgets; the SQL
+        # capture spans only the helper invocation. No outer db.no_autoflush
+        # wrapper here, so a helper-side flush would still be observed.
+        result=validate_stored_raster_page(db,store,project_id,version_id,1,
+            byte_budget=byte_budget,pixel_budget=pixel_budget)
+    finally:
+        event.remove(db.get_bind(),'before_cursor_execute',capture)
+    assert result['version_id']==version_id
     assert pending.id is None and pending in db.new and own in db.dirty
     assert not any(s.lstrip().lower().startswith(('insert','update','delete')) for s in statements)
 
@@ -183,7 +197,22 @@ def test_corrupt_bytes_rejected(page_world):
 
 def test_corrupt_hash_rejected(page_world):
     db,store,own,foreign,vol1,vol2,volf,v1,v2,vj,vf,png,jpeg=page_world
+    # A zeroed digest points at a nonexistent CAS filename; the real content
+    # store raises FileNotFoundError. Fail closed: no metadata is returned.
     v1.content_sha256='0'*64;db.commit()
+    with pytest.raises(FileNotFoundError):
+        validate(page_world,v1)
+
+
+def test_digest_mismatch_rejected(page_world,monkeypatch):
+    db,store,own,foreign,vol1,vol2,volf,v1,v2,vj,vf,png,jpeg=page_world
+    # Control: store.read returns altered bytes of the same expected length so
+    # the validator must detect a digest mismatch after the hash check.
+    original_read=store.read
+    def altered_read(project_id,digest,size):
+        content=original_read(project_id,digest,size)
+        return bytes([content[0]^0xFF])+content[1:]
+    monkeypatch.setattr(store,'read',altered_read)
     with pytest.raises(ValueError,match='mismatch'):validate(page_world,v1)
 
 
