@@ -110,7 +110,7 @@ describe("prepareWorkLogCreate", () => {
     expect(Object.keys(out).sort()).toEqual(["__proto__", "constructor", "prototype"]);
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     expect(({} as any).p).toBeUndefined();
-    expect(JSON.parse(JSON.stringify(out))).toEqual({ __proto__: { p: 1 }, constructor: { c: 2 }, prototype: { t: 3 } });
+    expect(JSON.parse(JSON.stringify(out))).toEqual(JSON.parse(raw));
   });
 });
 
@@ -156,7 +156,7 @@ describe("validateWorkLogAck", () => {
 });
 
 describe("submitPreparedWorkLogCreate", () => {
-  it("POSTs exact envelope to mobile-sync path with actor header", async () => {
+  it("POSTs exact envelope to mobile-sync path with expected-user header", async () => {
     const cmd = makeCmd();
     const transport = vi.fn(async () => validAck(cmd));
     const assertScope = vi.fn();
@@ -164,9 +164,9 @@ describe("submitPreparedWorkLogCreate", () => {
     expect(res).toEqual({ receiptId: 10, entityId: 20 });
     expect(transport).toHaveBeenCalledTimes(1);
     const [path, init] = transport.mock.calls[0] as unknown as [string, RequestInit];
-    expect(path).toBe("mobile-sync/work-log-create");
+    expect(path).toBe("/mobile-sync/work-log-create");
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>).actor).toBe(String(cmd.userId));
+    expect((init.headers as Record<string, string>)["X-PU-Expected-User"]).toBe(String(cmd.userId));
     expect(JSON.parse(init.body as string)).toEqual(workLogEnvelope(cmd));
     expect(assertScope).toHaveBeenCalled();
   });
