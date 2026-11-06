@@ -34,6 +34,19 @@ def arrive(stock):
     record_receipt(db,p,item,operation_key='synthetic-arrive',qty='3',unit='m')
 
 
+def _ledger_snapshot(stock):
+    db,p,item,entry,_=stock
+    rows=db.execute(select(MaterialWriteoff.id,MaterialWriteoff.operation_key,
+        MaterialWriteoff.qty,MaterialWriteoff.unit,MaterialWriteoff.reverses_id)
+        .where(MaterialWriteoff.project_id==p,MaterialWriteoff.purchase_item_id==item)
+        .order_by(MaterialWriteoff.id)).all()
+    return [(r.id,r.operation_key,Decimal(r.qty),r.unit,r.reverses_id) for r in rows]
+
+
+def _count(stock):
+    return stock[0].scalar(select(func.count()).select_from(MaterialWriteoff))
+
+
 def test_paid_purchase_is_not_physical_stock(stock):
     with pytest.raises(ValueError,match='Insufficient'):consume(stock)
     assert stock[0].scalar(select(func.count()).select_from(MaterialWriteoff))==0
@@ -52,11 +65,79 @@ def test_idempotent_explicit_consumption_conflict_and_storno(stock):
     with pytest.raises(ValueError,match='reverse a reversal'):reverse_writeoff(db,p,reverse['id'],operation_key='bad')
 
 
-def test_overdraw_default_forbidden_and_explicit_opt_in(stock):
+@pytest.mark.parametrize('policy',[
+    None,
+    ProvisionalPolicy(negative_stock='forbid'),
+    ProvisionalPolicy(negative_stock='allow_explicit'),
+])
+def test_overdraw_rejected_for_all_policies(stock,policy):
     arrive(stock)
-    with pytest.raises(ValueError,match='Insufficient'):consume(stock,qty='4')
-    consume(stock,qty='4',policy=ProvisionalPolicy(negative_stock='allow_explicit'))
-    assert physical_balance(stock[0],stock[1],stock[2])==Decimal('-1')
+    db,p,item,entry,_=stock
+    before=_ledger_snapshot(stock)
+    assert before==[] and _count(stock)==0
+    assert physical_balance(db,p,item)==Decimal('3')
+    with pytest.raises(ValueError,match='Insufficient'):
+        consume(stock,qty='4',policy=policy)
+    assert _ledger_snapshot(stock)==before
+    assert _count(stock)==0
+    assert physical_balance(db,p,item)==Decimal('3')
+
+
+def test_overdraw_rejected_with_monkeypatched_env_allow_explicit(stock,monkeypatch):
+    monkeypatch.setenv('PU_NEGATIVE_STOCK_POLICY','allow_explicit')
+    arrive(stock)
+    db,p,item,entry,_=stock
+    before=_ledger_snapshot(stock)
+    assert before==[] and _count(stock)==0
+    with pytest.raises(ValueError,match='Insufficient'):
+        consume(stock,qty='4')
+    assert _ledger_snapshot(stock)==before
+    assert _count(stock)==0
+    assert physical_balance(db,p,item)==Decimal('3')
+
+
+def test_exact_available_quantity_succeeds_then_further_rejected(stock):
+    arrive(stock)
+    db,p,item,entry,_=stock
+    result=consume(stock,qty='3')
+    assert result['qty']=='3.000'
+    assert physical_balance(db,p,item)==Decimal('0')
+    assert _count(stock)==1
+    before=_ledger_snapshot(stock)
+    with pytest.raises(ValueError,match='Insufficient'):
+        consume(stock,key='synthetic-consume-2',qty='0.001')
+    assert _ledger_snapshot(stock)==before
+    assert _count(stock)==1
+    assert physical_balance(db,p,item)==Decimal('0')
+
+
+def test_genuine_replay_succeeds_after_later_drain_to_zero(stock):
+    arrive(stock)
+    db,p,item,entry,_=stock
+    first=consume(stock,qty='2')
+    assert physical_balance(db,p,item)==Decimal('1')
+    consume(stock,key='synthetic-consume-drain',qty='1')
+    assert physical_balance(db,p,item)==Decimal('0')
+    before=_ledger_snapshot(stock)
+    assert _count(stock)==2
+    replay=consume(stock,qty='2')
+    assert replay==first
+    assert _ledger_snapshot(stock)==before
+    assert _count(stock)==2
+    assert physical_balance(db,p,item)==Decimal('0')
+
+
+def test_replay_payload_conflict_rejected_without_mutation(stock):
+    arrive(stock)
+    db,p,item,entry,_=stock
+    consume(stock,qty='2')
+    before=_ledger_snapshot(stock)
+    assert _count(stock)==1
+    with pytest.raises(ValueError,match='conflict'):
+        consume(stock,qty='1')
+    assert _ledger_snapshot(stock)==before
+    assert _count(stock)==1
+    assert physical_balance(db,p,item)==Decimal('1')
 
 
 def test_foreign_fact_rejected_without_movement(stock):
