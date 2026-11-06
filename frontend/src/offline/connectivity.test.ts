@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement, StrictMode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import {
   HEALTH_PATH, OFFLINE_RECHECK_MS, PROBE_TIMEOUT_MS, isOnline, markOfflineAndRecheck, recheckConnectivity,
@@ -170,12 +171,18 @@ describe("connectivity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// useOfflineSync lifetime regression coverage (PR459).
+// useOfflineSync lifetime regression coverage (PR459 / PR470 / PR471).
 //
 // These tests exercise the real hook against a mocked ./syncEngine module.
 // ./connectivity is intentionally NOT mocked so the connectivity suite above
 // keeps exercising the real module. IndexedDB availability is isolated per
 // test and every mounted hook, timer and restored global is cleaned up.
+//
+// Sequencing note: the hook fires an initial refresh() AND an initial
+// syncNow(false) on mount. Both consume offlineSummary/serverConflicts. Tests
+// therefore let the mount effects fully settle with default responses BEFORE
+// arming deferred mocks or recording baselines, so that only explicitly
+// triggered work is measured.
 // ---------------------------------------------------------------------------
 
 type Deferred<T> = {
@@ -251,6 +258,23 @@ async function flush() {
   });
 }
 
+// Dispatch a CHANGE_EVENT refresh and let the resulting microtasks settle.
+async function changeEvent() {
+  await act(async () => {
+    window.dispatchEvent(new Event(syncEngineMock.CHANGE_EVENT));
+  });
+  await flush();
+}
+
+// Resolve a deferred inside act and await its settlement.
+async function settle<T>(d: Deferred<T>, value: T) {
+  await act(async () => {
+    d.resolve(value);
+    await d.promise;
+  });
+  await flush();
+}
+
 describe("useOfflineSync lifetime", () => {
   beforeEach(() => {
     enableIndexedDB();
@@ -290,11 +314,7 @@ describe("useOfflineSync lifetime", () => {
     await flush();
     expect(result.current.summary.total).toBe(2);
 
-    await act(async () => {
-      oldSummary.resolve(summary(9));
-      await oldSummary.promise;
-    });
-    await flush();
+    await settle(oldSummary, summary(9));
 
     expect(result.current.summary.total).toBe(2);
     expect(onApplied).not.toHaveBeenCalled();
@@ -327,11 +347,7 @@ describe("useOfflineSync lifetime", () => {
     await flush();
     expect(result.current.summary.total).toBe(3);
 
-    await act(async () => {
-      firstA.resolve(summary(7));
-      await firstA.promise;
-    });
-    await flush();
+    await settle(firstA, summary(7));
 
     expect(result.current.summary.total).toBe(3);
     expect(onApplied).not.toHaveBeenCalled();
@@ -353,96 +369,84 @@ describe("useOfflineSync lifetime", () => {
     await flush();
 
     // Trigger a second refresh through the public event path.
-    await act(async () => {
-      window.dispatchEvent(new Event(syncEngineMock.CHANGE_EVENT));
-    });
-    await flush();
+    await changeEvent();
 
-    await act(async () => {
-      newer.resolve(summary(4));
-      await newer.promise;
-    });
-    await flush();
+    await settle(newer, summary(4));
     expect(result.current.summary.total).toBe(4);
 
-    await act(async () => {
-      older.resolve(summary(8));
-      await older.promise;
-    });
-    await flush();
+    await settle(older, summary(8));
 
     expect(result.current.summary.total).toBe(4);
     expect(onApplied).not.toHaveBeenCalled();
   });
 
   it("does not let a stale conflict fetch overwrite a newer conflict list", async () => {
+    const onApplied = vi.fn();
+    const { result } = renderHook(() => useOfflineSync(1, 1, onApplied));
+    // Let the initial refresh + initial autosync fully settle with defaults.
+    await flush();
+
+    // Arm deferred serverConflicts only for the two explicitly triggered
+    // CHANGE_EVENT refreshes. The first armed call is the OLDER request, the
+    // second armed call is the NEWER request.
     const olderConflicts = deferred<ServerConflict[]>();
     const newerConflicts = deferred<ServerConflict[]>();
-    let calls = 0;
+    let armed = 0;
     syncEngineMock.serverConflicts.mockImplementation(() => {
-      calls += 1;
-      if (calls === 1) return olderConflicts.promise;
-      if (calls === 2) return newerConflicts.promise;
+      armed += 1;
+      if (armed === 1) return olderConflicts.promise;
+      if (armed === 2) return newerConflicts.promise;
       return Promise.resolve([]);
     });
 
-    const onApplied = vi.fn();
-    const { result } = renderHook(() => useOfflineSync(1, 1, onApplied));
-    await flush();
+    await changeEvent();
+    await changeEvent();
+    expect(armed).toBe(2);
 
-    await act(async () => {
-      window.dispatchEvent(new Event(syncEngineMock.CHANGE_EVENT));
-    });
-    await flush();
-
-    await act(async () => {
-      newerConflicts.resolve([conflict(2)]);
-      await newerConflicts.promise;
-    });
-    await flush();
+    // Resolve the NEWER request first, then the OLDER one.
+    await settle(newerConflicts, [conflict(2)]);
     expect(result.current.conflicts.map((c) => c.id)).toEqual([2]);
 
-    await act(async () => {
-      olderConflicts.resolve([conflict(1)]);
-      await olderConflicts.promise;
-    });
-    await flush();
+    await settle(olderConflicts, [conflict(1)]);
 
     expect(result.current.conflicts.map((c) => c.id)).toEqual([2]);
     expect(onApplied).not.toHaveBeenCalled();
   });
 
   it("does not invoke onApplied or follow-on work for a pending syncNow after a scope switch", async () => {
-    const pendingBefore = deferred<SyncSummary>();
-    let user1SummaryCalls = 0;
-    syncEngineMock.offlineSummary.mockImplementation((userId: number) => {
-      if (userId === 1) {
-        user1SummaryCalls += 1;
-        if (user1SummaryCalls === 1) return pendingBefore.promise;
-        return Promise.resolve(summary(0));
-      }
-      return Promise.resolve(summary(0));
-    });
-
     const onApplied = vi.fn();
-    const { rerender } = renderHook(
+    const { result, rerender } = renderHook(
       ({ userId }: { userId: number }) => useOfflineSync(userId, 1, onApplied),
       { initialProps: { userId: 1 } },
     );
+    // Let the initial refresh + initial autosync fully settle.
     await flush();
 
+    // Arm a controlled pending summary for the explicit syncNow below.
+    const pendingBefore = deferred<SyncSummary>();
+    syncEngineMock.offlineSummary.mockImplementation(() => pendingBefore.promise);
+
+    // Record the baseline only after initial effects have settled.
+    const syncBaseline = syncEngineMock.synchronize.mock.calls.length;
+    const appliedBaseline = onApplied.mock.calls.length;
+
+    let syncPromise: Promise<void> = Promise.resolve();
+    await act(async () => {
+      syncPromise = result.current.syncNow(true);
+    });
+
+    // Switch scope while the old-scope summary is still pending.
     rerender({ userId: 2 });
     await flush();
 
-    await act(async () => {
-      pendingBefore.resolve(summary(5));
-      await pendingBefore.promise;
-    });
+    await settle(pendingBefore, summary(5));
+    await act(async () => { await syncPromise; });
     await flush();
 
-    expect(onApplied).not.toHaveBeenCalled();
-    // The old scope must not start a synchronize follow-on.
-    expect(syncEngineMock.synchronize).not.toHaveBeenCalledWith(1, 1, expect.anything());
+    expect(onApplied.mock.calls.length).toBe(appliedBaseline);
+    // No NEW old-scope synchronize follow-on since the baseline.
+    const newSyncCalls = syncEngineMock.synchronize.mock.calls.slice(syncBaseline);
+    expect(newSyncCalls.some((call) => call[0] === 1 && call[1] === 1)).toBe(false);
   });
 
   it("does not invoke onApplied for a pending resolve after a scope switch", async () => {
@@ -474,28 +478,32 @@ describe("useOfflineSync lifetime", () => {
   });
 
   it("suppresses follow-on work after unmount", async () => {
-    const pendingBefore = deferred<SyncSummary>();
-    let calls = 0;
-    syncEngineMock.offlineSummary.mockImplementation(() => {
-      calls += 1;
-      if (calls === 1) return pendingBefore.promise;
-      return Promise.resolve(summary(0));
-    });
-
     const onApplied = vi.fn();
-    const { unmount } = renderHook(() => useOfflineSync(1, 1, onApplied));
+    const { result, unmount } = renderHook(() => useOfflineSync(1, 1, onApplied));
+    // Let the initial refresh + initial autosync fully settle.
     await flush();
+
+    // Arm a gated summary for an explicitly started syncNow.
+    const pendingBefore = deferred<SyncSummary>();
+    syncEngineMock.offlineSummary.mockImplementation(() => pendingBefore.promise);
+
+    const syncBaseline = syncEngineMock.synchronize.mock.calls.length;
+    const appliedBaseline = onApplied.mock.calls.length;
+
+    let syncPromise: Promise<void> = Promise.resolve();
+    await act(async () => {
+      syncPromise = result.current.syncNow(true);
+    });
 
     unmount();
 
-    await act(async () => {
-      pendingBefore.resolve(summary(5));
-      await pendingBefore.promise;
-    });
+    await settle(pendingBefore, summary(5));
+    await act(async () => { await syncPromise; });
     await flush();
 
-    expect(onApplied).not.toHaveBeenCalled();
-    expect(syncEngineMock.synchronize).not.toHaveBeenCalled();
+    expect(onApplied.mock.calls.length).toBe(appliedBaseline);
+    // No NEW follow-on synchronize relative to the baseline.
+    expect(syncEngineMock.synchronize.mock.calls.length).toBe(syncBaseline);
   });
 
   it("invokes onApplied for a current-scope sync that reduces the total", async () => {
@@ -505,6 +513,121 @@ describe("useOfflineSync lifetime", () => {
 
     const onApplied = vi.fn();
     const { result } = renderHook(() => useOfflineSync(1, 1, onApplied));
+    await flush();
+
+    await act(async () => {
+      await result.current.syncNow(true);
+    });
+    await flush();
+
+    expect(syncEngineMock.synchronize).toHaveBeenCalledWith(1, 1, true);
+    expect(onApplied).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Retained-method coverage (PR471). A method captured from an earlier render
+  // must not start backend work or invoke callbacks once its scope is no longer
+  // current. Note: a pending first-A completion is NOT the same as a NEW
+  // invocation of the retained first-A function.
+  // -------------------------------------------------------------------------
+
+  it("does not run backend work or callbacks for a retained method after A -> B", async () => {
+    const onApplied = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ userId }: { userId: number }) => useOfflineSync(userId, 1, onApplied),
+      { initialProps: { userId: 1 } },
+    );
+    await flush();
+
+    const retainedSyncNow = result.current.syncNow;
+    const retainedResolve = result.current.resolve;
+
+    rerender({ userId: 2 });
+    await flush();
+
+    const summaryBaseline = syncEngineMock.offlineSummary.mock.calls.length;
+    const syncBaseline = syncEngineMock.synchronize.mock.calls.length;
+    const resolveBaseline = syncEngineMock.resolveConflict.mock.calls.length;
+    const appliedBaseline = onApplied.mock.calls.length;
+
+    await act(async () => { await retainedSyncNow(true); });
+    await act(async () => { await retainedResolve(1, "keep_server"); });
+    await flush();
+
+    expect(syncEngineMock.offlineSummary.mock.calls.length).toBe(summaryBaseline);
+    expect(syncEngineMock.synchronize.mock.calls.length).toBe(syncBaseline);
+    expect(syncEngineMock.resolveConflict.mock.calls.length).toBe(resolveBaseline);
+    expect(onApplied.mock.calls.length).toBe(appliedBaseline);
+  });
+
+  it("does not run backend work or callbacks for a retained first-A method after A -> B -> A", async () => {
+    const onApplied = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ userId }: { userId: number }) => useOfflineSync(userId, 1, onApplied),
+      { initialProps: { userId: 1 } },
+    );
+    await flush();
+
+    const retainedFirstASyncNow = result.current.syncNow;
+    const retainedFirstAResolve = result.current.resolve;
+
+    rerender({ userId: 2 });
+    await flush();
+
+    rerender({ userId: 1 });
+    await flush();
+
+    const summaryBaseline = syncEngineMock.offlineSummary.mock.calls.length;
+    const syncBaseline = syncEngineMock.synchronize.mock.calls.length;
+    const resolveBaseline = syncEngineMock.resolveConflict.mock.calls.length;
+    const appliedBaseline = onApplied.mock.calls.length;
+
+    // Invoking the RETAINED first-A function is a NEW invocation, not the
+    // completion of a pending first-A request. It must be inert.
+    await act(async () => { await retainedFirstASyncNow(true); });
+    await act(async () => { await retainedFirstAResolve(1, "keep_server"); });
+    await flush();
+
+    expect(syncEngineMock.offlineSummary.mock.calls.length).toBe(summaryBaseline);
+    expect(syncEngineMock.synchronize.mock.calls.length).toBe(syncBaseline);
+    expect(syncEngineMock.resolveConflict.mock.calls.length).toBe(resolveBaseline);
+    expect(onApplied.mock.calls.length).toBe(appliedBaseline);
+  });
+
+  it("does not run backend work or callbacks for a retained method after unmount", async () => {
+    const onApplied = vi.fn();
+    const { result, unmount } = renderHook(() => useOfflineSync(1, 1, onApplied));
+    await flush();
+
+    const retainedSyncNow = result.current.syncNow;
+    const retainedResolve = result.current.resolve;
+
+    unmount();
+
+    const summaryBaseline = syncEngineMock.offlineSummary.mock.calls.length;
+    const syncBaseline = syncEngineMock.synchronize.mock.calls.length;
+    const resolveBaseline = syncEngineMock.resolveConflict.mock.calls.length;
+    const appliedBaseline = onApplied.mock.calls.length;
+
+    await act(async () => { await retainedSyncNow(true); });
+    await act(async () => { await retainedResolve(1, "keep_server"); });
+    await flush();
+
+    expect(syncEngineMock.offlineSummary.mock.calls.length).toBe(summaryBaseline);
+    expect(syncEngineMock.synchronize.mock.calls.length).toBe(syncBaseline);
+    expect(syncEngineMock.resolveConflict.mock.calls.length).toBe(resolveBaseline);
+    expect(onApplied.mock.calls.length).toBe(appliedBaseline);
+  });
+
+  it("resolves and invokes onApplied for a current-scope sync under StrictMode", async () => {
+    let total = 5;
+    syncEngineMock.offlineSummary.mockImplementation(() => Promise.resolve(summary(total)));
+    syncEngineMock.synchronize.mockImplementation(async () => { total = 0; });
+
+    const onApplied = vi.fn();
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      createElement(StrictMode, null, children);
+    const { result } = renderHook(() => useOfflineSync(1, 1, onApplied), { wrapper });
     await flush();
 
     await act(async () => {
