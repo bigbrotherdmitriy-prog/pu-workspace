@@ -2,7 +2,12 @@
 from decimal import Decimal, InvalidOperation
 from sqlalchemy import select, text
 from app.models.defects import Defect, DefectDrawingPoint
+from app.models.rd import RdVolume, RdVolumeVersion
 from app.provisional_policy import get_policy
+
+# Static single-frame image formats: only page 1 is meaningful. This is a
+# metadata boundary only; it does not decode or verify image content.
+_STATIC_IMAGE_MIME_TYPES = frozenset({'image/png', 'image/jpeg'})
 
 
 def validate_point(version_id, page, x, y, *, policy=None):
@@ -25,10 +30,35 @@ def validate_point(version_id, page, x, y, *, policy=None):
     return {'rd_version_id':version_id,'page':page,'x':coordinates[0],'y':coordinates[1],'coordinate_system':'normalized_page_v1'}
 
 
+def _resolve_version_metadata(db, project_id, version_id):
+    """Read immutable version metadata scoped to the supplied project.
+
+    Returns primitive values only (no ORM instances) so pending caller objects
+    are not touched. Missing or foreign versions raise LookupError without
+    exposing metadata across projects.
+    """
+    row = db.execute(
+        select(RdVolumeVersion.mime_type)
+        .join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id)
+        .where(
+            RdVolumeVersion.id == version_id,
+            RdVolume.project_id == project_id,
+        )
+    ).first()
+    if row is None:
+        raise LookupError('Version not found in project')
+    return {'mime_type': row[0]}
+
+
 def bind_point(db,project_id,defect_id,*,version_id,page,x,y,policy=None):
     intent=validate_point(version_id,page,x,y,policy=policy)
     from app.defects import bind_rd_version
     with db.no_autoflush:
+        # Resolve immutable version metadata before any mutation so a rejected
+        # page cannot leave a partially bound defect behind.
+        metadata = _resolve_version_metadata(db, project_id, version_id)
+        if metadata['mime_type'] in _STATIC_IMAGE_MIME_TYPES and page != 1:
+            raise ValueError('Static image version only supports page 1')
         if db.get_bind().dialect.name=='sqlite':
             db.execute(text('UPDATE defects SET id=id WHERE id=:id AND project_id=:p'),{'id':defect_id,'p':project_id})
         elif db.get_bind().dialect.name!='postgresql':raise RuntimeError('Unsupported drawing point database')
