@@ -303,19 +303,93 @@ export async function serverConflicts(projectId: number): Promise<ServerConflict
   return result.conflicts;
 }
 
+const RESOLUTION_VALUES = ["keep_server", "apply_local", "latest_write_wins"] as const;
+type ConflictResolution = (typeof RESOLUTION_VALUES)[number];
+const SUPPORTED_ENTITY_TYPES = ["task", "notification"] as const;
+
+function isSupportedEntityType(value: unknown): value is string {
+  return typeof value === "string" && (SUPPORTED_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function isSupportedResolution(value: unknown): value is ConflictResolution {
+  return typeof value === "string" && (RESOLUTION_VALUES as readonly string[]).includes(value);
+}
+
+function conflictAckError(message: string): Error {
+  return new Error(`Некорректное подтверждение разрешения конфликта: ${message}`);
+}
+
 export async function resolveConflict(
   userId: number,
   projectId: number,
   conflictId: number,
   resolution: "keep_server" | "apply_local" | "latest_write_wins",
 ): Promise<void> {
-  await api(`/mobile-sync/conflicts/${conflictId}/resolve`, {
+  if (!isPositiveSafeInteger(userId)) throw conflictAckError("некорректный userId");
+  if (!isPositiveSafeInteger(projectId)) throw conflictAckError("некорректный projectId");
+  if (!isPositiveSafeInteger(conflictId)) throw conflictAckError("некорректный conflictId");
+  if (!isSupportedResolution(resolution)) throw conflictAckError("неподдерживаемое разрешение конфликта");
+
+  const before = await listCommands(userId, projectId);
+  const local = before.find((item) => item.conflictId === conflictId);
+
+  const response = await api<{
+    id: number;
+    command_id: number;
+    entity_type: string;
+    entity_id: number;
+    status: string;
+    resolution?: string;
+  }>(`/mobile-sync/conflicts/${conflictId}/resolve`, {
     method: "POST",
     body: JSON.stringify({ resolution }),
   });
-  const commands = await listCommands(userId, projectId);
-  const local = commands.find((item) => item.conflictId === conflictId);
-  if (local) await deleteCommand(local.id);
+
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    throw conflictAckError("ответ не является объектом");
+  }
+  if (!isPositiveSafeInteger(response.id)) {
+    throw conflictAckError("отсутствует корректный id конфликта");
+  }
+  if (response.id !== conflictId) {
+    throw conflictAckError("id конфликта не совпадает с запрошенным");
+  }
+  if (!isPositiveSafeInteger(response.command_id)) {
+    throw conflictAckError("отсутствует корректный command_id");
+  }
+  if (!isPositiveSafeInteger(response.entity_id)) {
+    throw conflictAckError("отсутствует корректный entity_id");
+  }
+  if (!isSupportedEntityType(response.entity_type)) {
+    throw conflictAckError("неподдерживаемый entity_type");
+  }
+  if (response.status !== "resolved") {
+    throw conflictAckError("конфликт не разрешён");
+  }
+  if (!isSupportedResolution(response.resolution)) {
+    throw conflictAckError("отсутствует корректное разрешение конфликта");
+  }
+
+  if (local) {
+    if (!isPositiveSafeInteger(local.receiptId)) {
+      throw conflictAckError("у локальной команды отсутствует receiptId");
+    }
+    if (response.command_id !== local.receiptId) {
+      throw conflictAckError("command_id не совпадает с локальной квитанцией");
+    }
+    if (response.entity_type !== expectedEntityType(local)) {
+      throw conflictAckError("entity_type не совпадает с локальной командой");
+    }
+    if (response.entity_id !== local.entityId) {
+      throw conflictAckError("entity_id не совпадает с локальной командой");
+    }
+    const current = (await listCommands(userId, projectId)).find((item) => item.id === local.id);
+    if (!current || current.conflictId !== conflictId || current.receiptId !== local.receiptId) {
+      throw conflictAckError("локальная команда изменилась до подтверждения");
+    }
+    await deleteCommand(current.id);
+  }
+
   await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
   changed();
 }
