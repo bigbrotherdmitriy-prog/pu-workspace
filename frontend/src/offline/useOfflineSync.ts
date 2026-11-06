@@ -15,6 +15,13 @@ function sameScope(a: Scope, b: Scope): boolean {
   return a.userId === b.userId && a.projectId === b.projectId;
 }
 
+// A lifetime token identifies one mounted scope instance. It is created fresh
+// for every (userId, projectId) activation and invalidated on unmount or scope
+// change. Handlers capture the token of the lifetime they were created in, so a
+// retained handler from an earlier lifetime (even for the same user/project,
+// e.g. A -> B -> A) can never become valid again.
+type Lifetime = { scope: Scope; active: boolean };
+
 export function useOfflineSync(userId: number, projectId: number, onApplied: () => void) {
   const storageAvailable = typeof indexedDB !== "undefined";
   const [summary, setSummary] = useState<SyncSummary>(EMPTY);
@@ -22,38 +29,43 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   const onAppliedRef = useRef(onApplied);
   useEffect(() => { onAppliedRef.current = onApplied; }, [onApplied]);
 
-  // Lifetime generation: bumped on unmount and whenever the active scope changes.
-  const generationRef = useRef(0);
+  // The currently active lifetime. Replaced on scope change and invalidated on
+  // unmount. Handlers compare against this by identity, not by scope values.
+  const lifetimeRef = useRef<Lifetime>({ scope: { userId, projectId }, active: true });
   // Latest refresh generation per scope; a newer refresh supersedes older ones.
   const refreshGenRef = useRef(0);
-  const scopeRef = useRef<Scope>({ userId, projectId });
 
-  const isCurrent = useCallback((gen: number, scope: Scope): boolean => {
-    return generationRef.current === gen && sameScope(scopeRef.current, scope);
+  const isLive = useCallback((lifetime: Lifetime): boolean => {
+    return lifetime.active && lifetimeRef.current === lifetime;
   }, []);
 
   // Invalidate outstanding async work and reset visible state on scope change.
   useEffect(() => {
-    generationRef.current += 1;
+    const lifetime: Lifetime = { scope: { userId, projectId }, active: true };
+    lifetimeRef.current = lifetime;
     refreshGenRef.current += 1;
-    scopeRef.current = { userId, projectId };
     setSummary(EMPTY);
     setConflicts([]);
     return () => {
-      generationRef.current += 1;
+      lifetime.active = false;
+      if (lifetimeRef.current === lifetime) {
+        lifetimeRef.current = { scope: lifetime.scope, active: false };
+      }
       refreshGenRef.current += 1;
     };
   }, [userId, projectId]);
 
   const refresh = useCallback(async () => {
-    const gen = generationRef.current;
+    const lifetime = lifetimeRef.current;
     const scope: Scope = { userId, projectId };
     const refreshGen = ++refreshGenRef.current;
     const stillCurrent = () =>
-      isCurrent(gen, scope) && refreshGenRef.current === refreshGen;
+      isLive(lifetime) && sameScope(lifetime.scope, scope) &&
+      refreshGenRef.current === refreshGen;
 
+    if (!isLive(lifetime)) return;
     if (!storageAvailable || !userId || !projectId) {
-      if (isCurrent(gen, scope)) {
+      if (isLive(lifetime)) {
         setSummary(EMPTY);
         setConflicts([]);
       }
@@ -74,13 +86,14 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
         setConflicts(nextConflicts);
       } catch { /* Preserve local state. */ }
     }
-  }, [userId, projectId, storageAvailable, isCurrent]);
+  }, [userId, projectId, storageAvailable, isLive]);
 
   const syncNow = useCallback(async (manual = false) => {
-    const gen = generationRef.current;
+    const lifetime = lifetimeRef.current;
     const scope: Scope = { userId, projectId };
-    const stillCurrent = () => isCurrent(gen, scope);
+    const stillCurrent = () => isLive(lifetime) && sameScope(lifetime.scope, scope);
 
+    if (!stillCurrent()) return;
     if (!storageAvailable || !userId || !projectId) return;
     let before: number;
     try {
@@ -101,7 +114,7 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
     await refresh();
     if (!stillCurrent()) return;
     if (after < before) onAppliedRef.current();
-  }, [userId, projectId, refresh, storageAvailable, isCurrent]);
+  }, [userId, projectId, refresh, storageAvailable, isLive]);
 
   useEffect(() => {
     if (!storageAvailable || !userId || !projectId) return;
@@ -126,10 +139,11 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
   }, [userId, projectId, refresh, syncNow, storageAvailable]);
 
   async function resolve(id: number, resolution: "keep_server" | "apply_local" | "latest_write_wins") {
-    const gen = generationRef.current;
+    const lifetime = lifetimeRef.current;
     const scope: Scope = { userId, projectId };
-    const stillCurrent = () => isCurrent(gen, scope);
+    const stillCurrent = () => isLive(lifetime) && sameScope(lifetime.scope, scope);
 
+    if (!stillCurrent()) return;
     if (!storageAvailable || !userId || !projectId) return;
     await resolveConflict(userId, projectId, id, resolution);
     if (!stillCurrent()) return;
