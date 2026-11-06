@@ -159,11 +159,11 @@ def test_service_single_frame_annotation_page2_rejected(world):
     assert before_rd_version_id is None and before_points==()
     with pytest.raises(ValueError,match='page'):
         bind_point(db,own.id,defect.id,version_id=version.id,page=2,x='0.25',y='0.50')
-        # Assert stored state BEFORE any caller rollback so a partial mutation
-        # cannot be hidden by the rollback below.
-        mid_rd_version_id,mid_points=_snapshot(db,defect.id,own.id)
-        assert mid_rd_version_id==before_rd_version_id
-        assert mid_points==before_points
+    # Assert stored state BEFORE any caller rollback so a partial mutation
+    # cannot be hidden by the rollback below.
+    mid_rd_version_id,mid_points=_snapshot(db,defect.id,own.id)
+    assert mid_rd_version_id==before_rd_version_id
+    assert mid_points==before_points
     db.rollback()
     after_rd_version_id,after_points=_snapshot(db,defect.id,own.id)
     assert after_rd_version_id==before_rd_version_id
