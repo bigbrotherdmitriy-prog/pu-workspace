@@ -36,6 +36,20 @@ async function persist(command: OfflineCommand) {
   changed();
 }
 
+/**
+ * A queued command may be safely coalesced only when it has never been sent:
+ * no attempts, no receipt, no conflict. Once a command has been attempted (or
+ * is syncing/attention/auth_required/conflict) its payload is immutable, because
+ * the server may already have applied it and compares the stored payload on
+ * retry (client_mutation_id_reused on mismatch).
+ */
+function isSafeToCoalesce(command: OfflineCommand): boolean {
+  return command.status === "queued"
+    && command.attempts === 0
+    && command.receiptId === undefined
+    && command.conflictId === undefined;
+}
+
 export async function enqueueTaskUpdate(args: {
   userId: number;
   projectId: number;
@@ -46,18 +60,15 @@ export async function enqueueTaskUpdate(args: {
   if (!args.baseToken) throw new Error("Задача загружена без защищённой базовой версии. Обновите данные онлайн.");
   const now = new Date().toISOString();
   const existing = (await listCommands(args.userId, args.projectId)).find((item) =>
-    item.operation === "task.update" && item.entityId === args.taskId
-      && ["queued", "attention", "auth_required"].includes(item.status),
+    item.operation === "task.update" && item.entityId === args.taskId && isSafeToCoalesce(item),
   );
   if (existing) {
+    // Keep the original baseToken, clientCreatedAt and attempts: the merged
+    // payload is still the first (never-sent) attempt for this id.
     await persist({
       ...existing,
       patch: { ...existing.patch, ...args.patch },
-      clientCreatedAt: now,
-      status: "queued",
-      attempts: 0,
       updatedAt: now,
-      lastError: undefined,
     });
     return existing.id;
   }
@@ -138,26 +149,125 @@ function blobBase64(blob: Blob): Promise<string> {
   });
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function expectedEntityType(command: OfflineCommand): string {
+  return command.operation === "task.update" ? "task" : "notification";
+}
+
+function receiptError(message: string): Error {
+  return new Error(`Некорректная квитанция сервера: ${message}`);
+}
+
+const UPLOAD_JOB_STATUSES = ["queued", "retrying", "running", "already_queued"] as const;
+type UploadJobStatus = (typeof UPLOAD_JOB_STATUSES)[number];
+const STAGING_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+type UploadStagingRef = { job_id: number; staging_id: string; status: UploadJobStatus };
+type UploadStagingAck = { status: string; jobs: UploadStagingRef[] };
+
+function uploadAckError(message: string): Error {
+  return new Error(`Некорректное подтверждение загрузки документа: ${message}`);
+}
+
+function isUploadJobStatus(value: unknown): value is UploadJobStatus {
+  return typeof value === "string" && (UPLOAD_JOB_STATUSES as readonly string[]).includes(value);
+}
+
+function isStagingId(value: unknown): value is string {
+  return typeof value === "string" && STAGING_ID_PATTERN.test(value);
+}
+
+function validateUploadAck(response: unknown, expectedCount: number): UploadStagingAck {
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    throw uploadAckError("ответ не является объектом");
+  }
+  const ack = response as Record<string, unknown>;
+  if (typeof ack.status !== "string" || ack.status !== "queued") {
+    throw uploadAckError("некорректный статус анализа");
+  }
+  if (!Array.isArray(ack.jobs)) {
+    throw uploadAckError("отсутствует список заданий");
+  }
+  if (ack.jobs.length !== expectedCount) {
+    throw uploadAckError("количество заданий не совпадает с числом файлов");
+  }
+  const jobIds = new Set<number>();
+  const stagingIds = new Set<string>();
+  const jobs: UploadStagingRef[] = [];
+  for (const entry of ack.jobs) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw uploadAckError("задание не является объектом");
+    }
+    const job = entry as Record<string, unknown>;
+    if (!isPositiveSafeInteger(job.job_id)) {
+      throw uploadAckError("некорректный job_id");
+    }
+    if (!isStagingId(job.staging_id)) {
+      throw uploadAckError("некорректный staging_id");
+    }
+    if (!isUploadJobStatus(job.status)) {
+      throw uploadAckError("некорректный статус задания");
+    }
+    if (jobIds.has(job.job_id)) {
+      throw uploadAckError("повторяющийся job_id");
+    }
+    if (stagingIds.has(job.staging_id)) {
+      throw uploadAckError("повторяющийся staging_id");
+    }
+    jobIds.add(job.job_id);
+    stagingIds.add(job.staging_id);
+    jobs.push({ job_id: job.job_id, staging_id: job.staging_id, status: job.status });
+  }
+  return { status: ack.status, jobs };
+}
+
 async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
   if (command.operation === "document.upload") {
-    const files = await Promise.all((command.uploads || []).map(async (file) => ({
+    const uploads = command.uploads || [];
+    if (uploads.length === 0) {
+      throw uploadAckError("нет файлов для загрузки");
+    }
+    const files = await Promise.all(uploads.map(async (file) => ({
       path: file.path,
       mime_type: file.mimeType,
       content_base64: await blobBase64(file.blob),
     })));
-    await api("/local-upload/analyze", {
+    const response = await api<unknown>("/local-upload/analyze", {
       method: "POST",
-      headers: { "Idempotency-Key": command.id },
+      headers: {
+        "Idempotency-Key": command.id,
+        "X-PU-Expected-User": String(command.userId),
+      },
       body: JSON.stringify({ project_id: command.projectId, files }),
+    });
+    const ack = validateUploadAck(response, uploads.length);
+    await setMeta(`upload-staging-ack:${command.userId}:${command.projectId}:${command.id}`, {
+      status: ack.status,
+      jobs: ack.jobs.map((job) => ({ job_id: job.job_id, staging_id: job.staging_id, status: job.status })),
     });
     return { applied: true };
   }
   const response = await api<{
     receipt_id: number;
+    client_mutation_id: string;
+    operation: string;
+    entity_id: number;
+    entity_type: string;
     status: string;
+    result?: unknown;
     error_code?: string;
     error_message?: string;
-    conflict?: { id: number };
+    conflict?: {
+      id: number;
+      command_id: number;
+      entity_type: string;
+      entity_id: number;
+    };
+    created_at?: string;
+    updated_at?: string;
   }>("/mobile-sync/commands", {
     method: "POST",
     body: JSON.stringify({
@@ -171,11 +281,45 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
       client_created_at: command.clientCreatedAt,
     }),
   });
-  if (response.status === "applied") return { applied: true, receiptId: response.receipt_id };
-  if (response.status === "conflict") {
-    return { applied: false, conflictId: response.conflict?.id, receiptId: response.receipt_id };
+  if (!response || typeof response !== "object") {
+    throw receiptError("ответ не является объектом");
   }
-  throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+  if (response.status !== "applied" && response.status !== "conflict") {
+    throw new Error(response.error_message || response.error_code || "Сервер отклонил офлайн-изменение");
+  }
+  if (!isPositiveSafeInteger(response.receipt_id)) {
+    throw receiptError("отсутствует корректный receipt_id");
+  }
+  if (response.client_mutation_id !== command.id) {
+    throw receiptError("client_mutation_id не совпадает с командой");
+  }
+  if (response.operation !== command.operation) {
+    throw receiptError("operation не совпадает с командой");
+  }
+  if (response.entity_id !== command.entityId) {
+    throw receiptError("entity_id не совпадает с командой");
+  }
+  if (response.entity_type !== expectedEntityType(command)) {
+    throw receiptError("entity_type не совпадает с командой");
+  }
+  if (response.status === "applied") return { applied: true, receiptId: response.receipt_id };
+  const conflict = response.conflict;
+  if (!conflict || typeof conflict !== "object") {
+    throw receiptError("отсутствует описание конфликта");
+  }
+  if (!isPositiveSafeInteger(conflict.id)) {
+    throw receiptError("отсутствует корректный conflict.id");
+  }
+  if (conflict.command_id !== response.receipt_id) {
+    throw receiptError("conflict.command_id не совпадает с receipt_id");
+  }
+  if (conflict.entity_type !== response.entity_type) {
+    throw receiptError("conflict.entity_type не совпадает с квитанцией");
+  }
+  if (conflict.entity_id !== response.entity_id) {
+    throw receiptError("conflict.entity_id не совпадает с квитанцией");
+  }
+  return { applied: false, conflictId: conflict.id, receiptId: response.receipt_id };
 }
 
 export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
@@ -245,19 +389,93 @@ export async function serverConflicts(projectId: number): Promise<ServerConflict
   return result.conflicts;
 }
 
+const RESOLUTION_VALUES = ["keep_server", "apply_local", "latest_write_wins"] as const;
+type ConflictResolution = (typeof RESOLUTION_VALUES)[number];
+const SUPPORTED_ENTITY_TYPES = ["task", "notification"] as const;
+
+function isSupportedEntityType(value: unknown): value is string {
+  return typeof value === "string" && (SUPPORTED_ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function isSupportedResolution(value: unknown): value is ConflictResolution {
+  return typeof value === "string" && (RESOLUTION_VALUES as readonly string[]).includes(value);
+}
+
+function conflictAckError(message: string): Error {
+  return new Error(`Некорректное подтверждение разрешения конфликта: ${message}`);
+}
+
 export async function resolveConflict(
   userId: number,
   projectId: number,
   conflictId: number,
   resolution: "keep_server" | "apply_local" | "latest_write_wins",
 ): Promise<void> {
-  await api(`/mobile-sync/conflicts/${conflictId}/resolve`, {
+  if (!isPositiveSafeInteger(userId)) throw conflictAckError("некорректный userId");
+  if (!isPositiveSafeInteger(projectId)) throw conflictAckError("некорректный projectId");
+  if (!isPositiveSafeInteger(conflictId)) throw conflictAckError("некорректный conflictId");
+  if (!isSupportedResolution(resolution)) throw conflictAckError("неподдерживаемое разрешение конфликта");
+
+  const before = await listCommands(userId, projectId);
+  const local = before.find((item) => item.conflictId === conflictId);
+
+  const response = await api<{
+    id: number;
+    command_id: number;
+    entity_type: string;
+    entity_id: number;
+    status: string;
+    resolution?: string;
+  }>(`/mobile-sync/conflicts/${conflictId}/resolve`, {
     method: "POST",
     body: JSON.stringify({ resolution }),
   });
-  const commands = await listCommands(userId, projectId);
-  const local = commands.find((item) => item.conflictId === conflictId);
-  if (local) await deleteCommand(local.id);
+
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    throw conflictAckError("ответ не является объектом");
+  }
+  if (!isPositiveSafeInteger(response.id)) {
+    throw conflictAckError("отсутствует корректный id конфликта");
+  }
+  if (response.id !== conflictId) {
+    throw conflictAckError("id конфликта не совпадает с запрошенным");
+  }
+  if (!isPositiveSafeInteger(response.command_id)) {
+    throw conflictAckError("отсутствует корректный command_id");
+  }
+  if (!isPositiveSafeInteger(response.entity_id)) {
+    throw conflictAckError("отсутствует корректный entity_id");
+  }
+  if (!isSupportedEntityType(response.entity_type)) {
+    throw conflictAckError("неподдерживаемый entity_type");
+  }
+  if (response.status !== "resolved") {
+    throw conflictAckError("конфликт не разрешён");
+  }
+  if (!isSupportedResolution(response.resolution)) {
+    throw conflictAckError("отсутствует корректное разрешение конфликта");
+  }
+
+  if (local) {
+    if (!isPositiveSafeInteger(local.receiptId)) {
+      throw conflictAckError("у локальной команды отсутствует receiptId");
+    }
+    if (response.command_id !== local.receiptId) {
+      throw conflictAckError("command_id не совпадает с локальной квитанцией");
+    }
+    if (response.entity_type !== expectedEntityType(local)) {
+      throw conflictAckError("entity_type не совпадает с локальной командой");
+    }
+    if (response.entity_id !== local.entityId) {
+      throw conflictAckError("entity_id не совпадает с локальной командой");
+    }
+    const current = (await listCommands(userId, projectId)).find((item) => item.id === local.id);
+    if (!current || current.conflictId !== conflictId || current.receiptId !== local.receiptId) {
+      throw conflictAckError("локальная команда изменилась до подтверждения");
+    }
+    await deleteCommand(current.id);
+  }
+
   await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
   changed();
 }
