@@ -94,3 +94,54 @@ it('an API body completing after logout cannot publish private data',async()=>{
   await entered;auth.beginLocalSignout();release({private:'SYNTHETIC old body'});
   await expect(pending).rejects.toMatchObject({status:401});
 });
+
+it('concurrent flush calls share one in-flight revoke and drop the ticket only after confirmed ACK',async()=>{
+  await prepared();auth.beginLocalSignout();
+  let release!:(response:Response)=>void;
+  network.mockImplementation(()=>new Promise<Response>(resolve=>{release=resolve;}));
+  const first=auth.flushPendingRevocations();const second=auth.flushPendingRevocations();
+  expect(second).toBe(first);expect(network).toHaveBeenCalledTimes(1);
+  const [path,options]=network.mock.calls[0];expect(path).toBe('/auth/logout/revoke');
+  expect((options as RequestInit).credentials).toBe('omit');expect((options as RequestInit).cache).toBe('no-store');
+  expect(JSON.parse(String((options as RequestInit).body))).toEqual({ticket});
+  release(reply({status:'revoked'}));
+  await first;await second;
+  expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBeNull();
+  expect(localStorage.getItem('pu.local-signout.v1')).toBe('1');
+  expect(auth.isLocallySignedOut()).toBe(true);
+});
+
+it('a malformed revoke body keeps the queue and fence until a later confirmed retry',async()=>{
+  await prepared();auth.beginLocalSignout();
+  network.mockResolvedValue({ok:true,status:200,headers:new Headers(),json:()=>Promise.reject(new SyntaxError('SYNTHETIC malformed body'))});
+  await expect(auth.flushPendingRevocations()).rejects.toBeInstanceOf(SyntaxError);
+  expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBe(ticket);
+  expect(localStorage.getItem('pu.local-signout.v1')).toBe('1');
+  network.mockResolvedValue(reply({status:'revoked'}));
+  await auth.flushPendingRevocations();
+  expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBeNull();
+  expect(localStorage.getItem('pu.local-signout.v1')).toBe('1');
+  expect(auth.isLocallySignedOut()).toBe(true);
+});
+
+it('a partial batch keeps the unconfirmed ticket and retries only it',async()=>{
+  await prepared();auth.beginLocalSignout();
+  localStorage.setItem('pu.logout-revoke.v1.2',nextTicket);
+  network.mockImplementation(async (_path:string,options:RequestInit)=>{
+    const body=JSON.parse(String(options.body));
+    return body.ticket===ticket?reply({status:'revoked'}):reply({error:'SYNTHETIC unavailable'},503);
+  });
+  await expect(auth.flushPendingRevocations()).rejects.toThrow();
+  expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBeNull();
+  expect(localStorage.getItem('pu.logout-revoke.v1.2')).toBe(nextTicket);
+  expect(localStorage.getItem('pu.local-signout.v1')).toBe('1');
+  network.mockClear();network.mockResolvedValue(reply({status:'revoked'}));
+  await auth.flushPendingRevocations();
+  expect(network).toHaveBeenCalledTimes(1);
+  const [path,options]=network.mock.calls[0];expect(path).toBe('/auth/logout/revoke');
+  expect((options as RequestInit).credentials).toBe('omit');
+  expect(JSON.parse(String((options as RequestInit).body))).toEqual({ticket:nextTicket});
+  expect(localStorage.getItem('pu.logout-revoke.v1.2')).toBeNull();
+  expect(localStorage.getItem('pu.local-signout.v1')).toBe('1');
+  expect(auth.isLocallySignedOut()).toBe(true);
+});
