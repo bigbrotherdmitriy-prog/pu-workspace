@@ -480,7 +480,7 @@ describe("resolveConflict ACK guard", () => {
       return ackFor(22, 71, "task", 9, "keep_server");
     });
 
-    await resolveConflict(1, 17, 71, "keep_server");
+    await expect(resolveConflict(1, 17, 71, "keep_server")).rejects.toBeDefined();
 
     const row = store.rows.get(seeded.id)!;
     expect(row).toBeDefined();
