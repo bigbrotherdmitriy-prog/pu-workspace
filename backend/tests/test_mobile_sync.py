@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -338,6 +339,8 @@ def test_same_mutation_id_scopes_receipts_per_user_for_own_notifications(mobile_
     assert colleague_notice.is_read is True
 
     command_count_before_replay = db.query(MobileSyncCommand).count()
+    owner_version_before_replay = owner_notice.record_version
+    colleague_version_before_replay = colleague_notice.record_version
     owner_replay = submit_mobile_command(owner_payload, db, owner)
 
     assert owner_replay["receipt_id"] == owner_first["receipt_id"]
@@ -347,6 +350,8 @@ def test_same_mutation_id_scopes_receipts_per_user_for_own_notifications(mobile_
     db.refresh(colleague_notice)
     assert owner_notice.is_read is True
     assert colleague_notice.is_read is True
+    assert owner_notice.record_version == owner_version_before_replay
+    assert colleague_notice.record_version == colleague_version_before_replay
 
 
 def test_colleague_cannot_replay_owner_notification_command(mobile_sync_world):
@@ -372,16 +377,9 @@ def test_colleague_cannot_replay_owner_notification_command(mobile_sync_world):
         mutation_id=shared_mutation_id,
     )
 
-    try:
-        colleague_response = submit_mobile_command(colleague_payload, db, colleague)
-    except Exception as exc:  # authorization exception is an acceptable contract outcome
-        assert not isinstance(exc, AssertionError)
-        colleague_response = None
-
-    if colleague_response is not None:
-        assert colleague_response["status"] == "rejected"
-        assert colleague_response.get("receipt_id") != owner_first["receipt_id"]
-        assert colleague_response.get("result") != owner_first.get("result")
+    with pytest.raises(HTTPException) as exc_info:
+        submit_mobile_command(colleague_payload, db, colleague)
+    assert exc_info.value.status_code == 404
 
     db.refresh(owner_notice)
     assert owner_notice.is_read is True
