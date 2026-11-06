@@ -3,6 +3,9 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 from app.api.defects import DefectBody
 
+# Identity contract shared with the frontend: project ids are JS safe integers.
+MAX_SAFE_PROJECT_ID = 9007199254740991
+
 
 class OfflineDefectData(DefectBody):
     model_config = ConfigDict(extra="forbid")
@@ -24,7 +27,7 @@ class OfflineDefectCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     client_mutation_id: str = Field(min_length=8, max_length=90, pattern=r"^[A-Za-z0-9_.:-]+$")
     device_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_.:-]+$")
-    project_id: int = Field(strict=True, gt=0)
+    project_id: int = Field(strict=True, gt=0, le=MAX_SAFE_PROJECT_ID)
     operation: Literal["defect.create"]
     client_created_at: AwareDatetime
     data: OfflineDefectData

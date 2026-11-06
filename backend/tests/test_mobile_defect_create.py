@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from app import defects
 from app.mobile_defect import submit_defect_create
-from app.mobile_defect_contract import OfflineDefectCreateRequest
+from app.mobile_defect_contract import MAX_SAFE_PROJECT_ID, OfflineDefectCreateRequest
 from app.mobile_work_log import submit_work_log_create
 from app.mobile_work_log_contract import OfflineWorkLogCreateRequest
 from app.models.defects import Defect
@@ -224,6 +224,17 @@ def test_data_does_not_accept_photos_actor_links_or_status(extra):
 @pytest.mark.parametrize("project", [True, 0, -1, "1", 1.5])
 def test_project_is_a_strict_positive_integer(project):
     with pytest.raises(ValidationError): OfflineDefectCreateRequest.model_validate(envelope(project))
+
+
+def test_project_id_at_safe_integer_boundary_is_accepted_unchanged():
+    request = OfflineDefectCreateRequest.model_validate(envelope(MAX_SAFE_PROJECT_ID))
+    assert request.project_id == MAX_SAFE_PROJECT_ID
+
+
+@pytest.mark.parametrize("project", [MAX_SAFE_PROJECT_ID + 1, 10 ** 100])
+def test_project_id_above_safe_integer_boundary_is_rejected_before_service(project):
+    with pytest.raises(ValidationError):
+        OfflineDefectCreateRequest.model_validate(envelope(project))
 
 
 def test_client_timestamp_cannot_invent_a_timezone():
