@@ -94,3 +94,83 @@ it('an API body completing after logout cannot publish private data',async()=>{
   await entered;auth.beginLocalSignout();release({private:'SYNTHETIC old body'});
   await expect(pending).rejects.toMatchObject({status:401});
 });
+
+// DeepSeek Login UI core
+async function loginUiRender() {
+  const React = await import('react');
+  const rtl = await import('@testing-library/react/pure');
+  const { Login } = await import('./Login');
+  const onDone = vi.fn();
+  const view = rtl.render(React.createElement(Login, { onDone }));
+  return { rtl, onDone, view };
+}
+async function loginUiFill(rtl: typeof import('@testing-library/react/pure'), email: string, password: string) {
+  rtl.fireEvent.change(rtl.screen.getByLabelText('Email'), { target: { value: email } });
+  rtl.fireEvent.change(rtl.screen.getByLabelText('Пароль'), { target: { value: password } });
+  rtl.fireEvent.click(rtl.screen.getByRole('button', { name: 'Войти' }));
+}
+function loginUiNoSyntheticPassword() {
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    expect(String(localStorage.getItem(key!))).not.toContain('SYNTHETIC-password');
+  }
+}
+
+it('login UI revokes old ticket before login and clears fence once', async () => {
+  await prepared(); auth.beginLocalSignout();
+  const calls: string[] = [];
+  network.mockImplementation(async (path: string, options: RequestInit) => {
+    calls.push(path);
+    if (path === '/auth/logout/revoke') {
+      expect(options.credentials).toBe('omit');
+      expect(JSON.parse(String(options.body))).toEqual({ ticket });
+      return reply({ status: 'revoked' });
+    }
+    if (path === '/auth/login') return reply({ logout_ticket: nextTicket, user: { id: 2 } });
+    throw new Error('SYNTHETIC unexpected ' + path);
+  });
+  const { rtl, onDone, view } = await loginUiRender();
+  try {
+    loginUiFill(rtl, 'user@example.test', 'SYNTHETIC-password');
+    await rtl.waitFor(() => expect(onDone).toHaveBeenCalledOnce());
+    expect(calls).toEqual(['/auth/logout/revoke', '/auth/login']);
+    expect(auth.isLocallySignedOut()).toBe(false);
+    expect(localStorage.getItem('pu.local-signout.v1')).toBeNull();
+    loginUiNoSyntheticPassword();
+  } finally { view.unmount(); rtl.cleanup(); }
+});
+
+it('login UI keeps queued ticket and fence when revoke fails', async () => {
+  await prepared(); auth.beginLocalSignout();
+  network.mockImplementation(async (path: string) => {
+    if (path === '/auth/logout/revoke') return reply({ detail: 'SYNTHETIC unavailable' }, 503);
+    throw new Error('SYNTHETIC unexpected ' + path);
+  });
+  const { rtl, onDone, view } = await loginUiRender();
+  try {
+    loginUiFill(rtl, 'user@example.test', 'SYNTHETIC-password');
+    await rtl.waitFor(() => expect(rtl.screen.getByText(/ожидает подтверждения/)).toBeTruthy());
+    expect(network.mock.calls.map((c) => c[0])).toEqual(['/auth/logout/revoke']);
+    expect(localStorage.getItem('pu.logout-revoke.v1.1')).toBe(ticket);
+    expect(auth.isLocallySignedOut()).toBe(true);
+    expect(onDone).not.toHaveBeenCalled();
+    loginUiNoSyntheticPassword();
+  } finally { view.unmount(); rtl.cleanup(); }
+});
+
+it('login UI rejects login without valid ticket and retains fence', async () => {
+  localStorage.setItem('pu.local-signout.v1', '1');
+  network.mockImplementation(async (path: string) => {
+    if (path === '/auth/login') return reply({ user: { id: 2 } });
+    throw new Error('SYNTHETIC unexpected ' + path);
+  });
+  const { rtl, onDone, view } = await loginUiRender();
+  try {
+    loginUiFill(rtl, 'user@example.test', 'SYNTHETIC-password');
+    await rtl.waitFor(() => expect(rtl.screen.getByText(/Вход не подтверждён сервером/)).toBeTruthy());
+    expect(localStorage.getItem('pu.local-signout.v1')).toBe('1');
+    expect(auth.isLocallySignedOut()).toBe(true);
+    expect(onDone).not.toHaveBeenCalled();
+    loginUiNoSyntheticPassword();
+  } finally { view.unmount(); rtl.cleanup(); }
+});
