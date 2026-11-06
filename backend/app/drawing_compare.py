@@ -133,7 +133,7 @@ def validate_stored_raster_page(db, store, project_id: int, version_id: int, pag
             func.substr(RdVolumeVersion.content_sha256, 1, 65).label('digest'),
             func.substr(RdVolumeVersion.mime_type, 1, 101).label('mime'),
         ).join(RdVolume, RdVolume.id == RdVolumeVersion.volume_id).where(
-            RdVolume.project_id == project_id, RdVolume.id == version_id,
+            RdVolume.project_id == project_id,
             RdVolumeVersion.id == version_id).limit(1)).mappings().first()
     if row is None:
         raise LookupError('Drawing version not found in project')
