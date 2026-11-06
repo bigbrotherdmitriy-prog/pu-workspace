@@ -372,16 +372,13 @@ def test_colleague_cannot_replay_owner_notification_command(mobile_sync_world):
         mutation_id=shared_mutation_id,
     )
 
-    try:
-        colleague_response = submit_mobile_command(colleague_payload, db, colleague)
-    except Exception as exc:  # authorization exception is an acceptable contract outcome
-        assert not isinstance(exc, AssertionError)
-        colleague_response = None
+    response = submit_mobile_command(colleague_payload, db, colleague)
 
-    if colleague_response is not None:
-        assert colleague_response["status"] == "rejected"
-        assert colleague_response.get("receipt_id") != owner_first["receipt_id"]
-        assert colleague_response.get("result") != owner_first.get("result")
+    assert response["status"] == "rejected"
+    assert response["error_code"] == "http_404"
+    assert response["error_message"] == "Notification not found"
+    assert response["receipt_id"] != owner_first["receipt_id"]
+    assert response["result"] is None
 
     db.refresh(owner_notice)
     assert owner_notice.is_read is True
@@ -400,3 +397,10 @@ def test_colleague_cannot_replay_owner_notification_command(mobile_sync_world):
     for receipt in colleague_receipts:
         assert receipt.id != owner_first["receipt_id"]
         assert receipt.status != "applied"
+
+    colleague_receipt = db.scalar(select(MobileSyncCommand).where(
+        MobileSyncCommand.id == response["receipt_id"],
+    ))
+    assert colleague_receipt is not None
+    assert colleague_receipt.status == "rejected"
+    assert colleague_receipt.user_id == colleague.id
