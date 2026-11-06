@@ -34,6 +34,9 @@ def _result(row):
 
 
 def record_writeoff(db, project_id, item_id, entry_id, *, operation_key, qty, unit, policy=None):
+    # Negative physical stock is never allowed (user decision 06Nov). The
+    # supplied/legacy policy is accepted for signature compatibility only and
+    # cannot bypass the sufficient-balance check for new consumption.
     policy = policy or get_policy()
     if any(type(value) is not int or value <= 0 for value in [project_id,item_id,entry_id]):
         raise ValueError('Invalid writeoff identity')
@@ -49,6 +52,8 @@ def record_writeoff(db, project_id, item_id, entry_id, *, operation_key, qty, un
         if old:
             if (old.purchase_item_id, old.work_log_entry_id, old.qty, old.unit, old.reverses_id) != (item_id, entry_id, quantity, normalized_unit, None):
                 raise ValueError('Writeoff operation key conflict')
+            # Genuine replay of a stored movement: read-only success, no
+            # balance check and no mutation of historical rows.
             return _result(old)
         # A genuine replay is bound to its persisted unit; only NEW consumption
         # is checked against the current material definition (no conversion).
@@ -56,7 +61,9 @@ def record_writeoff(db, project_id, item_id, entry_id, *, operation_key, qty, un
         historical_unit = existing_physical_unit(db,project_id,item_id)
         if historical_unit is not None and historical_unit != normalized_unit:
             raise ValueError("Единица движения отличается от истории материала; автоматического пересчёта нет")
-        if policy.negative_stock == 'forbid' and physical_balance(db, project_id, item_id) < quantity:
+        # Physical stock may never go negative for any new writeoff, regardless
+        # of supplied policy or legacy explicit opt-in.
+        if physical_balance(db, project_id, item_id) < quantity:
             raise ValueError('Insufficient physical stock')
         # Core INSERT does not flush unrelated pending caller objects.
         pk = db.execute(MaterialWriteoff.__table__.insert().values(project_id=project_id, purchase_item_id=item_id,
