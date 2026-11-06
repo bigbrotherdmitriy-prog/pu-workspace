@@ -191,8 +191,8 @@ def _render(kind: str, header: dict, rows: list[dict]) -> bytes:
     return render_register_xlsx(header, rows)
 
 
-def _make_row(kind: str, **overrides) -> dict:
-    return _equipment_row(**overrides) if kind == "equipment" else _register_row(**overrides)
+def _make_row(export_kind: str, **overrides) -> dict:
+    return _equipment_row(**overrides) if export_kind == "equipment" else _register_row(**overrides)
 
 
 def _text_columns(kind: str) -> list[str]:
@@ -273,14 +273,14 @@ def test_xlsx_literal_text_no_apostrophe_or_strip(kind):
 def test_xlsx_numeric_and_optional_control(kind):
     header = {"object_name": "ДУБНА"}
     if kind == "equipment":
-        row = _equipment_row(qty="2")
+        row = _equipment_row(qty=2)
         data = _render(kind, header, [row])
         ws = _load_xlsx(data).worksheets[0]
         assert ws.cell(row=3, column=1).value == 1
         assert ws.cell(row=3, column=1).data_type == "n"
         qty_cell = ws.cell(row=3, column=_column_index(kind, "qty"))
-        assert qty_cell.value == "2"
-        assert qty_cell.data_type == "s"
+        assert qty_cell.value == 2
+        assert qty_cell.data_type == "n"
     else:
         row = _register_row(required=True)
         data = _render(kind, header, [row])
@@ -291,9 +291,27 @@ def test_xlsx_numeric_and_optional_control(kind):
 
 
 @pytest.mark.parametrize("kind", ["equipment", "register"])
-def test_xlsx_none_and_blank_legacy_semantics(kind):
+def test_xlsx_text_quantity_string_control(kind):
     header = {"object_name": "ДУБНА"}
-    row = _make_row(kind, **{key: None for key in _text_columns(kind)})
+    if kind == "equipment":
+        row = _equipment_row(qty="2")
+        data = _render(kind, header, [row])
+        ws = _load_xlsx(data).worksheets[0]
+        qty_cell = ws.cell(row=3, column=_column_index(kind, "qty"))
+        assert qty_cell.value == "2"
+        assert qty_cell.data_type == "s"
+    else:
+        row = _register_row(required=False)
+        data = _render(kind, header, [row])
+        ws = _load_xlsx(data).worksheets[0]
+        assert ws.cell(row=3, column=_column_index(kind, "required")).value == "нет"
+
+
+@pytest.mark.parametrize("kind", ["equipment", "register"])
+@pytest.mark.parametrize("blank", [None, ""])
+def test_xlsx_none_and_blank_legacy_semantics(kind, blank):
+    header = {"object_name": "ДУБНА"}
+    row = _make_row(kind, **{key: blank for key in _text_columns(kind)})
     data = _render(kind, header, [row])
     ws = _load_xlsx(data).worksheets[0]
     for key in _text_columns(kind):
