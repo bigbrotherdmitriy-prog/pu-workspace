@@ -48,7 +48,13 @@ def validate(header: dict, items: list[dict]) -> list[dict]:
     return rows
 
 
-def render(header: dict, items: list[dict]) -> bytes:
+def render(
+    header: dict,
+    items: list[dict],
+    *,
+    template_id: str | None = None,
+    template_version: str | None = None,
+) -> bytes:
     rows = validate(header, items)
     h = header or {}
     all_ok = all(r["result"] == "pass" for r in rows)
@@ -92,4 +98,6 @@ def render(header: dict, items: list[dict]) -> bytes:
     for label, key in (("Представитель заказчика", "customer_rep"), ("Представитель подрядчика", "contractor_rep"),
                        ("Представитель эксплуатирующей организации", "operator_rep")):
         p.append(_para(f"{label}: ____________ / {_text(h.get(key))} /"))
-    return build_docx(p)
+    if template_id is None and template_version is None:
+        return build_docx(p)
+    return build_docx(p, template_id=template_id, template_version=template_version)
