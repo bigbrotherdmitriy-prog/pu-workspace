@@ -9,6 +9,9 @@ from typing import Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 from app.api.work_log import WorkLogBody
 
+# JS Number.MAX_SAFE_INTEGER: frontend positive-id wire identity contract.
+MAX_SAFE_PROJECT_ID = 9007199254740991
+
 
 class OfflineWorkLogData(WorkLogBody):
     model_config = ConfigDict(extra='forbid')
@@ -27,7 +30,7 @@ class OfflineWorkLogCreateRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     client_mutation_id: str = Field(min_length=8, max_length=90, pattern=r'^[A-Za-z0-9_.:-]+$')
     device_id: str = Field(min_length=8, max_length=100, pattern=r'^[A-Za-z0-9_.:-]+$')
-    project_id: int = Field(strict=True, gt=0)
+    project_id: int = Field(strict=True, gt=0, le=MAX_SAFE_PROJECT_ID)
     operation: Literal['work_log.create']
     client_created_at: AwareDatetime
     data: OfflineWorkLogData

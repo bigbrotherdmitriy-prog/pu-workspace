@@ -43,6 +43,19 @@ def test_project_id_is_strict_positive_integer(value):
     with pytest.raises(ValidationError):OfflineWorkLogCreateRequest.model_validate(body)
 
 
+@pytest.mark.parametrize('value',[9007199254740991])
+def test_project_id_accepts_max_safe_integer_boundary(value):
+    body=payload();body['project_id']=value
+    model=OfflineWorkLogCreateRequest.model_validate(body)
+    assert model.project_id==value
+
+
+@pytest.mark.parametrize('value',[9007199254740992,10**100])
+def test_project_id_rejects_above_safe_integer_before_service(value):
+    body=payload();body['project_id']=value
+    with pytest.raises(ValidationError):OfflineWorkLogCreateRequest.model_validate(body)
+
+
 @pytest.mark.parametrize('field',['user_id','author_user_id','organization_id','entity_id'])
 @pytest.mark.parametrize('location',['envelope','data'])
 def test_identity_and_server_id_not_accepted(field,location):
