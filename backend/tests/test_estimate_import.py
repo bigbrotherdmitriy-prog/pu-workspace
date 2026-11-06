@@ -1,11 +1,12 @@
 """Тесты разбора сметы из Excel (.xlsx)."""
 
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_EVEN, localcontext
 from io import BytesIO
 
 import pytest
 from openpyxl import Workbook
 
-from app.estimate_import import parse_estimate_xlsx
+from app.estimate_import import _apply_math, parse_estimate_xlsx
 
 
 def _wb_bytes(wb: Workbook) -> bytes:
@@ -206,3 +207,91 @@ def test_regular_numbers_control():
     assert lines[0]["unit_price"] == "50"
     assert lines[0]["total"] == "100"
     assert result["warnings"] == []
+
+
+# --- Регрессии для _apply_math: денежное округление и сохранение total ---
+
+
+def _fresh_line(qty, price, total=None):
+    """Свежий dict позиции для каждого вызова _apply_math."""
+    return {
+        "sort_order": 1,
+        "section": "",
+        "position": "1",
+        "code": "",
+        "name": "Тест",
+        "unit": "шт",
+        "qty": qty,
+        "unit_price": price,
+        "total": total,
+        "note": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "qty, price, expected",
+    [
+        ("0.5", "2.01", "1.01"),
+        ("0.5", "2.05", "1.03"),
+        ("1.25", "0.10", "0.13"),
+    ],
+)
+def test_apply_math_derived_total_half_up(qty, price, expected):
+    line = _fresh_line(qty, price)
+    warnings: list[str] = []
+    _apply_math(line, 1, warnings)
+    assert Decimal(str(line["total"])) == Decimal(expected)
+
+
+@pytest.mark.parametrize("rounding", [ROUND_DOWN, ROUND_HALF_EVEN])
+@pytest.mark.parametrize(
+    "qty, price, expected",
+    [
+        ("0.5", "2.01", "1.01"),
+        ("0.5", "2.05", "1.03"),
+        ("1.25", "0.10", "0.13"),
+    ],
+)
+def test_apply_math_derived_total_independent_of_caller_rounding(
+    rounding, qty, price, expected
+):
+    line = _fresh_line(qty, price)
+    warnings: list[str] = []
+    with localcontext() as ctx:
+        ctx.rounding = rounding
+        _apply_math(line, 1, warnings)
+    assert Decimal(str(line["total"])) == Decimal(expected)
+
+
+@pytest.mark.parametrize(
+    "qty, price, expected",
+    [
+        ("0.5", "2.01", "1.01"),
+        ("0.5", "2.05", "1.03"),
+        ("1.25", "0.10", "0.13"),
+    ],
+)
+def test_apply_math_derived_total_independent_of_low_caller_precision(
+    qty, price, expected
+):
+    line = _fresh_line(qty, price)
+    warnings: list[str] = []
+    with localcontext() as ctx:
+        ctx.prec = 2
+        _apply_math(line, 1, warnings)
+    assert Decimal(str(line["total"])) == Decimal(expected)
+
+
+@pytest.mark.parametrize(
+    "qty, price, supplied_total",
+    [
+        ("0.5", "2.01", "1.01"),
+        ("0.5", "2.05", "1.03"),
+        ("1.25", "0.10", "0.13"),
+    ],
+)
+def test_apply_math_preserves_explicit_total(qty, price, supplied_total):
+    line = _fresh_line(qty, price, supplied_total)
+    warnings: list[str] = []
+    _apply_math(line, 1, warnings)
+    assert Decimal(str(line["total"])) == Decimal(supplied_total)
