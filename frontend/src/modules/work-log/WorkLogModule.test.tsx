@@ -168,3 +168,117 @@ it("links the entry to an estimate position and fills name and unit from it", as
     expect(body).toContain("Прокладка кабеля ВВГ");
   });
 });
+
+
+// --- STAGE3: GET lifetime regression for crews / schedule / suggestions ---
+
+type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void };
+function defer<T>(): Deferred<T> {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+const crewOf = (id: number, name: string) => ({ id, name, foreman: null, members: "", members_count: 1, note: null });
+const planItemOf = (id: number, title: string) => ({ id, title, is_group: false, is_milestone: false, planned_start: "2026-10-01", planned_finish: "2026-10-10", planned_progress: 100, actual_progress: 0, overdue: false, fact_entries: 0, fact_qty: null, fact_unit: null, fact_first: null, fact_last: null });
+const schedOf = (name: string, item: ReturnType<typeof planItemOf>) => ({ baseline: { id: 1, name, version: 1, status: "approved" }, items: [item] });
+const suggOf = (object: string) => ({ works: [], objects: [object], rd_items: [] });
+
+const endpointOf = (path: string): "crews" | "schedule" | "suggestions" | "list" => {
+  if (path.includes("/work-log/crews")) return "crews";
+  if (path.includes("/work-log/schedule")) return "schedule";
+  if (path.includes("/suggestions")) return "suggestions";
+  return "list";
+};
+
+const projectOf = (path: string): number => Number(/\/projects\/(\d+)\//.exec(path)?.[1] ?? 0);
+
+const scenarios = [
+  { name: "crews", stale: { crews: [crewOf(41, "СТАРАЯ-БРИГАДА-5")] }, fresh: { crews: [crewOf(61, "НОВАЯ-БРИГАДА-6")] }, staleMarker: "СТАРАЯ-БРИГАДА-5", freshMarker: "НОВАЯ-БРИГАДА-6" },
+  { name: "schedule", stale: schedOf("ГПР-СТАРЫЙ-5", planItemOf(91, "СТАРАЯ-РАБОТА-5")), fresh: schedOf("ГПР-НОВЫЙ-6", planItemOf(92, "НОВАЯ-РАБОТА-6")), staleMarker: "СТАРАЯ-РАБОТА-5", freshMarker: "НОВАЯ-РАБОТА-6" },
+  { name: "suggestions", stale: suggOf("СТАРЫЙ-ОБЪЕКТ-5"), fresh: suggOf("НОВЫЙ-ОБЪЕКТ-6"), staleMarker: "СТАРЫЙ-ОБЪЕКТ-5", freshMarker: "НОВЫЙ-ОБЪЕКТ-6" },
+] as const;
+
+function expose(name: string) {
+  if (name === "crews") fireEvent.click(screen.getByText("Бригады"));
+  else if (name === "schedule") fireEvent.click(screen.getByText("Подсказка из графика (ГПР)"));
+}
+
+for (const sc of scenarios) {
+  it(`ignores stale ${sc.name} from project 5 after switching to project 6`, async () => {
+    const stale = defer<unknown>();
+    mockApi.mockImplementation(async (path: string) => {
+      const ep = endpointOf(path);
+      const pid = projectOf(path);
+      if (ep === sc.name) {
+        if (pid === 5) return stale.promise;
+        if (pid === 6) return sc.fresh;
+      }
+      if (ep === "crews") return { crews: [] };
+      if (ep === "schedule") return { baseline: null, items: [] };
+      if (ep === "suggestions") return { works: [], objects: [], rd_items: [] };
+      return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+    });
+    const { rerender } = render(<WorkLogModule projectId={5} />);
+    await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === sc.name && projectOf(String(c[0])) === 5)).toBe(true));
+    rerender(<WorkLogModule projectId={6} />);
+    await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === sc.name && projectOf(String(c[0])) === 6)).toBe(true));
+    expose(sc.name);
+    await waitFor(() => expect(screen.queryByText(sc.freshMarker)).toBeTruthy());
+    await waitFor(() => expect(screen.queryByText(sc.staleMarker)).toBeNull());
+    await waitFor(async () => { stale.resolve(sc.stale); });
+    await waitFor(() => expect(screen.queryByText(sc.freshMarker)).toBeTruthy());
+    expect(screen.queryByText(sc.staleMarker)).toBeNull();
+  });
+}
+
+it("clears crews/schedule/suggestions and skips GETs when switching to project 0", async () => {
+  mockApi.mockImplementation(async (path: string) => {
+    const ep = endpointOf(path);
+    const pid = projectOf(path);
+    if (pid === 5) {
+      if (ep === "crews") return { crews: [crewOf(41, "СТАРАЯ-БРИГАДА-5")] };
+      if (ep === "schedule") return schedOf("ГПР-СТАРЫЙ-5", planItemOf(91, "СТАРАЯ-РАБОТА-5"));
+      if (ep === "suggestions") return suggOf("СТАРЫЙ-ОБЪЕКТ-5");
+    }
+    if (ep === "crews") return { crews: [] };
+    if (ep === "schedule") return { baseline: null, items: [] };
+    if (ep === "suggestions") return { works: [], objects: [], rd_items: [] };
+    return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+  });
+  const { rerender } = render(<WorkLogModule projectId={5} />);
+  await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === "crews" && projectOf(String(c[0])) === 5)).toBe(true));
+  await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === "schedule" && projectOf(String(c[0])) === 5)).toBe(true));
+  await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === "suggestions" && projectOf(String(c[0])) === 5)).toBe(true));
+  rerender(<WorkLogModule projectId={0} />);
+  await waitFor(() => expect(screen.queryByText("СТАРАЯ-БРИГАДА-5")).toBeNull());
+  fireEvent.click(screen.getByText("Подсказка из графика (ГПР)"));
+  await waitFor(() => expect(screen.queryByText("СТАРАЯ-РАБОТА-5")).toBeNull());
+  expect(screen.queryByText("СТАРЫЙ-ОБЪЕКТ-5")).toBeNull();
+  expect(mockApi.mock.calls.some((c) => projectOf(String(c[0])) === 0)).toBe(false);
+});
+
+it("ignores old project 5 deferred data after A->B->A", async () => {
+  const stale = defer<unknown>();
+  mockApi.mockImplementation(async (path: string) => {
+    const ep = endpointOf(path);
+    const pid = projectOf(path);
+    if (ep === "crews") {
+      if (pid === 5) return stale.promise;
+      if (pid === 6) return { crews: [crewOf(61, "НОВАЯ-БРИГАДА-6")] };
+      return { crews: [] };
+    }
+    if (ep === "schedule") return { baseline: null, items: [] };
+    if (ep === "suggestions") return { works: [], objects: [], rd_items: [] };
+    return { entries: [], summary: { entries: 0, days: 0, by_work: [] } };
+  });
+  const { rerender } = render(<WorkLogModule projectId={5} />);
+  await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === "crews" && projectOf(String(c[0])) === 5)).toBe(true));
+  rerender(<WorkLogModule projectId={6} />);
+  await waitFor(() => expect(mockApi.mock.calls.some((c) => endpointOf(String(c[0])) === "crews" && projectOf(String(c[0])) === 6)).toBe(true));
+  rerender(<WorkLogModule projectId={5} />);
+  await waitFor(() => expect(mockApi.mock.calls.filter((c) => endpointOf(String(c[0])) === "crews" && projectOf(String(c[0])) === 5).length).toBeGreaterThanOrEqual(2));
+  await waitFor(async () => { stale.resolve({ crews: [crewOf(41, "СТАРАЯ-БРИГАДА-5")] }); });
+  fireEvent.click(screen.getByText("Бригады"));
+  await waitFor(() => expect(screen.queryByText("СТАРАЯ-БРИГАДА-5")).toBeNull());
+});
