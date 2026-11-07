@@ -372,18 +372,22 @@ export async function synchronize(userId: number, projectId: number, manual = fa
     for (const command of commands) {
       if (["conflict", "auth_required"].includes(command.status)) continue;
       if (command.status === "attention" && !manual) continue;
+      const isJournal = command.operation === "work_log.create";
+      const assertScope = isJournal ? requireScopeAssertion(assertCurrentScope) : undefined;
+      if (assertScope) assertScope();
       const working = { ...command, status: "syncing" as const, updatedAt: new Date().toISOString() };
       await persist(working);
+      if (assertScope) assertScope();
       try {
         const result = await submit(working, assertCurrentScope);
         if (result.applied) {
-          if (working.operation === "work_log.create") {
-            requireScopeAssertion(assertCurrentScope)();
-          }
+          if (assertScope) assertScope();
           await deleteCommand(working.id);
+          if (assertScope) assertScope();
           await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
           changed();
         } else {
+          if (assertScope) assertScope();
           await persist({
             ...working,
             status: "conflict",
@@ -393,6 +397,7 @@ export async function synchronize(userId: number, projectId: number, manual = fa
           });
         }
       } catch (reason) {
+        if (assertScope) assertScope();
         const attempts = working.attempts + 1;
         const authRequired = reason instanceof ApiError && [401, 403].includes(reason.status || 0);
         await persist({
@@ -537,6 +542,7 @@ export async function enqueuePreparedWorkLogCreate(
   const existing = (await listCommands(prepared.userId, prepared.projectId)).find(
     (item) => item.id === prepared.id,
   );
+  assertScope();
   if (existing) {
     if (existing.operation !== "work_log.create") {
       throw new Error("Идентификатор мутации уже занят другой командой");
