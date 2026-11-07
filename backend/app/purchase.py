@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.execution_finance import CashFlowEntry
 from app.models.invoice_line import InvoiceLine
-from app.models.purchase import PurchaseItem, PurchaseItemSource
+from app.models.purchase import MaterialReceipt, PurchaseItem, PurchaseItemSource
 from app.models.rd import RdSpecItem, RdVolume
 
 ALLOWED_STATUSES = {"need", "ordered", "paid", "received"}
@@ -391,3 +392,185 @@ def invoices_for_matching(db: Session, project_id: int) -> list[dict]:
             "suggested": suggested,
         })
     return result
+
+
+# ---------------------------------------------------------------------------
+# Explicit physical material receipt service (inert review candidate).
+#
+# Concurrency limits: the SELECT ... FOR UPDATE row lock is meaningful only on
+# PostgreSQL (and similar engines). SQLite ignores it, so synthetic SQLite
+# tests do not prove production concurrency safety. The unique constraint on
+# (project_id, operation_key) plus the savepoint recovery path is the real
+# backstop for concurrent replays.
+# ---------------------------------------------------------------------------
+
+_QTY_MAX = Decimal("999999999999999.999")
+_QTY_STR_MAX = 64
+_OP_KEY_MAX = 160
+_UNIT_MAX = 40
+_DOCREF_MAX = 500
+
+
+def _positive_int(value, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise HTTPException(status_code=422, detail=f"invalid {field}")
+    if value <= 0:
+        raise HTTPException(status_code=422, detail=f"invalid {field}")
+    return value
+
+
+def _clean_str(value, field: str, max_len: int, *, optional: bool = False):
+    if value is None:
+        if optional:
+            return None
+        raise HTTPException(status_code=422, detail=f"invalid {field}")
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=f"invalid {field}")
+    trimmed = value.strip()
+    if not trimmed:
+        if optional:
+            return None
+        raise HTTPException(status_code=422, detail=f"invalid {field}")
+    if len(trimmed) > max_len:
+        raise HTTPException(status_code=422, detail=f"invalid {field}")
+    return trimmed
+
+
+def _parse_qty(value) -> Decimal:
+    if isinstance(value, bool) or isinstance(value, float):
+        raise HTTPException(status_code=422, detail="invalid qty")
+    if isinstance(value, Decimal):
+        qty = value
+    elif isinstance(value, int):
+        qty = Decimal(value)
+    elif isinstance(value, str):
+        if len(value) > _QTY_STR_MAX:
+            raise HTTPException(status_code=422, detail="invalid qty")
+        try:
+            qty = Decimal(value.strip())
+        except (InvalidOperation, ValueError):
+            raise HTTPException(status_code=422, detail="invalid qty")
+    else:
+        raise HTTPException(status_code=422, detail="invalid qty")
+
+    if not qty.is_finite():
+        raise HTTPException(status_code=422, detail="invalid qty")
+    # Bound exponent/size before any arithmetic to avoid huge expansions.
+    if qty.adjusted() > 15:
+        raise HTTPException(status_code=422, detail="invalid qty")
+    if qty <= 0:
+        raise HTTPException(status_code=422, detail="invalid qty")
+    if qty > _QTY_MAX:
+        raise HTTPException(status_code=422, detail="invalid qty")
+    # At most three meaningful fractional digits, no rounding.
+    if qty != qty.quantize(Decimal("0.001")):
+        raise HTTPException(status_code=422, detail="invalid qty")
+    return qty
+
+
+def _receipt_to_dict(receipt: MaterialReceipt) -> dict:
+    return {
+        "id": receipt.id,
+        "project_id": receipt.project_id,
+        "purchase_item_id": receipt.purchase_item_id,
+        "operation_key": receipt.operation_key,
+        "qty": str(_to_decimal(receipt.qty)),
+        "unit": receipt.unit,
+        "source_document_ref": receipt.source_document_ref,
+    }
+
+
+def _find_receipt(db: Session, project_id: int, operation_key: str):
+    return db.execute(
+        select(MaterialReceipt).where(
+            MaterialReceipt.project_id == project_id,
+            MaterialReceipt.operation_key == operation_key,
+        )
+    ).scalar_one_or_none()
+
+
+def _payload_matches(
+    receipt: MaterialReceipt,
+    item_id: int,
+    qty: Decimal,
+    unit: str,
+    docref: str | None,
+) -> bool:
+    return (
+        receipt.purchase_item_id == item_id
+        and _to_decimal(receipt.qty) == qty
+        and receipt.unit == unit
+        and receipt.source_document_ref == docref
+    )
+
+
+def create_material_receipt(
+    db: Session,
+    project_id: int,
+    item_id: int,
+    *,
+    operation_key,
+    qty,
+    unit,
+    source_document_ref=None,
+) -> dict:
+    """Record an explicit physical material receipt (idempotent by key).
+
+    Never infers receipts from ordered/paid/status/work quantities. Does not
+    commit or roll back; the caller owns the outer transaction. Row locks are
+    meaningful on PostgreSQL only; SQLite synthetic tests are not proof of
+    production concurrency.
+    """
+    project_id = _positive_int(project_id, "project_id")
+    item_id = _positive_int(item_id, "item_id")
+    op_key = _clean_str(operation_key, "operation_key", _OP_KEY_MAX)
+    unit_clean = _clean_str(unit, "unit", _UNIT_MAX)
+    docref = _clean_str(
+        source_document_ref, "source_document_ref", _DOCREF_MAX, optional=True,
+    )
+    qty_dec = _parse_qty(qty)
+
+    item = db.execute(
+        select(PurchaseItem)
+        .where(
+            PurchaseItem.id == item_id,
+            PurchaseItem.project_id == project_id,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+
+    item_unit = (item.unit or "").strip()
+    if item_unit != unit_clean:
+        raise HTTPException(status_code=422, detail="unit mismatch")
+
+    with db.no_autoflush:
+        existing = _find_receipt(db, project_id, op_key)
+    if existing is not None:
+        if _payload_matches(existing, item_id, qty_dec, unit_clean, docref):
+            return _receipt_to_dict(existing)
+        raise HTTPException(status_code=409, detail="operation_key conflict")
+
+    receipt = MaterialReceipt(
+        project_id=project_id,
+        purchase_item_id=item_id,
+        operation_key=op_key,
+        qty=qty_dec,
+        unit=unit_clean,
+        source_document_ref=docref,
+    )
+    try:
+        with db.begin_nested():
+            db.add(receipt)
+            db.flush()
+    except IntegrityError:
+        with db.no_autoflush:
+            recovered = _find_receipt(db, project_id, op_key)
+        if recovered is None:
+            raise
+        if _payload_matches(recovered, item_id, qty_dec, unit_clean, docref):
+            return _receipt_to_dict(recovered)
+        raise HTTPException(status_code=409, detail="operation_key conflict")
+
+    return _receipt_to_dict(receipt)
