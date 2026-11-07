@@ -120,7 +120,20 @@ export function useOfflineSync(userId: number, projectId: number, onApplied: () 
       return;
     }
     if (!stillCurrent()) return;
-    await synchronize(userId, projectId, manual);
+    // Live-guard callback: the engine invokes this before/after journal awaits.
+    // It throws when the captured scope/lifetime/epoch is no longer current so
+    // the engine aborts stale async work instead of continuing.
+    const assertCurrentScope = () => {
+      if (!stillCurrent()) throw new Error("scope changed");
+    };
+    try {
+      await synchronize(userId, projectId, manual, assertCurrentScope);
+    } catch (reason) {
+      // Quietly abort only when the scope went stale; otherwise surface the
+      // real error to the caller.
+      if (!stillCurrent()) return;
+      throw reason;
+    }
     if (!stillCurrent()) return;
     let after: number;
     try {
