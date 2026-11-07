@@ -380,7 +380,7 @@ describe("syncEngine work_log.create guards", () => {
     h.db.putCommand.mockClear();
     h.db.deleteCommand.mockClear();
     h.api.mockReset();
-    await synchronize(USER, PROJECT, false, undefined);
+    await expect(synchronize(USER, PROJECT, false, undefined)).rejects.toThrow(TypeError);
     expect(h.api).not.toHaveBeenCalled();
     expect(h.db.putCommand).not.toHaveBeenCalled();
     expect(h.db.deleteCommand).not.toHaveBeenCalled();
@@ -431,6 +431,7 @@ describe("syncEngine work_log.create guards", () => {
     h.db.deleteCommand.mockClear();
     h.db.setMeta.mockClear();
     const promise = synchronize(USER, PROJECT, false, assertScope);
+    const rejection = expect(promise).rejects.toThrow("scope changed");
     await vi.waitFor(() => expect(h.api).toHaveBeenCalledTimes(1));
     // The pre-POST syncing write is the only put so far.
     expect(h.db.putCommand).toHaveBeenCalledTimes(1);
@@ -439,7 +440,7 @@ describe("syncEngine work_log.create guards", () => {
     h.db.setMeta.mockClear();
     ok = false;
     release(ackFor(p));
-    await promise;
+    await rejection;
     expect(h.db.putCommand).not.toHaveBeenCalled();
     expect(h.db.deleteCommand).not.toHaveBeenCalled();
     expect(h.db.setMeta).not.toHaveBeenCalled();
@@ -454,7 +455,7 @@ describe("syncEngine work_log.create guards", () => {
     const assertScope = () => {
       throw new Error("scope changed");
     };
-    await synchronize(USER, PROJECT, false, assertScope);
+    await expect(synchronize(USER, PROJECT, false, assertScope)).rejects.toThrow("scope changed");
     expect(h.api).not.toHaveBeenCalled();
     expect(h.db.putCommand).not.toHaveBeenCalled();
   });
