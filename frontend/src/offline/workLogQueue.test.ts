@@ -221,3 +221,258 @@ describe("submitPreparedWorkLogCreate", () => {
     await expect(submitPreparedWorkLogCreate(cmd, transport, vi.fn())).rejects.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Engine guard tests: exercise the ACTUAL syncEngine enqueue/synchronize
+// paths against a synthetic in-memory db and a mocked transport. The pure
+// module tests above use their own transport and are unaffected.
+// ---------------------------------------------------------------------------
+
+const h = vi.hoisted(() => {
+  const store = new Map<string, any>();
+  const key = (u: number, p: number) => `${u}:${p}`;
+  const db = {
+    store,
+    listCommands: vi.fn(async (u: number, p: number) => {
+      const rows = store.get(key(u, p)) || [];
+      return rows.map((r: any) => JSON.parse(JSON.stringify(r)));
+    }),
+    putCommand: vi.fn(async (c: any) => {
+      const k = key(c.userId, c.projectId);
+      const rows = store.get(k) || [];
+      const idx = rows.findIndex((r: any) => r.id === c.id);
+      const copy = JSON.parse(JSON.stringify(c));
+      if (idx >= 0) rows[idx] = copy;
+      else rows.push(copy);
+      store.set(k, rows);
+    }),
+    deleteCommand: vi.fn(async (id: string) => {
+      for (const [k, rows] of store) {
+        store.set(k, rows.filter((r: any) => r.id !== id));
+      }
+    }),
+    setMeta: vi.fn(async () => undefined),
+    getMeta: vi.fn(async () => undefined),
+  };
+  const api = vi.fn();
+  class ApiError extends Error {
+    status?: number;
+    constructor(message: string, status?: number) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  }
+  return { db, api, ApiError, key };
+});
+
+vi.mock("./db", () => ({
+  listCommands: h.db.listCommands,
+  putCommand: h.db.putCommand,
+  deleteCommand: h.db.deleteCommand,
+  setMeta: h.db.setMeta,
+  getMeta: h.db.getMeta,
+}));
+
+vi.mock("./connectivity", () => ({ isOnline: () => true }));
+
+vi.mock("../api/client", () => ({ api: h.api, ApiError: h.ApiError }));
+
+describe("syncEngine work_log.create guards", () => {
+  const USER = 7;
+  const PROJECT = 3;
+
+  function reset() {
+    h.db.store.clear();
+    h.db.listCommands.mockClear();
+    h.db.putCommand.mockClear();
+    h.db.deleteCommand.mockClear();
+    h.db.setMeta.mockClear();
+    h.api.mockReset();
+  }
+
+  function prepared(over: Record<string, unknown> = {}, idOver: Partial<typeof identity> = {}) {
+    return prepareWorkLogCreate(
+      { userId: USER, projectId: PROJECT, data: { work_date: "2026-11-07", work_name: "SYNTHETIC", ...over } },
+      { ...identity, ...idOver },
+    );
+  }
+
+  function ackFor(p: ReturnType<typeof prepared>) {
+    return {
+      receipt_id: 10,
+      client_mutation_id: p.id,
+      operation: "work_log.create",
+      entity_type: "work_log",
+      entity_id: 20,
+      status: "applied",
+      result: { id: 20, project_id: p.projectId, author_user_id: p.userId },
+    };
+  }
+
+  async function engine() {
+    return await import("./syncEngine");
+  }
+
+  it("enqueue persists a stable identity and deep-copies the patch", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate } = await engine();
+    const p = prepared();
+    const id = await enqueuePreparedWorkLogCreate(p, () => {});
+    expect(id).toBe(p.id);
+    expect(h.db.putCommand).toHaveBeenCalledTimes(1);
+    const stored = h.db.store.get(h.key(USER, PROJECT))![0];
+    expect(stored.id).toBe(p.id);
+    expect(stored.operation).toBe("work_log.create");
+    expect(stored.status).toBe("queued");
+    expect(stored.attempts).toBe(0);
+    expect(stored.patch).toEqual(p.data);
+    expect(stored.patch).not.toBe(p.data);
+  });
+
+  it("identical retry retains attempts/status/receipt without reset; different payload rejects", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate } = await engine();
+    const p = prepared();
+    await enqueuePreparedWorkLogCreate(p, () => {});
+    const rows = h.db.store.get(h.key(USER, PROJECT))!;
+    rows[0].attempts = 2;
+    rows[0].status = "attention";
+    rows[0].receiptId = 55;
+    h.db.putCommand.mockClear();
+    const id = await enqueuePreparedWorkLogCreate(p, () => {});
+    expect(id).toBe(p.id);
+    expect(h.db.putCommand).not.toHaveBeenCalled();
+    const after = h.db.store.get(h.key(USER, PROJECT))![0];
+    expect(after.attempts).toBe(2);
+    expect(after.status).toBe("attention");
+    expect(after.receiptId).toBe(55);
+    await expect(
+      enqueuePreparedWorkLogCreate(prepared({ note: "changed" }), () => {}),
+    ).rejects.toThrow();
+  });
+
+  it("scope change after deferred list rejects without writing", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate } = await engine();
+    const p = prepared();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.db.listCommands.mockImplementationOnce(async () => {
+      await gate;
+      return [];
+    });
+    let ok = true;
+    const assertScope = () => {
+      if (!ok) throw new Error("scope changed");
+    };
+    const promise = enqueuePreparedWorkLogCreate(p, assertScope);
+    ok = false;
+    release();
+    await expect(promise).rejects.toThrow("scope changed");
+    expect(h.db.putCommand).not.toHaveBeenCalled();
+  });
+
+  it("synchronize without a scope guard performs no POST/put/delete for journal", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate, synchronize } = await engine();
+    await enqueuePreparedWorkLogCreate(prepared(), () => {});
+    h.db.putCommand.mockClear();
+    h.db.deleteCommand.mockClear();
+    h.api.mockReset();
+    await synchronize(USER, PROJECT, false, undefined);
+    expect(h.api).not.toHaveBeenCalled();
+    expect(h.db.putCommand).not.toHaveBeenCalled();
+    expect(h.db.deleteCommand).not.toHaveBeenCalled();
+  });
+
+  it("valid ACK for same actor/project deletes exactly once", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate, synchronize } = await engine();
+    const p = prepared();
+    await enqueuePreparedWorkLogCreate(p, () => {});
+    h.api.mockResolvedValueOnce(ackFor(p));
+    h.db.deleteCommand.mockClear();
+    await synchronize(USER, PROJECT, false, () => {});
+    expect(h.api).toHaveBeenCalledTimes(1);
+    expect(h.db.deleteCommand).toHaveBeenCalledTimes(1);
+    expect(h.db.deleteCommand).toHaveBeenCalledWith(p.id);
+  });
+
+  it("invalid ACK leaves the command and retry persists without delete", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate, synchronize } = await engine();
+    const p = prepared();
+    await enqueuePreparedWorkLogCreate(p, () => {});
+    h.api.mockResolvedValueOnce({ ...ackFor(p), status: "rejected" });
+    h.db.deleteCommand.mockClear();
+    h.db.putCommand.mockClear();
+    await synchronize(USER, PROJECT, false, () => {});
+    expect(h.db.deleteCommand).not.toHaveBeenCalled();
+    const rows = h.db.store.get(h.key(USER, PROJECT))!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(p.id);
+    expect(rows[0].attempts).toBe(1);
+    expect(rows[0].status).toBe("queued");
+  });
+
+  it("deferred POST then late scope guard throws: no retry put/delete/setMeta beyond pre-POST syncing write", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate, synchronize } = await engine();
+    const p = prepared();
+    await enqueuePreparedWorkLogCreate(p, () => {});
+    let release!: (v: unknown) => void;
+    h.api.mockImplementationOnce(() => new Promise((r) => (release = r)));
+    let ok = true;
+    const assertScope = () => {
+      if (!ok) throw new Error("scope changed");
+    };
+    h.db.putCommand.mockClear();
+    h.db.deleteCommand.mockClear();
+    h.db.setMeta.mockClear();
+    const promise = synchronize(USER, PROJECT, false, assertScope);
+    await vi.waitFor(() => expect(h.api).toHaveBeenCalledTimes(1));
+    // The pre-POST syncing write is the only put so far.
+    expect(h.db.putCommand).toHaveBeenCalledTimes(1);
+    h.db.putCommand.mockClear();
+    h.db.deleteCommand.mockClear();
+    h.db.setMeta.mockClear();
+    ok = false;
+    release(ackFor(p));
+    await promise;
+    expect(h.db.putCommand).not.toHaveBeenCalled();
+    expect(h.db.deleteCommand).not.toHaveBeenCalled();
+    expect(h.db.setMeta).not.toHaveBeenCalled();
+  });
+
+  it("before-guard failure performs no persist and no POST", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate, synchronize } = await engine();
+    await enqueuePreparedWorkLogCreate(prepared(), () => {});
+    h.db.putCommand.mockClear();
+    h.api.mockReset();
+    const assertScope = () => {
+      throw new Error("scope changed");
+    };
+    await synchronize(USER, PROJECT, false, assertScope);
+    expect(h.api).not.toHaveBeenCalled();
+    expect(h.db.putCommand).not.toHaveBeenCalled();
+  });
+
+  it("network rejection with a valid scope retries in normal state", async () => {
+    reset();
+    const { enqueuePreparedWorkLogCreate, synchronize } = await engine();
+    const p = prepared();
+    await enqueuePreparedWorkLogCreate(p, () => {});
+    h.api.mockRejectedValueOnce(new Error("network"));
+    h.db.deleteCommand.mockClear();
+    await synchronize(USER, PROJECT, false, () => {});
+    expect(h.db.deleteCommand).not.toHaveBeenCalled();
+    const rows = h.db.store.get(h.key(USER, PROJECT))!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(p.id);
+    expect(rows[0].attempts).toBe(1);
+    expect(rows[0].status).toBe("queued");
+    expect(rows[0].lastError).toBe("network");
+  });
+});
