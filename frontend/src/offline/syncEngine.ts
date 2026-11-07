@@ -2,6 +2,10 @@ import { api, ApiError } from "../api/client";
 import { isOnline } from "./connectivity";
 import { deleteCommand, getMeta, listCommands, putCommand, setMeta } from "./db";
 import type { OfflineCommand, ServerConflict, StoredUploadFile, SyncSummary } from "./types";
+import {
+  submitPreparedWorkLogCreate as submitPreparedWorkLogCreateActual,
+  type PreparedWorkLogCreate,
+} from "./workLogQueue";
 
 const ATTENTION_AFTER_ATTEMPTS = 3;
 export const CHANGE_EVENT = "pu-mobile-sync-changed";
@@ -154,6 +158,9 @@ function isPositiveSafeInteger(value: unknown): value is number {
 }
 
 function expectedEntityType(command: OfflineCommand): string {
+  if (command.operation === "work_log.create") {
+    throw new Error("Журналная команда не имеет типа сущности");
+  }
   return command.operation === "task.update" ? "task" : "notification";
 }
 
@@ -224,7 +231,42 @@ function validateUploadAck(response: unknown, expectedCount: number): UploadStag
   return { status: ack.status, jobs };
 }
 
-async function submit(command: OfflineCommand): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
+type ScopeAssertion = () => void;
+
+function requireScopeAssertion(assertCurrentScope: ScopeAssertion | undefined): ScopeAssertion {
+  if (typeof assertCurrentScope !== "function") {
+    throw new TypeError("assertCurrentScope должен быть функцией");
+  }
+  return assertCurrentScope;
+}
+
+function preparedFromCommand(command: OfflineCommand): PreparedWorkLogCreate {
+  if (command.operation !== "work_log.create") {
+    throw new Error("Команда не является журнальной");
+  }
+  return {
+    id: command.id,
+    userId: command.userId,
+    projectId: command.projectId,
+    deviceId: command.deviceId,
+    operation: "work_log.create",
+    data: command.patch,
+    clientCreatedAt: command.clientCreatedAt,
+  };
+}
+
+async function submit(command: OfflineCommand, assertCurrentScope?: ScopeAssertion): Promise<{ applied: boolean; conflictId?: number; receiptId?: number }> {
+  if (command.operation === "work_log.create") {
+    const assertScope = requireScopeAssertion(assertCurrentScope);
+    const prepared = preparedFromCommand(command);
+    const ack = await submitPreparedWorkLogCreateActual(
+      prepared,
+      (path, init) => api<unknown>(path, init),
+      assertScope,
+    );
+    assertScope();
+    return { applied: true, receiptId: ack.receiptId };
+  }
   if (command.operation === "document.upload") {
     const uploads = command.uploads || [];
     if (uploads.length === 0) {
@@ -322,7 +364,7 @@ async function submit(command: OfflineCommand): Promise<{ applied: boolean; conf
   return { applied: false, conflictId: conflict.id, receiptId: response.receipt_id };
 }
 
-export async function synchronize(userId: number, projectId: number, manual = false): Promise<void> {
+export async function synchronize(userId: number, projectId: number, manual = false, assertCurrentScope?: ScopeAssertion): Promise<void> {
   if (running || !isOnline() || !userId || !projectId) return;
   running = true;
   try {
@@ -333,8 +375,11 @@ export async function synchronize(userId: number, projectId: number, manual = fa
       const working = { ...command, status: "syncing" as const, updatedAt: new Date().toISOString() };
       await persist(working);
       try {
-        const result = await submit(working);
+        const result = await submit(working, assertCurrentScope);
         if (result.applied) {
+          if (working.operation === "work_log.create") {
+            requireScopeAssertion(assertCurrentScope)();
+          }
           await deleteCommand(working.id);
           await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
           changed();
@@ -418,6 +463,9 @@ export async function resolveConflict(
 
   const before = await listCommands(userId, projectId);
   const local = before.find((item) => item.conflictId === conflictId);
+  if (local && local.operation === "work_log.create") {
+    throw conflictAckError("журнальные команды не поддерживают разрешение конфликтов");
+  }
 
   const response = await api<{
     id: number;
@@ -478,4 +526,45 @@ export async function resolveConflict(
 
   await setMeta(`last-synced:${userId}:${projectId}`, new Date().toISOString());
   changed();
+}
+
+export async function enqueuePreparedWorkLogCreate(
+  prepared: PreparedWorkLogCreate,
+  assertCurrentScope: ScopeAssertion,
+): Promise<string> {
+  const assertScope = requireScopeAssertion(assertCurrentScope);
+  assertScope();
+  const existing = (await listCommands(prepared.userId, prepared.projectId)).find(
+    (item) => item.id === prepared.id,
+  );
+  if (existing) {
+    if (existing.operation !== "work_log.create") {
+      throw new Error("Идентификатор мутации уже занят другой командой");
+    }
+    const sameIdentity = existing.userId === prepared.userId
+      && existing.projectId === prepared.projectId
+      && existing.deviceId === prepared.deviceId
+      && existing.clientCreatedAt === prepared.clientCreatedAt;
+    const samePayload = JSON.stringify(existing.patch) === JSON.stringify(prepared.data);
+    if (!sameIdentity || !samePayload) {
+      throw new Error("Идентификатор мутации уже занят другой полезной нагрузкой");
+    }
+    return existing.id;
+  }
+  assertScope();
+  const now = new Date().toISOString();
+  await persist({
+    id: prepared.id,
+    userId: prepared.userId,
+    projectId: prepared.projectId,
+    deviceId: prepared.deviceId,
+    operation: "work_log.create",
+    patch: JSON.parse(JSON.stringify(prepared.data)) as Record<string, unknown>,
+    clientCreatedAt: prepared.clientCreatedAt,
+    status: "queued",
+    attempts: 0,
+    updatedAt: now,
+  });
+  assertScope();
+  return prepared.id;
 }

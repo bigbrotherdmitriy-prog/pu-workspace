@@ -12,16 +12,16 @@ export type StoredUploadFile = {
   blob: Blob;
 };
 
-export type OfflineCommand = {
+/**
+ * Fields shared by every offline journal command, regardless of operation.
+ * These remain available exactly as before on all command variants.
+ */
+export type OfflineCommandBase = {
   id: string;
   userId: number;
   projectId: number;
   deviceId: string;
-  operation: "task.update" | "notification.mark_read" | "document.upload";
-  entityId: number;
-  baseToken?: string;
   patch: Record<string, unknown>;
-  uploads?: StoredUploadFile[];
   clientCreatedAt: string;
   status: OfflineCommandStatus;
   attempts: number;
@@ -30,6 +30,32 @@ export type OfflineCommand = {
   conflictId?: number;
   updatedAt: string;
 };
+
+/**
+ * Existing entity-targeted operations. These retain a REQUIRED numeric
+ * entityId and keep the existing baseToken / uploads compatibility.
+ */
+export type OfflineEntityCommand = OfflineCommandBase & {
+  operation: "task.update" | "notification.mark_read" | "document.upload";
+  entityId: number;
+  baseToken?: string;
+  uploads?: StoredUploadFile[];
+};
+
+/**
+ * New work_log.create operation. It is not entity-targeted: entityId,
+ * baseToken and uploads are explicitly forbidden (never) so the union can be
+ * narrowed safely. The payload lives in `patch`; a future engine maps
+ * command.patch -> module prepared.data explicitly (no unsafe cast).
+ */
+export type OfflineWorkLogCreateCommand = OfflineCommandBase & {
+  operation: "work_log.create";
+  entityId?: never;
+  baseToken?: never;
+  uploads?: never;
+};
+
+export type OfflineCommand = OfflineEntityCommand | OfflineWorkLogCreateCommand;
 
 export type ServerConflict = {
   id: number;
