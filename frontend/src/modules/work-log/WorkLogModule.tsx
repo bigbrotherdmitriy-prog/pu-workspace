@@ -64,17 +64,27 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
   const [crewForm, setCrewForm] = useState({ id: 0, name: "", foreman: "", members: "" });
 
   useEffect(() => {
+    setCrews([]);
+    setPlan({ baseline: null, items: [] });
+    setSuggest({ works: [], objects: [], rd_items: [] });
+  }, [projectId]);
+
+  useEffect(() => {
     if (projectId <= 0) return;
+    let alive = true;
     api<{ crews: Crew[] }>(`/projects/${projectId}/work-log/crews`)
-      .then((res) => { if (res && Array.isArray(res.crews)) setCrews(res.crews); })
+      .then((res) => { if (alive && res && Array.isArray(res.crews)) setCrews(res.crews); })
       .catch(() => undefined);
+    return () => { alive = false; };
   }, [projectId, tick]);
 
   useEffect(() => {
     if (projectId <= 0) return;
+    let alive = true;
     api<Schedule>(`/projects/${projectId}/work-log/schedule`)
-      .then((res) => { if (res && Array.isArray(res.items)) setPlan(res); })
+      .then((res) => { if (alive && res && Array.isArray(res.items)) setPlan(res); })
       .catch(() => undefined);
+    return () => { alive = false; };
   }, [projectId, tick]);
 
   useEffect(() => {
@@ -91,9 +101,11 @@ export function WorkLogModule({ projectId }: { projectId: number }) {
 
   useEffect(() => {
     if (projectId <= 0) return;
+    let alive = true;
     api<Suggestions>(`/projects/${projectId}/work-log/suggestions`)
-      .then((res) => { if (res) setSuggest(res); })
+      .then((res) => { if (alive && res) setSuggest(res); })
       .catch(() => undefined);
+    return () => { alive = false; };
   }, [projectId, tick]);
 
   const set = (field: keyof ReturnType<typeof emptyForm>, value: string) => setForm((f) => ({ ...f, [field]: value }));
